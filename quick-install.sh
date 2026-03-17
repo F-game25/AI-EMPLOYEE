@@ -6,7 +6,7 @@ R='\033[0;31m';G='\033[0;32m';Y='\033[1;33m';B='\033[0;34m';C='\033[0;36m';NC='\
 GITHUB_USER="F-game25"
 GITHUB_REPO="AI-EMPLOYEE"
 GITHUB_BRANCH="main"
-BASE_URL="https://raw.githubusercontent.com/F-game25/Ai-EMPLOYEE/main"
+BASE_URL="https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main"
 
 banner() {
 clear
