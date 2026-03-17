@@ -11,12 +11,12 @@
 ## ⚡ One-Click Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR-USERNAME/ai-employee/main/quick-install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
 
 
 manual install linux
 # Download
-curl -O https://raw.githubusercontent.com/YOUR-USERNAME/ai-employee/main/quick-install.sh
+curl -O https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh
 
 # Run
 chmod +x quick-install.sh

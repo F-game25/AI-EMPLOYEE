@@ -9,7 +9,7 @@ ok() { echo -e "${G}✓${NC} $1"; }
 
 input() {
     log "Configuration"
-    read -p "WhatsApp (+31612345678): " PHONE
+    read -p "WhatsApp (+31624323731): " PHONE
     read -sp "Anthropic API key (optional): " ANTHROPIC_KEY; echo
     read -p "Trading bot path (optional): " BOT_PATH
     TOKEN=$(openssl rand -hex 32)

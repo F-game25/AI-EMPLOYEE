@@ -1,1 +1,38 @@
+cd ~/Documenten/ai\ employee/ai-employee-github
 
+# Check status
+git status
+
+# Als git niet initialized:
+git init
+
+
+git remote add origin https://github.com/F-game25/AI-EMPLOYEE.git
+
+
+git remote set-url origin https://github.com/F-game25/AI-EMPLOYEE.git
+
+
+git add .
+
+
+git commit -m "Complete setup: all files ready"
+
+
+git push -u origin main
+
+
+git pull origin main --allow-unrelated-histories
+git push -u origin main
+
+
+cd ~/Documenten/ai\ employee/ai-employee-github
+
+# Remove oude remote
+git remote remove origin
+
+# Add nieuwe met TOKEN (VERVANG ghp_JOUW_TOKEN!)
+git remote add origin https://11BT7A3UQ02x01q6VRDiMK_wtcpKC8f8p80qNm8FHup8Jrcn9p0WbYCbG9Gld1V7p5VIN5AD42PFDJHGCa@github.com/F-game25/AI-EMPLOYEE.git
+
+# Push (geen password gevraagd!)
+git push -u origin main
