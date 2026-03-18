@@ -12,8 +12,8 @@ banner() {
 clear
 cat << 'BANNER'
 ╔══════════════════════════════════════════════════════════════════╗
-║              AI EMPLOYEE - ONE-CLICK INSTALLER v3.0              ║
-╚══════════════════════════════════════════════════════════════════╝
+║              AI EMPLOYEE - ONE-CLICK INSTALLER v3.1              ║
+╚════════════════════════════════════════════════════════════════��═╝
 BANNER
 echo ""
 }
@@ -31,6 +31,8 @@ check_requirements() {
     command -v node >/dev/null 2>&1 || err "Node.js 22+ required"
     NODE_V=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
     [ "$NODE_V" -lt 22 ] && err "Node.js 22+ required"
+    command -v python3 >/dev/null 2>&1 || err "python3 required"
+    command -v openssl >/dev/null 2>&1 || err "openssl required"
     ok "Requirements met"
 }
 
@@ -63,6 +65,7 @@ show_next_steps() {
     echo "  1. cd ~/.ai-employee && ./start.sh"
     echo "  2. openclaw channels login  (new terminal)"
     echo "  3. Open http://localhost:3000"
+    echo "  4. Problem Solver UI: http://127.0.0.1:8787"
     echo ""
 }
 
