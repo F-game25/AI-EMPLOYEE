@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+BOTS_DIR="$AI_HOME/bots"
+LOGS_DIR="$AI_HOME/logs"
+RUN_DIR="$AI_HOME/run"
+
+mkdir -p "$LOGS_DIR" "$RUN_DIR"
+
+usage() {
+  cat <<'USAGE'
+ai-employee commands:
+  start --all | <bot>
+  stop --all | <bot>
+  restart --all | <bot>
+  status
+  logs <bot>
+  doctor
+  ui
+USAGE
+}
+
+bot_pid_file() { echo "$RUN_DIR/$1.pid"; }
+
+is_running() {
+  local bot="$1"
+  local pid_file
+  pid_file="$(bot_pid_file "$bot")"
+  [[ -f "$pid_file" ]] || return 1
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  [[ -n "${pid:-}" ]] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+start_bot() {
+  local bot="$1"
+  local bot_dir="$BOTS_DIR/$bot"
+  local entry="$bot_dir/run.sh"
+  local log="$LOGS_DIR/$bot.log"
+  local pid_file
+  pid_file="$(bot_pid_file "$bot")"
+
+  if is_running "$bot"; then
+    echo "Already running: $bot (pid $(cat "$pid_file"))"
+    return 0
+  fi
+
+  if [[ ! -x "$entry" ]]; then
+    echo "ERROR: missing executable $entry"
+    exit 1
+  fi
+
+  echo "Starting $bot ..."
+  nohup "$entry" >>"$log" 2>&1 &
+  echo $! > "$pid_file"
+  echo "Started $bot pid=$!"
+}
+
+stop_bot() {
+  local bot="$1"
+  local pid_file
+  pid_file="$(bot_pid_file "$bot")"
+  if ! [[ -f "$pid_file" ]]; then
+    echo "Not running (no pid file): $bot"
+    return 0
+  fi
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ -z "${pid:-}" ]]; then
+    rm -f "$pid_file"
+    echo "Cleaned empty pid file: $bot"
+    return 0
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "Stopping $bot pid=$pid ..."
+    kill "$pid" || true
+    sleep 1
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  rm -f "$pid_file"
+  echo "Stopped $bot"
+}
+
+list_bots() {
+  if [[ ! -d "$BOTS_DIR" ]]; then
+    return 0
+  fi
+  find "$BOTS_DIR" -maxdepth 1 -mindepth 1 -type d -printf "%f\n" | sort
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  start)
+    arg="${1:-}"
+    if [[ "$arg" == "--all" ]]; then
+      while read -r bot; do
+        [[ -n "$bot" ]] && start_bot "$bot"
+      done < <(list_bots)
+    else
+      [[ -n "$arg" ]] || { usage; exit 1; }
+      start_bot "$arg"
+    fi
+    ;;
+  stop)
+    arg="${1:-}"
+    if [[ "$arg" == "--all" ]]; then
+      while read -r bot; do
+        [[ -n "$bot" ]] && stop_bot "$bot"
+      done < <(list_bots)
+    else
+      [[ -n "$arg" ]] || { usage; exit 1; }
+      stop_bot "$arg"
+    fi
+    ;;
+  restart)
+    arg="${1:-}"
+    if [[ "$arg" == "--all" ]]; then
+      while read -r bot; do
+        [[ -n "$bot" ]] && stop_bot "$bot"
+      done < <(list_bots)
+      while read -r bot; do
+        [[ -n "$bot" ]] && start_bot "$bot"
+      done < <(list_bots)
+    else
+      [[ -n "$arg" ]] || { usage; exit 1; }
+      stop_bot "$arg"
+      start_bot "$arg"
+    fi
+    ;;
+  status)
+    while read -r bot; do
+      [[ -n "$bot" ]] || continue
+      if is_running "$bot"; then
+        echo "RUNNING $bot pid=$(cat "$(bot_pid_file "$bot")")"
+      else
+        echo "STOPPED $bot"
+      fi
+    done < <(list_bots)
+    ;;
+  logs)
+    bot="${1:-}"
+    [[ -n "$bot" ]] || { usage; exit 1; }
+    tail -n 200 -f "$LOGS_DIR/$bot.log"
+    ;;
+  doctor)
+    echo "AI_HOME=$AI_HOME"
+    echo "Bots dir: $BOTS_DIR"
+    echo "Logs dir: $LOGS_DIR"
+    echo "Run dir : $RUN_DIR"
+    echo "Bots:"
+    list_bots || true
+    ;;
+  ui)
+    start_bot "problem-solver-ui"
+    echo "UI started (check logs)."
+    ;;
+  ""|-h|--help|help)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $cmd"
+    usage
+    exit 1
+    ;;
+esac
