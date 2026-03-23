@@ -98,7 +98,10 @@ list_bots() {
   if [[ ! -d "$BOTS_DIR" ]]; then
     return 0
   fi
-  find "$BOTS_DIR" -maxdepth 1 -mindepth 1 -type d -printf "%f\n" | sort
+  # Portable: works on Linux and macOS
+  find "$BOTS_DIR" -maxdepth 1 -mindepth 1 -type d | sort | while read -r d; do
+    basename "$d"
+  done
 }
 
 cmd="${1:-}"
