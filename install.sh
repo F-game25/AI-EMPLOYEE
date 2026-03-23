@@ -433,14 +433,47 @@ CFG_END
         chmod 600 "$AI_HOME/config.json"
         ok "OpenClaw config.json created"
     else
-        ok "OpenClaw config.json already exists — not overwritten"
+        # Existing config: patch gateway.mode=local if missing (fixes old installs)
+        if ! grep -q '"mode".*"local"' "$AI_HOME/config.json" 2>/dev/null; then
+            warn "Existing config.json missing gateway.mode=local — backing up and replacing"
+            cp "$AI_HOME/config.json" "$AI_HOME/config.json.bak.$(date +%s)"
+            if [[ -f "$template" ]]; then
+                cp "$template" "$AI_HOME/config.json"
+            else
+                cat > "$AI_HOME/config.json" << 'CFG_END'
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "port": 18789,
+    "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
+    "controlUi": { "enabled": true, "port": 18789 }
+  },
+  "channels": {
+    "whatsapp": { "dmPolicy": "allowlist", "allowFrom": ["PHONE_PLACEHOLDER"] }
+  },
+  "cron": { "enabled": true },
+  "discovery": { "mdns": { "mode": "off" } }
+}
+CFG_END
+            fi
+            sed -i.bak \
+                -e "s|TOKEN_PLACEHOLDER|$TOKEN|g" \
+                -e "s|AI_HOME_PLACEHOLDER|$AI_HOME|g" \
+                -e "s|PHONE_PLACEHOLDER|$PHONE|g" \
+                -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" \
+                "$AI_HOME/config.json"
+            rm -f "$AI_HOME/config.json.bak"
+            chmod 600 "$AI_HOME/config.json"
+            ok "OpenClaw config.json updated (gateway.mode=local added)"
+        else
+            ok "OpenClaw config.json already exists — not overwritten"
+        fi
     fi
 
-    # Symlink for openclaw
-    if command -v openclaw >/dev/null 2>&1; then
-        mkdir -p "$HOME/.openclaw"
-        ln -sf "$AI_HOME/config.json" "$HOME/.openclaw/openclaw.json" 2>/dev/null || true
-    fi
+    # Symlink for openclaw (always ensure it points to current config)
+    mkdir -p "$HOME/.openclaw"
+    ln -sf "$AI_HOME/config.json" "$HOME/.openclaw/openclaw.json" 2>/dev/null || true
 
     # .env file
     if [[ ! -f "$AI_HOME/.env" ]]; then
