@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
 BOT_HOME="$AI_HOME/bots/problem-solver"
 
