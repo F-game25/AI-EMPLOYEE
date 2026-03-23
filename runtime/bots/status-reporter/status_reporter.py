@@ -137,6 +137,28 @@ def write_state(state: dict):
 
 def main():
     print(f"[{now_iso()}] status-reporter started; interval={REPORT_INTERVAL}s")
+
+    # Send welcome/startup message once if installer queued one
+    startup_file = AI_HOME / "state" / "startup_message.json"
+    if startup_file.exists():
+        try:
+            data = json.loads(startup_file.read_text())
+            if data.get("pending"):
+                msg = data.get("message", "")
+                if msg:
+                    print(f"[{now_iso()}] sending startup welcome message…")
+                    sent = send_whatsapp(msg)
+                    if sent:
+                        data["pending"] = False
+                        data["sent_at"] = now_iso()
+                        startup_file.write_text(json.dumps(data, indent=2))
+                        append_chatlog({"ts": now_iso(), "type": "bot", "message": msg})
+                        print(f"[{now_iso()}] welcome message sent")
+                    else:
+                        print(f"[{now_iso()}] welcome message queued but gateway not reachable yet; will retry next cycle")
+        except Exception as e:
+            print(f"[{now_iso()}] startup message error: {e}")
+
     while True:
         msg = build_compact_status()
         print(f"[{now_iso()}] status report:\n{msg}\n")

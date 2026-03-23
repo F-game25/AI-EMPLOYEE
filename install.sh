@@ -122,27 +122,33 @@ wizard() {
     info "Answer each question (press Enter for default)."
     echo ""
 
+    # Ensure we always read from the terminal, even when stdin is a pipe (curl | bash)
+    local tty_in="/dev/tty"
+    [[ ! -r "$tty_in" ]] && tty_in="/dev/stdin"
+
     # 1) WhatsApp phone
     ask "WhatsApp phone number in E.164 format (e.g. +31612345678):"
-    read -r PHONE
+    read -r PHONE < "$tty_in"
     while [[ ! $PHONE =~ ^\+[0-9]{7,15}$ ]]; do
         warn "Invalid format. Use E.164: +<country_code><number> (e.g. +31612345678)"
         ask "WhatsApp phone number:"
-        read -r PHONE
+        read -r PHONE < "$tty_in"
     done
     ok "Phone: $PHONE"
-    ok "Phone registered: $PHONE — a startup message is queued and will be delivered on first WhatsApp connection"
+    echo ""
+    echo -e "  📱 Phone registered! A welcome message will be sent to ${PHONE} via WhatsApp"
+    echo -e "     once you connect with: ${C}openclaw channels login${NC}"
+    echo ""
 
     # 2) Local LLM
-    echo ""
     ask "Use Ollama for local LLM? (recommended for privacy) [y/N]:"
-    read -r WANT_OLLAMA
+    read -r WANT_OLLAMA < "$tty_in"
     WANT_OLLAMA="${WANT_OLLAMA:-n}"
     WANT_OLLAMA=$(echo "$WANT_OLLAMA" | tr '[:upper:]' '[:lower:]')
     OLLAMA_MODEL="llama3.2"
     if [[ "$WANT_OLLAMA" == "y" ]]; then
         ask "Ollama model name [default: llama3.2]:"
-        read -r OLLAMA_MODEL_INPUT
+        read -r OLLAMA_MODEL_INPUT < "$tty_in"
         OLLAMA_MODEL="${OLLAMA_MODEL_INPUT:-llama3.2}"
         MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
         ok "Ollama model: $OLLAMA_MODEL"
@@ -154,18 +160,18 @@ wizard() {
     # 3) Anthropic API key
     echo ""
     ask "Anthropic API key (optional, Enter to skip):"
-    read -rsp "" ANTHROPIC_KEY; echo
+    read -rs ANTHROPIC_KEY < "$tty_in"; echo
     [[ -n "$ANTHROPIC_KEY" ]] && ok "Anthropic key: set" || info "Anthropic key: skipped"
 
     # 4) OpenAI API key
     ask "OpenAI API key (optional, Enter to skip):"
-    read -rsp "" OPENAI_KEY; echo
+    read -rs OPENAI_KEY < "$tty_in"; echo
     [[ -n "$OPENAI_KEY" ]] && ok "OpenAI key: set" || info "OpenAI key: skipped"
 
     # 5) Trading bot path
     echo ""
     ask "Path to trading bot directory (optional, Enter to skip):"
-    read -r BOT_PATH
+    read -r BOT_PATH < "$tty_in"
     BOT_PATH="${BOT_PATH/#\~/$HOME}"
     if [[ -n "$BOT_PATH" && -d "$BOT_PATH" ]]; then
         ok "Trading bot path: $BOT_PATH"
@@ -179,14 +185,14 @@ wizard() {
     # 6) Hourly status reports
     echo ""
     ask "Enable hourly WhatsApp status updates? [Y/n]:"
-    read -r WANT_STATUS
+    read -r WANT_STATUS < "$tty_in"
     WANT_STATUS="${WANT_STATUS:-y}"
     STATUS_INTERVAL=3600
     if [[ ! "$WANT_STATUS" =~ ^[Nn] ]]; then
         ok "Status reports: every hour"
     else
         ask "Status interval in seconds [default: 3600]:"
-        read -r STATUS_INTERVAL_INPUT
+        read -r STATUS_INTERVAL_INPUT < "$tty_in"
         STATUS_INTERVAL="${STATUS_INTERVAL_INPUT:-3600}"
         ok "Status interval: ${STATUS_INTERVAL}s"
     fi
@@ -194,18 +200,18 @@ wizard() {
     # 7) UI ports
     echo ""
     ask "Dashboard port [default: 3000]:"
-    read -r DASHBOARD_PORT_INPUT
+    read -r DASHBOARD_PORT_INPUT < "$tty_in"
     DASHBOARD_PORT="${DASHBOARD_PORT_INPUT:-3000}"
 
     ask "Problem Solver UI port [default: 8787]:"
-    read -r UI_PORT_INPUT
+    read -r UI_PORT_INPUT < "$tty_in"
     UI_PORT="${UI_PORT_INPUT:-8787}"
     ok "Ports: dashboard=$DASHBOARD_PORT, ui=$UI_PORT"
 
     # 8) Number of workers
     echo ""
     ask "How many AI agents to enable? (1-13, default 13 = all):"
-    read -r WORKERS_INPUT
+    read -r WORKERS_INPUT < "$tty_in"
     WORKERS="${WORKERS_INPUT:-13}"
     [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 13"; WORKERS=13; }
     if (( WORKERS > 13 )); then warn "Maximum is 13; clamping to 13"; WORKERS=13; fi
@@ -1043,15 +1049,15 @@ HTMLEND
 
 queue_startup_message() {
     local f="$AI_HOME/state/startup_message.json"
-    if [[ ! -f "$f" ]]; then
-        cat > "$f" << MSG
+    mkdir -p "$AI_HOME/state"
+    # Always overwrite so the message reflects the current install
+    cat > "$f" << MSG
 {
   "pending": true,
-  "message": "🤖 *AI Employee installed!*\n\nSend me a task:\n• switch to lead-hunter\n• find 20 SaaS CTOs\n• status\n• help\n\nDashboard: http://127.0.0.1:${UI_PORT:-8787}",
+  "message": "👋 *Welcome to AI Employee!*\n\n✅ Setup complete — your bot is connected and ready.\n\n*Available commands:*\n• status — get system status\n• workers — list active agents\n• switch to lead-hunter — activate an agent\n• help — show all commands\n\n*Try it now:*\nType 'hello' or 'status' to get started.\n\n📊 Dashboard: http://127.0.0.1:${UI_PORT:-8787}",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 MSG
-    fi
 }
 
 # ─── PATH ─────────────────────────────────────────────────────────────────────
@@ -1083,20 +1089,26 @@ done_message() {
     echo "  Ollama model: $OLLAMA_MODEL  (host: $OLLAMA_HOST)"
     echo "  Token:        ${TOKEN:0:16}...${TOKEN: -8}"
     echo "  Config:       ~/.ai-employee/config.json"
-    echo "  Web UI:       http://localhost:3000"
-    echo "  Solver:       http://127.0.0.1:8787"
+    echo "  Dashboard:    http://localhost:${DASHBOARD_PORT:-3000}"
+    echo "  Problem UI:   http://127.0.0.1:${UI_PORT:-8787}"
     echo "  Claude Agent: http://127.0.0.1:8788"
     echo "  Ollama Agent: http://127.0.0.1:8789"
     echo ""
     echo -e "${Y}Next steps:${NC}"
     echo "  1. cd ~/.ai-employee && ./start.sh"
-    echo "  2. openclaw channels login  (new terminal)"
-    echo "  3. Send WhatsApp: 'Hello!'"
-    echo "  4. Use Claude: 'switch to claude-agent' via WhatsApp or visit http://127.0.0.1:8788"
-    echo "  5. Use Ollama: 'switch to ollama-agent' via WhatsApp or visit http://127.0.0.1:8789"
-    [[ -n "$OLLAMA_MODEL" ]] && echo "     (run first: ollama pull $OLLAMA_MODEL)"
+    echo "     (the UI will open automatically in your browser)"
     echo ""
-    echo -e "  UI opens automatically when you run ${G}./start.sh${NC}"
+    echo "  2. In a new terminal, link your WhatsApp:"
+    echo "     openclaw channels login"
+    echo "     Scan the QR code with your phone"
+    echo ""
+    echo "  3. Send 'Hello!' to yourself on WhatsApp"
+    echo "     You will receive a welcome message confirming it works"
+    echo ""
+    echo "  4. Switch agents via WhatsApp:"
+    echo "     switch to claude-agent   → visit http://127.0.0.1:8788"
+    echo "     switch to ollama-agent   → visit http://127.0.0.1:8789"
+    [[ -n "${OLLAMA_MODEL:-}" ]] && echo "     (run first: ollama pull $OLLAMA_MODEL)"
     echo ""
 }
 
