@@ -26,7 +26,7 @@ check_requirements() {
     log "Checking requirements..."
     [ "$EUID" -eq 0 ] && err "Don't run as root!"
     command -v curl >/dev/null 2>&1 || err "curl required"
-    command -v docker >/dev/null 2>&1 || err "Docker required"
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then export USE_DOCKER=true; else export USE_DOCKER=false; fi
     docker info >/dev/null 2>&1 || err "Docker not running!"
     command -v node >/dev/null 2>&1 || err "Node.js 22+ required"
     NODE_V=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
