@@ -8,6 +8,15 @@ G='\033[0;32m'; C='\033[0;36m'; NC='\033[0m'
 log() { echo -e "${C}▸${NC} $1"; }
 ok()  { echo -e "${G}✓${NC} $1"; }
 
+# Load env to pick up DASHBOARD_PORT if set
+if [[ -f "$AI_HOME/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$AI_HOME/.env" 2>/dev/null || true
+  set +a
+fi
+DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
+
 log "Stopping bots..."
 "$AI_HOME/bin/ai-employee" stop --all >/dev/null 2>&1 || true
 
@@ -17,7 +26,6 @@ if [[ -f "$AI_HOME/run/gateway.pid" ]]; then
   [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
   rm -f "$AI_HOME/run/gateway.pid"
 fi
-# fallback: by name
 pkill -f "openclaw gateway" 2>/dev/null || true
 
 log "Stopping dashboard..."
