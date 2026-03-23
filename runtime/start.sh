@@ -101,12 +101,27 @@ open_url() {
   fi
 }
 
-log "Opening UI in browser..."
-sleep 1
-if [[ -n "${UI_PORT:-}" ]] && [[ "$UI_PORT" =~ ^[0-9]+$ ]]; then
-  open_url "http://127.0.0.1:$UI_PORT"
+wait_for_ui() {
+  local url="$1"
+  local max="${UI_STARTUP_TIMEOUT:-20}"  # configurable via env var
+  local i=0
+  while (( i < max )); do
+    if curl -sf --max-time 1 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    (( i++ )) || true
+  done
+  return 1
+}
+
+log "Waiting for UI to be ready..."
+UI_URL="http://127.0.0.1:${UI_PORT:-8787}"
+if wait_for_ui "$UI_URL"; then
+  ok "UI is ready — opening in browser"
+  open_url "$UI_URL"
 else
-  echo "  → Open manually: http://127.0.0.1:${UI_PORT:-8787}"
+  warn "UI did not respond in time — open manually: $UI_URL"
 fi
 
 # ── Keep alive ────────────────────────────────────────────────────────────────
