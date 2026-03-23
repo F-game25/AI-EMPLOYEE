@@ -163,6 +163,16 @@ case "$cmd" in
     tail -n 200 -f "$LOGS_DIR/$bot.log"
     ;;
   doctor)
+    echo "AI_HOME=$AI_HOME"
+    echo "Bots dir: $BOTS_DIR"
+    echo "Logs dir: $LOGS_DIR"
+    echo "Run dir : $RUN_DIR"
+    echo "Bots:"
+    list_bots || true
+    ;;
+  ui)
+    start_bot "problem-solver-ui"
+    echo "UI started (check logs)."
     echo "=== AI Employee Doctor ==="
     echo "AI_HOME  : $AI_HOME"
     echo "Bots dir : $BOTS_DIR"

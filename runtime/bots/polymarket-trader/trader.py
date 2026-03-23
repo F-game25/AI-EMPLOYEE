@@ -30,6 +30,18 @@ def write_state(state: dict):
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
+@dataclass
+class MarketQuote:
+    market_id: str
+    yes_price: float
+    no_price: float
+
+class PolymarketClient:
+    def get_quotes(self) -> list[MarketQuote]:
+        return []
+    def place_order_yes(self, market_id: str, usd_amount: float, max_price: float) -> str:
+        raise NotImplementedError
+
 
 @dataclass
 class MarketQuote:
@@ -112,6 +124,11 @@ def main():
             if not LIVE_TRADING:
                 executed.append({**a, "executed": False, "mode": "paper"})
                 continue
+            executed.append({**a, "executed": False, "error": "Client not implemented", "mode": "live"})
+
+        write_state({"ts": time.time(), "actions_found": len(actions), "executed": executed[:50]})
+        time.sleep(POLL_SECONDS)
+
             try:
                 if a["side"] == "YES":
                     oid = client.place_order_yes(a["market_id"], a["usd"], a["max_price"])
