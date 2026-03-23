@@ -11,4 +11,4 @@ if [[ -f "$AI_HOME/config/problem-solver.env" ]]; then
   set +a
 fi
 
-python3 "$BOT_HOME/problem_solver.py"
+exec python3 "$BOT_HOME/problem_solver.py"
