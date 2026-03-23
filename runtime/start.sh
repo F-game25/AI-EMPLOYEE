@@ -32,6 +32,20 @@ log "Starting OpenClaw gateway..."
 if command -v openclaw >/dev/null 2>&1; then
   OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$AI_HOME/config.json}"
   export OPENCLAW_CONFIG
+
+  # Ensure the symlink exists so openclaw can find config by default path too
+  mkdir -p "$HOME/.openclaw"
+  ln -sf "$OPENCLAW_CONFIG" "$HOME/.openclaw/openclaw.json" 2>/dev/null || true
+
+  # Verify config has gateway.mode=local before starting
+  if [[ ! -f "$OPENCLAW_CONFIG" ]]; then
+    warn "No config.json found at $OPENCLAW_CONFIG"
+    warn "Re-run the installer: cd ~/.ai-employee && bash install.sh"
+  elif ! grep -q '"mode".*"local"\|mode.*local' "$OPENCLAW_CONFIG" 2>/dev/null; then
+    warn "config.json is missing gateway.mode=local — re-run installer to fix:"
+    warn "  curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash"
+  fi
+
   nohup openclaw gateway \
     --config "$OPENCLAW_CONFIG" \
     >> "$AI_HOME/logs/gateway.log" 2>&1 &
