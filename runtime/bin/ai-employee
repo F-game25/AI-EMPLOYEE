@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# AI Employee - Multi-bot runner
+# Usage: ai-employee <command> [args]
+set -euo pipefail
+
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+BOTS_DIR="$AI_HOME/bots"
+LOGS_DIR="$AI_HOME/logs"
+RUN_DIR="$AI_HOME/run"
+STATE_DIR="$AI_HOME/state"
+
+mkdir -p "$LOGS_DIR" "$RUN_DIR" "$STATE_DIR"
+
+usage() {
+  cat <<'USAGE'
+ai-employee commands:
+  start --all | <bot>    Start one or all bots
+  stop  --all | <bot>    Stop one or all bots
+  restart --all | <bot>  Restart one or all bots
+  status                 Show running status of all bots
+  logs <bot>             Tail logs for a bot
+  doctor                 Show environment info
+  ui                     Open UI in browser
+USAGE
+}
+
+bot_pid_file() { echo "$RUN_DIR/$1.pid"; }
+
+is_running() {
+  local bot="$1"
+  local pid_file
+  pid_file="$(bot_pid_file "$bot")"
+  [[ -f "$pid_file" ]] || return 1
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  [[ -n "${pid:-}" ]] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+start_bot() {
+  local bot="$1"
+  local bot_dir="$BOTS_DIR/$bot"
+  local entry="$bot_dir/run.sh"
+  local log="$LOGS_DIR/$bot.log"
+  local pid_file
+  pid_file="$(bot_pid_file "$bot")"
+
+  if is_running "$bot"; then
+    echo "Already running: $bot (pid $(cat "$pid_file"))"
+    return 0
+  fi
+
+  if [[ ! -x "$entry" ]]; then
+    echo "ERROR: missing executable $entry"
+    return 1
+  fi
+
+  echo "Starting $bot ..."
+  nohup "$entry" >>"$log" 2>&1 &
+  echo $! > "$pid_file"
+  echo "Started $bot pid=$!"
+
+  # Record start time in state
+  local state_file="$STATE_DIR/$bot.state.json"
+  echo "{\"bot\":\"$bot\",\"status\":\"running\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"pid\":$!}" > "$state_file"
+}
+
+stop_bot() {
+  local bot="$1"
+  local pid_file
+  pid_file="$(bot_pid_file "$bot")"
+  if ! [[ -f "$pid_file" ]]; then
+    echo "Not running (no pid file): $bot"
+    return 0
+  fi
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ -z "${pid:-}" ]]; then
+    rm -f "$pid_file"
+    echo "Cleaned empty pid file: $bot"
+    return 0
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "Stopping $bot pid=$pid ..."
+    kill "$pid" || true
+    sleep 1
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  rm -f "$pid_file"
+
+  # Update state
+  local state_file="$STATE_DIR/$bot.state.json"
+  echo "{\"bot\":\"$bot\",\"status\":\"stopped\",\"stopped_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$state_file"
+  echo "Stopped $bot"
+}
+
+list_bots() {
+  if [[ ! -d "$BOTS_DIR" ]]; then
+    return 0
+  fi
+  # Portable: works on Linux and macOS
+  find "$BOTS_DIR" -maxdepth 1 -mindepth 1 -type d | sort | while read -r d; do
+    basename "$d"
+  done
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  start)
+    arg="${1:-}"
+    if [[ "$arg" == "--all" ]]; then
+      while read -r bot; do
+        [[ -n "$bot" ]] && start_bot "$bot" || true
+      done < <(list_bots)
+    else
+      [[ -n "$arg" ]] || { usage; exit 1; }
+      start_bot "$arg"
+    fi
+    ;;
+  stop)
+    arg="${1:-}"
+    if [[ "$arg" == "--all" ]]; then
+      while read -r bot; do
+        [[ -n "$bot" ]] && stop_bot "$bot" || true
+      done < <(list_bots)
+    else
+      [[ -n "$arg" ]] || { usage; exit 1; }
+      stop_bot "$arg"
+    fi
+    ;;
+  restart)
+    arg="${1:-}"
+    if [[ "$arg" == "--all" ]]; then
+      while read -r bot; do
+        [[ -n "$bot" ]] && stop_bot "$bot" || true
+      done < <(list_bots)
+      sleep 1
+      while read -r bot; do
+        [[ -n "$bot" ]] && start_bot "$bot" || true
+      done < <(list_bots)
+    else
+      [[ -n "$arg" ]] || { usage; exit 1; }
+      stop_bot "$arg"
+      sleep 1
+      start_bot "$arg"
+    fi
+    ;;
+  status)
+    while read -r bot; do
+      [[ -n "$bot" ]] || continue
+      if is_running "$bot"; then
+        echo "RUNNING  $bot  pid=$(cat "$(bot_pid_file "$bot")")"
+      else
+        echo "STOPPED  $bot"
+      fi
+    done < <(list_bots)
+    ;;
+  logs)
+    bot="${1:-}"
+    [[ -n "$bot" ]] || { usage; exit 1; }
+    tail -n 200 -f "$LOGS_DIR/$bot.log"
+    ;;
+  doctor)
+    echo "=== AI Employee Doctor ==="
+    echo "AI_HOME  : $AI_HOME"
+    echo "Bots dir : $BOTS_DIR"
+    echo "Logs dir : $LOGS_DIR"
+    echo "Run dir  : $RUN_DIR"
+    echo "State dir: $STATE_DIR"
+    echo ""
+    echo "Bots installed:"
+    list_bots || true
+    echo ""
+    echo "Dependency checks:"
+    command -v openclaw >/dev/null 2>&1 && echo "  openclaw : $(openclaw --version 2>/dev/null || echo ok)" || echo "  openclaw : NOT FOUND"
+    command -v ollama   >/dev/null 2>&1 && echo "  ollama   : $(ollama --version 2>/dev/null || echo ok)" || echo "  ollama   : not installed (optional)"
+    command -v python3  >/dev/null 2>&1 && echo "  python3  : $(python3 --version)" || echo "  python3  : NOT FOUND"
+    command -v node     >/dev/null 2>&1 && echo "  node     : $(node --version)" || echo "  node     : NOT FOUND"
+    command -v docker   >/dev/null 2>&1 && echo "  docker   : $(docker --version 2>/dev/null | head -1)" || echo "  docker   : NOT FOUND"
+    ;;
+  ui)
+    url="http://127.0.0.1:${PROBLEM_SOLVER_UI_PORT:-8787}"
+    echo "Opening UI at $url"
+    if command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$url" &
+    elif command -v open >/dev/null 2>&1; then
+      open "$url"
+    else
+      echo "  -> Open manually: $url"
+    fi
+    ;;
+  ""|-h|--help|help)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $cmd"
+    usage
+    exit 1
+    ;;
+esac
