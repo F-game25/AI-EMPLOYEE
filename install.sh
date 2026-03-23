@@ -131,7 +131,7 @@ wizard() {
         read -r PHONE
     done
     ok "Phone: $PHONE"
-    ok "Phone registered: $PHONE — a welcome WhatsApp message will be sent when you first connect"
+    ok "Phone registered: $PHONE — a startup message is queued and will be delivered on first WhatsApp connection"
 
     # 2) Local LLM
     echo ""
