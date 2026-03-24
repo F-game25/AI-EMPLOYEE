@@ -71,7 +71,22 @@ def build_compact_status() -> str:
             pm = json.loads(pm_state.read_text())
             mode = "LIVE" if pm.get("live") else "PAPER"
             found = pm.get("actions_found", 0)
-            lines.append(f"*Trading:* {mode} | signals: {found}")
+            mf = "ON" if pm.get("mirofish_enabled") else "OFF"
+            lines.append(f"*Trading:* {mode} | signals: {found} | MiroFish: {mf}")
+        except Exception:
+            pass
+
+    # MiroFish researcher state
+    mf_state = STATE_DIR / "mirofish-researcher.state.json"
+    if mf_state.exists():
+        try:
+            mf_data = json.loads(mf_state.read_text())
+            analyzed = mf_data.get("markets_analyzed", 0)
+            status = mf_data.get("status", "unknown")
+            if status == "running":
+                lines.append(f"*MiroFish:* {analyzed} markets analyzed 🐟")
+            elif status == "idle":
+                lines.append("*MiroFish:* idle (no markets configured)")
         except Exception:
             pass
 
