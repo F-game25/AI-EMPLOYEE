@@ -32,6 +32,11 @@ MIROFISH_AGENTS = int(os.environ.get("MIROFISH_AGENTS", "200"))
 MIROFISH_ROUNDS = int(os.environ.get("MIROFISH_ROUNDS", "15"))
 
 
+# Mask to constrain Python's arbitrary-precision hash to a 32-bit unsigned
+# integer, ensuring a reproducible seed range for random.Random.
+_SEED_MASK = 0xFFFFFFFF
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -105,7 +110,7 @@ class MiroFishPredictor:
             predicted_move, sim_agents, sim_rounds, current_price.
         """
         ctx = context or {}
-        seed = hash(f"{market_id}:{current_price:.4f}") & 0xFFFFFFFF
+        seed = hash(f"{market_id}:{current_price:.4f}") & _SEED_MASK
         rng = random.Random(seed)
 
         signal = self._compute_signal(current_price, ctx)
