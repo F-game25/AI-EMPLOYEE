@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
-# AI Employee — Linux Quick Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
-#
-# ─── Platform guide ────────────────────────────────────────────────────────────
-#   Linux:   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
-#   macOS:   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/mac/quick-install-mac.sh | bash
-#   Windows: Download quick-install-windows.bat from the 'windows' branch on GitHub
-# ───────────────────────────────────────────────────────────────────────────────
+# AI Employee — macOS Quick Installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/mac/quick-install-mac.sh | bash
 set -euo pipefail
-
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; C='\033[0;36m'; NC='\033[0m'
 
 GITHUB_USER="F-game25"
 GITHUB_REPO="AI-EMPLOYEE"
-GITHUB_BRANCH="main"
+GITHUB_BRANCH="mac"
 BASE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${GITHUB_BRANCH}"
 
 err()  { echo -e "${R}✗ $1${NC}"; exit 1; }
@@ -24,28 +17,33 @@ warn() { echo -e "${Y}⚠ $1${NC}"; }
 
 # ── Pre-flight checks ──────────────────────────────────────────────────────────
 [ "$EUID" -eq 0 ] && err "Do not run as root. Run as your regular user."
-command -v curl >/dev/null 2>&1 || err "curl is required. Install it first."
+command -v curl >/dev/null 2>&1 || err "curl is required. Install it first: brew install curl"
 
-# Warn if running on macOS
-if [[ "$(uname)" == "Darwin" ]]; then
-    warn "This is the Linux installer. For macOS use:"
-    warn "  curl -fsSL https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/mac/quick-install-mac.sh | bash"
-    echo -n "Continue with Linux installer anyway? [y/N]: "
-    read -r _continue < /dev/tty
-    [[ "$_continue" =~ ^[Yy]$ ]] || exit 0
+# macOS check
+if [[ "$(uname)" != "Darwin" ]]; then
+    err "This installer is for macOS only.
+  Linux:   curl -fsSL https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main/quick-install.sh | bash
+  Windows: Download install-windows.ps1 from the windows branch on GitHub"
 fi
 
+echo ""
+echo "  ╔══════════════════════════════════════════════════════╗"
+echo "  ║      AI EMPLOYEE - macOS Quick Installer             ║"
+echo "  ║  curl | bash one-liner for Mac                       ║"
+echo "  ╚══════════════════════════════════════════════════════╝"
+echo ""
+
 # ── Download installer + runtime ───────────────────────────────────────────────
-log "Downloading AI Employee installer..."
+log "Downloading AI Employee macOS installer..."
 
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
 cd "$TEMP_DIR"
 
-# Download install.sh
-curl -fsSL "$BASE_URL/install.sh" -o install.sh || err "Failed to download install.sh"
-chmod +x install.sh
+# Download macOS install script
+curl -fsSL "$BASE_URL/install-mac.sh" -o install-mac.sh || err "Failed to download install-mac.sh"
+chmod +x install-mac.sh
 
 # Download runtime directory structure
 log "Downloading runtime files..."
@@ -86,8 +84,7 @@ dl "stop.sh"
 ok "Files downloaded"
 
 # ── Run installer ──────────────────────────────────────────────────────────────
-log "Running installer..."
+log "Running macOS installer..."
 # Redirect stdin from /dev/tty so wizard prompts work even when piped through curl
-bash install.sh < /dev/tty
+bash install-mac.sh < /dev/tty
 ok "Installation complete!"
-

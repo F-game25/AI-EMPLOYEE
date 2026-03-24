@@ -138,112 +138,127 @@ pm risks <project>            # risk register
 
 | Tool | Version | Notes |
 |---|---|---|
-| **Linux / macOS / WSL** | — | Ubuntu/Debian/Mint/macOS/WSL2 |
+| **Linux** | Ubuntu 20.04+ / Debian / Mint / Fedora | `main` branch |
+| **macOS** | 12+ (Monterey or newer) | `mac` branch |
+| **Windows** | Windows 10/11 (PowerShell 5.1+) | `windows` branch |
+| **Python 3** | 3.10+ | for bots and dashboard |
 | **curl** | any | for downloading |
-| **Python 3** | 3.10+ | for the dashboard UI (fastapi/uvicorn) |
-| **OpenSSL** | any | for token generation |
-| **Node.js** | 20+ | recommended (for OpenClaw) |
-| **Docker** | any | optional (sandbox mode) |
+| **OpenSSL** | any | for token generation (Linux/macOS) |
 
-Quick check:
+---
+
+## 🖥️ Install — Choose Your Platform
+
+### 🐧 Linux (Ubuntu / Debian / Mint / Fedora / Arch)
 
 ```bash
-curl --version
-python3 --version
-openssl version
-node -v          # optional
-docker --version # optional
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+```
+
+Or download directly:
+```bash
+# Clone or download from the 'main' branch
+bash install.sh
+```
+
+### 🍎 macOS (Monterey 12+ / Ventura / Sonoma)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/mac/quick-install-mac.sh | bash
+```
+
+Or download directly from the **`mac` branch** on GitHub:
+1. Go to → https://github.com/F-game25/AI-EMPLOYEE/tree/mac
+2. Download `install-mac.sh`
+3. Open Terminal and run: `bash ~/Downloads/install-mac.sh`
+
+> **Requires Homebrew.** The installer will offer to install it automatically.
+
+### 🪟 Windows 10 / 11
+
+**No WSL or Git Bash required** — fully native PowerShell installer.
+
+**One-click install:**
+1. Go to → https://github.com/F-game25/AI-EMPLOYEE/tree/windows
+2. Download **`quick-install-windows.bat`**
+3. Double-click the file to install
+
+Or run from PowerShell:
+```powershell
+powershell -ExecutionPolicy Bypass -File install-windows.ps1
 ```
 
 ---
 
-## Install (one command)
+## What the installer asks
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
-```
-
-The installer runs a **step-by-step wizard** that asks:
+The step-by-step wizard asks:
 
 1. WhatsApp phone number (E.164 format, e.g. `+31612345678`)
 2. Local LLM via Ollama? (yes/no + model name)
 3. Anthropic / OpenAI API keys (optional)
-4. Trading bot path (optional)
-5. Enable hourly WhatsApp status updates?
-6. Dashboard port (default: 3000) and UI port (default: 8787)
-7. Number of workers (1–20, default: 20)
+4. Alpha Insider, Tavily, NewsAPI keys (optional)
+5. Telegram / Discord / SMTP (optional)
+6. Enable hourly WhatsApp status updates?
+7. Dashboard port (default: 3000) and UI port (default: 8787)
+8. Number of workers (1–20, default: 20)
 
-Everything is installed into **`~/.ai-employee/`**.
-
-### Update (re-run installer)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
-```
-
-Re-running upgrades runtime files **without overwriting** your existing config files or `.env`.
-
-During installation you will be asked for:
-- Your WhatsApp number
-- Anthropic API key (optional – required for **Claude Agent**)
-- Claude model name (default: `claude-opus-4-5`)
-- Ollama model name (default: `llama3`) and host (default: `http://localhost:11434`)
+Everything is installed into **`~/.ai-employee/`** (Linux/macOS) or **`%USERPROFILE%\.ai-employee\`** (Windows).
 
 ---
 
 ## Start / Stop
 
-### Start
+### 🐧 Linux / 🍎 macOS
 
 ```bash
 cd ~/.ai-employee
 ./start.sh
 ```
 
-You should see:
-- Web UI: `http://localhost:3000`
-- Gateway: `http://localhost:18789`
-- Problem Solver UI: `http://127.0.0.1:8787`
-- **Claude AI Agent UI**: `http://127.0.0.1:8788`
-- **Ollama Local Agent UI**: `http://127.0.0.1:8789`
-The UI **opens automatically** in your browser. If it doesn't, open manually:
+Stop: `./stop.sh` or Ctrl+C in the terminal.
 
-- **Full Dashboard:** http://127.0.0.1:8787
+**Desktop launchers** (created by installer):
+| Platform | How to start |
+|---|---|
+| **Linux** | Double-click `~/Desktop/ai-employee.desktop` or search "AI Employee" in app menu |
+| **macOS** | Double-click `~/Desktop/AI-Employee.command` |
+| **Linux autostart** | `systemctl --user enable --now ai-employee` |
+| **macOS autostart** | `launchctl load -w ~/Library/LaunchAgents/com.ai-employee.plist` |
+
+### 🪟 Windows
+
+Double-click **`Start AI Employee.bat`** on your Desktop.
+
+Or run from PowerShell:
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.ai-employee\start-windows.ps1"
+```
+
+Stop: Double-click **`Stop AI Employee.bat`** on your Desktop.
+
+### All platforms — browser URLs
+
+After starting, the browser opens automatically. URLs:
+- **Full Dashboard:** http://127.0.0.1:8787 ← main UI
 - **Simple Dashboard:** http://localhost:3000
 - **Gateway API:** http://localhost:18789
 
-### Stop
-
-In a new terminal:
-
-```bash
-cd ~/.ai-employee
-./stop.sh
-```
-
 ---
 
-## Start without a terminal (desktop launcher)
+## Update
 
-The installer creates a **desktop launcher** so you can start AI Employee by double-clicking — no terminal needed after the first-time WhatsApp link.
+Re-run the installer for your platform to upgrade runtime files without touching your config.
 
-| Platform | How to start |
-|---|---|
-| **Linux** | Double-click `~/Desktop/ai-employee.desktop` **or** search *"AI Employee"* in your app menu |
-| **macOS** | Double-click `~/Desktop/Start AI Employee.command` |
-| **Autostart on login** | `systemctl --user enable --now ai-employee` |
-
-> **Note:** You still need a terminal **once** to scan the WhatsApp QR code (`openclaw channels login`).  After that, everything is controllable via WhatsApp messages and the web dashboard.
-
-Once running, open the dashboard in your browser:
-- **Full Dashboard:** http://127.0.0.1:8787
-- **Simple Dashboard:** http://localhost:3000
+- **Linux:** `curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash`
+- **macOS:** `curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/mac/quick-install-mac.sh | bash`
+- **Windows:** Re-run `quick-install-windows.bat` or `install-windows.ps1`
 
 ---
 
 ## Connect WhatsApp (first time)
 
-After starting, open a **new terminal** and run:
+After starting, open a **new terminal** (Linux/macOS) or PowerShell (Windows) and run:
 
 ```bash
 openclaw channels login
@@ -282,15 +297,33 @@ analyze competitor pricing for Notion
 
 ## Dashboard (UI)
 
-The full dashboard runs at **http://127.0.0.1:8787** and has 5 tabs:
+The full dashboard runs at **http://127.0.0.1:8787** and has 9 tabs:
 
 | Tab | Description |
 |---|---|
-| 📊 **Dashboard** | Live bot status, system info, quick start/stop |
+| 📊 **Dashboard** | Live bot status, system info, WhatsApp quick-commands panel |
 | 💬 **Chat** | Send tasks (same as WhatsApp), view chat history |
+| 🚀 **Tasks** | **Task agent selection** — describe goal → auto-select agents → launch |
+| 🐝 **Swarm** | All 20 agents: capabilities, status, workload |
+| 📜 **Commands** | Full WhatsApp commands reference — searchable, click to copy |
 | 📅 **Scheduler** | Create/edit/delete scheduled tasks |
-| 👷 **Workers** | Start/stop individual bots |
+| 👷 **Workers** | Start/stop/toggle individual bots |
 | 💡 **Improvements** | Review and approve/reject skill proposals |
+| 🛠️ **Skills** | Browse and search 126+ business skills |
+
+### Tasks tab — Agent Selection & Auto-Assign
+
+1. **Describe your goal** in plain English
+2. Click **🤖 Auto-Select Agents** — AI picks the best agents for your task
+3. Review/adjust the agent grid (select All, None, or manual picks)
+4. Choose execution mode: **Auto** (orchestrator decides), **Parallel** (all at once), **Single** (first agent)
+5. Click **🚀 Launch Task**
+
+### Commands tab — WhatsApp Controls
+
+The Commands tab lists every WhatsApp command grouped by category with search:
+- Copy any command to clipboard with one click
+- Works directly in the Chat tab too — same commands work on WhatsApp and in the UI
 
 ---
 

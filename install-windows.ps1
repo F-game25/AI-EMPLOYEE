@@ -393,20 +393,46 @@ try {
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Step "Downloading runtime files from GitHub ($GITHUB_BRANCH branch)..."
 
-$BOTS = @(
-    'problem-solver', 'problem-solver-ui', 'polymarket-trader', 'status-reporter',
-    'scheduler-runner', 'discovery', 'skills-manager', 'mirofish-researcher',
-    'ai-router', 'ollama-agent', 'claude-agent', 'web-researcher',
-    'social-media-manager', 'lead-generator', 'recruiter', 'ecom-agent',
-    'creator-agency', 'signal-community', 'appointment-setter', 'newsletter-bot',
-    'chatbot-builder', 'faceless-video', 'print-on-demand', 'course-creator',
-    'arbitrage-bot', 'task-orchestrator', 'company-builder', 'memecoin-creator',
-    'hr-manager', 'finance-wizard', 'brand-strategist', 'growth-hacker',
-    'project-manager'
-)
+# Mapping: bot-folder-name => python-file-name
+$BOT_FILES = [ordered]@{
+    'problem-solver'        = 'problem_solver.py'
+    'problem-solver-ui'     = 'server.py'
+    'polymarket-trader'     = 'trader.py'
+    'status-reporter'       = 'status_reporter.py'
+    'scheduler-runner'      = 'scheduler.py'
+    'discovery'             = 'discovery.py'
+    'skills-manager'        = 'skills_manager.py'
+    'mirofish-researcher'   = 'researcher.py'
+    'ai-router'             = 'ai_router.py'
+    'ollama-agent'          = 'ollama_agent.py'
+    'claude-agent'          = 'claude_agent.py'
+    'web-researcher'        = 'web_researcher.py'
+    'social-media-manager'  = 'social_media_manager.py'
+    'lead-generator'        = 'lead_generator.py'
+    'recruiter'             = 'recruiter.py'
+    'ecom-agent'            = 'ecom_agent.py'
+    'creator-agency'        = 'creator_agency.py'
+    'signal-community'      = 'signal_community.py'
+    'appointment-setter'    = 'appointment_setter.py'
+    'newsletter-bot'        = 'newsletter_bot.py'
+    'chatbot-builder'       = 'chatbot_builder.py'
+    'faceless-video'        = 'faceless_video.py'
+    'print-on-demand'       = 'print_on_demand.py'
+    'course-creator'        = 'course_creator.py'
+    'arbitrage-bot'         = 'arbitrage_bot.py'
+    'task-orchestrator'     = 'task_orchestrator.py'
+    'company-builder'       = 'company_builder.py'
+    'memecoin-creator'      = 'memecoin_creator.py'
+    'hr-manager'            = 'hr_manager.py'
+    'finance-wizard'        = 'finance_wizard.py'
+    'brand-strategist'      = 'brand_strategist.py'
+    'growth-hacker'         = 'growth_hacker.py'
+    'project-manager'       = 'project_manager.py'
+}
+$BOTS = $BOT_FILES.Keys
 
-# Download start-windows.ps1 launcher
-$startScriptUrl  = "$BASE_URL/start-windows.ps1"
+# Download start-windows.ps1 launcher (the script that actually starts all bots)
+$startScriptUrl  = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/windows/start-windows.ps1"
 $startScriptDest = Join-Path $AI_HOME 'start-windows.ps1'
 $ok = Invoke-Download $startScriptUrl $startScriptDest
 if (-not $ok) {
@@ -422,24 +448,30 @@ Get-Content "`$AI_HOME\.env" | ForEach-Object {
 }
 Write-Host 'Starting AI Employee...' -ForegroundColor Cyan
 Push-Location `$AI_HOME
-& python bots\problem-solver-ui\main.py
+`$python = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'py' }
+`$uiScript = Join-Path `$AI_HOME 'bots\problem-solver-ui\server.py'
+Start-Process `$python -ArgumentList `"`$uiScript`" -WindowStyle Hidden
+Start-Sleep 5
+Start-Process 'http://127.0.0.1:8787'
+Read-Host 'Press Enter to exit'
 "@
     Set-Content -Path $startScriptDest -Value $fallbackLauncher -Encoding UTF8
-    Write-Warn "start-windows.ps1 not on GitHub yet – created minimal fallback launcher."
+    Write-Warn "start-windows.ps1 not downloaded – created minimal fallback launcher."
 }
 
-# Download bot files
+# Download bot files using correct per-bot filenames
 $downloadCount = 0
 $failCount = 0
 foreach ($bot in $BOTS) {
+    $pyFile = $BOT_FILES[$bot]
     $botDir = Join-Path $AI_HOME "bots\$bot"
     if (-not (Test-Path $botDir)) {
         New-Item -ItemType Directory -Path $botDir -Force | Out-Null
     }
 
-    # Main bot script
-    $botUrl  = "$BASE_URL/bots/$bot/main.py"
-    $botDest = Join-Path $botDir 'main.py'
+    # Main bot Python script (with correct filename)
+    $botUrl  = "$BASE_URL/bots/$bot/$pyFile"
+    $botDest = Join-Path $botDir $pyFile
     if (Invoke-Download $botUrl $botDest) { $downloadCount++ } else { $failCount++ }
 
     # requirements.txt (optional)
@@ -447,23 +479,41 @@ foreach ($bot in $BOTS) {
     $reqDest = Join-Path $botDir 'requirements.txt'
     Invoke-Download $reqUrl $reqDest | Out-Null
 
-    # Config file
+    # Config .env file
     $cfgUrl  = "$BASE_URL/config/$bot.env"
     $cfgDest = Join-Path $AI_HOME "config\$bot.env"
     Invoke-Download $cfgUrl $cfgDest | Out-Null
 }
-Write-OK "Bot files: $downloadCount downloaded, $failCount not found (will be created empty)."
 
-# Ensure every bot directory has at least a placeholder main.py
+# Also download shared config files
+$configFiles = @(
+    'openclaw.template.json', 'schedules.json', 'polymarket_estimates.json',
+    'skills_library.json', 'custom_agents.json', 'agent_capabilities.json',
+    'task_plans.json'
+)
+foreach ($cf in $configFiles) {
+    $cfUrl   = "$BASE_URL/config/$cf"
+    $cfDest  = Join-Path $AI_HOME "config\$cf"
+    Invoke-Download $cfUrl $cfDest | Out-Null
+}
+
+Write-OK "Bot files: $downloadCount downloaded, $failCount not found (placeholders created)."
+
+# Ensure every bot directory has at least a placeholder Python script
 foreach ($bot in $BOTS) {
-    $mainPy = Join-Path $AI_HOME "bots\$bot\main.py"
-    if (-not (Test-Path $mainPy)) {
+    $pyFile  = $BOT_FILES[$bot]
+    $pyDest  = Join-Path $AI_HOME "bots\$bot\$pyFile"
+    if (-not (Test-Path $pyDest)) {
         $placeholder = @"
-# $bot - placeholder
-# Replace with actual bot code from the AI Employee repository.
-print('$bot placeholder – not yet configured.')
+# $bot ($pyFile) - placeholder
+# The actual bot code will be downloaded when you run the installer connected to GitHub.
+import time, os
+AI_HOME = os.environ.get('AI_HOME', os.path.expanduser('~/.ai-employee'))
+print(f'$bot: waiting for real code. AI_HOME={AI_HOME}')
+while True:
+    time.sleep(60)
 "@
-        Set-Content -Path $mainPy -Value $placeholder -Encoding UTF8
+        Set-Content -Path $pyDest -Value $placeholder -Encoding UTF8
     }
 }
 
@@ -568,20 +618,20 @@ Write-OK ".env written."
 
 # 9c. Problem-solver-ui config
 $uiEnv = @"
-PORT=$UI_PORT
-HOST=127.0.0.1
+PROBLEM_SOLVER_UI_PORT=$UI_PORT
+PROBLEM_SOLVER_UI_HOST=127.0.0.1
 SECRET_TOKEN=$AI_SECRET_TOKEN
 AI_HOME=$AI_HOME
 "@
 Set-Content -Path (Join-Path $AI_HOME 'config\problem-solver-ui.env') -Value $uiEnv -Encoding UTF8
 
 # 9d. Status-reporter config
-$intervalMin = if ($HOURLY_STATUS) { 60 } else { 0 }
+$intervalSecs = if ($HOURLY_STATUS) { 3600 } else { 0 }
 $statusEnv = @"
 WHATSAPP_PHONE=$WHATSAPP_PHONE
-STATUS_INTERVAL_MINUTES=$intervalMin
+STATUS_REPORT_INTERVAL_SECONDS=$intervalSecs
+OPENCLAW_GATEWAY_TOKEN=$AI_SECRET_TOKEN
 OPENCLAW_PORT=18789
-SECRET_TOKEN=$AI_SECRET_TOKEN
 "@
 Set-Content -Path (Join-Path $AI_HOME 'config\status-reporter.env') -Value $statusEnv -Encoding UTF8
 
@@ -673,11 +723,11 @@ powershell -ExecutionPolicy Bypass -WindowStyle Normal -File "%USERPROFILE%\.ai-
 Set-Content -Path (Join-Path $desktop 'Start AI Employee.bat') -Value $startBat -Encoding ASCII
 Write-OK "Created 'Start AI Employee.bat' on Desktop."
 
-# Stop shortcut (.bat) – kills uvicorn / python processes started by ai-employee
+# Stop shortcut (.bat) – kills AI Employee processes using saved PID files
 $stopBat = @"
 @echo off
 echo Stopping AI Employee...
-powershell -Command "Get-Process python,uvicorn -ErrorAction SilentlyContinue | Stop-Process -Force"
+powershell -ExecutionPolicy Bypass -Command "& { `$AI_HOME = Join-Path `$env:USERPROFILE '.ai-employee'; `$runDir = Join-Path `$AI_HOME 'run'; if (Test-Path `$runDir) { Get-ChildItem `$runDir -Filter '*.pid' | ForEach-Object { `$pid = Get-Content `$_.FullName -Raw; try { Stop-Process -Id `$pid -Force -ErrorAction Stop; Write-Host 'Stopped process' `$pid } catch { Write-Host 'PID' `$pid 'already stopped' }; Remove-Item `$_.FullName } } }"
 echo AI Employee stopped.
 pause
 "@
