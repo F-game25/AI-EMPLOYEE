@@ -71,92 +71,259 @@ def ai_employee(*args: str) -> tuple:
 
 # ─── HTML Dashboard ────────────────────────────────────────────────────────────
 
+# ─── HTML Dashboard ────────────────────────────────────────────────────────────
+
 INDEX_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>AI Employee Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
+    :root{
+      --bg:#080e1a;--surface:#0d1626;--surface2:#111d30;--border:#1e2d45;
+      --primary:#6366f1;--primary-dark:#4f46e5;--accent:#22d3ee;
+      --success:#10b981;--danger:#ef4444;--warning:#f59e0b;
+      --text:#e2e8f0;--text-muted:#64748b;--text-secondary:#94a3b8;
+      --radius:12px;--radius-sm:8px;--shadow:0 4px 24px rgba(0,0,0,.4);
+    }
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
-    header{background:linear-gradient(135deg,#667eea,#764ba2);padding:20px 30px;display:flex;align-items:center;gap:16px}
-    header h1{color:#fff;font-size:1.6em}
-    header .sub{color:rgba(255,255,255,.8);font-size:.9em;margin-top:2px}
-    nav{background:#1e293b;border-bottom:1px solid #334155;display:flex;gap:0}
-    nav button{background:none;border:none;color:#94a3b8;padding:12px 22px;cursor:pointer;font-size:.95em;border-bottom:3px solid transparent;transition:all .2s}
-    nav button:hover{color:#e2e8f0;background:#334155}
-    nav button.active{color:#667eea;border-bottom-color:#667eea}
-    .tab-content{display:none;padding:24px;max-width:1200px;margin:0 auto}
-    .tab-content.active{display:block}
-    .card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin-bottom:16px}
-    .card h3{color:#667eea;margin-bottom:12px;font-size:1.05em}
+    html{scroll-behavior:smooth}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
+
+    /* ── Scrollbars ── */
+    ::-webkit-scrollbar{width:6px;height:6px}
+    ::-webkit-scrollbar-track{background:var(--surface)}
+    ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+    ::-webkit-scrollbar-thumb:hover{background:#2a3d5a}
+
+    /* ── Layout ── */
+    .app{display:flex;flex-direction:column;min-height:100vh}
+
+    /* ── Header ── */
+    header{
+      background:linear-gradient(135deg,var(--primary-dark) 0%,#312e81 50%,#1e1b4b 100%);
+      padding:16px 28px;display:flex;align-items:center;justify-content:space-between;
+      border-bottom:1px solid rgba(99,102,241,.25);
+      position:sticky;top:0;z-index:100;backdrop-filter:blur(10px);
+    }
+    .header-left{display:flex;align-items:center;gap:14px}
+    .logo{width:40px;height:40px;background:rgba(255,255,255,.1);border-radius:10px;
+      display:flex;align-items:center;justify-content:center;font-size:1.4em;
+      border:1px solid rgba(255,255,255,.15)}
+    .header-title h1{color:#fff;font-size:1.2em;font-weight:700;letter-spacing:-.02em}
+    .header-title .sub{color:rgba(255,255,255,.6);font-size:.8em;margin-top:1px}
+    .header-right{display:flex;align-items:center;gap:10px}
+    .status-pill{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.07);
+      border:1px solid rgba(255,255,255,.12);border-radius:20px;
+      padding:5px 12px;font-size:.8em;color:rgba(255,255,255,.75)}
+    .status-dot{width:7px;height:7px;border-radius:50%;background:var(--success);
+      box-shadow:0 0 6px var(--success);animation:blink 2s infinite}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+
+    /* ── Navigation ── */
+    nav{background:var(--surface);border-bottom:1px solid var(--border);
+      padding:0 28px;display:flex;gap:2px;overflow-x:auto}
+    nav button{
+      background:none;border:none;color:var(--text-secondary);
+      padding:12px 16px;cursor:pointer;font-size:.875em;font-weight:500;
+      border-bottom:2px solid transparent;transition:all .2s;
+      white-space:nowrap;display:flex;align-items:center;gap:6px;
+      font-family:inherit;
+    }
+    nav button:hover{color:var(--text);background:rgba(255,255,255,.03)}
+    nav button.active{color:var(--primary);border-bottom-color:var(--primary);background:rgba(99,102,241,.05)}
+
+    /* ── Main content ── */
+    main{flex:1;padding:24px 28px;max-width:1280px;margin:0 auto;width:100%}
+    @media(max-width:768px){main{padding:16px}}
+
+    /* ── Tab panels ── */
+    .tab-content{display:none}
+    .tab-content.active{display:block;animation:fadeIn .2s ease}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+    /* ── Cards ── */
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+    .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+    .card-title{font-size:.95em;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
+    .card-title .icon{color:var(--primary)}
+    .section-title{font-size:.8em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+
+    /* ── Grid layouts ── */
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
-    @media(max-width:700px){.grid2,.grid3{grid-template-columns:1fr}}
-    .bot-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #334155}
+    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    .grid-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+    @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
+
+    /* ── Stat cards ── */
+    .stat-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);
+      padding:16px;display:flex;align-items:center;gap:12px}
+    .stat-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;
+      justify-content:center;font-size:1.1em;flex-shrink:0}
+    .stat-icon.green{background:rgba(16,185,129,.15);color:var(--success)}
+    .stat-icon.blue{background:rgba(99,102,241,.15);color:var(--primary)}
+    .stat-icon.cyan{background:rgba(34,211,238,.15);color:var(--accent)}
+    .stat-icon.yellow{background:rgba(245,158,11,.15);color:var(--warning)}
+    .stat-body .val{font-size:1.5em;font-weight:700;color:var(--text)}
+    .stat-body .lbl{font-size:.78em;color:var(--text-muted);margin-top:1px}
+
+    /* ── Bot rows ── */
+    .bot-row{display:flex;align-items:center;gap:10px;padding:9px 0;
+      border-bottom:1px solid var(--border)}
     .bot-row:last-child{border:none}
-    .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
-    .dot.on{background:#10b981;box-shadow:0 0 6px #10b981}
-    .dot.off{background:#ef4444}
-    .dot.unknown{background:#f59e0b}
-    .btn{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:.9em;transition:all .2s}
-    .btn:hover{opacity:.9;transform:translateY(-1px)}
-    .btn.danger{background:linear-gradient(135deg,#ef4444,#b91c1c)}
-    .btn.success{background:linear-gradient(135deg,#10b981,#059669)}
-    .btn.sm{padding:5px 12px;font-size:.82em}
-    textarea,input,select{background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px 12px;font-size:.9em;width:100%}
+    .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:background .3s}
+    .dot.on{background:var(--success);box-shadow:0 0 8px rgba(16,185,129,.5)}
+    .dot.off{background:#374151}
+    .dot.unknown{background:var(--warning)}
+    .bot-name{flex:1;font-size:.88em;color:var(--text)}
+
+    /* ── Badges ── */
+    .badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;
+      font-size:.75em;font-weight:600;letter-spacing:.01em}
+    .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:var(--success);border:1px solid rgba(16,185,129,.25)}
+    .badge.stopped,.badge.rejected{background:rgba(239,68,68,.12);color:var(--danger);border:1px solid rgba(239,68,68,.25)}
+    .badge.pending{background:rgba(245,158,11,.12);color:var(--warning);border:1px solid rgba(245,158,11,.25)}
+    .badge.enabled{background:rgba(99,102,241,.12);color:var(--primary);border:1px solid rgba(99,102,241,.25)}
+    .badge.disabled{background:rgba(100,116,139,.12);color:var(--text-muted);border:1px solid rgba(100,116,139,.25)}
+
+    /* ── Buttons ── */
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border:none;
+      border-radius:var(--radius-sm);cursor:pointer;font-size:.875em;font-weight:500;
+      transition:all .2s;font-family:inherit;text-decoration:none;white-space:nowrap}
+    .btn-primary{background:var(--primary);color:#fff}
+    .btn-primary:hover{background:var(--primary-dark);transform:translateY(-1px);box-shadow:0 4px 12px rgba(99,102,241,.4)}
+    .btn-danger{background:rgba(239,68,68,.15);color:var(--danger);border:1px solid rgba(239,68,68,.25)}
+    .btn-danger:hover{background:rgba(239,68,68,.25)}
+    .btn-success{background:rgba(16,185,129,.15);color:var(--success);border:1px solid rgba(16,185,129,.25)}
+    .btn-success:hover{background:rgba(16,185,129,.25)}
+    .btn-ghost{background:rgba(255,255,255,.05);color:var(--text-secondary);border:1px solid var(--border)}
+    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text)}
+    .btn-sm{padding:5px 11px;font-size:.8em}
+    .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important}
+
+    /* ── Form controls ── */
+    .form-group{margin-bottom:14px}
+    label{display:block;font-size:.82em;font-weight:500;color:var(--text-secondary);margin-bottom:5px}
+    input,textarea,select{
+      width:100%;background:var(--surface2);border:1px solid var(--border);
+      color:var(--text);border-radius:var(--radius-sm);padding:9px 12px;
+      font-size:.875em;font-family:inherit;transition:border-color .2s;outline:none}
+    input:focus,textarea:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
     textarea{resize:vertical;min-height:80px}
-    pre{background:#0f172a;border:1px solid #334155;padding:12px;border-radius:8px;overflow:auto;font-size:.85em;max-height:300px;white-space:pre-wrap;word-break:break-word}
-    .chat-msg{padding:8px 12px;border-radius:8px;margin-bottom:8px;max-width:80%}
-    .chat-msg.user{background:#3730a3;margin-left:auto;text-align:right}
-    .chat-msg.bot{background:#1e293b;border:1px solid #334155}
-    .chat-msg .ts{font-size:.75em;opacity:.6;margin-top:4px}
-    #chat-log{max-height:380px;overflow-y:auto;padding:8px;border:1px solid #334155;border-radius:8px;background:#0f172a;margin-bottom:12px}
-    .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.8em;font-weight:600}
-    .badge.pending{background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b}
-    .badge.approved{background:#10b98122;color:#10b981;border:1px solid #10b981}
-    .badge.rejected{background:#ef444422;color:#ef4444;border:1px solid #ef4444}
-    .badge.running{background:#10b98122;color:#10b981}
-    .badge.stopped{background:#ef444422;color:#ef4444}
-    .improv-row{border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:10px}
-    .improv-row h4{color:#e2e8f0;margin-bottom:4px}
-    .improv-row p{font-size:.88em;color:#94a3b8;margin-bottom:8px}
-    label{display:block;margin-bottom:4px;font-size:.88em;color:#94a3b8}
-    .form-row{margin-bottom:12px}
-    .sched-row{border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:10px;display:flex;align-items:flex-start;gap:12px}
+    select option{background:var(--surface)}
+
+    /* ── Code / pre ── */
+    pre{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);
+      padding:14px;overflow:auto;font-size:.82em;max-height:280px;
+      white-space:pre-wrap;word-break:break-word;color:var(--text-secondary);
+      font-family:'JetBrains Mono','Fira Code',monospace}
+    code{background:rgba(99,102,241,.12);color:var(--primary);
+      padding:1px 6px;border-radius:4px;font-size:.88em;font-family:monospace}
+
+    /* ── Chat ── */
+    #chat-log{max-height:400px;overflow-y:auto;padding:12px;border:1px solid var(--border);
+      border-radius:var(--radius-sm);background:var(--bg);margin-bottom:12px}
+    .chat-msg{padding:10px 14px;border-radius:10px;margin-bottom:8px;max-width:82%;word-break:break-word}
+    .chat-msg.user{background:linear-gradient(135deg,var(--primary),var(--primary-dark));
+      margin-left:auto;text-align:right;color:#fff}
+    .chat-msg.bot{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+    .chat-msg .ts{font-size:.72em;opacity:.55;margin-top:4px}
+    .chat-input-row{display:flex;gap:8px;align-items:flex-end}
+
+    /* ── Improvements ── */
+    .improv-row{border:1px solid var(--border);border-radius:var(--radius-sm);
+      padding:14px;margin-bottom:10px;background:var(--surface2);transition:border-color .2s}
+    .improv-row:hover{border-color:rgba(99,102,241,.3)}
+    .improv-row h4{color:var(--text);font-size:.9em;margin-bottom:4px}
+    .improv-row p{font-size:.83em;color:var(--text-secondary);margin-bottom:8px;line-height:1.5}
+
+    /* ── Scheduler ── */
+    .sched-row{border:1px solid var(--border);border-radius:var(--radius-sm);
+      padding:12px 14px;margin-bottom:10px;background:var(--surface2);
+      display:flex;align-items:flex-start;gap:12px}
     .sched-info{flex:1}
-    .sched-info h4{color:#e2e8f0;font-size:.95em;margin-bottom:2px}
-    .sched-info p{font-size:.82em;color:#94a3b8}
-    .toggle{position:relative;display:inline-block;width:36px;height:20px}
+    .sched-info h4{color:var(--text);font-size:.88em;margin-bottom:3px;display:flex;align-items:center;gap:8px}
+    .sched-info p{font-size:.8em;color:var(--text-muted)}
+
+    /* ── Toggle ── */
+    .toggle{position:relative;display:inline-block;width:38px;height:22px;flex-shrink:0}
     .toggle input{opacity:0;width:0;height:0}
-    .slider{position:absolute;cursor:pointer;inset:0;background:#334155;border-radius:20px;transition:.3s}
-    .slider:before{content:"";position:absolute;width:14px;height:14px;left:3px;top:3px;background:#94a3b8;border-radius:50%;transition:.3s}
-    input:checked+.slider{background:#667eea}
+    .slider{position:absolute;cursor:pointer;inset:0;background:var(--border);border-radius:22px;transition:.3s}
+    .slider:before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;
+      background:#64748b;border-radius:50%;transition:.3s}
+    input:checked+.slider{background:var(--primary)}
     input:checked+.slider:before{transform:translateX(16px);background:#fff}
-    #toast{position:fixed;bottom:24px;right:24px;background:#10b981;color:#fff;padding:10px 20px;border-radius:8px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}
-    #toast.show{opacity:1}
-    .skill-card{border:1px solid #334155;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .2s}
-    .skill-card:hover{border-color:#667eea}
-    .skill-card.selected{border-color:#10b981;background:#0f2a1e}
-    .skill-card h5{color:#e2e8f0;font-size:.9em;margin-bottom:2px}
-    .skill-card p{font-size:.8em;color:#94a3b8;margin:0}
-    .skill-card .tags{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
-    .tag{background:#1e3a5f;color:#93c5fd;border-radius:4px;padding:1px 6px;font-size:.75em}
-    .cat-pill{display:inline-block;padding:4px 10px;border-radius:16px;font-size:.8em;cursor:pointer;border:1px solid #334155;color:#94a3b8;margin:2px;transition:all .2s}
-    .cat-pill.active{background:#667eea;color:#fff;border-color:#667eea}
-    .agent-card{border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:8px}
-    .agent-card h4{color:#e2e8f0;margin-bottom:4px}
-    .agent-card p{font-size:.85em;color:#94a3b8}
-    #skill-search{margin-bottom:12px}
-    .skill-grid{max-height:440px;overflow-y:auto;padding-right:4px}
+
+    /* ── Skills ── */
+    .skill-card{border:1px solid var(--border);border-radius:var(--radius-sm);
+      padding:12px;margin-bottom:8px;cursor:pointer;transition:all .2s;background:var(--surface2)}
+    .skill-card:hover{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.05)}
+    .skill-card.selected{border-color:var(--success);background:rgba(16,185,129,.05)}
+    .skill-card h5{color:var(--text);font-size:.88em;margin-bottom:3px;font-weight:600}
+    .skill-card p{font-size:.8em;color:var(--text-muted);margin:0;line-height:1.4}
+    .skill-card .tags{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px}
+    .tag{background:rgba(99,102,241,.12);color:var(--primary);border-radius:4px;
+      padding:2px 7px;font-size:.72em;font-weight:500}
+    .cat-pill{display:inline-block;padding:4px 12px;border-radius:20px;font-size:.8em;
+      cursor:pointer;border:1px solid var(--border);color:var(--text-secondary);
+      margin:2px;transition:all .2s;font-weight:500}
+    .cat-pill:hover{border-color:var(--primary);color:var(--primary)}
+    .cat-pill.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .skill-grid{max-height:500px;overflow-y:auto;padding-right:4px}
+    .agent-card{border:1px solid var(--border);border-radius:var(--radius-sm);
+      padding:14px;margin-bottom:8px;background:var(--surface2)}
+    .agent-card h4{color:var(--text);margin-bottom:4px;font-size:.9em;font-weight:600}
+    .agent-card p{font-size:.83em;color:var(--text-muted)}
+    #skill-search{margin-bottom:10px}
+
+    /* ── Toast ── */
+    #toast{position:fixed;bottom:24px;right:24px;min-width:220px;padding:12px 18px;
+      border-radius:var(--radius-sm);color:#fff;opacity:0;
+      transition:opacity .3s,transform .3s;pointer-events:none;z-index:9999;
+      font-size:.875em;font-weight:500;box-shadow:var(--shadow);
+      transform:translateY(10px);display:flex;align-items:center;gap:8px}
+    #toast.show{opacity:1;transform:translateY(0)}
+
+    /* ── Empty states ── */
+    .empty{text-align:center;padding:32px 16px;color:var(--text-muted)}
+    .empty .icon{font-size:2.5em;margin-bottom:10px;opacity:.5}
+    .empty p{font-size:.88em}
+
+    /* ── Divider ── */
+    hr{border:none;border-top:1px solid var(--border);margin:16px 0}
+
+    /* ── Quick actions bar ── */
+    .actions-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+
+    /* ── Cmd reference ── */
+    .cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
+    .cmd-item{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px}
+    .cmd-item code{display:block;margin-bottom:4px;font-size:.82em}
+    .cmd-item span{font-size:.78em;color:var(--text-muted)}
   </style>
 </head>
 <body>
+<div class="app">
+
+<!-- ── Header ── -->
 <header>
-  <span style="font-size:2em">🤖</span>
-  <div><h1>AI Employee</h1><div class="sub" id="header-sub">Loading...</div></div>
+  <div class="header-left">
+    <div class="logo">🤖</div>
+    <div class="header-title">
+      <h1>AI Employee</h1>
+      <div class="sub" id="header-sub">Loading…</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-pill"><div class="status-dot"></div><span id="header-status">Running</span></div>
+  </div>
 </header>
+
+<!-- ── Navigation ── -->
 <nav>
   <button class="active" onclick="switchTab('dashboard',this)">📊 Dashboard</button>
   <button onclick="switchTab('chat',this)">💬 Chat</button>
@@ -166,68 +333,106 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('skills',this)">🛠️ Skills</button>
 </nav>
 
-<!-- DASHBOARD TAB -->
+<main>
+
+<!-- ── Dashboard ── -->
 <div id="tab-dashboard" class="tab-content active">
+  <div class="grid-stat" id="stat-cards">
+    <div class="stat-card">
+      <div class="stat-icon green">🟢</div>
+      <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Bots Running</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon blue">🤖</div>
+      <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Bots</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon cyan">📡</div>
+      <div class="stat-body"><div class="val" id="stat-gateway">–</div><div class="lbl">Gateway</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon yellow">⏱️</div>
+      <div class="stat-body"><div class="val" id="stat-uptime">–</div><div class="lbl">Uptime</div></div>
+    </div>
+  </div>
+
   <div class="grid2">
     <div class="card">
-      <h3>Bot Status</h3>
-      <div id="bot-status-list">Loading...</div>
-      <br><button class="btn sm" onclick="loadDashboard()">🔄 Refresh</button>
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🤖</span> Bot Status</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadDashboard()">↻ Refresh</button>
+      </div>
+      <div id="bot-status-list"><div class="empty"><div class="icon">🔍</div><p>Loading bots…</p></div></div>
     </div>
     <div class="card">
-      <h3>Quick Actions</h3>
-      <button class="btn" onclick="startAll()" style="margin:4px">▶ Start All</button>
-      <button class="btn danger" onclick="stopAll()" style="margin:4px">■ Stop All</button>
-      <button class="btn sm" onclick="window.open('http://localhost:18789','_blank')" style="margin:4px">📡 Gateway</button>
-      <br><br>
-      <h3>System Info</h3>
-      <pre id="system-info">Click Refresh to load</pre>
+      <div class="card-header">
+        <div class="card-title"><span class="icon">⚡</span> Quick Actions</div>
+      </div>
+      <div class="actions-bar">
+        <button class="btn btn-success" onclick="startAll()">▶ Start All</button>
+        <button class="btn btn-danger" onclick="stopAll()">■ Stop All</button>
+        <a class="btn btn-ghost btn-sm" href="http://localhost:18789" target="_blank">📡 Gateway</a>
+      </div>
+      <hr>
+      <div class="card-title" style="margin-bottom:10px"><span class="icon">🔧</span> System Info</div>
+      <pre id="system-info" style="font-size:.78em">Click Refresh on the left to load…</pre>
     </div>
   </div>
+
   <div class="card">
-    <h3>WhatsApp Commands Reference</h3>
-    <p style="color:#94a3b8;font-size:.88em;line-height:1.8">
-      Send these to your WhatsApp number:<br>
-      <code style="color:#10b981">status</code> — get current status report &nbsp;|&nbsp;
-      <code style="color:#10b981">workers</code> — list active workers &nbsp;|&nbsp;
-      <code style="color:#10b981">schedule</code> — list scheduled tasks &nbsp;|&nbsp;
-      <code style="color:#10b981">improvements</code> — list pending improvements &nbsp;|&nbsp;
-      <code style="color:#10b981">switch to &lt;agent&gt;</code> — switch active agent &nbsp;|&nbsp;
-      <code style="color:#10b981">help</code> — show all commands
-    </p>
+    <div class="card-header">
+      <div class="card-title"><span class="icon">💬</span> WhatsApp Commands</div>
+    </div>
+    <div class="cmd-grid">
+      <div class="cmd-item"><code>status</code><span>Get current status report</span></div>
+      <div class="cmd-item"><code>workers</code><span>List active workers</span></div>
+      <div class="cmd-item"><code>schedule</code><span>List scheduled tasks</span></div>
+      <div class="cmd-item"><code>improvements</code><span>List pending proposals</span></div>
+      <div class="cmd-item"><code>switch to &lt;agent&gt;</code><span>Switch active agent</span></div>
+      <div class="cmd-item"><code>help</code><span>Show all commands</span></div>
+    </div>
   </div>
 </div>
 
-<!-- CHAT TAB -->
+<!-- ── Chat ── -->
 <div id="tab-chat" class="tab-content">
   <div class="card">
-    <h3>Chat / Task Input</h3>
-    <p style="color:#94a3b8;font-size:.85em;margin-bottom:12px">
-      Send tasks here — same as WhatsApp. Tasks are logged and can be picked up by agents.
-    </p>
-    <div id="chat-log"></div>
-    <div style="display:flex;gap:8px;align-items:flex-end">
-      <div style="flex:1">
-        <textarea id="chat-input" placeholder="Type a task or question..." rows="2"></textarea>
-      </div>
-      <button class="btn" onclick="sendChat()" style="flex-shrink:0">Send</button>
+    <div class="card-header">
+      <div class="card-title"><span class="icon">💬</span> Chat / Task Input</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadChatLog()">↻ Refresh</button>
     </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">
+      Send tasks here — same as WhatsApp. Tasks are processed by the active agent.
+    </p>
+    <div id="chat-log"><div class="empty"><div class="icon">💬</div><p>No messages yet.</p></div></div>
+    <div class="chat-input-row">
+      <div style="flex:1">
+        <textarea id="chat-input" placeholder="Type a task or question…" rows="2"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="sendChat()" style="height:44px">Send ↗</button>
+    </div>
+    <p style="font-size:.75em;color:var(--text-muted);margin-top:6px">Press Enter to send · Shift+Enter for new line</p>
   </div>
 </div>
 
-<!-- SCHEDULER TAB -->
+<!-- ── Scheduler ── -->
 <div id="tab-scheduler" class="tab-content">
   <div class="grid2">
     <div class="card">
-      <h3>Scheduled Tasks</h3>
-      <div id="schedule-list">Loading...</div>
-      <br><button class="btn sm" onclick="loadSchedules()">🔄 Refresh</button>
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📅</span> Scheduled Tasks</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadSchedules()">↻ Refresh</button>
+      </div>
+      <div id="schedule-list"><div class="empty"><div class="icon">📅</div><p>No tasks yet.</p></div></div>
     </div>
     <div class="card">
-      <h3>Add New Task</h3>
-      <div class="form-row"><label>Task ID (unique)</label><input id="sched-id" placeholder="my_task_1"/></div>
-      <div class="form-row"><label>Label</label><input id="sched-label" placeholder="Hourly status report"/></div>
-      <div class="form-row">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">➕</span> Add New Task</div>
+      </div>
+      <div class="form-group"><label>Task ID (unique)</label><input id="sched-id" placeholder="my_task_1"/></div>
+      <div class="form-group"><label>Label</label><input id="sched-label" placeholder="Hourly status report"/></div>
+      <div class="form-group">
         <label>Action</label>
         <select id="sched-action">
           <option value="log">Log message</option>
@@ -236,91 +441,101 @@ INDEX_HTML = r"""<!doctype html>
           <option value="status_report">Send status report</option>
         </select>
       </div>
-      <div class="form-row" id="sched-bot-row" style="display:none">
-        <label>Bot name</label>
-        <input id="sched-bot" placeholder="status-reporter"/>
+      <div class="form-group" id="sched-bot-row" style="display:none">
+        <label>Bot name</label><input id="sched-bot" placeholder="status-reporter"/>
       </div>
-      <div class="form-row"><label>Message (for log action)</label><input id="sched-msg" placeholder="Task ran"/></div>
-      <div class="form-row">
+      <div class="form-group"><label>Message (for log action)</label><input id="sched-msg" placeholder="Task ran"/></div>
+      <div class="form-group">
         <label>Schedule type</label>
         <select id="sched-type">
           <option value="interval">Interval (every N minutes)</option>
           <option value="daily">Daily at time (UTC)</option>
         </select>
       </div>
-      <div class="form-row" id="sched-interval-row">
-        <label>Interval (minutes)</label>
-        <input id="sched-interval" type="number" value="60" min="1"/>
+      <div class="form-group" id="sched-interval-row">
+        <label>Interval (minutes)</label><input id="sched-interval" type="number" value="60" min="1"/>
       </div>
-      <div class="form-row" id="sched-daily-row" style="display:none">
-        <label>Run at (HH:MM UTC)</label>
-        <input id="sched-daily-time" placeholder="08:00"/>
+      <div class="form-group" id="sched-daily-row" style="display:none">
+        <label>Run at (HH:MM UTC)</label><input id="sched-daily-time" placeholder="08:00"/>
       </div>
-      <button class="btn success" onclick="addSchedule()">+ Add Task</button>
+      <button class="btn btn-success" onclick="addSchedule()">➕ Add Task</button>
     </div>
   </div>
 </div>
 
-<!-- WORKERS TAB -->
+<!-- ── Workers ── -->
 <div id="tab-workers" class="tab-content">
   <div class="card">
-    <h3>Manage Workers / Bots</h3>
-    <p style="color:#94a3b8;font-size:.85em;margin-bottom:12px">
-      Start or stop individual bots. The problem-solver watchdog will auto-restart
-      enabled bots if they crash.
+    <div class="card-header">
+      <div class="card-title"><span class="icon">👷</span> Manage Workers</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadWorkers()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">
+      Start or stop individual bots. The problem-solver watchdog auto-restarts enabled bots if they crash.
     </p>
-    <div id="worker-list">Loading...</div>
-    <br><button class="btn sm" onclick="loadWorkers()">🔄 Refresh</button>
+    <div id="worker-list"><div class="empty"><div class="icon">👷</div><p>Loading workers…</p></div></div>
   </div>
 </div>
 
-<!-- IMPROVEMENTS TAB -->
+<!-- ── Improvements ── -->
 <div id="tab-improvements" class="tab-content">
   <div class="card">
-    <h3>Skill &amp; Market Improvement Proposals</h3>
-    <p style="color:#94a3b8;font-size:.85em;margin-bottom:12px">
-      The discovery bot proposes new skills and markets. Review and approve/reject below.
-      <strong>No changes are made automatically.</strong>
+    <div class="card-header">
+      <div class="card-title"><span class="icon">💡</span> Improvement Proposals</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadImprovements()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">
+      The discovery bot proposes new skills and markets. Review and approve or reject below.
+      <strong style="color:var(--warning)">No changes are applied automatically.</strong>
     </p>
-    <div id="improvement-list">Loading...</div>
-    <br><button class="btn sm" onclick="loadImprovements()">🔄 Refresh</button>
+    <div id="improvement-list"><div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery bot will add proposals over time.</p></div></div>
   </div>
 </div>
 
-<!-- SKILLS TAB -->
+<!-- ── Skills ── -->
 <div id="tab-skills" class="tab-content">
   <div class="grid2">
     <div class="card">
-      <h3>🛠️ Skills Library <span id="skill-total-badge" style="font-size:.8em;color:#94a3b8"></span></h3>
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🛠️</span> Skills Library <span id="skill-total-badge" style="font-size:.8em;color:var(--text-muted)"></span></div>
+      </div>
       <input id="skill-search" placeholder="Search skills…" oninput="filterSkills()" />
-      <div id="category-pills" style="margin-bottom:10px"></div>
-      <div id="skill-grid" class="skill-grid">Loading skills…</div>
+      <div id="category-pills" style="margin:10px 0"></div>
+      <div id="skill-grid" class="skill-grid"><div class="empty"><div class="icon">🛠️</div><p>Loading skills…</p></div></div>
     </div>
     <div>
       <div class="card">
-        <h3>🤖 Create Custom Agent</h3>
-        <p style="color:#94a3b8;font-size:.85em;margin-bottom:12px">Select skills from the library (left), name your agent, then click Create.</p>
-        <div class="form-row"><label>Agent Name</label><input id="agent-name-input" placeholder="e.g. My Content Writer"/></div>
-        <div class="form-row"><label>Description (optional)</label><input id="agent-desc-input" placeholder="What this agent does"/></div>
-        <div class="form-row">
-          <label>Selected Skills <span id="selected-count" style="color:#667eea">(0)</span></label>
-          <div id="selected-skills-list" style="font-size:.82em;color:#94a3b8;min-height:24px">No skills selected. Click skill cards on the left.</div>
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🤖</span> Create Custom Agent</div>
         </div>
-        <button class="btn success" onclick="createAgent()">+ Create Agent</button>
+        <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">Select skills from the library, name your agent, then click Create.</p>
+        <div class="form-group"><label>Agent Name</label><input id="agent-name-input" placeholder="e.g. My Content Writer"/></div>
+        <div class="form-group"><label>Description (optional)</label><input id="agent-desc-input" placeholder="What this agent does"/></div>
+        <div class="form-group">
+          <label>Selected Skills <span id="selected-count" style="color:var(--primary)">(0)</span></label>
+          <div id="selected-skills-list" style="font-size:.82em;color:var(--text-muted);min-height:24px">No skills selected. Click cards on the left.</div>
+        </div>
+        <button class="btn btn-success" onclick="createAgent()">➕ Create Agent</button>
       </div>
       <div class="card">
-        <h3>👥 Custom Agents</h3>
-        <div id="agents-list">Loading…</div>
-        <br><button class="btn sm" onclick="loadAgents()">🔄 Refresh</button>
+        <div class="card-header">
+          <div class="card-title"><span class="icon">👥</span> Custom Agents</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadAgents()">↻ Refresh</button>
+        </div>
+        <div id="agents-list"><div class="empty"><div class="icon">👥</div><p>No agents yet.</p></div></div>
       </div>
     </div>
   </div>
 </div>
+
+</main>
+</div><!-- .app -->
 
 <div id="toast"></div>
 
 <script>
 let currentTab = 'dashboard';
+const _startTime = Date.now();
 
 function switchTab(tab, btn) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -345,50 +560,87 @@ function toast(msg, color='#10b981') {
 }
 
 async function api(path, opts={}) {
-  const r = await fetch(path, opts);
-  return r.json();
+  try {
+    const r = await fetch(path, opts);
+    return r.json();
+  } catch(e) {
+    return {error: String(e)};
+  }
 }
 
-// ── Dashboard ──
+// ── Dashboard ──────────────────────────────────────────────────────────────
 async function loadDashboard() {
   const d = await api('/api/status');
   const bots = d.bots || [];
+  const running = bots.filter(b => b.running).length;
+  const total = bots.length;
+
+  document.getElementById('stat-running').textContent = running;
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('header-sub').textContent = `${running}/${total} bots running`;
+
+  // Uptime
+  const secs = Math.floor((Date.now() - _startTime) / 1000);
+  document.getElementById('stat-uptime').textContent =
+    secs < 60 ? secs + 's' : secs < 3600 ? Math.floor(secs/60) + 'm' : Math.floor(secs/3600) + 'h';
+
+  // Gateway status (try to ping)
+  fetch('http://localhost:18789', {mode:'no-cors',signal:AbortSignal.timeout(1500)})
+    .then(() => document.getElementById('stat-gateway').textContent = 'Online')
+    .catch(() => document.getElementById('stat-gateway').textContent = 'Offline');
+
   const el = document.getElementById('bot-status-list');
-  if (!bots.length) { el.innerHTML = '<p style="color:#94a3b8">No bot state data yet.</p>'; return; }
-  el.innerHTML = bots.map(b => {
-    const cls = b.running ? 'on' : 'off';
-    const lbl = b.running ? 'running' : 'stopped';
-    return `<div class="bot-row"><div class="dot ${cls}"></div><span style="flex:1">${b.bot}</span><span class="badge ${lbl}">${lbl}</span></div>`;
-  }).join('');
-  document.getElementById('header-sub').textContent = `${bots.filter(b=>b.running).length}/${bots.length} bots running`;
+  if (!bots.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">🤖</div><p>No bot state data yet. Start the bots first.</p></div>';
+  } else {
+    el.innerHTML = bots.map(b => {
+      const cls = b.running ? 'on' : 'off';
+      const lbl = b.running ? 'running' : 'stopped';
+      return `<div class="bot-row">
+        <div class="dot ${cls}"></div>
+        <span class="bot-name">${b.bot}</span>
+        <span class="badge ${lbl}">${lbl}</span>
+      </div>`;
+    }).join('');
+  }
 
   const sys = await api('/api/doctor');
-  document.getElementById('system-info').textContent = sys.output || '';
+  document.getElementById('system-info').textContent = sys.output || '(no output)';
 }
 
 async function startAll() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '…';
   await api('/api/bots/start-all', {method:'POST'});
-  toast('Starting all bots...');
-  setTimeout(loadDashboard, 2000);
+  toast('Starting all bots…');
+  setTimeout(() => { loadDashboard(); btn.disabled=false; btn.textContent='▶ Start All'; }, 2500);
 }
 
 async function stopAll() {
-  if (!confirm('Stop all bots?')) return;
+  if (!confirm('Stop all running bots?')) return;
   await api('/api/bots/stop-all', {method:'POST'});
-  toast('Stopping all bots...', '#ef4444');
+  toast('Stopping all bots…', '#ef4444');
   setTimeout(loadDashboard, 2000);
 }
 
-// ── Chat ──
+// ── Chat ────────────────────────────────────────────────────────────────────
 async function loadChatLog() {
   const data = await api('/api/chat');
   const log = document.getElementById('chat-log');
   const msgs = data.messages || [];
-  if (!msgs.length) { log.innerHTML = '<p style="color:#94a3b8;padding:8px">No messages yet.</p>'; return; }
-  log.innerHTML = msgs.slice(-50).map(m => {
+  if (!msgs.length) {
+    log.innerHTML = '<div class="empty"><div class="icon">💬</div><p>No messages yet.</p></div>';
+    return;
+  }
+  log.innerHTML = msgs.slice(-60).map(m => {
     const type = m.type === 'user' ? 'user' : 'bot';
-    const text = m.message || m.question || JSON.stringify(m);
-    return `<div class="chat-msg ${type}"><div>${text}</div><div class="ts">${m.ts||''}</div></div>`;
+    const raw = m.message || m.question || JSON.stringify(m);
+    // HTML-escape to prevent XSS, then convert newlines to <br>
+    const text = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                    .replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/\n/g,'<br>');
+    const ts = (m.ts||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<div class="chat-msg ${type}"><div>${text}</div><div class="ts">${ts}</div></div>`;
   }).join('');
   log.scrollTop = log.scrollHeight;
 }
@@ -398,11 +650,11 @@ async function sendChat() {
   const q = input.value.trim();
   if (!q) return;
   input.value = '';
-  const r = await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q})});
+  await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q})});
   loadChatLog();
 }
 
-// ── Scheduler ──
+// ── Scheduler ───────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('sched-action').addEventListener('change', function() {
     document.getElementById('sched-bot-row').style.display = (this.value==='start_bot'||this.value==='stop_bot') ? '' : 'none';
@@ -417,15 +669,16 @@ async function loadSchedules() {
   const data = await api('/api/schedules');
   const tasks = data.tasks || [];
   const el = document.getElementById('schedule-list');
-  if (!tasks.length) { el.innerHTML = '<p style="color:#94a3b8">No scheduled tasks yet.</p>'; return; }
+  if (!tasks.length) { el.innerHTML = '<div class="empty"><div class="icon">📅</div><p>No scheduled tasks yet.</p></div>'; return; }
   el.innerHTML = tasks.map(t => {
     const info = t.type==='interval' ? `every ${t.interval_minutes||60}m` : `daily at ${t.run_at_utc||'?'} UTC`;
+    const enabled = t.enabled !== false;
     return `<div class="sched-row">
       <div class="sched-info">
-        <h4>${t.label||t.id} <span class="badge ${t.enabled!==false?'approved':'rejected'}">${t.enabled!==false?'enabled':'disabled'}</span></h4>
-        <p>${t.action} | ${info}</p>
+        <h4>${t.label||t.id} <span class="badge ${enabled?'enabled':'disabled'}">${enabled?'enabled':'disabled'}</span></h4>
+        <p>${t.action} · ${info}</p>
       </div>
-      <button class="btn sm danger" onclick="deleteSchedule('${t.id}')">✕</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteSchedule('${t.id}')">✕</button>
     </div>`;
   }).join('');
 }
@@ -443,8 +696,7 @@ async function addSchedule() {
   if (!id || !label) { toast('ID and label are required', '#ef4444'); return; }
 
   const task = {id, label, action, type, enabled: true,
-    ...(bot && {bot}),
-    ...(msg && {message: msg}),
+    ...(bot && {bot}), ...(msg && {message: msg}),
     ...(type==='interval' && {interval_minutes: interval}),
     ...(type==='daily' && {run_at_utc: dailyTime||'08:00'}),
   };
@@ -455,59 +707,60 @@ async function addSchedule() {
 }
 
 async function deleteSchedule(id) {
-  if (!confirm(`Delete task ${id}?`)) return;
+  if (!confirm(`Delete task "${id}"?`)) return;
   const r = await api(`/api/schedules/${id}`, {method:'DELETE'});
-  if (r.ok) { toast('Deleted'); loadSchedules(); }
+  if (r.ok) { toast('Task deleted'); loadSchedules(); }
 }
 
-// ── Workers ──
+// ── Workers ─────────────────────────────────────────────────────────────────
 async function loadWorkers() {
   const data = await api('/api/workers');
   const bots = data.bots || [];
   const el = document.getElementById('worker-list');
+  if (!bots.length) { el.innerHTML = '<div class="empty"><div class="icon">👷</div><p>No bots found.</p></div>'; return; }
   el.innerHTML = bots.map(b => {
     const cls = b.running ? 'on' : 'off';
     const lbl = b.running ? 'running' : 'stopped';
-    const startBtn = b.running ? '' : `<button class="btn sm success" onclick="startBot('${b.name}')">▶ Start</button>`;
-    const stopBtn = b.running ? `<button class="btn sm danger" onclick="stopBot('${b.name}')">■ Stop</button>` : '';
+    const startBtn = b.running ? '' : `<button class="btn btn-success btn-sm" onclick="startBot('${b.name}')">▶ Start</button>`;
+    const stopBtn = b.running ? `<button class="btn btn-danger btn-sm" onclick="stopBot('${b.name}')">■ Stop</button>` : '';
     return `<div class="sched-row">
-      <div class="dot ${cls}" style="margin-top:4px"></div>
-      <div class="sched-info"><h4>${b.name}</h4><p class="badge ${lbl}">${lbl}</p></div>
+      <div class="dot ${cls}" style="margin-top:4px;flex-shrink:0"></div>
+      <div class="sched-info"><h4>${b.name} <span class="badge ${lbl}">${lbl}</span></h4></div>
       <div style="display:flex;gap:6px">${startBtn}${stopBtn}</div>
     </div>`;
-  }).join('') || '<p style="color:#94a3b8">No bots found.</p>';
+  }).join('');
 }
 
 async function startBot(name) {
   await api('/api/bots/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
-  toast(`Starting ${name}...`);
-  setTimeout(loadWorkers, 1500);
+  toast(`Starting ${name}…`);
+  setTimeout(loadWorkers, 1800);
 }
 
 async function stopBot(name) {
   if (!confirm(`Stop ${name}?`)) return;
   await api('/api/bots/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
-  toast(`Stopping ${name}...`, '#ef4444');
-  setTimeout(loadWorkers, 1500);
+  toast(`Stopping ${name}…`, '#ef4444');
+  setTimeout(loadWorkers, 1800);
 }
 
-// ── Improvements ──
+// ── Improvements ────────────────────────────────────────────────────────────
 async function loadImprovements() {
   const data = await api('/api/improvements');
   const items = data.improvements || [];
   const el = document.getElementById('improvement-list');
-  if (!items.length) { el.innerHTML = '<p style="color:#94a3b8">No proposals yet. The discovery bot will add proposals over time.</p>'; return; }
+  if (!items.length) { el.innerHTML = '<div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery bot will add them over time.</p></div>'; return; }
   el.innerHTML = items.map(imp => `
     <div class="improv-row">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
         <h4>${imp.title||imp.id} <span class="badge ${imp.status||'pending'}">${imp.status||'pending'}</span></h4>
-        ${imp.status==='pending' ? `<div style="display:flex;gap:6px">
-          <button class="btn sm success" onclick="reviewImprovement('${imp.id}','approved')">✓ Approve</button>
-          <button class="btn sm danger" onclick="reviewImprovement('${imp.id}','rejected')">✕ Reject</button>
+        ${imp.status==='pending' ? `<div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn btn-success btn-sm" onclick="reviewImprovement('${imp.id}','approved')">✓ Approve</button>
+          <button class="btn btn-danger btn-sm" onclick="reviewImprovement('${imp.id}','rejected')">✕ Reject</button>
         </div>` : ''}
       </div>
       <p>${imp.description||''}</p>
-      ${imp.agent ? `<p style="font-size:.8em;color:#667eea;margin-top:4px">Agent: ${imp.agent} | Type: ${imp.type||'?'} | Effort: ${imp.effort||'?'}</p>` : ''}
+      ${imp.agent ? `<p style="font-size:.78em;color:var(--primary);margin-top:4px">Agent: ${imp.agent} · Type: ${imp.type||'?'} · Effort: ${imp.effort||'?'}</p>` : ''}
     </div>`).join('');
 }
 
@@ -516,29 +769,24 @@ async function reviewImprovement(id, decision) {
   if (r.ok) { toast(decision==='approved' ? '✓ Approved' : '✕ Rejected', decision==='approved'?'#10b981':'#ef4444'); loadImprovements(); }
 }
 
-// ── Skills ──
+// ── Skills ───────────────────────────────────────────────────────────────────
 let allSkills = [];
 let selectedSkillIds = new Set();
 let activeCategory = '';
 
 const CAT_COLORS = {
-  'Content & Writing':        '#f472b6',
-  'Research & Analysis':      '#60a5fa',
-  'Trading & Finance':        '#34d399',
-  'Social Media':             '#fb923c',
-  'Lead Generation & Sales':  '#a78bfa',
-  'Customer Support':         '#fbbf24',
-  'Development & Technical':  '#22d3ee',
-  'Data Analysis':            '#4ade80',
-  'E-commerce & Product':     '#f87171',
-  'Marketing & SEO':          '#c084fc',
+  'Content & Writing':'#f472b6','Research & Analysis':'#60a5fa',
+  'Trading & Finance':'#34d399','Social Media':'#fb923c',
+  'Lead Generation & Sales':'#a78bfa','Customer Support':'#fbbf24',
+  'Development & Technical':'#22d3ee','Data Analysis':'#4ade80',
+  'E-commerce & Product':'#f87171','Marketing & SEO':'#c084fc',
   'Automation & Productivity':'#e2e8f0',
 };
 
 async function loadSkills() {
   const data = await api('/api/skills');
   allSkills = data.skills || [];
-  document.getElementById('skill-total-badge').textContent = `(${allSkills.length} skills)`;
+  document.getElementById('skill-total-badge').textContent = `(${allSkills.length})`;
   renderCategoryPills(data.categories || []);
   renderSkillGrid(allSkills);
   loadAgents();
@@ -546,10 +794,8 @@ async function loadSkills() {
 
 function renderCategoryPills(cats) {
   const el = document.getElementById('category-pills');
-  const all = `<span class="cat-pill active" onclick="setCat('',this)">All</span>`;
-  el.innerHTML = all + cats.map(c =>
-    `<span class="cat-pill" onclick="setCat(${JSON.stringify(c)},this)">${c}</span>`
-  ).join('');
+  el.innerHTML = `<span class="cat-pill active" onclick="setCat('',this)">All</span>` +
+    cats.map(c => `<span class="cat-pill" onclick="setCat(${JSON.stringify(c)},this)">${c}</span>`).join('');
 }
 
 function setCat(cat, btn) {
@@ -573,27 +819,22 @@ function filterSkills() {
 
 function renderSkillGrid(skills) {
   const el = document.getElementById('skill-grid');
-  if (!skills.length) { el.innerHTML = '<p style="color:#94a3b8">No skills match.</p>'; return; }
+  if (!skills.length) { el.innerHTML = '<div class="empty"><div class="icon">🔍</div><p>No skills match.</p></div>'; return; }
   el.innerHTML = skills.map(s => {
     const color = CAT_COLORS[s.category] || '#94a3b8';
     const sel = selectedSkillIds.has(s.id);
     const tags = (s.tags||[]).slice(0,4).map(t=>`<span class="tag">${t}</span>`).join('');
     return `<div class="skill-card${sel?' selected':''}" onclick="toggleSkill(${JSON.stringify(s.id)},this)">
-      <h5>${s.name} <span style="color:${color};font-size:.75em">${s.category}</span></h5>
-      <p>${s.description.slice(0,100)}${s.description.length>100?'…':''}</p>
+      <h5>${s.name} <span style="color:${color};font-size:.72em;font-weight:500">${s.category}</span></h5>
+      <p>${s.description.slice(0,110)}${s.description.length>110?'…':''}</p>
       <div class="tags">${tags}</div>
     </div>`;
   }).join('');
 }
 
 function toggleSkill(id, card) {
-  if (selectedSkillIds.has(id)) {
-    selectedSkillIds.delete(id);
-    card.classList.remove('selected');
-  } else {
-    selectedSkillIds.add(id);
-    card.classList.add('selected');
-  }
+  if (selectedSkillIds.has(id)) { selectedSkillIds.delete(id); card.classList.remove('selected'); }
+  else { selectedSkillIds.add(id); card.classList.add('selected'); }
   updateSelectedPanel();
 }
 
@@ -601,13 +842,13 @@ function updateSelectedPanel() {
   const count = selectedSkillIds.size;
   document.getElementById('selected-count').textContent = `(${count})`;
   const el = document.getElementById('selected-skills-list');
-  if (!count) { el.textContent = 'No skills selected. Click skill cards on the left.'; return; }
-  const ids = [...selectedSkillIds];
-  el.innerHTML = ids.map(id => {
+  if (!count) { el.textContent = 'No skills selected. Click cards on the left.'; return; }
+  el.innerHTML = [...selectedSkillIds].map(id => {
     const s = allSkills.find(x => x.id === id);
-    return `<span style="display:inline-flex;align-items:center;gap:4px;margin:2px 4px 2px 0;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:2px 8px;font-size:.8em">
+    return `<span style="display:inline-flex;align-items:center;gap:4px;margin:2px 4px 2px 0;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:.8em">
       ${s ? s.name : id}
-      <span onclick="selectedSkillIds.delete(${JSON.stringify(id)});updateSelectedPanel();filterSkills();" style="cursor:pointer;color:#ef4444;font-weight:bold;margin-left:2px">×</span>
+      <span onclick="selectedSkillIds.delete(${JSON.stringify(id)});updateSelectedPanel();filterSkills();"
+        style="cursor:pointer;color:var(--danger);font-weight:bold;margin-left:2px">×</span>
     </span>`;
   }).join('');
 }
@@ -618,8 +859,7 @@ async function createAgent() {
   if (!name) { toast('Agent name is required', '#ef4444'); return; }
   if (!selectedSkillIds.size) { toast('Select at least one skill', '#ef4444'); return; }
   const r = await api('/api/agents/custom', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({name, description: desc, skills: [...selectedSkillIds]}),
   });
   if (r.ok) {
@@ -630,27 +870,22 @@ async function createAgent() {
     updateSelectedPanel();
     filterSkills();
     loadAgents();
-  } else {
-    toast(r.error || 'Error creating agent', '#ef4444');
-  }
+  } else { toast(r.error || 'Error creating agent', '#ef4444'); }
 }
 
 async function loadAgents() {
   const data = await api('/api/agents/custom');
   const agents = data.agents || [];
   const el = document.getElementById('agents-list');
-  if (!agents.length) {
-    el.innerHTML = '<p style="color:#94a3b8">No custom agents yet. Create one above.</p>';
-    return;
-  }
+  if (!agents.length) { el.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No agents yet. Create one above.</p></div>'; return; }
   el.innerHTML = agents.map(a => `
     <div class="agent-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <h4>${a.name}</h4>
-        <button class="btn sm danger" onclick="deleteAgent('${a.id}')">🗑</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteAgent('${a.id}')">🗑</button>
       </div>
       <p>${a.description || 'No description'}</p>
-      <p style="margin-top:4px;color:#667eea;font-size:.8em">${a.skill_count} skills: ${(a.skills||[]).slice(0,5).join(', ')}${a.skill_count>5?'…':''}</p>
+      <p style="margin-top:6px;color:var(--primary);font-size:.78em">${a.skill_count} skills: ${(a.skills||[]).slice(0,5).join(', ')}${a.skill_count>5?'…':''}</p>
     </div>`).join('');
 }
 
@@ -662,6 +897,8 @@ async function deleteAgent(id) {
 
 // Initial load
 loadDashboard();
+// Auto-refresh dashboard every 30s
+setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 </script>
 </body>
 </html>"""

@@ -447,9 +447,17 @@ install_runtime() {
         if command -v pip3 >/dev/null 2>&1; then
             pip3 install --user -q -r "$req" 2>/dev/null \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip3 install failed. Run: pip3 install --user fastapi uvicorn"
+                || warn "pip3 install failed — run.sh will auto-retry on first start."
+        elif command -v pip >/dev/null 2>&1; then
+            pip install --user -q -r "$req" 2>/dev/null \
+                && ok "Python deps (fastapi/uvicorn) installed" \
+                || warn "pip install failed — run.sh will auto-retry on first start."
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 -m pip install --user -q -r "$req" 2>/dev/null \
+                && ok "Python deps (fastapi/uvicorn) installed" \
+                || warn "pip install failed — run.sh will auto-retry on first start."
         else
-            warn "pip3 not found. Run: pip3 install --user fastapi uvicorn"
+            warn "pip not found — run.sh will install deps on first start."
         fi
     fi
 
