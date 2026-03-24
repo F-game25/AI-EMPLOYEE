@@ -45,6 +45,11 @@ start_bot() {
   local pid_file
   pid_file="$(bot_pid_file "$bot")"
 
+  # Library/module directories (e.g. ai-router) have no run.sh — skip silently
+  if [[ ! -f "$entry" ]]; then
+    return 0
+  fi
+
   if is_running "$bot"; then
     echo "Already running: $bot (pid $(cat "$pid_file"))"
     return 0
