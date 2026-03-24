@@ -3,13 +3,14 @@
 .SYNOPSIS
     AI Employee — Windows Startup Script
 .DESCRIPTION
-    Starts all 35 AI Employee bots natively on Windows using Python directly.
+    Starts all 33 AI Employee bots natively on Windows using Python directly.
     No WSL or Git Bash required.
 .NOTES
     UI Port:        8787 (override with $env:PROBLEM_SOLVER_UI_PORT)
     Dashboard Port: 3000
     Gateway Port:   18789
-    Bot manifest:   31 background bots + problem-solver-ui = 32 Python services
+    Bot manifest:   31 background bots + problem-solver-ui = 32 Python services started
+                    (ai-router is a shared module, not a standalone service)
 #>
 
 $ErrorActionPreference = 'Continue'
@@ -355,7 +356,7 @@ $bots = [ordered]@{
     'project-manager'       = 'project_manager.py'
 }
 
-Write-Step "Starting $($bots.Count) bots…"
+Write-Step "Starting $($bots.Count) background bots…"
 Write-Host ""
 
 $startedCount = 0
