@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AI Employee — Main Installer v4.0 (runtime-first)
+# AI Employee — macOS Installer v4.0 (runtime-first)
 # Called by quick-install.sh
 set -euo pipefail
 
@@ -25,7 +25,7 @@ ask()   { echo -e "${Y}?${NC} $1"; }
 banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
-║      AI EMPLOYEE - v4.0 INSTALLER  (Linux)           ║
+║      AI EMPLOYEE - v4.0 INSTALLER  (macOS)           ║
 ║  35 Agents • Claude AI • Ollama Local • WhatsApp     ║
 ╚══════════════════════════════════════════════════════╝
 EOF
@@ -38,6 +38,34 @@ check_requirements() {
 
     [ "$EUID" -eq 0 ] && err "Do not run as root. Run as your regular user."
 
+    # Check for Homebrew
+    if ! command -v brew >/dev/null 2>&1; then
+        warn "Homebrew is not installed."
+        echo ""
+        ask "Homebrew is required to install dependencies. Install it now? [Y/n]:"
+        local tty_in="/dev/tty"
+        [[ ! -r "$tty_in" ]] && tty_in="/dev/stdin"
+        read -r WANT_BREW < "$tty_in"
+        WANT_BREW="${WANT_BREW:-y}"
+        WANT_BREW=$(echo "$WANT_BREW" | tr '[:upper:]' '[:lower:]')
+        if [[ "$WANT_BREW" == "y" ]]; then
+            log "Installing Homebrew..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            # Add Homebrew to PATH for this session (Apple Silicon vs Intel)
+            if [[ -f "/opt/homebrew/bin/brew" ]]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            elif [[ -f "/usr/local/bin/brew" ]]; then
+                eval "$(/usr/local/bin/brew shellenv)"
+            fi
+            ok "Homebrew installed"
+        else
+            err "Homebrew is required. Install it manually:
+  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        fi
+    else
+        ok "Homebrew: $(brew --version 2>/dev/null | head -1)"
+    fi
+
     local missing=()
     command -v curl    >/dev/null 2>&1 || missing+=("curl")
     command -v python3 >/dev/null 2>&1 || missing+=("python3")
@@ -46,9 +74,7 @@ check_requirements() {
     if [[ ${#missing[@]} -gt 0 ]]; then
         err "Missing required dependencies: ${missing[*]}
 Install them with:
-  sudo apt install curl python3 openssl   # Debian/Ubuntu/Linux Mint
-  sudo dnf install curl python3 openssl   # Fedora/RHEL
-  sudo pacman -S curl python openssl      # Arch Linux"
+  brew install ${missing[*]}"
     fi
 
     if command -v node >/dev/null 2>&1; then
@@ -83,9 +109,13 @@ install_openclaw() {
         ok "OpenClaw already installed: $ver"
     else
         log "OpenClaw not found. Attempting install..."
+        # Try standard install script; also check for macOS-specific binary
         if curl -fsSL https://openclaw.ai/install.sh | bash; then
             export PATH="$HOME/.local/bin:$HOME/.openclaw/bin:$PATH"
             ok "OpenClaw installed"
+        elif curl -fsSL "https://openclaw.ai/install-macos.sh" | bash 2>/dev/null; then
+            export PATH="$HOME/.local/bin:$HOME/.openclaw/bin:$PATH"
+            ok "OpenClaw installed (macOS binary)"
         else
             warn "OpenClaw auto-install failed. Install manually:
   curl -fsSL https://openclaw.ai/install.sh | bash
@@ -94,8 +124,8 @@ install_openclaw() {
     fi
 
     # The openclaw installer adds a `source ~/.openclaw/completions/openclaw.bash`
-    # line to ~/.bashrc, but it does not always create that file.  Create a stub
-    # so every new terminal session starts cleanly without a "file not found" error.
+    # line to ~/.zshrc or ~/.bash_profile, but it does not always create that file.
+    # Create a stub so every new terminal session starts cleanly without a "file not found" error.
     mkdir -p "$HOME/.openclaw/completions"
     if [[ ! -f "$HOME/.openclaw/completions/openclaw.bash" ]]; then
         touch "$HOME/.openclaw/completions/openclaw.bash"
@@ -305,7 +335,7 @@ install_runtime() {
         log "Runtime dir not found locally. Downloading from GitHub..."
         local TMP_RUNTIME
         TMP_RUNTIME=$(mktemp -d)
-        local BASE_URL="https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main"
+        local BASE_URL="https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/mac"
 
         dl() {
             local rel="$1"
@@ -920,7 +950,7 @@ MSG
 
 add_to_path() {
     local path_line='export PATH="$HOME/.ai-employee/bin:$PATH"'
-    for profile in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc"; do
+    for profile in "$HOME/.zshrc" "$HOME/.bash_profile"; do
         if [[ -f "$profile" ]] && ! grep -q "\.ai-employee/bin" "$profile" 2>/dev/null; then
             { echo ""; echo "# AI Employee"; echo "$path_line"; } >> "$profile"
         fi
@@ -932,55 +962,55 @@ add_to_path() {
 # ─── Desktop launcher & autostart ────────────────────────────────────────────
 
 create_desktop_launcher() {
-    # ── Linux: .desktop entry (app menu + Desktop shortcut) ───────────────────
-    local app_dir="$HOME/.local/share/applications"
-    mkdir -p "$app_dir"
-    cat > "$app_dir/ai-employee.desktop" << DESK
-[Desktop Entry]
-Name=AI Employee
-Comment=Start the AI Employee multi-agent system
-Exec=bash -c 'cd $AI_HOME && ./start.sh; exec bash'
-Icon=utilities-terminal
-Terminal=true
-Type=Application
-Categories=Utility;Network;
-StartupNotify=false
-DESK
-    chmod +x "$app_dir/ai-employee.desktop"
-    ok "App launcher added — search 'AI Employee' in your app menu"
-
-    # Copy to Desktop if it exists
+    # ── macOS: .command file on Desktop ───────────────────────────────────────
     if [[ -d "$HOME/Desktop" ]]; then
-        cp "$app_dir/ai-employee.desktop" "$HOME/Desktop/ai-employee.desktop"
-        chmod +x "$HOME/Desktop/ai-employee.desktop"
-        ok "Desktop shortcut created: ~/Desktop/ai-employee.desktop (double-click to start)"
+        local cmd_file="$HOME/Desktop/AI-Employee.command"
+        cat > "$cmd_file" << CMD
+#!/usr/bin/env bash
+cd "$AI_HOME" && ./start.sh
+CMD
+        chmod +x "$cmd_file"
+        ok "Desktop launcher created: ~/Desktop/AI-Employee.command (double-click to start)"
     fi
 
-    # ── Systemd user service (optional autostart on login) ─────────────
-    if command -v systemctl >/dev/null 2>&1; then
-        local svc_dir="$HOME/.config/systemd/user"
-        mkdir -p "$svc_dir"
-        cat > "$svc_dir/ai-employee.service" << SVC
-[Unit]
-Description=AI Employee multi-agent system
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=$AI_HOME
-ExecStart=$AI_HOME/start.sh
-ExecStop=$AI_HOME/stop.sh
-Restart=on-failure
-RestartSec=10
-Environment=AI_HOME=$AI_HOME
-
-[Install]
-WantedBy=default.target
-SVC
-        systemctl --user daemon-reload 2>/dev/null || true
-        ok "Systemd service created — to auto-start on login run:"
-        info "  systemctl --user enable --now ai-employee"
-    fi
+    # ── macOS LaunchAgent (auto-start on login) ────────────────────────────────
+    local launch_agents_dir="$HOME/Library/LaunchAgents"
+    mkdir -p "$launch_agents_dir"
+    local plist="$launch_agents_dir/com.ai-employee.plist"
+    cat > "$plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ai-employee</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$AI_HOME/start.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$AI_HOME</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>AI_HOME</key>
+        <string>$AI_HOME</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>$AI_HOME/logs/launchagent.log</string>
+    <key>StandardErrorPath</key>
+    <string>$AI_HOME/logs/launchagent-error.log</string>
+</dict>
+</plist>
+PLIST
+    ok "LaunchAgent plist created — to auto-start on login run:"
+    info "  launchctl load -w ~/Library/LaunchAgents/com.ai-employee.plist"
 }
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
@@ -1008,10 +1038,9 @@ done_message() {
     echo ""
     echo -e "  ${G}▸ No-terminal start (after first-time setup):${NC}"
     if [[ -d "$HOME/Desktop" ]]; then
-        echo "    • Double-click  ~/Desktop/ai-employee.desktop  (Linux)"
+        echo "    • Double-click  ~/Desktop/AI-Employee.command  (macOS)"
     fi
-    echo "    • Or search 'AI Employee' in your application menu"
-    echo "    • Or enable autostart: systemctl --user enable --now ai-employee"
+    echo "    • Or enable autostart: launchctl load -w ~/Library/LaunchAgents/com.ai-employee.plist"
     echo ""
     echo "  1. First start (terminal needed once to link WhatsApp):"
     echo "     cd ~/.ai-employee && ./start.sh"
