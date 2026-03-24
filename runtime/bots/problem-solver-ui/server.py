@@ -329,6 +329,7 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('chat',this)">💬 Chat</button>
   <button onclick="switchTab('tasks',this)">🚀 Tasks</button>
   <button onclick="switchTab('swarm',this)">🐝 Swarm</button>
+  <button onclick="switchTab('commands',this)">📜 Commands</button>
   <button onclick="switchTab('scheduler',this)">📅 Scheduler</button>
   <button onclick="switchTab('workers',this)">👷 Workers</button>
   <button onclick="switchTab('improvements',this)">💡 Improvements</button>
@@ -532,27 +533,86 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Tasks ── -->
 <div id="tab-tasks" class="tab-content">
-  <div class="grid2">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">🚀</span> Submit a Task</div>
+
+  <!-- Task Builder -->
+  <div class="grid2" style="align-items:start">
+    <!-- Left: build a task -->
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🚀</span> Build a Task</div>
+          <span id="task-step-badge" style="font-size:.78em;background:var(--primary);color:#fff;padding:2px 8px;border-radius:10px">Step 1</span>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Describe any goal — agents will be auto-selected. You can adjust everything before launching.</p>
+
+        <!-- Step 1: description -->
+        <div id="task-step1">
+          <div class="form-group">
+            <label>Task Description</label>
+            <textarea id="task-input" rows="4"
+              placeholder="e.g. Build a SaaS company for remote team management — create business plan, brand identity, hiring plan, financial model, and go-to-market strategy"
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"
+              oninput="onTaskInputChange()"></textarea>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="runAutoSelect()" style="flex:1" id="btn-autoselect" disabled>🤖 Auto-Select Agents</button>
+            <button class="btn btn-ghost btn-sm" onclick="showManualAgentPicker()" title="Manually pick agents">⚙️ Manual</button>
+          </div>
+          <div id="autoselect-status" style="margin-top:8px;font-size:.82em;color:var(--text-muted)"></div>
+        </div>
+
+        <!-- Step 2: agent picker (hidden until auto-select or manual click) -->
+        <div id="task-step2" style="display:none;margin-top:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <label style="font-weight:600">🤖 Agent Selection <span id="agent-sel-count" style="color:var(--primary);font-weight:700"></span></label>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="selectAllAgents()">All</button>
+              <button class="btn btn-ghost btn-sm" onclick="clearAllAgents()">None</button>
+              <button class="btn btn-ghost btn-sm" onclick="resetToAutoSelected()">Auto</button>
+            </div>
+          </div>
+          <div id="agent-picker-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:6px;max-height:340px;overflow-y:auto;padding:2px"></div>
+        </div>
+
+        <!-- Step 3: mode + submit (hidden until agents selected) -->
+        <div id="task-step3" style="display:none;margin-top:16px">
+          <div class="form-group">
+            <label>Execution Mode</label>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px" id="mode-selector">
+              <label id="mode-auto" onclick="setMode('auto')" style="cursor:pointer;border:2px solid var(--primary);border-radius:var(--radius-sm);padding:8px 4px;text-align:center;background:var(--surface2)">
+                <div style="font-size:1.2em">🧠</div>
+                <div style="font-size:.75em;font-weight:600;margin-top:2px">Auto</div>
+                <div style="font-size:.68em;color:var(--text-muted)">Orchestrator decides</div>
+              </label>
+              <label id="mode-parallel" onclick="setMode('parallel')" style="cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 4px;text-align:center;background:var(--surface2)">
+                <div style="font-size:1.2em">⚡</div>
+                <div style="font-size:.75em;font-weight:600;margin-top:2px">Parallel</div>
+                <div style="font-size:.68em;color:var(--text-muted)">All agents at once</div>
+              </label>
+              <label id="mode-single" onclick="setMode('single')" style="cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 4px;text-align:center;background:var(--surface2)">
+                <div style="font-size:1.2em">1️⃣</div>
+                <div style="font-size:.75em;font-weight:600;margin-top:2px">Single</div>
+                <div style="font-size:.68em;color:var(--text-muted)">First selected agent</div>
+              </label>
+            </div>
+          </div>
+          <button class="btn btn-success" onclick="submitTask()" style="width:100%;margin-top:4px" id="btn-launch">🚀 Launch Task</button>
+          <div id="task-submit-result" style="margin-top:10px;font-size:.88em"></div>
+        </div>
       </div>
-      <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">Describe any goal — the AI will decompose it, pick the right agents, and execute autonomously.</p>
-      <div class="form-group">
-        <label>Task Description</label>
-        <textarea id="task-input" rows="4" placeholder="e.g. Build a SaaS company for remote team management — create business plan, brand identity, hiring plan, financial model, and go-to-market strategy" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
-      </div>
-      <button class="btn btn-success" onclick="submitTask()" style="width:100%">🚀 Launch Multi-Agent Task</button>
-      <div id="task-submit-result" style="margin-top:12px;font-size:.88em;color:var(--text-muted)"></div>
     </div>
+
+    <!-- Right: active task -->
     <div class="card">
       <div class="card-header">
         <div class="card-title"><span class="icon">📊</span> Active Task</div>
         <button class="btn btn-ghost btn-sm" onclick="loadTasks()">↻ Refresh</button>
       </div>
-      <div id="active-task-panel"><div class="empty"><div class="icon">🚀</div><p>No active task. Submit one on the left.</p></div></div>
+      <div id="active-task-panel"><div class="empty"><div class="icon">🚀</div><p>No active task.</p></div></div>
     </div>
   </div>
+
+  <!-- Task History -->
   <div class="card" style="margin-top:16px">
     <div class="card-header">
       <div class="card-title"><span class="icon">📋</span> Recent Tasks</div>
@@ -570,6 +630,19 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px">All 20 AI agents — their capabilities, current status, and workload.</p>
     <div id="swarm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"><div class="empty"><div class="icon">🐝</div><p>Loading agents…</p></div></div>
+  </div>
+</div>
+
+<!-- ── Commands ── -->
+<div id="tab-commands" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📜</span> WhatsApp Commands Reference</div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Every command works on WhatsApp AND in the Chat tab. Click any command to copy it.</p>
+    <input id="cmd-search" placeholder="🔍 Search commands…" oninput="filterCommands()" style="width:100%;margin-bottom:14px" />
+    <div id="cmd-category-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px"></div>
+    <div id="cmd-list"></div>
   </div>
 </div>
 
@@ -596,6 +669,7 @@ function switchTab(tab, btn) {
   if (tab === 'skills') loadSkills();
   if (tab === 'tasks') loadTasks();
   if (tab === 'swarm') loadSwarm();
+  if (tab === 'commands') loadCommandsTab();
 }
 
 function toast(msg, color='#10b981') {
@@ -942,20 +1016,165 @@ async function deleteAgent(id) {
   if (r.ok) { toast('Agent deleted', '#ef4444'); loadAgents(); }
 }
 
-// ── Tasks ────────────────────────────────────────────────────────────────────
+// ── Tasks — agent selector state ─────────────────────────────────────────────
+let _allAgents = [];          // full list from /api/agents
+let _autoSelectedIds = new Set(); // IDs suggested by auto-select
+let _selectedAgentIds = new Set(); // currently selected (user may adjust)
+let _taskMode = 'auto';       // 'auto' | 'parallel' | 'single'
+
+function onTaskInputChange() {
+  const v = document.getElementById('task-input').value.trim();
+  document.getElementById('btn-autoselect').disabled = !v;
+  document.getElementById('autoselect-status').textContent = '';
+}
+
+function setMode(m) {
+  _taskMode = m;
+  ['auto','parallel','single'].forEach(id => {
+    const el = document.getElementById('mode-' + id);
+    el.style.border = id === m ? '2px solid var(--primary)' : '1px solid var(--border)';
+  });
+}
+
+async function runAutoSelect() {
+  const desc = document.getElementById('task-input').value.trim();
+  if (!desc) return;
+  const statusEl = document.getElementById('autoselect-status');
+  statusEl.textContent = '⏳ Analysing task…';
+  document.getElementById('btn-autoselect').disabled = true;
+
+  // Fetch all agents if we don't have them yet
+  if (!_allAgents.length) {
+    const r = await api('/api/agents');
+    if (r.ok) { const d = await r.json(); _allAgents = d.agents || []; }
+  }
+
+  const r = await api('/api/task/auto-agents', {method:'POST', body: JSON.stringify({description: desc})});
+  if (r.ok) {
+    const d = await r.json();
+    _autoSelectedIds = new Set(d.suggested || []);
+    _selectedAgentIds = new Set(_autoSelectedIds);
+    statusEl.innerHTML = `<span style="color:var(--success)">✅ ${_autoSelectedIds.size} agent${_autoSelectedIds.size!==1?'s':''} auto-selected</span>`;
+    renderAgentPicker();
+    document.getElementById('task-step2').style.display = 'block';
+    document.getElementById('task-step3').style.display = 'block';
+    document.getElementById('task-step-badge').textContent = 'Step 2';
+  } else {
+    statusEl.innerHTML = '<span style="color:var(--danger)">❌ Auto-select failed — use Manual to pick agents</span>';
+    showManualAgentPicker();
+  }
+  document.getElementById('btn-autoselect').disabled = false;
+}
+
+async function showManualAgentPicker() {
+  if (!_allAgents.length) {
+    const r = await api('/api/agents');
+    if (r.ok) { const d = await r.json(); _allAgents = d.agents || []; }
+  }
+  renderAgentPicker();
+  document.getElementById('task-step2').style.display = 'block';
+  document.getElementById('task-step3').style.display = 'block';
+  document.getElementById('task-step-badge').textContent = 'Step 2';
+}
+
+const _catColors = {
+  coordination:'#6366f1', sales:'#10b981', content:'#22d3ee', social:'#f59e0b',
+  research:'#3b82f6', ecommerce:'#ec4899', analytics:'#8b5cf6', creative:'#ef4444',
+  trading:'#f97316', development:'#14b8a6', hr:'#84cc16', finance:'#eab308',
+  marketing:'#06b6d4', growth:'#a855f7', management:'#64748b', crypto:'#f59e0b',
+  strategy:'#6366f1', support:'#10b981'
+};
+const _catEmoji = {
+  coordination:'🎯', sales:'💼', content:'✍️', social:'📱', research:'🔍',
+  ecommerce:'🛒', analytics:'📊', creative:'🎨', trading:'📈', development:'💻',
+  hr:'👔', finance:'💰', marketing:'🚀', growth:'📈', management:'📋',
+  crypto:'🪙', strategy:'🏢', support:'🎧'
+};
+
+function renderAgentPicker() {
+  const grid = document.getElementById('agent-picker-grid');
+  if (!_allAgents.length) {
+    grid.innerHTML = '<p style="color:var(--text-muted);font-size:.84em">No agents loaded. Check /api/agents.</p>';
+    return;
+  }
+  grid.innerHTML = _allAgents.map(a => {
+    const selected = _selectedAgentIds.has(a.id);
+    const wasAuto = _autoSelectedIds.has(a.id);
+    const color = _catColors[a.category] || '#64748b';
+    const emoji = _catEmoji[a.category] || '🤖';
+    const dotColor = a.running ? '#10b981' : '#64748b';
+    return `<div id="agentcard-${a.id}"
+      onclick="toggleAgent('${escHtml(a.id)}')"
+      title="${escHtml(a.description||'')}"
+      style="cursor:pointer;border:2px solid ${selected ? color : 'var(--border)'};border-radius:var(--radius-sm);padding:8px 6px;background:${selected ? 'var(--surface2)' : 'var(--surface)'};transition:all .15s;position:relative;user-select:none">
+      ${wasAuto ? `<span style="position:absolute;top:3px;right:3px;font-size:.6em;background:${color};color:#fff;border-radius:3px;padding:1px 4px">AUTO</span>` : ''}
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+        <span style="font-size:1em">${emoji}</span>
+        <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0"></span>
+      </div>
+      <div style="font-size:.78em;font-weight:600;color:${selected ? color : 'var(--text)'};line-height:1.2">${escHtml(a.id)}</div>
+      <div style="font-size:.68em;color:var(--text-muted);margin-top:1px">${escHtml(a.category||'')}</div>
+    </div>`;
+  }).join('');
+  updateAgentSelCount();
+}
+
+function toggleAgent(id) {
+  if (_selectedAgentIds.has(id)) _selectedAgentIds.delete(id);
+  else _selectedAgentIds.add(id);
+  const a = _allAgents.find(x => x.id === id);
+  const card = document.getElementById('agentcard-' + id);
+  if (!card || !a) return;
+  const selected = _selectedAgentIds.has(id);
+  const color = _catColors[a.category] || '#64748b';
+  card.style.border = `2px solid ${selected ? color : 'var(--border)'}`;
+  card.style.background = selected ? 'var(--surface2)' : 'var(--surface)';
+  card.querySelector('div:last-child').previousElementSibling.style.color = selected ? color : 'var(--text)';
+  updateAgentSelCount();
+}
+
+function selectAllAgents() {
+  _allAgents.forEach(a => _selectedAgentIds.add(a.id));
+  renderAgentPicker();
+}
+function clearAllAgents() {
+  _selectedAgentIds.clear();
+  renderAgentPicker();
+}
+function resetToAutoSelected() {
+  _selectedAgentIds = new Set(_autoSelectedIds);
+  renderAgentPicker();
+}
+
+function updateAgentSelCount() {
+  const n = _selectedAgentIds.size;
+  document.getElementById('agent-sel-count').textContent = `(${n} selected)`;
+}
+
 async function submitTask() {
   const desc = document.getElementById('task-input').value.trim();
   if (!desc) { toast('Please enter a task description', '#ef4444'); return; }
   const resultEl = document.getElementById('task-submit-result');
-  resultEl.textContent = '⏳ Submitting task to orchestrator…';
-  const r = await api('/api/task/submit', {method:'POST', body: JSON.stringify({description: desc})});
+  resultEl.innerHTML = '⏳ Submitting…';
+  const agents = [..._selectedAgentIds];
+  const r = await api('/api/task/submit', {method:'POST', body: JSON.stringify({
+    description: desc,
+    agents: agents,
+    mode: _taskMode
+  })});
   if (r.ok) {
     const d = await r.json();
-    resultEl.innerHTML = '<span style="color:var(--success)">✅ Task submitted! ID: <code>' + (d.task_id||'?') + '</code></span>';
+    resultEl.innerHTML = `<span style="color:var(--success)">✅ Task launched! ID: <code>${d.task_id||'?'}</code> | ${agents.length || 'auto'} agent${agents.length!==1?'s':''} | mode: ${_taskMode}</span>`;
     document.getElementById('task-input').value = '';
+    _selectedAgentIds.clear();
+    _autoSelectedIds.clear();
+    document.getElementById('task-step2').style.display = 'none';
+    document.getElementById('task-step3').style.display = 'none';
+    document.getElementById('task-step-badge').textContent = 'Step 1';
+    document.getElementById('autoselect-status').textContent = '';
     setTimeout(loadTasks, 2000);
   } else {
-    resultEl.innerHTML = '<span style="color:var(--danger)">❌ Failed to submit task. Is task-orchestrator running?</span>';
+    resultEl.innerHTML = '<span style="color:var(--danger)">❌ Failed to submit. Is task-orchestrator running?</span>';
   }
 }
 
@@ -965,7 +1184,6 @@ async function loadTasks() {
   const d = await r.json();
   const plans = d.plans || [];
 
-  // Active task panel
   const activePanel = document.getElementById('active-task-panel');
   const active = plans.find(p => p.status === 'running' || p.status === 'planning');
   if (active) {
@@ -973,9 +1191,10 @@ async function loadTasks() {
     const done = subtasks.filter(s => s.status === 'done').length;
     const pct = subtasks.length ? Math.round(done/subtasks.length*100) : 0;
     const statusEmoji = {running:'⏳',planning:'🧠',done:'✅',failed:'❌'}[active.status]||'?';
+    const modeTag = active.mode ? `<span style="font-size:.72em;background:var(--surface2);padding:1px 6px;border-radius:3px;margin-left:6px">${active.mode}</span>` : '';
     activePanel.innerHTML = `
       <div style="margin-bottom:12px">
-        <div style="font-weight:600;margin-bottom:4px">${statusEmoji} ${escHtml(active.title||active.id)}</div>
+        <div style="font-weight:600;margin-bottom:4px">${statusEmoji} ${escHtml(active.title||active.id)}${modeTag}</div>
         <div style="font-size:.82em;color:var(--text-muted)">ID: ${active.id} | ${done}/${subtasks.length} subtasks</div>
         <div style="background:var(--border);border-radius:4px;height:6px;margin:8px 0">
           <div style="background:var(--primary);height:100%;width:${pct}%;border-radius:4px;transition:width .3s"></div>
@@ -983,36 +1202,37 @@ async function loadTasks() {
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         ${subtasks.map(st => {
-          const e = {done:'✅',running:'⏳',pending:'⏸️',failed:'❌'}[st.status]||'?';
-          return `<div style="display:flex;align-items:center;gap:8px;font-size:.85em">
+          const e = {done:'✅',running:'⏳',pending:'⏸️',failed:'❌',skipped:'⏭️'}[st.status]||'?';
+          const agColor = _catColors[(_allAgents.find(a=>a.id===st.agent_id)||{}).category] || '#64748b';
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:.84em;padding:4px 6px;border-radius:4px;background:var(--surface)">
             <span>${e}</span>
-            <span style="color:var(--accent);min-width:120px">[${escHtml(st.agent_id||'')}]</span>
-            <span style="color:var(--text-secondary)">${escHtml(st.title||st.subtask_id||'')}</span>
+            <span style="color:${agColor};font-weight:600;min-width:110px;font-size:.9em">${escHtml(st.agent_id||'?')}</span>
+            <span style="color:var(--text-secondary);flex:1">${escHtml(st.title||st.subtask_id||'')}</span>
+            ${st.status==='pending' ? `<button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:.7em" onclick="reassignSubtask('${escHtml(active.id)}','${escHtml(st.subtask_id||'')}')">↩ Reassign</button>` : ''}
           </div>`;
         }).join('')}
       </div>
-      <button class="btn btn-ghost btn-sm" style="margin-top:12px;color:var(--danger)" onclick="cancelTask()">🛑 Cancel Task</button>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="cancelTask()">🛑 Cancel</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadTasks()">↻ Refresh</button>
+      </div>
     `;
     setTimeout(loadTasks, 5000);
   } else {
-    activePanel.innerHTML = '<div class="empty"><div class="icon">🚀</div><p>No active task. Submit one on the left.</p></div>';
+    activePanel.innerHTML = '<div class="empty"><div class="icon">🚀</div><p>No active task. Build one on the left.</p></div>';
   }
 
-  // History list
   const histEl = document.getElementById('task-history-list');
   const history = plans.filter(p => !['running','planning'].includes(p.status)).slice(0,10);
-  if (!history.length) {
-    histEl.innerHTML = '<div class="empty"><p>No task history yet.</p></div>';
-    return;
-  }
+  if (!history.length) { histEl.innerHTML = '<div class="empty"><p>No task history yet.</p></div>'; return; }
   histEl.innerHTML = history.map(p => {
     const e = {done:'✅',failed:'❌',cancelled:'🛑',timed_out:'⏰'}[p.status]||'?';
-    const subs = (p.subtasks||[]).length;
-    const agents = [...new Set((p.subtasks||[]).map(s=>s.agent_id))].join(', ');
+    const agents = [...new Set((p.subtasks||[]).map(s=>s.agent_id).filter(Boolean))].join(', ');
+    const mode = p.mode ? ` · ${p.mode}` : '';
     return `<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
       <div>
         <div style="font-weight:500">${e} ${escHtml(p.title||p.id)}</div>
-        <div style="font-size:.78em;color:var(--text-muted)">${subs} subtasks | Agents: ${escHtml(agents)} | ${p.created_at||''}</div>
+        <div style="font-size:.78em;color:var(--text-muted)">${(p.subtasks||[]).length} subtasks${mode} | Agents: ${escHtml(agents)||'—'} | ${p.created_at||''}</div>
       </div>
       <span style="font-size:.78em;background:var(--surface2);padding:2px 8px;border-radius:4px;color:var(--text-secondary)">${p.status}</span>
     </div>`;
@@ -1024,26 +1244,35 @@ async function cancelTask() {
   if (r.ok) { toast('Task cancelled', '#f59e0b'); loadTasks(); }
 }
 
+async function reassignSubtask(taskId, subtaskId) {
+  if (!_allAgents.length) {
+    const r = await api('/api/agents');
+    if (r.ok) { const d = await r.json(); _allAgents = d.agents || []; }
+  }
+  const agentId = prompt(
+    'Reassign subtask to which agent?\nAvailable: ' +
+    _allAgents.map(a=>a.id).join(', ')
+  );
+  if (!agentId) return;
+  const r = await api('/api/task/reassign', {method:'POST', body: JSON.stringify({task_id: taskId, subtask_id: subtaskId, agent_id: agentId.trim()})});
+  if (r.ok) { toast('Subtask reassigned ✅', '#10b981'); loadTasks(); }
+  else toast('Reassign failed', '#ef4444');
+}
+
 // ── Swarm ────────────────────────────────────────────────────────────────────
 async function loadSwarm() {
   const r = await api('/api/agents');
   if (!r.ok) return;
   const d = await r.json();
   const agents = d.agents || [];
+  _allAgents = agents; // cache for task picker
   const grid = document.getElementById('swarm-grid');
   if (!agents.length) {
-    grid.innerHTML = '<div class="empty"><div class="icon">🐝</div><p>No agent data. Ensure agent_capabilities.json is loaded.</p></div>';
+    grid.innerHTML = '<div class="empty"><div class="icon">🐝</div><p>No agent data.</p></div>';
     return;
   }
-  const categoryColors = {
-    coordination:'#6366f1', sales:'#10b981', content:'#22d3ee', social:'#f59e0b',
-    research:'#3b82f6', ecommerce:'#ec4899', analytics:'#8b5cf6', creative:'#ef4444',
-    trading:'#f97316', development:'#14b8a6', hr:'#84cc16', finance:'#eab308',
-    marketing:'#06b6d4', growth:'#a855f7', management:'#64748b', crypto:'#f59e0b',
-    strategy:'#6366f1'
-  };
   grid.innerHTML = agents.map(a => {
-    const color = categoryColors[a.category] || '#64748b';
+    const color = _catColors[a.category] || '#64748b';
     const dotColor = a.running ? '#10b981' : '#ef4444';
     const runningDot = `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};display:inline-block;margin-left:6px"></span>`;
     const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:var(--surface);padding:2px 6px;border-radius:3px;font-size:.73em;color:var(--text-secondary)">${escHtml(s)}</span>`).join('');
@@ -1057,6 +1286,224 @@ async function loadSwarm() {
       <div style="margin-top:8px;font-size:.75em;color:var(--text-muted)">Category: ${escHtml(a.category||'')}</div>
     </div>`;
   }).join('');
+}
+
+// ── Commands Tab ─────────────────────────────────────────────────────────────
+const COMMAND_GROUPS = [
+  {
+    cat: '⚙️ System',
+    cmds: [
+      ['status', 'Get current bot status report'],
+      ['workers', 'List all active workers'],
+      ['start <bot>', 'Start a specific bot'],
+      ['stop <bot>', 'Stop a specific bot'],
+      ['schedule', 'List all scheduled tasks'],
+      ['improvements', 'List pending skill proposals'],
+      ['skills', 'Show skills library summary'],
+      ['agents', 'List all 20 AI agents'],
+      ['help', 'Show full command list'],
+      ['cmds', 'Show this commands reference'],
+    ]
+  },
+  {
+    cat: '🚀 Tasks & Orchestration',
+    cmds: [
+      ['task <description>', 'Submit a multi-agent task'],
+      ['task status', 'Show status of active task'],
+      ['task list', 'List recent tasks'],
+      ['task cancel', 'Cancel active task'],
+      ['task agents <a1,a2>', 'Set agents for next task'],
+      ['task mode auto|parallel|single', 'Set execution mode'],
+      ['task config', 'Show current task configuration'],
+      ['assign <agent> <subtask>', 'Manually dispatch a subtask'],
+    ]
+  },
+  {
+    cat: '🏢 Company Building',
+    cmds: [
+      ['company build <idea>', 'Full company launch package'],
+      ['company validate <idea>', 'Viability check & SWOT'],
+      ['company plan <idea>', 'Business plan only'],
+      ['company simulate <scenario>', 'Growth simulation'],
+      ['company gtm <idea>', 'Go-to-market strategy'],
+      ['company pitch <company>', 'Investor pitch deck'],
+      ['company org <company>', 'Org chart design'],
+      ['company swot <topic>', 'SWOT analysis'],
+    ]
+  },
+  {
+    cat: '🪙 Memecoin & Web3',
+    cmds: [
+      ['memecoin create <concept>', 'Full token launch package'],
+      ['memecoin name <concept>', 'Generate token names'],
+      ['memecoin tokenomics <name>', 'Design tokenomics model'],
+      ['memecoin whitepaper <name>', 'Draft whitepaper'],
+      ['memecoin community <name>', 'Community strategy'],
+      ['memecoin viral <name>', 'Viral launch campaign'],
+    ]
+  },
+  {
+    cat: '💰 Finance',
+    cmds: [
+      ['finance model <business>', '3-year financial model'],
+      ['finance pl <business>', 'P&L projections'],
+      ['finance runway <burn> <cash>', 'Burn rate & runway'],
+      ['finance raise <stage> <amount>', 'Fundraising prep'],
+      ['finance unit <product> <price>', 'Unit economics (CAC/LTV)'],
+      ['finance pricing <product>', 'Pricing strategy'],
+      ['finance pitch <company>', 'Investor pitch financials'],
+      ['finance valuation <company>', 'Valuation methodology'],
+    ]
+  },
+  {
+    cat: '👔 HR & People',
+    cmds: [
+      ['hr hire <role>', 'Full hiring package'],
+      ['hr jd <role>', 'Write job description'],
+      ['hr screen <cv-text>', 'AI CV screening & scoring'],
+      ['hr interview <role>', 'Interview question pack'],
+      ['hr onboard <role>', '90-day onboarding plan'],
+      ['hr review <role>', 'Performance review template'],
+      ['hr org <company>', 'Org chart design'],
+      ['hr culture <company>', 'Culture & values document'],
+    ]
+  },
+  {
+    cat: '🎨 Brand',
+    cmds: [
+      ['brand identity <company>', 'Full brand identity system'],
+      ['brand name <industry>', 'Brand name generation (15 options)'],
+      ['brand position <company>', 'Brand positioning strategy'],
+      ['brand voice <company>', 'Brand voice & tone guide'],
+      ['brand messaging <company>', 'Messaging framework'],
+      ['brand story <company>', 'Brand story & narrative'],
+      ['brand audit <company>', 'Competitive brand audit'],
+    ]
+  },
+  {
+    cat: '📈 Growth',
+    cmds: [
+      ['growth loop <product>', 'Viral growth loop design'],
+      ['growth funnel <product>', 'Conversion funnel optimization'],
+      ['growth abtests <feature>', 'A/B test framework'],
+      ['growth retention <product>', 'Retention strategy'],
+      ['growth referral <product>', 'Referral program design'],
+      ['growth plg <product>', 'Product-led growth strategy'],
+      ['growth experiments <product>', 'ICE-scored experiment backlog'],
+    ]
+  },
+  {
+    cat: '📋 Project Management',
+    cmds: [
+      ['pm start <project>', 'Kick off a project'],
+      ['pm breakdown <project>', 'Work breakdown structure'],
+      ['pm sprint <goal>', '2-week sprint plan'],
+      ['pm roadmap <project>', 'Project roadmap & milestones'],
+      ['pm risks <project>', 'Risk register & mitigation'],
+      ['pm raci <project>', 'RACI responsibility matrix'],
+      ['pm gantt <project>', 'Gantt chart (text-based)'],
+      ['pm retro <sprint>', 'Sprint retrospective facilitation'],
+    ]
+  },
+  {
+    cat: '✍️ Content & Social',
+    cmds: [
+      ['content <brief>', 'Full content package'],
+      ['social <brief>', 'Social media content pack'],
+      ['social plan <brief>', 'Strategy plan only'],
+      ['video <topic>', 'Faceless video full pipeline'],
+      ['video script <topic>', 'Video script only'],
+      ['video seo <topic>', 'YouTube SEO pack'],
+      ['newsletter create <topic>', 'Generate newsletter issue'],
+      ['course create <topic>', 'Full course package'],
+      ['course outline <topic>', 'Course structure only'],
+    ]
+  },
+  {
+    cat: '💼 Sales & Leads',
+    cmds: [
+      ['leads <niche> <location>', 'Local business lead generation'],
+      ['outreach <campaign>', 'Outreach campaign'],
+      ['email <brief>', 'Cold email sequence'],
+      ['prospect <niche> <location>', 'Appointment setter prospects'],
+      ['websales audit <url>', 'Website audit + sales pitch'],
+      ['recruit <role> <requirements>', 'Find & screen candidates'],
+    ]
+  },
+  {
+    cat: '📈 Crypto & Trading',
+    cmds: [
+      ['crypto <pair>', 'Technical analysis with signals'],
+      ['trade <pair>', 'Trading signal & risk analysis'],
+      ['signals', 'Current trading signals'],
+      ['signal daily', 'Daily market summary'],
+      ['arb scan <product>', 'Arbitrage opportunity scan'],
+      ['arb opportunities', 'Top arbitrage opportunities'],
+    ]
+  },
+  {
+    cat: '📅 Scheduling',
+    cmds: [
+      ['schedule', 'List all scheduled tasks'],
+      ['schedule add <label> <action> <cron>', 'Add scheduled task (via UI)'],
+    ]
+  },
+];
+
+let _cmdActiveFilter = null;
+let _renderedCmds = [];
+
+function loadCommandsTab() {
+  // Category pills
+  const pills = document.getElementById('cmd-category-pills');
+  pills.innerHTML = `<span onclick="setCmdFilter(null)" id="cmd-pill-all"
+    style="cursor:pointer;padding:4px 10px;border-radius:10px;font-size:.8em;background:var(--primary);color:#fff">All</span>` +
+    COMMAND_GROUPS.map((g,i) => `<span onclick="setCmdFilter(${i})" id="cmd-pill-${i}"
+      style="cursor:pointer;padding:4px 10px;border-radius:10px;font-size:.8em;background:var(--surface2);color:var(--text-secondary)">${g.cat}</span>`
+    ).join('');
+  renderCommands();
+}
+
+function setCmdFilter(idx) {
+  _cmdActiveFilter = idx;
+  document.getElementById('cmd-pill-all').style.background = idx===null ? 'var(--primary)' : 'var(--surface2)';
+  document.getElementById('cmd-pill-all').style.color = idx===null ? '#fff' : 'var(--text-secondary)';
+  COMMAND_GROUPS.forEach((_,i) => {
+    const p = document.getElementById('cmd-pill-' + i);
+    if (!p) return;
+    p.style.background = i===idx ? 'var(--primary)' : 'var(--surface2)';
+    p.style.color = i===idx ? '#fff' : 'var(--text-secondary)';
+  });
+  renderCommands();
+}
+
+function filterCommands() { renderCommands(); }
+
+function renderCommands() {
+  const q = (document.getElementById('cmd-search')?.value || '').toLowerCase();
+  const groups = _cmdActiveFilter !== null ? [COMMAND_GROUPS[_cmdActiveFilter]] : COMMAND_GROUPS;
+  const list = document.getElementById('cmd-list');
+  if (!list) return;
+  list.innerHTML = groups.map(g => {
+    const rows = g.cmds
+      .filter(([cmd, desc]) => !q || cmd.toLowerCase().includes(q) || desc.toLowerCase().includes(q))
+      .map(([cmd, desc]) => `
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+          <code onclick="copyCmd('${escHtml(cmd)}')" title="Click to copy" style="cursor:pointer;min-width:200px;background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:.84em;color:var(--accent)">${escHtml(cmd)}</code>
+          <span style="color:var(--text-secondary);font-size:.85em;flex:1">${escHtml(desc)}</span>
+          <button class="btn btn-ghost btn-sm" onclick="copyCmd('${escHtml(cmd)}')" style="padding:2px 8px;font-size:.72em">📋</button>
+        </div>`
+      ).join('');
+    if (!rows) return '';
+    return `<div style="margin-bottom:16px">
+      <div style="font-weight:700;font-size:.9em;color:var(--text);margin-bottom:4px">${g.cat}</div>
+      ${rows}
+    </div>`;
+  }).join('');
+}
+
+function copyCmd(cmd) {
+  navigator.clipboard.writeText(cmd).then(() => toast(`Copied: ${cmd}`, '#6366f1')).catch(() => {});
 }
 
 // Initial load
@@ -1196,6 +1643,129 @@ def handle_command(message: str) -> str:
         bot = message[5:].strip()
         rc, out = ai_employee("stop", bot)
         return f"Stopped {bot}. {out}"
+
+    # ── Task configuration commands ───────────────────────────────────────────
+    if msg_lower in ("task status", "task list"):
+        plans = _load_task_plans()
+        active = next((p for p in plans if p.get("status") in ("running", "planning")), None)
+        if active:
+            subs = active.get("subtasks", [])
+            done = sum(1 for s in subs if s.get("status") == "done")
+            agents_used = ", ".join({s.get("agent_id","?") for s in subs if s.get("agent_id")})
+            return (
+                f"🚀 Active task: {active.get('title','?')}\n"
+                f"Status: {active.get('status')} | Mode: {active.get('mode','auto')}\n"
+                f"Progress: {done}/{len(subs)} subtasks\n"
+                f"Agents: {agents_used or '—'}"
+            )
+        recent = [p for p in plans[:5] if p.get("status") not in ("running", "planning")]
+        if recent:
+            lines = [f"• {p.get('title','?')[:40]} [{p.get('status')}]" for p in recent]
+            return "No active task. Recent tasks:\n" + "\n".join(lines)
+        return "No tasks found."
+
+    if msg_lower == "task cancel":
+        plans = _load_task_plans()
+        for p in plans:
+            if p.get("status") in ("running", "planning"):
+                p["status"] = "cancelled"
+                p["completed_at"] = now_iso()
+                _save_task_plans(plans)
+                return f"🛑 Cancelled task: {p.get('title','?')}"
+        return "No active task to cancel."
+
+    # task agents <agent1,agent2,...> — set agents for next task submitted via WhatsApp
+    if msg_lower.startswith("task agents "):
+        agents_raw = message[12:].strip()
+        agent_list = [a.strip() for a in agents_raw.replace(";", ",").split(",") if a.strip()]
+        capabilities = _load_agent_capabilities()
+        valid = list(capabilities.get("agents", {}).keys())
+        invalid = [a for a in agent_list if a not in valid]
+        if invalid:
+            return (
+                f"❌ Unknown agents: {', '.join(invalid)}\n"
+                f"Available: {', '.join(valid[:10])}…\n"
+                f"Tip: use exact IDs e.g. company-builder, finance-wizard"
+            )
+        # Store in a temp config file so next 'task <description>' via WhatsApp uses them
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        cfg = {}
+        if _task_cfg_file.exists():
+            try:
+                cfg = json.loads(_task_cfg_file.read_text())
+            except Exception:
+                pass
+        cfg["agents"] = agent_list
+        _task_cfg_file.write_text(json.dumps(cfg))
+        return f"✅ Agents set for next task: {', '.join(agent_list)}\nNow send: task <description>"
+
+    # task mode auto|parallel|single
+    if msg_lower.startswith("task mode "):
+        mode = message[10:].strip().lower()
+        if mode not in ("auto", "parallel", "single"):
+            return "❌ Valid modes: auto, parallel, single\nExample: task mode parallel"
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        cfg = {}
+        if _task_cfg_file.exists():
+            try:
+                cfg = json.loads(_task_cfg_file.read_text())
+            except Exception:
+                pass
+        cfg["mode"] = mode
+        _task_cfg_file.write_text(json.dumps(cfg))
+        mode_desc = {"auto": "🧠 Orchestrator decides agent assignments", "parallel": "⚡ All selected agents run simultaneously", "single": "1️⃣ Only first/best agent runs"}[mode]
+        return f"✅ Task mode set to: {mode}\n{mode_desc}\nNext task will use this mode."
+
+    # task config — show current WhatsApp task config
+    if msg_lower in ("task config", "task settings"):
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        cfg = {}
+        if _task_cfg_file.exists():
+            try:
+                cfg = json.loads(_task_cfg_file.read_text())
+            except Exception:
+                pass
+        agents = cfg.get("agents", [])
+        mode = cfg.get("mode", "auto")
+        return (
+            f"📋 Current task config:\n"
+            f"Mode: {mode}\n"
+            f"Agents: {', '.join(agents) if agents else 'auto-select'}\n"
+            f"\nChange with:\n"
+            f"  task mode <auto|parallel|single>\n"
+            f"  task agents <agent1,agent2>\n"
+            f"  task agents clear"
+        )
+
+    # task agents clear
+    if msg_lower in ("task agents clear", "task agents reset"):
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        if _task_cfg_file.exists():
+            try:
+                cfg = json.loads(_task_cfg_file.read_text())
+                cfg.pop("agents", None)
+                _task_cfg_file.write_text(json.dumps(cfg))
+            except Exception:
+                pass
+        return "✅ Agent selection cleared. Next task will use auto-select."
+
+    # cmds / commands — show command categories
+    if msg_lower in ("cmds", "commands", "cmd list"):
+        return (
+            "📜 Command categories — open *📜 Commands* tab in dashboard for full list.\n\n"
+            "⚙️ System: status, workers, start/stop <bot>\n"
+            "🚀 Tasks: task <desc>, task agents <a1,a2>, task mode <m>, task config, task cancel\n"
+            "🏢 Company: company build/validate/plan/simulate/gtm/pitch/org/swot\n"
+            "🪙 Crypto: memecoin create/tokenomics/whitepaper, crypto <pair>, signals\n"
+            "💰 Finance: finance model/pl/runway/raise/unit/pricing/pitch/valuation\n"
+            "👔 HR: hr hire/jd/screen/interview/onboard/review/org/culture\n"
+            "🎨 Brand: brand identity/name/position/voice/messaging/story/audit\n"
+            "📈 Growth: growth loop/funnel/abtests/retention/referral/plg\n"
+            "📋 PM: pm start/breakdown/sprint/roadmap/risks/raci/gantt/retro\n"
+            "✍️ Content: content/social/video/newsletter/course\n"
+            "💼 Sales: leads/outreach/email/recruit/websales\n"
+            "Type *help* for the full command list."
+        )
 
     if msg_lower == "help":
         return (
@@ -1366,6 +1936,39 @@ def handle_command(message: str) -> str:
                 pass
         return f"{emoji} {desc}\nStart it: `start {bot_name}`"
 
+    # Special handler for 'task <description>' — injects stored agent/mode config
+    if msg_lower.startswith("task "):
+        # Load stored WhatsApp task config
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        _task_cfg: dict = {}
+        if _task_cfg_file.exists():
+            try:
+                _task_cfg = json.loads(_task_cfg_file.read_text())
+            except Exception:
+                pass
+        _agents_hint = _task_cfg.get("agents", [])
+        _mode_hint = _task_cfg.get("mode", "auto")
+        desc_part = message[5:].strip()
+        # Append hints to the chat message for task-orchestrator to parse
+        agents_str = f" [agents:{','.join(_agents_hint)}]" if _agents_hint else ""
+        mode_str = f" [mode:{_mode_hint}]" if _mode_hint and _mode_hint != "auto" else ""
+        enriched_msg = f"task {desc_part}{agents_str}{mode_str}"
+        entry = {"ts": now_iso(), "type": "user", "message": enriched_msg}
+        CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(CHATLOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        config_note = ""
+        if _agents_hint:
+            config_note = f"\nAgents: {', '.join(_agents_hint)} | Mode: {_mode_hint}"
+        elif _mode_hint and _mode_hint != "auto":
+            config_note = f"\nMode: {_mode_hint}"
+        else:
+            config_note = "\nAgents: auto-selected | Mode: auto"
+        return (
+            f"🚀 Task queued: '{desc_part[:60]}'{config_note}\n"
+            f"Tip: use *task config* to see/change agent settings."
+        )
+
     for _prefixes, _bot, _emoji, _desc in [
         (["leads ", "outreach "], "lead-generator", "📋", "Lead generator not running."),
         (["recruit "], "recruiter", "👔", "Recruiter not running."),
@@ -1379,7 +1982,7 @@ def handle_command(message: str) -> str:
         (["pod "], "print-on-demand", "👕", "Print-on-demand bot not running."),
         (["course "], "course-creator", "🎓", "Course creator not running."),
         (["arb "], "arbitrage-bot", "💹", "Arbitrage bot not running."),
-        (["task ", "orchestrate "], "task-orchestrator", "🚀", "Task orchestrator not running. Start it: `start task-orchestrator`"),
+        (["orchestrate "], "task-orchestrator", "🚀", "Task orchestrator not running. Start it: `start task-orchestrator`"),
         (["company "], "company-builder", "🏢", "Company builder not running. Start it: `start company-builder`"),
         (["memecoin "], "memecoin-creator", "🪙", "Memecoin creator not running. Start it: `start memecoin-creator`"),
         (["hr "], "hr-manager", "👔", "HR manager not running. Start it: `start hr-manager`"),
@@ -1665,21 +2268,45 @@ def _save_task_plans(plans: list) -> None:
 
 @app.post("/api/task/submit")
 def submit_task(payload: dict):
-    """Submit a task for multi-agent orchestration via chatlog."""
+    """Submit a task for multi-agent orchestration via chatlog.
+    Accepts optional 'agents' list and 'mode' string.
+    """
     description = (payload.get("description") or "").strip()
     if not description:
         raise HTTPException(400, "description required")
 
-    # Write to chatlog so task-orchestrator picks it up
-    task_msg = f"task {description}"
+    agents: list = payload.get("agents") or []
+    mode: str = (payload.get("mode") or "auto").strip()
+
+    # Build the chat message so task-orchestrator can pick it up
+    agents_hint = ""
+    if agents:
+        agents_hint = f" [agents:{','.join(agents)}]"
+    mode_hint = f" [mode:{mode}]" if mode and mode != "auto" else ""
+    task_msg = f"task {description}{agents_hint}{mode_hint}"
+
     entry = {"ts": now_iso(), "type": "user", "message": task_msg}
     CHATLOG.parent.mkdir(parents=True, exist_ok=True)
     with open(CHATLOG, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
-    import re as _re
-    task_id = _re.sub(r"[^a-z0-9]", "", description[:8].lower())
-    return JSONResponse({"ok": True, "task_id": task_id, "message": f"Task submitted: {description[:60]}"})
+    # Create a pending plan entry so the UI can show it immediately
+    import uuid as _uuid
+    task_id = _uuid.uuid4().hex[:12]
+    plan = {
+        "id": task_id,
+        "title": description[:80],
+        "status": "planning",
+        "mode": mode,
+        "agents_hint": agents,
+        "subtasks": [],
+        "created_at": now_iso(),
+    }
+    plans = _load_task_plans()
+    plans.insert(0, plan)
+    _save_task_plans(plans[:50])  # keep last 50
+
+    return JSONResponse({"ok": True, "task_id": task_id, "message": f"Task submitted: {description[:60]}", "agents": agents, "mode": mode})
 
 
 @app.post("/api/task/cancel")
@@ -1693,6 +2320,95 @@ def cancel_task():
             _save_task_plans(plans)
             return JSONResponse({"ok": True, "cancelled_id": p["id"]})
     return JSONResponse({"ok": False, "message": "No active task found"})
+
+
+@app.post("/api/task/reassign")
+def reassign_subtask(payload: dict):
+    """Reassign a pending subtask to a different agent."""
+    task_id = (payload.get("task_id") or "").strip()
+    subtask_id = (payload.get("subtask_id") or "").strip()
+    agent_id = (payload.get("agent_id") or "").strip()
+    if not all([task_id, subtask_id, agent_id]):
+        raise HTTPException(400, "task_id, subtask_id, and agent_id are required")
+
+    # Validate agent exists
+    capabilities = _load_agent_capabilities()
+    if agent_id not in capabilities.get("agents", {}):
+        raise HTTPException(400, f"Unknown agent '{agent_id}'")
+
+    plans = _load_task_plans()
+    for p in plans:
+        if p.get("id") != task_id:
+            continue
+        for st in p.get("subtasks", []):
+            if (st.get("subtask_id") or st.get("id")) == subtask_id:
+                if st.get("status") not in ("pending", "failed"):
+                    raise HTTPException(400, f"Can only reassign pending/failed subtasks (current: {st.get('status')})")
+                old = st.get("agent_id")
+                st["agent_id"] = agent_id
+                st["status"] = "pending"
+                _save_task_plans(plans)
+                return JSONResponse({"ok": True, "subtask_id": subtask_id, "old_agent": old, "new_agent": agent_id})
+        raise HTTPException(404, f"Subtask '{subtask_id}' not found in task '{task_id}'")
+    raise HTTPException(404, f"Task '{task_id}' not found")
+
+
+# Agent keyword→category scoring map used by auto-select.
+# Keys use task-description vocabulary (not agent skill IDs), so this intentionally
+# differs from agent_capabilities.json.  It is derived from each agent's specialties
+# and kept here for fast, dependency-free lookup.  Update when adding new agents.
+_AGENT_KEYWORDS: dict[str, list[str]] = {
+    "company-builder":   ["company", "startup", "build", "launch", "found", "business plan", "enterprise", "venture", "gtm", "go-to-market", "mvp", "market entry", "b2b", "b2c"],
+    "brand-strategist":  ["brand", "logo", "identity", "name", "naming", "visual", "design", "positioning", "voice", "messaging", "tagline", "story", "rebrand"],
+    "finance-wizard":    ["finance", "financial", "revenue", "profit", "pl", "p&l", "model", "valuation", "fundrais", "investor", "pitch", "vc", "budget", "unit economics", "burn", "runway", "cac", "ltv"],
+    "hr-manager":        ["hire", "hiring", "recruit", "hr", "team", "culture", "onboard", "job description", "interview", "employee", "headcount", "org chart", "talent", "people"],
+    "growth-hacker":     ["grow", "growth", "viral", "funnel", "retention", "referral", "plg", "activation", "conversion", "ab test", "churn", "user acquisition", "marketing channel"],
+    "project-manager":   ["project", "sprint", "roadmap", "milestone", "gantt", "risk", "plan", "timeline", "deadline", "deliverable", "backlog", "agile", "scrum", "scope"],
+    "content-master":    ["content", "blog", "article", "seo", "write", "copywrite", "post", "long-form", "keyword", "headline", "editorial"],
+    "social-guru":       ["social", "instagram", "twitter", "tiktok", "linkedin", "facebook", "viral post", "caption", "hashtag", "reel", "story", "thread", "community"],
+    "intel-agent":       ["research", "competitor", "market", "intelligence", "swot", "analyse", "analyze", "landscape", "benchmark", "trend", "industry", "sector"],
+    "lead-hunter":       ["lead", "prospect", "b2b list", "cold outreach", "decision maker", "crm", "pipeline", "contact list"],
+    "email-ninja":       ["email", "cold email", "drip", "sequence", "deliverability", "open rate", "subject line", "newsletter email"],
+    "creative-studio":   ["ad", "creative", "banner", "image prompt", "ad copy", "campaign", "visual", "design brief"],
+    "crypto-trader":     ["crypto", "bitcoin", "ethereum", "trade", "trading", "chart", "technical analysis", "signal", "defi", "altcoin"],
+    "memecoin-creator":  ["memecoin", "token", "tokenomics", "whitepaper", "web3", "nft", "meme coin", "launch token", "smart contract"],
+    "data-analyst":      ["data", "analytics", "dashboard", "kpi", "metric", "report", "insight", "survey", "statistic"],
+    "support-bot":       ["support", "faq", "ticket", "customer service", "helpdesk", "escalat", "sentiment", "complaint"],
+    "product-scout":     ["product", "ecommerce", "shopify", "amazon", "arbitrage", "dropship", "supplier", "niche product", "trend product"],
+    "bot-dev":           ["code", "develop", "python", "script", "api", "bot", "automate", "integration", "endpoint", "webhook"],
+    "web-sales":         ["website", "landing page", "ux", "conversion rate", "seo audit", "pitch website", "sales page"],
+    "orchestrator":      ["coordinate", "orchestrate", "multi-agent", "full pipeline", "end-to-end", "all agents"],
+}
+
+
+@app.post("/api/task/auto-agents")
+def auto_select_agents(payload: dict):
+    """Return suggested agent IDs for a given task description using keyword scoring."""
+    description = (payload.get("description") or "").strip().lower()
+    if not description:
+        raise HTTPException(400, "description required")
+
+    scores: dict[str, int] = {}
+    for agent_id, keywords in _AGENT_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in description)
+        if score > 0:
+            scores[agent_id] = score
+
+    # Sort by score descending; take top agents covering the task
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    # Always include at least 1; cap at 6 unless the description is very broad
+    max_agents = 6 if len(description) > 80 else 4
+    suggested = [aid for aid, _ in ranked[:max_agents]]
+
+    # If nothing matched, fall back to orchestrator
+    if not suggested:
+        suggested = ["orchestrator"]
+
+    # Attach reasons
+    reasons = {aid: [kw for kw in _AGENT_KEYWORDS.get(aid, []) if kw in description][:3] for aid in suggested}
+
+    return JSONResponse({"suggested": suggested, "scores": dict(ranked[:max_agents]), "reasons": reasons})
 
 
 @app.get("/api/task/list")
