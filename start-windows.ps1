@@ -9,10 +9,10 @@
     UI Port:        8787 (override with $env:PROBLEM_SOLVER_UI_PORT)
     Dashboard Port: 3000
     Gateway Port:   18789
+    Bot manifest:   31 background bots + problem-solver-ui = 32 Python services
 #>
 
-Set-StrictMode -Off
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Continue'
 
 # ─── Colour helpers ────────────────────────────────────────────────────────────
 function Write-Banner {
@@ -139,7 +139,7 @@ Write-OK "AI_HOME = $AI_HOME"
 # Locate Python
 $script:python = $null
 foreach ($candidate in @('python', 'python3', 'py')) {
-    $ver = & $candidate --version 2>&1
+    $ver = & $candidate --version 2>&1 -ErrorAction SilentlyContinue
     if ($LASTEXITCODE -eq 0 -and "$ver" -match 'Python 3') {
         $script:python = $candidate
         Write-OK "Python  = $candidate  ($("$ver".Trim()))"
