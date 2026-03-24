@@ -1,6 +1,6 @@
 # 🤖 AI Employee
 
-> **Autonomous multi-agent AI system** — download, install, and run 13 AI workers controlled via WhatsApp and a local web dashboard.
+> **Autonomous 20-agent AI company** — download, install, and run 20 AI workers controlled via WhatsApp and a local web dashboard. Give the AI any task — it self-selects agents, decomposes the work, and executes in parallel.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -8,17 +8,129 @@
 
 ## Overview
 
-AI Employee is a self-hosted AI workforce that runs on your own machine (Linux, macOS, or WSL). You control your agents via **WhatsApp** or the **local dashboard**, schedule tasks, and receive compact hourly status updates — no cloud subscription required.
+AI Employee is a self-hosted AI workforce that runs on your own machine (Linux, macOS, or WSL). You control your agents via **WhatsApp** or the **local dashboard**, give them tasks in plain English, and watch them collaborate autonomously.
 
 | Feature | Details |
 |---|---|
-| 13 AI agents | lead-hunter, content-master, social-guru, intel-agent, product-scout, email-ninja, support-bot, data-analyst, creative-studio, crypto-trader, bot-dev, web-sales, orchestrator |
-| Control | WhatsApp + Web Dashboard |
+| **20 AI agents** | Full company team: strategy, finance, HR, brand, growth, PM + specialist bots |
+| **Task Orchestrator** | Give any task → AI decomposes it → assigns agents → runs in parallel → aggregates results |
+| Control | WhatsApp + Web Dashboard (Tasks tab + Swarm view) |
 | Local LLM | Ollama support (privacy-first) or cloud (Anthropic/OpenAI) |
 | Persistence | State survives restarts; bots auto-restart on crash |
 | Scheduling | Schedule tasks via UI or WhatsApp |
-| Status updates | Compact hourly WhatsApp reports |
+| 126 skills | 17 categories covering every business function |
 | Continuous improvement | Discovery bot proposes new skills; you approve |
+
+---
+
+## 🤖 The 20 Agents
+
+### Core Business Team (NEW)
+| Agent | Prefix | What it does |
+|---|---|---|
+| **task-orchestrator** | `task <description>` | 🧠 Master brain — decomposes tasks, assigns agents, runs parallel workflows |
+| **company-builder** | `company build <idea>` | 🏢 Build companies from scratch: plans, simulations, GTM, org design |
+| **memecoin-creator** | `memecoin create <concept>` | 🪙 Full token launch: tokenomics, whitepaper, viral marketing |
+| **hr-manager** | `hr hire <role>` | 👔 Hiring pipeline, onboarding, org charts, culture docs |
+| **finance-wizard** | `finance model <business>` | 💰 P&L models, fundraising prep, unit economics, valuation |
+| **brand-strategist** | `brand identity <company>` | 🎨 Brand naming, identity systems, positioning, messaging |
+| **growth-hacker** | `growth loop <product>` | 🚀 Viral loops, A/B tests, retention, referral programs |
+| **project-manager** | `pm start <project>` | 📋 Sprints, roadmaps, risk registers, Gantt charts |
+
+### Specialist Bots (Original 13)
+| Agent | What it does |
+|---|---|
+| **orchestrator** | WhatsApp command routing + task coordination |
+| **lead-hunter** | B2B lead generation + cold outreach CRM |
+| **content-master** | SEO blog posts + long-form content |
+| **social-guru** | Viral social media + captions + hashtags |
+| **intel-agent** | Competitor monitoring + market research |
+| **product-scout** | E-commerce product research + arbitrage |
+| **email-ninja** | Cold email sequences + deliverability |
+| **support-bot** | Customer support + FAQ + ticket routing |
+| **data-analyst** | Market trends + reports + KPI tracking |
+| **creative-studio** | Ad copy + design briefs + campaign concepts |
+| **crypto-trader** | Technical analysis + trading signals |
+| **bot-dev** | Python bot development + code review |
+| **web-sales** | Website audits + sales pitches + UX analysis |
+
+---
+
+## 🧠 Multi-Agent Task Orchestration
+
+The **Task Orchestrator** is the system's brain. Give it any goal:
+
+```
+task Build a SaaS company for remote team productivity
+```
+
+The orchestrator will:
+1. **Decompose** the task into 3-8 subtasks using AI
+2. **Assign** each subtask to the most capable agent
+3. **Run** parallel tasks simultaneously (up to 5 at once)
+4. **Monitor** progress and handle dependencies
+5. **Aggregate** all results into a comprehensive answer
+
+### Example Multi-Agent Tasks
+
+```bash
+# Build a full company from scratch
+task Build an AI tutoring platform: create business plan, brand identity, hiring roadmap, and GTM strategy
+
+# Launch a memecoin
+task Launch a dog-themed memecoin: design tokenomics, draft whitepaper, create viral community strategy
+
+# Market research to content pipeline
+task Research the AI productivity tools market and create 3 SEO blog posts targeting decision makers
+
+# Complete startup package
+task Create a complete startup package for a fintech app: validate idea, model financials, design brand, plan first sprint
+```
+
+### Standalone Commands
+
+Every agent also works independently:
+
+```bash
+# Company Building
+company build <idea>          # full launch package
+company validate <idea>       # viability check
+company simulate <scenario>   # growth simulation
+company pitch <company>       # investor pitch deck
+
+# Memecoin Creation
+memecoin create <concept>     # full launch package
+memecoin tokenomics <name>    # design tokenomics
+memecoin whitepaper <name>    # draft whitepaper
+memecoin viral <name>         # viral campaign
+
+# HR & People
+hr hire <role>                # full hiring package
+hr screen <cv>                # AI CV scoring
+hr onboard <role>             # 90-day onboarding plan
+hr culture <company>          # culture & values doc
+
+# Finance
+finance model <business>      # 3-year financial model
+finance raise <stage> for <amount>  # fundraising prep
+finance unit <product> at <price>   # unit economics
+
+# Brand
+brand identity <company>      # full brand system
+brand name <industry>         # name generation
+brand voice <company>         # voice & tone guide
+
+# Growth
+growth loop <product>         # viral growth loop
+growth abtests <feature>      # A/B test framework
+growth referral <product>     # referral program design
+
+# Project Management
+pm start <project>            # kick off project
+pm sprint <goal>              # sprint planning
+pm gantt <project>            # Gantt chart
+pm risks <project>            # risk register
+```
 
 ---
 
@@ -59,7 +171,7 @@ The installer runs a **step-by-step wizard** that asks:
 4. Trading bot path (optional)
 5. Enable hourly WhatsApp status updates?
 6. Dashboard port (default: 3000) and UI port (default: 8787)
-7. Number of workers (1–13, default: 13)
+7. Number of workers (1–20, default: 20)
 
 Everything is installed into **`~/.ai-employee/`**.
 

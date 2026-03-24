@@ -327,6 +327,8 @@ INDEX_HTML = r"""<!doctype html>
 <nav>
   <button class="active" onclick="switchTab('dashboard',this)">📊 Dashboard</button>
   <button onclick="switchTab('chat',this)">💬 Chat</button>
+  <button onclick="switchTab('tasks',this)">🚀 Tasks</button>
+  <button onclick="switchTab('swarm',this)">🐝 Swarm</button>
   <button onclick="switchTab('scheduler',this)">📅 Scheduler</button>
   <button onclick="switchTab('workers',this)">👷 Workers</button>
   <button onclick="switchTab('improvements',this)">💡 Improvements</button>
@@ -528,6 +530,49 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- ── Tasks ── -->
+<div id="tab-tasks" class="tab-content">
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🚀</span> Submit a Task</div>
+      </div>
+      <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">Describe any goal — the AI will decompose it, pick the right agents, and execute autonomously.</p>
+      <div class="form-group">
+        <label>Task Description</label>
+        <textarea id="task-input" rows="4" placeholder="e.g. Build a SaaS company for remote team management — create business plan, brand identity, hiring plan, financial model, and go-to-market strategy" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
+      </div>
+      <button class="btn btn-success" onclick="submitTask()" style="width:100%">🚀 Launch Multi-Agent Task</button>
+      <div id="task-submit-result" style="margin-top:12px;font-size:.88em;color:var(--text-muted)"></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📊</span> Active Task</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadTasks()">↻ Refresh</button>
+      </div>
+      <div id="active-task-panel"><div class="empty"><div class="icon">🚀</div><p>No active task. Submit one on the left.</p></div></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📋</span> Recent Tasks</div>
+    </div>
+    <div id="task-history-list"><div class="empty"><p>No task history yet.</p></div></div>
+  </div>
+</div>
+
+<!-- ── Swarm ── -->
+<div id="tab-swarm" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🐝</span> Agent Swarm Overview</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadSwarm()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px">All 20 AI agents — their capabilities, current status, and workload.</p>
+    <div id="swarm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"><div class="empty"><div class="icon">🐝</div><p>Loading agents…</p></div></div>
+  </div>
+</div>
+
 </main>
 </div><!-- .app -->
 
@@ -549,6 +594,8 @@ function switchTab(tab, btn) {
   if (tab === 'workers') loadWorkers();
   if (tab === 'improvements') loadImprovements();
   if (tab === 'skills') loadSkills();
+  if (tab === 'tasks') loadTasks();
+  if (tab === 'swarm') loadSwarm();
 }
 
 function toast(msg, color='#10b981') {
@@ -895,6 +942,123 @@ async function deleteAgent(id) {
   if (r.ok) { toast('Agent deleted', '#ef4444'); loadAgents(); }
 }
 
+// ── Tasks ────────────────────────────────────────────────────────────────────
+async function submitTask() {
+  const desc = document.getElementById('task-input').value.trim();
+  if (!desc) { toast('Please enter a task description', '#ef4444'); return; }
+  const resultEl = document.getElementById('task-submit-result');
+  resultEl.textContent = '⏳ Submitting task to orchestrator…';
+  const r = await api('/api/task/submit', {method:'POST', body: JSON.stringify({description: desc})});
+  if (r.ok) {
+    const d = await r.json();
+    resultEl.innerHTML = '<span style="color:var(--success)">✅ Task submitted! ID: <code>' + (d.task_id||'?') + '</code></span>';
+    document.getElementById('task-input').value = '';
+    setTimeout(loadTasks, 2000);
+  } else {
+    resultEl.innerHTML = '<span style="color:var(--danger)">❌ Failed to submit task. Is task-orchestrator running?</span>';
+  }
+}
+
+async function loadTasks() {
+  const r = await api('/api/task/list');
+  if (!r.ok) return;
+  const d = await r.json();
+  const plans = d.plans || [];
+
+  // Active task panel
+  const activePanel = document.getElementById('active-task-panel');
+  const active = plans.find(p => p.status === 'running' || p.status === 'planning');
+  if (active) {
+    const subtasks = active.subtasks || [];
+    const done = subtasks.filter(s => s.status === 'done').length;
+    const pct = subtasks.length ? Math.round(done/subtasks.length*100) : 0;
+    const statusEmoji = {running:'⏳',planning:'🧠',done:'✅',failed:'❌'}[active.status]||'?';
+    activePanel.innerHTML = `
+      <div style="margin-bottom:12px">
+        <div style="font-weight:600;margin-bottom:4px">${statusEmoji} ${escHtml(active.title||active.id)}</div>
+        <div style="font-size:.82em;color:var(--text-muted)">ID: ${active.id} | ${done}/${subtasks.length} subtasks</div>
+        <div style="background:var(--border);border-radius:4px;height:6px;margin:8px 0">
+          <div style="background:var(--primary);height:100%;width:${pct}%;border-radius:4px;transition:width .3s"></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${subtasks.map(st => {
+          const e = {done:'✅',running:'⏳',pending:'⏸️',failed:'❌'}[st.status]||'?';
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:.85em">
+            <span>${e}</span>
+            <span style="color:var(--accent);min-width:120px">[${escHtml(st.agent_id||'')}]</span>
+            <span style="color:var(--text-secondary)">${escHtml(st.title||st.subtask_id||'')}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:12px;color:var(--danger)" onclick="cancelTask()">🛑 Cancel Task</button>
+    `;
+    setTimeout(loadTasks, 5000);
+  } else {
+    activePanel.innerHTML = '<div class="empty"><div class="icon">🚀</div><p>No active task. Submit one on the left.</p></div>';
+  }
+
+  // History list
+  const histEl = document.getElementById('task-history-list');
+  const history = plans.filter(p => !['running','planning'].includes(p.status)).slice(0,10);
+  if (!history.length) {
+    histEl.innerHTML = '<div class="empty"><p>No task history yet.</p></div>';
+    return;
+  }
+  histEl.innerHTML = history.map(p => {
+    const e = {done:'✅',failed:'❌',cancelled:'🛑',timed_out:'⏰'}[p.status]||'?';
+    const subs = (p.subtasks||[]).length;
+    const agents = [...new Set((p.subtasks||[]).map(s=>s.agent_id))].join(', ');
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:500">${e} ${escHtml(p.title||p.id)}</div>
+        <div style="font-size:.78em;color:var(--text-muted)">${subs} subtasks | Agents: ${escHtml(agents)} | ${p.created_at||''}</div>
+      </div>
+      <span style="font-size:.78em;background:var(--surface2);padding:2px 8px;border-radius:4px;color:var(--text-secondary)">${p.status}</span>
+    </div>`;
+  }).join('');
+}
+
+async function cancelTask() {
+  const r = await api('/api/task/cancel', {method:'POST'});
+  if (r.ok) { toast('Task cancelled', '#f59e0b'); loadTasks(); }
+}
+
+// ── Swarm ────────────────────────────────────────────────────────────────────
+async function loadSwarm() {
+  const r = await api('/api/agents');
+  if (!r.ok) return;
+  const d = await r.json();
+  const agents = d.agents || [];
+  const grid = document.getElementById('swarm-grid');
+  if (!agents.length) {
+    grid.innerHTML = '<div class="empty"><div class="icon">🐝</div><p>No agent data. Ensure agent_capabilities.json is loaded.</p></div>';
+    return;
+  }
+  const categoryColors = {
+    coordination:'#6366f1', sales:'#10b981', content:'#22d3ee', social:'#f59e0b',
+    research:'#3b82f6', ecommerce:'#ec4899', analytics:'#8b5cf6', creative:'#ef4444',
+    trading:'#f97316', development:'#14b8a6', hr:'#84cc16', finance:'#eab308',
+    marketing:'#06b6d4', growth:'#a855f7', management:'#64748b', crypto:'#f59e0b',
+    strategy:'#6366f1'
+  };
+  grid.innerHTML = agents.map(a => {
+    const color = categoryColors[a.category] || '#64748b';
+    const dotColor = a.running ? '#10b981' : '#ef4444';
+    const runningDot = `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};display:inline-block;margin-left:6px"></span>`;
+    const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:var(--surface);padding:2px 6px;border-radius:3px;font-size:.73em;color:var(--text-secondary)">${escHtml(s)}</span>`).join('');
+    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:600;font-size:.95em">${escHtml(a.id)}</div>
+        ${runningDot}
+      </div>
+      <div style="font-size:.8em;color:var(--text-secondary);margin-bottom:10px;line-height:1.4">${escHtml(a.description||'')}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${skills}${(a.skills||[]).length > 4 ? `<span style="font-size:.73em;color:var(--text-muted)">+${(a.skills||[]).length-4} more</span>` : ''}</div>
+      <div style="margin-top:8px;font-size:.75em;color:var(--text-muted)">Category: ${escHtml(a.category||'')}</div>
+    </div>`;
+  }).join('');
+}
+
 // Initial load
 loadDashboard();
 // Auto-refresh dashboard every 30s
@@ -1087,6 +1251,24 @@ def handle_command(message: str) -> str:
             "  arb scan <product> — arbitrage scan\n"
             "  arb trends — hot arbitrage categories\n"
             "  arb opportunities / arb watchlist\n"
+            "  task <description> — multi-agent orchestration\n"
+            "  task status / task list / task cancel\n"
+            "  agents — list all 20 AI agents\n"
+            "  assign <agent> <subtask> — manual agent dispatch\n"
+            "  company build <idea> — build a company from scratch\n"
+            "  company validate / plan / simulate / gtm / pitch / org / swot\n"
+            "  memecoin create <concept> — full token launch package\n"
+            "  memecoin name / tokenomics / whitepaper / community / viral\n"
+            "  hr hire <role> — full hiring package\n"
+            "  hr jd / screen / interview / onboard / review / org / culture\n"
+            "  finance model <business> — full financial model\n"
+            "  finance pl / runway / raise / unit / pricing / pitch / valuation\n"
+            "  brand identity <company> — full brand system\n"
+            "  brand name / position / voice / messaging / story / audit\n"
+            "  growth loop <product> — viral growth loop\n"
+            "  growth funnel / abtests / retention / referral / plg / experiments\n"
+            "  pm start <project> — kick off a project\n"
+            "  pm breakdown / sprint / roadmap / risks / raci / gantt / retro\n"
             "  help — this help"
         )
 
@@ -1197,6 +1379,14 @@ def handle_command(message: str) -> str:
         (["pod "], "print-on-demand", "👕", "Print-on-demand bot not running."),
         (["course "], "course-creator", "🎓", "Course creator not running."),
         (["arb "], "arbitrage-bot", "💹", "Arbitrage bot not running."),
+        (["task ", "orchestrate "], "task-orchestrator", "🚀", "Task orchestrator not running. Start it: `start task-orchestrator`"),
+        (["company "], "company-builder", "🏢", "Company builder not running. Start it: `start company-builder`"),
+        (["memecoin "], "memecoin-creator", "🪙", "Memecoin creator not running. Start it: `start memecoin-creator`"),
+        (["hr "], "hr-manager", "👔", "HR manager not running. Start it: `start hr-manager`"),
+        (["finance "], "finance-wizard", "💰", "Finance wizard not running. Start it: `start finance-wizard`"),
+        (["brand "], "brand-strategist", "🎨", "Brand strategist not running. Start it: `start brand-strategist`"),
+        (["growth "], "growth-hacker", "🚀", "Growth hacker not running. Start it: `start growth-hacker`"),
+        (["pm "], "project-manager", "📋", "Project manager not running. Start it: `start project-manager`"),
     ]:
         _reply = _bot_passthrough(_prefixes, _bot, _emoji, _desc)
         if _reply is not None:
@@ -1441,6 +1631,128 @@ def get_custom_agent(agent_id: str):
     if agent_id not in agents:
         raise HTTPException(404, f"agent '{agent_id}' not found")
     return JSONResponse(agents[agent_id])
+
+
+# ─── Task Orchestration API ────────────────────────────────────────────────────
+
+AGENT_CAPS_FILE = CONFIG_DIR / "agent_capabilities.json"
+TASK_PLANS_FILE = CONFIG_DIR / "task_plans.json"
+AGENT_TASKS_DIR = STATE_DIR / "agent_tasks"
+
+
+def _load_agent_capabilities() -> dict:
+    if not AGENT_CAPS_FILE.exists():
+        return {}
+    try:
+        return json.loads(AGENT_CAPS_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _load_task_plans() -> list:
+    if not TASK_PLANS_FILE.exists():
+        return []
+    try:
+        return json.loads(TASK_PLANS_FILE.read_text())
+    except Exception:
+        return []
+
+
+def _save_task_plans(plans: list) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    TASK_PLANS_FILE.write_text(json.dumps(plans, indent=2))
+
+
+@app.post("/api/task/submit")
+def submit_task(payload: dict):
+    """Submit a task for multi-agent orchestration via chatlog."""
+    description = (payload.get("description") or "").strip()
+    if not description:
+        raise HTTPException(400, "description required")
+
+    # Write to chatlog so task-orchestrator picks it up
+    task_msg = f"task {description}"
+    entry = {"ts": now_iso(), "type": "user", "message": task_msg}
+    CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(CHATLOG, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+    import re as _re
+    task_id = _re.sub(r"[^a-z0-9]", "", description[:8].lower())
+    return JSONResponse({"ok": True, "task_id": task_id, "message": f"Task submitted: {description[:60]}"})
+
+
+@app.post("/api/task/cancel")
+def cancel_task():
+    """Cancel the currently running task plan."""
+    plans = _load_task_plans()
+    for p in plans:
+        if p.get("status") in ("running", "planning"):
+            p["status"] = "cancelled"
+            p["completed_at"] = now_iso()
+            _save_task_plans(plans)
+            return JSONResponse({"ok": True, "cancelled_id": p["id"]})
+    return JSONResponse({"ok": False, "message": "No active task found"})
+
+
+@app.get("/api/task/list")
+def list_tasks():
+    """List all task plans (active and history)."""
+    plans = _load_task_plans()
+    return JSONResponse({"plans": plans[:20]})
+
+
+@app.get("/api/task/status/{task_id}")
+def get_task_status(task_id: str):
+    """Get status of a specific task plan."""
+    plans = _load_task_plans()
+    for p in plans:
+        if p.get("id") == task_id:
+            return JSONResponse(p)
+    raise HTTPException(404, f"task '{task_id}' not found")
+
+
+@app.get("/api/agents")
+def get_all_agents():
+    """Get all 20 agents with capabilities and running status."""
+    capabilities = _load_agent_capabilities()
+    agents_config = capabilities.get("agents", {})
+
+    result = []
+    for agent_id, info in agents_config.items():
+        pid_file = AI_HOME / "run" / f"{agent_id}.pid"
+        running = False
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+                running = True
+            except Exception:
+                pass
+
+        # Get current state if available
+        state_file = STATE_DIR / f"{agent_id}.state.json"
+        current_task = None
+        if state_file.exists():
+            try:
+                st = json.loads(state_file.read_text())
+                current_task = st.get("active_plan_title") or st.get("current_task")
+            except Exception:
+                pass
+
+        result.append({
+            "id": agent_id,
+            "description": info.get("description", ""),
+            "category": info.get("category", ""),
+            "skills": info.get("skills", []),
+            "commands": info.get("commands", []),
+            "specialties": info.get("specialties", []),
+            "parallel_capable": info.get("parallel_capable", True),
+            "running": running,
+            "current_task": current_task,
+        })
+
+    return JSONResponse({"agents": result, "total": len(result)})
 
 
 if __name__ == "__main__":

@@ -264,11 +264,11 @@ wizard() {
 
     # 8) Number of workers
     echo ""
-    ask "How many AI agents to enable? (1-13, default 13 = all):"
+    ask "How many AI agents to enable? (1-20, default 20 = all):"
     read -r WORKERS_INPUT < "$tty_in"
-    WORKERS="${WORKERS_INPUT:-13}"
-    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 13"; WORKERS=13; }
-    if (( WORKERS > 13 )); then warn "Maximum is 13; clamping to 13"; WORKERS=13; fi
+    WORKERS="${WORKERS_INPUT:-20}"
+    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 20"; WORKERS=20; }
+    if (( WORKERS > 20 )); then warn "Maximum is 20; clamping to 20"; WORKERS=20; fi
     if (( WORKERS < 1  )); then warn "Minimum is 1; clamping to 1";  WORKERS=1;  fi
     ok "Workers: $WORKERS enabled"
 
@@ -284,7 +284,8 @@ setup_directories() {
     mkdir -p "$AI_HOME"/{workspace,credentials,downloads,logs,ui,backups,bin,run,bots,config,state,improvements}
 
     for a in orchestrator lead-hunter content-master social-guru intel-agent product-scout \
-              email-ninja support-bot data-analyst creative-studio crypto-trader bot-dev web-sales; do
+              email-ninja support-bot data-analyst creative-studio crypto-trader bot-dev web-sales \
+              company-builder memecoin-creator hr-manager finance-wizard brand-strategist growth-hacker project-manager; do
         mkdir -p "$AI_HOME/workspace-$a/skills"
     done
 
@@ -378,6 +379,30 @@ install_runtime() {
         dl "bots/arbitrage-bot/run.sh"
         dl "bots/arbitrage-bot/arbitrage_bot.py"
         dl "bots/arbitrage-bot/requirements.txt"
+        dl "bots/task-orchestrator/run.sh"
+        dl "bots/task-orchestrator/task_orchestrator.py"
+        dl "bots/task-orchestrator/requirements.txt"
+        dl "bots/company-builder/run.sh"
+        dl "bots/company-builder/company_builder.py"
+        dl "bots/company-builder/requirements.txt"
+        dl "bots/memecoin-creator/run.sh"
+        dl "bots/memecoin-creator/memecoin_creator.py"
+        dl "bots/memecoin-creator/requirements.txt"
+        dl "bots/hr-manager/run.sh"
+        dl "bots/hr-manager/hr_manager.py"
+        dl "bots/hr-manager/requirements.txt"
+        dl "bots/finance-wizard/run.sh"
+        dl "bots/finance-wizard/finance_wizard.py"
+        dl "bots/finance-wizard/requirements.txt"
+        dl "bots/brand-strategist/run.sh"
+        dl "bots/brand-strategist/brand_strategist.py"
+        dl "bots/brand-strategist/requirements.txt"
+        dl "bots/growth-hacker/run.sh"
+        dl "bots/growth-hacker/growth_hacker.py"
+        dl "bots/growth-hacker/requirements.txt"
+        dl "bots/project-manager/run.sh"
+        dl "bots/project-manager/project_manager.py"
+        dl "bots/project-manager/requirements.txt"
         dl "config/openclaw.template.json"
         dl "config/problem-solver.env"
         dl "config/problem-solver-ui.env"
@@ -403,6 +428,16 @@ install_runtime() {
         dl "config/print-on-demand.env"
         dl "config/course-creator.env"
         dl "config/arbitrage-bot.env"
+        dl "config/task-orchestrator.env"
+        dl "config/company-builder.env"
+        dl "config/memecoin-creator.env"
+        dl "config/hr-manager.env"
+        dl "config/finance-wizard.env"
+        dl "config/brand-strategist.env"
+        dl "config/growth-hacker.env"
+        dl "config/project-manager.env"
+        dl "config/agent_capabilities.json"
+        dl "config/task_plans.json"
         dl "start.sh"
         dl "stop.sh"
 
