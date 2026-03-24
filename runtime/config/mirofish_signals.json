@@ -1,0 +1,16 @@
+{
+  "_comment": "Optional external signals for the MiroFish market researcher.",
+  "_usage": "Add an entry per Polymarket market ID. Each signal is in [-1, 1].",
+  "_fields": {
+    "sentiment":    "Overall sentiment: -1 = very bearish, 0 = neutral, +1 = very bullish",
+    "volume_trend": "Recent volume trend: -1 = declining, 0 = flat, +1 = increasing",
+    "news_impact":  "Latest news impact: -1 = negative, 0 = neutral, +1 = positive"
+  },
+  "_example_entry": {
+    "your-market-id-here": {
+      "sentiment": 0.3,
+      "volume_trend": 0.1,
+      "news_impact": 0.2
+    }
+  }
+}

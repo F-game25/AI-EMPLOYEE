@@ -111,6 +111,24 @@ cd ~/.ai-employee
 
 ---
 
+## Start without a terminal (desktop launcher)
+
+The installer creates a **desktop launcher** so you can start AI Employee by double-clicking — no terminal needed after the first-time WhatsApp link.
+
+| Platform | How to start |
+|---|---|
+| **Linux** | Double-click `~/Desktop/ai-employee.desktop` **or** search *"AI Employee"* in your app menu |
+| **macOS** | Double-click `~/Desktop/Start AI Employee.command` |
+| **Autostart on login** | `systemctl --user enable --now ai-employee` |
+
+> **Note:** You still need a terminal **once** to scan the WhatsApp QR code (`openclaw channels login`).  After that, everything is controllable via WhatsApp messages and the web dashboard.
+
+Once running, open the dashboard in your browser:
+- **Full Dashboard:** http://127.0.0.1:8787
+- **Simple Dashboard:** http://localhost:3000
+
+---
+
 ## Connect WhatsApp (first time)
 
 After starting, open a **new terminal** and run:
@@ -328,6 +346,135 @@ The **problem-solver watchdog** auto-restarts any enabled bot that crashes.
 
 ---
 
+## Skills Library (100+ Skills)
+
+AI Employee includes a library of **111 reusable skills** across 11 categories. Skills are the building blocks for creating custom specialised agents.
+
+### Categories & skill counts
+
+| Category | Skills |
+|---|---|
+| Content & Writing | 15 |
+| Research & Analysis | 12 |
+| Trading & Finance | 12 |
+| Social Media | 10 |
+| Lead Generation & Sales | 10 |
+| Development & Technical | 10 |
+| E-commerce & Product | 10 |
+| Data Analysis | 8 |
+| Customer Support | 8 |
+| Marketing & SEO | 8 |
+| Automation & Productivity | 8 |
+
+### Managing skills via the Dashboard
+
+Open the **🛠️ Skills** tab (http://127.0.0.1:8787):
+- **Browse** all 111 skills with search and category filters
+- **Click** skill cards to select them
+- **Create** a new custom agent from the selected skills
+- **View** and delete your custom agents
+
+### Managing skills via WhatsApp / Chat
+
+```
+skills                              → show library summary
+skills categories                   → list all categories
+skills list Trading & Finance       → list skills in a category
+skills search blog                  → search by name/tag/description
+agents                              → list all custom agents
+agent My Content Writer             → show agent details
+create agent My Writer with blog_writing, headline_generation, seo_optimization
+add skill keyword_research to My Writer
+remove skill keyword_research from My Writer
+delete agent My Writer
+```
+
+### skills-manager agent
+
+The `skills-manager` runs in the background, polls the chatlog every 5 seconds, and processes all skills commands.  Custom agents are stored in `~/.ai-employee/config/custom_agents.json`.
+
+Each custom agent has a generated **system prompt** that describes all its assigned skills, ready to use with any LLM.
+
+Configure in `~/.ai-employee/config/skills-manager.env`:
+```env
+SKILLS_MANAGER_POLL_INTERVAL=5   # seconds between chatlog polls
+SKILLS_MANAGER_MAX_SKILLS=20     # max skills per agent
+```
+
+### External signals for MiroFish skills
+
+When `mirofish_prediction` skill is used, populate `~/.ai-employee/config/mirofish_signals.json` with signals for each market (see MiroFish section above).
+
+---
+
+## OpenClaw 2.0 Integration
+
+> **Note:** If you have an `openclaw-2.0` (safe version) repository, place its `main` file at:
+> ```
+> ~/.ai-employee/bin/openclaw2
+> ```
+> Then set `OPENCLAW_BIN=openclaw2` in `~/.ai-employee/.env` to have the start script use it instead of the standard `openclaw` binary.  The `start.sh` script already reads `OPENCLAW_BIN` from the environment for this purpose.
+>
+> *Share your openclaw 2.0 repo URL to integrate it directly into this repo.*
+
+---
+
+## MiroFish Swarm Intelligence
+
+[MiroFish](https://github.com/666ghj/MiroFish) is an open-source multi-agent prediction engine that simulates thousands of autonomous agents to forecast real-world outcomes.  AI Employee integrates MiroFish in two ways:
+
+### Inline predictor (polymarket-trader)
+
+The trader runs a lightweight swarm simulation on every market quote to estimate the probability of YES resolution.  Each agent has a random personality (optimism bias, herd tendency, expertise) and iteratively updates its belief by blending its own signal processing with the emerging crowd consensus.
+
+Configure in `~/.ai-employee/config/polymarket-trader.env`:
+
+```env
+MIROFISH_ENABLED=true
+MIROFISH_AGENTS=200    # agents per simulation (lower = faster)
+MIROFISH_ROUNDS=15     # interaction rounds per simulation
+```
+
+### mirofish-researcher agent (separate)
+
+A dedicated background agent that runs deeper simulations (more agents, more rounds, multi-scenario analysis) and writes probability estimates to `~/.ai-employee/config/polymarket_estimates.json`.  The polymarket-trader automatically reads these and blends them (60 % researcher weight, 40 % inline simulation) for higher-quality signals.
+
+**Start / stop:**
+```bash
+~/.ai-employee/bin/ai-employee start mirofish-researcher
+~/.ai-employee/bin/ai-employee stop  mirofish-researcher
+~/.ai-employee/bin/ai-employee logs  mirofish-researcher
+```
+
+**Configure markets to research** — edit `~/.ai-employee/config/mirofish-researcher.env`:
+```env
+MIROFISH_RESEARCH_INTERVAL=300   # seconds between research cycles
+MIROFISH_AGENTS=500
+MIROFISH_ROUNDS=20
+MIROFISH_SCENARIOS=5
+RESEARCH_MARKETS=market-id-1,market-id-2
+```
+
+**Provide external signals** — edit `~/.ai-employee/config/mirofish_signals.json`:
+```json
+{
+  "your-market-id": {
+    "sentiment":    0.3,
+    "volume_trend": 0.1,
+    "news_impact":  0.2
+  }
+}
+```
+Each signal is in `[-1, 1]`: `-1` = very bearish/negative/declining, `+1` = very bullish/positive/increasing.
+
+**Research output** is available at:
+- `~/.ai-employee/state/mirofish-researcher.state.json` — full per-market report with distribution analysis and scenario confidence intervals
+- `~/.ai-employee/config/polymarket_estimates.json` — prob_yes per market (consumed by trader)
+
+The hourly WhatsApp status report now includes a MiroFish research summary line.
+
+---
+
 ## Where Everything is Stored
 
 ```
@@ -339,20 +486,26 @@ The **problem-solver watchdog** auto-restarts any enabled bot that crashes.
 ├── bin/
 │   └── ai-employee      Multi-bot CLI runner
 ├── bots/                Bot code (overwritten on update)
-│   ├── problem-solver/  Watchdog — keeps other bots alive
+│   ├── problem-solver/     Watchdog — keeps other bots alive
 │   ├── problem-solver-ui/  Full dashboard (FastAPI)
-│   ├── polymarket-trader/  Trading bot (paper mode default)
-│   ├── status-reporter/ Hourly WhatsApp status
-│   ├── scheduler-runner/ Task scheduler
-│   └── discovery/       Skill & market discovery
+│   ├── polymarket-trader/  Trading bot with inline MiroFish predictor
+│   ├── mirofish-researcher/ MiroFish deep market research agent
+│   ├── status-reporter/    Hourly WhatsApp status
+│   ├── scheduler-runner/   Task scheduler
+│   └── discovery/          Skill & market discovery
 ├── config/              Config files (never overwritten on update)
 │   ├── status-reporter.env
 │   ├── problem-solver-ui.env
+│   ├── polymarket-trader.env
+│   ├── mirofish-researcher.env
+│   ├── mirofish_signals.json  External market signals for MiroFish
+│   ├── polymarket_estimates.json  MiroFish probability estimates (auto-written)
 │   ├── schedules.json   Scheduled tasks
 │   └── ...
 ├── state/               Persistent bot state (JSON)
 │   ├── chatlog.jsonl    Chat/task history
 │   ├── improvements.json Skill proposals
+│   ├── mirofish-researcher.state.json  Full MiroFish research report
 │   └── *.state.json     Per-bot state files
 ├── logs/                Log files
 ├── improvements/        Approved improvement files
@@ -362,6 +515,19 @@ The **problem-solver watchdog** auto-restarts any enabled bot that crashes.
 ---
 
 ## Troubleshooting
+
+### Terminal shows "openclaw.bash: file not found" on every open
+
+The openclaw installer adds a `source` line to your `~/.bashrc` but does not always
+create the target file.  One-time fix:
+
+```bash
+mkdir -p ~/.openclaw/completions
+touch ~/.openclaw/completions/openclaw.bash
+```
+
+Re-open your terminal — the error will be gone.  
+The AI Employee installer now creates this stub automatically, so fresh installs are not affected.
 
 ### Docker not running
 ```

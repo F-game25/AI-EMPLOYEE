@@ -29,7 +29,18 @@ echo ""
 
 # ── OpenClaw gateway ───────────────────────────────────────────────────────────
 log "Starting OpenClaw gateway..."
-if command -v openclaw >/dev/null 2>&1; then
+# Support openclaw 2.0 (safe version): set OPENCLAW_BIN=openclaw2 in .env
+# to use ~/.ai-employee/bin/openclaw2 instead of the standard openclaw binary.
+OPENCLAW_BIN="${OPENCLAW_BIN:-openclaw}"
+if [[ -x "$AI_HOME/bin/$OPENCLAW_BIN" ]]; then
+  OPENCLAW_CMD="$AI_HOME/bin/$OPENCLAW_BIN"
+elif command -v "$OPENCLAW_BIN" >/dev/null 2>&1; then
+  OPENCLAW_CMD="$OPENCLAW_BIN"
+else
+  OPENCLAW_CMD=""
+fi
+
+if [[ -n "$OPENCLAW_CMD" ]]; then
   OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$AI_HOME/config.json}"
   export OPENCLAW_CONFIG
 
@@ -46,15 +57,16 @@ if command -v openclaw >/dev/null 2>&1; then
     warn "  curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash"
   fi
 
-  nohup openclaw gateway \
+  nohup "$OPENCLAW_CMD" gateway \
     --config "$OPENCLAW_CONFIG" \
     >> "$AI_HOME/logs/gateway.log" 2>&1 &
   GATEWAY_PID=$!
   echo "$GATEWAY_PID" > "$AI_HOME/run/gateway.pid"
   sleep 2
-  ok "OpenClaw gateway started (pid=$GATEWAY_PID)"
+  ok "OpenClaw gateway started via '$OPENCLAW_BIN' (pid=$GATEWAY_PID)"
 else
   warn "openclaw not found — gateway not started. Run: curl -fsSL https://openclaw.ai/install.sh | bash"
+  warn "For openclaw 2.0: place the binary at $AI_HOME/bin/openclaw2 and set OPENCLAW_BIN=openclaw2 in .env"
 fi
 
 # ── Dashboard (static) ────────────────────────────────────────────────────────
