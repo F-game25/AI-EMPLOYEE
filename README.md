@@ -111,6 +111,24 @@ cd ~/.ai-employee
 
 ---
 
+## Start without a terminal (desktop launcher)
+
+The installer creates a **desktop launcher** so you can start AI Employee by double-clicking — no terminal needed after the first-time WhatsApp link.
+
+| Platform | How to start |
+|---|---|
+| **Linux** | Double-click `~/Desktop/ai-employee.desktop` **or** search *"AI Employee"* in your app menu |
+| **macOS** | Double-click `~/Desktop/Start AI Employee.command` |
+| **Autostart on login** | `systemctl --user enable --now ai-employee` |
+
+> **Note:** You still need a terminal **once** to scan the WhatsApp QR code (`openclaw channels login`).  After that, everything is controllable via WhatsApp messages and the web dashboard.
+
+Once running, open the dashboard in your browser:
+- **Full Dashboard:** http://127.0.0.1:8787
+- **Simple Dashboard:** http://localhost:3000
+
+---
+
 ## Connect WhatsApp (first time)
 
 After starting, open a **new terminal** and run:
@@ -497,6 +515,19 @@ The hourly WhatsApp status report now includes a MiroFish research summary line.
 ---
 
 ## Troubleshooting
+
+### Terminal shows "openclaw.bash: file not found" on every open
+
+The openclaw installer adds a `source` line to your `~/.bashrc` but does not always
+create the target file.  One-time fix:
+
+```bash
+mkdir -p ~/.openclaw/completions
+touch ~/.openclaw/completions/openclaw.bash
+```
+
+Re-open your terminal — the error will be gone.  
+The AI Employee installer now creates this stub automatically, so fresh installs are not affected.
 
 ### Docker not running
 ```
