@@ -23,17 +23,25 @@ log "Stopping bots..."
 log "Stopping gateway..."
 if [[ -f "$AI_HOME/run/gateway.pid" ]]; then
   pid=$(cat "$AI_HOME/run/gateway.pid" 2>/dev/null || true)
-  [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+  if [[ -n "$pid" ]]; then
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+    # Only force-kill if still running
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+  fi
   rm -f "$AI_HOME/run/gateway.pid"
 fi
-pkill -f "openclaw gateway" 2>/dev/null || true
 
 log "Stopping dashboard..."
 if [[ -f "$AI_HOME/run/dashboard.pid" ]]; then
   pid=$(cat "$AI_HOME/run/dashboard.pid" 2>/dev/null || true)
-  [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+  if [[ -n "$pid" ]]; then
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+    # Only force-kill if still running
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+  fi
   rm -f "$AI_HOME/run/dashboard.pid"
 fi
-pkill -f "http.server $DASHBOARD_PORT" 2>/dev/null || true
 
 ok "AI Employee stopped."
