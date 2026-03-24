@@ -26,7 +26,7 @@ banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
 ║      AI EMPLOYEE - v4.0 INSTALLER  (macOS)           ║
-║  35 Agents • Claude AI • Ollama Local • WhatsApp     ║
+║  33 Agents • Claude AI • Ollama Local • WhatsApp     ║
 ╚══════════════════════════════════════════════════════╝
 EOF
 }

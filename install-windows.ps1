@@ -4,7 +4,7 @@
     AI EMPLOYEE v4.0 - Windows Native Installer
 .DESCRIPTION
     One-click installer for AI Employee on Windows (no WSL or Git Bash required).
-    Installs Python, Git, OpenClaw, Ollama (optional), all 35 bots, and configures
+    Installs Python, Git, OpenClaw, Ollama (optional), all 33 bots, and configures
     everything for immediate use.
 .NOTES
     Run as a normal user (not Administrator).
@@ -686,7 +686,7 @@ $htmlContent = @"
     </div>
     <div class="card">
       <h2>Active Bots</h2>
-      <div class="stat">35</div>
+      <div class="stat">$($BOTS.Count)</div>
     </div>
     <div class="card">
       <h2>Problem Solver UI</h2>
