@@ -1,0 +1,654 @@
+{
+  "_meta": {
+    "version": "2.0",
+    "description": "Capabilities map for all 20 AI agents \u2014 used by task-orchestrator for intelligent routing",
+    "total_agents": 20,
+    "updated_at": "2026-03-24"
+  },
+  "agents": {
+    "orchestrator": {
+      "description": "Master Orchestrator \u2014 routes tasks to specialist agents and coordinates multi-agent workflows",
+      "category": "coordination",
+      "skills": [
+        "task_routing",
+        "agent_coordination",
+        "workflow_planning",
+        "multi_agent_synthesis"
+      ],
+      "commands": [
+        "task",
+        "orchestrate",
+        "assign",
+        "agents"
+      ],
+      "specialties": [
+        "task decomposition",
+        "agent selection",
+        "result aggregation"
+      ],
+      "parallel_capable": true
+    },
+    "lead-hunter": {
+      "description": "B2B Lead Generation Specialist \u2014 finds decision makers, emails, and qualifies leads",
+      "category": "sales",
+      "skills": [
+        "lead_generation",
+        "prospect_research",
+        "cold_outreach",
+        "crm_management",
+        "email_personalization",
+        "linkedin_prospecting"
+      ],
+      "commands": [
+        "leads",
+        "outreach"
+      ],
+      "specialties": [
+        "B2B leads",
+        "email campaigns",
+        "LinkedIn outreach",
+        "CRM"
+      ],
+      "parallel_capable": true
+    },
+    "content-master": {
+      "description": "SEO Content Specialist \u2014 writes 2000+ word optimized articles with proper structure",
+      "category": "content",
+      "skills": [
+        "blog_writing",
+        "seo_optimization",
+        "content_strategy",
+        "keyword_research",
+        "copywriting_expert",
+        "headline_generation"
+      ],
+      "commands": [
+        "content"
+      ],
+      "specialties": [
+        "SEO blogs",
+        "articles",
+        "content strategy",
+        "copywriting"
+      ],
+      "parallel_capable": true
+    },
+    "social-guru": {
+      "description": "Social Media Manager \u2014 finds viral content, writes engaging captions, generates hashtags",
+      "category": "social",
+      "skills": [
+        "viral_content_creation",
+        "hashtag_research",
+        "social_captions",
+        "influencer_outreach",
+        "community_management",
+        "social_analytics"
+      ],
+      "commands": [
+        "social"
+      ],
+      "specialties": [
+        "viral content",
+        "captions",
+        "hashtags",
+        "community management"
+      ],
+      "parallel_capable": true
+    },
+    "intel-agent": {
+      "description": "Competitive Intelligence Analyst \u2014 monitors competitors: pricing, features, reviews, traffic",
+      "category": "research",
+      "skills": [
+        "competitive_analysis",
+        "market_trend_analysis",
+        "web_monitoring",
+        "swot_analysis",
+        "customer_research"
+      ],
+      "commands": [
+        "research",
+        "find",
+        "web search"
+      ],
+      "specialties": [
+        "competitor monitoring",
+        "market research",
+        "SWOT analysis"
+      ],
+      "parallel_capable": true
+    },
+    "product-scout": {
+      "description": "E-commerce Product Researcher \u2014 finds arbitrage opportunities, trending products, validates suppliers",
+      "category": "ecommerce",
+      "skills": [
+        "product_research",
+        "supplier_vetting",
+        "price_comparison",
+        "trend_spotting",
+        "marketplace_analysis"
+      ],
+      "commands": [
+        "ecom"
+      ],
+      "specialties": [
+        "product research",
+        "arbitrage",
+        "supplier vetting",
+        "trending products"
+      ],
+      "parallel_capable": true
+    },
+    "email-ninja": {
+      "description": "Cold Email Specialist \u2014 builds sequences, personalizes at scale, optimizes deliverability",
+      "category": "sales",
+      "skills": [
+        "email_copywriting",
+        "cold_email_sequences",
+        "email_personalization",
+        "deliverability_optimization",
+        "a_b_testing_emails"
+      ],
+      "commands": [
+        "email"
+      ],
+      "specialties": [
+        "cold email",
+        "email sequences",
+        "deliverability",
+        "A/B testing"
+      ],
+      "parallel_capable": true
+    },
+    "support-bot": {
+      "description": "E-commerce Support Bot \u2014 24/7 customer service agent that classifies tickets, auto-resolves 90% of cases (refunds, tracking, FAQs) and escalates the rest",
+      "category": "support",
+      "skills": [
+        "ticket_classification",
+        "refund_processing",
+        "order_tracking",
+        "faq_handling",
+        "escalation_routing",
+        "sentiment_analysis"
+      ],
+      "commands": [
+        "support ticket",
+        "support refund",
+        "support tracking",
+        "support status"
+      ],
+      "specialties": [
+        "auto-resolve refunds",
+        "tracking lookups",
+        "size/product FAQs",
+        "escalation to owner"
+      ],
+      "parallel_capable": true
+    },
+    "data-analyst": {
+      "description": "Market Research Analyst \u2014 analyzes trends, generates SWOT, creates reports with data",
+      "category": "analytics",
+      "skills": [
+        "data_analysis",
+        "market_trend_analysis",
+        "report_generation",
+        "swot_analysis",
+        "survey_design",
+        "kpi_tracking"
+      ],
+      "commands": [
+        "research",
+        "analyze"
+      ],
+      "specialties": [
+        "data analysis",
+        "trend reports",
+        "market intelligence",
+        "KPI dashboards"
+      ],
+      "parallel_capable": true
+    },
+    "creative-studio": {
+      "description": "Creative Director \u2014 design briefs, image prompts, brand voice, ad copy",
+      "category": "creative",
+      "skills": [
+        "ad_copywriting",
+        "creative_briefs",
+        "image_prompt_generation",
+        "brand_voice",
+        "campaign_ideation"
+      ],
+      "commands": [
+        "creative"
+      ],
+      "specialties": [
+        "ad copy",
+        "creative briefs",
+        "visual prompts",
+        "campaign concepts"
+      ],
+      "parallel_capable": true
+    },
+    "crypto-trader": {
+      "description": "Crypto Trading Analyst \u2014 technical analysis, patterns, risk assessment with confidence scores",
+      "category": "trading",
+      "skills": [
+        "technical_analysis",
+        "sentiment_analysis",
+        "price_prediction",
+        "risk_assessment",
+        "portfolio_optimization",
+        "market_monitoring"
+      ],
+      "commands": [
+        "crypto",
+        "trade"
+      ],
+      "specialties": [
+        "crypto analysis",
+        "technical charts",
+        "trading signals",
+        "risk management"
+      ],
+      "parallel_capable": true
+    },
+    "bot-dev": {
+      "description": "Trading Bot Developer \u2014 code review, feature implementation, optimization. Security-first",
+      "category": "development",
+      "skills": [
+        "python_development",
+        "api_integration",
+        "trading_bot_coding",
+        "code_review",
+        "security_audit"
+      ],
+      "commands": [
+        "dev",
+        "code"
+      ],
+      "specialties": [
+        "Python bots",
+        "API integration",
+        "code review",
+        "automation scripts"
+      ],
+      "parallel_capable": true
+    },
+    "web-sales": {
+      "description": "Web Analysis & Sales Specialist \u2014 UX/SEO audits, find contacts, write personalized pitches",
+      "category": "sales",
+      "skills": [
+        "website_audit",
+        "seo_optimization",
+        "prospect_research",
+        "pitch_writing",
+        "conversion_optimization"
+      ],
+      "commands": [
+        "websales",
+        "audit"
+      ],
+      "specialties": [
+        "website audits",
+        "SEO analysis",
+        "sales pitches",
+        "UX review"
+      ],
+      "parallel_capable": true
+    },
+    "company-builder": {
+      "description": "Company Builder \u2014 builds companies from scratch with simulations, business plans, and GTM strategy",
+      "category": "strategy",
+      "skills": [
+        "business_plan_generation",
+        "company_simulation",
+        "market_entry_strategy",
+        "org_chart_design",
+        "go_to_market",
+        "milestone_planning",
+        "investor_pitch_deck",
+        "swot_analysis"
+      ],
+      "commands": [
+        "company"
+      ],
+      "specialties": [
+        "business plans",
+        "company simulation",
+        "GTM strategy",
+        "investor pitch",
+        "org design"
+      ],
+      "parallel_capable": false
+    },
+    "memecoin-creator": {
+      "description": "Memecoin & Token Creator \u2014 full token launch from concept, tokenomics to viral community strategy",
+      "category": "crypto",
+      "skills": [
+        "tokenomics_design",
+        "whitepaper_writing",
+        "token_launch_strategy",
+        "crypto_community_building",
+        "viral_marketing",
+        "smart_contract_parameters"
+      ],
+      "commands": [
+        "memecoin"
+      ],
+      "specialties": [
+        "token creation",
+        "tokenomics",
+        "whitepapers",
+        "crypto marketing",
+        "community growth"
+      ],
+      "parallel_capable": true
+    },
+    "hr-manager": {
+      "description": "HR Manager \u2014 full hiring pipeline, onboarding, org design, and culture building",
+      "category": "hr",
+      "skills": [
+        "job_description_writing",
+        "cv_screening",
+        "interview_frameworks",
+        "onboarding_design",
+        "performance_reviews",
+        "compensation_benchmarking",
+        "culture_design"
+      ],
+      "commands": [
+        "hr"
+      ],
+      "specialties": [
+        "job descriptions",
+        "CV screening",
+        "interview guides",
+        "onboarding",
+        "org charts",
+        "culture docs"
+      ],
+      "parallel_capable": true
+    },
+    "finance-wizard": {
+      "description": "Finance Wizard \u2014 P&L modeling, investor pitch financials, revenue models, and fundraising prep",
+      "category": "finance",
+      "skills": [
+        "financial_modeling",
+        "pl_projections",
+        "burn_rate_analysis",
+        "investor_pitch_deck",
+        "unit_economics",
+        "pricing_strategy",
+        "valuation_methodology",
+        "fundraising_prep"
+      ],
+      "commands": [
+        "finance"
+      ],
+      "specialties": [
+        "financial models",
+        "P&L",
+        "fundraising",
+        "unit economics",
+        "valuation",
+        "investor prep"
+      ],
+      "parallel_capable": true
+    },
+    "brand-strategist": {
+      "description": "Brand Strategist \u2014 brand naming, identity systems, positioning, voice, and messaging frameworks",
+      "category": "marketing",
+      "skills": [
+        "brand_naming",
+        "brand_guidelines",
+        "visual_identity_brief",
+        "brand_positioning",
+        "messaging_framework",
+        "competitive_brand_analysis",
+        "brand_voice"
+      ],
+      "commands": [
+        "brand"
+      ],
+      "specialties": [
+        "brand naming",
+        "identity systems",
+        "positioning",
+        "messaging",
+        "brand audits"
+      ],
+      "parallel_capable": true
+    },
+    "growth-hacker": {
+      "description": "Growth Hacker \u2014 viral loops, funnel optimization, A/B tests, retention, and product-led growth",
+      "category": "growth",
+      "skills": [
+        "growth_loop_design",
+        "funnel_optimization",
+        "ab_testing_framework",
+        "retention_analysis",
+        "referral_program_design",
+        "plg_strategy",
+        "viral_mechanics",
+        "growth_okrs"
+      ],
+      "commands": [
+        "growth"
+      ],
+      "specialties": [
+        "viral loops",
+        "conversion funnels",
+        "A/B testing",
+        "retention",
+        "referral programs",
+        "PLG"
+      ],
+      "parallel_capable": true
+    },
+    "project-manager": {
+      "description": "Project Manager \u2014 sprint planning, milestones, risk registers, Gantt charts, and team coordination",
+      "category": "management",
+      "skills": [
+        "sprint_planning",
+        "milestone_tracking",
+        "risk_assessment",
+        "work_breakdown_structure",
+        "raci_matrix",
+        "gantt_planning",
+        "stakeholder_management",
+        "retrospective_facilitation"
+      ],
+      "commands": [
+        "pm"
+      ],
+      "specialties": [
+        "sprint planning",
+        "WBS",
+        "risk registers",
+        "Gantt charts",
+        "RACI matrices",
+        "retrospectives"
+      ],
+      "parallel_capable": true
+    },
+    "order-processor": {
+      "description": "E-commerce Order Processor \u2014 listens for new orders via webhook, validates payment, places supplier orders, and notifies customers with tracking info",
+      "category": "ecommerce",
+      "skills": [
+        "order_processing",
+        "payment_validation",
+        "supplier_api_integration",
+        "customer_notification",
+        "tracking_updates",
+        "shopify_webhook"
+      ],
+      "commands": [
+        "order process",
+        "order status",
+        "order fulfill"
+      ],
+      "specialties": [
+        "Shopify webhook handling",
+        "Printful/Oberlo order creation",
+        "automated tracking emails",
+        "error alerting"
+      ],
+      "parallel_capable": true
+    },
+    "bookkeeper": {
+      "description": "AI Bookkeeper \u2014 pulls Stripe/PayPal transaction data, categorises expenses, generates P&L reports, and prepares quarterly tax exports",
+      "category": "finance",
+      "skills": [
+        "stripe_data_pull",
+        "expense_categorisation",
+        "pl_generation",
+        "quickbooks_sync",
+        "tax_preparation",
+        "daily_profit_alerts"
+      ],
+      "commands": [
+        "books daily",
+        "books pl",
+        "books expenses",
+        "books tax",
+        "books summary"
+      ],
+      "specialties": [
+        "Stripe/PayPal integration",
+        "COGS vs Ads vs Shipping split",
+        "monthly P&L PDF",
+        "QuickBooks API sync"
+      ],
+      "parallel_capable": false
+    },
+    "inventory-sync": {
+      "description": "Inventory Sync Agent \u2014 monitors supplier stock levels, forecasts demand using 7-day sales averages, and triggers auto-reorders before stockouts",
+      "category": "ecommerce",
+      "skills": [
+        "stock_monitoring",
+        "demand_forecasting",
+        "auto_reorder",
+        "supplier_api_sync",
+        "shopify_inventory_update",
+        "low_stock_alerts"
+      ],
+      "commands": [
+        "inventory check",
+        "inventory forecast",
+        "inventory reorder",
+        "inventory status"
+      ],
+      "specialties": [
+        "Printful/supplier stock sync",
+        "ML demand forecast (7-day avg * 1.5)",
+        "auto-reorder at threshold",
+        "Shopify inventory push"
+      ],
+      "parallel_capable": true
+    },
+    "email-marketer": {
+      "description": "Email Marketing Agent \u2014 segments customers (new/abandoned-cart/repeat), generates personalised GPT-powered email copy, runs A/B tests on subject lines, and sends via Mailchimp",
+      "category": "marketing",
+      "skills": [
+        "customer_segmentation",
+        "email_copywriting",
+        "ab_testing",
+        "mailchimp_integration",
+        "campaign_scheduling",
+        "open_rate_optimisation"
+      ],
+      "commands": [
+        "email campaign",
+        "email segment",
+        "email abtest",
+        "email report",
+        "email welcome",
+        "email abandoned"
+      ],
+      "specialties": [
+        "welcome series",
+        "abandoned cart recovery",
+        "repeat-buyer upsell",
+        "A/B subject-line winner picking"
+      ],
+      "parallel_capable": true
+    },
+    "social-poster": {
+      "description": "Social Media Poster \u2014 generates viral content scripts and images, schedules posts across Instagram/TikTok/Twitter at peak engagement times, and auto-replies to early comments",
+      "category": "social",
+      "skills": [
+        "content_generation",
+        "image_prompt_creation",
+        "post_scheduling",
+        "hashtag_research",
+        "comment_automation",
+        "tiktok_scripting"
+      ],
+      "commands": [
+        "social post",
+        "social schedule",
+        "social script",
+        "social engage",
+        "social plan"
+      ],
+      "specialties": [
+        "TikTok viral scripts",
+        "Instagram carousel creation",
+        "9AM/3PM/8PM scheduling",
+        "first-50-comments auto-reply"
+      ],
+      "parallel_capable": true
+    },
+    "product-researcher": {
+      "description": "Product Researcher \u2014 scans TikTok trends and Amazon bestsellers daily, validates demand via Google Trends / JungleScout scoring, writes GPT-powered listings, and auto-publishes to Shopify",
+      "category": "ecommerce",
+      "skills": [
+        "tiktok_trend_scanning",
+        "amazon_research",
+        "demand_validation",
+        "listing_creation",
+        "shopify_product_publish",
+        "competitor_analysis"
+      ],
+      "commands": [
+        "product scan",
+        "product validate",
+        "product list",
+        "product trends",
+        "product publish"
+      ],
+      "specialties": [
+        "TikTok/Google Trends API",
+        "JungleScout demand score >7 filter",
+        "auto-generate title/desc/bullets/tags",
+        "Printful mockup + Shopify publish"
+      ],
+      "parallel_capable": true
+    },
+    "ecom-dashboard": {
+      "description": "E-commerce Dashboard Agent \u2014 aggregates real-time metrics (revenue, profit margin, orders, top products) from Stripe + Shopify and surfaces alerts for anomalies",
+      "category": "analytics",
+      "skills": [
+        "revenue_tracking",
+        "profit_margin_calc",
+        "order_aggregation",
+        "top_product_ranking",
+        "anomaly_alerting",
+        "daily_reports"
+      ],
+      "commands": [
+        "ecom metrics",
+        "ecom revenue",
+        "ecom profit",
+        "ecom orders",
+        "ecom top"
+      ],
+      "specialties": [
+        "24-hour revenue roll-up",
+        "per-product margin calc",
+        "Slack/Telegram daily digest",
+        "conversion rate tracking"
+      ],
+      "parallel_capable": true
+    }
+  }
+}
