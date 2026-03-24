@@ -29,8 +29,10 @@ State files
   ~/.ai-employee/config/custom_agents.json        — custom agent definitions
 """
 import json
+import logging
 import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +45,21 @@ CHATLOG = AI_HOME / "state" / "chatlog.jsonl"
 
 POLL_INTERVAL = int(os.environ.get("SKILLS_MANAGER_POLL_INTERVAL", "5"))
 MAX_SKILLS_PER_AGENT = int(os.environ.get("SKILLS_MANAGER_MAX_SKILLS", "20"))
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("skills-manager")
+
+# ── AI router (Ollama first, cloud fallback) ──────────────────────────────────
+
+_ai_router_path = AI_HOME / "bots" / "ai-router"
+if str(_ai_router_path) not in sys.path:
+    sys.path.insert(0, str(_ai_router_path))
+
+try:
+    from ai_router import query_ai as _query_ai  # type: ignore
+    _AI_AVAILABLE = True
+except ImportError:
+    _AI_AVAILABLE = False
 
 
 def now_iso() -> str:
@@ -338,13 +355,44 @@ def handle_skills_command(message: str, library: dict, agents: dict) -> str | No
         save_custom_agents(agents)
         return f"🗑 Agent *{deleted_name}* deleted."
 
+    # ── AI fallback for natural language queries ───────────────────────────────
+    # If no pattern matched AND the message looks skills/agent related, use AI
+    if _AI_AVAILABLE and any(kw in msg_lower for kw in (
+        "skill", "agent", "create", "build", "make", "generate", "what can", "how to", "help"
+    )):
+        return _ai_skills_help(msg, library, agents)
+
     return None  # command not recognised as a skills command
+
+
+def _ai_skills_help(message: str, library: dict, agents: dict) -> str | None:
+    """Use the AI router to answer skills/agent related natural language queries."""
+    skill_names = [s["name"] for s in library.get("skills", [])[:30]]
+    agent_names = [a["name"] for a in agents.values()]
+    system = (
+        "You are the Skills Manager for an AI employee system. "
+        "You help users understand and manage skills and agents. "
+        f"Available skills (sample): {', '.join(skill_names)}. "
+        f"Custom agents: {', '.join(agent_names) if agent_names else 'none yet'}. "
+        "Be concise and practical. If the user wants to create or modify something, "
+        "guide them with the exact command syntax."
+    )
+    try:
+        result = _query_ai(message, system_prompt=system)
+        if result.get("answer"):
+            provider = result.get("provider", "ai")
+            suffix = f"\n_[answered by {provider}]_" if provider not in ("error",) else ""
+            return result["answer"] + suffix
+    except Exception as exc:
+        logger.debug("skills-manager: AI fallback failed — %s", exc)
+    return None
 
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    print(f"[{now_iso()}] skills-manager started; poll_interval={POLL_INTERVAL}s")
+    ai_status = "Ollama-first AI routing active" if _AI_AVAILABLE else "AI router not available"
+    print(f"[{now_iso()}] skills-manager started; poll_interval={POLL_INTERVAL}s; {ai_status}")
 
     last_processed_idx = len(load_chatlog())
 
