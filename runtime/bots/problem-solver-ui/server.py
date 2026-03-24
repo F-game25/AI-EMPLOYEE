@@ -11,9 +11,11 @@ State files are read from ~/.ai-employee/state/
 Config is read/written in ~/.ai-employee/config/
 """
 import json
+import logging
 import os
 import signal
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +35,21 @@ CUSTOM_AGENTS_FILE = CONFIG_DIR / "custom_agents.json"
 
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("problem-solver-ui")
+
+# ── AI router (Ollama first, cloud fallback) ──────────────────────────────────
+
+_ai_router_path = AI_HOME / "bots" / "ai-router"
+if str(_ai_router_path) not in sys.path:
+    sys.path.insert(0, str(_ai_router_path))
+
+try:
+    from ai_router import query_ai as _query_ai  # type: ignore
+    _AI_ROUTER_AVAILABLE = True
+except ImportError:
+    _AI_ROUTER_AVAILABLE = False
 
 app = FastAPI(title="AI Employee Dashboard")
 
@@ -782,19 +799,57 @@ def handle_command(message: str) -> str:
     if msg_lower == "help":
         return (
             "Available commands:\n"
-            "  status — bot status\n"
-            "  workers — list workers\n"
-            "  start <bot> — start a bot\n"
-            "  stop <bot> — stop a bot\n"
-            "  schedule — list schedules\n"
-            "  improvements — pending proposals\n"
-            "  skills — show skills library summary\n"
-            "  skills list [<category>] — list skills\n"
-            "  skills search <query> — search skills\n"
-            "  agents — list custom agents\n"
-            "  create agent <name> with <skill1>, <skill2> — create agent\n"
-            "  add skill <id> to <agent> — add skill to agent\n"
-            "  delete agent <name> — delete agent\n"
+            "  status / workers — bot status\n"
+            "  start <bot> / stop <bot> — control bots\n"
+            "  schedule / improvements — view tasks & proposals\n"
+            "  skills / agents — skills library & custom agents\n"
+            "  research <query> — web research\n"
+            "  find <topic> / web search <query> / latest news <topic>\n"
+            "  social <brief> — full social media content package\n"
+            "  social plan <brief> — strategy plan only\n"
+            "  content <brief> — same as social\n"
+            "  leads <niche> <location> — local business lead generation\n"
+            "  leads real-estate <location> — real estate leads\n"
+            "  leads status / leads pipeline / leads followup\n"
+            "  recruit <role> <requirements> — find candidates\n"
+            "  recruit screen <cv_text> — AI CV screening\n"
+            "  recruit candidates / recruit status\n"
+            "  ecom research <niche> — trending product research\n"
+            "  ecom listing <product> — generate full product listing\n"
+            "  ecom email <type> <product> — email marketing flow\n"
+            "  ecom trends / ecom ads <product>\n"
+            "  creator plan <topic> — 30-day content calendar\n"
+            "  creator dm-funnel <style> — DM funnel sequence\n"
+            "  creator upsell <tier> — upsell scripts\n"
+            "  creator brand <name> <niche> — full brand kit\n"
+            "  signals — current trading signals (Telegram/Discord)\n"
+            "  signal daily — daily market summary\n"
+            "  signal post <analysis> — post a manual signal\n"
+            "  community update — community newsletter\n"
+            "  prospect <niche> <location> — appointment setter prospects\n"
+            "  outreach <campaign> — generate outreach campaign\n"
+            "  pipeline / setter followup / setter scripts\n"
+            "  newsletter create <topic> — generate newsletter issue\n"
+            "  newsletter subscribe <email> — add subscriber\n"
+            "  newsletter send <issue_id> — send newsletter\n"
+            "  chatbot create <niche> — build niche chatbot\n"
+            "  chatbot flow <niche> — conversation flow\n"
+            "  chatbot scripts <niche> — response scripts\n"
+            "  video <topic> — faceless video full pipeline\n"
+            "  video script <topic> — video script only\n"
+            "  video seo <topic> — YouTube SEO pack\n"
+            "  video tiktok <topic> — TikTok short-form\n"
+            "  pod research <niche> — print-on-demand trends\n"
+            "  pod design <niche> — AI design prompts\n"
+            "  pod listing <product> — full POD listing\n"
+            "  pod ads <product> — ad copy\n"
+            "  course create <topic> — full course package\n"
+            "  course outline <topic> — course structure\n"
+            "  course lesson <module> <title> — lesson content\n"
+            "  course market <topic> — marketing pack\n"
+            "  arb scan <product> — arbitrage scan\n"
+            "  arb trends — hot arbitrage categories\n"
+            "  arb opportunities / arb watchlist\n"
             "  help — this help"
         )
 
@@ -834,7 +889,100 @@ def handle_command(message: str) -> str:
                 pass
         return "Skills library not loaded yet. Ensure skills-manager is running."
 
-    # Default: queue as task
+    # ── Research commands (pass-through; web-researcher processes these) ──
+    if (msg_lower.startswith("research ") or msg_lower.startswith("find ")
+            or msg_lower.startswith("web search ") or msg_lower.startswith("search web ")
+            or msg_lower.startswith("latest news ") or msg_lower.startswith("news about ")
+            or msg_lower.startswith("lookup ")):
+        web_bot_state = STATE_DIR / "web-researcher.state.json"
+        if web_bot_state.exists():
+            try:
+                st = json.loads(web_bot_state.read_text())
+                if st.get("status") == "running":
+                    return (
+                        "🔍 Research request queued — web-researcher bot is processing it.\n"
+                        "The answer will appear in the chat shortly."
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return (
+            "🔍 Research request noted — ensure web-researcher bot is running.\n"
+            "Start it: `start web-researcher`"
+        )
+
+    # ── Social media commands (pass-through; social-media-manager processes these) ──
+    if (msg_lower.startswith("social ") or msg_lower.startswith("content ")
+            or msg_lower.startswith("create content ") or msg_lower.startswith("create social ")):
+        social_bot_state = STATE_DIR / "social-media-manager.state.json"
+        if social_bot_state.exists():
+            try:
+                st = json.loads(social_bot_state.read_text())
+                if st.get("status") == "running":
+                    return (
+                        "🎨 Content creation request queued — social-media-manager bot is processing it.\n"
+                        "Full content package will appear in the chat shortly (30-90 seconds)."
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return (
+            "🎨 Content request noted — ensure social-media-manager bot is running.\n"
+            "Start it: `start social-media-manager`"
+        )
+
+    # ── Pass-through routing helper ───────────────────────────────────────────
+    def _bot_passthrough(prefixes: list, bot_name: str, emoji: str, desc: str) -> str | None:
+        """Return a pass-through ack if msg matches any prefix, else None."""
+        if not any(msg_lower.startswith(p) for p in prefixes):
+            return None
+        st_file = STATE_DIR / f"{bot_name}.state.json"
+        if st_file.exists():
+            try:
+                st = json.loads(st_file.read_text())
+                if st.get("status") == "running":
+                    return (
+                        f"{emoji} Request queued — {bot_name} bot is processing it.\n"
+                        f"Result will appear in chat shortly."
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return f"{emoji} {desc}\nStart it: `start {bot_name}`"
+
+    for _prefixes, _bot, _emoji, _desc in [
+        (["leads ", "outreach "], "lead-generator", "📋", "Lead generator not running."),
+        (["recruit "], "recruiter", "👔", "Recruiter not running."),
+        (["ecom "], "ecom-agent", "🛒", "Ecom agent not running."),
+        (["creator "], "creator-agency", "🎭", "Creator agency not running."),
+        (["signals", "signal ", "community update"], "signal-community", "📊", "Signal community not running."),
+        (["prospect ", "pipeline", "setter "], "appointment-setter", "📅", "Appointment setter not running."),
+        (["newsletter "], "newsletter-bot", "📧", "Newsletter bot not running."),
+        (["chatbot "], "chatbot-builder", "🤖", "Chatbot builder not running."),
+        (["video "], "faceless-video", "🎬", "Faceless video bot not running."),
+        (["pod "], "print-on-demand", "👕", "Print-on-demand bot not running."),
+        (["course "], "course-creator", "🎓", "Course creator not running."),
+        (["arb "], "arbitrage-bot", "💹", "Arbitrage bot not running."),
+    ]:
+        _reply = _bot_passthrough(_prefixes, _bot, _emoji, _desc)
+        if _reply is not None:
+            return _reply
+
+    # Default: try AI router (Ollama first, then cloud) before falling back to queued message
+    if _AI_ROUTER_AVAILABLE:
+        try:
+            result = _query_ai(
+                message,
+                system_prompt=(
+                    "You are an AI employee assistant. "
+                    "Help the user with their task or question concisely and practically. "
+                    "If the task requires running a specific bot command, suggest the right command."
+                ),
+            )
+            if result.get("answer"):
+                provider = result.get("provider", "ai")
+                suffix = f"\n_[{provider}]_" if provider not in ("error",) else ""
+                return result["answer"] + suffix
+        except Exception as exc:
+            logger.debug("handle_command: AI router error — %s", exc)
+
     return (
         f"Task queued: '{message}'\n"
         "Tip: use 'start <bot>', 'stop <bot>', 'status', 'help' for commands."
