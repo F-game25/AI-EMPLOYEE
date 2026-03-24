@@ -799,28 +799,57 @@ def handle_command(message: str) -> str:
     if msg_lower == "help":
         return (
             "Available commands:\n"
-            "  status — bot status\n"
-            "  workers — list workers\n"
-            "  start <bot> — start a bot\n"
-            "  stop <bot> — stop a bot\n"
-            "  schedule — list schedules\n"
-            "  improvements — pending proposals\n"
-            "  skills — show skills library summary\n"
-            "  skills list [<category>] — list skills\n"
-            "  skills search <query> — search skills\n"
-            "  agents — list custom agents\n"
-            "  create agent <name> with <skill1>, <skill2> — create agent\n"
-            "  add skill <id> to <agent> — add skill to agent\n"
-            "  delete agent <name> — delete agent\n"
-            "  research <query> — web research (via web-researcher bot)\n"
-            "  find <topic> — web research shortcut\n"
-            "  web search <query> — web search shortcut\n"
-            "  latest news <topic> — news-focused research\n"
-            "  social <brief> — create full social media content package\n"
-            "  social plan <brief> — content strategy plan only\n"
+            "  status / workers — bot status\n"
+            "  start <bot> / stop <bot> — control bots\n"
+            "  schedule / improvements — view tasks & proposals\n"
+            "  skills / agents — skills library & custom agents\n"
+            "  research <query> — web research\n"
+            "  find <topic> / web search <query> / latest news <topic>\n"
+            "  social <brief> — full social media content package\n"
+            "  social plan <brief> — strategy plan only\n"
             "  content <brief> — same as social\n"
-            "  social status — social media manager status\n"
-            "  social history — list saved content packages\n"
+            "  leads <niche> <location> — local business lead generation\n"
+            "  leads real-estate <location> — real estate leads\n"
+            "  leads status / leads pipeline / leads followup\n"
+            "  recruit <role> <requirements> — find candidates\n"
+            "  recruit screen <cv_text> — AI CV screening\n"
+            "  recruit candidates / recruit status\n"
+            "  ecom research <niche> — trending product research\n"
+            "  ecom listing <product> — generate full product listing\n"
+            "  ecom email <type> <product> — email marketing flow\n"
+            "  ecom trends / ecom ads <product>\n"
+            "  creator plan <topic> — 30-day content calendar\n"
+            "  creator dm-funnel <style> — DM funnel sequence\n"
+            "  creator upsell <tier> — upsell scripts\n"
+            "  creator brand <name> <niche> — full brand kit\n"
+            "  signals — current trading signals (Telegram/Discord)\n"
+            "  signal daily — daily market summary\n"
+            "  signal post <analysis> — post a manual signal\n"
+            "  community update — community newsletter\n"
+            "  prospect <niche> <location> — appointment setter prospects\n"
+            "  outreach <campaign> — generate outreach campaign\n"
+            "  pipeline / setter followup / setter scripts\n"
+            "  newsletter create <topic> — generate newsletter issue\n"
+            "  newsletter subscribe <email> — add subscriber\n"
+            "  newsletter send <issue_id> — send newsletter\n"
+            "  chatbot create <niche> — build niche chatbot\n"
+            "  chatbot flow <niche> — conversation flow\n"
+            "  chatbot scripts <niche> — response scripts\n"
+            "  video <topic> — faceless video full pipeline\n"
+            "  video script <topic> — video script only\n"
+            "  video seo <topic> — YouTube SEO pack\n"
+            "  video tiktok <topic> — TikTok short-form\n"
+            "  pod research <niche> — print-on-demand trends\n"
+            "  pod design <niche> — AI design prompts\n"
+            "  pod listing <product> — full POD listing\n"
+            "  pod ads <product> — ad copy\n"
+            "  course create <topic> — full course package\n"
+            "  course outline <topic> — course structure\n"
+            "  course lesson <module> <title> — lesson content\n"
+            "  course market <topic> — marketing pack\n"
+            "  arb scan <product> — arbitrage scan\n"
+            "  arb trends — hot arbitrage categories\n"
+            "  arb opportunities / arb watchlist\n"
             "  help — this help"
         )
 
@@ -899,6 +928,42 @@ def handle_command(message: str) -> str:
             "🎨 Content request noted — ensure social-media-manager bot is running.\n"
             "Start it: `start social-media-manager`"
         )
+
+    # ── Pass-through routing helper ───────────────────────────────────────────
+    def _bot_passthrough(prefixes: list, bot_name: str, emoji: str, desc: str) -> str | None:
+        """Return a pass-through ack if msg matches any prefix, else None."""
+        if not any(msg_lower.startswith(p) for p in prefixes):
+            return None
+        st_file = STATE_DIR / f"{bot_name}.state.json"
+        if st_file.exists():
+            try:
+                st = json.loads(st_file.read_text())
+                if st.get("status") == "running":
+                    return (
+                        f"{emoji} Request queued — {bot_name} bot is processing it.\n"
+                        f"Result will appear in chat shortly."
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return f"{emoji} {desc}\nStart it: `start {bot_name}`"
+
+    for _prefixes, _bot, _emoji, _desc in [
+        (["leads ", "outreach "], "lead-generator", "📋", "Lead generator not running."),
+        (["recruit "], "recruiter", "👔", "Recruiter not running."),
+        (["ecom "], "ecom-agent", "🛒", "Ecom agent not running."),
+        (["creator "], "creator-agency", "🎭", "Creator agency not running."),
+        (["signals", "signal ", "community update"], "signal-community", "📊", "Signal community not running."),
+        (["prospect ", "pipeline", "setter "], "appointment-setter", "📅", "Appointment setter not running."),
+        (["newsletter "], "newsletter-bot", "📧", "Newsletter bot not running."),
+        (["chatbot "], "chatbot-builder", "🤖", "Chatbot builder not running."),
+        (["video "], "faceless-video", "🎬", "Faceless video bot not running."),
+        (["pod "], "print-on-demand", "👕", "Print-on-demand bot not running."),
+        (["course "], "course-creator", "🎓", "Course creator not running."),
+        (["arb "], "arbitrage-bot", "💹", "Arbitrage bot not running."),
+    ]:
+        _reply = _bot_passthrough(_prefixes, _bot, _emoji, _desc)
+        if _reply is not None:
+            return _reply
 
     # Default: try AI router (Ollama first, then cloud) before falling back to queued message
     if _AI_ROUTER_AVAILABLE:

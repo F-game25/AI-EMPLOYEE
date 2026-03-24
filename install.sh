@@ -192,6 +192,36 @@ wizard() {
     read -rs NEWS_API_KEY < "$tty_in"; echo
     [[ -n "$NEWS_API_KEY" ]] && ok "NewsAPI key: set" || info "NewsAPI key: skipped"
 
+    # 4e) Telegram Bot Token (signal-community + appointment-setter)
+    ask "Telegram Bot Token (optional — trading signals + outreach, Enter to skip):"
+    read -rs TELEGRAM_BOT_TOKEN < "$tty_in"; echo
+    [[ -n "$TELEGRAM_BOT_TOKEN" ]] && ok "Telegram: set" || info "Telegram: skipped"
+
+    # 4f) Discord Webhook URL (signal-community)
+    ask "Discord Webhook URL (optional — trading signals community, Enter to skip):"
+    read -r DISCORD_WEBHOOK_URL < "$tty_in"
+    [[ -n "$DISCORD_WEBHOOK_URL" ]] && ok "Discord webhook: set" || info "Discord webhook: skipped"
+
+    # 4g) SMTP for newsletter-bot
+    echo ""
+    ask "SMTP host for newsletter sending (optional, e.g. smtp.gmail.com, Enter to skip):"
+    read -r SMTP_HOST < "$tty_in"
+    if [[ -n "$SMTP_HOST" ]]; then
+        ask "SMTP username (email address):"
+        read -r SMTP_USER < "$tty_in"
+        ask "SMTP password (app password):"
+        read -rs SMTP_PASS < "$tty_in"; echo
+        ok "SMTP: $SMTP_HOST / $SMTP_USER"
+    else
+        SMTP_USER=""; SMTP_PASS=""
+        info "SMTP: skipped (newsletter will save to outbox)"
+    fi
+
+    # 4h) ElevenLabs for faceless-video voiceovers
+    ask "ElevenLabs API key (optional — voiceover generation for faceless-video bot, Enter to skip):"
+    read -rs ELEVEN_LABS_KEY < "$tty_in"; echo
+    [[ -n "$ELEVEN_LABS_KEY" ]] && ok "ElevenLabs: set" || info "ElevenLabs: skipped"
+
     # 5) Trading bot path
     echo ""
     ask "Path to trading bot directory (optional, Enter to skip):"
@@ -312,6 +342,42 @@ install_runtime() {
         dl "bots/social-media-manager/run.sh"
         dl "bots/social-media-manager/social_media_manager.py"
         dl "bots/social-media-manager/requirements.txt"
+        dl "bots/lead-generator/run.sh"
+        dl "bots/lead-generator/lead_generator.py"
+        dl "bots/lead-generator/requirements.txt"
+        dl "bots/recruiter/run.sh"
+        dl "bots/recruiter/recruiter.py"
+        dl "bots/recruiter/requirements.txt"
+        dl "bots/ecom-agent/run.sh"
+        dl "bots/ecom-agent/ecom_agent.py"
+        dl "bots/ecom-agent/requirements.txt"
+        dl "bots/creator-agency/run.sh"
+        dl "bots/creator-agency/creator_agency.py"
+        dl "bots/creator-agency/requirements.txt"
+        dl "bots/signal-community/run.sh"
+        dl "bots/signal-community/signal_community.py"
+        dl "bots/signal-community/requirements.txt"
+        dl "bots/appointment-setter/run.sh"
+        dl "bots/appointment-setter/appointment_setter.py"
+        dl "bots/appointment-setter/requirements.txt"
+        dl "bots/newsletter-bot/run.sh"
+        dl "bots/newsletter-bot/newsletter_bot.py"
+        dl "bots/newsletter-bot/requirements.txt"
+        dl "bots/chatbot-builder/run.sh"
+        dl "bots/chatbot-builder/chatbot_builder.py"
+        dl "bots/chatbot-builder/requirements.txt"
+        dl "bots/faceless-video/run.sh"
+        dl "bots/faceless-video/faceless_video.py"
+        dl "bots/faceless-video/requirements.txt"
+        dl "bots/print-on-demand/run.sh"
+        dl "bots/print-on-demand/print_on_demand.py"
+        dl "bots/print-on-demand/requirements.txt"
+        dl "bots/course-creator/run.sh"
+        dl "bots/course-creator/course_creator.py"
+        dl "bots/course-creator/requirements.txt"
+        dl "bots/arbitrage-bot/run.sh"
+        dl "bots/arbitrage-bot/arbitrage_bot.py"
+        dl "bots/arbitrage-bot/requirements.txt"
         dl "config/openclaw.template.json"
         dl "config/problem-solver.env"
         dl "config/problem-solver-ui.env"
@@ -325,6 +391,18 @@ install_runtime() {
         dl "config/claude-agent.env"
         dl "config/web-researcher.env"
         dl "config/social-media-manager.env"
+        dl "config/lead-generator.env"
+        dl "config/recruiter.env"
+        dl "config/ecom-agent.env"
+        dl "config/creator-agency.env"
+        dl "config/signal-community.env"
+        dl "config/appointment-setter.env"
+        dl "config/newsletter-bot.env"
+        dl "config/chatbot-builder.env"
+        dl "config/faceless-video.env"
+        dl "config/print-on-demand.env"
+        dl "config/course-creator.env"
+        dl "config/arbitrage-bot.env"
         dl "start.sh"
         dl "stop.sh"
 
@@ -529,6 +607,12 @@ ${OPENAI_KEY:+OPENAI_API_KEY=$OPENAI_KEY}
 ${ALPHA_INSIDER_KEY:+ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY}
 ${TAVILY_KEY:+TAVILY_API_KEY=$TAVILY_KEY}
 ${NEWS_API_KEY:+NEWS_API_KEY=$NEWS_API_KEY}
+${TELEGRAM_BOT_TOKEN:+TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN}
+${DISCORD_WEBHOOK_URL:+DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL}
+${SMTP_HOST:+SMTP_HOST=$SMTP_HOST}
+${SMTP_USER:+SMTP_USER=$SMTP_USER}
+${SMTP_PASS:+SMTP_PASS=$SMTP_PASS}
+${ELEVEN_LABS_KEY:+ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY}
 OLLAMA_HOST=$OLLAMA_HOST
 OLLAMA_MODEL=$OLLAMA_MODEL
 CLAUDE_MODEL=$CLAUDE_MODEL
@@ -625,11 +709,17 @@ CFG_END
     if [[ ! -f "$AI_HOME/.env" ]]; then
         {
             echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN"
-            [[ -n "${ANTHROPIC_KEY:-}" ]]     && echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY"
-            [[ -n "${OPENAI_KEY:-}" ]]         && echo "OPENAI_API_KEY=$OPENAI_KEY"
-            [[ -n "${ALPHA_INSIDER_KEY:-}" ]] && echo "ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY"
-            [[ -n "${TAVILY_KEY:-}" ]]         && echo "TAVILY_API_KEY=$TAVILY_KEY"
-            [[ -n "${NEWS_API_KEY:-}" ]]       && echo "NEWS_API_KEY=$NEWS_API_KEY"
+            [[ -n "${ANTHROPIC_KEY:-}" ]]        && echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY"
+            [[ -n "${OPENAI_KEY:-}" ]]             && echo "OPENAI_API_KEY=$OPENAI_KEY"
+            [[ -n "${ALPHA_INSIDER_KEY:-}" ]]     && echo "ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY"
+            [[ -n "${TAVILY_KEY:-}" ]]             && echo "TAVILY_API_KEY=$TAVILY_KEY"
+            [[ -n "${NEWS_API_KEY:-}" ]]           && echo "NEWS_API_KEY=$NEWS_API_KEY"
+            [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]    && echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"
+            [[ -n "${DISCORD_WEBHOOK_URL:-}" ]]   && echo "DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL"
+            [[ -n "${SMTP_HOST:-}" ]]              && echo "SMTP_HOST=$SMTP_HOST"
+            [[ -n "${SMTP_USER:-}" ]]              && echo "SMTP_USER=$SMTP_USER"
+            [[ -n "${SMTP_PASS:-}" ]]              && echo "SMTP_PASS=$SMTP_PASS"
+            [[ -n "${ELEVEN_LABS_KEY:-}" ]]       && echo "ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY"
             echo "OPENCLAW_DISABLE_BONJOUR=1"
             echo "DASHBOARD_PORT=${DASHBOARD_PORT:-3000}"
             echo "TZ=Europe/Amsterdam"
