@@ -148,10 +148,10 @@ wizard() {
     echo -e "     once you connect with: ${C}openclaw channels login${NC}"
     echo ""
 
-    # 2) Local LLM
-    ask "Use Ollama for local LLM? (recommended for privacy) [y/N]:"
+    # 2) Local LLM — Ollama is the recommended default (saves tokens, privacy-first)
+    ask "Use Ollama for local LLM? (recommended — saves tokens & keeps data private) [Y/n]:"
     read -r WANT_OLLAMA < "$tty_in"
-    WANT_OLLAMA="${WANT_OLLAMA:-n}"
+    WANT_OLLAMA="${WANT_OLLAMA:-y}"
     WANT_OLLAMA=$(echo "$WANT_OLLAMA" | tr '[:upper:]' '[:lower:]')
     OLLAMA_MODEL="llama3.2"
     if [[ "$WANT_OLLAMA" == "y" ]]; then
@@ -159,10 +159,10 @@ wizard() {
         read -r OLLAMA_MODEL_INPUT < "$tty_in"
         OLLAMA_MODEL="${OLLAMA_MODEL_INPUT:-llama3.2}"
         MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
-        ok "Ollama model: $OLLAMA_MODEL"
+        ok "Ollama model: $OLLAMA_MODEL (primary AI -- free & private)"
     else
         MODEL_PRIMARY="anthropic/claude-opus-4-5"
-        ok "Using cloud LLM (set API key below)"
+        ok "Cloud LLM selected (Ollama will still be tried first if running)"
     fi
 
     # 3) Anthropic API key
@@ -279,6 +279,17 @@ install_runtime() {
         dl "bots/scheduler-runner/scheduler.py"
         dl "bots/discovery/run.sh"
         dl "bots/discovery/discovery.py"
+        dl "bots/skills-manager/run.sh"
+        dl "bots/skills-manager/skills_manager.py"
+        dl "bots/mirofish-researcher/run.sh"
+        dl "bots/mirofish-researcher/researcher.py"
+        dl "bots/ai-router/ai_router.py"
+        dl "bots/ollama-agent/run.sh"
+        dl "bots/ollama-agent/ollama_agent.py"
+        dl "bots/ollama-agent/requirements.txt"
+        dl "bots/claude-agent/run.sh"
+        dl "bots/claude-agent/claude_agent.py"
+        dl "bots/claude-agent/requirements.txt"
         dl "config/openclaw.template.json"
         dl "config/problem-solver.env"
         dl "config/problem-solver-ui.env"
@@ -288,6 +299,8 @@ install_runtime() {
         dl "config/polymarket-trader.env"
         dl "config/polymarket_estimates.json"
         dl "config/schedules.json"
+        dl "config/ollama-agent.env"
+        dl "config/claude-agent.env"
         dl "start.sh"
         dl "stop.sh"
 
@@ -338,415 +351,85 @@ install_runtime() {
         fi
     fi
 
+    # Python deps for ai-router (requests is needed for Ollama calls)
+    if command -v pip3 >/dev/null 2>&1; then
+        pip3 install --user -q "requests>=2.31.0" 2>/dev/null \
+            && ok "Python deps (requests) installed for AI router" \
+            || warn "pip3 install requests failed"
+    fi
+
     ok "Runtime files installed"
 }
 
 # ─── Claude AI bot ───────────────────────────────────────────────────────────
 
 install_claude_bot() {
-    log "Installing Claude AI bot (separate agent)..."
+    log "Configuring Claude AI agent..."
+
+    # Bot files (claude_agent.py, run.sh, requirements.txt) are deployed by
+    # install_runtime() from runtime/bots/claude-agent/. This function only
+    # handles config file creation and Python dep installation.
 
     mkdir -p "$AI_HOME/bots/claude-agent"
 
-    cat > "$AI_HOME/bots/claude-agent/run.sh" << 'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-BOT_HOME="$AI_HOME/bots/claude-agent"
-
-# Load global .env for ANTHROPIC_API_KEY
-if [[ -f "$AI_HOME/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$AI_HOME/.env"
-  set +a
-fi
-
-# Load bot-specific env (overrides if set)
-if [[ -f "$AI_HOME/config/claude-agent.env" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$AI_HOME/config/claude-agent.env"
-  set +a
-fi
-
-python3 "$BOT_HOME/claude_agent.py"
-EOF
-    chmod +x "$AI_HOME/bots/claude-agent/run.sh"
-
-    cat > "$AI_HOME/bots/claude-agent/claude_agent.py" << 'EOF'
-import os
-import json
-from pathlib import Path
-
-AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-5")
-CLAUDE_AGENT_HOST = os.environ.get("CLAUDE_AGENT_HOST", "127.0.0.1")
-CLAUDE_AGENT_PORT = int(os.environ.get("CLAUDE_AGENT_PORT", "8788"))
-MAX_TOKENS = int(os.environ.get("CLAUDE_MAX_TOKENS", "4096"))
-SYSTEM_PROMPT = os.environ.get(
-    "CLAUDE_SYSTEM_PROMPT",
-    "You are a highly capable AI assistant powered by Anthropic Claude. "
-    "You excel at reasoning, analysis, creative writing, and code. "
-    "Be concise but thorough. Always be helpful, honest, and harmless.",
-)
-
-try:
-    import anthropic
-    _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
-except ImportError:
-    _client = None
-
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
-import uvicorn
-
-app = FastAPI(title="Claude AI Agent")
-
-INDEX_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <title>Claude AI Agent</title>
-  <style>
-    body{font-family:system-ui,sans-serif;margin:24px;max-width:900px;background:#0f172a;color:#e2e8f0}
-    h1{color:#a78bfa}
-    textarea{width:100%;height:120px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;padding:12px;border-radius:8px;font-size:14px;resize:vertical}
-    button{background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:1em;margin-top:8px;margin-right:6px}
-    button:hover{opacity:0.85}
-    pre{background:#1e293b;padding:16px;border-radius:8px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;border:1px solid #334155;margin-top:16px;min-height:60px}
-    .status{font-size:0.85em;color:#64748b;margin-top:8px}
-    .badge{display:inline-block;background:#312e81;color:#a5b4fc;padding:4px 12px;border-radius:20px;font-size:0.85em;margin-bottom:16px}
-  </style>
-</head>
-<body>
-  <h1>&#x1F916; Claude AI Agent</h1>
-  <div class="badge" id="badge">Loading...</div>
-  <br/><br/>
-  <textarea id="q" placeholder="Ask Claude anything... complex reasoning, analysis, code, creative writing..."></textarea>
-  <br/>
-  <button onclick="ask()">&#x2728; Ask Claude</button>
-  <button onclick="clearHistory()">&#x1F5D1; Clear History</button>
-  <div class="status" id="status"></div>
-  <pre id="a">Response will appear here...</pre>
-<script>
-async function ask(){
-  const q=document.getElementById('q').value.trim();
-  if(!q)return;
-  document.getElementById('status').textContent='Thinking...';
-  document.getElementById('a').textContent='...';
-  const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
-  const d=await r.json();
-  document.getElementById('a').textContent=d.answer||d.error||JSON.stringify(d,null,2);
-  document.getElementById('status').textContent=d.model?'Model: '+d.model+' | Input tokens: '+((d.usage||{}).input_tokens||'?')+' | Output tokens: '+((d.usage||{}).output_tokens||'?'):'';
-}
-async function clearHistory(){
-  await fetch('/api/clear',{method:'POST'});
-  document.getElementById('a').textContent='History cleared.';
-  document.getElementById('status').textContent='';
-}
-async function loadInfo(){
-  const r=await fetch('/api/info');
-  const d=await r.json();
-  document.getElementById('badge').textContent='Model: '+d.model+' | Ready: '+d.ready;
-}
-loadInfo();
-</script>
-</body>
-</html>"""
-
-_history = []
-
-
-@app.get("/", response_class=HTMLResponse)
-def index():
-    return INDEX_HTML
-
-
-@app.get("/api/info")
-def info():
-    return JSONResponse({
-        "model": CLAUDE_MODEL,
-        "ready": _client is not None,
-        "api_key_set": bool(ANTHROPIC_API_KEY),
-        "max_tokens": MAX_TOKENS,
-    })
-
-
-@app.post("/api/ask")
-def ask(payload: dict):
-    global _history
-    q = (payload or {}).get("question", "").strip()
-    if not q:
-        return JSONResponse({"error": "Empty question"}, status_code=400)
-    if not _client:
-        return JSONResponse({
-            "error": "Anthropic client not available. Set ANTHROPIC_API_KEY in ~/.ai-employee/.env",
-            "hint": "Add ANTHROPIC_API_KEY=sk-ant-... to ~/.ai-employee/.env and restart claude-agent",
-        }, status_code=503)
-    _history.append({"role": "user", "content": q})
-    try:
-        response = _client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            messages=_history,
-        )
-        answer = response.content[0].text
-        _history.append({"role": "assistant", "content": answer})
-        return JSONResponse({
-            "question": q,
-            "answer": answer,
-            "model": CLAUDE_MODEL,
-            "usage": {
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
-            },
-        })
-    except Exception as e:
-        _history.pop()
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@app.post("/api/clear")
-def clear_history():
-    global _history
-    _history = []
-    return JSONResponse({"status": "cleared"})
-
-
-if __name__ == "__main__":
-    uvicorn.run(app, host=CLAUDE_AGENT_HOST, port=CLAUDE_AGENT_PORT)
-EOF
-
-    cat > "$AI_HOME/bots/claude-agent/requirements.txt" << 'EOF'
-anthropic>=0.25.0
-fastapi==0.115.0
-uvicorn==0.30.6
-EOF
-
     if [[ ! -f "$AI_HOME/config/claude-agent.env" ]]; then
-      cat > "$AI_HOME/config/claude-agent.env" << EOF
+      cat > "$AI_HOME/config/claude-agent.env" << 'EOF'
 CLAUDE_AGENT_HOST=127.0.0.1
 CLAUDE_AGENT_PORT=8788
-CLAUDE_MODEL=$CLAUDE_MODEL
-CLAUDE_MAX_TOKENS=4096
 EOF
+      # Append model from installer variable
+      echo "CLAUDE_MODEL=$CLAUDE_MODEL" >> "$AI_HOME/config/claude-agent.env"
+      echo "CLAUDE_MAX_TOKENS=4096" >> "$AI_HOME/config/claude-agent.env"
       chmod 600 "$AI_HOME/config/claude-agent.env"
     fi
 
     log "Installing Python deps for Claude Agent (best-effort)..."
-    if command -v pip3 >/dev/null 2>&1; then
-      pip3 install --user -r "$AI_HOME/bots/claude-agent/requirements.txt" >/dev/null 2>&1 \
+    local req="$AI_HOME/bots/claude-agent/requirements.txt"
+    if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
+      pip3 install --user -q -r "$req" 2>/dev/null \
         || warn "pip install failed; run manually: pip3 install --user anthropic fastapi uvicorn"
     else
-      warn "pip3 not found; install manually: pip3 install --user anthropic fastapi uvicorn"
+      [[ ! -f "$req" ]] && warn "requirements.txt not found; run manually: pip3 install --user anthropic fastapi uvicorn"
+      ! command -v pip3 >/dev/null 2>&1 && warn "pip3 not found; install manually: pip3 install --user anthropic fastapi uvicorn"
     fi
 
-    ok "Claude AI bot installed (http://127.0.0.1:8788 after start)"
+    ok "Claude AI agent configured (http://127.0.0.1:8788 after start)"
 }
 
 # ─── Ollama local AI bot ─────────────────────────────────────────────────────
 
 install_ollama_bot() {
-    log "Installing Ollama local AI bot (separate agent)..."
+    log "Configuring Ollama local AI agent..."
+
+    # Bot files (ollama_agent.py, run.sh, requirements.txt) are deployed by
+    # install_runtime() from runtime/bots/ollama-agent/. This function only
+    # handles config file creation and Python dep installation.
 
     mkdir -p "$AI_HOME/bots/ollama-agent"
 
-    cat > "$AI_HOME/bots/ollama-agent/run.sh" << 'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-BOT_HOME="$AI_HOME/bots/ollama-agent"
-
-# Load global .env for shared vars
-if [[ -f "$AI_HOME/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$AI_HOME/.env"
-  set +a
-fi
-
-# Load bot-specific env (overrides if set)
-if [[ -f "$AI_HOME/config/ollama-agent.env" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$AI_HOME/config/ollama-agent.env"
-  set +a
-fi
-
-python3 "$BOT_HOME/ollama_agent.py"
-EOF
-    chmod +x "$AI_HOME/bots/ollama-agent/run.sh"
-
-    cat > "$AI_HOME/bots/ollama-agent/ollama_agent.py" << 'EOF'
-import os
-import json
-import requests
-from pathlib import Path
-
-AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
-OLLAMA_AGENT_HOST = os.environ.get("OLLAMA_AGENT_HOST", "127.0.0.1")
-OLLAMA_AGENT_PORT = int(os.environ.get("OLLAMA_AGENT_PORT", "8789"))
-SYSTEM_PROMPT = os.environ.get(
-    "OLLAMA_SYSTEM_PROMPT",
-    "You are a helpful AI assistant running locally on the user's machine. "
-    "You excel at reasoning, analysis, and helping with tasks. "
-    "Be concise but thorough.",
-)
-
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
-import uvicorn
-
-app = FastAPI(title="Ollama Local AI Agent")
-
-INDEX_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <title>Ollama Local AI Agent</title>
-  <style>
-    body{font-family:system-ui,sans-serif;margin:24px;max-width:900px;background:#0f172a;color:#e2e8f0}
-    h1{color:#34d399}
-    textarea{width:100%;height:120px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;padding:12px;border-radius:8px;font-size:14px;resize:vertical}
-    button{background:linear-gradient(135deg,#059669,#065f46);color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:1em;margin-top:8px;margin-right:6px}
-    button:hover{opacity:0.85}
-    pre{background:#1e293b;padding:16px;border-radius:8px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;border:1px solid #334155;margin-top:16px;min-height:60px}
-    .status{font-size:0.85em;color:#64748b;margin-top:8px}
-    .badge{display:inline-block;background:#064e3b;color:#6ee7b7;padding:4px 12px;border-radius:20px;font-size:0.85em;margin-bottom:16px}
-  </style>
-</head>
-<body>
-  <h1>&#x1F999; Ollama Local AI Agent</h1>
-  <div class="badge" id="badge">Loading...</div>
-  <br/><br/>
-  <textarea id="q" placeholder="Ask the local AI anything... runs entirely on your machine, no data leaves!"></textarea>
-  <br/>
-  <button onclick="ask()">&#x1F680; Ask Ollama</button>
-  <button onclick="clearHistory()">&#x1F5D1; Clear History</button>
-  <div class="status" id="status"></div>
-  <pre id="a">Response will appear here...</pre>
-<script>
-async function ask(){
-  const q=document.getElementById('q').value.trim();
-  if(!q)return;
-  document.getElementById('status').textContent='Processing locally...';
-  document.getElementById('a').textContent='...';
-  const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
-  const d=await r.json();
-  document.getElementById('a').textContent=d.answer||d.error||JSON.stringify(d,null,2);
-  document.getElementById('status').textContent=d.model?'Model: '+d.model+' (local, private)':'';
-}
-async function clearHistory(){
-  await fetch('/api/clear',{method:'POST'});
-  document.getElementById('a').textContent='History cleared.';
-  document.getElementById('status').textContent='';
-}
-async function loadInfo(){
-  const r=await fetch('/api/info');
-  const d=await r.json();
-  document.getElementById('badge').textContent='Model: '+d.model+' | Host: '+d.host+' | Ready: '+d.ready;
-}
-loadInfo();
-</script>
-</body>
-</html>"""
-
-_history = []
-
-
-def _ollama_ready() -> bool:
-    try:
-        r = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=3)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-@app.get("/", response_class=HTMLResponse)
-def index():
-    return INDEX_HTML
-
-
-@app.get("/api/info")
-def info():
-    return JSONResponse({
-        "model": OLLAMA_MODEL,
-        "host": OLLAMA_HOST,
-        "ready": _ollama_ready(),
-    })
-
-
-@app.post("/api/ask")
-def ask(payload: dict):
-    global _history
-    q = (payload or {}).get("question", "").strip()
-    if not q:
-        return JSONResponse({"error": "Empty question"}, status_code=400)
-    _history.append({"role": "user", "content": q})
-    try:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + _history
-        resp = requests.post(
-            f"{OLLAMA_HOST}/api/chat",
-            json={"model": OLLAMA_MODEL, "messages": messages, "stream": False},
-            timeout=120,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        answer = data.get("message", {}).get("content", "No response")
-        _history.append({"role": "assistant", "content": answer})
-        return JSONResponse({"question": q, "answer": answer, "model": OLLAMA_MODEL})
-    except requests.exceptions.ConnectionError:
-        _history.pop()
-        return JSONResponse({
-            "error": f"Cannot connect to Ollama at {OLLAMA_HOST}. Is Ollama running?",
-            "hint": f"Install Ollama from https://ollama.ai/download, then run: ollama pull {OLLAMA_MODEL}",
-        }, status_code=503)
-    except Exception as e:
-        _history.pop()
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@app.post("/api/clear")
-def clear_history():
-    global _history
-    _history = []
-    return JSONResponse({"status": "cleared"})
-
-
-if __name__ == "__main__":
-    uvicorn.run(app, host=OLLAMA_AGENT_HOST, port=OLLAMA_AGENT_PORT)
-EOF
-
-    cat > "$AI_HOME/bots/ollama-agent/requirements.txt" << 'EOF'
-fastapi==0.115.0
-uvicorn==0.30.6
-requests>=2.31.0
-EOF
-
     if [[ ! -f "$AI_HOME/config/ollama-agent.env" ]]; then
-      cat > "$AI_HOME/config/ollama-agent.env" << EOF
+      cat > "$AI_HOME/config/ollama-agent.env" << 'EOF'
 OLLAMA_AGENT_HOST=127.0.0.1
 OLLAMA_AGENT_PORT=8789
-OLLAMA_HOST=$OLLAMA_HOST
-OLLAMA_MODEL=$OLLAMA_MODEL
+OLLAMA_TIMEOUT=120
 EOF
+      # Append host/model from installer variables
+      echo "OLLAMA_HOST=$OLLAMA_HOST" >> "$AI_HOME/config/ollama-agent.env"
+      echo "OLLAMA_MODEL=$OLLAMA_MODEL" >> "$AI_HOME/config/ollama-agent.env"
       chmod 600 "$AI_HOME/config/ollama-agent.env"
     fi
 
     log "Installing Python deps for Ollama Agent (best-effort)..."
-    if command -v pip3 >/dev/null 2>&1; then
-      pip3 install --user -r "$AI_HOME/bots/ollama-agent/requirements.txt" >/dev/null 2>&1 \
+    local req="$AI_HOME/bots/ollama-agent/requirements.txt"
+    if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
+      pip3 install --user -q -r "$req" 2>/dev/null \
         || warn "pip install failed; run manually: pip3 install --user fastapi uvicorn requests"
     else
-      warn "pip3 not found; install manually: pip3 install --user fastapi uvicorn requests"
+      [[ ! -f "$req" ]] && warn "requirements.txt not found; run manually: pip3 install --user fastapi uvicorn requests"
+      ! command -v pip3 >/dev/null 2>&1 && warn "pip3 not found; install manually: pip3 install --user fastapi uvicorn requests"
     fi
 
-    ok "Ollama local AI bot installed (http://127.0.0.1:8789 after start)"
+    ok "Ollama local AI agent configured (http://127.0.0.1:8789 after start)"
 }
 
 # ─── Skills ───────────────────────────────────────────────────────────────────
@@ -818,6 +501,7 @@ SKILL
     cat > "$AI_HOME/.env" << ENV
 OPENCLAW_GATEWAY_TOKEN=$TOKEN
 ${ANTHROPIC_KEY:+ANTHROPIC_API_KEY=$ANTHROPIC_KEY}
+${OPENAI_KEY:+OPENAI_API_KEY=$OPENAI_KEY}
 OLLAMA_HOST=$OLLAMA_HOST
 OLLAMA_MODEL=$OLLAMA_MODEL
 CLAUDE_MODEL=$CLAUDE_MODEL

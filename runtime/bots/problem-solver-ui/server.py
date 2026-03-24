@@ -11,9 +11,11 @@ State files are read from ~/.ai-employee/state/
 Config is read/written in ~/.ai-employee/config/
 """
 import json
+import logging
 import os
 import signal
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +35,21 @@ CUSTOM_AGENTS_FILE = CONFIG_DIR / "custom_agents.json"
 
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("problem-solver-ui")
+
+# ── AI router (Ollama first, cloud fallback) ──────────────────────────────────
+
+_ai_router_path = AI_HOME / "bots" / "ai-router"
+if str(_ai_router_path) not in sys.path:
+    sys.path.insert(0, str(_ai_router_path))
+
+try:
+    from ai_router import query_ai as _query_ai  # type: ignore
+    _AI_ROUTER_AVAILABLE = True
+except ImportError:
+    _AI_ROUTER_AVAILABLE = False
 
 app = FastAPI(title="AI Employee Dashboard")
 
@@ -834,7 +851,24 @@ def handle_command(message: str) -> str:
                 pass
         return "Skills library not loaded yet. Ensure skills-manager is running."
 
-    # Default: queue as task
+    # Default: try AI router (Ollama first, then cloud) before falling back to queued message
+    if _AI_ROUTER_AVAILABLE:
+        try:
+            result = _query_ai(
+                message,
+                system_prompt=(
+                    "You are an AI employee assistant. "
+                    "Help the user with their task or question concisely and practically. "
+                    "If the task requires running a specific bot command, suggest the right command."
+                ),
+            )
+            if result.get("answer"):
+                provider = result.get("provider", "ai")
+                suffix = f"\n_[{provider}]_" if provider not in ("error",) else ""
+                return result["answer"] + suffix
+        except Exception as exc:
+            logger.debug("handle_command: AI router error — %s", exc)
+
     return (
         f"Task queued: '{message}'\n"
         "Tip: use 'start <bot>', 'stop <bot>', 'status', 'help' for commands."
