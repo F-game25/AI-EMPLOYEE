@@ -468,12 +468,83 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Workers ── -->
 <div id="tab-workers" class="tab-content">
+
+  <!-- Worker Bundles section -->
   <div class="card">
     <div class="card-header">
-      <div class="card-title"><span class="icon">👷</span> Manage Workers</div>
+      <div class="card-title"><span class="icon">🏭</span> Worker Bundles</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="loadWorkers()">↻ Refresh</button>
+        <button class="btn btn-primary btn-sm" onclick="openCreateWorker()">＋ New Worker</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+      Bundle agents together with a recurring task. Workers run on a schedule and always perform their assigned role.
+      <strong style="color:var(--accent)">Ecom Workers auto-preset</strong> is included below.
+    </p>
+    <div id="bundle-list"><div class="empty"><div class="icon">🏭</div><p>No worker bundles yet. Click <strong>+ New Worker</strong> to create one.</p></div></div>
+  </div>
+
+  <!-- Create / Edit Worker Bundle form (inline, hidden by default) -->
+  <div id="worker-form-card" class="card" style="display:none;border:2px solid var(--primary)">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">✏️</span> <span id="worker-form-title">Create Worker Bundle</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="closeWorkerForm()">✕ Cancel</button>
+    </div>
+    <div class="grid2" style="gap:12px">
+      <div>
+        <div class="form-group">
+          <label>Worker Name</label>
+          <input id="wf-name" placeholder="e.g. Ecom Order Processor" />
+        </div>
+        <div class="form-group">
+          <label>Recurring Task / Role Description</label>
+          <textarea id="wf-task" rows="3" placeholder="e.g. Monitor new Shopify orders, validate payments, place Printful orders, send customer tracking emails"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Schedule</label>
+          <select id="wf-schedule" style="width:100%">
+            <option value="continuous">Continuous (always on)</option>
+            <option value="hourly">Every hour</option>
+            <option value="every6h">Every 6 hours</option>
+            <option value="daily">Daily (2 AM)</option>
+            <option value="3x_daily">3× daily (9 AM / 3 PM / 8 PM)</option>
+            <option value="weekly">Weekly</option>
+            <option value="manual">Manual trigger only</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Description (optional)</label>
+          <input id="wf-desc" placeholder="Short description of what this worker does" />
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label style="font-weight:600">Assign Agents <span id="wf-agent-count" style="color:var(--primary)"></span></label>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="wfSelectAll()">All</button>
+            <button class="btn btn-ghost btn-sm" onclick="wfClearAll()">None</button>
+          </div>
+        </div>
+        <div id="wf-agent-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:5px;max-height:300px;overflow-y:auto"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-success" onclick="saveWorkerBundle()" style="flex:1" id="wf-save-btn">💾 Save Worker</button>
+      <button class="btn btn-ghost" onclick="presetEcomWorker()" title="Fill in the full ecom automation preset">🛒 Ecom Preset</button>
+    </div>
+    <div id="wf-save-result" style="margin-top:8px;font-size:.84em"></div>
+    <input type="hidden" id="wf-editing-id" value="" />
+  </div>
+
+  <!-- Bot Workers section (raw bots start/stop) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">👷</span> Bot Workers</div>
       <button class="btn btn-ghost btn-sm" onclick="loadWorkers()">↻ Refresh</button>
     </div>
-    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
       Start or stop individual bots. The problem-solver watchdog auto-restarts enabled bots if they crash.
     </p>
     <div id="worker-list"><div class="empty"><div class="icon">👷</div><p>Loading workers…</p></div></div>
@@ -664,7 +735,7 @@ function switchTab(tab, btn) {
   if (tab === 'dashboard') loadDashboard();
   if (tab === 'chat') loadChatLog();
   if (tab === 'scheduler') loadSchedules();
-  if (tab === 'workers') loadWorkers();
+  if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm(); }
   if (tab === 'improvements') loadImprovements();
   if (tab === 'skills') loadSkills();
   if (tab === 'tasks') loadTasks();
@@ -834,9 +905,51 @@ async function deleteSchedule(id) {
 }
 
 // ── Workers ─────────────────────────────────────────────────────────────────
+// ── Bundle management ───────────────────────────────────────────────────────
+let _wfSelectedAgents = new Set();
+
 async function loadWorkers() {
-  const data = await api('/api/workers');
-  const bots = data.bots || [];
+  // Load bundles
+  const bd = await api('/api/workers/bundles');
+  const bundles = (bd && bd.bundles) || [];
+  const bundleEl = document.getElementById('bundle-list');
+  if (!bundles.length) {
+    bundleEl.innerHTML = '<div class="empty"><div class="icon">🏭</div><p>No worker bundles yet. Click <strong>+ New Worker</strong> to create one.</p></div>';
+  } else {
+    bundleEl.innerHTML = bundles.map(b => {
+      const enabled = b.enabled !== false;
+      const statusColor = enabled ? '#10b981' : '#64748b';
+      const agents = (b.agents || []).map(a => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:.73em">${escHtml(a)}</span>`).join(' ');
+      const schedMap = {continuous:'🔄 Continuous', hourly:'⏰ Hourly', every6h:'⏰ Every 6h', daily:'🌙 Daily 2AM', '3x_daily':'☀️ 3× Daily', weekly:'📅 Weekly', manual:'🖱 Manual'};
+      const schedLabel = schedMap[b.schedule] || b.schedule || 'manual';
+      const lastRun = b.last_run ? `Last: ${b.last_run.split('T')[0]}` : 'Never run';
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px;border-left:4px solid ${statusColor}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:.95em;display:flex;align-items:center;gap:6px">
+              🏭 ${escHtml(b.name)}
+              <span style="font-size:.72em;background:${statusColor};color:#fff;border-radius:3px;padding:1px 6px">${enabled ? 'enabled' : 'disabled'}</span>
+              <span style="font-size:.72em;color:var(--text-muted)">${schedLabel}</span>
+            </div>
+            <div style="font-size:.82em;color:var(--text-secondary);margin:4px 0">${escHtml(b.description || b.task_description || '')}</div>
+            <div style="font-size:.8em;color:var(--text-muted);margin-bottom:6px;line-height:1.5">${escHtml((b.task_description||'').slice(0,120))}${(b.task_description||'').length>120?'…':''}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:3px">${agents}</div>
+            <div style="font-size:.72em;color:var(--text-muted);margin-top:5px">${lastRun}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;min-width:90px">
+            <button class="btn btn-primary btn-sm" onclick="runBundle('${escHtml(b.id)}')">▶ Run</button>
+            <button class="btn btn-ghost btn-sm" onclick="editBundle(${escHtml(JSON.stringify(b))})">✏️ Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="toggleBundle('${escHtml(b.id)}', ${!enabled})">${enabled ? '⏸ Disable' : '▶ Enable'}</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteBundle('${escHtml(b.id)}')">🗑</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Load bot workers
+  const wd = await api('/api/workers');
+  const bots = (wd && wd.bots) || [];
   const el = document.getElementById('worker-list');
   if (!bots.length) { el.innerHTML = '<div class="empty"><div class="icon">👷</div><p>No bots found.</p></div>'; return; }
   el.innerHTML = bots.map(b => {
@@ -850,6 +963,132 @@ async function loadWorkers() {
       <div style="display:flex;gap:6px">${startBtn}${stopBtn}</div>
     </div>`;
   }).join('');
+}
+
+function openCreateWorker(prefill) {
+  document.getElementById('wf-editing-id').value = '';
+  document.getElementById('wf-name').value = (prefill && prefill.name) || '';
+  document.getElementById('wf-task').value = (prefill && prefill.task_description) || '';
+  document.getElementById('wf-desc').value = (prefill && prefill.description) || '';
+  document.getElementById('wf-schedule').value = (prefill && prefill.schedule) || 'continuous';
+  document.getElementById('worker-form-title').textContent = 'Create Worker Bundle';
+  document.getElementById('wf-save-btn').textContent = '💾 Save Worker';
+  document.getElementById('wf-save-result').textContent = '';
+  _wfSelectedAgents = new Set((prefill && prefill.agents) || []);
+  renderWfAgentGrid();
+  document.getElementById('worker-form-card').style.display = 'block';
+  document.getElementById('worker-form-card').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function editBundle(b) {
+  openCreateWorker(b);
+  document.getElementById('wf-editing-id').value = b.id;
+  document.getElementById('worker-form-title').textContent = 'Edit Worker Bundle';
+  document.getElementById('wf-save-btn').textContent = '💾 Update Worker';
+}
+
+function closeWorkerForm() {
+  document.getElementById('worker-form-card').style.display = 'none';
+  _wfSelectedAgents.clear();
+}
+
+function renderWfAgentGrid() {
+  const grid = document.getElementById('wf-agent-grid');
+  if (!_allAgents.length) {
+    grid.innerHTML = '<p style="color:var(--text-muted);font-size:.82em">Agents not loaded yet. Open Tasks tab first to load agent list.</p>';
+    return;
+  }
+  grid.innerHTML = _allAgents.map(a => {
+    const sel = _wfSelectedAgents.has(a.id);
+    const color = _catColors[a.category] || '#64748b';
+    return `<div id="wfcard-${a.id}" onclick="toggleWfAgent('${escHtml(a.id)}')"
+      style="cursor:pointer;border:2px solid ${sel ? color : 'var(--border)'};border-radius:var(--radius-sm);padding:6px;background:${sel ? 'var(--surface2)' : 'var(--surface)'};transition:all .15s">
+      <div style="font-size:.75em;font-weight:600;color:${sel ? color : 'var(--text)'}">${escHtml(a.id)}</div>
+      <div style="font-size:.65em;color:var(--text-muted)">${escHtml(a.category||'')}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('wf-agent-count').textContent = `(${_wfSelectedAgents.size} selected)`;
+}
+
+function toggleWfAgent(id) {
+  if (_wfSelectedAgents.has(id)) _wfSelectedAgents.delete(id);
+  else _wfSelectedAgents.add(id);
+  const a = _allAgents.find(x => x.id === id);
+  const card = document.getElementById('wfcard-' + id);
+  if (!card || !a) return;
+  const sel = _wfSelectedAgents.has(id);
+  const color = _catColors[a.category] || '#64748b';
+  card.style.border = `2px solid ${sel ? color : 'var(--border)'}`;
+  card.style.background = sel ? 'var(--surface2)' : 'var(--surface)';
+  card.querySelector('div').style.color = sel ? color : 'var(--text)';
+  document.getElementById('wf-agent-count').textContent = `(${_wfSelectedAgents.size} selected)`;
+}
+
+function wfSelectAll() { _allAgents.forEach(a => _wfSelectedAgents.add(a.id)); renderWfAgentGrid(); }
+function wfClearAll()  { _wfSelectedAgents.clear(); renderWfAgentGrid(); }
+
+function presetEcomWorker() {
+  const preset = {
+    name: 'E-commerce Automation Worker',
+    description: 'Full 100% automated e-commerce operation — orders, support, inventory, marketing, and reporting.',
+    task_description: 'Run the full e-commerce automation pipeline: process new orders via Shopify webhook, handle customer support tickets, sync inventory with supplier, run email marketing campaigns, post to social media, research new products, and generate daily P&L reports.',
+    schedule: 'continuous',
+    agents: ['order-processor','support-bot','bookkeeper','inventory-sync','email-marketer','social-poster','product-researcher','ecom-dashboard']
+  };
+  openCreateWorker(preset);
+  toast('E-commerce preset loaded! Adjust agents and save.', '#10b981');
+}
+
+async function saveWorkerBundle() {
+  const name = document.getElementById('wf-name').value.trim();
+  const task_description = document.getElementById('wf-task').value.trim();
+  const description = document.getElementById('wf-desc').value.trim();
+  const schedule = document.getElementById('wf-schedule').value;
+  const agents = [..._wfSelectedAgents];
+  const editingId = document.getElementById('wf-editing-id').value.trim();
+  const resultEl = document.getElementById('wf-save-result');
+
+  if (!name) { toast('Worker name is required', '#ef4444'); return; }
+  if (!task_description) { toast('Task description is required', '#ef4444'); return; }
+  if (!agents.length) { toast('Select at least one agent', '#ef4444'); return; }
+
+  resultEl.textContent = '⏳ Saving…';
+  const payload = {name, description, task_description, schedule, agents, enabled: true};
+
+  let r;
+  if (editingId) {
+    r = await api(`/api/workers/bundles/${editingId}`, {method:'PATCH', body: JSON.stringify(payload)});
+  } else {
+    r = await api('/api/workers/bundles', {method:'POST', body: JSON.stringify(payload)});
+  }
+
+  if (r && r.ok !== false) {
+    resultEl.innerHTML = `<span style="color:var(--success)">✅ Worker ${editingId ? 'updated' : 'created'}!</span>`;
+    setTimeout(() => { closeWorkerForm(); loadWorkers(); }, 800);
+  } else {
+    resultEl.innerHTML = `<span style="color:var(--danger)">❌ Save failed. Check API.</span>`;
+  }
+}
+
+async function runBundle(id) {
+  const r = await api(`/api/workers/bundles/${id}/run`, {method:'POST'});
+  if (r && r.ok !== false) toast('Worker triggered ▶', '#10b981');
+  else toast('Run failed', '#ef4444');
+  setTimeout(loadWorkers, 1500);
+}
+
+async function toggleBundle(id, enabled) {
+  const r = await api(`/api/workers/bundles/${id}`, {method:'PATCH', body: JSON.stringify({enabled})});
+  if (r && r.ok !== false) toast(enabled ? 'Worker enabled ✅' : 'Worker disabled ⏸', enabled ? '#10b981' : '#f59e0b');
+  else toast('Update failed', '#ef4444');
+  loadWorkers();
+}
+
+async function deleteBundle(id) {
+  if (!confirm('Delete this worker bundle?')) return;
+  const r = await api(`/api/workers/bundles/${id}`, {method:'DELETE'});
+  if (r && r.ok !== false) { toast('Worker deleted', '#ef4444'); loadWorkers(); }
+  else toast('Delete failed', '#ef4444');
 }
 
 async function startBot(name) {
@@ -1300,9 +1539,52 @@ const COMMAND_GROUPS = [
       ['schedule', 'List all scheduled tasks'],
       ['improvements', 'List pending skill proposals'],
       ['skills', 'Show skills library summary'],
-      ['agents', 'List all 20 AI agents'],
+      ['agents', 'List all AI agents'],
       ['help', 'Show full command list'],
       ['cmds', 'Show this commands reference'],
+    ]
+  },
+  {
+    cat: '🏭 Worker Bundles',
+    cmds: [
+      ['worker list', 'List all worker bundles'],
+      ['worker create <name> agents:<a1,a2> task:<desc>', 'Create a worker bundle'],
+      ['worker run <name>', 'Manually trigger a worker'],
+      ['worker enable <name>', 'Enable a worker bundle'],
+      ['worker disable <name>', 'Pause a worker bundle'],
+      ['worker delete <name>', 'Delete a worker bundle'],
+      ['worker status <name>', 'Show worker details & last run'],
+      ['worker ecom', 'Create full e-commerce automation worker preset'],
+    ]
+  },
+  {
+    cat: '🛒 E-commerce Automation',
+    cmds: [
+      ['ecom metrics', 'Real-time revenue / profit / orders dashboard'],
+      ['ecom research <niche>', 'Find top 5 trending product opportunities'],
+      ['ecom listing <product>', 'Generate full Shopify listing (title/desc/tags/price)'],
+      ['ecom email <type> <product>', 'Email flow: welcome|abandoned_cart|post_purchase|upsell'],
+      ['ecom ads <product>', 'Facebook/Google ad copy (headline + body + CTA)'],
+      ['ecom trends', 'Current trending products & niches'],
+      ['ecom service <issue>', 'Customer service reply template'],
+      ['ecom status', 'Listings, emails, and research session count'],
+      ['order process <order_id>', 'Process a specific order'],
+      ['order status <order_id>', 'Get order fulfillment status'],
+      ['inventory check', 'Current stock levels across all products'],
+      ['inventory forecast', '7-day demand forecast & reorder recommendations'],
+      ['inventory reorder', 'Trigger auto-reorder for low-stock items'],
+      ['support ticket <issue>', 'Classify & auto-resolve a support ticket'],
+      ['support refund <order_id>', 'Process a refund automatically'],
+      ['books daily', 'Daily P&L summary from Stripe'],
+      ['books pl', 'Full P&L report (revenue / COGS / ads / profit)'],
+      ['books tax', 'Quarterly tax export'],
+      ['email campaign <segment>', 'Launch email campaign (new/abandoned/repeat)'],
+      ['email abtest <subject1> vs <subject2>', 'Run A/B subject line test'],
+      ['social post <product>', 'Generate & schedule viral social post'],
+      ['social script <topic>', 'TikTok viral script'],
+      ['product scan', 'Daily TikTok/Amazon trending product scan'],
+      ['product validate <idea>', 'Demand validation via Google Trends / JungleScout'],
+      ['product publish <product>', 'Auto-generate listing and publish to Shopify'],
     ]
   },
   {
@@ -1749,11 +2031,158 @@ def handle_command(message: str) -> str:
                 pass
         return "✅ Agent selection cleared. Next task will use auto-select."
 
+    # ── Worker bundle commands ─────────────────────────────────────────────────
+    # worker list
+    if msg_lower in ("worker list", "workers list", "workers"):
+        bundles = _load_worker_bundles()
+        if not bundles:
+            return "🏭 No worker bundles yet.\nCreate one: worker create <name> agents:<a1,a2> task:<description>"
+        lines = []
+        for b in bundles:
+            enabled_tag = "✅" if b.get("enabled", True) else "⏸"
+            agents_short = ", ".join((b.get("agents") or [])[:3])
+            if len(b.get("agents") or []) > 3:
+                agents_short += f" +{len(b['agents'])-3} more"
+            lines.append(f"{enabled_tag} *{b['name']}* [{b.get('schedule','manual')}]\n   Agents: {agents_short}")
+        return f"🏭 Worker Bundles ({len(bundles)}):\n\n" + "\n\n".join(lines)
+
+    # worker create <name> agents:<a1,a2> task:<description>
+    if msg_lower.startswith("worker create "):
+        rest = message[14:].strip()
+        # Parse agents: param
+        import re as _re
+        agents_match = _re.search(r'agents:\s*([\w,\- ]+?)(?:\s+task:|$)', rest, _re.IGNORECASE)
+        task_match = _re.search(r'task:\s*(.+)', rest, _re.IGNORECASE)
+        worker_name = _re.split(r'\s+agents:', rest, flags=_re.IGNORECASE)[0].strip()
+        if not worker_name:
+            return "❌ Usage: worker create <name> agents:<a1,a2> task:<description>"
+        agents_raw = agents_match.group(1).strip() if agents_match else ""
+        agent_list = [a.strip() for a in agents_raw.replace(";", ",").split(",") if a.strip()] if agents_raw else []
+        task_desc = task_match.group(1).strip() if task_match else ""
+        if not task_desc:
+            return "❌ Usage: worker create <name> agents:<a1,a2> task:<description>"
+        if not agent_list:
+            return "❌ Specify at least one agent: agents:order-processor,support-bot"
+        # Validate agents
+        capabilities = _load_agent_capabilities()
+        valid_agents = set(capabilities.get("agents", {}).keys())
+        invalid = [a for a in agent_list if a not in valid_agents]
+        if invalid:
+            return (f"❌ Unknown agents: {', '.join(invalid)}\n"
+                    f"Available: {', '.join(list(valid_agents)[:10])}…")
+        import uuid as _uuid
+        bundle = {
+            "id": _uuid.uuid4().hex[:10],
+            "name": worker_name,
+            "description": f"Created via WhatsApp",
+            "task_description": task_desc,
+            "schedule": "continuous",
+            "agents": agent_list,
+            "enabled": True,
+            "created_at": now_iso(),
+            "last_run": None,
+        }
+        bundles = _load_worker_bundles()
+        bundles.append(bundle)
+        _save_worker_bundles(bundles)
+        return (f"✅ Worker created: *{worker_name}*\n"
+                f"Agents: {', '.join(agent_list)}\n"
+                f"Task: {task_desc[:80]}\n"
+                f"Use *worker run {worker_name}* to trigger it now.")
+
+    # worker run <name>
+    if msg_lower.startswith("worker run "):
+        w_name = message[11:].strip()
+        bundles = _load_worker_bundles()
+        match = next((b for b in bundles if b["name"].lower() == w_name.lower()), None)
+        if not match:
+            names = [b["name"] for b in bundles]
+            return f"❌ Worker '{w_name}' not found.\nKnown workers: {', '.join(names) or '(none)'}"
+        agents = match.get("agents", [])
+        agents_str = f" [agents:{','.join(agents)}]" if agents else ""
+        msg = f"task {match.get('task_description','')}{agents_str}"
+        entry = {"ts": now_iso(), "type": "user", "message": msg}
+        CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(CHATLOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        match["last_run"] = now_iso()
+        _save_worker_bundles(bundles)
+        return (f"▶ Worker *{match['name']}* triggered!\n"
+                f"Agents: {', '.join(agents)}\n"
+                f"Check *task status* for progress.")
+
+    # worker enable / disable <name>
+    if msg_lower.startswith("worker enable ") or msg_lower.startswith("worker disable "):
+        enable = msg_lower.startswith("worker enable ")
+        w_name = message[14:].strip() if enable else message[15:].strip()
+        bundles = _load_worker_bundles()
+        match = next((b for b in bundles if b["name"].lower() == w_name.lower()), None)
+        if not match:
+            return f"❌ Worker '{w_name}' not found. Use *worker list* to see workers."
+        match["enabled"] = enable
+        _save_worker_bundles(bundles)
+        return f"{'✅ Enabled' if enable else '⏸ Disabled'}: *{match['name']}*"
+
+    # worker delete <name>
+    if msg_lower.startswith("worker delete "):
+        w_name = message[14:].strip()
+        bundles = _load_worker_bundles()
+        remaining = [b for b in bundles if b["name"].lower() != w_name.lower()]
+        if len(remaining) == len(bundles):
+            return f"❌ Worker '{w_name}' not found. Use *worker list* to see workers."
+        _save_worker_bundles(remaining)
+        return f"🗑 Worker '{w_name}' deleted."
+
+    # worker status <name>
+    if msg_lower.startswith("worker status "):
+        w_name = message[14:].strip()
+        bundles = _load_worker_bundles()
+        match = next((b for b in bundles if b["name"].lower() == w_name.lower()), None)
+        if not match:
+            return f"❌ Worker '{w_name}' not found. Use *worker list* to see workers."
+        agents = ", ".join(match.get("agents") or [])
+        last = match.get("last_run") or "Never"
+        enabled = "✅ Enabled" if match.get("enabled", True) else "⏸ Disabled"
+        return (f"🏭 Worker: *{match['name']}*\n"
+                f"Status: {enabled}\n"
+                f"Schedule: {match.get('schedule','manual')}\n"
+                f"Agents: {agents}\n"
+                f"Task: {match.get('task_description','')[:100]}\n"
+                f"Last run: {last}")
+
+    # worker ecom — create the e-commerce preset worker
+    if msg_lower in ("worker ecom", "worker ecom preset", "ecom worker"):
+        ecom_agents = ["order-processor","support-bot","bookkeeper","inventory-sync","email-marketer","social-poster","product-researcher","ecom-dashboard"]
+        capabilities = _load_agent_capabilities()
+        known = set(capabilities.get("agents", {}).keys())
+        available = [a for a in ecom_agents if a in known]
+        import uuid as _uuid
+        bundle = {
+            "id": _uuid.uuid4().hex[:10],
+            "name": "E-commerce Automation Worker",
+            "description": "Full 100% automated e-commerce operation",
+            "task_description": "Run the full e-commerce automation pipeline: process new orders, handle customer support, sync inventory, run email campaigns, post to social media, research new products, and generate daily P&L reports.",
+            "schedule": "continuous",
+            "agents": available,
+            "enabled": True,
+            "created_at": now_iso(),
+            "last_run": None,
+        }
+        bundles = _load_worker_bundles()
+        # Avoid duplicate
+        if not any(b["name"] == bundle["name"] for b in bundles):
+            bundles.append(bundle)
+            _save_worker_bundles(bundles)
+        return (f"🛒 E-commerce Worker created!\n"
+                f"Agents ({len(available)}): {', '.join(available)}\n"
+                f"Use *worker run E-commerce Automation Worker* to start.")
+
     # cmds / commands — show command categories
     if msg_lower in ("cmds", "commands", "cmd list"):
         return (
             "📜 Command categories — open *📜 Commands* tab in dashboard for full list.\n\n"
             "⚙️ System: status, workers, start/stop <bot>\n"
+            "🏭 Workers: worker list, worker create, worker run, worker enable/disable, worker delete, worker ecom\n"
             "🚀 Tasks: task <desc>, task agents <a1,a2>, task mode <m>, task config, task cancel\n"
             "🏢 Company: company build/validate/plan/simulate/gtm/pitch/org/swot\n"
             "🪙 Crypto: memecoin create/tokenomics/whitepaper, crypto <pair>, signals\n"
@@ -1774,6 +2203,11 @@ def handle_command(message: str) -> str:
             "  start <bot> / stop <bot> — control bots\n"
             "  schedule / improvements — view tasks & proposals\n"
             "  skills / agents — skills library & custom agents\n"
+            "  worker list — list all worker bundles\n"
+            "  worker create <name> agents:<a1,a2> task:<desc> — create bundle\n"
+            "  worker run <name> — trigger a worker now\n"
+            "  worker enable/disable/delete/status <name> — manage workers\n"
+            "  worker ecom — create full e-commerce automation worker\n"
             "  research <query> — web research\n"
             "  find <topic> / web search <query> / latest news <topic>\n"
             "  social <brief> — full social media content package\n"
@@ -2241,6 +2675,117 @@ def get_custom_agent(agent_id: str):
 AGENT_CAPS_FILE = CONFIG_DIR / "agent_capabilities.json"
 TASK_PLANS_FILE = CONFIG_DIR / "task_plans.json"
 AGENT_TASKS_DIR = STATE_DIR / "agent_tasks"
+WORKER_BUNDLES_FILE = CONFIG_DIR / "worker_bundles.json"
+
+
+def _load_worker_bundles() -> list:
+    if not WORKER_BUNDLES_FILE.exists():
+        return []
+    try:
+        return json.loads(WORKER_BUNDLES_FILE.read_text())
+    except Exception:
+        return []
+
+
+def _save_worker_bundles(bundles: list) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    WORKER_BUNDLES_FILE.write_text(json.dumps(bundles, indent=2))
+
+
+# ─── Worker Bundle API ────────────────────────────────────────────────────────
+
+@app.get("/api/workers/bundles")
+def list_worker_bundles():
+    """List all worker bundles."""
+    return JSONResponse({"bundles": _load_worker_bundles()})
+
+
+@app.post("/api/workers/bundles")
+def create_worker_bundle(payload: dict):
+    """Create a new worker bundle."""
+    import uuid as _uuid
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    agents = payload.get("agents") or []
+    if not agents:
+        raise HTTPException(400, "at least one agent required")
+    task_description = (payload.get("task_description") or "").strip()
+    if not task_description:
+        raise HTTPException(400, "task_description required")
+    schedule = (payload.get("schedule") or "manual").strip()
+    description = (payload.get("description") or "").strip()
+    enabled = payload.get("enabled", True)
+
+    # Validate agents
+    capabilities = _load_agent_capabilities()
+    known_agents = set(capabilities.get("agents", {}).keys())
+    invalid = [a for a in agents if a not in known_agents]
+    if invalid:
+        raise HTTPException(400, f"Unknown agents: {', '.join(invalid)}")
+
+    bundle = {
+        "id": _uuid.uuid4().hex[:10],
+        "name": name,
+        "description": description,
+        "task_description": task_description,
+        "schedule": schedule,
+        "agents": agents,
+        "enabled": enabled,
+        "created_at": now_iso(),
+        "last_run": None,
+    }
+    bundles = _load_worker_bundles()
+    bundles.append(bundle)
+    _save_worker_bundles(bundles)
+    return JSONResponse({"ok": True, "bundle": bundle})
+
+
+@app.patch("/api/workers/bundles/{bundle_id}")
+def update_worker_bundle(bundle_id: str, payload: dict):
+    """Update an existing worker bundle."""
+    bundles = _load_worker_bundles()
+    for b in bundles:
+        if b["id"] == bundle_id:
+            for field in ("name", "description", "task_description", "schedule", "agents", "enabled"):
+                if field in payload:
+                    b[field] = payload[field]
+            b["updated_at"] = now_iso()
+            _save_worker_bundles(bundles)
+            return JSONResponse({"ok": True, "bundle": b})
+    raise HTTPException(404, f"bundle '{bundle_id}' not found")
+
+
+@app.delete("/api/workers/bundles/{bundle_id}")
+def delete_worker_bundle(bundle_id: str):
+    """Delete a worker bundle."""
+    bundles = _load_worker_bundles()
+    remaining = [b for b in bundles if b["id"] != bundle_id]
+    if len(remaining) == len(bundles):
+        raise HTTPException(404, f"bundle '{bundle_id}' not found")
+    _save_worker_bundles(remaining)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/workers/bundles/{bundle_id}/run")
+def run_worker_bundle(bundle_id: str):
+    """Manually trigger a worker bundle — submits its task to the orchestrator chatlog."""
+    bundles = _load_worker_bundles()
+    for b in bundles:
+        if b["id"] != bundle_id:
+            continue
+        desc = b.get("task_description", "")
+        agents = b.get("agents", [])
+        agents_str = f" [agents:{','.join(agents)}]" if agents else ""
+        msg = f"task {desc}{agents_str}"
+        entry = {"ts": now_iso(), "type": "user", "message": msg}
+        CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(CHATLOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        b["last_run"] = now_iso()
+        _save_worker_bundles(bundles)
+        return JSONResponse({"ok": True, "message": f"Worker '{b['name']}' triggered", "agents": agents})
+    raise HTTPException(404, f"bundle '{bundle_id}' not found")
 
 
 def _load_agent_capabilities() -> dict:
@@ -2373,11 +2918,19 @@ _AGENT_KEYWORDS: dict[str, list[str]] = {
     "crypto-trader":     ["crypto", "bitcoin", "ethereum", "trade", "trading", "chart", "technical analysis", "signal", "defi", "altcoin"],
     "memecoin-creator":  ["memecoin", "token", "tokenomics", "whitepaper", "web3", "nft", "meme coin", "launch token", "smart contract"],
     "data-analyst":      ["data", "analytics", "dashboard", "kpi", "metric", "report", "insight", "survey", "statistic"],
-    "support-bot":       ["support", "faq", "ticket", "customer service", "helpdesk", "escalat", "sentiment", "complaint"],
+    "support-bot":       ["support", "faq", "ticket", "customer service", "helpdesk", "escalat", "sentiment", "complaint", "refund", "customer complaint", "help desk", "return", "exchange"],
     "product-scout":     ["product", "ecommerce", "shopify", "amazon", "arbitrage", "dropship", "supplier", "niche product", "trend product"],
     "bot-dev":           ["code", "develop", "python", "script", "api", "bot", "automate", "integration", "endpoint", "webhook"],
     "web-sales":         ["website", "landing page", "ux", "conversion rate", "seo audit", "pitch website", "sales page"],
     "orchestrator":      ["coordinate", "orchestrate", "multi-agent", "full pipeline", "end-to-end", "all agents"],
+    # Ecom agents
+    "order-processor":   ["order", "shopify", "webhook", "printful", "fulfill", "dispatch", "tracking", "payment validation", "supplier order"],
+    "bookkeeper":        ["bookkeeping", "accounting", "p&l", "expense", "stripe data", "quickbooks", "tax", "profit report", "daily report"],
+    "inventory-sync":    ["inventory", "stock", "reorder", "supplier sync", "demand forecast", "low stock", "out of stock", "printful sync"],
+    "email-marketer":    ["email campaign", "mailchimp", "welcome email", "abandoned cart", "drip sequence", "newsletter campaign", "segment customers"],
+    "social-poster":     ["tiktok post", "instagram post", "twitter post", "social schedule", "viral script", "auto post", "social media automation"],
+    "product-researcher":["product research", "trending product", "tiktok trend", "amazon trend", "junglescout", "product listing", "auto-list", "shopify product"],
+    "ecom-dashboard":    ["ecom metrics", "revenue report", "profit margin report", "daily digest", "order analytics", "ecommerce kpi", "ecom dashboard"],
 }
 
 
