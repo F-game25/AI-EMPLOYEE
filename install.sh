@@ -176,6 +176,22 @@ wizard() {
     read -rs OPENAI_KEY < "$tty_in"; echo
     [[ -n "$OPENAI_KEY" ]] && ok "OpenAI key: set" || info "OpenAI key: skipped"
 
+    # 4b) Alpha Insider API key (trading strategies)
+    echo ""
+    ask "Alpha Insider API key (optional — enhances trading strategies, Enter to skip):"
+    read -rs ALPHA_INSIDER_KEY < "$tty_in"; echo
+    [[ -n "$ALPHA_INSIDER_KEY" ]] && ok "Alpha Insider key: set" || info "Alpha Insider key: skipped"
+
+    # 4c) Tavily API key (web search — best quality for research bot)
+    ask "Tavily API key (optional — best web search for research bot, Enter to skip):"
+    read -rs TAVILY_KEY < "$tty_in"; echo
+    [[ -n "$TAVILY_KEY" ]] && ok "Tavily key: set" || info "Tavily key: skipped (DuckDuckGo/Wikipedia used)"
+
+    # 4d) NewsAPI key (optional news search)
+    ask "NewsAPI key (optional — news search for research bot, Enter to skip):"
+    read -rs NEWS_API_KEY < "$tty_in"; echo
+    [[ -n "$NEWS_API_KEY" ]] && ok "NewsAPI key: set" || info "NewsAPI key: skipped"
+
     # 5) Trading bot path
     echo ""
     ask "Path to trading bot directory (optional, Enter to skip):"
@@ -290,6 +306,12 @@ install_runtime() {
         dl "bots/claude-agent/run.sh"
         dl "bots/claude-agent/claude_agent.py"
         dl "bots/claude-agent/requirements.txt"
+        dl "bots/web-researcher/run.sh"
+        dl "bots/web-researcher/web_researcher.py"
+        dl "bots/web-researcher/requirements.txt"
+        dl "bots/social-media-manager/run.sh"
+        dl "bots/social-media-manager/social_media_manager.py"
+        dl "bots/social-media-manager/requirements.txt"
         dl "config/openclaw.template.json"
         dl "config/problem-solver.env"
         dl "config/problem-solver-ui.env"
@@ -301,6 +323,8 @@ install_runtime() {
         dl "config/schedules.json"
         dl "config/ollama-agent.env"
         dl "config/claude-agent.env"
+        dl "config/web-researcher.env"
+        dl "config/social-media-manager.env"
         dl "start.sh"
         dl "stop.sh"
 
@@ -502,6 +526,9 @@ SKILL
 OPENCLAW_GATEWAY_TOKEN=$TOKEN
 ${ANTHROPIC_KEY:+ANTHROPIC_API_KEY=$ANTHROPIC_KEY}
 ${OPENAI_KEY:+OPENAI_API_KEY=$OPENAI_KEY}
+${ALPHA_INSIDER_KEY:+ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY}
+${TAVILY_KEY:+TAVILY_API_KEY=$TAVILY_KEY}
+${NEWS_API_KEY:+NEWS_API_KEY=$NEWS_API_KEY}
 OLLAMA_HOST=$OLLAMA_HOST
 OLLAMA_MODEL=$OLLAMA_MODEL
 CLAUDE_MODEL=$CLAUDE_MODEL
@@ -598,8 +625,11 @@ CFG_END
     if [[ ! -f "$AI_HOME/.env" ]]; then
         {
             echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN"
-            [[ -n "${ANTHROPIC_KEY:-}" ]] && echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY"
-            [[ -n "${OPENAI_KEY:-}" ]]    && echo "OPENAI_API_KEY=$OPENAI_KEY"
+            [[ -n "${ANTHROPIC_KEY:-}" ]]     && echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY"
+            [[ -n "${OPENAI_KEY:-}" ]]         && echo "OPENAI_API_KEY=$OPENAI_KEY"
+            [[ -n "${ALPHA_INSIDER_KEY:-}" ]] && echo "ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY"
+            [[ -n "${TAVILY_KEY:-}" ]]         && echo "TAVILY_API_KEY=$TAVILY_KEY"
+            [[ -n "${NEWS_API_KEY:-}" ]]       && echo "NEWS_API_KEY=$NEWS_API_KEY"
             echo "OPENCLAW_DISABLE_BONJOUR=1"
             echo "DASHBOARD_PORT=${DASHBOARD_PORT:-3000}"
             echo "TZ=Europe/Amsterdam"
