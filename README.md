@@ -328,6 +328,62 @@ The **problem-solver watchdog** auto-restarts any enabled bot that crashes.
 
 ---
 
+## MiroFish Swarm Intelligence
+
+[MiroFish](https://github.com/666ghj/MiroFish) is an open-source multi-agent prediction engine that simulates thousands of autonomous agents to forecast real-world outcomes.  AI Employee integrates MiroFish in two ways:
+
+### Inline predictor (polymarket-trader)
+
+The trader runs a lightweight swarm simulation on every market quote to estimate the probability of YES resolution.  Each agent has a random personality (optimism bias, herd tendency, expertise) and iteratively updates its belief by blending its own signal processing with the emerging crowd consensus.
+
+Configure in `~/.ai-employee/config/polymarket-trader.env`:
+
+```env
+MIROFISH_ENABLED=true
+MIROFISH_AGENTS=200    # agents per simulation (lower = faster)
+MIROFISH_ROUNDS=15     # interaction rounds per simulation
+```
+
+### mirofish-researcher agent (separate)
+
+A dedicated background agent that runs deeper simulations (more agents, more rounds, multi-scenario analysis) and writes probability estimates to `~/.ai-employee/config/polymarket_estimates.json`.  The polymarket-trader automatically reads these and blends them (60 % researcher weight, 40 % inline simulation) for higher-quality signals.
+
+**Start / stop:**
+```bash
+~/.ai-employee/bin/ai-employee start mirofish-researcher
+~/.ai-employee/bin/ai-employee stop  mirofish-researcher
+~/.ai-employee/bin/ai-employee logs  mirofish-researcher
+```
+
+**Configure markets to research** — edit `~/.ai-employee/config/mirofish-researcher.env`:
+```env
+MIROFISH_RESEARCH_INTERVAL=300   # seconds between research cycles
+MIROFISH_AGENTS=500
+MIROFISH_ROUNDS=20
+MIROFISH_SCENARIOS=5
+RESEARCH_MARKETS=market-id-1,market-id-2
+```
+
+**Provide external signals** — edit `~/.ai-employee/config/mirofish_signals.json`:
+```json
+{
+  "your-market-id": {
+    "sentiment":    0.3,
+    "volume_trend": 0.1,
+    "news_impact":  0.2
+  }
+}
+```
+Each signal is in `[-1, 1]`: `-1` = very bearish/negative/declining, `+1` = very bullish/positive/increasing.
+
+**Research output** is available at:
+- `~/.ai-employee/state/mirofish-researcher.state.json` — full per-market report with distribution analysis and scenario confidence intervals
+- `~/.ai-employee/config/polymarket_estimates.json` — prob_yes per market (consumed by trader)
+
+The hourly WhatsApp status report now includes a MiroFish research summary line.
+
+---
+
 ## Where Everything is Stored
 
 ```
@@ -339,20 +395,26 @@ The **problem-solver watchdog** auto-restarts any enabled bot that crashes.
 ├── bin/
 │   └── ai-employee      Multi-bot CLI runner
 ├── bots/                Bot code (overwritten on update)
-│   ├── problem-solver/  Watchdog — keeps other bots alive
+│   ├── problem-solver/     Watchdog — keeps other bots alive
 │   ├── problem-solver-ui/  Full dashboard (FastAPI)
-│   ├── polymarket-trader/  Trading bot (paper mode default)
-│   ├── status-reporter/ Hourly WhatsApp status
-│   ├── scheduler-runner/ Task scheduler
-│   └── discovery/       Skill & market discovery
+│   ├── polymarket-trader/  Trading bot with inline MiroFish predictor
+│   ├── mirofish-researcher/ MiroFish deep market research agent
+│   ├── status-reporter/    Hourly WhatsApp status
+│   ├── scheduler-runner/   Task scheduler
+│   └── discovery/          Skill & market discovery
 ├── config/              Config files (never overwritten on update)
 │   ├── status-reporter.env
 │   ├── problem-solver-ui.env
+│   ├── polymarket-trader.env
+│   ├── mirofish-researcher.env
+│   ├── mirofish_signals.json  External market signals for MiroFish
+│   ├── polymarket_estimates.json  MiroFish probability estimates (auto-written)
 │   ├── schedules.json   Scheduled tasks
 │   └── ...
 ├── state/               Persistent bot state (JSON)
 │   ├── chatlog.jsonl    Chat/task history
 │   ├── improvements.json Skill proposals
+│   ├── mirofish-researcher.state.json  Full MiroFish research report
 │   └── *.state.json     Per-bot state files
 ├── logs/                Log files
 ├── improvements/        Approved improvement files
