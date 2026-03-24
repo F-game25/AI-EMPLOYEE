@@ -28,6 +28,8 @@ BOTS_DIR = AI_HOME / "bots"
 CHATLOG = STATE_DIR / "chatlog.jsonl"
 SCHEDULES_FILE = CONFIG_DIR / "schedules.json"
 IMPROVEMENTS_FILE = STATE_DIR / "improvements.json"
+SKILLS_LIBRARY_FILE = CONFIG_DIR / "skills_library.json"
+CUSTOM_AGENTS_FILE = CONFIG_DIR / "custom_agents.json"
 
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
@@ -117,6 +119,20 @@ INDEX_HTML = r"""<!doctype html>
     input:checked+.slider:before{transform:translateX(16px);background:#fff}
     #toast{position:fixed;bottom:24px;right:24px;background:#10b981;color:#fff;padding:10px 20px;border-radius:8px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}
     #toast.show{opacity:1}
+    .skill-card{border:1px solid #334155;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .2s}
+    .skill-card:hover{border-color:#667eea}
+    .skill-card.selected{border-color:#10b981;background:#0f2a1e}
+    .skill-card h5{color:#e2e8f0;font-size:.9em;margin-bottom:2px}
+    .skill-card p{font-size:.8em;color:#94a3b8;margin:0}
+    .skill-card .tags{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
+    .tag{background:#1e3a5f;color:#93c5fd;border-radius:4px;padding:1px 6px;font-size:.75em}
+    .cat-pill{display:inline-block;padding:4px 10px;border-radius:16px;font-size:.8em;cursor:pointer;border:1px solid #334155;color:#94a3b8;margin:2px;transition:all .2s}
+    .cat-pill.active{background:#667eea;color:#fff;border-color:#667eea}
+    .agent-card{border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:8px}
+    .agent-card h4{color:#e2e8f0;margin-bottom:4px}
+    .agent-card p{font-size:.85em;color:#94a3b8}
+    #skill-search{margin-bottom:12px}
+    .skill-grid{max-height:440px;overflow-y:auto;padding-right:4px}
   </style>
 </head>
 <body>
@@ -130,6 +146,7 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('scheduler',this)">📅 Scheduler</button>
   <button onclick="switchTab('workers',this)">👷 Workers</button>
   <button onclick="switchTab('improvements',this)">💡 Improvements</button>
+  <button onclick="switchTab('skills',this)">🛠️ Skills</button>
 </nav>
 
 <!-- DASHBOARD TAB -->
@@ -253,6 +270,36 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- SKILLS TAB -->
+<div id="tab-skills" class="tab-content">
+  <div class="grid2">
+    <div class="card">
+      <h3>🛠️ Skills Library <span id="skill-total-badge" style="font-size:.8em;color:#94a3b8"></span></h3>
+      <input id="skill-search" placeholder="Search skills…" oninput="filterSkills()" />
+      <div id="category-pills" style="margin-bottom:10px"></div>
+      <div id="skill-grid" class="skill-grid">Loading skills…</div>
+    </div>
+    <div>
+      <div class="card">
+        <h3>🤖 Create Custom Agent</h3>
+        <p style="color:#94a3b8;font-size:.85em;margin-bottom:12px">Select skills from the library (left), name your agent, then click Create.</p>
+        <div class="form-row"><label>Agent Name</label><input id="agent-name-input" placeholder="e.g. My Content Writer"/></div>
+        <div class="form-row"><label>Description (optional)</label><input id="agent-desc-input" placeholder="What this agent does"/></div>
+        <div class="form-row">
+          <label>Selected Skills <span id="selected-count" style="color:#667eea">(0)</span></label>
+          <div id="selected-skills-list" style="font-size:.82em;color:#94a3b8;min-height:24px">No skills selected. Click skill cards on the left.</div>
+        </div>
+        <button class="btn success" onclick="createAgent()">+ Create Agent</button>
+      </div>
+      <div class="card">
+        <h3>👥 Custom Agents</h3>
+        <div id="agents-list">Loading…</div>
+        <br><button class="btn sm" onclick="loadAgents()">🔄 Refresh</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -269,6 +316,7 @@ function switchTab(tab, btn) {
   if (tab === 'scheduler') loadSchedules();
   if (tab === 'workers') loadWorkers();
   if (tab === 'improvements') loadImprovements();
+  if (tab === 'skills') loadSkills();
 }
 
 function toast(msg, color='#10b981') {
@@ -451,6 +499,150 @@ async function reviewImprovement(id, decision) {
   if (r.ok) { toast(decision==='approved' ? '✓ Approved' : '✕ Rejected', decision==='approved'?'#10b981':'#ef4444'); loadImprovements(); }
 }
 
+// ── Skills ──
+let allSkills = [];
+let selectedSkillIds = new Set();
+let activeCategory = '';
+
+const CAT_COLORS = {
+  'Content & Writing':        '#f472b6',
+  'Research & Analysis':      '#60a5fa',
+  'Trading & Finance':        '#34d399',
+  'Social Media':             '#fb923c',
+  'Lead Generation & Sales':  '#a78bfa',
+  'Customer Support':         '#fbbf24',
+  'Development & Technical':  '#22d3ee',
+  'Data Analysis':            '#4ade80',
+  'E-commerce & Product':     '#f87171',
+  'Marketing & SEO':          '#c084fc',
+  'Automation & Productivity':'#e2e8f0',
+};
+
+async function loadSkills() {
+  const data = await api('/api/skills');
+  allSkills = data.skills || [];
+  document.getElementById('skill-total-badge').textContent = `(${allSkills.length} skills)`;
+  renderCategoryPills(data.categories || []);
+  renderSkillGrid(allSkills);
+  loadAgents();
+}
+
+function renderCategoryPills(cats) {
+  const el = document.getElementById('category-pills');
+  const all = `<span class="cat-pill active" onclick="setCat('',this)">All</span>`;
+  el.innerHTML = all + cats.map(c =>
+    `<span class="cat-pill" onclick="setCat(${JSON.stringify(c)},this)">${c}</span>`
+  ).join('');
+}
+
+function setCat(cat, btn) {
+  activeCategory = cat;
+  document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  filterSkills();
+}
+
+function filterSkills() {
+  const q = (document.getElementById('skill-search').value || '').toLowerCase();
+  const filtered = allSkills.filter(s => {
+    const catMatch = !activeCategory || s.category === activeCategory;
+    const textMatch = !q || s.id.includes(q) || s.name.toLowerCase().includes(q) ||
+                      s.description.toLowerCase().includes(q) ||
+                      (s.tags||[]).some(t => t.toLowerCase().includes(q));
+    return catMatch && textMatch;
+  });
+  renderSkillGrid(filtered);
+}
+
+function renderSkillGrid(skills) {
+  const el = document.getElementById('skill-grid');
+  if (!skills.length) { el.innerHTML = '<p style="color:#94a3b8">No skills match.</p>'; return; }
+  el.innerHTML = skills.map(s => {
+    const color = CAT_COLORS[s.category] || '#94a3b8';
+    const sel = selectedSkillIds.has(s.id);
+    const tags = (s.tags||[]).slice(0,4).map(t=>`<span class="tag">${t}</span>`).join('');
+    return `<div class="skill-card${sel?' selected':''}" onclick="toggleSkill(${JSON.stringify(s.id)},this)">
+      <h5>${s.name} <span style="color:${color};font-size:.75em">${s.category}</span></h5>
+      <p>${s.description.slice(0,100)}${s.description.length>100?'…':''}</p>
+      <div class="tags">${tags}</div>
+    </div>`;
+  }).join('');
+}
+
+function toggleSkill(id, card) {
+  if (selectedSkillIds.has(id)) {
+    selectedSkillIds.delete(id);
+    card.classList.remove('selected');
+  } else {
+    selectedSkillIds.add(id);
+    card.classList.add('selected');
+  }
+  updateSelectedPanel();
+}
+
+function updateSelectedPanel() {
+  const count = selectedSkillIds.size;
+  document.getElementById('selected-count').textContent = `(${count})`;
+  const el = document.getElementById('selected-skills-list');
+  if (!count) { el.textContent = 'No skills selected. Click skill cards on the left.'; return; }
+  const ids = [...selectedSkillIds];
+  el.innerHTML = ids.map(id => {
+    const s = allSkills.find(x => x.id === id);
+    return `<span style="display:inline-flex;align-items:center;gap:4px;margin:2px 4px 2px 0;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:2px 8px;font-size:.8em">
+      ${s ? s.name : id}
+      <span onclick="selectedSkillIds.delete(${JSON.stringify(id)});updateSelectedPanel();filterSkills();" style="cursor:pointer;color:#ef4444;font-weight:bold;margin-left:2px">×</span>
+    </span>`;
+  }).join('');
+}
+
+async function createAgent() {
+  const name = document.getElementById('agent-name-input').value.trim();
+  const desc = document.getElementById('agent-desc-input').value.trim();
+  if (!name) { toast('Agent name is required', '#ef4444'); return; }
+  if (!selectedSkillIds.size) { toast('Select at least one skill', '#ef4444'); return; }
+  const r = await api('/api/agents/custom', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, description: desc, skills: [...selectedSkillIds]}),
+  });
+  if (r.ok) {
+    toast(`Agent "${name}" created with ${r.skill_count} skills!`);
+    document.getElementById('agent-name-input').value = '';
+    document.getElementById('agent-desc-input').value = '';
+    selectedSkillIds.clear();
+    updateSelectedPanel();
+    filterSkills();
+    loadAgents();
+  } else {
+    toast(r.error || 'Error creating agent', '#ef4444');
+  }
+}
+
+async function loadAgents() {
+  const data = await api('/api/agents/custom');
+  const agents = data.agents || [];
+  const el = document.getElementById('agents-list');
+  if (!agents.length) {
+    el.innerHTML = '<p style="color:#94a3b8">No custom agents yet. Create one above.</p>';
+    return;
+  }
+  el.innerHTML = agents.map(a => `
+    <div class="agent-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <h4>${a.name}</h4>
+        <button class="btn sm danger" onclick="deleteAgent('${a.id}')">🗑</button>
+      </div>
+      <p>${a.description || 'No description'}</p>
+      <p style="margin-top:4px;color:#667eea;font-size:.8em">${a.skill_count} skills: ${(a.skills||[]).slice(0,5).join(', ')}${a.skill_count>5?'…':''}</p>
+    </div>`).join('');
+}
+
+async function deleteAgent(id) {
+  if (!confirm('Delete this agent?')) return;
+  const r = await api('/api/agents/custom/' + id, {method:'DELETE'});
+  if (r.ok) { toast('Agent deleted', '#ef4444'); loadAgents(); }
+}
+
 // Initial load
 loadDashboard();
 </script>
@@ -596,6 +788,13 @@ def handle_command(message: str) -> str:
             "  stop <bot> — stop a bot\n"
             "  schedule — list schedules\n"
             "  improvements — pending proposals\n"
+            "  skills — show skills library summary\n"
+            "  skills list [<category>] — list skills\n"
+            "  skills search <query> — search skills\n"
+            "  agents — list custom agents\n"
+            "  create agent <name> with <skill1>, <skill2> — create agent\n"
+            "  add skill <id> to <agent> — add skill to agent\n"
+            "  delete agent <name> — delete agent\n"
             "  help — this help"
         )
 
@@ -615,6 +814,25 @@ def handle_command(message: str) -> str:
                 lines = [f"• {i.get('title', i.get('id'))}" for i in pending[:5]]
                 return f"{len(pending)} pending proposals:\n" + "\n".join(lines) + "\nGo to UI > Improvements to approve."
         return "No pending improvements."
+
+    # ── Skills commands (pass-through; skills-manager processes these) ──
+    if (msg_lower.startswith("skills") or msg_lower.startswith("agents")
+            or msg_lower.startswith("agent ") or msg_lower.startswith("create agent")
+            or msg_lower.startswith("add skill") or msg_lower.startswith("remove skill")
+            or msg_lower.startswith("delete agent")):
+        if SKILLS_LIBRARY_FILE.exists():
+            try:
+                lib = json.loads(SKILLS_LIBRARY_FILE.read_text())
+                total = len(lib.get("skills", []))
+                cats = len(lib.get("categories", []))
+                return (
+                    f"📚 Skills Library: {total} skills in {cats} categories.\n"
+                    "The skills-manager is processing your command — check the chat in a moment.\n"
+                    "Tip: open the *🛠️ Skills* tab in the dashboard for the full interactive UI."
+                )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return "Skills library not loaded yet. Ensure skills-manager is running."
 
     # Default: queue as task
     return (
@@ -704,6 +922,140 @@ def review_improvement(improvement_id: str, payload: dict):
 
     IMPROVEMENTS_FILE.write_text(json.dumps(items, indent=2))
     return JSONResponse({"ok": True, "id": improvement_id, "status": status})
+
+
+# ─── Skills Library ────────────────────────────────────────────────────────────
+
+@app.get("/api/skills")
+def get_skills(category: str = "", q: str = ""):
+    lib = {}
+    if SKILLS_LIBRARY_FILE.exists():
+        try:
+            lib = json.loads(SKILLS_LIBRARY_FILE.read_text())
+        except Exception:
+            pass
+    skills = lib.get("skills", [])
+    categories = lib.get("categories", sorted({s["category"] for s in skills}))
+    if category:
+        skills = [s for s in skills if s["category"].lower() == category.lower()]
+    if q:
+        ql = q.lower()
+        skills = [
+            s for s in skills
+            if (ql in s["id"].lower() or ql in s["name"].lower()
+                or ql in s["description"].lower()
+                or any(ql in t.lower() for t in s.get("tags", [])))
+        ]
+    return JSONResponse({"skills": skills, "categories": categories, "total": len(skills)})
+
+
+# ─── Custom Agents ─────────────────────────────────────────────────────────────
+
+def _load_library():
+    if SKILLS_LIBRARY_FILE.exists():
+        try:
+            return json.loads(SKILLS_LIBRARY_FILE.read_text())
+        except Exception:
+            pass
+    return {"skills": []}
+
+
+def _load_custom_agents() -> dict:
+    if CUSTOM_AGENTS_FILE.exists():
+        try:
+            return json.loads(CUSTOM_AGENTS_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_custom_agents(agents: dict) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CUSTOM_AGENTS_FILE.write_text(json.dumps(agents, indent=2))
+
+
+def _build_system_prompt(name: str, skill_ids: list, library: dict) -> str:
+    skills_map = {s["id"]: s for s in library.get("skills", [])}
+    lines = [f"You are {name}, a specialised AI assistant with the following expertise:", ""]
+    for sid in skill_ids:
+        s = skills_map.get(sid)
+        if s:
+            lines.append(f"- **{s['name']}** ({s['category']}): {s['description']}")
+        else:
+            lines.append(f"- {sid}")
+    lines += ["", "Apply your full expertise when responding. Be precise, actionable, and thorough."]
+    return "\n".join(lines)
+
+
+@app.get("/api/agents/custom")
+def list_custom_agents():
+    agents = _load_custom_agents()
+    result = []
+    for a in agents.values():
+        result.append({
+            "id": a["id"],
+            "name": a["name"],
+            "description": a.get("description", ""),
+            "skills": a.get("skills", []),
+            "skill_count": len(a.get("skills", [])),
+            "created_at": a.get("created_at", ""),
+            "updated_at": a.get("updated_at", ""),
+        })
+    return JSONResponse({"agents": result})
+
+
+@app.post("/api/agents/custom")
+def create_custom_agent(payload: dict):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    skill_ids = [str(s).strip() for s in (payload.get("skills") or []) if str(s).strip()]
+    description = (payload.get("description") or "").strip()
+
+    library = _load_library()
+    known_ids = {s["id"] for s in library.get("skills", [])}
+    valid_ids = [s for s in skill_ids if s in known_ids][:20]
+    unknown = [s for s in skill_ids if s not in known_ids]
+
+    import re as _re
+    agent_id = _re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-")
+    agents = _load_custom_agents()
+    ts = now_iso()
+    agent = {
+        "id": agent_id,
+        "name": name,
+        "description": description,
+        "skills": valid_ids,
+        "created_at": agents.get(agent_id, {}).get("created_at", ts),
+        "updated_at": ts,
+        "system_prompt": _build_system_prompt(name, valid_ids, library),
+    }
+    agents[agent_id] = agent
+    _save_custom_agents(agents)
+    return JSONResponse({
+        "ok": True,
+        "id": agent_id,
+        "skill_count": len(valid_ids),
+        "unknown_skills": unknown,
+    })
+
+
+@app.delete("/api/agents/custom/{agent_id}")
+def delete_custom_agent(agent_id: str):
+    agents = _load_custom_agents()
+    if agent_id not in agents:
+        raise HTTPException(404, f"agent '{agent_id}' not found")
+    del agents[agent_id]
+    _save_custom_agents(agents)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/agents/custom/{agent_id}")
+def get_custom_agent(agent_id: str):
+    agents = _load_custom_agents()
+    if agent_id not in agents:
+        raise HTTPException(404, f"agent '{agent_id}' not found")
+    return JSONResponse(agents[agent_id])
 
 
 if __name__ == "__main__":

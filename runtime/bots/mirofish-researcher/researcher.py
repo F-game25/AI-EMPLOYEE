@@ -133,7 +133,8 @@ class MiroFishPredictor:
     ) -> dict:
         """Run swarm simulation and return a probability estimate dict."""
         ctx = context or {}
-        # Hour-granular seed so results refresh each hour even without price changes
+        # Seed is hour-granular: [:13] captures "YYYY-MM-DDTHH" so results
+        # refresh every hour even when the market price has not changed.
         seed = hash(f"{market_id}:{current_price:.4f}:{now_iso()[:13]}") & _SEED_MASK
         rng = random.Random(seed)
 

@@ -328,6 +328,79 @@ The **problem-solver watchdog** auto-restarts any enabled bot that crashes.
 
 ---
 
+## Skills Library (100+ Skills)
+
+AI Employee includes a library of **111 reusable skills** across 11 categories. Skills are the building blocks for creating custom specialised agents.
+
+### Categories & skill counts
+
+| Category | Skills |
+|---|---|
+| Content & Writing | 15 |
+| Research & Analysis | 12 |
+| Trading & Finance | 12 |
+| Social Media | 10 |
+| Lead Generation & Sales | 10 |
+| Development & Technical | 10 |
+| E-commerce & Product | 10 |
+| Data Analysis | 8 |
+| Customer Support | 8 |
+| Marketing & SEO | 8 |
+| Automation & Productivity | 8 |
+
+### Managing skills via the Dashboard
+
+Open the **🛠️ Skills** tab (http://127.0.0.1:8787):
+- **Browse** all 111 skills with search and category filters
+- **Click** skill cards to select them
+- **Create** a new custom agent from the selected skills
+- **View** and delete your custom agents
+
+### Managing skills via WhatsApp / Chat
+
+```
+skills                              → show library summary
+skills categories                   → list all categories
+skills list Trading & Finance       → list skills in a category
+skills search blog                  → search by name/tag/description
+agents                              → list all custom agents
+agent My Content Writer             → show agent details
+create agent My Writer with blog_writing, headline_generation, seo_optimization
+add skill keyword_research to My Writer
+remove skill keyword_research from My Writer
+delete agent My Writer
+```
+
+### skills-manager agent
+
+The `skills-manager` runs in the background, polls the chatlog every 5 seconds, and processes all skills commands.  Custom agents are stored in `~/.ai-employee/config/custom_agents.json`.
+
+Each custom agent has a generated **system prompt** that describes all its assigned skills, ready to use with any LLM.
+
+Configure in `~/.ai-employee/config/skills-manager.env`:
+```env
+SKILLS_MANAGER_POLL_INTERVAL=5   # seconds between chatlog polls
+SKILLS_MANAGER_MAX_SKILLS=20     # max skills per agent
+```
+
+### External signals for MiroFish skills
+
+When `mirofish_prediction` skill is used, populate `~/.ai-employee/config/mirofish_signals.json` with signals for each market (see MiroFish section above).
+
+---
+
+## OpenClaw 2.0 Integration
+
+> **Note:** If you have an `openclaw-2.0` (safe version) repository, place its `main` file at:
+> ```
+> ~/.ai-employee/bin/openclaw2
+> ```
+> Then set `OPENCLAW_BIN=openclaw2` in `~/.ai-employee/.env` to have the start script use it instead of the standard `openclaw` binary.  The `start.sh` script already reads `OPENCLAW_BIN` from the environment for this purpose.
+>
+> *Share your openclaw 2.0 repo URL to integrate it directly into this repo.*
+
+---
+
 ## MiroFish Swarm Intelligence
 
 [MiroFish](https://github.com/666ghj/MiroFish) is an open-source multi-agent prediction engine that simulates thousands of autonomous agents to forecast real-world outcomes.  AI Employee integrates MiroFish in two ways:
