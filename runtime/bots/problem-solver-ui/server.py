@@ -812,6 +812,15 @@ def handle_command(message: str) -> str:
             "  create agent <name> with <skill1>, <skill2> — create agent\n"
             "  add skill <id> to <agent> — add skill to agent\n"
             "  delete agent <name> — delete agent\n"
+            "  research <query> — web research (via web-researcher bot)\n"
+            "  find <topic> — web research shortcut\n"
+            "  web search <query> — web search shortcut\n"
+            "  latest news <topic> — news-focused research\n"
+            "  social <brief> — create full social media content package\n"
+            "  social plan <brief> — content strategy plan only\n"
+            "  content <brief> — same as social\n"
+            "  social status — social media manager status\n"
+            "  social history — list saved content packages\n"
             "  help — this help"
         )
 
@@ -850,6 +859,46 @@ def handle_command(message: str) -> str:
             except (json.JSONDecodeError, OSError):
                 pass
         return "Skills library not loaded yet. Ensure skills-manager is running."
+
+    # ── Research commands (pass-through; web-researcher processes these) ──
+    if (msg_lower.startswith("research ") or msg_lower.startswith("find ")
+            or msg_lower.startswith("web search ") or msg_lower.startswith("search web ")
+            or msg_lower.startswith("latest news ") or msg_lower.startswith("news about ")
+            or msg_lower.startswith("lookup ")):
+        web_bot_state = STATE_DIR / "web-researcher.state.json"
+        if web_bot_state.exists():
+            try:
+                st = json.loads(web_bot_state.read_text())
+                if st.get("status") == "running":
+                    return (
+                        "🔍 Research request queued — web-researcher bot is processing it.\n"
+                        "The answer will appear in the chat shortly."
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return (
+            "🔍 Research request noted — ensure web-researcher bot is running.\n"
+            "Start it: `start web-researcher`"
+        )
+
+    # ── Social media commands (pass-through; social-media-manager processes these) ──
+    if (msg_lower.startswith("social ") or msg_lower.startswith("content ")
+            or msg_lower.startswith("create content ") or msg_lower.startswith("create social ")):
+        social_bot_state = STATE_DIR / "social-media-manager.state.json"
+        if social_bot_state.exists():
+            try:
+                st = json.loads(social_bot_state.read_text())
+                if st.get("status") == "running":
+                    return (
+                        "🎨 Content creation request queued — social-media-manager bot is processing it.\n"
+                        "Full content package will appear in the chat shortly (30-90 seconds)."
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return (
+            "🎨 Content request noted — ensure social-media-manager bot is running.\n"
+            "Start it: `start social-media-manager`"
+        )
 
     # Default: try AI router (Ollama first, then cloud) before falling back to queued message
     if _AI_ROUTER_AVAILABLE:
