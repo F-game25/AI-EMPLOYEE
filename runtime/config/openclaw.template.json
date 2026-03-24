@@ -103,6 +103,48 @@
         "workspace": "AI_HOME_PLACEHOLDER/workspace-web-sales",
         "systemPrompt": "Web Analysis & Sales Specialist. UX/SEO audits, find contacts, write personalized pitches. Max 10 emails per session.",
         "tools": { "allow": ["browser", "web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
+      },
+      {
+        "id": "company-builder",
+        "workspace": "AI_HOME_PLACEHOLDER/workspace-company-builder",
+        "systemPrompt": "Company Builder Agent. Build companies from scratch: business plans, financial projections, org structure, market entry strategy, go-to-market plans, investor pitches, and company simulations. Handle all aspects of company creation and strategic planning.",
+        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
+      },
+      {
+        "id": "memecoin-creator",
+        "workspace": "AI_HOME_PLACEHOLDER/workspace-memecoin-creator",
+        "systemPrompt": "Memecoin & Crypto Token Creator. Generate token concepts, design tokenomics, draft whitepapers, create viral community strategies, plan token launches, and develop crypto marketing campaigns. Expert in Web3 and meme culture.",
+        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
+      },
+      {
+        "id": "hr-manager",
+        "workspace": "AI_HOME_PLACEHOLDER/workspace-hr-manager",
+        "systemPrompt": "HR Manager Agent. Handle full HR lifecycle: job description writing, CV screening, interview frameworks, 90-day onboarding plans, performance review templates, org chart design, compensation benchmarking, and company culture documents.",
+        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
+      },
+      {
+        "id": "finance-wizard",
+        "workspace": "AI_HOME_PLACEHOLDER/workspace-finance-wizard",
+        "systemPrompt": "Finance Wizard Agent. Create financial models, P&L projections, burn rate analyses, runway calculations, fundraising round prep, unit economics, pricing strategies, cap table modeling, and investor-grade financial narratives.",
+        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
+      },
+      {
+        "id": "brand-strategist",
+        "workspace": "AI_HOME_PLACEHOLDER/workspace-brand-strategist",
+        "systemPrompt": "Brand Strategist Agent. Create brand names, full identity systems, positioning strategies, brand voice guides, messaging frameworks, competitive brand analyses, and brand launch plans. Expert in building iconic, memorable brands.",
+        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
+      },
+      {
+        "id": "growth-hacker",
+        "workspace": "AI_HOME_PLACEHOLDER/workspace-growth-hacker",
+        "systemPrompt": "Growth Hacker Agent. Design viral growth loops, optimize conversion funnels, create A/B test frameworks, build retention strategies, design referral programs, develop product-led growth strategies, and generate ICE-scored experiment backlogs.",
+        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
+      },
+      {
+        "id": "project-manager",
+        "workspace": "AI_HOME_PLACEHOLDER/workspace-project-manager",
+        "systemPrompt": "Project Manager Agent. Create work breakdown structures, sprint plans, project roadmaps, risk registers, RACI matrices, Gantt charts, status reports, and retrospective facilitation. Expert in both Agile and traditional project management.",
+        "tools": { "allow": ["read", "write", "web_fetch"], "deny": ["exec", "elevated", "browser"] }
       }
     ]
   },
