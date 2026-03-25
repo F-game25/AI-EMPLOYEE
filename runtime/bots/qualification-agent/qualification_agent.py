@@ -161,7 +161,20 @@ def qualify_lead(lead: dict, crm: dict) -> str:
     scores = _score_lead(lead)
     lead.setdefault("qualification", {})
     lead["qualification"] = scores
-    lead["status"] = scores["verdict"]
+    status = scores["verdict"]
+    allowed_statuses = {
+        "new",
+        "contacted",
+        "replied",
+        "qualified",
+        "appointment",
+        "won",
+        "lost",
+    }
+    if status not in allowed_statuses and status == "unqualified":
+        # Map internal "unqualified" verdict to a CRM-compatible status
+        status = "lost"
+    lead["status"] = status
     lead["updated_at"] = now_iso()
     save_crm(crm)
 
