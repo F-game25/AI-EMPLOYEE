@@ -276,6 +276,48 @@ wizard() {
     ok "Wizard complete"
 }
 
+# ─── JWT Secret (openclaw-2) ───────────────────────────────────────────────────
+
+setup_jwt_secret() {
+    step "JWT / Security secret"
+
+    local env_file="$AI_HOME/.env"
+    mkdir -p "$(dirname "$env_file")"
+
+    # Honour an already-exported JWT_SECRET_KEY
+    if [[ -n "${JWT_SECRET_KEY:-}" ]]; then
+        ok "JWT_SECRET_KEY already set in environment — keeping it"
+        # Make sure it is also persisted in the .env file
+        if [[ -f "$env_file" ]] && grep -q "^JWT_SECRET_KEY=" "$env_file"; then
+            :  # already in file
+        else
+            echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}" >> "$env_file"
+            ok "JWT_SECRET_KEY saved to $env_file"
+        fi
+        return
+    fi
+
+    # Check if already in .env
+    if [[ -f "$env_file" ]] && grep -q "^JWT_SECRET_KEY=" "$env_file"; then
+        ok "JWT_SECRET_KEY already present in $env_file"
+        return
+    fi
+
+    # Generate a fresh secure secret
+    if command -v python3 >/dev/null 2>&1; then
+        local jwt_secret
+        jwt_secret=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+        echo "JWT_SECRET_KEY=${jwt_secret}" >> "$env_file"
+        chmod 600 "$env_file"
+        export JWT_SECRET_KEY="$jwt_secret"
+        ok "JWT secret generated and saved to $env_file"
+        info "Keep this secret safe — rotate it every 90 days."
+    else
+        warn "python3 not found — cannot generate JWT secret automatically."
+        warn "Set JWT_SECRET_KEY manually:  export JWT_SECRET_KEY=\$(openssl rand -hex 32)"
+    fi
+}
+
 # ─── Directory structure ───────────────────────────────────────────────────────
 
 setup_directories() {
@@ -1059,6 +1101,7 @@ main() {
     install_ollama "${WANT_OLLAMA:-n}"
     setup_directories
     install_runtime
+    setup_jwt_secret
     install_claude_bot
     install_ollama_bot
     install_skills
