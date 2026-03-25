@@ -192,6 +192,14 @@ def run_followups() -> str:
     for lead in crm["items"]:
         if lead.get("status") in ("won", "lost", "new"):
             continue
+        # Prefer an explicit next_followup schedule if available; fall back to
+        # the legacy updated_at/created_at + WAIT_HOURS logic for compatibility.
+        next_followup = lead.get("next_followup")
+        if next_followup:
+            # _hours_since(next_followup) >= 0 means the scheduled time has passed.
+            if _hours_since(next_followup) >= 0:
+                due.append(lead)
+            continue
         updated = lead.get("updated_at", lead.get("created_at", ""))
         if _hours_since(updated) >= WAIT_HOURS:
             due.append(lead)
