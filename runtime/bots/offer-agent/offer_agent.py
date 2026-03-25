@@ -50,7 +50,7 @@ _OFFER_SYSTEM = (
     "Je schrijft korte berichten die nieuwsgierigheid opwekken. "
     "Je verkoopt niet — je opent gesprekken. "
     "Wees specifiek over het resultaat. Geen buzzwords. Geen AI-praat. "
-    "Maximaal 3 zinnen per versie."
+    "Maximaal 2 zinnen voor de WhatsApp-versie en maximaal 3 zinnen voor de e-mailversie."
 )
 
 _NICHE_SYSTEM = (
@@ -148,6 +148,12 @@ def offer_lead(lead_id: str) -> str:
     lead = next((l for l in crm["items"] if l["id"] == lead_id), None)
     if not lead:
         return f"Lead '{lead_id}' niet gevonden."
+    status = lead.get("status")
+    if status != "qualified":
+        return (
+            f"Lead '{lead_id}' heeft status '{status or 'onbekend'}' en is niet gekwalificeerd "
+            f"voor een aanbod. Gebruik 'qualify lead {lead_id}' om de lead eerst te kwalificeren."
+        )
     return generate_offer(lead, crm)
 
 

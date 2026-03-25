@@ -171,7 +171,7 @@ def qualify_lead(lead: dict, crm: dict) -> str:
         "won",
         "lost",
     }
-    if status not in allowed_statuses and status == "unqualified":
+    if status == "unqualified":
         # Map internal "unqualified" verdict to a CRM-compatible status
         status = "lost"
     lead["status"] = status
