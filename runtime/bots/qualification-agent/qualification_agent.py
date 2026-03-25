@@ -1,23 +1,23 @@
 """Qualification Agent — filters leads by budget, interest, and need.
 
 Analyses each lead in the shared CRM and assigns a qualification score (0–10)
-across three dimensions:
+as the average across three dimensions:
   • Budget   — can they afford a solution?
   • Interest — how engaged are they?
   • Need     — do they have the pain point you solve?
 
-Leads that score below the threshold are marked 'unqualified' so the sales team
-can focus only on high-value opportunities.
+Leads whose average qualification score falls below the threshold are marked
+'unqualified' so the sales team can focus only on high-value opportunities.
 
 Commands (via chatlog):
   qualify run               — qualify all leads that have not yet been scored
   qualify lead <lead_id>    — (re)qualify a specific lead
   qualify report            — show qualification scores for all leads
-  qualify threshold <0-10>  — update the minimum score to pass qualification
+  qualify threshold <0-10>  — update the minimum average score to pass
 
 Config env vars:
   QUALIFY_POLL_INTERVAL     — chatlog poll seconds (default: 5)
-  QUALIFY_MIN_SCORE         — minimum total score to pass (default: 5)
+  QUALIFY_MIN_SCORE         — minimum average score to pass (default: 5)
 """
 import json
 import os
