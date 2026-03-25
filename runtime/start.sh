@@ -116,7 +116,9 @@ echo -e "  ${C}📊 Dashboard:${NC}     http://localhost:$DASHBOARD_PORT"
 echo -e "  ${C}🛠️  Problem Solver:${NC} http://127.0.0.1:$UI_PORT"
 echo -e "  ${C}🔧 Gateway:${NC}       http://localhost:18789"
 echo ""
-echo -e "${Y}WhatsApp: run 'openclaw channels login' in a new terminal to link your phone.${NC}"
+echo -e "${Y}WhatsApp (quick commands + notifications only):${NC}"
+echo -e "  Run ${C}openclaw channels login${NC} in a new terminal to link your phone."
+echo -e "  Use WhatsApp to check status & get alerts — use the ${C}dashboard${NC} for full control."
 echo ""
 
 # ── Cross-platform browser open ───────────────────────────────────────────────
@@ -162,6 +164,22 @@ else
   warn "UI did not respond in time."
   warn "  Check logs: $AI_HOME/logs/problem-solver-ui.log"
   warn "  Open manually: $UI_URL"
+fi
+
+# ── First 15 Minutes Value Flow (first install only) ─────────────────────────
+if [[ ! -f "$AI_HOME/state/onboarding.json" ]]; then
+  echo ""
+  echo -e "${G}╔══════════════════════════════════════════════════════╗${NC}"
+  echo -e "${G}║   🚀 First install detected — run your first tasks!   ║${NC}"
+  echo -e "${G}╚══════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  Run this to generate your first business results in 2 minutes:"
+  echo ""
+  echo -e "  ${C}ai-employee onboard${NC}"
+  echo ""
+  echo -e "  Or jump straight to a task:"
+  echo -e "  ${C}ai-employee do \"find 10 leads for my business\"${NC}"
+  echo ""
 fi
 
 # ── Keep alive ────────────────────────────────────────────────────────────────
