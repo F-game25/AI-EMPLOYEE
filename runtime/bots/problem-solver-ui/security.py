@@ -155,21 +155,27 @@ class EncryptionManager:
         Args:
             password: Derive key from this password with PBKDF2.  If None a
                 random one-shot Fernet key is generated.
-            salt: PBKDF2 salt.  If None and password is given, an application-
-                level fixed salt is used (suitable for config encryption; use a
-                unique random salt per-record for user data).
+            salt: PBKDF2 salt.  Required when *password* is given if you need
+                to decrypt the ciphertext later with a new instance.  When
+                omitted, a cryptographically random salt is generated —
+                **call ``self.salt`` to retrieve it and store it alongside the
+                ciphertext**.
 
         Note:
             To be able to decrypt data later, reuse the *same* password + salt.
+            For per-record encryption always store the generated salt with the
+            ciphertext.  Only pass a fixed salt for application-level config
+            encryption where a stable, reproducible key is acceptable.
         """
         if password is None:
             self.key = Fernet.generate_key()
             self.salt = None
         else:
+            # Always generate a random salt unless one is explicitly supplied.
+            # This prevents the caller from inadvertently using the same key
+            # for every record when they do not think about the salt at all.
             if salt is None:
-                # Fixed application-level salt — acceptable for config/secrets
-                # encryption but NOT for per-user or per-record data.
-                salt = b'ai_employee_v2_app_level_salt_2026'
+                salt = secrets.token_bytes(32)
             self.salt = salt
 
             kdf = PBKDF2HMAC(

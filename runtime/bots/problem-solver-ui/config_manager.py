@@ -103,7 +103,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
     """
     if config_path is None:
         local = Path("security.local.yml")
-        bundled = Path(__file__).parent.parent.parent / "config" / "security.yml"
+        bundled = Path(__file__).resolve().parents[2] / "config" / "security.yml"
         if local.exists():
             config_path = str(local)
         elif bundled.exists():
