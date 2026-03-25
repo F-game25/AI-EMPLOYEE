@@ -171,7 +171,10 @@ def _send_followup(lead: dict, crm: dict) -> str:
         "message": msg,
         "ts": now_iso(),
     })
-    lead["status"] = "contacted"
+    # Do NOT overwrite an advanced pipeline status (qualified, appointment, …).
+    # Only bump up if the lead is still in an early/silent stage.
+    if lead.get("status") not in ("qualified", "appointment", "replied", "won"):
+        lead["status"] = "contacted"
     lead["next_followup"] = (
         datetime.now(timezone.utc) + timedelta(hours=WAIT_HOURS)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -190,7 +193,9 @@ def run_followups() -> str:
     due: list[dict] = []
 
     for lead in crm["items"]:
-        if lead.get("status") in ("won", "lost", "new"):
+        # Only follow up on truly silent leads; skip closed, new, or
+        # leads that have already replied or reached the appointment stage.
+        if lead.get("status") in ("won", "lost", "new", "replied", "appointment"):
             continue
         # Prefer an explicit next_followup schedule if available; fall back to
         # the legacy updated_at/created_at + WAIT_HOURS logic for compatibility.
