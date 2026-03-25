@@ -127,6 +127,10 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # NOTE: The AI Employee dashboard uses extensive inline CSS and JS in its
+    # HTML template (INDEX_HTML). Until those are moved to external files with
+    # hashes/nonces, 'unsafe-inline' and 'unsafe-eval' are required. This is a
+    # known limitation; contributions to remove them are welcome.
     response.headers["Content-Security-Policy"] = (
         "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: "
         "https://fonts.googleapis.com https://fonts.gstatic.com"
