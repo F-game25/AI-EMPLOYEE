@@ -18,10 +18,41 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field
 import uvicorn
+
+# ── Security imports (openclaw-2) ─────────────────────────────────────────────
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    _SLOWAPI_AVAILABLE = True
+except ImportError:
+    _SLOWAPI_AVAILABLE = False
+
+# Locate security module relative to this file
+_SEC_DIR = Path(__file__).parent
+if str(_SEC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SEC_DIR))
+
+try:
+    from security import AuthManager, InputSanitizer, PasswordValidator, generate_secure_token
+    from config_manager import load_config, validate_security_config, Config as _Cfg
+    _security_config: Optional[_Cfg] = None
+    try:
+        _security_config = load_config()
+    except (ValueError, Exception):
+        # JWT secret not set — security features degraded, app still starts
+        _security_config = None
+    _SECURITY_AVAILABLE = True
+except ImportError:
+    _SECURITY_AVAILABLE = False
+    _security_config = None
 
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_DIR = AI_HOME / "state"
@@ -60,6 +91,88 @@ except ImportError:
     _AI_ROUTER_AVAILABLE = False
 
 app = FastAPI(title="AI Employee Dashboard")
+
+# ── Rate limiter (openclaw-2) ─────────────────────────────────────────────────
+if _SLOWAPI_AVAILABLE:
+    _rate_limit = (
+        f"{_security_config.security.rate_limit_per_minute}/minute"
+        if _security_config else "60/minute"
+    )
+    limiter = Limiter(key_func=get_remote_address, default_limits=[_rate_limit])
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+else:
+    limiter = None
+
+# ── CORS (openclaw-2) ─────────────────────────────────────────────────────────
+_cors_origins = (
+    _security_config.security.cors_origins
+    if _security_config
+    else ["http://localhost:8787", "http://127.0.0.1:8787"]
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
+    allow_headers=["*"],
+)
+
+# ── Security headers middleware (openclaw-2) ──────────────────────────────────
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Attach HTTP security headers to every response."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # NOTE: The AI Employee dashboard uses extensive inline CSS and JS in its
+    # HTML template (INDEX_HTML). Until those are moved to external files with
+    # hashes/nonces, 'unsafe-inline' and 'unsafe-eval' are required. This is a
+    # known limitation; contributions to remove them are welcome.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: "
+        "https://fonts.googleapis.com https://fonts.gstatic.com"
+    )
+    return response
+
+# ── Audit logging middleware (openclaw-2) ─────────────────────────────────────
+_audit_logger = logging.getLogger("ai_employee.audit")
+if not _audit_logger.handlers:
+    _audit_handler = logging.StreamHandler()
+    _audit_handler.setFormatter(logging.Formatter("%(asctime)s AUDIT %(message)s"))
+    _audit_logger.addHandler(_audit_handler)
+    _audit_logger.setLevel(logging.INFO)
+
+@app.middleware("http")
+async def audit_logging_middleware(request: Request, call_next):
+    """Log every inbound request and outbound status for the audit trail."""
+    _audit_enabled = (
+        _security_config.logging.audit_enabled if _security_config else True
+    )
+    if not _audit_enabled:
+        return await call_next(request)
+
+    start = datetime.now(timezone.utc)
+    _audit_logger.info(json.dumps({
+        "event": "request",
+        "timestamp": start.isoformat(),
+        "method": request.method,
+        "path": request.url.path,
+        "client": request.client.host if request.client else "unknown",
+    }))
+    response = await call_next(request)
+    duration = (datetime.now(timezone.utc) - start).total_seconds()
+    _audit_logger.info(json.dumps({
+        "event": "response",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "duration_seconds": round(duration, 4),
+    }))
+    return response
 
 
 def now_iso() -> str:
@@ -2377,6 +2490,111 @@ setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 @app.get("/", response_class=HTMLResponse)
 def index():
     return INDEX_HTML
+
+
+# ── Security endpoints (openclaw-2) ───────────────────────────────────────────
+
+class _HealthResponse(BaseModel):
+    status: str
+    version: str
+    secure_mode: bool
+    privacy_mode: bool
+
+
+class _UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=12)
+
+
+class _TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@app.get("/health", response_model=_HealthResponse)
+def health_check():
+    """Health-check endpoint — always responds with current security posture."""
+    return _HealthResponse(
+        status="healthy",
+        version=_security_config.app_version if _security_config else "2.0.0",
+        secure_mode=_SECURITY_AVAILABLE,
+        privacy_mode=(
+            not _security_config.privacy.telemetry_enabled
+            if _security_config else True
+        ),
+    )
+
+
+@app.get("/security/status")
+def security_status():
+    """Return the current security configuration posture and any warnings."""
+    warnings = validate_security_config(_security_config) if _security_config else []
+    return JSONResponse({
+        "secure_mode": _SECURITY_AVAILABLE,
+        "encryption_enabled": (
+            _security_config.privacy.encrypt_data_at_rest if _security_config else False
+        ),
+        "rate_limiting_enabled": (
+            _security_config.security.rate_limit_enabled if _security_config else False
+        ),
+        "external_calls_blocked": (
+            _security_config.privacy.external_api_calls_disabled if _security_config else False
+        ),
+        "telemetry_disabled": (
+            not _security_config.privacy.telemetry_enabled if _security_config else True
+        ),
+        "security_module_loaded": _SECURITY_AVAILABLE,
+        "warnings": warnings,
+    })
+
+
+@app.post("/auth/register", response_model=_TokenResponse,
+          status_code=status.HTTP_201_CREATED)
+def auth_register(user_data: _UserCreate):
+    """
+    Register a dashboard user and return a JWT bearer token.
+
+    Password is validated against the configured strength policy (openclaw-2).
+    """
+    if not _SECURITY_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Security module not available. Install security dependencies.",
+        )
+
+    cfg = _security_config
+    is_valid, err_msg = PasswordValidator.validate(
+        user_data.password,
+        min_length=cfg.security.min_password_length if cfg else 12,
+        require_special=cfg.security.require_special_chars if cfg else True,
+        require_numbers=cfg.security.require_numbers if cfg else True,
+        require_uppercase=cfg.security.require_uppercase if cfg else True,
+    )
+    if not is_valid:
+        _audit_logger.warning(json.dumps({
+            "event": "registration_failed",
+            "reason": "weak_password",
+            "username": user_data.username,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg)
+
+    username = InputSanitizer.sanitize_input(user_data.username, max_length=50)
+    auth = AuthManager(
+        secret_key=cfg.security.jwt_secret_key,
+        algorithm=cfg.security.jwt_algorithm,
+        expire_minutes=cfg.security.access_token_expire_minutes,
+    )
+    token = auth.create_access_token({"sub": username, "type": "user"})
+
+    _audit_logger.info(json.dumps({
+        "event": "user_registered",
+        "username": username,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }))
+    return _TokenResponse(access_token=token)
+
+# ── End security endpoints ─────────────────────────────────────────────────────
 
 
 @app.get("/api/status")

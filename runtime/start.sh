@@ -32,6 +32,22 @@ echo -e "${G}║       🚀 AI Employee Starting         ║${NC}"
 echo -e "${G}╚══════════════════════════════════════╝${NC}"
 echo ""
 
+# ── JWT secret check (openclaw-2) ─────────────────────────────────────────────
+if [[ -z "${JWT_SECRET_KEY:-}" ]]; then
+  warn "JWT_SECRET_KEY is not set."
+  if command -v python3 >/dev/null 2>&1; then
+    JWT_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+    export JWT_SECRET_KEY
+    echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}" >> "$AI_HOME/.env"
+    ok "JWT secret auto-generated for this session and saved to $AI_HOME/.env"
+    warn "For production: rotate this key every 90 days (see SECURITY.md)"
+  else
+    warn "python3 not found — set JWT_SECRET_KEY manually before starting."
+  fi
+else
+  ok "JWT_SECRET_KEY is set"
+fi
+
 # ── OpenClaw gateway ───────────────────────────────────────────────────────────
 log "Starting OpenClaw gateway..."
 # Support openclaw 2.0 (safe version): set OPENCLAW_BIN=openclaw2 in .env
