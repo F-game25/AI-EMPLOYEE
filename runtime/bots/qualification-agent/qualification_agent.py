@@ -191,7 +191,7 @@ def run_qualify() -> str:
     crm = load_crm()
     unscored = [
         l for l in crm["items"]
-        if "qualification" not in l and l.get("status") not in ("won", "lost")
+        if "qualification" not in l and l.get("status") not in ("won", "lost", "appointment", "replied")
     ]
     if not unscored:
         return "Alle leads zijn al gekwalificeerd of er zijn geen leads."
