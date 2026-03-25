@@ -1,0 +1,155 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "description": "Pre-built plug-and-play agent templates for common business use-cases",
+    "updated_at": "2026-03-25"
+  },
+  "templates": [
+    {
+      "id": "sales-agent",
+      "name": "Sales Agent",
+      "icon": "💼",
+      "category": "Sales",
+      "description": "Full-stack AI sales assistant: finds leads, sends cold outreach, books appointments, and tracks pipeline. Estimated ROI: €3,000–€8,000/month in closed deals.",
+      "agents": ["lead-hunter", "email-ninja", "growth-hacker", "intel-agent"],
+      "task_description": "Run the full sales pipeline: research B2B leads in our target niche, generate personalised cold emails, follow up with prospects, qualify leads, and book discovery calls. Track all activity in the CRM and report pipeline status daily.",
+      "schedule": "3x_daily",
+      "kpis": ["leads_generated", "emails_sent", "calls_booked", "pipeline_value"],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Configure your target niche and geography in the lead-hunter settings",
+        "Add your email sending credentials to the email-ninja integration",
+        "Set your ideal customer profile (ICP) in the template settings",
+        "Review and approve the first batch of outreach messages"
+      ],
+      "expected_results": {
+        "leads_per_week": 50,
+        "emails_per_week": 200,
+        "reply_rate_pct": 8,
+        "meetings_per_week": 4,
+        "estimated_monthly_revenue": "€3,000 – €8,000"
+      }
+    },
+    {
+      "id": "customer-support-bot",
+      "name": "Customer Support Bot",
+      "icon": "🎧",
+      "category": "Support",
+      "description": "24/7 AI customer support: classifies tickets, resolves common issues, escalates edge cases, and tracks satisfaction. Saves 30–40 hours/month of manual support work.",
+      "agents": ["support-bot", "data-analyst"],
+      "task_description": "Handle all incoming customer support requests: classify tickets by urgency and category, resolve common FAQs automatically, process refund and return requests, escalate complex issues to humans with full context, and generate daily support analytics reports.",
+      "schedule": "continuous",
+      "kpis": ["tickets_resolved", "avg_response_time", "escalation_rate", "satisfaction_score"],
+      "guardrail_level": "high",
+      "setup_steps": [
+        "Import your existing FAQ document into the support-bot knowledge base",
+        "Configure escalation rules (which issues go to a human)",
+        "Set up your email/chat integration to receive tickets",
+        "Define your refund and return policy"
+      ],
+      "expected_results": {
+        "tickets_auto_resolved_pct": 70,
+        "avg_first_response_minutes": 2,
+        "hours_saved_per_month": 35,
+        "estimated_monthly_savings": "€2,500 – €5,000"
+      }
+    },
+    {
+      "id": "recruitment-bot",
+      "name": "Recruitment Bot",
+      "icon": "👔",
+      "category": "HR",
+      "description": "End-to-end hiring automation: sources candidates, screens CVs, schedules interviews, and manages the hiring pipeline. Cuts time-to-hire from 6 weeks to 2 weeks.",
+      "agents": ["recruiter", "hr-manager", "email-ninja"],
+      "task_description": "Automate the full recruitment pipeline: source candidates from LinkedIn and job boards, screen CVs against job requirements, send personalised outreach to top candidates, schedule screening calls, conduct structured assessments, and maintain the hiring pipeline. Report weekly on candidate funnel metrics.",
+      "schedule": "daily",
+      "kpis": ["cvs_screened", "candidates_contacted", "interviews_scheduled", "time_to_hire_days"],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Upload your job descriptions and requirements",
+        "Configure candidate scoring criteria (must-haves vs nice-to-haves)",
+        "Connect your calendar for interview scheduling",
+        "Set up outreach templates per role"
+      ],
+      "expected_results": {
+        "cvs_screened_per_week": 100,
+        "qualified_candidates_per_week": 15,
+        "time_to_hire_reduction_pct": 65,
+        "estimated_monthly_savings": "€4,000 – €10,000"
+      }
+    },
+    {
+      "id": "lead-gen-machine",
+      "name": "Lead Generation Machine",
+      "icon": "🎯",
+      "category": "Sales",
+      "description": "Automated lead generation at scale: scrapes prospects, enriches data, segments by ICP fit, and fills your CRM daily. 50–200 qualified leads per week on autopilot.",
+      "agents": ["lead-hunter", "intel-agent", "data-analyst"],
+      "task_description": "Run automated lead generation: scrape B2B leads from LinkedIn, web directories, and niche platforms; enrich contact data with company size, revenue, and tech stack; score leads by ICP fit; segment into hot/warm/cold buckets; export to CRM with full context; and send a daily pipeline report.",
+      "schedule": "daily",
+      "kpis": ["leads_generated", "enrichment_rate", "icp_match_rate", "pipeline_value"],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Define your Ideal Customer Profile (ICP): industry, company size, location, role",
+        "Configure lead sources (LinkedIn, Google Maps, industry directories)",
+        "Connect your CRM (or use the built-in JSON CRM)",
+        "Set daily lead volume target"
+      ],
+      "expected_results": {
+        "leads_per_week": 150,
+        "enrichment_rate_pct": 85,
+        "icp_match_pct": 60,
+        "estimated_weekly_value": "€500 – €2,000 in pipeline"
+      }
+    },
+    {
+      "id": "content-automation",
+      "name": "Content Automation Engine",
+      "icon": "✍️",
+      "category": "Content",
+      "description": "Full content marketing on autopilot: SEO blog posts, social media content, email newsletters, and video scripts. 10x content output with zero extra headcount.",
+      "agents": ["content-master", "social-guru", "email-ninja", "creative-studio"],
+      "task_description": "Run the full content automation pipeline: write 2 SEO-optimised blog posts per week, create daily social media content for Instagram/LinkedIn/Twitter, generate weekly email newsletter, produce YouTube video scripts, repurpose long-form content into multiple formats, and track content performance metrics.",
+      "schedule": "daily",
+      "kpis": ["content_pieces_created", "words_written", "social_posts", "newsletter_issues"],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Set your brand voice and tone guidelines",
+        "Configure target keywords for SEO content",
+        "Connect social media accounts via integrations",
+        "Set up email newsletter integration"
+      ],
+      "expected_results": {
+        "blog_posts_per_month": 8,
+        "social_posts_per_month": 60,
+        "newsletters_per_month": 4,
+        "hours_saved_per_month": 40,
+        "estimated_monthly_value": "€2,000 – €6,000"
+      }
+    },
+    {
+      "id": "ecom-operations",
+      "name": "E-commerce Operations",
+      "icon": "🛒",
+      "category": "E-commerce",
+      "description": "100% automated e-commerce operations: order processing, inventory sync, customer emails, social posting, and daily P&L reports. Run a full Shopify store on autopilot.",
+      "agents": ["order-processor", "support-bot", "bookkeeper", "inventory-sync", "email-marketer", "social-poster", "product-researcher", "ecom-dashboard"],
+      "task_description": "Automate the full e-commerce operation: process new Shopify orders, validate payments, place Printful/supplier orders, sync inventory levels, handle customer support tickets, send transactional and marketing emails, post daily social content, research new trending products, and generate daily P&L and order analytics reports.",
+      "schedule": "continuous",
+      "kpis": ["orders_processed", "revenue", "support_tickets_resolved", "new_products_listed"],
+      "guardrail_level": "high",
+      "setup_steps": [
+        "Connect your Shopify store via API",
+        "Connect print-on-demand supplier (Printful, Printify)",
+        "Set up Stripe/payment processor integration",
+        "Configure email marketing integration (Mailchimp, Klaviyo)"
+      ],
+      "expected_results": {
+        "orders_auto_processed_pct": 95,
+        "support_auto_resolved_pct": 70,
+        "hours_saved_per_month": 80,
+        "estimated_monthly_savings": "€5,000 – €15,000"
+      }
+    }
+  ]
+}

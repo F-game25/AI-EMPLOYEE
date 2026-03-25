@@ -14,7 +14,12 @@ AI Employee is a self-hosted AI workforce that runs on your own machine (Linux, 
 |---|---|
 | **20 AI agents** | Full company team: strategy, finance, HR, brand, growth, PM + specialist bots |
 | **Task Orchestrator** | Give any task → AI decomposes it → assigns agents → runs in parallel → aggregates results |
-| Control | WhatsApp + Web Dashboard (Tasks tab + Swarm view) |
+| **ROI Dashboard** | Track tasks completed, leads generated, hours saved, and cost/revenue metrics |
+| **Agent Templates** | Pre-built plug-and-play templates: Sales Agent, Support Bot, Recruitment Bot, and more |
+| **Guardrails** | Approval queue for high-risk actions, action logging, and rate limits |
+| **Memory** | Persistent client/customer memory across all sessions and conversations |
+| **Integrations** | Configuration UI for Gmail, Google Sheets, Telegram, Slack, OpenAI, Anthropic, Webhooks |
+| Control | WhatsApp + Web Dashboard (14-tab dashboard) |
 | Local LLM | Ollama support (privacy-first) or cloud (Anthropic/OpenAI) |
 | Persistence | State survives restarts; bots auto-restart on crash |
 | Scheduling | Schedule tasks via UI or WhatsApp |
@@ -22,6 +27,148 @@ AI Employee is a self-hosted AI workforce that runs on your own machine (Linux, 
 | Continuous improvement | Discovery bot proposes new skills; you approve |
 
 ---
+
+## 📊 Dashboard (14 Tabs)
+
+Open the dashboard at **http://localhost:8787** after starting:
+
+| Tab | What it shows |
+|---|---|
+| 📊 Dashboard | Bot status overview, quick actions, system info |
+| 💬 Chat | Send tasks, view chat history (mirrors WhatsApp) |
+| 🚀 Tasks | Build & launch multi-agent tasks, track active/recent tasks |
+| 🐝 Swarm | All 20 agents — capabilities, status, workload |
+| 📜 Commands | Full command reference, searchable by category |
+| 📅 Scheduler | Create & manage scheduled tasks (interval/daily) |
+| 👷 Workers | Start/stop individual bots, manage Worker Bundles |
+| 💡 Improvements | Review & approve AI-proposed skill upgrades |
+| 🛠️ Skills | Browse 126-skill library, create custom agents |
+| 📈 ROI | KPI metrics: tasks done, leads generated, hours saved, €€ saved |
+| 📋 Templates | Pre-built agent templates — deploy a full AI team in one click |
+| 🔒 Guardrails | Action approval queue, safety logs, rate limit configuration |
+| 🧠 Memory | Client CRM memory, recent interactions, context tracking |
+| 🔌 Integrations | Configure Gmail, Sheets, Telegram, Slack, OpenAI, Webhooks |
+
+---
+
+## 📈 ROI Metrics
+
+Track the business value your AI team creates:
+
+```bash
+# Via WhatsApp / Chat:
+metrics                    # Show ROI summary
+metrics record lead_generated  # Log an event
+metrics record deal_closed:5000  # Log deal worth €5000
+```
+
+**Tracked metrics:**
+- ✅ Tasks completed
+- 🎯 Leads generated
+- 📧 Emails sent
+- 📝 Content created
+- 📞 Calls booked
+- 💰 Deals closed (with revenue)
+- ⏱️ Hours saved (auto-calculated per event type)
+- 💶 Cost saved (hours × €75/h by default — customise with `AI_EMPLOYEE_HOURLY_RATE` env var)
+
+---
+
+## 📋 Agent Templates
+
+Deploy a pre-configured AI team in one click from the **📋 Templates** tab:
+
+| Template | Agents | Est. ROI |
+|---|---|---|
+| **Sales Agent** | lead-hunter, email-ninja, growth-hacker, intel-agent | €3,000–€8,000/month |
+| **Customer Support Bot** | support-bot, data-analyst | €2,500–€5,000/month |
+| **Recruitment Bot** | recruiter, hr-manager, email-ninja | €4,000–€10,000/month |
+| **Lead Generation Machine** | lead-hunter, intel-agent, data-analyst | 150 leads/week |
+| **Content Automation Engine** | content-master, social-guru, email-ninja, creative-studio | €2,000–€6,000/month |
+| **E-commerce Operations** | 8 specialist agents | €5,000–€15,000/month |
+
+```bash
+# Via WhatsApp / Chat:
+templates                  # List all templates
+template deploy sales-agent  # Deploy the Sales Agent template
+```
+
+---
+
+## 🔒 Guardrails
+
+Prevent the AI from taking dangerous actions without your approval:
+
+**Default approval required for:**
+- Sending bulk emails
+- Posting to social media
+- Making purchases / placing orders
+- Deleting or modifying data
+
+```bash
+# Via WhatsApp / Chat:
+guardrails                 # View pending approvals
+approve <action_id>        # Approve an action
+reject <action_id>         # Reject an action
+```
+
+**API:**
+```bash
+POST /api/guardrails/request        # Submit action for approval (used by agents)
+POST /api/guardrails/{id}/approve   # Approve
+POST /api/guardrails/{id}/reject    # Reject
+GET  /api/guardrails                # List pending + logs
+POST /api/guardrails/settings       # Update settings
+```
+
+---
+
+## 🧠 Memory
+
+The AI remembers your clients across all conversations and tasks:
+
+```bash
+# Via WhatsApp / Chat:
+memory                         # Show all clients
+clients                        # Alias
+client add John Smith          # Add a client
+client add John Acme Corp      # With company name
+```
+
+**API:**
+```bash
+GET    /api/memory                       # All clients + recent interactions
+POST   /api/memory/clients               # Add client
+PATCH  /api/memory/clients/{id}          # Update (status, notes, etc.)
+DELETE /api/memory/clients/{id}          # Remove
+POST   /api/memory/interactions          # Log an interaction (used by agents)
+```
+
+---
+
+## 🔌 Integrations
+
+Configure connections in the **🔌 Integrations** tab or via API:
+
+| Integration | Use |
+|---|---|
+| **Gmail / Google Workspace** | Send/receive email, create drafts |
+| **Google Sheets** | Read/write CRM data, reports |
+| **Telegram Bot** | Receive commands, send alerts |
+| **Slack** | Post to channels, receive commands |
+| **OpenAI** | GPT-4 cloud AI fallback |
+| **Anthropic Claude** | Claude AI provider |
+| **Outbound Webhook** | Forward events to Zapier, Make, n8n, etc. |
+
+**API:**
+```bash
+GET   /api/integrations             # List all integrations with status
+PATCH /api/integrations/{id}        # Save config
+POST  /api/integrations/{id}/test   # Test connection
+```
+
+---
+
 
 ## 🤖 The 20 Agents
 
