@@ -410,16 +410,16 @@ def _format_summary(brief: dict, strategy: dict, content: dict,
                     hashtags: dict, filename: Path) -> str:
     """Format a concise chat summary of the generated content package."""
     lines = [
-        f"🎨 *Social Media Content Package Created!*",
+        "🎨 *Social Media Content Package Created!*",
         f"Topic: {brief['topic']}",
         f"Platforms: {', '.join(brief['platforms'])}",
         f"Tone: {brief['tone']}\n",
-        f"📋 *Strategy:*",
+        "📋 *Strategy:*",
     ]
     for pillar in strategy.get("content_pillars", [])[:3]:
         lines.append(f"  • {pillar}")
 
-    lines.append(f"\n📝 *Content Generated:*")
+    lines.append("\n📝 *Content Generated:*")
     total_posts = sum(len(v) for v in content.values())
     lines.append(f"  {total_posts} posts across {len(content)} platforms")
 
@@ -467,7 +467,7 @@ def run_content_pipeline(brief_text: str, plan_only: bool = False) -> str:
             lines.append(f"  • {p}")
         lines.append(f"\n*Hook Strategy:* {strategy.get('hook_strategy', '')}")
         lines.append(f"*CTA Strategy:* {strategy.get('cta_strategy', '')}")
-        lines.append(f"\n*Key Messages:*")
+        lines.append("\n*Key Messages:*")
         for m in strategy.get("key_messages", []):
             lines.append(f"  • {m}")
         if research_summary:

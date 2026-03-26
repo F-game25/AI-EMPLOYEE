@@ -8,7 +8,6 @@ Usage: can be triggered by openclaw cron hourly, or run as a long-running daemon
 import json
 import os
 import time
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 

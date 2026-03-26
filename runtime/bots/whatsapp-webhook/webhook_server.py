@@ -19,13 +19,12 @@ import hmac
 import json
 import logging
 import os
-import sys
 import urllib.parse
 from base64 import b64encode
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 import uvicorn
 
