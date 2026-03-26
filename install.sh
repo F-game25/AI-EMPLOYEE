@@ -27,8 +27,8 @@ ask()   { echo -e "${Y}?${NC} $1"; }
 banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
-║          AI EMPLOYEE - v4.0 INSTALLER                ║
-║  15 Agents • Claude AI • Ollama Local • Multi-Bot    ║
+║      AI EMPLOYEE - v4.0 INSTALLER  (Linux)           ║
+║  33 Agents • Claude AI • Ollama Local • WhatsApp     ║
 ╚══════════════════════════════════════════════════════╝
 EOF
 }
@@ -47,9 +47,10 @@ check_requirements() {
 
     if [[ ${#missing[@]} -gt 0 ]]; then
         err "Missing required dependencies: ${missing[*]}
-Install them with your package manager, e.g.:
+Install them with:
   sudo apt install curl python3 openssl   # Debian/Ubuntu/Linux Mint
-  brew install python3 openssl             # macOS"
+  sudo dnf install curl python3 openssl   # Fedora/RHEL
+  sudo pacman -S curl python openssl      # Arch Linux"
     fi
 
     if command -v node >/dev/null 2>&1; then
@@ -1021,14 +1022,10 @@ add_to_path() {
 # ─── Desktop launcher & autostart ────────────────────────────────────────────
 
 create_desktop_launcher() {
-    local _os
-    _os="$(uname 2>/dev/null || echo unknown)"
-
     # ── Linux: .desktop entry (app menu + Desktop shortcut) ───────────────────
-    if [[ "$_os" == "Linux" ]]; then
-        local app_dir="$HOME/.local/share/applications"
-        mkdir -p "$app_dir"
-        cat > "$app_dir/ai-employee.desktop" << DESK
+    local app_dir="$HOME/.local/share/applications"
+    mkdir -p "$app_dir"
+    cat > "$app_dir/ai-employee.desktop" << DESK
 [Desktop Entry]
 Name=AI Employee
 Comment=Start the AI Employee multi-agent system
@@ -1039,21 +1036,21 @@ Type=Application
 Categories=Utility;Network;
 StartupNotify=false
 DESK
-        chmod +x "$app_dir/ai-employee.desktop"
-        ok "App launcher added — search 'AI Employee' in your app menu"
+    chmod +x "$app_dir/ai-employee.desktop"
+    ok "App launcher added — search 'AI Employee' in your app menu"
 
-        # Copy to Desktop if it exists
-        if [[ -d "$HOME/Desktop" ]]; then
-            cp "$app_dir/ai-employee.desktop" "$HOME/Desktop/ai-employee.desktop"
-            chmod +x "$HOME/Desktop/ai-employee.desktop"
-            ok "Desktop shortcut created: ~/Desktop/ai-employee.desktop (double-click to start)"
-        fi
+    # Copy to Desktop if it exists
+    if [[ -d "$HOME/Desktop" ]]; then
+        cp "$app_dir/ai-employee.desktop" "$HOME/Desktop/ai-employee.desktop"
+        chmod +x "$HOME/Desktop/ai-employee.desktop"
+        ok "Desktop shortcut created: ~/Desktop/ai-employee.desktop (double-click to start)"
+    fi
 
-        # ── Systemd user service (optional autostart on login) ─────────────
-        if command -v systemctl >/dev/null 2>&1; then
-            local svc_dir="$HOME/.config/systemd/user"
-            mkdir -p "$svc_dir"
-            cat > "$svc_dir/ai-employee.service" << SVC
+    # ── Systemd user service (optional autostart on login) ─────────────
+    if command -v systemctl >/dev/null 2>&1; then
+        local svc_dir="$HOME/.config/systemd/user"
+        mkdir -p "$svc_dir"
+        cat > "$svc_dir/ai-employee.service" << SVC
 [Unit]
 Description=AI Employee multi-agent system
 After=network.target
@@ -1070,18 +1067,9 @@ Environment=AI_HOME=$AI_HOME
 [Install]
 WantedBy=default.target
 SVC
-            systemctl --user daemon-reload 2>/dev/null || true
-            ok "Systemd service created — to auto-start on login run:"
-            info "  systemctl --user enable --now ai-employee"
-        fi
-    fi
-
-    # ── macOS: double-clickable .command file on Desktop ──────────────────────
-    if [[ "$_os" == "Darwin" ]]; then
-        local mac_launcher="$HOME/Desktop/Start AI Employee.command"
-        printf '#!/bin/bash\ncd "%s" && ./start.sh\n' "$AI_HOME" > "$mac_launcher"
-        chmod +x "$mac_launcher"
-        ok "macOS launcher created: ~/Desktop/Start AI Employee.command (double-click to start)"
+        systemctl --user daemon-reload 2>/dev/null || true
+        ok "Systemd service created — to auto-start on login run:"
+        info "  systemctl --user enable --now ai-employee"
     fi
 }
 
@@ -1125,9 +1113,6 @@ done_message() {
     echo -e "  ${G}▸ No-terminal start (after first-time setup):${NC}"
     if [[ -d "$HOME/Desktop" ]]; then
         echo "    • Double-click  ~/Desktop/ai-employee.desktop  (Linux)"
-    fi
-    if [[ "$(uname 2>/dev/null)" == "Darwin" ]]; then
-        echo "    • Double-click  ~/Desktop/Start AI Employee.command  (macOS)"
     fi
     echo "    • Or search 'AI Employee' in your application menu"
     echo "    • Or enable autostart: systemctl --user enable --now ai-employee"
