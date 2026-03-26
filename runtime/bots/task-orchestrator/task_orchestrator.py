@@ -5,8 +5,10 @@ The orchestrator accepts any natural-language task and autonomously:
   2. Selects which of the 20 agents and skills are needed
   3. Decides parallel vs sequential execution strategy
   4. Dispatches subtasks into each agent's queue file
-  5. Monitors progress and aggregates final results
-  6. Writes the combined result back to the chatlog
+  5. Runs up to 10+ subtasks concurrently via a thread-pool
+  6. Validates results with peer-review between agents
+  7. Monitors progress and aggregates final results
+  8. Writes the combined result back to the chatlog
 
 Commands (via chatlog / WhatsApp / Dashboard):
   task <description>               — submit a task for orchestration
@@ -29,8 +31,10 @@ import re
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_FILE = AI_HOME / "state" / "task-orchestrator.state.json"
@@ -41,9 +45,11 @@ CHATLOG = AI_HOME / "state" / "chatlog.jsonl"
 RESULTS_DIR = AI_HOME / "state" / "orchestrator_results"
 
 POLL_INTERVAL = int(os.environ.get("TASK_ORCHESTRATOR_POLL_INTERVAL", "5"))
-MAX_PARALLEL = int(os.environ.get("TASK_ORCHESTRATOR_MAX_PARALLEL", "5"))
+MAX_PARALLEL = int(os.environ.get("TASK_ORCHESTRATOR_MAX_PARALLEL", "10"))
 PLAN_TIMEOUT_SECS = int(os.environ.get("TASK_ORCHESTRATOR_TIMEOUT", "600"))
 MAX_PLANS_HISTORY = int(os.environ.get("TASK_ORCHESTRATOR_MAX_HISTORY", "20"))
+# Enable peer-review validation between agents (default: on)
+PEER_REVIEW_ENABLED = os.environ.get("TASK_ORCHESTRATOR_PEER_REVIEW", "true").lower() == "true"
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("task-orchestrator")
@@ -327,6 +333,198 @@ def execute_plan(plan: dict, capabilities: dict) -> None:
         aggregate_results(plan)
 
 
+# ── Peer-Review Validation ────────────────────────────────────────────────────
+
+def peer_review_subtask(subtask: dict, capabilities: dict) -> dict:
+    """Ask a second agent to review and validate a completed subtask result.
+
+    Returns an updated subtask dict with a "review" key added.
+    The reviewer is the first agent in a complementary category.
+    """
+    if not _AI_AVAILABLE or not PEER_REVIEW_ENABLED:
+        return subtask
+    result_text = subtask.get("result", "")
+    if not result_text:
+        return subtask
+
+    original_agent = subtask.get("agent_id", "")
+    # Pick a reviewer: prefer a different category agent
+    agents = capabilities.get("agents", {})
+    reviewer_id = None
+    original_category = agents.get(original_agent, {}).get("category", "")
+    for aid, info in agents.items():
+        if aid != original_agent and info.get("category") != original_category:
+            reviewer_id = aid
+            break
+    if not reviewer_id:
+        return subtask
+
+    review_prompt = (
+        f"You are acting as a quality reviewer ({reviewer_id}).\n"
+        f"Review the following output from agent '{original_agent}':\n\n"
+        f"Task: {subtask.get('title', subtask.get('subtask_id', ''))}\n"
+        f"Instructions: {subtask.get('instructions', '')[:500]}\n\n"
+        f"Output:\n{result_text[:1500]}\n\n"
+        "Provide a brief review (2-4 sentences): Is the output accurate, complete, and useful? "
+        "Note any issues or gaps. Rate quality 1-5."
+    )
+    try:
+        review_result = _query_ai(
+            review_prompt,
+            system_prompt=(
+                "You are a critical peer reviewer in a multi-agent AI company. "
+                "Be concise, objective, and constructive."
+            ),
+        )
+        review_text = review_result.get("answer", "")
+        subtask["review"] = {
+            "reviewer": reviewer_id,
+            "text": review_text,
+            "ts": now_iso(),
+        }
+        logger.info(
+            "task-orchestrator: peer review for subtask '%s' by '%s'",
+            subtask["subtask_id"], reviewer_id,
+        )
+    except Exception as exc:
+        logger.debug("task-orchestrator: peer review failed — %s", exc)
+    return subtask
+
+
+# ── Async / Thread-Pool Execution ─────────────────────────────────────────────
+
+def _execute_subtask_in_thread(subtask: dict, plan: dict, capabilities: dict) -> dict:
+    """Execute a single subtask in a worker thread.
+
+    Simulates agent work by generating an AI-driven result directly.
+    In a real deployment agents run as separate processes; this provides
+    immediate results for the thread-pool path.
+    """
+    try:
+        agent_id = subtask.get("agent_id", "orchestrator")
+        instructions = subtask.get("instructions", "")
+        agent_info = capabilities.get("agents", {}).get(agent_id, {})
+
+        if _AI_AVAILABLE:
+            system_prompt = (
+                f"You are the '{agent_id}' agent — {agent_info.get('description', '')}. "
+                f"Complete the following subtask as part of a larger plan titled "
+                f"'{plan.get('title', '')}'. "
+                "Be thorough, specific, and return a complete, structured result."
+            )
+            result = _query_ai(instructions, system_prompt=system_prompt)
+            answer = result.get("answer", "")
+        else:
+            answer = f"[{agent_id}] Subtask queued (AI unavailable): {instructions[:100]}"
+
+        return {
+            "subtask_id": subtask["subtask_id"],
+            "status": "done",
+            "result": answer,
+            "completed_at": now_iso(),
+        }
+    except Exception as exc:
+        logger.warning(
+            "task-orchestrator: subtask '%s' failed in thread — %s",
+            subtask.get("subtask_id"), exc,
+        )
+        return {
+            "subtask_id": subtask["subtask_id"],
+            "status": "failed",
+            "result": f"Error: {exc}",
+            "completed_at": now_iso(),
+        }
+
+
+def execute_plan_parallel(plan: dict, capabilities: dict) -> None:
+    """Drive a task plan forward using a thread pool for concurrent execution.
+
+    Dispatches all ready subtasks simultaneously (up to MAX_PARALLEL threads),
+    waits for results, applies peer-review, then updates the plan.
+    """
+    subtasks = plan.get("subtasks", [])
+    completed_ids = {st["subtask_id"] for st in subtasks if st["status"] == "done"}
+
+    # Collect subtasks that are ready to run
+    ready = []
+    for st in subtasks:
+        if st["status"] != "pending":
+            continue
+        deps = st.get("depends_on", [])
+        if any(d not in completed_ids for d in deps):
+            continue
+        ready.append(st)
+
+    if not ready:
+        # Check for completed results from external agent processes
+        for st in subtasks:
+            if st["status"] != "running":
+                continue
+            result = check_agent_result(st["agent_id"], st["subtask_id"])
+            if result:
+                st["status"] = result.get("status", "done")
+                st["result"] = result.get("result", "")
+                st["completed_at"] = now_iso()
+                completed_ids.add(st["subtask_id"])
+    else:
+        # Mark as running and dispatch the agent queue entries concurrently
+        batch = ready[:MAX_PARALLEL]
+        for st in batch:
+            payload = {
+                "subtask_id": st["subtask_id"],
+                "plan_id": plan["id"],
+                "task_title": plan.get("title", ""),
+                "agent_id": st["agent_id"],
+                "title": st.get("title", ""),
+                "instructions": st.get("instructions", ""),
+                "skills": st.get("skills", []),
+                "dispatched_at": now_iso(),
+            }
+            dispatch_to_agent(st["agent_id"], payload)
+            st["status"] = "running"
+            st["dispatched_at"] = now_iso()
+
+        # Execute in thread pool (provides direct AI results when agents are
+        # embedded rather than separate processes)
+        with ThreadPoolExecutor(max_workers=min(len(batch), MAX_PARALLEL)) as pool:
+            futures = {
+                pool.submit(_execute_subtask_in_thread, st, plan, capabilities): st
+                for st in batch
+            }
+            for future in as_completed(futures):
+                st = futures[future]
+                try:
+                    thread_result = future.result()
+                    st["status"] = thread_result["status"]
+                    st["result"] = thread_result["result"]
+                    st["completed_at"] = thread_result["completed_at"]
+                    completed_ids.add(st["subtask_id"])
+                    logger.info(
+                        "task-orchestrator: subtask '%s' completed (%s) via thread pool",
+                        st["subtask_id"], st["status"],
+                    )
+                    # Peer-review the result
+                    if st["status"] == "done":
+                        peer_review_subtask(st, capabilities)
+                except Exception as exc:
+                    st["status"] = "failed"
+                    st["result"] = f"Thread error: {exc}"
+                    st["completed_at"] = now_iso()
+                    logger.warning(
+                        "task-orchestrator: subtask '%s' thread error — %s",
+                        st["subtask_id"], exc,
+                    )
+
+    # Update plan status
+    all_done = all(st["status"] in ("done", "failed") for st in subtasks)
+    any_failed = any(st["status"] == "failed" for st in subtasks)
+
+    if all_done:
+        plan["status"] = "failed" if any_failed else "done"
+        plan["completed_at"] = now_iso()
+        aggregate_results(plan)
+
+
 def aggregate_results(plan: dict) -> None:
     """Combine all subtask results and post a summary to the chatlog."""
     subtasks = plan.get("subtasks", [])
@@ -572,10 +770,10 @@ def main() -> None:
                 save_task_plans(plans)
                 logger.info("task-orchestrator: handled command: %s", message[:60])
 
-        # Drive active plan(s) forward
+        # Drive active plan(s) forward (async thread-pool execution)
         active = get_active_plan(plans)
         if active:
-            execute_plan(active, capabilities)
+            execute_plan_parallel(active, capabilities)
             save_task_plans(plans)
 
         # Timeout check
@@ -593,6 +791,7 @@ def main() -> None:
             "total_plans": len(plans),
             "agents_available": len(capabilities.get("agents", {})),
             "max_parallel": MAX_PARALLEL,
+            "peer_review_enabled": PEER_REVIEW_ENABLED,
         })
 
         time.sleep(POLL_INTERVAL)

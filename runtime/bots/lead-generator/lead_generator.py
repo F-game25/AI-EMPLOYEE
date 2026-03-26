@@ -46,6 +46,17 @@ try:
 except ImportError:
     _AI_AVAILABLE = False
 
+_memory_path = AI_HOME / "bots" / "memory"
+if str(_memory_path) not in sys.path:
+    sys.path.insert(0, str(_memory_path))
+try:
+    from memory_store import MemoryStore as _MemoryStore  # type: ignore
+    _memory = _MemoryStore()
+    _MEMORY_AVAILABLE = True
+except ImportError:
+    _MEMORY_AVAILABLE = False
+    _memory = None
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -73,10 +84,20 @@ def append_chatlog(e: dict) -> None:
         f.write(json.dumps(e) + "\n")
 
 
-def _ai(prompt: str, system: str = "") -> str:
+def _ai(prompt: str, system: str = "", lead_id: str = "") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
-    return (_query_ai(prompt, system_prompt=system) or {}).get("answer", "")
+    # Retrieve conversation history for this lead (last 10 turns)
+    history = []
+    if _MEMORY_AVAILABLE and _memory and lead_id:
+        history = _memory.get_history(lead_id, last_n=10)
+    result = (_query_ai(prompt, system_prompt=system, history=history) or {})
+    answer = result.get("answer", "")
+    # Store the exchange in memory
+    if _MEMORY_AVAILABLE and _memory and lead_id and answer:
+        _memory.add_turn(lead_id, role="user", content=prompt)
+        _memory.add_turn(lead_id, role="assistant", content=answer)
+    return answer
 
 
 def _web(query: str) -> str:
@@ -191,6 +212,7 @@ def find_leads(niche: str, location: str, is_real_estate: bool = False) -> str:
             system="You are an expert cold email copywriter. Write a personalised, short "
                    "(150 words max), value-focused cold email. Use a compelling subject line. "
                    "Be specific, avoid generic phrases. End with a clear CTA.",
+            lead_id=lead["id"],
         )
         lead["outreach_messages"].append({"channel": "email", "message": cold_email, "ts": now_iso()})
         lead["status"] = "new"
@@ -231,6 +253,7 @@ def followup_leads() -> str:
             f"Name: {lead['name']}\nNiche: {lead['niche']}\nLast contacted: {lead['updated_at']}",
             system="You are a sales follow-up specialist. Write a brief, non-pushy follow-up "
                    "message (under 80 words). Reference the previous contact naturally.",
+            lead_id=lead["id"],
         )
         lead["outreach_messages"].append({"channel": "followup", "message": msg, "ts": now_iso()})
         lead["next_followup"] = now_iso()
@@ -255,6 +278,7 @@ def outreach_lead(lead_id: str, channel: str) -> str:
         system="You are an expert cold email copywriter. Write a personalised, short "
                "(150 words max), value-focused outreach message tailored to the channel. "
                "Be specific and end with a clear CTA.",
+        lead_id=lead["id"],
     )
     lead["outreach_messages"].append({"channel": channel, "message": msg, "ts": now_iso()})
     lead["status"] = "contacted"
