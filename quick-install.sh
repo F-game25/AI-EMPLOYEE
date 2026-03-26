@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # AI Employee — Quick Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash -s -- --zero-config
 set -euo pipefail
 
 
@@ -11,10 +13,29 @@ GITHUB_REPO="AI-EMPLOYEE"
 GITHUB_BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${GITHUB_BRANCH}"
 
+# Parse flags
+ZERO_CONFIG=0
+for arg in "$@"; do
+  case "$arg" in
+    --zero-config) ZERO_CONFIG=1 ;;
+    --advanced)    ZERO_CONFIG=0 ;;
+  esac
+done
+export ZERO_CONFIG
+
 err()  { echo -e "${R}✗ $1${NC}"; exit 1; }
 ok()   { echo -e "${G}✓ $1${NC}"; }
 log()  { echo -e "${C}▸ $1${NC}"; }
 warn() { echo -e "${Y}⚠ $1${NC}"; }
+
+if [[ "$ZERO_CONFIG" == "1" ]]; then
+  echo ""
+  echo -e "${G}╔══════════════════════════════════════════════════════╗${NC}"
+  echo -e "${G}║   Zero-config install — no questions asked           ║${NC}"
+  echo -e "${G}║   Defaults: Starter mode, Ollama local, 5 agents     ║${NC}"
+  echo -e "${G}╚══════════════════════════════════════════════════════╝${NC}"
+  echo ""
+fi
 
 # ── Pre-flight checks ──────────────────────────────────────────────────────────
 [ "$EUID" -eq 0 ] && err "Do not run as root. Run as your regular user."
@@ -72,7 +93,12 @@ ok "Files downloaded"
 
 # ── Run installer ──────────────────────────────────────────────────────────────
 log "Running installer..."
-# Redirect stdin from /dev/tty so wizard prompts work even when piped through curl
-bash install.sh < /dev/tty
+if [[ "$ZERO_CONFIG" == "1" ]]; then
+  # Zero-config: no stdin required (no questions asked)
+  ZERO_CONFIG=1 bash install.sh
+else
+  # Redirect stdin from /dev/tty so wizard prompts work even when piped through curl
+  bash install.sh < /dev/tty
+fi
 ok "Installation complete!"
 

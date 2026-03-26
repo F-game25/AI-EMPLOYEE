@@ -69,6 +69,17 @@ except ImportError:
     def _best_template(*a, **kw):  # type: ignore
         return ""
 
+_memory_path = AI_HOME / "bots" / "memory"
+if str(_memory_path) not in sys.path:
+    sys.path.insert(0, str(_memory_path))
+try:
+    from memory_store import MemoryStore as _MemoryStore  # type: ignore
+    _memory = _MemoryStore()
+    _MEMORY_AVAILABLE = True
+except ImportError:
+    _MEMORY_AVAILABLE = False
+    _memory = None
+
 # Tone progression: attempt index → (label, system prompt)
 _TONE = {
     1: (
@@ -131,10 +142,21 @@ def append_chatlog(e: dict) -> None:
         f.write(json.dumps(e) + "\n")
 
 
-def _ai(prompt: str, system: str = "") -> str:
+def _ai(prompt: str, system: str = "", lead_id: str = "") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
     return (_query_ai_for_agent("sales", prompt, system_prompt=system) or {}).get("answer", "")
+    # Retrieve conversation history for this lead (last 10 turns)
+    history = []
+    if _MEMORY_AVAILABLE and _memory and lead_id:
+        history = _memory.get_history(lead_id, last_n=10)
+    result = (_query_ai(prompt, system_prompt=system, history=history) or {})
+    answer = result.get("answer", "")
+    # Store the exchange in memory
+    if _MEMORY_AVAILABLE and _memory and lead_id and answer:
+        _memory.add_turn(lead_id, role="user", content=prompt)
+        _memory.add_turn(lead_id, role="assistant", content=answer)
+    return answer
 
 
 def load_crm() -> dict:
@@ -204,6 +226,7 @@ def _send_followup(lead: dict, crm: dict) -> str:
         f"Naam: {lead['name']}\nNiche: {lead['niche']}\nLocatie: {lead.get('location', '')}"
         f"{previous}{memory_context}{example_hint}",
         system=system_prompt,
+        lead_id=lead.get("id", ""),
     )
 
     lead["outreach_messages"].append({
