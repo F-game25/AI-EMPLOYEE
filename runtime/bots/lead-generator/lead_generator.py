@@ -45,10 +45,55 @@ try:
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
-    def _query_ai_for_agent(*args, **kwargs):  # type: ignore
+    def _query_ai_for_agent(*a, **kw):  # type: ignore
         return {"answer": "[AI unavailable]"}
 
 # ── Memory store (optional) ───────────────────────────────────────────────────
+
+_memory_path = AI_HOME / "bots" / "memory"
+if str(_memory_path) not in sys.path:
+    sys.path.insert(0, str(_memory_path))
+try:
+    from memory_store import MemoryStore as _MemoryStore  # type: ignore
+    _MEMORY: "_MemoryStore | None" = _MemoryStore()
+except ImportError:
+    _MEMORY = None
+
+# ── Feedback loop (optional) ──────────────────────────────────────────────────
+
+_feedback_path = AI_HOME / "bots" / "feedback-loop"
+if str(_feedback_path) not in sys.path:
+    sys.path.insert(0, str(_feedback_path))
+try:
+    from feedback_loop import record_message as _record_message, get_best_template_as_example as _best_template  # type: ignore
+    _FEEDBACK_AVAILABLE = True
+except ImportError:
+    _FEEDBACK_AVAILABLE = False
+    def _record_message(*a, **kw):  # type: ignore
+        return ""
+    def _best_template(*a, **kw):  # type: ignore
+        return ""
+
+# ── Real tool integrations (optional) ────────────────────────────────────────
+
+_tools_path = AI_HOME / "bots" / "tools"
+if str(_tools_path) not in sys.path:
+    sys.path.insert(0, str(_tools_path))
+try:
+    from email_sender import send_email as _send_email, is_email_configured as _email_ok  # type: ignore
+    _EMAIL_AVAILABLE = _email_ok()
+except ImportError:
+    _EMAIL_AVAILABLE = False
+    def _send_email(*a, **kw):  # type: ignore
+        return False, {"error": "email_sender not available"}
+
+try:
+    from whatsapp import send_whatsapp as _send_whatsapp, is_whatsapp_configured as _wa_ok  # type: ignore
+    _WHATSAPP_AVAILABLE = _wa_ok()
+except ImportError:
+    _WHATSAPP_AVAILABLE = False
+    def _send_whatsapp(*a, **kw):  # type: ignore
+        return False, {"error": "whatsapp not available"}
 
 _memory_path = AI_HOME / "bots" / "memory"
 if str(_memory_path) not in sys.path:
@@ -123,6 +168,10 @@ def append_chatlog(e: dict) -> None:
 
 
 def _ai(prompt: str, system: str = "", agent_type: str = "sales") -> str:
+    if not _AI_AVAILABLE:
+        return "[AI unavailable]"
+    return (_query_ai_for_agent(agent_type, prompt, system_prompt=system) or {}).get("answer", "")
+def _ai(prompt: str, system: str = "", lead_id: str = "") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
     return (_query_ai_for_agent(agent_type, prompt, system_prompt=system) or {}).get("answer", "")
@@ -264,6 +313,7 @@ def find_leads(niche: str, location: str, is_real_estate: bool = False) -> str:
                    "(150 words max), value-focused cold email. Use a compelling subject line. "
                    "Be specific, avoid generic phrases. End with a clear CTA.",
             agent_type="sales",
+            lead_id=lead["id"],
         )
         lead["outreach_messages"].append({"channel": "email", "message": cold_email, "ts": now_iso()})
         lead["status"] = "new"

@@ -1,4 +1,4 @@
-"""AI Router — Ollama-first with cloud AI fallback + web search utilities.
+"""AI Router — Ollama-first with cloud AI fallback + per-agent model routing + web search.
 
 Routes AI queries to the best available provider in priority order:
   1. Ollama  (local, free, private — preferred for general tasks)
@@ -9,6 +9,13 @@ Per-agent model routing selects the optimal provider for each agent category:
   - sales / persuasion (lead-hunter, email-ninja, web-sales) → OpenAI GPT-4o
   - analytics / research (data-analyst, intel-agent) → Anthropic Claude
   - general / all others → Ollama (local, free)
+
+Per-agent model routing (query_ai_for_agent):
+  - sales / persuasive   → OpenAI GPT-4o (best persuasive writing)
+  - analytical / data    → Anthropic Claude (long context, deep reasoning)
+  - creative             → OpenAI GPT-4o (best creative output)
+  - coding               → OpenAI GPT-4o (strong code generation)
+  - general / local      → Ollama (free, privacy-preserving)
 
 Also provides search_web() for web research tasks:
   - DuckDuckGo Instant Answers (free, no API key)
@@ -29,6 +36,9 @@ Usage (from any bot that adds this directory to sys.path):
     print(result["answer"])    # the response text
     print(result["provider"])  # "ollama" | "anthropic" | "openai" | "error"
 
+    # Agent-aware routing: picks the best model for the task type
+    result = query_ai_for_agent("sales", "Write a cold email for a SaaS product")
+    result = query_ai_for_agent("analytical", "Analyse this dataset...", history=[...])
     # Route to best model for a specific agent
     result = query_ai_for_agent("Write a cold email", agent_id="lead-hunter")
     print(result["answer"])
@@ -70,7 +80,8 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-5")
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-OPENAI_SALES_MODEL = os.environ.get("OPENAI_SALES_MODEL", "gpt-4o")
+OPENAI_MODEL_SALES = os.environ.get("OPENAI_MODEL_SALES", "gpt-4o")
+OPENAI_MODEL_CREATIVE = os.environ.get("OPENAI_MODEL_CREATIVE", "gpt-4o")
 
 CLOUD_AI_TIMEOUT = int(os.environ.get("CLOUD_AI_TIMEOUT", "30"))
 
@@ -345,6 +356,112 @@ def is_ollama_available() -> bool:
         return r.status_code == 200
     except Exception:
         return False
+
+
+def query_ai_for_agent(
+    agent_type: str,
+    prompt: str,
+    system_prompt: str = "",
+    history: Optional[list] = None,
+) -> dict:
+    """Route an AI query to the best model for a specific agent type.
+
+    Uses _AGENT_ROUTING to select the optimal provider/model for each task
+    category (e.g. sales → GPT-4o, analytics → Claude, general → Ollama),
+    then falls back through the standard provider chain if the preferred
+    provider is unavailable.
+
+    Args:
+        agent_type:   Agent category key (e.g. "sales", "analytical", "creative").
+                      Case-insensitive. Falls back to general routing if unknown.
+        prompt:       The user message or question.
+        system_prompt: Optional system/role instructions.
+        history:      Optional conversation history.
+
+    Returns:
+        Same dict structure as query_ai():
+            answer, provider, model, error, usage
+    """
+    history = history or []
+    agent_key = agent_type.lower()
+
+    # Look up preferred provider/model for this agent type
+    preferred_provider, preferred_model = _AGENT_ROUTING.get(
+        agent_key, _AGENT_ROUTING.get("general", ("ollama", OLLAMA_MODEL))
+    )
+
+    logger.debug(
+        "ai_router: agent_type=%s → preferred_provider=%s model=%s",
+        agent_type, preferred_provider, preferred_model,
+    )
+
+    # Override model env vars temporarily for this call using local variables
+    result = None
+    if preferred_provider == "openai" and OPENAI_API_KEY:
+        try:
+            import openai
+            client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            messages = _build_messages(prompt, system_prompt, history)
+            response = client.chat.completions.create(
+                model=preferred_model,
+                messages=messages,
+                max_tokens=4096,
+                timeout=CLOUD_AI_TIMEOUT,
+            )
+            answer = response.choices[0].message.content.strip()
+            logger.debug("ai_router: agent=%s used OpenAI/%s", agent_type, preferred_model)
+            result = {
+                "answer": answer,
+                "provider": "openai",
+                "model": preferred_model,
+                "error": None,
+                "usage": {
+                    "input_tokens": response.usage.prompt_tokens,
+                    "output_tokens": response.usage.completion_tokens,
+                },
+            }
+        except Exception as exc:
+            logger.debug("ai_router: preferred OpenAI/%s failed — %s", preferred_model, exc)
+
+    elif preferred_provider == "anthropic" and ANTHROPIC_API_KEY:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            messages = list(history) if history else []
+            messages.append({"role": "user", "content": prompt})
+            response = client.messages.create(
+                model=preferred_model,
+                max_tokens=4096,
+                system=system_prompt or "You are a helpful AI assistant.",
+                messages=messages,
+            )
+            answer = response.content[0].text.strip()
+            logger.debug("ai_router: agent=%s used Anthropic/%s", agent_type, preferred_model)
+            result = {
+                "answer": answer,
+                "provider": "anthropic",
+                "model": preferred_model,
+                "error": None,
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                },
+            }
+        except Exception as exc:
+            logger.debug("ai_router: preferred Anthropic/%s failed — %s", preferred_model, exc)
+
+    elif preferred_provider == "ollama":
+        result = _try_ollama(prompt, system_prompt, history)
+
+    # Fall back to the standard chain if preferred provider failed
+    if result:
+        return result
+
+    logger.debug(
+        "ai_router: preferred provider for agent=%s unavailable, falling back to standard chain",
+        agent_type,
+    )
+    return query_ai(prompt, system_prompt=system_prompt, history=history)
 
 
 # ── Web Search ────────────────────────────────────────────────────────────────
