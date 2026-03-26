@@ -14,12 +14,15 @@ mkdir -p "$LOGS_DIR" "$RUN_DIR" "$STATE_DIR"
 usage() {
   cat <<'USAGE'
 ai-employee commands:
+  do <task>              Send any task to your AI employee (e.g. ai-employee do "find 10 leads")
   start --all | <bot>    Start one or all bots
   stop  --all | <bot>    Stop one or all bots
   restart --all | <bot>  Restart one or all bots
   status                 Show running status of all bots
   logs <bot>             Tail logs for a bot
-  doctor                 Show environment info
+  doctor                 Health-check all services (✅/❌ per component)
+  onboard                Run the First 15 Minutes Value Flow (3 starter tasks)
+  mode [starter|business|power]  Show or set the active mode
   ui                     Open UI in browser
 USAGE
 }
@@ -168,22 +171,115 @@ case "$cmd" in
     tail -n 200 -f "$LOGS_DIR/$bot.log"
     ;;
   doctor)
-    echo "=== AI Employee Doctor ==="
-    echo "AI_HOME  : $AI_HOME"
-    echo "Bots dir : $BOTS_DIR"
-    echo "Logs dir : $LOGS_DIR"
-    echo "Run dir  : $RUN_DIR"
-    echo "State dir: $STATE_DIR"
+    OK="✅"; FAIL="❌"; WARN="⚠️ "
     echo ""
-    echo "Bots installed:"
-    list_bots || true
+    echo "=== AI Employee — Health Check ==="
     echo ""
-    echo "Dependency checks:"
-    command -v openclaw >/dev/null 2>&1 && echo "  openclaw : $(openclaw --version 2>/dev/null || echo ok)" || echo "  openclaw : NOT FOUND"
-    command -v ollama   >/dev/null 2>&1 && echo "  ollama   : $(ollama --version 2>/dev/null || echo ok)" || echo "  ollama   : not installed (optional)"
-    command -v python3  >/dev/null 2>&1 && echo "  python3  : $(python3 --version)" || echo "  python3  : NOT FOUND"
-    command -v node     >/dev/null 2>&1 && echo "  node     : $(node --version)" || echo "  node     : NOT FOUND"
-    command -v docker   >/dev/null 2>&1 && echo "  docker   : $(docker --version 2>/dev/null | head -1)" || echo "  docker   : NOT FOUND"
+
+    # Load env for port/key info
+    if [[ -f "$AI_HOME/.env" ]]; then
+      # shellcheck disable=SC1091
+      set -a; source "$AI_HOME/.env" 2>/dev/null || true; set +a
+    fi
+
+    # Core binaries
+    echo "── Dependencies ──────────────────────────────"
+    command -v python3  >/dev/null 2>&1 \
+      && echo "  $OK python3    : $(python3 --version 2>&1)" \
+      || echo "  $FAIL python3   : NOT FOUND (required)"
+    command -v curl     >/dev/null 2>&1 \
+      && echo "  $OK curl       : $(curl --version 2>&1 | head -1)" \
+      || echo "  $FAIL curl      : NOT FOUND (required)"
+    command -v openclaw >/dev/null 2>&1 \
+      && echo "  $OK openclaw   : $(openclaw --version 2>/dev/null || echo installed)" \
+      || echo "  $FAIL openclaw  : NOT FOUND — install: curl -fsSL https://openclaw.ai/install.sh | bash"
+    command -v ollama   >/dev/null 2>&1 \
+      && echo "  $OK ollama     : $(ollama --version 2>/dev/null || echo installed)" \
+      || echo "  $WARN ollama    : not installed (optional — enables local/private LLM)"
+    command -v node     >/dev/null 2>&1 \
+      && echo "  $OK node       : $(node --version 2>&1)" \
+      || echo "  $WARN node      : not installed (optional)"
+    command -v docker   >/dev/null 2>&1 \
+      && echo "  $OK docker     : $(docker --version 2>/dev/null | head -1)" \
+      || echo "  $WARN docker    : not installed (optional — enables sandbox mode)"
+    echo ""
+
+    # Running services
+    echo "── Services ──────────────────────────────────"
+    _UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+    _DASH_PORT="${DASHBOARD_PORT:-3000}"
+    _GW_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
+
+    # Gateway
+    if [[ -f "$RUN_DIR/gateway.pid" ]] && kill -0 "$(cat "$RUN_DIR/gateway.pid" 2>/dev/null)" 2>/dev/null; then
+      echo "  $OK Gateway        : running (port $_GW_PORT)"
+    else
+      echo "  $FAIL Gateway       : not running — run: ai-employee start"
+    fi
+
+    # Dashboard
+    if [[ -f "$RUN_DIR/dashboard.pid" ]] && kill -0 "$(cat "$RUN_DIR/dashboard.pid" 2>/dev/null)" 2>/dev/null; then
+      echo "  $OK Dashboard      : running (port $_DASH_PORT) → http://localhost:$_DASH_PORT"
+    else
+      echo "  $WARN Dashboard     : not running"
+    fi
+
+    # Problem Solver UI
+    if is_running "problem-solver-ui"; then
+      echo "  $OK Problem Solver : running (port $_UI_PORT) → http://localhost:$_UI_PORT"
+    else
+      echo "  $FAIL Problem Solver: not running — run: ai-employee start problem-solver-ui"
+    fi
+
+    # Ollama reachability
+    if curl -sf --max-time 2 "${OLLAMA_HOST:-http://localhost:11434}" >/dev/null 2>&1; then
+      echo "  $OK Ollama API     : reachable at ${OLLAMA_HOST:-http://localhost:11434}"
+    else
+      echo "  $WARN Ollama API    : not reachable (start with: ollama serve)"
+    fi
+    echo ""
+
+    # API keys
+    echo "── API Keys ──────────────────────────────────"
+    [[ -n "${ANTHROPIC_API_KEY:-}" ]] \
+      && echo "  $OK Anthropic API key : set" \
+      || echo "  $WARN Anthropic API key : not set (optional — add to ~/.ai-employee/.env)"
+    [[ -n "${OPENAI_API_KEY:-}" ]] \
+      && echo "  $OK OpenAI API key   : set" \
+      || echo "  $WARN OpenAI API key   : not set (optional)"
+    [[ -n "${JWT_SECRET_KEY:-}" ]] \
+      && echo "  $OK JWT secret       : set" \
+      || echo "  $FAIL JWT secret      : NOT SET — run: ai-employee start (auto-generates)"
+    echo ""
+
+    # Port conflicts
+    echo "── Port Conflicts ────────────────────────────"
+    for _port in "$_UI_PORT" "$_DASH_PORT" "$_GW_PORT" 8788 8789; do
+      if command -v ss >/dev/null 2>&1; then
+        _owner=$(ss -tlnp 2>/dev/null | awk -v p=":${_port} " '$0 ~ p {match($NF,/pid=([0-9]+)/,a); print a[1]}' | head -1)
+      elif command -v lsof >/dev/null 2>&1; then
+        _owner=$(lsof -ti ":${_port}" 2>/dev/null | head -1 || true)
+      else
+        _owner=""
+      fi
+      if [[ -n "${_owner:-}" ]]; then
+        echo "  $OK Port $_port     : in use (pid=$_owner)"
+      else
+        echo "  $WARN Port $_port     : not in use (service on this port is stopped)"
+      fi
+    done
+    echo ""
+
+    # Mode
+    _mode="${AI_EMPLOYEE_MODE:-power}"
+    echo "── Configuration ─────────────────────────────"
+    echo "  $OK Mode           : $_mode  (change: ai-employee mode starter|business|power)"
+    echo "  $OK AI_HOME        : $AI_HOME"
+    echo "  $OK Bots dir       : $BOTS_DIR"
+    echo "  $OK Logs dir       : $LOGS_DIR"
+    echo ""
+    echo "  Tip: Run  ai-employee start --all  to start all services."
+    echo ""
     ;;
   ui)
     start_bot "problem-solver-ui"
@@ -197,6 +293,194 @@ case "$cmd" in
       echo "  -> Open manually: $url"
     fi
     ;;
+  do)
+    # Send any task to your AI employee via the Problem Solver UI API
+    task_text="${*}"
+    if [[ -z "${task_text:-}" ]]; then
+      echo "Usage: ai-employee do <task description>"
+      echo "Example: ai-employee do \"find 10 leads for a web design agency\""
+      exit 1
+    fi
+
+    # Load env for port
+    if [[ -f "$AI_HOME/.env" ]]; then
+      # shellcheck disable=SC1091
+      set -a; source "$AI_HOME/.env" 2>/dev/null || true; set +a
+    fi
+    _UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+    _API="http://127.0.0.1:${_UI_PORT}/api/chat"
+
+    # Start UI if not running
+    if ! is_running "problem-solver-ui"; then
+      echo "Starting AI employee..."
+      start_bot "problem-solver-ui" >/dev/null 2>&1 || true
+      sleep 3
+    fi
+
+    echo "🤖 Sending task to your AI employee..."
+    echo "   Task: $task_text"
+    echo ""
+
+    if command -v curl >/dev/null 2>&1; then
+      _resp=$(curl -sf --max-time 30 \
+        -X POST "$_API" \
+        -H "Content-Type: application/json" \
+        -d "{\"message\": $(printf '%s' "$task_text" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}" \
+        2>/dev/null || true)
+      if [[ -n "${_resp:-}" ]]; then
+        _msg=$(echo "$_resp" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("response",""))' 2>/dev/null || echo "$_resp")
+        echo "✅ Response:"
+        echo "$_msg"
+      else
+        echo "⚠️  AI employee is starting up. Try again in a few seconds."
+        echo "   Or open the dashboard: http://127.0.0.1:${_UI_PORT}"
+      fi
+    else
+      echo "ERROR: curl is required for the 'do' command."
+      exit 1
+    fi
+    ;;
+
+  onboard)
+    # First 15 Minutes Value Flow — auto-runs 3 starter tasks
+    if [[ -f "$AI_HOME/.env" ]]; then
+      # shellcheck disable=SC1091
+      set -a; source "$AI_HOME/.env" 2>/dev/null || true; set +a
+    fi
+    _UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+
+    echo ""
+    echo "╔══════════════════════════════════════════════════════╗"
+    echo "║   🚀 First 15 Minutes Value Flow                     ║"
+    echo "║   Let's generate your first real business results.   ║"
+    echo "╚══════════════════════════════════════════════════════╝"
+    echo ""
+
+    # Start UI if not running
+    if ! is_running "problem-solver-ui"; then
+      echo "Starting AI employee..."
+      start_bot "problem-solver-ui" >/dev/null 2>&1 || true
+      sleep 5
+    fi
+
+    _API="http://127.0.0.1:${_UI_PORT}/api/chat"
+    _total_value=0
+    _total_hours=0
+
+    _run_task() {
+      local label="$1" task="$2" value="$3" hours="$4"
+      echo "── Task: $label ──────────────────────────────"
+      if command -v curl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+        _resp=$(curl -sf --max-time 60 \
+          -X POST "$_API" \
+          -H "Content-Type: application/json" \
+          -d "{\"message\": $(printf '%s' "$task" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}" \
+          2>/dev/null || true)
+        if [[ -n "${_resp:-}" ]]; then
+          _msg=$(echo "$_resp" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("response",""))' 2>/dev/null || echo "$_resp")
+          echo "✅ Done:"
+          echo "$_msg" | head -10
+          _total_value=$(( _total_value + value ))
+          _total_hours=$(( _total_hours + hours ))
+        else
+          echo "⚠️  Task queued (UI still starting). Check dashboard: http://127.0.0.1:${_UI_PORT}"
+        fi
+      else
+        echo "⚠️  curl/python3 required. Task saved to queue."
+      fi
+      echo ""
+    }
+
+    echo "Running 3 tasks automatically. This takes ~2 minutes."
+    echo ""
+
+    _run_task \
+      "Generate 10 leads for your business" \
+      "Find 10 qualified B2B leads for a small agency. Include: company name, contact name, role, email (if available), and why they are a good fit. Format as a list." \
+      500 2
+
+    _run_task \
+      "Write your first sales email" \
+      "Write a personalised cold outreach email for a solo founder reaching out to a potential client. Keep it under 150 words, focus on value not features, include a clear CTA." \
+      200 1
+
+    _run_task \
+      "Analyse your top competitor" \
+      "Analyse the strengths and weaknesses of a typical competitor in the digital agency space. Give 3 opportunities I can exploit as a solo founder." \
+      300 1
+
+    echo "╔══════════════════════════════════════════════════════╗"
+    printf "║  ✅  Estimated value generated:  €%d potential       \n" "$_total_value"
+    printf "║  ⏱️   Estimated time saved:       %d hours            \n" "$_total_hours"
+    echo "╚══════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  📊 Open your dashboard to see full results:"
+    echo "     http://127.0.0.1:${_UI_PORT}"
+    echo ""
+    echo "  Next: run  ai-employee do \"<any task>\"  to keep going."
+    echo ""
+
+    # Mark onboarding complete
+    mkdir -p "$STATE_DIR"
+    echo "{\"onboarded\":true,\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+      > "$STATE_DIR/onboarding.json"
+    ;;
+
+  mode)
+    if [[ -f "$AI_HOME/.env" ]]; then
+      # shellcheck disable=SC1091
+      set -a; source "$AI_HOME/.env" 2>/dev/null || true; set +a
+    fi
+    _new_mode="${1:-}"
+    case "${_new_mode:-}" in
+      starter|business|power)
+        # Update mode in .env
+        if [[ -f "$AI_HOME/.env" ]]; then
+          if grep -q "^AI_EMPLOYEE_MODE=" "$AI_HOME/.env"; then
+            sed -i.bak "s|^AI_EMPLOYEE_MODE=.*|AI_EMPLOYEE_MODE=$_new_mode|" "$AI_HOME/.env"
+            rm -f "$AI_HOME/.env.bak"
+          else
+            echo "AI_EMPLOYEE_MODE=$_new_mode" >> "$AI_HOME/.env"
+          fi
+        fi
+        export AI_EMPLOYEE_MODE="$_new_mode"
+        echo "✅ Mode set to: $_new_mode"
+        case "$_new_mode" in
+          starter)
+            echo ""
+            echo "  Starter mode: 3 agents, 5 commands, no dashboard overload."
+            echo "  Commands: ai-employee do, status, logs, doctor, onboard"
+            ;;
+          business)
+            echo ""
+            echo "  Business mode: templates, ROI tracking, scheduling."
+            echo "  Run: ai-employee ui  to open the full dashboard."
+            ;;
+          power)
+            echo ""
+            echo "  Power mode: all 20 agents, all 126 skills, full dashboard."
+            ;;
+        esac
+        ;;
+      "")
+        _cur="${AI_EMPLOYEE_MODE:-power}"
+        echo "Current mode: $_cur"
+        echo ""
+        echo "Available modes:"
+        echo "  starter  — 3 agents, 5 commands (best for getting started)"
+        echo "  business — templates, ROI, scheduling (recommended for solo founders)"
+        echo "  power    — everything, all 20 agents (advanced users)"
+        echo ""
+        echo "Change mode: ai-employee mode <starter|business|power>"
+        ;;
+      *)
+        echo "Unknown mode: $_new_mode"
+        echo "Valid modes: starter, business, power"
+        exit 1
+        ;;
+    esac
+    ;;
+
   ""|-h|--help|help)
     usage
     ;;
