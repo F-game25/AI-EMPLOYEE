@@ -241,11 +241,11 @@ ai-employee do "reject <action_id>"
 | Tool | Version | Notes |
 |---|---|---|
 | **Linux** | Ubuntu 20.04+ / Debian / Mint / Fedora | `main` branch |
-| **macOS** | 12+ (Monterey or newer) | `mac` branch |
-| **Windows** | Windows 10/11 (PowerShell 5.1+) | `windows` branch |
+| **macOS** | 12+ (Monterey or newer) | `main` branch |
+| **Windows** | Windows 10/11 (PowerShell 5.1+) | `main` branch |
 | **Python 3** | 3.10+ | for bots and dashboard |
 | **curl** | any | for downloading |
-| **OpenSSL** | any | for token generation (Linux/macOS) |
+| **OpenSSL** | any | for token generation |
 | **Node.js** | 20+ | recommended (for OpenClaw gateway) |
 | **Ollama** | any | optional — free local AI, no API key needed |
 
@@ -337,7 +337,7 @@ Invoke-WebRequest https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/in
 Or use the one-click batch file: download and run `quick-install-windows.bat`.
 No WSL or Git Bash required — installs Python, Git, Ollama, and all 33 bots natively.
 
-Everything is installed into **`~/.ai-employee/`**.
+Everything is installed into **`~/.ai-employee/`** (Linux/macOS) or **`%USERPROFILE%\.ai-employee\`** (Windows).
 
 ### Update (re-run installer):
 ```bash
@@ -345,9 +345,24 @@ curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-ins
 ```
 Re-running upgrades runtime files **without overwriting** your existing config or `.env`.
 
+### What the installer asks (advanced mode)
+
+The step-by-step wizard asks:
+
+1. WhatsApp phone number (E.164 format, e.g. `+31612345678`)
+2. Local LLM via Ollama? (yes/no + model name)
+3. Anthropic / OpenAI API keys (optional)
+4. Alpha Insider, Tavily, NewsAPI keys (optional)
+5. Telegram / Discord / SMTP (optional)
+6. Enable hourly WhatsApp status updates?
+7. Dashboard port (default: 3000) and UI port (default: 8787)
+8. Number of workers (1–20, default: 20)
+
 ---
 
 ## Start / Stop
+
+### 🐧 Linux / 🍎 macOS
 
 
 ```bash
