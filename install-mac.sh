@@ -272,14 +272,12 @@ wizard() {
     ask "Enable hourly WhatsApp status updates? [Y/n]:"
     read -r WANT_STATUS < "$tty_in"
     WANT_STATUS="${WANT_STATUS:-y}"
-    STATUS_INTERVAL=3600
+    STATUS_INTERVAL=0
     if [[ ! "$WANT_STATUS" =~ ^[Nn] ]]; then
+        STATUS_INTERVAL=3600
         ok "Status reports: every hour"
     else
-        ask "Status interval in seconds [default: 3600]:"
-        read -r STATUS_INTERVAL_INPUT < "$tty_in"
-        STATUS_INTERVAL="${STATUS_INTERVAL_INPUT:-3600}"
-        ok "Status interval: ${STATUS_INTERVAL}s"
+        ok "Status reports: disabled"
     fi
 
     # 7) UI ports
@@ -674,26 +672,6 @@ SKILL
         fi
     done
 
-    cat > "$AI_HOME/.env" << ENV
-OPENCLAW_GATEWAY_TOKEN=$TOKEN
-${ANTHROPIC_KEY:+ANTHROPIC_API_KEY=$ANTHROPIC_KEY}
-${OPENAI_KEY:+OPENAI_API_KEY=$OPENAI_KEY}
-${ALPHA_INSIDER_KEY:+ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY}
-${TAVILY_KEY:+TAVILY_API_KEY=$TAVILY_KEY}
-${NEWS_API_KEY:+NEWS_API_KEY=$NEWS_API_KEY}
-${TELEGRAM_BOT_TOKEN:+TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN}
-${DISCORD_WEBHOOK_URL:+DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL}
-${SMTP_HOST:+SMTP_HOST=$SMTP_HOST}
-${SMTP_USER:+SMTP_USER=$SMTP_USER}
-${SMTP_PASS:+SMTP_PASS=$SMTP_PASS}
-${ELEVEN_LABS_KEY:+ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY}
-OLLAMA_HOST=$OLLAMA_HOST
-OLLAMA_MODEL=$OLLAMA_MODEL
-CLAUDE_MODEL=$CLAUDE_MODEL
-OPENCLAW_DISABLE_BONJOUR=1
-TZ=Europe/Amsterdam
-ENV
-    chmod 600 "$AI_HOME/.env"
     ok "Skills installed"
 }
 
@@ -796,6 +774,8 @@ CFG_END
             [[ -n "${ELEVEN_LABS_KEY:-}" ]]       && echo "ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY"
             echo "OPENCLAW_DISABLE_BONJOUR=1"
             echo "DASHBOARD_PORT=${DASHBOARD_PORT:-3000}"
+            echo "PROBLEM_SOLVER_UI_PORT=${UI_PORT:-8787}"
+            echo "UI_PORT=${UI_PORT:-8787}"
             echo "TZ=Europe/Amsterdam"
         } > "$AI_HOME/.env"
         chmod 600 "$AI_HOME/.env"

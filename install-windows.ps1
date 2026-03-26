@@ -625,14 +625,23 @@ AI_HOME=$AI_HOME
 "@
 Set-Content -Path (Join-Path $AI_HOME 'config\problem-solver-ui.env') -Value $uiEnv -Encoding UTF8
 
-# 9d. Status-reporter config
-$intervalSecs = if ($HOURLY_STATUS) { 3600 } else { 0 }
-$statusEnv = @"
+# 9d. Status-reporter config — omit STATUS_REPORT_INTERVAL_SECONDS when disabled
+#     so the bot is never started with interval=0 (which causes a busy loop)
+if ($HOURLY_STATUS) {
+    $statusEnv = @"
 WHATSAPP_PHONE=$WHATSAPP_PHONE
-STATUS_REPORT_INTERVAL_SECONDS=$intervalSecs
+STATUS_REPORT_INTERVAL_SECONDS=3600
 OPENCLAW_GATEWAY_TOKEN=$AI_SECRET_TOKEN
 OPENCLAW_PORT=18789
 "@
+} else {
+    $statusEnv = @"
+WHATSAPP_PHONE=$WHATSAPP_PHONE
+STATUS_REPORT_INTERVAL_SECONDS=-1
+OPENCLAW_GATEWAY_TOKEN=$AI_SECRET_TOKEN
+OPENCLAW_PORT=18789
+"@
+}
 Set-Content -Path (Join-Path $AI_HOME 'config\status-reporter.env') -Value $statusEnv -Encoding UTF8
 
 Write-OK "Service config files written."

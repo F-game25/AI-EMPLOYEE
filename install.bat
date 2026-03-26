@@ -24,13 +24,13 @@ set TEMP_DIR=%TEMP%\ai-employee-install-%RANDOM%
 mkdir "%TEMP_DIR%" 2>nul
 
 powershell -ExecutionPolicy Bypass -Command ^
-    "try { (New-Object System.Net.WebClient).DownloadFile('https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/windows/install-windows.ps1', '%TEMP_DIR%\install-windows.ps1'); Write-Host 'Download OK' -ForegroundColor Green } catch { Write-Host ('Download failed: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
+    "try { (New-Object System.Net.WebClient).DownloadFile('https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/install-windows.ps1', '%TEMP_DIR%\install-windows.ps1'); Write-Host 'Download OK' -ForegroundColor Green } catch { Write-Host ('Download failed: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo ERROR: Could not download install-windows.ps1.
     echo Please check your internet connection, or download manually from:
-    echo   https://github.com/F-game25/AI-EMPLOYEE/tree/windows
+    echo   https://github.com/F-game25/AI-EMPLOYEE/tree/main
     echo.
     pause
     exit /b 1
