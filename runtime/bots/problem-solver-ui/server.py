@@ -13,6 +13,7 @@ Config is read/written in ~/.ai-employee/config/
 import json
 import logging
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -75,7 +76,10 @@ _REPO_TEMPLATES_FILE = Path(__file__).parent.parent.parent / "config" / "agent_t
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(message)s",
+)
 logger = logging.getLogger("problem-solver-ui")
 
 # ── AI router (Ollama first, cloud fallback) ──────────────────────────────────
@@ -121,20 +125,25 @@ app.add_middleware(
 # ── Security headers middleware (openclaw-2) ──────────────────────────────────
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
-    """Attach HTTP security headers to every response."""
+    """Attach HTTP security headers to every response.
+
+    The index route (/) generates its own tighter CSP with a per-request nonce
+    for the inline script block.  This middleware only sets the CSP fallback for
+    all other routes (JSON API endpoints) that don't set one themselves.
+    """
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    # NOTE: The AI Employee dashboard uses extensive inline CSS and JS in its
-    # HTML template (INDEX_HTML). Until those are moved to external files with
-    # hashes/nonces, 'unsafe-inline' and 'unsafe-eval' are required. This is a
-    # known limitation; contributions to remove them are welcome.
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: "
-        "https://fonts.googleapis.com https://fonts.gstatic.com"
-    )
+    # Only set the fallback CSP when the index route has not already applied
+    # a tighter nonce-based policy for the dashboard HTML.
+    if "Content-Security-Policy" not in response.headers:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; "
+            "img-src 'self' data: blob:"
+        )
     return response
 
 # ── Audit logging middleware (openclaw-2) ─────────────────────────────────────
@@ -189,8 +198,6 @@ def ai_employee(*args: str) -> tuple:
     except Exception as e:
         return 1, str(e)
 
-
-# ─── HTML Dashboard ────────────────────────────────────────────────────────────
 
 # ─── HTML Dashboard ────────────────────────────────────────────────────────────
 
@@ -1065,7 +1072,7 @@ INDEX_HTML = r"""<!doctype html>
 
 <div id="toast"></div>
 
-<script>
+<script nonce="__CSP_NONCE__">
 let currentTab = 'dashboard';
 const _startTime = Date.now();
 
@@ -2489,7 +2496,17 @@ setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return INDEX_HTML
+    nonce = secrets.token_urlsafe(16)
+    html = INDEX_HTML.replace("__CSP_NONCE__", nonce)
+    csp = (
+        "default-src 'self'; "
+        f"script-src 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'"
+    )
+    return HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
 
 
 # ── Security endpoints (openclaw-2) ───────────────────────────────────────────

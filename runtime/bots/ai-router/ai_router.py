@@ -289,65 +289,6 @@ def query_ai(
     }
 
 
-def query_ai_for_agent(
-    prompt: str,
-    agent_id: Optional[str] = None,
-    category: Optional[str] = None,
-    system_prompt: str = "",
-    history: Optional[list] = None,
-) -> dict:
-    """Route an AI query to the optimal provider for a specific agent type.
-
-    Per-agent model routing:
-      - sales agents (lead-hunter, email-ninja, web-sales, email-marketer)
-          → OpenAI GPT-4o (persuasive, human-like copy)
-      - analytics/research agents (data-analyst, intel-agent, ecom-dashboard)
-          → Anthropic Claude (superior long-context analysis)
-      - all other agents
-          → Ollama (local, free, private)
-
-    Falls back to the standard query_ai() priority chain if the preferred
-    provider is unavailable.
-
-    Args:
-        prompt:        The user message or question.
-        agent_id:      The agent identifier (e.g. "lead-hunter", "data-analyst").
-        category:      Agent category if agent_id not known ("sales", "analytics", …).
-        system_prompt: Optional system/role instructions for the AI.
-        history:       Optional prior conversation history.
-
-    Returns:
-        Same dict structure as query_ai().
-    """
-    history = history or []
-    routing = _route_for_agent(agent_id, category)
-    preferred = routing["provider"]
-    model = os.environ.get(routing["model_env"], routing["default_model"])
-
-    logger.debug(
-        "ai_router: agent_id=%s category=%s → preferred provider=%s model=%s",
-        agent_id, category, preferred, model,
-    )
-
-    # Try preferred provider first
-    if preferred == "openai":
-        result = _try_openai(prompt, system_prompt, history, model=model)
-        if result:
-            return result
-    elif preferred == "anthropic":
-        result = _try_anthropic(prompt, system_prompt, history, model=model)
-        if result:
-            return result
-    else:  # ollama / general
-        result = _try_ollama(prompt, system_prompt, history, model=model)
-        if result:
-            return result
-
-    # Fall back to standard priority chain
-    logger.debug("ai_router: preferred provider unavailable, falling back to standard chain")
-    return query_ai(prompt, system_prompt=system_prompt, history=history)
-
-
 def is_ollama_available() -> bool:
     """Quick check whether the local Ollama instance is reachable."""
     try:
