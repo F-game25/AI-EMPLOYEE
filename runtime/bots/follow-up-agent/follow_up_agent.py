@@ -69,6 +69,30 @@ except ImportError:
     def _best_template(*a, **kw):  # type: ignore
         return ""
 
+_memory_path = AI_HOME / "bots" / "memory"
+if str(_memory_path) not in sys.path:
+    sys.path.insert(0, str(_memory_path))
+try:
+    from memory_store import MemoryStore as _MemoryStore  # type: ignore
+    _MEMORY: "_MemoryStore | None" = _MemoryStore()
+except ImportError:
+    _MEMORY = None
+
+# ── Feedback loop (optional) ──────────────────────────────────────────────────
+
+_feedback_path = AI_HOME / "bots" / "feedback-loop"
+if str(_feedback_path) not in sys.path:
+    sys.path.insert(0, str(_feedback_path))
+try:
+    from feedback_loop import record_message as _record_message, get_best_template_as_example as _best_template  # type: ignore
+    _FEEDBACK_AVAILABLE = True
+except ImportError:
+    _FEEDBACK_AVAILABLE = False
+    def _record_message(*a, **kw):  # type: ignore
+        return ""
+    def _best_template(*a, **kw):  # type: ignore
+        return ""
+
 # Tone progression: attempt index → (label, system prompt)
 _TONE = {
     1: (
@@ -135,6 +159,17 @@ def _ai(prompt: str, system: str = "") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
     return (_query_ai_for_agent("sales", prompt, system_prompt=system) or {}).get("answer", "")
+    # Retrieve conversation history for this lead (last 10 turns)
+    history = []
+    if _MEMORY_AVAILABLE and _memory and lead_id:
+        history = _memory.get_history(lead_id, last_n=10)
+    result = (_query_ai(prompt, system_prompt=system, history=history) or {})
+    answer = result.get("answer", "")
+    # Store the exchange in memory
+    if _MEMORY_AVAILABLE and _memory and lead_id and answer:
+        _memory.add_turn(lead_id, role="user", content=prompt)
+        _memory.add_turn(lead_id, role="assistant", content=answer)
+    return answer
 
 
 def load_crm() -> dict:
