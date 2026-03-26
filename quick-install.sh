@@ -3,6 +3,12 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash -s -- --zero-config
+#
+# ─── Platform guide ────────────────────────────────────────────────────────────
+#   Linux:   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+#   macOS:   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install-mac.sh | bash
+#   Windows: Download quick-install-windows.bat from the main branch on GitHub
+# ───────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 
