@@ -322,40 +322,52 @@ Write-Step "Waiting 2 s before starting remaining bots…"
 Start-Sleep -Seconds 2
 
 # ─── 8. Bot manifest (name → python file) ─────────────────────────────────────
-$bots = [ordered]@{
-    'problem-solver'        = 'problem_solver.py'
-    'polymarket-trader'     = 'trader.py'
-    'status-reporter'       = 'status_reporter.py'
-    'scheduler-runner'      = 'scheduler.py'
-    'discovery'             = 'discovery.py'
-    'skills-manager'        = 'skills_manager.py'
-    'mirofish-researcher'   = 'researcher.py'
-    'ollama-agent'          = 'ollama_agent.py'
-    'claude-agent'          = 'claude_agent.py'
-    'web-researcher'        = 'web_researcher.py'
-    'social-media-manager'  = 'social_media_manager.py'
-    'lead-generator'        = 'lead_generator.py'
-    'recruiter'             = 'recruiter.py'
-    'ecom-agent'            = 'ecom_agent.py'
-    'creator-agency'        = 'creator_agency.py'
-    'signal-community'      = 'signal_community.py'
-    'appointment-setter'    = 'appointment_setter.py'
-    'newsletter-bot'        = 'newsletter_bot.py'
-    'chatbot-builder'       = 'chatbot_builder.py'
-    'faceless-video'        = 'faceless_video.py'
-    'print-on-demand'       = 'print_on_demand.py'
-    'course-creator'        = 'course_creator.py'
-    'arbitrage-bot'         = 'arbitrage_bot.py'
-    'task-orchestrator'     = 'task_orchestrator.py'
-    'company-builder'       = 'company_builder.py'
-    'memecoin-creator'      = 'memecoin_creator.py'
-    'hr-manager'            = 'hr_manager.py'
-    'finance-wizard'        = 'finance_wizard.py'
-    'brand-strategist'      = 'brand_strategist.py'
-    'growth-hacker'         = 'growth_hacker.py'
-    'project-manager'       = 'project_manager.py'
+# Determine whether to start status-reporter. Treat interval <= 0 as disabled.
+$statusReporterIntervalRaw = $env:STATUS_REPORT_INTERVAL_SECONDS
+$statusReporterEnabled = $true
+if ($statusReporterIntervalRaw) {
+    $parsedInterval = 0
+    if ([int]::TryParse($statusReporterIntervalRaw, [ref]$parsedInterval)) {
+        if ($parsedInterval -le 0) {
+            $statusReporterEnabled = $false
+        }
+    }
 }
 
+$bots = [ordered]@{}
+$bots['problem-solver']        = 'problem_solver.py'
+$bots['polymarket-trader']     = 'trader.py'
+if ($statusReporterEnabled) {
+    $bots['status-reporter']    = 'status_reporter.py'
+}
+$bots['scheduler-runner']      = 'scheduler.py'
+$bots['discovery']             = 'discovery.py'
+$bots['skills-manager']        = 'skills_manager.py'
+$bots['mirofish-researcher']   = 'researcher.py'
+$bots['ollama-agent']          = 'ollama_agent.py'
+$bots['claude-agent']          = 'claude_agent.py'
+$bots['web-researcher']        = 'web_researcher.py'
+$bots['social-media-manager']  = 'social_media_manager.py'
+$bots['lead-generator']        = 'lead_generator.py'
+$bots['recruiter']             = 'recruiter.py'
+$bots['ecom-agent']            = 'ecom_agent.py'
+$bots['creator-agency']        = 'creator_agency.py'
+$bots['signal-community']      = 'signal_community.py'
+$bots['appointment-setter']    = 'appointment_setter.py'
+$bots['newsletter-bot']        = 'newsletter_bot.py'
+$bots['chatbot-builder']       = 'chatbot_builder.py'
+$bots['faceless-video']        = 'faceless_video.py'
+$bots['print-on-demand']       = 'print_on_demand.py'
+$bots['course-creator']        = 'course_creator.py'
+$bots['arbitrage-bot']         = 'arbitrage_bot.py'
+$bots['task-orchestrator']     = 'task_orchestrator.py'
+$bots['company-builder']       = 'company_builder.py'
+$bots['memecoin-creator']      = 'memecoin_creator.py'
+$bots['hr-manager']            = 'hr_manager.py'
+$bots['finance-wizard']        = 'finance_wizard.py'
+$bots['brand-strategist']      = 'brand_strategist.py'
+$bots['growth-hacker']         = 'growth_hacker.py'
+$bots['project-manager']       = 'project_manager.py'
 Write-Step "Starting $($bots.Count) background bots…"
 Write-Host ""
 
