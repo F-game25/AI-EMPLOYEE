@@ -17,16 +17,33 @@ Config env vars:
   FOLLOWUP_MAX_ATTEMPTS     — max follow-up attempts before marking lost (default: 5)
 """
 import json
+import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+logger = logging.getLogger("follow-up-agent")
+
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_FILE = AI_HOME / "state" / "follow-up-agent.state.json"
 CHATLOG    = AI_HOME / "state" / "chatlog.jsonl"
 CRM_FILE   = AI_HOME / "state" / "lead-generator-crm.json"
+
+# ── WhatsApp tool (optional) ──────────────────────────────────────────────────
+
+_tools_path = AI_HOME / "bots" / "tools"
+if str(_tools_path) not in sys.path:
+    sys.path.insert(0, str(_tools_path))
+try:
+    from whatsapp import send_whatsapp as _send_whatsapp, is_whatsapp_configured as _wa_ok  # type: ignore
+    _WHATSAPP_AVAILABLE = _wa_ok()
+except ImportError:
+    _WHATSAPP_AVAILABLE = False
+    def _send_whatsapp(*a, **kw):  # type: ignore
+        return False, {"error": "whatsapp not available"}
 
 POLL_INTERVAL  = int(os.environ.get("FOLLOWUP_POLL_INTERVAL", "5"))
 WAIT_HOURS     = int(os.environ.get("FOLLOWUP_WAIT_HOURS", "48"))
@@ -206,13 +223,30 @@ def _send_followup(lead: dict, crm: dict) -> str:
         system=system_prompt,
     )
 
-    lead["outreach_messages"].append({
+    msg_record: dict = {
         "channel": "followup",
         "attempt": attempt_no,
         "tone": tone_label,
         "message": msg,
         "ts": now_iso(),
-    })
+        "direction": "outbound",
+    }
+
+    # Send via WhatsApp (Twilio) if a valid E.164 phone number is present
+    phone = lead.get("phone", "")
+    if phone and re.match(r"^\+?[1-9]\d{6,14}$", phone.replace(" ", "")) and _WHATSAPP_AVAILABLE:
+        wa_ok, wa_info = _send_whatsapp(to=phone, message=msg)
+        if wa_ok:
+            msg_record["sent_via"] = "whatsapp"
+            msg_record["message_sid"] = wa_info.get("message_sid", "")
+        else:
+            logger.warning(
+                "WhatsApp send failed for lead %s: %s",
+                lead["id"], wa_info.get("error", "unknown error"),
+            )
+            msg_record["send_error"] = wa_info.get("error", "unknown error")
+
+    lead["outreach_messages"].append(msg_record)
 
     # Register message with feedback loop
     if _FEEDBACK_AVAILABLE:
