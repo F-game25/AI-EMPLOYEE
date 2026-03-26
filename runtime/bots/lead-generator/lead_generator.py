@@ -41,10 +41,59 @@ _ai_router_path = AI_HOME / "bots" / "ai-router"
 if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 try:
-    from ai_router import query_ai as _query_ai, search_web as _search_web  # type: ignore
+    from ai_router import query_ai as _query_ai, query_ai_for_agent as _query_ai_for_agent, search_web as _search_web  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
+    def _query_ai_for_agent(*a, **kw):  # type: ignore
+        return {"answer": "[AI unavailable]"}
+
+# ── Memory store (optional) ───────────────────────────────────────────────────
+
+_memory_path = AI_HOME / "bots" / "memory"
+if str(_memory_path) not in sys.path:
+    sys.path.insert(0, str(_memory_path))
+try:
+    from memory_store import MemoryStore as _MemoryStore  # type: ignore
+    _MEMORY: "_MemoryStore | None" = _MemoryStore()
+except ImportError:
+    _MEMORY = None
+
+# ── Feedback loop (optional) ──────────────────────────────────────────────────
+
+_feedback_path = AI_HOME / "bots" / "feedback-loop"
+if str(_feedback_path) not in sys.path:
+    sys.path.insert(0, str(_feedback_path))
+try:
+    from feedback_loop import record_message as _record_message, get_best_template_as_example as _best_template  # type: ignore
+    _FEEDBACK_AVAILABLE = True
+except ImportError:
+    _FEEDBACK_AVAILABLE = False
+    def _record_message(*a, **kw):  # type: ignore
+        return ""
+    def _best_template(*a, **kw):  # type: ignore
+        return ""
+
+# ── Real tool integrations (optional) ────────────────────────────────────────
+
+_tools_path = AI_HOME / "bots" / "tools"
+if str(_tools_path) not in sys.path:
+    sys.path.insert(0, str(_tools_path))
+try:
+    from email_sender import send_email as _send_email, is_email_configured as _email_ok  # type: ignore
+    _EMAIL_AVAILABLE = _email_ok()
+except ImportError:
+    _EMAIL_AVAILABLE = False
+    def _send_email(*a, **kw):  # type: ignore
+        return False, {"error": "email_sender not available"}
+
+try:
+    from whatsapp import send_whatsapp as _send_whatsapp, is_whatsapp_configured as _wa_ok  # type: ignore
+    _WHATSAPP_AVAILABLE = _wa_ok()
+except ImportError:
+    _WHATSAPP_AVAILABLE = False
+    def _send_whatsapp(*a, **kw):  # type: ignore
+        return False, {"error": "whatsapp not available"}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,10 +122,10 @@ def append_chatlog(e: dict) -> None:
         f.write(json.dumps(e) + "\n")
 
 
-def _ai(prompt: str, system: str = "") -> str:
+def _ai(prompt: str, system: str = "", agent_type: str = "sales") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
-    return (_query_ai(prompt, system_prompt=system) or {}).get("answer", "")
+    return (_query_ai_for_agent(agent_type, prompt, system_prompt=system) or {}).get("answer", "")
 
 
 def _web(query: str) -> str:
@@ -162,6 +211,7 @@ def find_leads(niche: str, location: str, is_real_estate: bool = False) -> str:
         system="You are a B2B lead generation specialist. Find real local businesses from "
                "web search snippets. Extract only factual data present in the snippets. "
                "Return valid JSON only.",
+        agent_type="analytical",
     )
 
     try:
@@ -174,6 +224,10 @@ def find_leads(niche: str, location: str, is_real_estate: bool = False) -> str:
     existing_names = {i["name"].lower() for i in crm["items"]}
     added = []
 
+    # Get best-performing email template to use as example
+    best_example = _best_template(niche=category, channel="email") if _FEEDBACK_AVAILABLE else ""
+    example_hint = f"\n\nBest-performing example:\n{best_example}" if best_example else ""
+
     for biz in leads_raw[:10]:
         name = biz.get("name", "Unknown")
         if name.lower() in existing_names:
@@ -184,17 +238,55 @@ def find_leads(niche: str, location: str, is_real_estate: bool = False) -> str:
         lead["phone"]   = biz.get("phone", "")
         lead["email"]   = biz.get("email", "")
 
+        # Load memory context for this lead (if they exist in memory already)
+        memory_context = ""
+        if _MEMORY:
+            memory_context = _MEMORY.facts_as_context(f"lead_{lead['id']}")
+            _MEMORY.remember(
+                entity_id=f"lead_{lead['id']}",
+                key="niche",
+                value=category,
+                entity_type="lead",
+                tags=[category.lower(), location.lower()],
+            )
+            _MEMORY.remember(f"lead_{lead['id']}", "location", location)
+            _MEMORY.remember(f"lead_{lead['id']}", "name", name)
+            if lead["website"]:
+                _MEMORY.remember(f"lead_{lead['id']}", "website", lead["website"])
+
         cold_email = _ai(
             f"Write a personalised cold email for this business:\n"
             f"Name: {name}\nNiche: {category}\nLocation: {location}\n"
-            f"Website: {lead['website']}",
+            f"Website: {lead['website']}"
+            f"{memory_context}"
+            f"{example_hint}",
             system="You are an expert cold email copywriter. Write a personalised, short "
                    "(150 words max), value-focused cold email. Use a compelling subject line. "
                    "Be specific, avoid generic phrases. End with a clear CTA.",
+            agent_type="sales",
         )
         lead["outreach_messages"].append({"channel": "email", "message": cold_email, "ts": now_iso()})
         lead["status"] = "new"
         lead["updated_at"] = now_iso()
+
+        # Register message with feedback loop for tracking
+        if _FEEDBACK_AVAILABLE:
+            _record_message(
+                lead_id=lead["id"],
+                message=cold_email,
+                niche=category,
+                channel="email",
+                tone="cold_outreach",
+            )
+
+        # Store outreach in memory
+        if _MEMORY:
+            _MEMORY.append_conversation(
+                entity_id=f"lead_{lead['id']}",
+                role="assistant",
+                content=cold_email,
+                entity_type="lead",
+            )
 
         crm["items"].append(lead)
         existing_names.add(name.lower())
@@ -226,15 +318,44 @@ def followup_leads() -> str:
 
     results = []
     for lead in due[:5]:
+        # Include conversation history from memory
+        memory_context = ""
+        if _MEMORY:
+            memory_context = _MEMORY.get_conversation_summary(f"lead_{lead['id']}")
+            if memory_context and memory_context != "(no conversation history)":
+                memory_context = f"\n\nConversation history:\n{memory_context}"
+            else:
+                memory_context = ""
+
         msg = _ai(
             f"Write a brief follow-up for this lead:\n"
-            f"Name: {lead['name']}\nNiche: {lead['niche']}\nLast contacted: {lead['updated_at']}",
+            f"Name: {lead['name']}\nNiche: {lead['niche']}\nLast contacted: {lead['updated_at']}"
+            f"{memory_context}",
             system="You are a sales follow-up specialist. Write a brief, non-pushy follow-up "
                    "message (under 80 words). Reference the previous contact naturally.",
+            agent_type="sales",
         )
         lead["outreach_messages"].append({"channel": "followup", "message": msg, "ts": now_iso()})
         lead["next_followup"] = now_iso()
         lead["updated_at"] = now_iso()
+
+        # Track with feedback loop
+        if _FEEDBACK_AVAILABLE:
+            _record_message(
+                lead_id=lead["id"],
+                message=msg,
+                niche=lead.get("niche", ""),
+                channel="followup",
+            )
+
+        if _MEMORY:
+            _MEMORY.append_conversation(
+                entity_id=f"lead_{lead['id']}",
+                role="assistant",
+                content=msg,
+                entity_type="lead",
+            )
+
         results.append(f"[{lead['id']}] {lead['name']}: follow-up generated")
 
     save_crm(crm)
@@ -248,19 +369,70 @@ def outreach_lead(lead_id: str, channel: str) -> str:
         return f"Lead '{lead_id}' not found."
 
     channel = channel.lower()
+
+    # Load memory context to personalise the message
+    memory_context = ""
+    history = []
+    if _MEMORY:
+        memory_context = _MEMORY.facts_as_context(f"lead_{lead_id}")
+        history = _MEMORY.get_conversation(f"lead_{lead_id}", last_n=6)
+
+    # Get best-performing template as example
+    best_example = _best_template(niche=lead.get("niche", ""), channel=channel) if _FEEDBACK_AVAILABLE else ""
+    example_hint = f"\n\nBest-performing example:\n{best_example}" if best_example else ""
+
     msg = _ai(
         f"Generate a personalised {channel} outreach message for:\n"
         f"Name: {lead['name']}\nNiche: {lead['niche']}\nLocation: {lead['location']}\n"
-        f"Website: {lead['website']}",
+        f"Website: {lead['website']}"
+        f"{memory_context}"
+        f"{example_hint}",
         system="You are an expert cold email copywriter. Write a personalised, short "
                "(150 words max), value-focused outreach message tailored to the channel. "
                "Be specific and end with a clear CTA.",
+        agent_type="sales",
     )
     lead["outreach_messages"].append({"channel": channel, "message": msg, "ts": now_iso()})
     lead["status"] = "contacted"
     lead["updated_at"] = now_iso()
+
+    # Register message with feedback loop
+    if _FEEDBACK_AVAILABLE:
+        _record_message(
+            lead_id=lead_id,
+            message=msg,
+            niche=lead.get("niche", ""),
+            channel=channel,
+            tone="personalised",
+        )
+
+    # Store in memory
+    if _MEMORY:
+        _MEMORY.append_conversation(
+            entity_id=f"lead_{lead_id}",
+            role="assistant",
+            content=msg,
+            entity_type="lead",
+        )
+
+    delivery_note = ""
+
+    # Actually send the message via real tools if configured
+    if channel == "email" and _EMAIL_AVAILABLE and lead.get("email"):
+        subject_line = msg.split("\n")[0][:100] if msg else "Quick question"
+        ok, info = _send_email(
+            to=lead["email"],
+            subject=subject_line,
+            body=msg,
+        )
+        delivery_note = f"\n✅ Email sent to {lead['email']}" if ok else f"\n⚠️ Email failed: {info.get('error','')}"
+
+    elif channel in ("whatsapp", "wa") and _WHATSAPP_AVAILABLE and lead.get("phone"):
+        ok, info = _send_whatsapp(to=lead["phone"], message=msg)
+        delivery_note = f"\n✅ WhatsApp sent to {lead['phone']}" if ok else f"\n⚠️ WhatsApp failed: {info.get('error','')}"
+
     save_crm(crm)
-    return f"Outreach for [{lead_id}] {lead['name']} via {channel}:\n\n{msg}"
+    return f"Outreach for [{lead_id}] {lead['name']} via {channel}:{delivery_note}\n\n{msg}"
 
 
 def pipeline_summary() -> str:
