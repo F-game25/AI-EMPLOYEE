@@ -51,8 +51,9 @@ echo   2. Windows Subsystem for Linux (WSL):
 echo      Run in PowerShell (Admin): wsl --install
 echo      Then restart and re-run this installer.
 echo.
-echo   3. Or use install.ps1 (PowerShell):
-echo      Right-click install.ps1 > "Run with PowerShell"
+echo   3. Or use install-windows.ps1 (native PowerShell, no Git Bash needed):
+echo      Right-click install-windows.ps1 > "Run with PowerShell"
+echo      Or: powershell -ExecutionPolicy Bypass -File install-windows.ps1
 pause
 exit /b 1
 
