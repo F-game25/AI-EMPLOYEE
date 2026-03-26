@@ -1,9 +1,15 @@
 {
   "_meta": {
-    "version": "2.0",
-    "description": "Capabilities map for all 20 AI agents \u2014 used by task-orchestrator for intelligent routing",
+    "version": "2.1",
+    "description": "Capabilities map for all 20 AI agents — used by task-orchestrator for intelligent routing",
     "total_agents": 20,
-    "updated_at": "2026-03-24"
+    "updated_at": "2026-03-26",
+    "model_routing": {
+      "sales": {"provider": "openai", "model": "gpt-4o", "rationale": "GPT-4o excels at persuasive, human-like copy"},
+      "analytics": {"provider": "anthropic", "model": "claude-opus-4-5", "rationale": "Claude excels at long-context data analysis"},
+      "research": {"provider": "anthropic", "model": "claude-opus-4-5", "rationale": "Claude excels at long-context research synthesis"},
+      "general": {"provider": "ollama", "model": "llama3.2", "rationale": "Local Ollama for privacy-preserving general tasks"}
+    }
   },
   "agents": {
     "orchestrator": {
@@ -29,8 +35,10 @@
       "parallel_capable": true
     },
     "lead-hunter": {
-      "description": "B2B Lead Generation Specialist \u2014 finds decision makers, emails, and qualifies leads",
+      "description": "B2B Lead Generation Specialist — finds decision makers, emails, and qualifies leads",
       "category": "sales",
+      "model_provider": "openai",
+      "model": "gpt-4o",
       "skills": [
         "lead_generation",
         "prospect_research",
@@ -96,8 +104,10 @@
       "parallel_capable": true
     },
     "intel-agent": {
-      "description": "Competitive Intelligence Analyst \u2014 monitors competitors: pricing, features, reviews, traffic",
+      "description": "Competitive Intelligence Analyst — monitors competitors: pricing, features, reviews, traffic",
       "category": "research",
+      "model_provider": "anthropic",
+      "model": "claude-opus-4-5",
       "skills": [
         "competitive_analysis",
         "market_trend_analysis",
@@ -139,8 +149,10 @@
       "parallel_capable": true
     },
     "email-ninja": {
-      "description": "Cold Email Specialist \u2014 builds sequences, personalizes at scale, optimizes deliverability",
+      "description": "Cold Email Specialist — builds sequences, personalizes at scale, optimizes deliverability",
       "category": "sales",
+      "model_provider": "openai",
+      "model": "gpt-4o",
       "skills": [
         "email_copywriting",
         "cold_email_sequences",
@@ -185,8 +197,10 @@
       "parallel_capable": true
     },
     "data-analyst": {
-      "description": "Market Research Analyst \u2014 analyzes trends, generates SWOT, creates reports with data",
+      "description": "Market Research Analyst — analyzes trends, generates SWOT, creates reports with data",
       "category": "analytics",
+      "model_provider": "anthropic",
+      "model": "claude-opus-4-5",
       "skills": [
         "data_analysis",
         "market_trend_analysis",
@@ -274,8 +288,10 @@
       "parallel_capable": true
     },
     "web-sales": {
-      "description": "Web Analysis & Sales Specialist \u2014 UX/SEO audits, find contacts, write personalized pitches",
+      "description": "Web Analysis & Sales Specialist — UX/SEO audits, find contacts, write personalized pitches",
       "category": "sales",
+      "model_provider": "openai",
+      "model": "gpt-4o",
       "skills": [
         "website_audit",
         "seo_optimization",
@@ -546,8 +562,10 @@
       "parallel_capable": true
     },
     "email-marketer": {
-      "description": "Email Marketing Agent \u2014 segments customers (new/abandoned-cart/repeat), generates personalised GPT-powered email copy, runs A/B tests on subject lines, and sends via Mailchimp",
-      "category": "marketing",
+      "description": "Email Marketing Agent — segments customers (new/abandoned-cart/repeat), generates personalised GPT-powered email copy, runs A/B tests on subject lines, and sends via Mailchimp",
+      "category": "sales",
+      "model_provider": "openai",
+      "model": "gpt-4o",
       "skills": [
         "customer_segmentation",
         "email_copywriting",
@@ -625,8 +643,10 @@
       "parallel_capable": true
     },
     "ecom-dashboard": {
-      "description": "E-commerce Dashboard Agent \u2014 aggregates real-time metrics (revenue, profit margin, orders, top products) from Stripe + Shopify and surfaces alerts for anomalies",
+      "description": "E-commerce Dashboard Agent — aggregates real-time metrics (revenue, profit margin, orders, top products) from Stripe + Shopify and surfaces alerts for anomalies",
       "category": "analytics",
+      "model_provider": "anthropic",
+      "model": "claude-opus-4-5",
       "skills": [
         "revenue_tracking",
         "profit_margin_calc",

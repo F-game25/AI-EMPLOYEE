@@ -1,136 +1,238 @@
 # 🤖 AI Employee
 
-> **Autonomous 20-agent AI company** — download, install, and run 20 AI workers controlled via WhatsApp and a local web dashboard. Give the AI any task — it self-selects agents, decomposes the work, and executes in parallel.
+> **Your AI leverage machine for solo founders & small agencies** — one install, one command, and your AI employee starts generating leads, writing sales emails, and automating your ops.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## Overview
+## Who is this for?
 
-AI Employee is a self-hosted AI workforce that runs on your own machine (Linux, macOS, or WSL). You control your agents via **WhatsApp** or the **local dashboard**, give them tasks in plain English, and watch them collaborate autonomously.
+**AI Employee is built for solo founders and small agencies** who want leverage — not complexity.
 
-| Feature | Details |
-|---|---|
-| **20 AI agents** | Full company team: strategy, finance, HR, brand, growth, PM + specialist bots |
-| **Task Orchestrator** | Give any task → AI decomposes it → assigns agents → runs in parallel → aggregates results |
-| Control | WhatsApp + Web Dashboard (Tasks tab + Swarm view) |
-| Local LLM | Ollama support (privacy-first) or cloud (Anthropic/OpenAI) |
-| Persistence | State survives restarts; bots auto-restart on crash |
-| Scheduling | Schedule tasks via UI or WhatsApp |
-| 126 skills | 17 categories covering every business function |
-| Continuous improvement | Discovery bot proposes new skills; you approve |
+You run a business. You don't have time to manage 20 agents and 126 skills. You just want results:
+- 10 qualified leads today
+- A sales email in your inbox
+- Your customer support running on autopilot
+
+That's exactly what AI Employee does. One AI employee that handles your tasks — powered by specialist AI agents working behind the scenes.
 
 ---
 
-## 🤖 The 20 Agents
+## ⚡ Quickstart — Your First Business Result in 15 Minutes
 
-### Core Business Team (NEW)
-| Agent | Prefix | What it does |
+### Option A — Zero-config (recommended for new users, no questions asked):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash -s -- --zero-config
+```
+
+Installs with safe defaults: local Ollama model, Starter mode, 5 agents. No API keys required.
+
+### Option B — Advanced install (choose your model, mode, integrations):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+```
+
+### After install — generate your first results:
+
+```bash
+cd ~/.ai-employee && ./start.sh   # Start your AI employee (opens dashboard)
+ai-employee onboard               # Run the First 15 Minutes Value Flow
+```
+
+The onboard command auto-runs 3 tasks and shows you the estimated value generated:
+
+```
+✅ Generated 10 leads for your business
+✅ Wrote 1 sales email
+✅ Analysed 1 competitor
+
+✅ Estimated value generated: €1,000 potential
+⏱️  Estimated time saved: 4 hours
+```
+
+---
+
+## 🎯 Send Any Task
+
+```bash
+ai-employee do "find 10 leads for my web design agency"
+ai-employee do "write a cold sales email for my SaaS product"
+ai-employee do "analyse my competitor and find 3 gaps I can exploit"
+ai-employee do "create a 30-day content calendar for LinkedIn"
+```
+
+Your AI employee handles it — routing to the right specialist agents internally. From the outside, it's just one AI you talk to.
+
+---
+
+## 🗂️ Three Modes — Start Simple, Scale When Ready
+
+```bash
+ai-employee mode starter    # 3 agents, 5 commands — zero overwhelm
+ai-employee mode business   # templates, ROI tracking, scheduling (recommended)
+ai-employee mode power      # all 20 agents, 126 skills, full dashboard
+```
+
+| Mode | Agents | What you see | Best for |
+|---|---|---|---|
+| **Starter** | 3 | 5 commands, no dashboard overload | Getting your first results |
+| **Business** | 8 | Templates, ROI, scheduling | Daily business automation |
+| **Power** | 20 | Everything — full dashboard, all skills | Advanced users |
+
+Change mode any time: `ai-employee mode business`
+
+---
+
+## 📋 Goal-Based Templates
+
+Deploy a pre-configured AI team in one click from the **📋 Templates** tab:
+
+| Goal | Time to first result | Est. value |
 |---|---|---|
-| **task-orchestrator** | `task <description>` | 🧠 Master brain — decomposes tasks, assigns agents, runs parallel workflows |
-| **company-builder** | `company build <idea>` | 🏢 Build companies from scratch: plans, simulations, GTM, org design |
-| **memecoin-creator** | `memecoin create <concept>` | 🪙 Full token launch: tokenomics, whitepaper, viral marketing |
-| **hr-manager** | `hr hire <role>` | 👔 Hiring pipeline, onboarding, org charts, culture docs |
-| **finance-wizard** | `finance model <business>` | 💰 P&L models, fundraising prep, unit economics, valuation |
-| **brand-strategist** | `brand identity <company>` | 🎨 Brand naming, identity systems, positioning, messaging |
-| **growth-hacker** | `growth loop <product>` | 🚀 Viral loops, A/B tests, retention, referral programs |
-| **project-manager** | `pm start <project>` | 📋 Sprints, roadmaps, risk registers, Gantt charts |
+| **Get 10 Qualified Leads in 24h** | 24 hours | €200–€1,000/week |
+| **Close Your First €1k Deal** | 1 week | €1,000–€8,000/month |
+| **Automate Customer Support in 1 Hour** | 1 hour | €2,500–€5,000/month saved |
+| **Hire Your Best Candidate Faster** | 2 weeks | €4,000–€10,000/hire saved |
+| **10x Your Content Output This Week** | 1 week | €2,000–€6,000/month |
+| **Run Your E-commerce Store on Autopilot** | 3 days | €5,000–€15,000/month saved |
 
-### Specialist Bots (Original 13)
-| Agent | What it does |
-|---|---|
-| **orchestrator** | WhatsApp command routing + task coordination |
-| **lead-hunter** | B2B lead generation + cold outreach CRM |
-| **content-master** | SEO blog posts + long-form content |
-| **social-guru** | Viral social media + captions + hashtags |
-| **intel-agent** | Competitor monitoring + market research |
-| **product-scout** | E-commerce product research + arbitrage |
-| **email-ninja** | Cold email sequences + deliverability |
-| **support-bot** | Customer support + FAQ + ticket routing |
-| **data-analyst** | Market trends + reports + KPI tracking |
-| **creative-studio** | Ad copy + design briefs + campaign concepts |
-| **crypto-trader** | Technical analysis + trading signals |
-| **bot-dev** | Python bot development + code review |
-| **web-sales** | Website audits + sales pitches + UX analysis |
+```bash
+ai-employee do "deploy template get-10-leads-24h"
+```
 
 ---
 
-## 🧠 Multi-Agent Task Orchestration
+## 🖥️ Dashboard (Primary Control)
 
-The **Task Orchestrator** is the system's brain. Give it any goal:
+Open the dashboard at **http://localhost:8787** after starting.
 
-```
-task Build a SaaS company for remote team productivity
-```
+The dashboard is your primary control center. Use it for full control over tasks, scheduling, ROI tracking, and agent management.
 
-The orchestrator will:
-1. **Decompose** the task into 3-8 subtasks using AI
-2. **Assign** each subtask to the most capable agent
-3. **Run** parallel tasks simultaneously (up to 5 at once)
-4. **Monitor** progress and handle dependencies
-5. **Aggregate** all results into a comprehensive answer
+| Tab | What it shows |
+|---|---|
+| 📊 Dashboard | Bot status overview, quick actions |
+| 💬 Chat | Send tasks, view chat history |
+| 🚀 Tasks | Build & launch multi-agent tasks |
+| 🐝 Swarm | All agents — status, workload |
+| 📅 Scheduler | Create & manage scheduled tasks |
+| 👷 Workers | Start/stop individual bots |
+| 📈 ROI | Tasks done, leads, hours saved, €€ saved |
+| 📋 Templates | Deploy goal-based templates in one click |
+| 🔒 Guardrails | Approval queue, safety logs |
+| 🧠 Memory | Client CRM, interaction history |
+| 🔌 Integrations | Gmail, Sheets, Telegram, Slack, OpenAI |
 
-### Example Multi-Agent Tasks
+---
 
-```bash
-# Build a full company from scratch
-task Build an AI tutoring platform: create business plan, brand identity, hiring roadmap, and GTM strategy
+## 📱 WhatsApp — Quick Commands & Notifications
 
-# Launch a memecoin
-task Launch a dog-themed memecoin: design tokenomics, draft whitepaper, create viral community strategy
+> **WhatsApp is for quick checks and notifications — not your primary control system.**
+> Use the dashboard for full control.
 
-# Market research to content pipeline
-task Research the AI productivity tools market and create 3 SEO blog posts targeting decision makers
-
-# Complete startup package
-task Create a complete startup package for a fintech app: validate idea, model financials, design brand, plan first sprint
-```
-
-### Standalone Commands
-
-Every agent also works independently:
+After starting, link WhatsApp optionally:
 
 ```bash
-# Company Building
-company build <idea>          # full launch package
-company validate <idea>       # viability check
-company simulate <scenario>   # growth simulation
-company pitch <company>       # investor pitch deck
-
-# Memecoin Creation
-memecoin create <concept>     # full launch package
-memecoin tokenomics <name>    # design tokenomics
-memecoin whitepaper <name>    # draft whitepaper
-memecoin viral <name>         # viral campaign
-
-# HR & People
-hr hire <role>                # full hiring package
-hr screen <cv>                # AI CV scoring
-hr onboard <role>             # 90-day onboarding plan
-hr culture <company>          # culture & values doc
-
-# Finance
-finance model <business>      # 3-year financial model
-finance raise <stage> for <amount>  # fundraising prep
-finance unit <product> at <price>   # unit economics
-
-# Brand
-brand identity <company>      # full brand system
-brand name <industry>         # name generation
-brand voice <company>         # voice & tone guide
-
-# Growth
-growth loop <product>         # viral growth loop
-growth abtests <feature>      # A/B test framework
-growth referral <product>     # referral program design
-
-# Project Management
-pm start <project>            # kick off project
-pm sprint <goal>              # sprint planning
-pm gantt <project>            # Gantt chart
-pm risks <project>            # risk register
+openclaw channels login   # Scan QR code once
 ```
+
+WhatsApp lets you:
+
+| Command | What it does |
+|---|---|
+| `status` | Quick status check |
+| `workers` | List running bots |
+| `help` | Show available commands |
+
+Get notified when tasks complete, leads are generated, or deals close — without leaving your phone.
+
+For everything else: **use the dashboard**.
+
+---
+
+## 🔧 CLI Reference
+
+```bash
+ai-employee do <task>               # Send any task to your AI employee
+ai-employee start                   # Start all services
+ai-employee stop                    # Stop all services
+ai-employee status                  # Show running bots
+ai-employee logs <bot>              # Tail logs
+ai-employee doctor                  # Health check (✅/❌ per service)
+ai-employee onboard                 # First 15 Minutes Value Flow
+ai-employee mode [starter|business|power]  # Show or set mode
+ai-employee ui                      # Open dashboard in browser
+```
+
+### Health Check
+
+```bash
+ai-employee doctor
+```
+
+Outputs:
+
+```
+── Dependencies ──────────────────────────────
+  ✅ python3    : Python 3.11.2
+  ✅ curl       : curl 7.88.1
+  ✅ openclaw   : 2.1.0
+  ⚠️  ollama    : not installed (optional)
+
+── Services ──────────────────────────────────
+  ✅ Gateway        : running (port 18789)
+  ✅ Dashboard      : running (port 3000) → http://localhost:3000
+  ✅ Problem Solver : running (port 8787) → http://localhost:8787
+  ⚠️  Ollama API    : not reachable (start with: ollama serve)
+
+── API Keys ──────────────────────────────────
+  ⚠️  Anthropic API key : not set (optional)
+  ✅ JWT secret       : set
+
+── Configuration ─────────────────────────────
+  ✅ Mode           : business
+```
+
+---
+
+## 📈 ROI Metrics
+
+Track the business value your AI team creates:
+
+```bash
+ai-employee do "metrics"             # Show ROI summary
+ai-employee do "metrics record lead_generated"
+ai-employee do "metrics record deal_closed:5000"
+```
+
+**Tracked automatically:**
+- ✅ Tasks completed
+- 🎯 Leads generated
+- 📧 Emails sent
+- 📝 Content created
+- 💰 Deals closed (with revenue)
+- ⏱️ Hours saved (auto-calculated per event type)
+- 💶 Cost saved (hours × €75/h by default — customise with `AI_EMPLOYEE_HOURLY_RATE`)
+
+---
+
+## 🔒 Guardrails
+
+High-risk actions require your approval before execution:
+
+```bash
+ai-employee do "guardrails"          # View pending approvals
+ai-employee do "approve <action_id>"
+ai-employee do "reject <action_id>"
+```
+
+**Default approval required for:**
+- Sending bulk emails
+- Posting to social media
+- Making purchases or placing orders
+- Deleting or modifying data
 
 ---
 
@@ -144,6 +246,13 @@ pm risks <project>            # risk register
 | **Python 3** | 3.10+ | for bots and dashboard |
 | **curl** | any | for downloading |
 | **OpenSSL** | any | for token generation (Linux/macOS) |
+| **Node.js** | 20+ | recommended (for OpenClaw gateway) |
+| **Ollama** | any | optional — free local AI, no API key needed |
+
+Quick check:
+```bash
+ai-employee doctor   # checks everything automatically
+```
 
 ---
 
@@ -187,33 +296,71 @@ Or run from PowerShell:
 ```powershell
 powershell -ExecutionPolicy Bypass -File install-windows.ps1
 ```
+```
 
 ---
 
-## What the installer asks
+## Install Options
 
-The step-by-step wizard asks:
+### Zero-config (fastest, no questions):
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash -s -- --zero-config
+```
+- No questions asked
+- Uses Ollama local model (free, private)
+- Starter mode (3 agents)
+- No API keys required
+- Change settings later in `~/.ai-employee/.env`
 
-1. WhatsApp phone number (E.164 format, e.g. `+31612345678`)
-2. Local LLM via Ollama? (yes/no + model name)
-3. Anthropic / OpenAI API keys (optional)
-4. Alpha Insider, Tavily, NewsAPI keys (optional)
-5. Telegram / Discord / SMTP (optional)
-6. Enable hourly WhatsApp status updates?
-7. Dashboard port (default: 3000) and UI port (default: 8787)
-8. Number of workers (1–20, default: 20)
+### Advanced install (choose everything):
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+```
+- Choose your LLM (Ollama local or cloud)
+- Configure API keys
+- Select mode (starter/business/power)
+- Set ports and number of agents
 
-Everything is installed into **`~/.ai-employee/`** (Linux/macOS) or **`%USERPROFILE%\.ai-employee\`** (Windows).
+### macOS native installer:
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install-mac.sh | bash
+```
+macOS-specific installer with Homebrew integration, automatic dependency setup, and `.command` desktop launcher.
+
+### Windows native installer (PowerShell):
+```powershell
+# Run in PowerShell as your regular user:
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+Invoke-WebRequest https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/install-windows.ps1 -OutFile install-windows.ps1
+.\install-windows.ps1
+```
+Or use the one-click batch file: download and run `quick-install-windows.bat`.
+No WSL or Git Bash required — installs Python, Git, Ollama, and all 33 bots natively.
+
+Everything is installed into **`~/.ai-employee/`**.
+
+### Update (re-run installer):
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+```
+Re-running upgrades runtime files **without overwriting** your existing config or `.env`.
 
 ---
 
 ## Start / Stop
 
-### 🐧 Linux / 🍎 macOS
 
 ```bash
-cd ~/.ai-employee
-./start.sh
+# Start (opens dashboard automatically)
+cd ~/.ai-employee && ./start.sh
+
+# Stop
+cd ~/.ai-employee && ./stop.sh
+
+# Or use the CLI from anywhere:
+ai-employee start
+ai-employee stop
+ai-employee status
 ```
 
 Stop: `./stop.sh` or Ctrl+C in the terminal.
@@ -277,29 +424,23 @@ Send these to your own WhatsApp number:
 
 | Command | Description |
 |---|---|
-| `Hello!` | Start a conversation with the orchestrator |
-| `status` | Compact status report of all bots |
-| `workers` | List active workers and their state |
-| `switch to lead-hunter` | Switch to a specific agent |
-| `schedule` | List scheduled tasks |
-| `improvements` | Show pending skill proposals |
-| `help` | Show all available commands |
-
-**Example tasks:**
-
-```
-find 20 SaaS CTOs in the Netherlands
-write a 2000 word SEO article about AI tools
-analyze competitor pricing for Notion
-```
+| **lead-hunter** | B2B lead generation + cold outreach |
+| **content-master** | SEO blog posts + long-form content |
+| **social-guru** | Viral social media + captions + hashtags |
+| **intel-agent** | Competitor monitoring + market research |
+| **email-ninja** | Cold email sequences + deliverability |
+| **support-bot** | Customer support + FAQ + ticket routing |
+| **data-analyst** | Market trends + reports + KPI tracking |
+| **creative-studio** | Ad copy + design briefs + campaign concepts |
+| **web-sales** | Website audits + UX + sales pitches |
 
 ---
 
-## Dashboard (UI)
+## 🔌 Integrations
 
 The full dashboard runs at **http://127.0.0.1:8787** and has 9 tabs:
 
-| Tab | Description |
+| Integration | Use |
 |---|---|
 | 📊 **Dashboard** | Live bot status, system info, WhatsApp quick-commands panel |
 | 💬 **Chat** | Send tasks (same as WhatsApp), view chat history |
@@ -327,162 +468,29 @@ The Commands tab lists every WhatsApp command grouped by category with search:
 
 ---
 
-## Hourly Status Updates
+## Where Everything Is Stored
 
-The **status-reporter** bot sends a compact WhatsApp message every hour:
-
-```text
-switch to lead-hunter
-switch to claude-agent
-switch to ollama-agent
 ```
-🤖 AI Employee Status — 2026-03-22T10:00:00Z
-─────────────────
-Bots:
-  🟢 problem-solver-ui
-  🟢 polymarket-trader
-  🔴 scheduler-runner
-Trading: PAPER | signals: 0
-─────────────────
-Reply: status, workers, schedule, improvements
-```
-
-Configure interval in `~/.ai-employee/config/status-reporter.env`:
-
-```bash
-STATUS_REPORT_INTERVAL_SECONDS=3600  # 1 hour default
+~/.ai-employee/
+  .env                  # API keys, mode, config
+  config.json           # OpenClaw gateway config
+  start.sh / stop.sh    # Start/stop scripts
+  logs/                 # Per-bot log files
+  state/                # Bot state, metrics, memory
+  config/               # Per-bot .env config files
+  workspace-*/          # Agent workspaces and skills
 ```
 
 ---
 
-## 5) Claude AI Agent (separate agent)
+## Security
 
-The **Claude Agent** is a standalone bot that uses the Anthropic Claude API directly. It runs independently of the main gateway and provides a dedicated web UI.
+See [SECURITY.md](SECURITY.md) for full details. Key points:
 
-### Requirements
-- An **Anthropic API key** (`ANTHROPIC_API_KEY` in `~/.ai-employee/.env`)
-
-### Web UI
-After starting AI Employee, open:
-**http://127.0.0.1:8788**
-
-### Features
-- Multi-turn conversation with persistent history
-- Configurable Claude model (set `CLAUDE_MODEL` in `~/.ai-employee/config/claude-agent.env`)
-- Token usage reporting
-- Accessible via WhatsApp: `switch to claude-agent`
-
-### Configuration
-Edit `~/.ai-employee/config/claude-agent.env`:
-```env
-CLAUDE_AGENT_HOST=127.0.0.1
-CLAUDE_AGENT_PORT=8788
-CLAUDE_MODEL=claude-opus-4-5
-CLAUDE_MAX_TOKENS=4096
-```
-
----
-
-## 6) Ollama Local Agent (run AI locally)
-
-The **Ollama Agent** runs a local LLM via [Ollama](https://ollama.ai/) — no data leaves your machine.
-
-### Requirements
-1. Install Ollama: https://ollama.ai/download
-2. Pull your chosen model:
-   ```bash
-   ollama pull llama3
-   # or: ollama pull mistral
-   # or: ollama pull codellama
-   ```
-3. Ollama must be running (`ollama serve`) when you start AI Employee
-
-### Web UI
-After starting AI Employee, open:
-**http://127.0.0.1:8789**
-
-### Features
-- Privacy-first: all processing on your local machine
-- Multi-turn conversation with persistent history
-- Configurable model and Ollama host
-- Accessible via WhatsApp: `switch to ollama-agent`
-
-### Configuration
-Edit `~/.ai-employee/config/ollama-agent.env`:
-```env
-OLLAMA_AGENT_HOST=127.0.0.1
-OLLAMA_AGENT_PORT=8789
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama3
-```
-
----
-
-## 7) Web UI (Dashboard)
-## Scheduling
-
-Schedule tasks in the **Scheduler tab** of the dashboard, or edit:
-
-- **Web UI:** http://localhost:3000
-- **Gateway API:** http://localhost:18789
-
-### What the Web UI is
-The Web UI is a simple local dashboard:
-- shows which agents exist
-- shows "quick actions" and usage hints
-- links to Claude Agent UI and Ollama Agent UI
-- runs locally on your machine (served from `~/.ai-employee/ui`)
-```
-~/.ai-employee/config/schedules.json
-```
-
-Example schedule entry:
-
-```json
-{
-  "id": "hourly_status",
-  "label": "Hourly status report",
-  "action": "status_report",
-  "type": "interval",
-  "interval_minutes": 60,
-  "enabled": true
-}
-```
-
----
-
-## Continuous Improvement
-
-The **discovery bot** scans your agents and proposes new skills/markets. Proposals appear in:
-
-- Dashboard → Improvements tab
-- WhatsApp: send `improvements`
-- File: `~/.ai-employee/state/improvements.json`
-
-**Nothing is changed automatically.** You approve or reject each proposal.
-
----
-
-## 8) Where everything is stored
-## Adjusting Workers
-
-You can enable/disable individual bots in the **Workers tab** or via WhatsApp:
-
-```
-start status-reporter
-stop polymarket-trader
-```
-
-Important files:
-- `~/.ai-employee/config.json` (OpenClaw config)
-- `~/.ai-employee/.env` (token + API keys including `ANTHROPIC_API_KEY`, `OLLAMA_HOST`, `OLLAMA_MODEL`)
-- `~/.ai-employee/logs/` (logs)
-- `~/.ai-employee/workspace-*/` (agent workspaces)
-- `~/.ai-employee/bots/claude-agent/` (Claude AI standalone bot)
-- `~/.ai-employee/bots/ollama-agent/` (Ollama local AI standalone bot)
-- `~/.ai-employee/config/claude-agent.env` (Claude agent config)
-- `~/.ai-employee/config/ollama-agent.env` (Ollama agent config)
-- `~/.openclaw/openclaw.json` (symlink to config, if supported)
+- All services bind to `127.0.0.1` by default (not exposed to network)
+- JWT authentication on the dashboard API
+- Guardrails require human approval for high-risk actions
+- API keys stored in `~/.ai-employee/.env` (chmod 600)
 
 ---
 
