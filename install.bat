@@ -1,68 +1,43 @@
 @echo off
 REM AI Employee — Windows Installer
-REM Detects Git Bash or WSL and runs the Bash installer.
+REM Runs the PowerShell-based native Windows installer.
 setlocal
 
 echo.
 echo  ======================================================
-echo    AI Employee — Windows Installer
+echo    AI Employee — Windows Installer v4.0
 echo  ======================================================
 echo.
 
-REM ── Try Git Bash (most common on Windows) ──────────────────────────────────
-set GIT_BASH=""
-if exist "C:\Program Files\Git\bin\bash.exe" (
-    set GIT_BASH="C:\Program Files\Git\bin\bash.exe"
-    goto :run_gitbash
-)
-if exist "C:\Program Files (x86)\Git\bin\bash.exe" (
-    set GIT_BASH="C:\Program Files (x86)\Git\bin\bash.exe"
-    goto :run_gitbash
-)
-
-REM ── Try WSL ────────────────────────────────────────────────────────────────
-where wsl >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    echo Found: Windows Subsystem for Linux (WSL)
-    echo Running installer in WSL...
+REM ── Run PowerShell installer if it exists locally ─────────────────────────────
+if exist "%~dp0install-windows.ps1" (
+    echo Found: install-windows.ps1
+    echo Running native Windows installer...
     echo.
-    wsl bash -c "cd $(wslpath '%~dp0') && bash install.sh"
+    powershell -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1"
     goto :done
 )
 
-REM ── Git Bash not in default location — check PATH ─────────────────────────
-where bash >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    echo Found: bash in PATH
-    echo Running installer...
+REM ── PowerShell installer not found locally — download it ─────────────────────
+echo install-windows.ps1 not found. Downloading from GitHub...
+set TEMP_DIR=%TEMP%\ai-employee-install-%RANDOM%
+mkdir "%TEMP_DIR%" 2>nul
+
+powershell -ExecutionPolicy Bypass -Command ^
+    "try { (New-Object System.Net.WebClient).DownloadFile('https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/install-windows.ps1', '%TEMP_DIR%\install-windows.ps1'); Write-Host 'Download OK' -ForegroundColor Green } catch { Write-Host ('Download failed: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
+
+if %ERRORLEVEL% NEQ 0 (
     echo.
-    bash install.sh
-    goto :done
+    echo ERROR: Could not download install-windows.ps1.
+    echo Please check your internet connection, or download manually from:
+    echo   https://github.com/F-game25/AI-EMPLOYEE/tree/main
+    echo.
+    pause
+    exit /b 1
 )
 
-REM ── Nothing found ─────────────────────────────────────────────────────────
-echo ERROR: No Bash environment found.
-echo.
-echo To run AI Employee on Windows, install one of:
-echo   1. Git for Windows (recommended): https://git-scm.com/download/win
-echo      Then re-run this installer.
-echo.
-echo   2. Windows Subsystem for Linux (WSL):
-echo      Run in PowerShell (Admin): wsl --install
-echo      Then restart and re-run this installer.
-echo.
-echo   3. Or use install-windows.ps1 (native PowerShell, no Git Bash needed):
-echo      Right-click install-windows.ps1 > "Run with PowerShell"
-echo      Or: powershell -ExecutionPolicy Bypass -File install-windows.ps1
-pause
-exit /b 1
-
-:run_gitbash
-echo Found: Git Bash at %GIT_BASH%
-echo Running installer...
-echo.
-%GIT_BASH% --login -c "cd '%~dp0' && bash install.sh"
-goto :done
+powershell -ExecutionPolicy Bypass -File "%TEMP_DIR%\install-windows.ps1"
+rmdir /s /q "%TEMP_DIR%" 2>nul
 
 :done
 echo.
