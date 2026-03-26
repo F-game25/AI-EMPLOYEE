@@ -45,7 +45,7 @@ try:
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
-    def _query_ai_for_agent(*a, **kw):  # type: ignore
+    def _query_ai_for_agent(*args, **kwargs):  # type: ignore
         return {"answer": "[AI unavailable]"}
 
 # ── Memory store (optional) ───────────────────────────────────────────────────

@@ -29,6 +29,7 @@ Config env vars:
     FEEDBACK_POLL_INTERVAL    — poll interval in seconds (default: 30)
     FEEDBACK_TOP_N            — number of top templates to surface (default: 5)
 """
+import hashlib
 import json
 import logging
 import os
@@ -137,7 +138,6 @@ def record_message(
     Returns:
         template_id string.
     """
-    import hashlib
     # Use a hash of the message as a deduplication key so that identical
     # messages share the same template record and accumulate scores.
     template_id = hashlib.sha256(message.encode()).hexdigest()[:12]

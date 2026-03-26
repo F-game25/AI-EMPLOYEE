@@ -10,7 +10,7 @@
     Dashboard Port: 3000
     Gateway Port:   18789
     Bot manifest:   31 background bots + problem-solver-ui = 32 Python services started
-                    (ai-router is a shared module, not a standalone service)
+                    (ai-router is a shared module, not a standalone service; total bot count is 33)
 #>
 
 $ErrorActionPreference = 'Continue'
