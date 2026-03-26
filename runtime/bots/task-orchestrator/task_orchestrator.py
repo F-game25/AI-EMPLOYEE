@@ -22,6 +22,7 @@ State files:
   ~/.ai-employee/config/agent_capabilities.json       — 20-agent capabilities map
   ~/.ai-employee/state/agent_tasks/<agent>.queue.jsonl — per-agent task queues
 """
+import concurrent.futures
 import json
 import logging
 import os
@@ -31,6 +32,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_FILE = AI_HOME / "state" / "task-orchestrator.state.json"
@@ -41,9 +43,10 @@ CHATLOG = AI_HOME / "state" / "chatlog.jsonl"
 RESULTS_DIR = AI_HOME / "state" / "orchestrator_results"
 
 POLL_INTERVAL = int(os.environ.get("TASK_ORCHESTRATOR_POLL_INTERVAL", "5"))
-MAX_PARALLEL = int(os.environ.get("TASK_ORCHESTRATOR_MAX_PARALLEL", "5"))
+MAX_PARALLEL = int(os.environ.get("TASK_ORCHESTRATOR_MAX_PARALLEL", "10"))
 PLAN_TIMEOUT_SECS = int(os.environ.get("TASK_ORCHESTRATOR_TIMEOUT", "600"))
 MAX_PLANS_HISTORY = int(os.environ.get("TASK_ORCHESTRATOR_MAX_HISTORY", "20"))
+PEER_REVIEW_ENABLED = os.environ.get("TASK_ORCHESTRATOR_PEER_REVIEW", "true").lower() != "false"
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("task-orchestrator")
@@ -55,10 +58,26 @@ if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
 try:
-    from ai_router import query_ai as _query_ai  # type: ignore
+    from ai_router import query_ai as _query_ai, query_ai_for_agent as _query_ai_for_agent  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
+    def _query_ai_for_agent(*args, **kwargs):  # type: ignore
+        return {"answer": "", "provider": "error", "model": "", "error": "ai_router not available"}
+
+# ── Feedback loop (optional) ─────────────────────────────────────────────────
+
+_feedback_path = AI_HOME / "bots" / "feedback-loop"
+if str(_feedback_path) not in sys.path:
+    sys.path.insert(0, str(_feedback_path))
+
+try:
+    from feedback_loop import record_outcome as _record_outcome  # type: ignore
+    _FEEDBACK_AVAILABLE = True
+except ImportError:
+    _FEEDBACK_AVAILABLE = False
+    def _record_outcome(*args, **kwargs):  # type: ignore
+        pass
 
 
 def now_iso() -> str:
@@ -266,55 +285,212 @@ def select_skills_for_agent(agent_id: str, subtask_instructions: str, capabiliti
     return agent_skills[:3]
 
 
+# ── Peer Review ───────────────────────────────────────────────────────────────
+
+def peer_review_result(
+    agent_id: str,
+    subtask_title: str,
+    result_text: str,
+    reviewer_agent_type: str = "analytical",
+) -> dict:
+    """Have a 'reviewer' agent validate and improve a subtask result.
+
+    Uses query_ai_for_agent() with an analytical model to check quality,
+    flag issues, and optionally suggest improvements.
+
+    Args:
+        agent_id:           The agent whose result is being reviewed.
+        subtask_title:      Short description of the subtask.
+        result_text:        The raw result text to review.
+        reviewer_agent_type: Agent type to use for the review model.
+
+    Returns:
+        dict with keys:
+            approved    (bool)   — whether the result passes quality check
+            feedback    (str)    — reviewer comments
+            improved    (str)    — improved version (or original if no improvement needed)
+            reviewer    (str)    — AI provider used for review
+    """
+    if not _AI_AVAILABLE or not result_text:
+        return {"approved": True, "feedback": "", "improved": result_text, "reviewer": "none"}
+
+    system_prompt = (
+        "You are a quality-control reviewer for an AI agent company. "
+        "Your job is to validate agent outputs and ensure they are accurate, "
+        "complete, and actionable. Be concise and constructive. "
+        "Respond with valid JSON only."
+    )
+    user_prompt = (
+        f"Agent: {agent_id}\n"
+        f"Task: {subtask_title}\n\n"
+        f"Output to review:\n{result_text[:2000]}\n\n"
+        "Review this output and respond with JSON:\n"
+        '{"approved": true/false, "score": 1-10, "feedback": "...", '
+        '"improved": "improved version or empty string if no improvement needed"}'
+    )
+
+    try:
+        res = _query_ai_for_agent(reviewer_agent_type, user_prompt, system_prompt=system_prompt)
+        raw = res.get("answer", "")
+        match = re.search(r"\{[\s\S]*\}", raw)
+        if match:
+            parsed = json.loads(match.group(0))
+            improved = parsed.get("improved", "").strip() or result_text
+            return {
+                "approved": bool(parsed.get("approved", True)),
+                "feedback": parsed.get("feedback", ""),
+                "improved": improved,
+                "reviewer": res.get("provider", "unknown"),
+                "score": parsed.get("score", 7),
+            }
+    except Exception as exc:
+        logger.debug("task-orchestrator: peer_review failed — %s", exc)
+
+    return {"approved": True, "feedback": "", "improved": result_text, "reviewer": "error"}
+
+
+# ── Async Subtask Execution ───────────────────────────────────────────────────
+
+def _execute_subtask_inline(st: dict, plan: dict, capabilities: dict) -> dict:
+    """Execute a single subtask inline using the best model for the agent type.
+
+    This is called from a thread-pool worker. Returns the subtask dict
+    updated with result, status, and completed_at.
+    """
+    agent_id = st.get("agent_id", "general")
+    instructions = st.get("instructions", "")
+    title = st.get("title", st["subtask_id"])
+    skills = st.get("skills", [])
+
+    # Build a rich system prompt from agent capabilities
+    caps = capabilities.get("agents", {}).get(agent_id, {})
+    agent_desc = caps.get("description", f"You are a specialist {agent_id} agent.")
+    skills_text = ", ".join(skills[:5]) if skills else "general"
+
+    system_prompt = (
+        f"You are {agent_id}: {agent_desc}\n"
+        f"Your active skills for this subtask: {skills_text}\n"
+        "Deliver a complete, actionable result. Be specific and thorough."
+    )
+
+    # Use per-agent model routing
+    res = _query_ai_for_agent(
+        agent_id,
+        instructions,
+        system_prompt=system_prompt,
+    )
+    answer = res.get("answer", "")
+
+    # Optionally run peer review on the result
+    review = {"approved": True, "improved": answer, "feedback": ""}
+    if PEER_REVIEW_ENABLED and answer and agent_id not in ("orchestrator",):
+        review = peer_review_result(
+            agent_id=agent_id,
+            subtask_title=title,
+            result_text=answer,
+        )
+        if review.get("feedback"):
+            logger.info(
+                "task-orchestrator: peer review for '%s' [%s] — approved=%s score=%s",
+                title, agent_id, review["approved"], review.get("score", "?"),
+            )
+
+    final_result = review.get("improved") or answer
+
+    st["status"] = "done"
+    st["result"] = final_result
+    st["peer_review"] = {
+        "approved": review.get("approved", True),
+        "feedback": review.get("feedback", ""),
+        "reviewer": review.get("reviewer", "none"),
+        "score": review.get("score", 7),
+    }
+    st["completed_at"] = now_iso()
+
+    # Write result file for compatibility with check_agent_result()
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    result_file = RESULTS_DIR / f"{st['subtask_id']}.json"
+    result_file.write_text(json.dumps({
+        "subtask_id": st["subtask_id"],
+        "agent_id": agent_id,
+        "status": "done",
+        "result": final_result,
+        "peer_review": st["peer_review"],
+        "completed_at": now_iso(),
+    }, indent=2))
+
+    logger.info(
+        "task-orchestrator: subtask '%s' [%s] completed (provider=%s)",
+        title, agent_id, res.get("provider", "?"),
+    )
+    return st
+
+
 # ── Plan Execution ────────────────────────────────────────────────────────────
 
 def execute_plan(plan: dict, capabilities: dict) -> None:
-    """Drive a task plan forward: dispatch ready subtasks, check results."""
+    """Drive a task plan forward using async parallel execution.
+
+    Subtasks whose dependencies are satisfied are dispatched concurrently
+    into a thread pool (up to MAX_PARALLEL workers). Each subtask is
+    executed inline using query_ai_for_agent(), then optionally reviewed
+    by a peer agent before the result is accepted.
+    """
     subtasks = plan.get("subtasks", [])
     completed_ids = {st["subtask_id"] for st in subtasks if st["status"] == "done"}
 
-    running_count = sum(1 for st in subtasks if st["status"] == "running")
-
+    # Gather subtasks that are ready to run (dependencies satisfied, not yet started)
+    ready = []
     for st in subtasks:
         if st["status"] != "pending":
             continue
-        # Check dependencies
         deps = st.get("depends_on", [])
         if any(d not in completed_ids for d in deps):
             continue
-        # Respect parallelism cap
-        if running_count >= MAX_PARALLEL and st.get("parallel", True):
-            continue
+        ready.append(st)
 
-        # Dispatch subtask to agent queue
-        payload = {
-            "subtask_id": st["subtask_id"],
-            "plan_id": plan["id"],
-            "task_title": plan.get("title", ""),
-            "agent_id": st["agent_id"],
-            "title": st.get("title", ""),
-            "instructions": st.get("instructions", ""),
-            "skills": st.get("skills", []),
-            "dispatched_at": now_iso(),
-        }
-        dispatch_to_agent(st["agent_id"], payload)
-        st["status"] = "running"
-        st["dispatched_at"] = now_iso()
-        running_count += 1
-        logger.info(
-            "task-orchestrator: dispatched subtask '%s' to agent '%s'",
-            st["subtask_id"], st["agent_id"]
-        )
+    if not ready:
+        # Also poll for external agent results (queue-based agents)
+        for st in subtasks:
+            if st["status"] != "running":
+                continue
+            result = check_agent_result(st["agent_id"], st["subtask_id"])
+            if result:
+                st["status"] = result.get("status", "done")
+                st["result"] = result.get("result", "")
+                st["completed_at"] = now_iso()
+                completed_ids.add(st["subtask_id"])
+    else:
+        # Cap at MAX_PARALLEL
+        batch = ready[:MAX_PARALLEL]
+        for st in batch:
+            st["status"] = "running"
+            st["dispatched_at"] = now_iso()
 
-    # Check for completed results
-    for st in subtasks:
-        if st["status"] != "running":
-            continue
-        result = check_agent_result(st["agent_id"], st["subtask_id"])
-        if result:
-            st["status"] = result.get("status", "done")
-            st["result"] = result.get("result", "")
-            st["completed_at"] = now_iso()
+        # Run the batch concurrently
+        if len(batch) == 1:
+            # Single subtask — run directly to avoid thread overhead
+            _execute_subtask_inline(batch[0], plan, capabilities)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(batch)) as pool:
+                futures = {
+                    pool.submit(_execute_subtask_inline, st, plan, capabilities): st
+                    for st in batch
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        st = futures[future]
+                        st["status"] = "failed"
+                        st["result"] = f"Error: {exc}"
+                        st["completed_at"] = now_iso()
+                        logger.error(
+                            "task-orchestrator: subtask '%s' failed — %s",
+                            st.get("subtask_id"), exc,
+                        )
+
+        for st in batch:
             completed_ids.add(st["subtask_id"])
 
     # Update plan status
@@ -333,8 +509,11 @@ def aggregate_results(plan: dict) -> None:
     results_parts = []
     for st in subtasks:
         if st.get("result"):
+            peer_info = ""
+            if st.get("peer_review", {}).get("feedback"):
+                peer_info = f" _(reviewed, score {st['peer_review'].get('score','?')}/10)_"
             results_parts.append(
-                f"**{st.get('title', st['subtask_id'])}** ({st['agent_id']}):\n{st['result']}"
+                f"**{st.get('title', st['subtask_id'])}** ({st['agent_id']}){peer_info}:\n{st['result']}"
             )
 
     if not results_parts:
@@ -343,7 +522,9 @@ def aggregate_results(plan: dict) -> None:
         results_text = "\n\n---\n\n".join(results_parts)
         if _AI_AVAILABLE:
             try:
-                synthesis = _query_ai(
+                # Use the orchestrator/planning model for final synthesis
+                synthesis = _query_ai_for_agent(
+                    "orchestrator",
                     f"Synthesize these agent results into a coherent final answer:\n\n{results_text}",
                     system_prompt=(
                         "You are the final aggregator for a multi-agent AI company. "
