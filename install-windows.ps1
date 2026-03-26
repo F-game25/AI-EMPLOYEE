@@ -22,7 +22,7 @@ $AI_VERSION   = '4.0'
 $AI_HOME      = Join-Path $env:USERPROFILE '.ai-employee'
 $GITHUB_OWNER = 'F-game25'
 $GITHUB_REPO  = 'AI-EMPLOYEE'
-$GITHUB_BRANCH = 'windows'
+$GITHUB_BRANCH = 'main'
 $BASE_URL     = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/$GITHUB_BRANCH/runtime"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -169,6 +169,7 @@ if (-not $pythonOk) {
         Write-Err "Could not install Python automatically. Please install from https://python.org and re-run."
         exit 1
     }
+
 }
 
 # 2c. Check Git (optional)
@@ -430,7 +431,7 @@ $BOT_FILES = [ordered]@{
 $BOTS = $BOT_FILES.Keys
 
 # Download start-windows.ps1 launcher (the script that actually starts all bots)
-$startScriptUrl  = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/windows/start-windows.ps1"
+$startScriptUrl  = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/start-windows.ps1"
 $startScriptDest = Join-Path $AI_HOME 'start-windows.ps1'
 $ok = Invoke-Download $startScriptUrl $startScriptDest
 if (-not $ok) {

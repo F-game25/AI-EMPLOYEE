@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # AI Employee — Main Installer v4.0 (runtime-first)
 # Called by quick-install.sh
+# Zero-config mode: ZERO_CONFIG=1 bash install.sh  (no questions, safe defaults)
 set -euo pipefail
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; B='\033[0;34m'; C='\033[0;36m'; M='\033[0;35m'; NC='\033[0m'
@@ -13,6 +14,7 @@ CONFIG_FILES_UPDATED=0
 CLAUDE_MODEL="claude-opus-4-5"
 OLLAMA_HOST="http://localhost:11434"
 OLLAMA_MODEL="llama3.2"
+ZERO_CONFIG="${ZERO_CONFIG:-0}"
 
 log()   { echo -e "${C}▸${NC} $1"; }
 ok()    { echo -e "${G}✓${NC} $1"; }
@@ -128,6 +130,36 @@ install_ollama() {
 
 wizard() {
     step "4/8 — Configuration wizard"
+
+    # ── Zero-config mode — skip all questions, use safe defaults ──────────────
+    if [[ "$ZERO_CONFIG" == "1" ]]; then
+        ok "Zero-config mode: using safe defaults (no questions asked)."
+        PHONE="+10000000000"
+        WANT_OLLAMA="y"
+        OLLAMA_MODEL="llama3.2"
+        MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
+        ANTHROPIC_KEY=""
+        OPENAI_KEY=""
+        ALPHA_INSIDER_KEY=""
+        TAVILY_KEY=""
+        NEWS_API_KEY=""
+        TELEGRAM_BOT_TOKEN=""
+        DISCORD_WEBHOOK_URL=""
+        SMTP_HOST=""; SMTP_USER=""; SMTP_PASS=""
+        ELEVEN_LABS_KEY=""
+        BOT_PATH=""
+        WANT_STATUS="y"
+        STATUS_INTERVAL=3600
+        DASHBOARD_PORT=3000
+        UI_PORT=8787
+        WORKERS=5
+        AI_EMPLOYEE_MODE="starter"
+        TOKEN=$(openssl rand -hex 32)
+        ok "Zero-config defaults set (5 agents, Starter mode, local Ollama)"
+        ok "WhatsApp: set placeholder phone — update ~/.ai-employee/config.json to connect"
+        return
+    fi
+
     info "Answer each question (press Enter for default)."
     echo ""
 
@@ -273,8 +305,64 @@ wizard() {
     if (( WORKERS < 1  )); then warn "Minimum is 1; clamping to 1";  WORKERS=1;  fi
     ok "Workers: $WORKERS enabled"
 
+    # 9) Mode selection
+    echo ""
+    echo -e "  ${C}Mode options:${NC}"
+    echo "    starter  — 3 agents, 5 commands, zero overwhelm (best to start)"
+    echo "    business — templates, ROI tracking, scheduling (recommended)"
+    echo "    power    — all 20 agents, 126 skills, full dashboard (advanced)"
+    ask "Which mode? [default: business]:"
+    read -r MODE_INPUT < "$tty_in"
+    AI_EMPLOYEE_MODE="${MODE_INPUT:-business}"
+    case "$AI_EMPLOYEE_MODE" in
+      starter|business|power) ok "Mode: $AI_EMPLOYEE_MODE" ;;
+      *) warn "Unknown mode '$AI_EMPLOYEE_MODE'; defaulting to business"; AI_EMPLOYEE_MODE="business" ;;
+    esac
+
     TOKEN=$(openssl rand -hex 32)
     ok "Wizard complete"
+}
+
+# ─── JWT Secret (openclaw-2) ───────────────────────────────────────────────────
+
+setup_jwt_secret() {
+    step "JWT / Security secret"
+
+    local env_file="$AI_HOME/.env"
+    mkdir -p "$(dirname "$env_file")"
+
+    # Honour an already-exported JWT_SECRET_KEY
+    if [[ -n "${JWT_SECRET_KEY:-}" ]]; then
+        ok "JWT_SECRET_KEY already set in environment — keeping it"
+        # Make sure it is also persisted in the .env file
+        if [[ -f "$env_file" ]] && grep -q "^JWT_SECRET_KEY=" "$env_file"; then
+            :  # already in file
+        else
+            echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}" >> "$env_file"
+            ok "JWT_SECRET_KEY saved to $env_file"
+        fi
+        return
+    fi
+
+    # Check if already in .env
+    if [[ -f "$env_file" ]] && grep -q "^JWT_SECRET_KEY=" "$env_file"; then
+        ok "JWT_SECRET_KEY already present in $env_file"
+        return
+    fi
+
+    # Generate a fresh secure secret
+    if command -v python3 >/dev/null 2>&1; then
+        local jwt_secret
+        jwt_secret=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+        echo "JWT_SECRET_KEY=${jwt_secret}" >> "$env_file"
+        chmod 600 "$env_file"
+        export JWT_SECRET_KEY="$jwt_secret"
+        ok "JWT secret generated and saved to $env_file"
+        info "Keep this secret safe — rotate it every 90 days."
+    else
+        warn "python3 not found — cannot generate JWT secret automatically."
+        warn "Set JWT_SECRET_KEY manually:  export JWT_SECRET_KEY=\$(openssl rand -hex 32)"
+    fi
 }
 
 # ─── Directory structure ───────────────────────────────────────────────────────
@@ -660,6 +748,7 @@ ${ELEVEN_LABS_KEY:+ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY}
 OLLAMA_HOST=$OLLAMA_HOST
 OLLAMA_MODEL=$OLLAMA_MODEL
 CLAUDE_MODEL=$CLAUDE_MODEL
+AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}
 OPENCLAW_DISABLE_BONJOUR=1
 TZ=Europe/Amsterdam
 ENV
@@ -764,6 +853,7 @@ CFG_END
             [[ -n "${SMTP_USER:-}" ]]              && echo "SMTP_USER=$SMTP_USER"
             [[ -n "${SMTP_PASS:-}" ]]              && echo "SMTP_PASS=$SMTP_PASS"
             [[ -n "${ELEVEN_LABS_KEY:-}" ]]       && echo "ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY"
+            echo "AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}"
             echo "OPENCLAW_DISABLE_BONJOUR=1"
             echo "DASHBOARD_PORT=${DASHBOARD_PORT:-3000}"
             echo "TZ=Europe/Amsterdam"
@@ -994,17 +1084,31 @@ done_message() {
     echo -e "${G}╚══════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${C}Configuration saved:${NC}"
+    echo "  Mode:         ${AI_EMPLOYEE_MODE:-business}"
     echo "  Phone:        $PHONE"
     echo "  Claude model: $CLAUDE_MODEL"
     echo "  Ollama model: $OLLAMA_MODEL  (host: $OLLAMA_HOST)"
     echo "  Token:        ${TOKEN:0:16}...${TOKEN: -8}"
     echo "  Config:       ~/.ai-employee/config.json"
-    echo "  Dashboard:    http://localhost:${DASHBOARD_PORT:-3000}"
+    echo "  Dashboard:    http://localhost:${DASHBOARD_PORT:-3000}  ← primary control"
     echo "  Problem UI:   http://127.0.0.1:${UI_PORT:-8787}"
-    echo "  Claude Agent: http://127.0.0.1:8788"
-    echo "  Ollama Agent: http://127.0.0.1:8789"
     echo ""
     echo -e "${Y}Next steps:${NC}"
+    echo ""
+    echo "  1. Start your AI employee:"
+    echo "     cd ~/.ai-employee && ./start.sh"
+    echo "     (dashboard opens automatically in your browser)"
+    echo ""
+    echo "  2. Run your first tasks (generates real business value in ~2 min):"
+    echo "     ai-employee onboard"
+    echo ""
+    echo "  3. Send any task:"
+    echo "     ai-employee do \"find 10 leads for my business\""
+    echo "     ai-employee do \"write a sales email for my agency\""
+    echo ""
+    echo "  4. Optional — link WhatsApp for notifications & quick commands:"
+    echo "     openclaw channels login  (scan QR code)"
+    echo "     Use WhatsApp for status checks. Use the dashboard for full control."
     echo ""
     echo -e "  ${G}▸ No-terminal start (after first-time setup):${NC}"
     if [[ -d "$HOME/Desktop" ]]; then
@@ -1013,21 +1117,7 @@ done_message() {
     echo "    • Or search 'AI Employee' in your application menu"
     echo "    • Or enable autostart: systemctl --user enable --now ai-employee"
     echo ""
-    echo "  1. First start (terminal needed once to link WhatsApp):"
-    echo "     cd ~/.ai-employee && ./start.sh"
-    echo "     (the UI will open automatically in your browser)"
-    echo ""
-    echo "  2. In a new terminal, link your WhatsApp:"
-    echo "     openclaw channels login"
-    echo "     Scan the QR code with your phone"
-    echo ""
-    echo "  3. Send 'Hello!' to yourself on WhatsApp"
-    echo "     You will receive a welcome message confirming it works"
-    echo ""
-    echo "  4. Switch agents via WhatsApp:"
-    echo "     switch to claude-agent   → visit http://127.0.0.1:8788"
-    echo "     switch to ollama-agent   → visit http://127.0.0.1:8789"
-    [[ -n "${OLLAMA_MODEL:-}" ]] && echo "     (run first: ollama pull $OLLAMA_MODEL)"
+    [[ -n "${OLLAMA_MODEL:-}" ]] && echo "  Ollama: run  ollama pull $OLLAMA_MODEL  before starting."
     echo ""
 }
 
@@ -1044,6 +1134,7 @@ main() {
     install_ollama "${WANT_OLLAMA:-n}"
     setup_directories
     install_runtime
+    setup_jwt_secret
     install_claude_bot
     install_ollama_bot
     install_skills

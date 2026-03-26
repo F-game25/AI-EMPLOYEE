@@ -18,10 +18,41 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field
 import uvicorn
+
+# ── Security imports (openclaw-2) ─────────────────────────────────────────────
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    _SLOWAPI_AVAILABLE = True
+except ImportError:
+    _SLOWAPI_AVAILABLE = False
+
+# Locate security module relative to this file
+_SEC_DIR = Path(__file__).parent
+if str(_SEC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SEC_DIR))
+
+try:
+    from security import AuthManager, InputSanitizer, PasswordValidator, generate_secure_token
+    from config_manager import load_config, validate_security_config, Config as _Cfg
+    _security_config: Optional[_Cfg] = None
+    try:
+        _security_config = load_config()
+    except (ValueError, Exception):
+        # JWT secret not set — security features degraded, app still starts
+        _security_config = None
+    _SECURITY_AVAILABLE = True
+except ImportError:
+    _SECURITY_AVAILABLE = False
+    _security_config = None
 
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_DIR = AI_HOME / "state"
@@ -32,6 +63,14 @@ SCHEDULES_FILE = CONFIG_DIR / "schedules.json"
 IMPROVEMENTS_FILE = STATE_DIR / "improvements.json"
 SKILLS_LIBRARY_FILE = CONFIG_DIR / "skills_library.json"
 CUSTOM_AGENTS_FILE = CONFIG_DIR / "custom_agents.json"
+METRICS_FILE = STATE_DIR / "metrics.json"
+GUARDRAILS_FILE = STATE_DIR / "guardrails.json"
+MEMORY_FILE = STATE_DIR / "memory.json"
+INTEGRATIONS_FILE = CONFIG_DIR / "integrations.json"
+AGENT_TEMPLATES_FILE = CONFIG_DIR / "agent_templates.json"
+
+# Source agent_templates.json path (bundled in repo config directory)
+_REPO_TEMPLATES_FILE = Path(__file__).parent.parent.parent / "config" / "agent_templates.json"
 
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
@@ -52,6 +91,88 @@ except ImportError:
     _AI_ROUTER_AVAILABLE = False
 
 app = FastAPI(title="AI Employee Dashboard")
+
+# ── Rate limiter (openclaw-2) ─────────────────────────────────────────────────
+if _SLOWAPI_AVAILABLE:
+    _rate_limit = (
+        f"{_security_config.security.rate_limit_per_minute}/minute"
+        if _security_config else "60/minute"
+    )
+    limiter = Limiter(key_func=get_remote_address, default_limits=[_rate_limit])
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+else:
+    limiter = None
+
+# ── CORS (openclaw-2) ─────────────────────────────────────────────────────────
+_cors_origins = (
+    _security_config.security.cors_origins
+    if _security_config
+    else ["http://localhost:8787", "http://127.0.0.1:8787"]
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
+    allow_headers=["*"],
+)
+
+# ── Security headers middleware (openclaw-2) ──────────────────────────────────
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Attach HTTP security headers to every response."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # NOTE: The AI Employee dashboard uses extensive inline CSS and JS in its
+    # HTML template (INDEX_HTML). Until those are moved to external files with
+    # hashes/nonces, 'unsafe-inline' and 'unsafe-eval' are required. This is a
+    # known limitation; contributions to remove them are welcome.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: "
+        "https://fonts.googleapis.com https://fonts.gstatic.com"
+    )
+    return response
+
+# ── Audit logging middleware (openclaw-2) ─────────────────────────────────────
+_audit_logger = logging.getLogger("ai_employee.audit")
+if not _audit_logger.handlers:
+    _audit_handler = logging.StreamHandler()
+    _audit_handler.setFormatter(logging.Formatter("%(asctime)s AUDIT %(message)s"))
+    _audit_logger.addHandler(_audit_handler)
+    _audit_logger.setLevel(logging.INFO)
+
+@app.middleware("http")
+async def audit_logging_middleware(request: Request, call_next):
+    """Log every inbound request and outbound status for the audit trail."""
+    _audit_enabled = (
+        _security_config.logging.audit_enabled if _security_config else True
+    )
+    if not _audit_enabled:
+        return await call_next(request)
+
+    start = datetime.now(timezone.utc)
+    _audit_logger.info(json.dumps({
+        "event": "request",
+        "timestamp": start.isoformat(),
+        "method": request.method,
+        "path": request.url.path,
+        "client": request.client.host if request.client else "unknown",
+    }))
+    response = await call_next(request)
+    duration = (datetime.now(timezone.utc) - start).total_seconds()
+    _audit_logger.info(json.dumps({
+        "event": "response",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "duration_seconds": round(duration, 4),
+    }))
+    return response
 
 
 def now_iso() -> str:
@@ -334,6 +455,11 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('workers',this)">👷 Workers</button>
   <button onclick="switchTab('improvements',this)">💡 Improvements</button>
   <button onclick="switchTab('skills',this)">🛠️ Skills</button>
+  <button onclick="switchTab('metrics',this)">📈 ROI</button>
+  <button onclick="switchTab('templates',this)">📋 Templates</button>
+  <button onclick="switchTab('guardrails',this)">🔒 Guardrails</button>
+  <button onclick="switchTab('memory',this)">🧠 Memory</button>
+  <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
 </nav>
 
 <main>
@@ -717,8 +843,225 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- ── ROI Metrics ── -->
+<div id="tab-metrics" class="tab-content">
+  <div class="grid-stat" id="roi-stat-cards">
+    <div class="stat-card">
+      <div class="stat-icon blue">✅</div>
+      <div class="stat-body"><div class="val" id="m-tasks">–</div><div class="lbl">Tasks Completed</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon cyan">🎯</div>
+      <div class="stat-body"><div class="val" id="m-leads">–</div><div class="lbl">Leads Generated</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">⏱️</div>
+      <div class="stat-body"><div class="val" id="m-hours">–</div><div class="lbl">Hours Saved</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon yellow">💶</div>
+      <div class="stat-body"><div class="val" id="m-saved">–</div><div class="lbl">Cost Saved (€)</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">📧</div>
+      <div class="stat-body"><div class="val" id="m-emails">–</div><div class="lbl">Emails Sent</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon cyan">📝</div>
+      <div class="stat-body"><div class="val" id="m-content">–</div><div class="lbl">Content Created</div></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📊</span> Activity Log</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadMetrics()">↻ Refresh</button>
+      </div>
+      <div id="metrics-events"><div class="empty"><div class="icon">📊</div><p>No events yet. Run some tasks to start tracking ROI.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">➕</span> Record Activity</div>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Manually log a business result to track ROI.</p>
+      <div class="form-group">
+        <label>Event Type</label>
+        <select id="metric-type">
+          <option value="task_completed">Task Completed</option>
+          <option value="lead_generated">Lead Generated</option>
+          <option value="email_sent">Email Sent</option>
+          <option value="content_created">Content Created</option>
+          <option value="call_booked">Call Booked</option>
+          <option value="deal_closed">Deal Closed</option>
+          <option value="ticket_resolved">Ticket Resolved</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Agent / Source</label><input id="metric-agent" placeholder="e.g. lead-hunter"/></div>
+      <div class="form-group"><label>Value (€, optional)</label><input id="metric-value" type="number" placeholder="e.g. 500" min="0"/></div>
+      <div class="form-group"><label>Notes (optional)</label><input id="metric-notes" placeholder="e.g. Closed deal with Acme Corp"/></div>
+      <button class="btn btn-success" onclick="recordMetric()">📊 Record Event</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Templates ── -->
+<div id="tab-templates" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📋</span> Agent Templates</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadTemplates()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px">
+      Pre-built plug-and-play templates for common business use-cases. One click to deploy a full AI team.
+    </p>
+    <div id="templates-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px">
+      <div class="empty"><div class="icon">📋</div><p>Loading templates…</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Guardrails ── -->
+<div id="tab-guardrails" class="tab-content">
+  <div class="grid-stat">
+    <div class="stat-card">
+      <div class="stat-icon yellow">⏳</div>
+      <div class="stat-body"><div class="val" id="g-pending">–</div><div class="lbl">Pending Approvals</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">✅</div>
+      <div class="stat-body"><div class="val" id="g-approved">–</div><div class="lbl">Approved (total)</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon blue">🚫</div>
+      <div class="stat-body"><div class="val" id="g-rejected">–</div><div class="lbl">Rejected (total)</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon cyan">📋</div>
+      <div class="stat-body"><div class="val" id="g-total">–</div><div class="lbl">All Actions Logged</div></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">⏳</span> Pending Approvals</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadGuardrails()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+        High-risk actions require manual confirmation before execution.
+        <strong style="color:var(--warning)">Review carefully before approving.</strong>
+      </p>
+      <div id="guardrails-pending"><div class="empty"><div class="icon">✅</div><p>No pending approvals. All clear!</p></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📋</span> Action Log</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadGuardrails()">↻ Refresh</button>
+      </div>
+      <div id="guardrails-log"><div class="empty"><div class="icon">📋</div><p>No actions logged yet.</p></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">⚙️</span> Guardrail Settings</div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Configure which actions require approval and rate limits per agent.</p>
+    <div class="grid2">
+      <div>
+        <div class="section-title">Actions Requiring Approval</div>
+        <div id="guardrail-settings-list" style="font-size:.88em">
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" id="gr-send-email" checked /> Send bulk emails
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" id="gr-social-post" checked /> Post to social media
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" id="gr-make-purchase" checked /> Make purchases / place orders
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" id="gr-delete-data" checked /> Delete or modify data
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0">
+            <input type="checkbox" id="gr-api-calls" /> External API calls with side-effects
+          </label>
+        </div>
+      </div>
+      <div>
+        <div class="section-title">Rate Limits</div>
+        <div class="form-group"><label>Max emails / day</label><input id="rl-emails" type="number" value="200" min="1"/></div>
+        <div class="form-group"><label>Max social posts / day</label><input id="rl-posts" type="number" value="10" min="1"/></div>
+        <div class="form-group"><label>Max API calls / hour</label><input id="rl-api" type="number" value="100" min="1"/></div>
+        <button class="btn btn-primary" onclick="saveGuardrailSettings()">💾 Save Settings</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Memory ── -->
+<div id="tab-memory" class="tab-content">
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">👥</span> Client Memory</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadMemory()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">The AI remembers your clients across all conversations and tasks.</p>
+      <div id="memory-clients"><div class="empty"><div class="icon">👥</div><p>No clients remembered yet.</p></div></div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">➕</span> Add Client</div>
+        </div>
+        <div class="form-group"><label>Name</label><input id="mem-name" placeholder="e.g. John Smith"/></div>
+        <div class="form-group"><label>Company</label><input id="mem-company" placeholder="e.g. Acme Corp"/></div>
+        <div class="form-group"><label>Email</label><input id="mem-email" type="email" placeholder="john@acme.com"/></div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="mem-status">
+            <option value="prospect">Prospect</option>
+            <option value="lead">Lead</option>
+            <option value="customer">Customer</option>
+            <option value="churned">Churned</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Notes</label><textarea id="mem-notes" rows="3" placeholder="Any important context…"></textarea></div>
+        <button class="btn btn-success" onclick="addClient()">➕ Add Client</button>
+      </div>
+
+      <div class="card" style="margin-top:0">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📝</span> Recent Interactions</div>
+        </div>
+        <div id="memory-recent"><div class="empty"><div class="icon">📝</div><p>No recent interactions.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Integrations ── -->
+<div id="tab-integrations" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🔌</span> Integrations</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadIntegrations()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px">
+      Connect your tools and services. The AI uses these integrations to take real actions across your business.
+    </p>
+    <div id="integrations-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
+      <div class="empty"><div class="icon">🔌</div><p>Loading integrations…</p></div>
+    </div>
+  </div>
+</div>
+
 </main>
-</div><!-- .app -->
 
 <div id="toast"></div>
 
@@ -741,6 +1084,11 @@ function switchTab(tab, btn) {
   if (tab === 'tasks') loadTasks();
   if (tab === 'swarm') loadSwarm();
   if (tab === 'commands') loadCommandsTab();
+  if (tab === 'metrics') loadMetrics();
+  if (tab === 'templates') loadTemplates();
+  if (tab === 'guardrails') loadGuardrails();
+  if (tab === 'memory') loadMemory();
+  if (tab === 'integrations') loadIntegrations();
 }
 
 function toast(msg, color='#10b981') {
@@ -760,7 +1108,18 @@ async function api(path, opts={}) {
   }
 }
 
-// ── Dashboard ──────────────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Escape a value for safe embedding inside a JS string literal (single-quoted onclick="…")
+function jsEsc(str) {
+  return String(str ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"');
+}
+
+
 async function loadDashboard() {
   const d = await api('/api/status');
   const bots = d.bots || [];
@@ -1788,8 +2147,337 @@ function copyCmd(cmd) {
   navigator.clipboard.writeText(cmd).then(() => toast(`Copied: ${cmd}`, '#6366f1')).catch(() => {});
 }
 
-// Initial load
-loadDashboard();
+// ── ROI Metrics ──────────────────────────────────────────────────────────────
+async function loadMetrics() {
+  const d = await api('/api/metrics');
+  const s = d.summary || {};
+  document.getElementById('m-tasks').textContent  = (s.tasks_completed   || 0).toLocaleString();
+  document.getElementById('m-leads').textContent  = (s.leads_generated   || 0).toLocaleString();
+  document.getElementById('m-hours').textContent  = (s.hours_saved       || 0).toLocaleString();
+  document.getElementById('m-saved').textContent  = '€' + (s.cost_saved  || 0).toLocaleString();
+  document.getElementById('m-emails').textContent = (s.emails_sent       || 0).toLocaleString();
+  document.getElementById('m-content').textContent= (s.content_created   || 0).toLocaleString();
+
+  const events = d.events || [];
+  const el = document.getElementById('metrics-events');
+  if (!events.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">📊</div><p>No events yet. Run tasks to start tracking ROI.</p></div>';
+    return;
+  }
+  const typeIcon = {task_completed:'✅',lead_generated:'🎯',email_sent:'📧',content_created:'📝',call_booked:'📞',deal_closed:'💰',ticket_resolved:'🎫',custom:'⭐'};
+  el.innerHTML = events.slice(-30).reverse().map(e => {
+    const icon = typeIcon[e.type] || '⭐';
+    const val = e.value ? ` <span style="color:var(--success);font-weight:600">€${e.value}</span>` : '';
+    const agent = e.agent ? ` <code style="font-size:.72em">${escHtml(e.agent)}</code>` : '';
+    const note = e.notes ? `<div style="font-size:.77em;color:var(--text-muted);margin-top:2px">${escHtml(e.notes)}</div>` : '';
+    const ts = (e.ts||'').split('T')[0];
+    return `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:1.1em;margin-top:1px">${icon}</span>
+      <div style="flex:1">
+        <div style="font-size:.86em">${escHtml(e.type.replace(/_/g,' '))}${agent}${val}</div>
+        ${note}
+      </div>
+      <span style="font-size:.73em;color:var(--text-muted);white-space:nowrap">${ts}</span>
+    </div>`;
+  }).join('');
+}
+
+async function recordMetric() {
+  const type  = document.getElementById('metric-type').value;
+  const agent = document.getElementById('metric-agent').value.trim();
+  const value = parseFloat(document.getElementById('metric-value').value) || null;
+  const notes = document.getElementById('metric-notes').value.trim();
+  const r = await api('/api/metrics', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({type, agent: agent||null, value, notes: notes||null})});
+  if (r.ok) {
+    toast('Metric recorded!');
+    document.getElementById('metric-value').value = '';
+    document.getElementById('metric-notes').value = '';
+    loadMetrics();
+  } else { toast(r.detail || r.error || 'Error', '#ef4444'); }
+}
+
+// ── Templates ────────────────────────────────────────────────────────────────
+async function loadTemplates() {
+  const d = await api('/api/templates');
+  const templates = d.templates || [];
+  const el = document.getElementById('templates-grid');
+  if (!templates.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No templates found.</p></div>';
+    return;
+  }
+  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)'};
+  el.innerHTML = templates.map(t => {
+    const col = catColors[t.category] || 'rgba(99,102,241,.12)';
+    const agents = (t.agents||[]).map(a => `<span style="background:var(--surface);padding:1px 6px;border-radius:3px;font-size:.72em;border:1px solid var(--border)">${escHtml(a)}</span>`).join(' ');
+    const expected = t.expected_results || {};
+    const roi = expected.estimated_monthly_revenue || expected.estimated_monthly_savings || expected.estimated_monthly_value || '';
+    const steps = (t.setup_steps||[]).map(s => `<li style="margin-bottom:4px">${escHtml(s)}</li>`).join('');
+    return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:18px;background:var(--surface2)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-size:1.8em">${escHtml(t.icon||'📋')}</span>
+        <div>
+          <div style="font-weight:700;font-size:.95em">${escHtml(t.name)}</div>
+          <span style="font-size:.73em;background:${col};padding:2px 8px;border-radius:4px;color:var(--text-secondary)">${escHtml(t.category)}</span>
+        </div>
+        ${roi ? `<span style="margin-left:auto;font-size:.78em;color:var(--success);font-weight:600;background:rgba(16,185,129,.1);padding:3px 8px;border-radius:6px">${escHtml(roi)}</span>` : ''}
+      </div>
+      <p style="font-size:.83em;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${escHtml(t.description)}</p>
+      <div style="margin-bottom:10px">
+        <div style="font-size:.73em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Agents</div>
+        <div style="display:flex;flex-wrap:wrap;gap:3px">${agents}</div>
+      </div>
+      <details style="margin-bottom:10px">
+        <summary style="cursor:pointer;font-size:.8em;color:var(--accent);font-weight:600">📋 Setup Steps</summary>
+        <ol style="font-size:.8em;color:var(--text-muted);margin:8px 0 0 16px;line-height:1.6">${steps}</ol>
+      </details>
+      <button class="btn btn-success" style="width:100%" onclick="deployTemplate('${jsEsc(t.id)}','${jsEsc(t.name)}')">🚀 Deploy Template</button>
+    </div>`;
+  }).join('');
+}
+
+async function deployTemplate(id, name) {
+  if (!confirm(`Deploy template "${name}"?\n\nThis will create a new Worker Bundle with pre-configured agents and schedule.`)) return;
+  const r = await api(`/api/templates/${id}/deploy`, {method:'POST'});
+  if (r.ok) {
+    toast(`✅ Template "${name}" deployed! Check Workers tab.`, '#10b981');
+  } else { toast(r.detail || r.error || 'Deployment failed', '#ef4444'); }
+}
+
+// ── Guardrails ───────────────────────────────────────────────────────────────
+async function loadGuardrails() {
+  const d = await api('/api/guardrails');
+  const pending  = d.pending  || [];
+  const log      = d.log      || [];
+  const summary  = d.summary  || {};
+
+  document.getElementById('g-pending').textContent  = pending.length;
+  document.getElementById('g-approved').textContent = summary.approved || 0;
+  document.getElementById('g-rejected').textContent = summary.rejected || 0;
+  document.getElementById('g-total').textContent    = summary.total    || 0;
+
+  const pEl = document.getElementById('guardrails-pending');
+  if (!pending.length) {
+    pEl.innerHTML = '<div class="empty"><div class="icon">✅</div><p>No pending approvals. All clear!</p></div>';
+  } else {
+    const riskColor = {high:'#ef4444', medium:'#f59e0b', low:'#10b981'};
+    pEl.innerHTML = pending.map(a => {
+      const col = riskColor[a.risk_level] || '#f59e0b';
+      return `<div style="border:1px solid ${col};border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;background:var(--surface2)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1">
+            <div style="font-size:.88em;font-weight:600">${escHtml(a.action_type||'Action')}</div>
+            <div style="font-size:.82em;color:var(--text-secondary);margin:3px 0">${escHtml(a.description||'')}</div>
+            <div style="font-size:.77em;color:var(--text-muted)">Agent: <code>${escHtml(a.agent||'?')}</code> · Risk: <span style="color:${col};font-weight:600">${escHtml(a.risk_level||'medium')}</span></div>
+          </div>
+          <div style="display:flex;gap:5px;flex-shrink:0">
+            <button class="btn btn-success btn-sm" onclick="approveAction('${jsEsc(a.id)}')">✅ Approve</button>
+            <button class="btn btn-danger btn-sm" onclick="rejectAction('${jsEsc(a.id)}')">🚫 Reject</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  const lEl = document.getElementById('guardrails-log');
+  if (!log.length) {
+    lEl.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No actions logged yet.</p></div>';
+  } else {
+    const statusIcon = {approved:'✅', rejected:'🚫', pending:'⏳', auto_approved:'✔️'};
+    lEl.innerHTML = log.slice(-20).reverse().map(e => {
+      const icon = statusIcon[e.status] || '📋';
+      const ts = (e.ts||'').replace('T',' ').slice(0,16);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:.83em">
+        <span>${icon}</span>
+        <div style="flex:1">
+          <span>${escHtml(e.action_type||'action')}</span>
+          <code style="font-size:.77em;margin-left:4px">${escHtml(e.agent||'?')}</code>
+        </div>
+        <span style="font-size:.73em;color:var(--text-muted)">${ts}</span>
+      </div>`;
+    }).join('');
+  }
+}
+
+async function approveAction(id) {
+  const r = await api(`/api/guardrails/${id}/approve`, {method:'POST'});
+  if (r.ok) { toast('Action approved ✅'); loadGuardrails(); }
+  else { toast(r.detail || 'Error', '#ef4444'); }
+}
+
+async function rejectAction(id) {
+  const reason = prompt('Reason for rejection (optional):') || '';
+  const r = await api(`/api/guardrails/${id}/reject`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason})});
+  if (r.ok) { toast('Action rejected 🚫', '#ef4444'); loadGuardrails(); }
+  else { toast(r.detail || 'Error', '#ef4444'); }
+}
+
+async function saveGuardrailSettings() {
+  const settings = {
+    require_approval_for: {
+      send_email:    document.getElementById('gr-send-email').checked,
+      social_post:   document.getElementById('gr-social-post').checked,
+      make_purchase: document.getElementById('gr-make-purchase').checked,
+      delete_data:   document.getElementById('gr-delete-data').checked,
+      api_calls:     document.getElementById('gr-api-calls').checked,
+    },
+    rate_limits: {
+      emails_per_day: parseInt(document.getElementById('rl-emails').value) || 200,
+      posts_per_day:  parseInt(document.getElementById('rl-posts').value) || 10,
+      api_per_hour:   parseInt(document.getElementById('rl-api').value) || 100,
+    }
+  };
+  const r = await api('/api/guardrails/settings', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(settings)});
+  if (r.ok) { toast('Settings saved ✅'); }
+  else { toast(r.detail || 'Error', '#ef4444'); }
+}
+
+// ── Memory ───────────────────────────────────────────────────────────────────
+async function loadMemory() {
+  const d = await api('/api/memory');
+  const clients = d.clients || [];
+  const recent  = d.recent_interactions || [];
+
+  const cEl = document.getElementById('memory-clients');
+  if (!clients.length) {
+    cEl.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No clients remembered yet. Add one below.</p></div>';
+  } else {
+    const statusColor = {prospect:'rgba(245,158,11,.2)', lead:'rgba(34,211,238,.2)', customer:'rgba(16,185,129,.2)', churned:'rgba(239,68,68,.12)'};
+    cEl.innerHTML = clients.map(c => {
+      const col = statusColor[c.status] || 'var(--surface)';
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;background:var(--surface2)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div style="font-weight:600;font-size:.9em">${escHtml(c.name)}</div>
+            ${c.company ? `<div style="font-size:.8em;color:var(--text-secondary)">${escHtml(c.company)}</div>` : ''}
+            ${c.email   ? `<div style="font-size:.77em;color:var(--text-muted)">${escHtml(c.email)}</div>`   : ''}
+          </div>
+          <span style="font-size:.73em;background:${col};padding:2px 8px;border-radius:4px;border:1px solid var(--border)">${escHtml(c.status||'prospect')}</span>
+        </div>
+        ${c.notes ? `<div style="font-size:.78em;color:var(--text-muted);margin-top:6px;line-height:1.4">${escHtml(c.notes)}</div>` : ''}
+        <div style="font-size:.72em;color:var(--text-muted);margin-top:4px">${(c.interactions||0)} interactions · added ${(c.added_at||'').split('T')[0]}</div>
+        <div style="margin-top:8px;display:flex;gap:5px">
+          <button class="btn btn-ghost btn-sm" onclick="updateClientStatus('${jsEsc(c.id)}','customer')" title="Mark as customer">Mark customer</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteClient('${jsEsc(c.id)}')">🗑</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  const rEl = document.getElementById('memory-recent');
+  if (!recent.length) {
+    rEl.innerHTML = '<div class="empty"><div class="icon">📝</div><p>No recent interactions.</p></div>';
+  } else {
+    rEl.innerHTML = recent.slice(-10).reverse().map(i => {
+      const ts = (i.ts||'').replace('T',' ').slice(0,16);
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:.83em">
+        <div>${escHtml(i.summary||i.message||'interaction')}</div>
+        <div style="font-size:.77em;color:var(--text-muted);margin-top:2px">${ts} · ${escHtml(i.agent||'system')}</div>
+      </div>`;
+    }).join('');
+  }
+}
+
+async function addClient() {
+  const name    = document.getElementById('mem-name').value.trim();
+  const company = document.getElementById('mem-company').value.trim();
+  const email   = document.getElementById('mem-email').value.trim();
+  const status  = document.getElementById('mem-status').value;
+  const notes   = document.getElementById('mem-notes').value.trim();
+  if (!name) { toast('Name is required', '#ef4444'); return; }
+  const r = await api('/api/memory/clients', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, company: company||null, email: email||null, status, notes: notes||null})});
+  if (r.ok) {
+    toast('Client added ✅');
+    document.getElementById('mem-name').value    = '';
+    document.getElementById('mem-company').value = '';
+    document.getElementById('mem-email').value   = '';
+    document.getElementById('mem-notes').value   = '';
+    loadMemory();
+  } else { toast(r.detail || 'Error', '#ef4444'); }
+}
+
+async function updateClientStatus(id, status) {
+  await api(`/api/memory/clients/${id}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({status})});
+  loadMemory();
+}
+
+async function deleteClient(id) {
+  if (!confirm('Delete this client from memory?')) return;
+  await api(`/api/memory/clients/${id}`, {method:'DELETE'});
+  loadMemory();
+}
+
+// ── Integrations ─────────────────────────────────────────────────────────────
+async function loadIntegrations() {
+  const d = await api('/api/integrations');
+  const integrations = d.integrations || [];
+  const el = document.getElementById('integrations-grid');
+  if (!integrations.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">🔌</div><p>No integrations configured.</p></div>';
+    return;
+  }
+  el.innerHTML = integrations.map(intg => {
+    const enabled = intg.enabled === true;
+    const statusCol = enabled ? 'var(--success)' : 'var(--text-muted)';
+    const fields = (intg.fields||[]).map(f => `
+      <div class="form-group" style="margin-bottom:8px">
+        <label style="font-size:.78em">${escHtml(f.label)}</label>
+        <input type="${f.type||'text'}" id="intg-${escHtml(intg.id)}-${escHtml(f.key)}"
+          placeholder="${escHtml(f.placeholder||'')}"
+          value="${escHtml(intg.config && intg.config[f.key] ? String(intg.config[f.key]) : '')}"
+          ${f.type==='password'?'autocomplete="off"':''}/>
+      </div>`).join('');
+    return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:18px;background:var(--surface2)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-size:1.6em">${escHtml(intg.icon||'🔌')}</span>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:.95em">${escHtml(intg.name)}</div>
+          <div style="font-size:.8em;color:var(--text-muted)">${escHtml(intg.description||'')}</div>
+        </div>
+        <span style="font-size:.73em;font-weight:600;color:${statusCol}">${enabled ? '● Connected' : '○ Not configured'}</span>
+      </div>
+      <div>${fields}</div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn btn-primary btn-sm" style="flex:1" onclick="saveIntegration('${jsEsc(intg.id)}')">💾 Save</button>
+        <button class="btn btn-ghost btn-sm" onclick="testIntegration('${jsEsc(intg.id)}')">🔍 Test</button>
+      </div>
+      <div id="intg-result-${escHtml(intg.id)}" style="margin-top:6px;font-size:.8em"></div>
+    </div>`;
+  }).join('');
+}
+
+async function saveIntegration(id) {
+  const d = await api('/api/integrations');
+  const intg = (d.integrations||[]).find(i => i.id === id);
+  if (!intg) { toast('Integration not found', '#ef4444'); return; }
+  const config = {};
+  (intg.fields||[]).forEach(f => {
+    const el = document.getElementById(`intg-${id}-${f.key}`);
+    if (el) config[f.key] = el.value;
+  });
+  const enabled = Object.values(config).some(v => v.trim && v.trim());
+  const r = await api(`/api/integrations/${id}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({config, enabled})});
+  if (r.ok) { toast(`${intg.name} saved ✅`); loadIntegrations(); }
+  else { toast(r.detail || 'Error', '#ef4444'); }
+}
+
+async function testIntegration(id) {
+  const el = document.getElementById(`intg-result-${id}`);
+  if (el) el.textContent = '⏳ Testing…';
+  const r = await api(`/api/integrations/${id}/test`, {method:'POST'});
+  if (el) {
+    if (r.ok) { el.style.color = 'var(--success)'; el.textContent = '✅ ' + (r.message || 'Connection OK'); }
+    else       { el.style.color = 'var(--danger)';  el.textContent = '❌ ' + (r.message || r.detail || 'Test failed'); }
+  }
+}
+
+
 // Auto-refresh dashboard every 30s
 setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 </script>
@@ -1802,6 +2490,111 @@ setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 @app.get("/", response_class=HTMLResponse)
 def index():
     return INDEX_HTML
+
+
+# ── Security endpoints (openclaw-2) ───────────────────────────────────────────
+
+class _HealthResponse(BaseModel):
+    status: str
+    version: str
+    secure_mode: bool
+    privacy_mode: bool
+
+
+class _UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=12)
+
+
+class _TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@app.get("/health", response_model=_HealthResponse)
+def health_check():
+    """Health-check endpoint — always responds with current security posture."""
+    return _HealthResponse(
+        status="healthy",
+        version=_security_config.app_version if _security_config else "2.0.0",
+        secure_mode=_SECURITY_AVAILABLE,
+        privacy_mode=(
+            not _security_config.privacy.telemetry_enabled
+            if _security_config else True
+        ),
+    )
+
+
+@app.get("/security/status")
+def security_status():
+    """Return the current security configuration posture and any warnings."""
+    warnings = validate_security_config(_security_config) if _security_config else []
+    return JSONResponse({
+        "secure_mode": _SECURITY_AVAILABLE,
+        "encryption_enabled": (
+            _security_config.privacy.encrypt_data_at_rest if _security_config else False
+        ),
+        "rate_limiting_enabled": (
+            _security_config.security.rate_limit_enabled if _security_config else False
+        ),
+        "external_calls_blocked": (
+            _security_config.privacy.external_api_calls_disabled if _security_config else False
+        ),
+        "telemetry_disabled": (
+            not _security_config.privacy.telemetry_enabled if _security_config else True
+        ),
+        "security_module_loaded": _SECURITY_AVAILABLE,
+        "warnings": warnings,
+    })
+
+
+@app.post("/auth/register", response_model=_TokenResponse,
+          status_code=status.HTTP_201_CREATED)
+def auth_register(user_data: _UserCreate):
+    """
+    Register a dashboard user and return a JWT bearer token.
+
+    Password is validated against the configured strength policy (openclaw-2).
+    """
+    if not _SECURITY_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Security module not available. Install security dependencies.",
+        )
+
+    cfg = _security_config
+    is_valid, err_msg = PasswordValidator.validate(
+        user_data.password,
+        min_length=cfg.security.min_password_length if cfg else 12,
+        require_special=cfg.security.require_special_chars if cfg else True,
+        require_numbers=cfg.security.require_numbers if cfg else True,
+        require_uppercase=cfg.security.require_uppercase if cfg else True,
+    )
+    if not is_valid:
+        _audit_logger.warning(json.dumps({
+            "event": "registration_failed",
+            "reason": "weak_password",
+            "username": user_data.username,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg)
+
+    username = InputSanitizer.sanitize_input(user_data.username, max_length=50)
+    auth = AuthManager(
+        secret_key=cfg.security.jwt_secret_key,
+        algorithm=cfg.security.jwt_algorithm,
+        expire_minutes=cfg.security.access_token_expire_minutes,
+    )
+    token = auth.create_access_token({"sub": username, "type": "user"})
+
+    _audit_logger.info(json.dumps({
+        "event": "user_registered",
+        "username": username,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }))
+    return _TokenResponse(access_token=token)
+
+# ── End security endpoints ─────────────────────────────────────────────────────
 
 
 @app.get("/api/status")
@@ -2429,7 +3222,163 @@ def handle_command(message: str) -> str:
         if _reply is not None:
             return _reply
 
-    # Default: try AI router (Ollama first, then cloud) before falling back to queued message
+    # ── ROI / Metrics commands ────────────────────────────────────────────────
+    if msg_lower in ("metrics", "roi", "stats", "kpis"):
+        data = _load_metrics()
+        s = data.get("summary", {})
+        lines = [
+            f"📊 ROI Summary",
+            f"Tasks completed : {s.get('tasks_completed', 0)}",
+            f"Leads generated : {s.get('leads_generated', 0)}",
+            f"Emails sent     : {s.get('emails_sent', 0)}",
+            f"Content created : {s.get('content_created', 0)}",
+            f"Hours saved     : {s.get('hours_saved', 0):.1f}h",
+            f"Cost saved      : €{s.get('cost_saved', 0):.0f}",
+            f"Revenue tracked : €{s.get('revenue', 0):.0f}",
+            "",
+            "Open *📈 ROI* tab for full dashboard.",
+        ]
+        return "\n".join(lines)
+
+    if msg_lower.startswith("metrics record "):
+        parts = message[15:].strip().split(":")
+        event_type = parts[0].strip() if parts else "custom"
+        value = None
+        if len(parts) > 1:
+            try:
+                value = float(parts[1].strip())
+            except ValueError:
+                pass
+        valid_types = list(_HOURS_PER_EVENT.keys())
+        if event_type not in valid_types:
+            return f"❌ Unknown type. Valid: {', '.join(valid_types)}"
+        data = _load_metrics()
+        events = data.get("events", [])
+        import uuid as _uuid
+        events.append({"id": _uuid.uuid4().hex[:8], "type": event_type, "value": value, "ts": now_iso(), "agent": "manual"})
+        data["events"] = events[-500:]
+        data["summary"] = _recalc_summary(data["events"])
+        _save_metrics(data)
+        return f"✅ Recorded: {event_type}" + (f" · €{value:.0f}" if value else "")
+
+    # ── Guardrails commands ───────────────────────────────────────────────────
+    if msg_lower in ("guardrails", "pending approvals", "approvals"):
+        data = _load_guardrails()
+        pending = data.get("pending", [])
+        if not pending:
+            return "🔒 Guardrails: No pending approvals. All clear!"
+        lines = [f"🔒 {len(pending)} pending approval(s):"]
+        for a in pending[:5]:
+            lines.append(f"  [{a['id']}] {a.get('action_type','?')} by {a.get('agent','?')} — risk:{a.get('risk_level','?')}")
+        lines.append("\nOpen *🔒 Guardrails* tab to approve/reject.")
+        return "\n".join(lines)
+
+    if msg_lower.startswith("approve "):
+        action_id = message[8:].strip()
+        data = _load_guardrails()
+        pending = data.get("pending", [])
+        action = next((a for a in pending if a["id"] == action_id), None)
+        if not action:
+            return f"❌ Action '{action_id}' not found in pending queue."
+        action["status"] = "approved"
+        action["resolved_at"] = now_iso()
+        data["pending"] = [a for a in pending if a["id"] != action_id]
+        data.setdefault("log", []).append(action)
+        data["log"] = data["log"][-200:]
+        _save_guardrails(data)
+        return f"✅ Action {action_id} approved."
+
+    if msg_lower.startswith("reject "):
+        action_id = message[7:].strip()
+        data = _load_guardrails()
+        pending = data.get("pending", [])
+        action = next((a for a in pending if a["id"] == action_id), None)
+        if not action:
+            return f"❌ Action '{action_id}' not found in pending queue."
+        action["status"] = "rejected"
+        action["resolved_at"] = now_iso()
+        data["pending"] = [a for a in pending if a["id"] != action_id]
+        data.setdefault("log", []).append(action)
+        data["log"] = data["log"][-200:]
+        _save_guardrails(data)
+        return f"🚫 Action {action_id} rejected."
+
+    # ── Memory commands ───────────────────────────────────────────────────────
+    if msg_lower in ("memory", "clients", "crm"):
+        data = _load_memory()
+        clients = list(data.get("clients", {}).values())
+        if not clients:
+            return "🧠 Memory: No clients yet.\nAdd one: `client add <name> <company>`"
+        lines = [f"🧠 {len(clients)} client(s) in memory:"]
+        for c in clients[:10]:
+            status = c.get("status", "prospect")
+            lines.append(f"  • {c['name']} ({c.get('company','?')}) [{status}]")
+        if len(clients) > 10:
+            lines.append(f"  … and {len(clients)-10} more. Open *🧠 Memory* tab for full list.")
+        return "\n".join(lines)
+
+    if msg_lower.startswith("client add "):
+        rest = message[11:].strip().split(" ", 1)
+        name = rest[0] if rest else ""
+        company = rest[1] if len(rest) > 1 else None
+        if not name:
+            return "❌ Usage: client add <name> [company]"
+        data = _load_memory()
+        clients = data.get("clients", {})
+        import re as _re
+        import uuid as _uuid
+        client_id = _re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-") or _uuid.uuid4().hex[:8]
+        clients[client_id] = {
+            "id": client_id, "name": name, "company": company,
+            "status": "prospect", "interactions": 0, "added_at": now_iso(), "updated_at": now_iso(),
+        }
+        data["clients"] = clients
+        _save_memory(data)
+        return f"✅ Client added: {name}" + (f" ({company})" if company else "")
+
+    # ── Templates commands ────────────────────────────────────────────────────
+    if msg_lower in ("templates", "template list"):
+        templates = _load_templates()
+        if not templates:
+            return "📋 No templates found."
+        lines = [f"📋 {len(templates)} available templates:"]
+        for t in templates:
+            roi = (t.get("expected_results") or {}).get("estimated_monthly_revenue") or (t.get("expected_results") or {}).get("estimated_monthly_savings") or ""
+            roi_str = f" · {roi}" if roi else ""
+            lines.append(f"  {t.get('icon','📋')} {t['name']}{roi_str}")
+        lines.append("\nDeploy: `template deploy <id>` or use *📋 Templates* tab.")
+        return "\n".join(lines)
+
+    if msg_lower.startswith("template deploy "):
+        tmpl_id = message[16:].strip()
+        templates = _load_templates()
+        tmpl = next((t for t in templates if t["id"] == tmpl_id), None)
+        if not tmpl:
+            ids = [t["id"] for t in templates]
+            return f"❌ Template '{tmpl_id}' not found.\nAvailable: {', '.join(ids)}"
+        import uuid as _uuid
+        agents = tmpl.get("agents") or []
+        bundle = {
+            "id": _uuid.uuid4().hex[:10],
+            "name": tmpl["name"],
+            "description": tmpl.get("description", "")[:200],
+            "task_description": tmpl.get("task_description", ""),
+            "schedule": tmpl.get("schedule", "manual"),
+            "agents": agents,
+            "enabled": True,
+            "template_id": tmpl_id,
+            "created_at": now_iso(),
+            "last_run": None,
+        }
+        bundles = _load_worker_bundles()
+        bundles.append(bundle)
+        _save_worker_bundles(bundles)
+        return (f"🚀 Template deployed: *{tmpl['name']}*\n"
+                f"Agents: {', '.join(agents)}\n"
+                f"Schedule: {tmpl.get('schedule','manual')}\n"
+                f"Use `worker run {tmpl['name']}` to start it now.")
+
+
     if _AI_ROUTER_AVAILABLE:
         try:
             result = _query_ai(
@@ -3024,5 +3973,606 @@ def get_all_agents():
     return JSONResponse({"agents": result, "total": len(result)})
 
 
+
+# ─── ROI Metrics API ─────────────────────────────────────────────────────────
+
+# Cost-per-hour estimate used to calculate cost savings from hours saved
+_COST_PER_HOUR_EUR = float(os.environ.get("AI_EMPLOYEE_HOURLY_RATE", "75"))
+# Hours saved estimate per task type
+_HOURS_PER_EVENT = {
+    "task_completed": 0.5,
+    "lead_generated": 0.1,
+    "email_sent": 0.05,
+    "content_created": 1.5,
+    "call_booked": 0.25,
+    "deal_closed": 0.0,
+    "ticket_resolved": 0.2,
+    "custom": 0.0,
+}
+
+
+def _load_metrics() -> dict:
+    if not METRICS_FILE.exists():
+        return {"summary": {}, "events": []}
+    try:
+        return json.loads(METRICS_FILE.read_text())
+    except Exception:
+        return {"summary": {}, "events": []}
+
+
+def _save_metrics(data: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    METRICS_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _recalc_summary(events: list) -> dict:
+    s: dict = {
+        "tasks_completed": 0,
+        "leads_generated": 0,
+        "emails_sent": 0,
+        "content_created": 0,
+        "calls_booked": 0,
+        "deals_closed": 0,
+        "tickets_resolved": 0,
+        "hours_saved": 0.0,
+        "cost_saved": 0.0,
+        "revenue": 0.0,
+    }
+    for e in events:
+        t = e.get("type", "")
+        if t == "task_completed":
+            s["tasks_completed"] += 1
+        elif t == "lead_generated":
+            s["leads_generated"] += 1
+        elif t == "email_sent":
+            s["emails_sent"] += 1
+        elif t == "content_created":
+            s["content_created"] += 1
+        elif t == "call_booked":
+            s["calls_booked"] += 1
+        elif t == "deal_closed":
+            s["deals_closed"] += 1
+            if e.get("value"):
+                s["revenue"] += float(e["value"])
+        elif t == "ticket_resolved":
+            s["tickets_resolved"] += 1
+        hours = _HOURS_PER_EVENT.get(t, 0.0)
+        s["hours_saved"] += hours
+    s["hours_saved"] = round(s["hours_saved"], 2)
+    s["cost_saved"] = round(s["hours_saved"] * _COST_PER_HOUR_EUR, 2)
+    return s
+
+
+@app.get("/api/metrics")
+def get_metrics():
+    data = _load_metrics()
+    return JSONResponse(data)
+
+
+@app.post("/api/metrics")
+def record_metric(payload: dict):
+    import uuid as _uuid
+    event_type = (payload.get("type") or "custom").strip()
+    valid_types = list(_HOURS_PER_EVENT.keys())
+    if event_type not in valid_types:
+        event_type = "custom"
+    agent = (payload.get("agent") or "").strip() or None
+    value = payload.get("value")
+    if value is not None:
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = None
+    notes = (payload.get("notes") or "").strip() or None
+
+    data = _load_metrics()
+    events = data.get("events", [])
+    events.append({
+        "id": _uuid.uuid4().hex[:10],
+        "type": event_type,
+        "agent": agent,
+        "value": value,
+        "notes": notes,
+        "ts": now_iso(),
+    })
+    # Keep last 500 events
+    data["events"] = events[-500:]
+    data["summary"] = _recalc_summary(data["events"])
+    _save_metrics(data)
+    return JSONResponse({"ok": True, "summary": data["summary"]})
+
+
+# ─── Agent Templates API ──────────────────────────────────────────────────────
+
+def _load_templates() -> list:
+    # Prefer installed copy; fall back to repo copy
+    for candidate in (AGENT_TEMPLATES_FILE, _REPO_TEMPLATES_FILE):
+        if candidate.exists():
+            try:
+                return json.loads(candidate.read_text()).get("templates", [])
+            except Exception:
+                pass
+    return []
+
+
+@app.get("/api/templates")
+def list_templates():
+    return JSONResponse({"templates": _load_templates()})
+
+
+@app.post("/api/templates/{template_id}/deploy")
+def deploy_template(template_id: str):
+    import uuid as _uuid
+    templates = _load_templates()
+    tmpl = next((t for t in templates if t["id"] == template_id), None)
+    if not tmpl:
+        raise HTTPException(404, f"Template '{template_id}' not found")
+
+    capabilities = _load_agent_capabilities()
+    known_agents = set(capabilities.get("agents", {}).keys())
+    agents = [a for a in (tmpl.get("agents") or []) if a in known_agents]
+    if not agents:
+        # Accept unknown agents — they may be installed later
+        agents = tmpl.get("agents") or []
+
+    bundle = {
+        "id": _uuid.uuid4().hex[:10],
+        "name": tmpl["name"],
+        "description": tmpl.get("description", "")[:200],
+        "task_description": tmpl.get("task_description", ""),
+        "schedule": tmpl.get("schedule", "manual"),
+        "agents": agents,
+        "enabled": True,
+        "template_id": template_id,
+        "created_at": now_iso(),
+        "last_run": None,
+    }
+    bundles = _load_worker_bundles()
+    bundles.append(bundle)
+    _save_worker_bundles(bundles)
+    return JSONResponse({"ok": True, "bundle_id": bundle["id"], "name": bundle["name"]})
+
+
+# ─── Guardrails API ───────────────────────────────────────────────────────────
+
+def _load_guardrails() -> dict:
+    if not GUARDRAILS_FILE.exists():
+        return {"pending": [], "log": [], "settings": {}, "summary": {}}
+    try:
+        return json.loads(GUARDRAILS_FILE.read_text())
+    except Exception:
+        return {"pending": [], "log": [], "settings": {}, "summary": {}}
+
+
+def _save_guardrails(data: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    GUARDRAILS_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _recalc_guardrail_summary(data: dict) -> dict:
+    log = data.get("log", [])
+    return {
+        "total": len(log),
+        "approved": sum(1 for e in log if e.get("status") == "approved"),
+        "rejected": sum(1 for e in log if e.get("status") == "rejected"),
+        "auto_approved": sum(1 for e in log if e.get("status") == "auto_approved"),
+        "pending": len(data.get("pending", [])),
+    }
+
+
+@app.get("/api/guardrails")
+def get_guardrails():
+    data = _load_guardrails()
+    data["summary"] = _recalc_guardrail_summary(data)
+    return JSONResponse(data)
+
+
+@app.post("/api/guardrails/request")
+def request_guardrail_action(payload: dict):
+    """Submit an action for approval (called by agents before performing risky actions)."""
+    import uuid as _uuid
+    action_type = (payload.get("action_type") or "unknown").strip()
+    agent = (payload.get("agent") or "system").strip()
+    description = (payload.get("description") or "").strip()
+    risk_level = (payload.get("risk_level") or "medium").strip()
+    if risk_level not in ("low", "medium", "high"):
+        risk_level = "medium"
+
+    data = _load_guardrails()
+    settings = data.get("settings", {})
+    require_approval = settings.get("require_approval_for", {})
+
+    # Map action types to setting keys
+    action_key_map = {
+        "send_email": "send_email",
+        "email": "send_email",
+        "bulk_email": "send_email",
+        "social_post": "social_post",
+        "post": "social_post",
+        "social": "social_post",
+        "tweet": "social_post",
+        "publish": "social_post",
+        "purchase": "make_purchase",
+        "order": "make_purchase",
+        "buy": "make_purchase",
+        "checkout": "make_purchase",
+        "delete": "delete_data",
+        "remove": "delete_data",
+        "drop": "delete_data",
+        "api_call": "api_calls",
+        "webhook": "api_calls",
+    }
+    # Try full action_type first, then first word of action_type
+    at_lower = action_type.lower()
+    at_prefix = at_lower.split("_")[0] if at_lower else ""
+    setting_key = action_key_map.get(at_lower) or action_key_map.get(at_prefix, None)
+    needs_approval = require_approval.get(setting_key, False) if setting_key else risk_level in ("high",)
+
+    action = {
+        "id": _uuid.uuid4().hex[:10],
+        "action_type": action_type,
+        "agent": agent,
+        "description": description,
+        "risk_level": risk_level,
+        "status": "pending" if needs_approval else "auto_approved",
+        "ts": now_iso(),
+    }
+
+    if needs_approval:
+        data.setdefault("pending", []).append(action)
+    else:
+        data.setdefault("log", []).append(action)
+
+    # Keep log to last 200 entries
+    data["log"] = data.get("log", [])[-200:]
+    _save_guardrails(data)
+    return JSONResponse({"ok": True, "id": action["id"], "status": action["status"], "needs_approval": needs_approval})
+
+
+@app.post("/api/guardrails/{action_id}/approve")
+def approve_guardrail_action(action_id: str):
+    data = _load_guardrails()
+    pending = data.get("pending", [])
+    action = next((a for a in pending if a["id"] == action_id), None)
+    if not action:
+        raise HTTPException(404, f"Action '{action_id}' not found in pending queue")
+    action["status"] = "approved"
+    action["resolved_at"] = now_iso()
+    data["pending"] = [a for a in pending if a["id"] != action_id]
+    data.setdefault("log", []).append(action)
+    data["log"] = data["log"][-200:]
+    _save_guardrails(data)
+    return JSONResponse({"ok": True, "action_id": action_id})
+
+
+@app.post("/api/guardrails/{action_id}/reject")
+def reject_guardrail_action(action_id: str, payload: dict = None):
+    data = _load_guardrails()
+    pending = data.get("pending", [])
+    action = next((a for a in pending if a["id"] == action_id), None)
+    if not action:
+        raise HTTPException(404, f"Action '{action_id}' not found in pending queue")
+    action["status"] = "rejected"
+    action["resolved_at"] = now_iso()
+    if payload and payload.get("reason"):
+        action["reject_reason"] = payload["reason"]
+    data["pending"] = [a for a in pending if a["id"] != action_id]
+    data.setdefault("log", []).append(action)
+    data["log"] = data["log"][-200:]
+    _save_guardrails(data)
+    return JSONResponse({"ok": True, "action_id": action_id})
+
+
+@app.post("/api/guardrails/settings")
+def save_guardrail_settings(payload: dict):
+    data = _load_guardrails()
+    data["settings"] = payload
+    _save_guardrails(data)
+    return JSONResponse({"ok": True})
+
+
+# ─── Memory API ───────────────────────────────────────────────────────────────
+
+def _load_memory() -> dict:
+    if not MEMORY_FILE.exists():
+        return {"clients": {}, "recent_interactions": []}
+    try:
+        return json.loads(MEMORY_FILE.read_text())
+    except Exception:
+        return {"clients": {}, "recent_interactions": []}
+
+
+def _save_memory(data: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    MEMORY_FILE.write_text(json.dumps(data, indent=2))
+
+
+@app.get("/api/memory")
+def get_memory():
+    data = _load_memory()
+    clients_list = sorted(data.get("clients", {}).values(), key=lambda c: c.get("added_at", ""), reverse=True)
+    return JSONResponse({
+        "clients": clients_list,
+        "recent_interactions": data.get("recent_interactions", [])[-20:],
+        "total_clients": len(clients_list),
+    })
+
+
+@app.post("/api/memory/clients")
+def add_memory_client(payload: dict):
+    import uuid as _uuid
+    import re as _re
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    data = _load_memory()
+    clients = data.get("clients", {})
+    client_id = _re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-") or _uuid.uuid4().hex[:8]
+    # Ensure unique id
+    base_id = client_id
+    counter = 1
+    while client_id in clients:
+        client_id = f"{base_id}-{counter}"
+        counter += 1
+    client = {
+        "id": client_id,
+        "name": name,
+        "company": (payload.get("company") or "").strip() or None,
+        "email": (payload.get("email") or "").strip() or None,
+        "status": (payload.get("status") or "prospect").strip(),
+        "notes": (payload.get("notes") or "").strip() or None,
+        "interactions": 0,
+        "added_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    clients[client_id] = client
+    data["clients"] = clients
+    _save_memory(data)
+    return JSONResponse({"ok": True, "id": client_id})
+
+
+@app.patch("/api/memory/clients/{client_id}")
+def update_memory_client(client_id: str, payload: dict):
+    data = _load_memory()
+    clients = data.get("clients", {})
+    if client_id not in clients:
+        raise HTTPException(404, f"Client '{client_id}' not found")
+    client = clients[client_id]
+    for field in ("name", "company", "email", "status", "notes"):
+        if field in payload:
+            client[field] = payload[field]
+    client["updated_at"] = now_iso()
+    _save_memory(data)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/memory/clients/{client_id}")
+def delete_memory_client(client_id: str):
+    data = _load_memory()
+    clients = data.get("clients", {})
+    if client_id not in clients:
+        raise HTTPException(404, f"Client '{client_id}' not found")
+    del clients[client_id]
+    _save_memory(data)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/memory/interactions")
+def record_interaction(payload: dict):
+    """Record a new interaction/event in memory (called by agents)."""
+    data = _load_memory()
+    interaction = {
+        "ts": now_iso(),
+        "agent": (payload.get("agent") or "system").strip(),
+        "summary": (payload.get("summary") or "").strip(),
+        "client_id": (payload.get("client_id") or "").strip() or None,
+    }
+    interactions = data.get("recent_interactions", [])
+    interactions.append(interaction)
+    data["recent_interactions"] = interactions[-200:]
+
+    # Increment interaction count for client if specified
+    client_id = interaction.get("client_id")
+    if client_id and client_id in data.get("clients", {}):
+        data["clients"][client_id]["interactions"] = data["clients"][client_id].get("interactions", 0) + 1
+        data["clients"][client_id]["updated_at"] = now_iso()
+
+    _save_memory(data)
+    return JSONResponse({"ok": True})
+
+
+# ─── Integrations API ─────────────────────────────────────────────────────────
+
+_DEFAULT_INTEGRATIONS = [
+    {
+        "id": "gmail",
+        "name": "Gmail / Google Workspace",
+        "icon": "📧",
+        "description": "Send and receive emails, read inbox, create drafts",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "email", "label": "Gmail address", "type": "email", "placeholder": "you@gmail.com"},
+            {"key": "client_id", "label": "OAuth Client ID", "type": "text", "placeholder": "...apps.googleusercontent.com"},
+            {"key": "client_secret", "label": "OAuth Client Secret", "type": "password", "placeholder": "GOCSPX-…"},
+        ],
+    },
+    {
+        "id": "google_sheets",
+        "name": "Google Sheets / CRM",
+        "icon": "📊",
+        "description": "Read/write leads, pipeline, and data to Google Sheets",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "spreadsheet_id", "label": "Spreadsheet ID", "type": "text", "placeholder": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"},
+            {"key": "service_account_json", "label": "Service Account JSON path", "type": "text", "placeholder": "/path/to/service-account.json"},
+        ],
+    },
+    {
+        "id": "telegram",
+        "name": "Telegram Bot",
+        "icon": "✈️",
+        "description": "Send messages and receive commands via Telegram",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "bot_token", "label": "Bot Token", "type": "password", "placeholder": "123456:ABC-DEF…"},
+            {"key": "chat_id", "label": "Chat / Channel ID", "type": "text", "placeholder": "-1001234567890"},
+        ],
+    },
+    {
+        "id": "slack",
+        "name": "Slack",
+        "icon": "💬",
+        "description": "Post messages, receive commands, and manage channels via Slack",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "bot_token", "label": "Bot OAuth Token", "type": "password", "placeholder": "xoxb-…"},
+            {"key": "channel", "label": "Default Channel", "type": "text", "placeholder": "#general"},
+        ],
+    },
+    {
+        "id": "openai",
+        "name": "OpenAI (Cloud Fallback)",
+        "icon": "🤖",
+        "description": "Use GPT-4 as a cloud AI fallback when Ollama is unavailable",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "OpenAI API Key", "type": "password", "placeholder": "sk-…"},
+            {"key": "model", "label": "Model", "type": "text", "placeholder": "gpt-4o"},
+        ],
+    },
+    {
+        "id": "anthropic",
+        "name": "Anthropic Claude",
+        "icon": "🧠",
+        "description": "Use Claude as an AI provider for complex reasoning tasks",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "Anthropic API Key", "type": "password", "placeholder": "sk-ant-…"},
+            {"key": "model", "label": "Model", "type": "text", "placeholder": "claude-3-5-sonnet-20241022"},
+        ],
+    },
+    {
+        "id": "webhook",
+        "name": "Outbound Webhook",
+        "icon": "🔗",
+        "description": "Send task results and events to any URL (Zapier, Make, n8n, custom API)",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "url", "label": "Webhook URL", "type": "url", "placeholder": "https://hooks.zapier.com/…"},
+            {"key": "secret", "label": "Shared Secret (optional)", "type": "password", "placeholder": "mysecret"},
+        ],
+    },
+]
+
+
+def _load_integrations() -> list:
+    if not INTEGRATIONS_FILE.exists():
+        return _DEFAULT_INTEGRATIONS[:]
+    try:
+        saved = json.loads(INTEGRATIONS_FILE.read_text())
+    except Exception:
+        saved = []
+    # Merge saved configs into defaults so new integrations always appear
+    saved_map = {i["id"]: i for i in saved if isinstance(i, dict)}
+    merged = []
+    for default in _DEFAULT_INTEGRATIONS:
+        intg = dict(default)
+        if default["id"] in saved_map:
+            intg["enabled"] = saved_map[default["id"]].get("enabled", False)
+            intg["config"] = saved_map[default["id"]].get("config", {})
+        merged.append(intg)
+    return merged
+
+
+def _save_integrations(integrations: list) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    # Only save id + enabled + config (not the field definitions)
+    slim = [{"id": i["id"], "enabled": i.get("enabled", False), "config": i.get("config", {})} for i in integrations]
+    INTEGRATIONS_FILE.write_text(json.dumps(slim, indent=2))
+
+
+@app.get("/api/integrations")
+def list_integrations():
+    return JSONResponse({"integrations": _load_integrations()})
+
+
+@app.patch("/api/integrations/{integration_id}")
+def update_integration(integration_id: str, payload: dict):
+    integrations = _load_integrations()
+    intg = next((i for i in integrations if i["id"] == integration_id), None)
+    if not intg:
+        raise HTTPException(404, f"Integration '{integration_id}' not found")
+    if "enabled" in payload:
+        intg["enabled"] = bool(payload["enabled"])
+    if "config" in payload and isinstance(payload["config"], dict):
+        intg["config"] = payload["config"]
+    _save_integrations(integrations)
+    return JSONResponse({"ok": True, "id": integration_id, "enabled": intg["enabled"]})
+
+
+@app.post("/api/integrations/{integration_id}/test")
+def test_integration(integration_id: str):
+    """Basic connectivity test for an integration."""
+    integrations = _load_integrations()
+    intg = next((i for i in integrations if i["id"] == integration_id), None)
+    if not intg:
+        raise HTTPException(404, f"Integration '{integration_id}' not found")
+
+    config = intg.get("config", {})
+
+    if integration_id == "webhook":
+        url = config.get("url", "").strip()
+        if not url:
+            return JSONResponse({"ok": False, "message": "No webhook URL configured"})
+        try:
+            import urllib.request as _req
+            import urllib.error as _uerr
+            req = _req.Request(url, method="POST",
+                               data=b'{"test":true}',
+                               headers={"Content-Type": "application/json"})
+            with _req.urlopen(req, timeout=5) as resp:
+                return JSONResponse({"ok": True, "message": f"HTTP {resp.status} — webhook reachable"})
+        except Exception as exc:
+            return JSONResponse({"ok": False, "message": str(exc)})
+
+    if integration_id in ("openai", "anthropic"):
+        key_field = "api_key"
+        key = config.get(key_field, "").strip()
+        if not key:
+            return JSONResponse({"ok": False, "message": "No API key configured"})
+        return JSONResponse({"ok": True, "message": "API key present — live test requires the key to be used in a real request"})
+
+    if integration_id == "telegram":
+        token = config.get("bot_token", "").strip()
+        if not token:
+            return JSONResponse({"ok": False, "message": "No bot token configured"})
+        try:
+            import urllib.request as _req
+            url = f"https://api.telegram.org/bot{token}/getMe"
+            with _req.urlopen(url, timeout=5) as resp:
+                result = json.loads(resp.read())
+                if result.get("ok"):
+                    name = result.get("result", {}).get("username", "?")
+                    return JSONResponse({"ok": True, "message": f"Connected as @{name}"})
+                return JSONResponse({"ok": False, "message": "Telegram returned error"})
+        except Exception as exc:
+            return JSONResponse({"ok": False, "message": str(exc)})
+
+    # Generic: just check required fields are filled
+    required_fields = [f["key"] for f in intg.get("fields", []) if not f.get("optional")]
+    missing = [k for k in required_fields if not config.get(k, "").strip()]
+    if missing:
+        return JSONResponse({"ok": False, "message": f"Missing required fields: {', '.join(missing)}"})
+    return JSONResponse({"ok": True, "message": "Configuration looks complete — deploy agents to test live"})
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host=HOST, port=PORT)
+

@@ -14,3 +14,11 @@ temp/
 __pycache__/
 *.pyc
 *.pyo
+
+# Security local overrides (openclaw-2) — never commit these
+security.local.yml
+config.local.yml
+data/
+models/
+venv/
+.venv/

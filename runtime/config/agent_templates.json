@@ -1,0 +1,154 @@
+{
+  "_meta": {
+    "version": "2.0",
+    "description": "Pre-built plug-and-play agent templates — outcome-driven, goal-based",
+    "updated_at": "2026-03-25"
+  },
+  "templates": [
+    {
+      "id": "get-10-leads-24h",
+      "name": "Get 10 Qualified Leads in 24h",
+      "icon": "🎯",
+      "category": "Sales",
+      "mode": ["starter", "business", "power"],
+      "description": "Generate 10 qualified B2B leads for your business within 24 hours — complete with contact info, company context, and ICP scoring. No setup required.",
+      "agents": ["lead-hunter", "intel-agent", "data-analyst"],
+      "task_description": "Find 10 qualified B2B leads matching my ideal customer profile. For each lead: company name, decision-maker name and role, email (if findable), company size, and a 1-line reason why they are a good fit. Score each lead 1-10 for ICP match. Export as a ready-to-use list.",
+      "schedule": "daily",
+      "kpis": ["leads_generated", "icp_match_rate", "enrichment_rate"],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Define your Ideal Customer Profile (ICP): industry, company size, location",
+        "Set daily lead volume target (default: 10)"
+      ],
+      "expected_results": {
+        "leads_in_24h": 10,
+        "icp_match_pct": 70,
+        "estimated_weekly_value": "€200 – €1,000 in pipeline"
+      }
+    },
+    {
+      "id": "first-1k-deal",
+      "name": "Close Your First €1k Deal",
+      "icon": "💰",
+      "category": "Sales",
+      "mode": ["starter", "business", "power"],
+      "description": "Full end-to-end sales cycle: find prospects, send personalised outreach, follow up, and book a discovery call — all automated. Designed to close your first €1,000 deal.",
+      "agents": ["lead-hunter", "email-ninja", "growth-hacker", "intel-agent"],
+      "task_description": "Run the full sales pipeline to close a €1,000 deal: find 20 qualified prospects in my niche, write and send personalised cold emails, follow up automatically 3 days later, qualify interested replies, and book discovery calls. Track pipeline value and report daily.",
+      "schedule": "3x_daily",
+      "kpis": ["leads_generated", "emails_sent", "calls_booked", "pipeline_value"],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Configure your target niche and ideal customer profile",
+        "Add your email sending credentials",
+        "Review and approve the first batch of outreach messages"
+      ],
+      "expected_results": {
+        "leads_per_week": 50,
+        "emails_per_week": 200,
+        "reply_rate_pct": 8,
+        "meetings_per_week": 4,
+        "estimated_monthly_revenue": "€1,000 – €8,000"
+      }
+    },
+    {
+      "id": "automate-support-1h",
+      "name": "Automate Customer Support in 1 Hour",
+      "icon": "🎧",
+      "category": "Support",
+      "mode": ["starter", "business", "power"],
+      "description": "Set up 24/7 AI customer support in under 1 hour: auto-resolves 70% of tickets, escalates edge cases, tracks satisfaction. Saves 30–40 hours/month of manual support.",
+      "agents": ["support-bot", "data-analyst"],
+      "task_description": "Set up automated customer support: import FAQs, classify all incoming tickets by urgency, auto-resolve common questions, escalate complex issues with full context, and generate daily support analytics. Time-to-first-response under 2 minutes.",
+      "schedule": "continuous",
+      "kpis": ["tickets_resolved", "avg_response_time", "escalation_rate", "satisfaction_score"],
+      "guardrail_level": "high",
+      "setup_steps": [
+        "Import your FAQ document into the support-bot knowledge base",
+        "Configure escalation rules (which issues need a human)",
+        "Set up your email or chat integration to receive tickets"
+      ],
+      "expected_results": {
+        "tickets_auto_resolved_pct": 70,
+        "avg_first_response_minutes": 2,
+        "hours_saved_per_month": 35,
+        "estimated_monthly_savings": "€2,500 – €5,000"
+      }
+    },
+    {
+      "id": "hire-best-candidate",
+      "name": "Hire Your Best Candidate Faster",
+      "icon": "👔",
+      "category": "HR",
+      "mode": ["business", "power"],
+      "description": "Cut time-to-hire from 6 weeks to 2 weeks: sources candidates, screens CVs, schedules interviews, manages pipeline — fully automated.",
+      "agents": ["recruiter", "hr-manager", "email-ninja"],
+      "task_description": "Automate the full recruitment pipeline: source candidates from job boards, screen CVs against job requirements, send personalised outreach to top candidates, schedule screening calls, and maintain the hiring pipeline. Report weekly on candidate funnel metrics.",
+      "schedule": "daily",
+      "kpis": ["cvs_screened", "candidates_contacted", "interviews_scheduled", "time_to_hire_days"],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Upload your job descriptions and requirements",
+        "Configure candidate scoring criteria",
+        "Connect your calendar for interview scheduling"
+      ],
+      "expected_results": {
+        "cvs_screened_per_week": 100,
+        "qualified_candidates_per_week": 15,
+        "time_to_hire_reduction_pct": 65,
+        "estimated_monthly_savings": "€4,000 – €10,000"
+      }
+    },
+    {
+      "id": "10x-content-output",
+      "name": "10x Your Content Output This Week",
+      "icon": "✍️",
+      "category": "Content",
+      "mode": ["business", "power"],
+      "description": "Full content marketing on autopilot: SEO blog posts, social media, email newsletters, and video scripts — 10x output with zero extra headcount.",
+      "agents": ["content-master", "social-guru", "email-ninja", "creative-studio"],
+      "task_description": "Run the full content automation pipeline: write 2 SEO-optimised blog posts, create daily social media content for LinkedIn/Instagram, generate a weekly email newsletter, produce video scripts, and repurpose long-form content into multiple formats. Track all content performance.",
+      "schedule": "daily",
+      "kpis": ["content_pieces_created", "words_written", "social_posts", "newsletter_issues"],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Set your brand voice and tone guidelines",
+        "Configure target keywords for SEO content",
+        "Connect social media accounts via integrations"
+      ],
+      "expected_results": {
+        "blog_posts_per_month": 8,
+        "social_posts_per_month": 60,
+        "newsletters_per_month": 4,
+        "hours_saved_per_month": 40,
+        "estimated_monthly_value": "€2,000 – €6,000"
+      }
+    },
+    {
+      "id": "run-ecom-on-autopilot",
+      "name": "Run Your E-commerce Store on Autopilot",
+      "icon": "🛒",
+      "category": "E-commerce",
+      "mode": ["power"],
+      "description": "100% automated e-commerce: order processing, inventory sync, customer emails, social posting, and daily P&L. Run a full Shopify store without lifting a finger.",
+      "agents": ["order-processor", "support-bot", "bookkeeper", "inventory-sync", "email-marketer", "social-poster", "product-researcher", "ecom-dashboard"],
+      "task_description": "Automate the full e-commerce operation: process Shopify orders, validate payments, place supplier orders, sync inventory, handle support tickets, send transactional and marketing emails, post daily social content, research trending products, and generate daily P&L reports.",
+      "schedule": "continuous",
+      "kpis": ["orders_processed", "revenue", "support_tickets_resolved", "new_products_listed"],
+      "guardrail_level": "high",
+      "setup_steps": [
+        "Connect your Shopify store via API",
+        "Connect print-on-demand supplier (Printful, Printify)",
+        "Set up Stripe/payment processor integration",
+        "Configure email marketing integration"
+      ],
+      "expected_results": {
+        "orders_auto_processed_pct": 95,
+        "support_auto_resolved_pct": 70,
+        "hours_saved_per_month": 80,
+        "estimated_monthly_savings": "€5,000 – €15,000"
+      }
+    }
+  ]
+}
