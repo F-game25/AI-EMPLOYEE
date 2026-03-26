@@ -335,7 +335,7 @@ install_runtime() {
         log "Runtime dir not found locally. Downloading from GitHub..."
         local TMP_RUNTIME
         TMP_RUNTIME=$(mktemp -d)
-        local BASE_URL="https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/mac"
+        local BASE_URL="https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main"
 
         dl() {
             local rel="$1"
