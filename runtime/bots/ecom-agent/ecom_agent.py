@@ -20,7 +20,6 @@ Config env vars:
 """
 import json
 import os
-import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -198,7 +197,7 @@ def find_trends() -> str:
     """Find current trending products and niches."""
     raw = _web("trending products ecommerce 2024 winning niches dropshipping")
     result = _ai(
-        f"Summarise the top trending e-commerce niches and products right now based on this data.\n"
+        "Summarise the top trending e-commerce niches and products right now based on this data.\n"
         "List 8 niches with: niche name, trend direction (↑↑/↑/→), best platform, "
         "key products, and one action tip.\n\nData:\n{raw}".format(raw=raw),
         system="You are an e-commerce trend analyst. Be specific, actionable, and data-driven.",

@@ -13,7 +13,6 @@ Config is read/written in ~/.ai-employee/config/
 import json
 import logging
 import os
-import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -41,7 +40,7 @@ if str(_SEC_DIR) not in sys.path:
     sys.path.insert(0, str(_SEC_DIR))
 
 try:
-    from security import AuthManager, InputSanitizer, PasswordValidator, generate_secure_token
+    from security import AuthManager, InputSanitizer, PasswordValidator
     from config_manager import load_config, validate_security_config, Config as _Cfg
     _security_config: Optional[_Cfg] = None
     try:
@@ -2867,7 +2866,7 @@ def handle_command(message: str) -> str:
         bundle = {
             "id": _uuid.uuid4().hex[:10],
             "name": worker_name,
-            "description": f"Created via WhatsApp",
+            "description": "Created via WhatsApp",
             "task_description": task_desc,
             "schedule": "continuous",
             "agents": agent_list,
@@ -3227,7 +3226,7 @@ def handle_command(message: str) -> str:
         data = _load_metrics()
         s = data.get("summary", {})
         lines = [
-            f"📊 ROI Summary",
+            "📊 ROI Summary",
             f"Tasks completed : {s.get('tasks_completed', 0)}",
             f"Leads generated : {s.get('leads_generated', 0)}",
             f"Emails sent     : {s.get('emails_sent', 0)}",
@@ -4533,7 +4532,6 @@ def test_integration(integration_id: str):
             return JSONResponse({"ok": False, "message": "No webhook URL configured"})
         try:
             import urllib.request as _req
-            import urllib.error as _uerr
             req = _req.Request(url, method="POST",
                                data=b'{"test":true}',
                                headers={"Content-Type": "application/json"})

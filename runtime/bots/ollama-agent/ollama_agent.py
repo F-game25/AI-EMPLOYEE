@@ -12,9 +12,7 @@ Configuration (in ~/.ai-employee/config/ollama-agent.env):
     OLLAMA_AGENT_HOST   — bind address     (default: 127.0.0.1)
     OLLAMA_AGENT_PORT   — port             (default: 8789)
 """
-import json
 import os
-import sys
 from pathlib import Path
 
 import requests
@@ -157,7 +155,6 @@ def info() -> JSONResponse:
 
 @app.post("/api/ask")
 def ask(payload: dict) -> JSONResponse:
-    global _history
     q = (payload or {}).get("question", "").strip()
     if not q:
         return JSONResponse({"error": "Empty question"}, status_code=400)
