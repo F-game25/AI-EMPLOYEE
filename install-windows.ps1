@@ -169,8 +169,6 @@ if (-not $pythonOk) {
         Write-Err "Could not install Python automatically. Please install from https://python.org and re-run."
         exit 1
     }
-} else {
-    $PYTHON = if (Test-CommandExists 'python') { 'python' } else { 'py' }
 }
 
 # 2c. Check Git (optional)
