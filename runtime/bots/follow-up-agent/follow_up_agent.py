@@ -36,21 +36,38 @@ _ai_router_path = AI_HOME / "bots" / "ai-router"
 if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 try:
-    from ai_router import query_ai as _query_ai  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
+    def _query_ai_for_agent(*a, **kw):  # type: ignore
+        return {"answer": "[AI unavailable]"}
+
+# ── Memory store (optional) ───────────────────────────────────────────────────
 
 _memory_path = AI_HOME / "bots" / "memory"
 if str(_memory_path) not in sys.path:
     sys.path.insert(0, str(_memory_path))
 try:
     from memory_store import MemoryStore as _MemoryStore  # type: ignore
-    _memory = _MemoryStore()
-    _MEMORY_AVAILABLE = True
+    _MEMORY: "_MemoryStore | None" = _MemoryStore()
 except ImportError:
-    _MEMORY_AVAILABLE = False
-    _memory = None
+    _MEMORY = None
+
+# ── Feedback loop (optional) ──────────────────────────────────────────────────
+
+_feedback_path = AI_HOME / "bots" / "feedback-loop"
+if str(_feedback_path) not in sys.path:
+    sys.path.insert(0, str(_feedback_path))
+try:
+    from feedback_loop import record_message as _record_message, get_best_template_as_example as _best_template  # type: ignore
+    _FEEDBACK_AVAILABLE = True
+except ImportError:
+    _FEEDBACK_AVAILABLE = False
+    def _record_message(*a, **kw):  # type: ignore
+        return ""
+    def _best_template(*a, **kw):  # type: ignore
+        return ""
 
 # Tone progression: attempt index → (label, system prompt)
 _TONE = {
@@ -114,20 +131,10 @@ def append_chatlog(e: dict) -> None:
         f.write(json.dumps(e) + "\n")
 
 
-def _ai(prompt: str, system: str = "", lead_id: str = "") -> str:
+def _ai(prompt: str, system: str = "") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
-    # Retrieve conversation history for this lead (last 10 turns)
-    history = []
-    if _MEMORY_AVAILABLE and _memory and lead_id:
-        history = _memory.get_history(lead_id, last_n=10)
-    result = (_query_ai(prompt, system_prompt=system, history=history) or {})
-    answer = result.get("answer", "")
-    # Store the exchange in memory
-    if _MEMORY_AVAILABLE and _memory and lead_id and answer:
-        _memory.add_turn(lead_id, role="user", content=prompt)
-        _memory.add_turn(lead_id, role="assistant", content=answer)
-    return answer
+    return (_query_ai_for_agent("sales", prompt, system_prompt=system) or {}).get("answer", "")
 
 
 def load_crm() -> dict:
@@ -173,17 +180,30 @@ def _send_followup(lead: dict, crm: dict) -> str:
     attempt_no = attempts + 1
     tone_label, system_prompt = _TONE.get(attempt_no, _TONE[5])
 
+    # Build conversation context from memory
+    memory_context = ""
+    if _MEMORY:
+        conv_summary = _MEMORY.get_conversation_summary(f"lead_{lead['id']}")
+        if conv_summary and conv_summary != "(no conversation history)":
+            memory_context = f"\n\nEerdere gesprekken:\n{conv_summary}"
+        facts = _MEMORY.facts_as_context(f"lead_{lead['id']}")
+        if facts:
+            memory_context += f"\n\n{facts}"
+
     previous = ""
-    if lead.get("outreach_messages"):
+    if not memory_context and lead.get("outreach_messages"):
         last = lead["outreach_messages"][-1].get("message", "")
         previous = f"\nVorig bericht:\n{last[:300]}"
+
+    # Use best-performing template as hint if available
+    best_example = _best_template(niche=lead.get("niche", ""), channel="followup") if _FEEDBACK_AVAILABLE else ""
+    example_hint = f"\n\nBest-performing voorbeeld:\n{best_example}" if best_example else ""
 
     msg = _ai(
         f"Schrijf follow-up #{attempt_no} voor:\n"
         f"Naam: {lead['name']}\nNiche: {lead['niche']}\nLocatie: {lead.get('location', '')}"
-        f"{previous}",
+        f"{previous}{memory_context}{example_hint}",
         system=system_prompt,
-        lead_id=lead.get("id", ""),
     )
 
     lead["outreach_messages"].append({
@@ -193,6 +213,26 @@ def _send_followup(lead: dict, crm: dict) -> str:
         "message": msg,
         "ts": now_iso(),
     })
+
+    # Register message with feedback loop
+    if _FEEDBACK_AVAILABLE:
+        _record_message(
+            lead_id=lead["id"],
+            message=msg,
+            niche=lead.get("niche", ""),
+            channel="followup",
+            tone=tone_label,
+        )
+
+    # Store in memory
+    if _MEMORY:
+        _MEMORY.append_conversation(
+            entity_id=f"lead_{lead['id']}",
+            role="assistant",
+            content=msg,
+            entity_type="lead",
+        )
+
     # Do NOT overwrite an advanced pipeline status (qualified, appointment, …).
     # Only bump up if the lead is still in an early/silent stage.
     if lead.get("status") not in ("qualified", "appointment", "replied", "won"):
