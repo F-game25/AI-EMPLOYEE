@@ -1,39 +1,3 @@
-"""Feedback Loop — automatic prompt optimisation for AI agents.
-
-Tracks which outreach messages get replies and which are ignored, scores
-message templates by effectiveness, and surfaces the best-performing
-templates for reuse. Runs as a standalone service that polls the CRM for
-state changes, but its core helpers can also be imported directly by any
-bot.
-
-How it works
-────────────
-1. Every outreach message is registered with record_message().
-2. When a lead's status changes to "replied" the score for that template
-   is bumped up (+1.0). When a lead is marked "lost" all of its messages
-   get a small negative score (-0.2).
-3. get_best_templates() returns the highest-scoring messages for a given
-   niche/context — ready to be used as examples in AI prompts.
-4. The service loop runs every FEEDBACK_POLL_INTERVAL seconds, scans the
-   CRM for recent status changes, and updates scores automatically.
-
-Storage:
-    ~/.ai-employee/state/feedback_loop.json
-
-Commands (via chatlog):
-    feedback status           — show top-performing templates + reply rates
-    feedback top <niche>      — show best templates for a specific niche
-    feedback reset            — reset all scores (start fresh)
-
-Config env vars:
-    FEEDBACK_POLL_INTERVAL    — poll interval in seconds (default: 30)
-    FEEDBACK_TOP_N            — number of top templates to surface (default: 5)
-"""
-import json
-import logging
-import os
-import sys
-import time
 """Feedback Loop — tracks reply rates, scores message templates, auto-improves prompts.
 
 Monitors outreach performance by recording send/reply events per message template,
@@ -79,24 +43,10 @@ _SCORE_LOST = -0.2
 _SCORE_QUALIFIED = 2.0
 _SCORE_WON = 3.0
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-logger = logging.getLogger("feedback-loop")
-STATE_FILE = AI_HOME / "state" / "feedback_loop.json"
-CHATLOG = AI_HOME / "state" / "chatlog.jsonl"
-STATE_FILE = AI_HOME / "state" / "feedback-loop.state.json"
-
-POLL_INTERVAL = int(os.environ.get("FEEDBACK_POLL_INTERVAL", "30"))
-TOP_N = int(os.environ.get("FEEDBACK_TOP_N", "5"))
-
-# Positive score bump when a lead replies
-_SCORE_REPLY = 1.0
-# Negative score when a lead is marked lost (message didn't convert)
-_SCORE_LOST = -0.2
-# Bonus for leads that reached "qualified" or "appointment"
-_SCORE_QUALIFIED = 2.0
-_SCORE_WON = 3.0
-
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
+    format="%(message)s",
+)
 logger = logging.getLogger("feedback-loop")
 
 

@@ -57,7 +57,7 @@ from discord.ext import commands
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
     format="%(asctime)s [discord-bot] %(levelname)s %(message)s",
 )
 logger = logging.getLogger("discord-bot")
