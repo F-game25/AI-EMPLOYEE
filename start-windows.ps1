@@ -170,7 +170,7 @@ if (Test-Path $globalEnv) {
 }
 
 # Re-read UI port in case it was set in .env
-$UI_PORT = if ($env:PROBLEM_SOLVER_UI_PORT) { $env:PROBLEM_SOLVER_UI_PORT } else { $UI_PORT }
+$UI_PORT = if ($env:PROBLEM_SOLVER_UI_PORT) { $env:PROBLEM_SOLVER_UI_PORT } elseif ($env:UI_PORT) { $env:UI_PORT } else { $UI_PORT }
 
 # ─── 3. Create required directories ───────────────────────────────────────────
 Write-Step "Creating directories…"
