@@ -256,6 +256,50 @@ ai-employee doctor   # checks everything automatically
 
 ---
 
+## 🖥️ Install — Choose Your Platform
+
+### 🐧 Linux (Ubuntu / Debian / Mint / Fedora / Arch)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+```
+
+Or download directly:
+```bash
+# Clone or download from the 'main' branch
+bash install.sh
+```
+
+### 🍎 macOS (Monterey 12+ / Ventura / Sonoma)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/mac/quick-install-mac.sh | bash
+```
+
+Or download directly from the **`mac` branch** on GitHub:
+1. Go to → https://github.com/F-game25/AI-EMPLOYEE/tree/mac
+2. Download `install-mac.sh`
+3. Open Terminal and run: `bash ~/Downloads/install-mac.sh`
+
+> **Requires Homebrew.** The installer will offer to install it automatically.
+
+### 🪟 Windows 10 / 11
+
+**No WSL or Git Bash required** — fully native PowerShell installer.
+
+**One-click install:**
+1. Go to → https://github.com/F-game25/AI-EMPLOYEE/tree/windows
+2. Download **`quick-install-windows.bat`**
+3. Double-click the file to install
+
+Or run from PowerShell:
+```powershell
+powershell -ExecutionPolicy Bypass -File install-windows.ps1
+```
+```
+
+---
+
 ## Install Options
 
 ### Zero-config (fastest, no questions):
@@ -334,6 +378,8 @@ ai-employee stop
 ai-employee status
 ```
 
+Stop: `./stop.sh` or Ctrl+C in the terminal.
+
 **Desktop launchers** (created by installer):
 | Platform | How to start |
 |---|---|
@@ -362,23 +408,36 @@ After starting, the browser opens automatically. URLs:
 
 ---
 
-## The 20 Agents (Power Mode)
+## Update
 
-Under the hood, AI Employee routes your tasks to specialist agents. In **Starter** and **Business** modes, these are hidden — you just talk to one AI. In **Power** mode, you can address agents directly.
+Re-run the installer for your platform to upgrade runtime files without touching your config.
 
-### Core Business Team
-| Agent | What it does |
-|---|---|
-| **task-orchestrator** | Decomposes tasks, assigns agents, runs parallel workflows |
-| **company-builder** | Business plans, simulations, GTM, org design |
-| **hr-manager** | Hiring pipeline, onboarding, org charts |
-| **finance-wizard** | P&L models, fundraising prep, unit economics |
-| **brand-strategist** | Brand naming, identity, positioning, messaging |
-| **growth-hacker** | Viral loops, A/B tests, retention, referrals |
-| **project-manager** | Sprints, roadmaps, risk registers |
+- **Linux:** `curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash`
+- **macOS:** `curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/mac/quick-install-mac.sh | bash`
+- **Windows:** Re-run `quick-install-windows.bat` or `install-windows.ps1`
 
-### Specialist Bots
-| Agent | What it does |
+---
+
+## Connect WhatsApp (first time)
+
+After starting, open a **new terminal** (Linux/macOS) or PowerShell (Windows) and run:
+
+```bash
+openclaw channels login
+```
+
+Scan the QR code in WhatsApp:  
+**WhatsApp → Linked Devices → Link a device**
+
+Wait for "Connected" ✓ — then send yourself a WhatsApp message to test.
+
+---
+
+## WhatsApp Commands
+
+Send these to your own WhatsApp number:
+
+| Command | Description |
 |---|---|
 | **lead-hunter** | B2B lead generation + cold outreach |
 | **content-master** | SEO blog posts + long-form content |
@@ -394,16 +453,33 @@ Under the hood, AI Employee routes your tasks to specialist agents. In **Starter
 
 ## 🔌 Integrations
 
-Configure in the **🔌 Integrations** tab:
+The full dashboard runs at **http://127.0.0.1:8787** and has 9 tabs:
 
 | Integration | Use |
 |---|---|
-| **Gmail / Google Workspace** | Send/receive email |
-| **Google Sheets** | Read/write CRM data |
-| **Telegram Bot** | Receive commands, send alerts |
-| **Slack** | Post to channels |
-| **OpenAI / Anthropic** | Cloud AI providers |
-| **Outbound Webhook** | Forward events to Zapier, Make, n8n |
+| 📊 **Dashboard** | Live bot status, system info, WhatsApp quick-commands panel |
+| 💬 **Chat** | Send tasks (same as WhatsApp), view chat history |
+| 🚀 **Tasks** | **Task agent selection** — describe goal → auto-select agents → launch |
+| 🐝 **Swarm** | All 20 agents: capabilities, status, workload |
+| 📜 **Commands** | Full WhatsApp commands reference — searchable, click to copy |
+| 📅 **Scheduler** | Create/edit/delete scheduled tasks |
+| 👷 **Workers** | Start/stop/toggle individual bots |
+| 💡 **Improvements** | Review and approve/reject skill proposals |
+| 🛠️ **Skills** | Browse and search 126+ business skills |
+
+### Tasks tab — Agent Selection & Auto-Assign
+
+1. **Describe your goal** in plain English
+2. Click **🤖 Auto-Select Agents** — AI picks the best agents for your task
+3. Review/adjust the agent grid (select All, None, or manual picks)
+4. Choose execution mode: **Auto** (orchestrator decides), **Parallel** (all at once), **Single** (first agent)
+5. Click **🚀 Launch Task**
+
+### Commands tab — WhatsApp Controls
+
+The Commands tab lists every WhatsApp command grouped by category with search:
+- Copy any command to clipboard with one click
+- Works directly in the Chat tab too — same commands work on WhatsApp and in the UI
 
 ---
 

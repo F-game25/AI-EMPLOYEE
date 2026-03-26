@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # AI Employee — macOS Quick Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install-mac.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/mac/quick-install-mac.sh | bash
 set -euo pipefail
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; C='\033[0;36m'; NC='\033[0m'
 
 GITHUB_USER="F-game25"
 GITHUB_REPO="AI-EMPLOYEE"
-GITHUB_BRANCH="main"
+GITHUB_BRANCH="mac"
 BASE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${GITHUB_BRANCH}"
 
 err()  { echo -e "${R}✗ $1${NC}"; exit 1; }
@@ -23,7 +23,7 @@ command -v curl >/dev/null 2>&1 || err "curl is required. Install it first: brew
 if [[ "$(uname)" != "Darwin" ]]; then
     err "This installer is for macOS only.
   Linux:   curl -fsSL https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main/quick-install.sh | bash
-  Windows: Download install-windows.ps1 from the main branch on GitHub"
+  Windows: Download install-windows.ps1 from the windows branch on GitHub"
 fi
 
 echo ""
