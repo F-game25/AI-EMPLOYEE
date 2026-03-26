@@ -100,11 +100,45 @@ if str(_memory_path) not in sys.path:
     sys.path.insert(0, str(_memory_path))
 try:
     from memory_store import MemoryStore as _MemoryStore  # type: ignore
-    _memory = _MemoryStore()
-    _MEMORY_AVAILABLE = True
+    _MEMORY: "_MemoryStore | None" = _MemoryStore()
 except ImportError:
-    _MEMORY_AVAILABLE = False
-    _memory = None
+    _MEMORY = None
+
+# ── Feedback loop (optional) ──────────────────────────────────────────────────
+
+_feedback_path = AI_HOME / "bots" / "feedback-loop"
+if str(_feedback_path) not in sys.path:
+    sys.path.insert(0, str(_feedback_path))
+try:
+    from feedback_loop import record_message as _record_message, get_best_template_as_example as _best_template  # type: ignore
+    _FEEDBACK_AVAILABLE = True
+except ImportError:
+    _FEEDBACK_AVAILABLE = False
+    def _record_message(*a, **kw):  # type: ignore
+        return ""
+    def _best_template(*a, **kw):  # type: ignore
+        return ""
+
+# ── Real tool integrations (optional) ────────────────────────────────────────
+
+_tools_path = AI_HOME / "bots" / "tools"
+if str(_tools_path) not in sys.path:
+    sys.path.insert(0, str(_tools_path))
+try:
+    from email_sender import send_email as _send_email, is_email_configured as _email_ok  # type: ignore
+    _EMAIL_AVAILABLE = _email_ok()
+except ImportError:
+    _EMAIL_AVAILABLE = False
+    def _send_email(*a, **kw):  # type: ignore
+        return False, {"error": "email_sender not available"}
+
+try:
+    from whatsapp import send_whatsapp as _send_whatsapp, is_whatsapp_configured as _wa_ok  # type: ignore
+    _WHATSAPP_AVAILABLE = _wa_ok()
+except ImportError:
+    _WHATSAPP_AVAILABLE = False
+    def _send_whatsapp(*a, **kw):  # type: ignore
+        return False, {"error": "whatsapp not available"}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -140,17 +174,7 @@ def _ai(prompt: str, system: str = "", agent_type: str = "sales") -> str:
 def _ai(prompt: str, system: str = "", lead_id: str = "") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
-    # Retrieve conversation history for this lead (last 10 turns)
-    history = []
-    if _MEMORY_AVAILABLE and _memory and lead_id:
-        history = _memory.get_history(lead_id, last_n=10)
-    result = (_query_ai(prompt, system_prompt=system, history=history) or {})
-    answer = result.get("answer", "")
-    # Store the exchange in memory
-    if _MEMORY_AVAILABLE and _memory and lead_id and answer:
-        _memory.add_turn(lead_id, role="user", content=prompt)
-        _memory.add_turn(lead_id, role="assistant", content=answer)
-    return answer
+    return (_query_ai_for_agent(agent_type, prompt, system_prompt=system) or {}).get("answer", "")
 
 
 def _web(query: str) -> str:
@@ -359,7 +383,7 @@ def followup_leads() -> str:
             f"{memory_context}",
             system="You are a sales follow-up specialist. Write a brief, non-pushy follow-up "
                    "message (under 80 words). Reference the previous contact naturally.",
-            lead_id=lead["id"],
+            agent_type="sales",
         )
         lead["outreach_messages"].append({"channel": "followup", "message": msg, "ts": now_iso()})
         lead["next_followup"] = now_iso()
@@ -416,7 +440,7 @@ def outreach_lead(lead_id: str, channel: str) -> str:
         system="You are an expert cold email copywriter. Write a personalised, short "
                "(150 words max), value-focused outreach message tailored to the channel. "
                "Be specific and end with a clear CTA.",
-        lead_id=lead["id"],
+        agent_type="sales",
     )
     lead["outreach_messages"].append({"channel": channel, "message": msg, "ts": now_iso()})
     lead["status"] = "contacted"

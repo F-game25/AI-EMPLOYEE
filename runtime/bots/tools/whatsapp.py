@@ -57,14 +57,11 @@ Usage:
     client = WhatsAppClient(account_sid="AC…", auth_token="…", from_number="whatsapp:+1…")
     result = client.send(to="+31612345678", body="Hi!")
 """
-
 import json
 import logging
 import os
-import urllib.parse
 import urllib.request
-import urllib.error
-import base64
+import urllib.parse
 from typing import Optional
 
 logger = logging.getLogger("whatsapp")
@@ -210,120 +207,139 @@ def is_whatsapp_configured() -> bool:
     )
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")
 
-_TWILIO_API_BASE = "https://api.twilio.com/2010-04-01"
+# ── Meta Cloud API configuration ──────────────────────────────────────────────
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
+WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")
 
-
-def _normalize_to(number: str) -> str:
-    """Ensure the recipient is in Twilio WhatsApp format."""
-    if not number.startswith("whatsapp:"):
-        return f"whatsapp:{number}"
-    return number
+DRY_RUN = os.environ.get("WHATSAPP_DRY_RUN", "false").lower() == "true"
 
 
-class WhatsAppClient:
-    """Twilio WhatsApp sender.
+def _twilio_send(to: str, message: str, from_number: str) -> tuple[bool, dict]:
+    """Send via Twilio Messaging API (stdlib only)."""
+    import base64
 
-    Falls back to a dry-run log if credentials are missing/invalid
-    so that bots can be tested without real credentials.
-    """
+    url = (
+        f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+    )
+    # Ensure WhatsApp prefix on numbers
+    wa_to = to if to.startswith("whatsapp:") else f"whatsapp:{to}"
+    wa_from = from_number if from_number.startswith("whatsapp:") else f"whatsapp:{from_number}"
 
-    def __init__(
-        self,
-        account_sid: str = "",
-        auth_token: str = "",
-        from_number: str = "",
-    ) -> None:
-        self.account_sid = account_sid or TWILIO_ACCOUNT_SID
-        self.auth_token = auth_token or TWILIO_AUTH_TOKEN
-        self.from_number = from_number or TWILIO_WHATSAPP_FROM
+    data = urllib.parse.urlencode({
+        "To": wa_to,
+        "From": wa_from,
+        "Body": message,
+    }).encode("utf-8")
 
-    @property
-    def _credentials_set(self) -> bool:
-        return bool(self.account_sid and self.auth_token)
+    credentials = base64.b64encode(
+        f"{TWILIO_ACCOUNT_SID}:{TWILIO_AUTH_TOKEN}".encode()
+    ).decode()
+    headers = {
+        "Authorization": f"Basic {credentials}",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "AI-Employee/1.0",
+    }
 
-    def send(self, to: str, body: str) -> dict:
-        """Send a WhatsApp message.
-
-        Args:
-            to:   Recipient phone number (e.g. "+31612345678" or "whatsapp:+31612345678").
-            body: Message text.
-
-        Returns:
-            dict with keys:
-                status   (str)   — "sent" | "dry_run" | "error"
-                sid      (str)   — Twilio message SID (if sent)
-                to       (str)   — normalised recipient
-                error    (str)   — error message (if status == "error")
-        """
-        to_norm = _normalize_to(to)
-
-        if not self._credentials_set:
-            logger.info(
-                "whatsapp [dry_run]: to=%s from=%s body=%s",
-                to_norm, self.from_number, body[:80],
-            )
-            return {
-                "status": "dry_run",
-                "sid": "",
-                "to": to_norm,
-                "error": "TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN not configured",
-            }
-
-        url = f"{_TWILIO_API_BASE}/Accounts/{self.account_sid}/Messages.json"
-        data = urllib.parse.urlencode({
-            "From": self.from_number,
-            "To": to_norm,
-            "Body": body,
-        }).encode("utf-8")
-
-        # Basic auth header
-        credentials = base64.b64encode(
-            f"{self.account_sid}:{self.auth_token}".encode()
-        ).decode()
-        headers = {
-            "Authorization": f"Basic {credentials}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-
-        try:
-            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-                sid = result.get("sid", "")
-                logger.info("whatsapp: sent to=%s sid=%s", to_norm, sid)
-                return {"status": "sent", "sid": sid, "to": to_norm, "error": None}
-        except urllib.error.HTTPError as exc:
-            body_err = exc.read().decode("utf-8", errors="replace")
-            try:
-                err_data = json.loads(body_err)
-                error_msg = err_data.get("message", body_err)
-            except Exception:
-                error_msg = body_err
-            logger.error("whatsapp: HTTP error %s — %s", exc.code, error_msg)
-            return {"status": "error", "sid": "", "to": to_norm, "error": error_msg}
-        except Exception as exc:
-            logger.error("whatsapp: send failed — %s", exc)
-            return {"status": "error", "sid": "", "to": to_norm, "error": str(exc)}
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            sid = body.get("sid", "")
+            status = body.get("status", "")
+            logger.info("whatsapp: Twilio sent to %s | sid=%s status=%s", to, sid, status)
+            return True, {"message_sid": sid, "status": status, "provider": "twilio"}
+    except Exception as exc:
+        logger.error("whatsapp: Twilio send failed — %s", exc)
+        return False, {"error": str(exc), "provider": "twilio"}
 
 
-# ── Module-level convenience function ─────────────────────────────────────────
+def _meta_send(to: str, message: str) -> tuple[bool, dict]:
+    """Send via Meta WhatsApp Cloud API (stdlib only)."""
+    url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_ID}/messages"
+    # Meta expects E.164 without "+" for the to field in some versions,
+    # but sending full E.164 is safest.
+    payload = json.dumps({
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to.lstrip("+"),
+        "type": "text",
+        "text": {"preview_url": False, "body": message},
+    }).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json",
+        "User-Agent": "AI-Employee/1.0",
+    }
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            msg_id = body.get("messages", [{}])[0].get("id", "")
+            logger.info("whatsapp: Meta sent to %s | id=%s", to, msg_id)
+            return True, {"message_sid": msg_id, "status": "sent", "provider": "meta"}
+    except Exception as exc:
+        logger.error("whatsapp: Meta send failed — %s", exc)
+        return False, {"error": str(exc), "provider": "meta"}
 
-_default_client: Optional[WhatsAppClient] = None
 
+def send_whatsapp(
+    to: str,
+    message: str,
+    from_number: str = "",
+) -> tuple[bool, dict]:
+    """Send a WhatsApp message to a phone number.
 
-def send_whatsapp(to: str, body: str) -> dict:
-    """Send a WhatsApp message using default (env-var) credentials.
+    Tries Twilio first; falls back to Meta Cloud API if Twilio credentials
+    are not set.
 
     Args:
-        to:   Recipient phone number.
-        body: Message text.
+        to:          Recipient phone number in E.164 format (e.g. +31612345678).
+        message:     Message text (max 4096 characters).
+        from_number: Sender number override; falls back to TWILIO_WHATSAPP_FROM.
 
     Returns:
-        dict — see WhatsAppClient.send() for structure.
+        Tuple (success: bool, info: dict).
+        On success: info contains message_sid, status, provider.
+        On failure: info contains error, provider.
     """
-    global _default_client
-    if _default_client is None:
-        _default_client = WhatsAppClient()
-    return _default_client.send(to=to, body=body)
+    if DRY_RUN:
+        logger.info("whatsapp: DRY_RUN — would send to %s: %s", to, message[:80])
+        return True, {"message_sid": "dry_run", "status": "dry_run", "provider": "dry_run"}
+
+    if not to:
+        return False, {"error": "No recipient number provided", "provider": "none"}
+
+    message = message[:4096]
+
+    # Try Twilio if credentials are available
+    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+        sender = from_number or TWILIO_WHATSAPP_FROM
+        if sender:
+            return _twilio_send(to, message, sender)
+        logger.warning(
+            "whatsapp: Twilio creds set but TWILIO_WHATSAPP_FROM is empty — "
+            "set it to your WhatsApp sender number"
+        )
+
+    # Try Meta Cloud API
+    if WHATSAPP_TOKEN and WHATSAPP_PHONE_ID:
+        return _meta_send(to, message)
+
+    return False, {
+        "error": (
+            "No WhatsApp provider configured. "
+            "Set TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_WHATSAPP_FROM "
+            "or WHATSAPP_TOKEN + WHATSAPP_PHONE_ID in ~/.ai-employee/.env"
+        ),
+        "provider": "none",
+    }
+
+
+def is_whatsapp_configured() -> bool:
+    """Return True if at least one WhatsApp provider is configured."""
+    return bool(
+        (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM)
+        or (WHATSAPP_TOKEN and WHATSAPP_PHONE_ID)
+    )
