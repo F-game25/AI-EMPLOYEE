@@ -153,119 +153,100 @@ def _sendgrid_send(
         return False, {"error": str(exc), "provider": "sendgrid"}
 SMTP_USE_SSL = os.environ.get("SMTP_USE_SSL", "false").lower() == "true"
 
+# ── SendGrid configuration ────────────────────────────────────────────────────
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
+SENDGRID_FROM = os.environ.get("SENDGRID_FROM", "")
 
-class EmailClient:
-    """SMTP email sender with STARTTLS/SSL support.
+EMAIL_DRY_RUN = os.environ.get("EMAIL_DRY_RUN", "false").lower() == "true"
+EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO", "")
 
-    Falls back to a dry-run log when credentials are missing so bots
-    can be tested without real mail server credentials.
-    """
 
-    def __init__(
-        self,
-        host: str = "",
-        port: int = 0,
-        user: str = "",
-        password: str = "",
-        use_ssl: Optional[bool] = None,
-    ) -> None:
-        self.host = host or SMTP_HOST
-        self.port = port or SMTP_PORT
-        self.user = user or SMTP_USER
-        self.password = password or SMTP_PASS
-        self.use_ssl = use_ssl if use_ssl is not None else SMTP_USE_SSL
+def _smtp_send(
+    to: str,
+    subject: str,
+    body: str,
+    html_body: Optional[str],
+    reply_to: str,
+) -> tuple[bool, dict]:
+    """Send an email via SMTP using Python stdlib smtplib."""
+    import smtplib
 
-    @property
-    def _credentials_set(self) -> bool:
-        return bool(self.host and self.user and self.password)
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM
+    msg["To"] = to
+    if reply_to:
+        msg["Reply-To"] = reply_to
 
-    def send(
-        self,
-        to: str,
-        subject: str,
-        body: str,
-        html_body: str = "",
-        from_name: str = "",
-        reply_to: str = "",
-    ) -> dict:
-        """Send an email.
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+    if html_body:
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-        Args:
-            to:        Recipient email address.
-            subject:   Email subject line.
-            body:      Plain-text body.
-            html_body: Optional HTML body (sends multipart/alternative when set).
-            from_name: Optional display name for the sender.
-            reply_to:  Optional Reply-To address.
-
-        Returns:
-            dict with keys:
-                status  (str)  — "sent" | "dry_run" | "error"
-                to      (str)  — recipient address
-                subject (str)  — subject line
-                error   (str)  — error message (if status == "error")
-        """
-        if not self._credentials_set:
-            logger.info(
-                "email_sender [dry_run]: to=%s subject=%s",
-                to, subject[:80],
-            )
-            return {
-                "status": "dry_run",
-                "to": to,
-                "subject": subject,
-                "error": "SMTP_HOST / SMTP_USER / SMTP_PASS not configured",
-            }
-
-        sender = f"{from_name} <{self.user}>" if from_name else self.user
-
-        # Build message
-        if html_body:
-            msg = email.mime.multipart.MIMEMultipart("alternative")
-            msg.attach(email.mime.text.MIMEText(body, "plain", "utf-8"))
-            msg.attach(email.mime.text.MIMEText(html_body, "html", "utf-8"))
+    try:
+        if SMTP_USE_TLS:
+            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+            server.ehlo()
+            server.starttls()
         else:
-            msg = email.mime.text.MIMEText(body, "plain", "utf-8")
+            server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20)
+            server.ehlo()
 
-        msg["Subject"] = subject
-        msg["From"] = sender
-        msg["To"] = to
-        if reply_to:
-            msg["Reply-To"] = reply_to
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(SMTP_FROM, [to], msg.as_string())
+        server.quit()
 
-        try:
-            if self.use_ssl:
-                with smtplib.SMTP_SSL(self.host, self.port, timeout=15) as server:
-                    server.login(self.user, self.password)
-                    server.sendmail(self.user, [to], msg.as_string())
-            else:
-                with smtplib.SMTP(self.host, self.port, timeout=15) as server:
-                    server.ehlo()
-                    server.starttls()
-                    server.ehlo()
-                    server.login(self.user, self.password)
-                    server.sendmail(self.user, [to], msg.as_string())
+        message_id = msg.get("Message-ID", "")
+        logger.info("email_sender: SMTP sent to %s | subject: %s", to, subject[:60])
+        return True, {"message_id": message_id, "provider": "smtp", "status": "sent"}
 
-            logger.info("email_sender: sent to=%s subject=%s", to, subject[:80])
-            return {"status": "sent", "to": to, "subject": subject, "error": None}
-
-        except smtplib.SMTPAuthenticationError as exc:
-            error_msg = f"SMTP authentication failed: {exc}"
-            logger.error("email_sender: %s", error_msg)
-            return {"status": "error", "to": to, "subject": subject, "error": error_msg}
-        except smtplib.SMTPException as exc:
-            error_msg = f"SMTP error: {exc}"
-            logger.error("email_sender: %s", error_msg)
-            return {"status": "error", "to": to, "subject": subject, "error": error_msg}
-        except Exception as exc:
-            error_msg = str(exc)
-            logger.error("email_sender: unexpected error — %s", error_msg)
-            return {"status": "error", "to": to, "subject": subject, "error": error_msg}
+    except Exception as exc:
+        logger.error("email_sender: SMTP send failed — %s", exc)
+        return False, {"error": str(exc), "provider": "smtp"}
 
 
-# ── Module-level convenience function ─────────────────────────────────────────
+def _sendgrid_send(
+    to: str,
+    subject: str,
+    body: str,
+    html_body: Optional[str],
+    reply_to: str,
+    from_addr: str,
+) -> tuple[bool, dict]:
+    """Send an email via SendGrid HTTP API (stdlib only)."""
+    payload: dict = {
+        "personalizations": [{"to": [{"email": to}]}],
+        "from": {"email": from_addr},
+        "subject": subject,
+        "content": [{"type": "text/plain", "value": body}],
+    }
+    if html_body:
+        payload["content"].append({"type": "text/html", "value": html_body})
+    if reply_to:
+        payload["reply_to"] = {"email": reply_to}
 
-_default_client: Optional[EmailClient] = None
+    data = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {SENDGRID_API_KEY}",
+        "Content-Type": "application/json",
+        "User-Agent": "AI-Employee/1.0",
+    }
+    req = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=data,
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            message_id = resp.headers.get("X-Message-Id", "")
+            logger.info(
+                "email_sender: SendGrid sent to %s | subject: %s | id: %s",
+                to, subject[:60], message_id,
+            )
+            return True, {"message_id": message_id, "provider": "sendgrid", "status": "sent"}
+    except Exception as exc:
+        logger.error("email_sender: SendGrid send failed — %s", exc)
+        return False, {"error": str(exc), "provider": "sendgrid"}
 
 
 def send_email(
@@ -283,8 +264,11 @@ def send_email(
     html_body: str = "",
     from_name: str = "",
     reply_to: str = "",
-) -> dict:
-    """Send an email using default (env-var) SMTP credentials.
+) -> tuple[bool, dict]:
+    """Send an email to a single recipient.
+
+    Tries SendGrid first (if configured, better deliverability for bulk
+    outreach); falls back to SMTP.
 
     Args:
         to:        Recipient email address.
@@ -345,16 +329,47 @@ def is_email_configured() -> bool:
         reply_to:  Optional Reply-To address.
 
     Returns:
-        dict — see EmailClient.send() for structure.
+        Tuple (success: bool, info: dict).
+        On success: info contains message_id, status, provider.
+        On failure: info contains error, provider.
     """
-    global _default_client
-    if _default_client is None:
-        _default_client = EmailClient()
-    return _default_client.send(
-        to=to,
-        subject=subject,
-        body=body,
-        html_body=html_body,
-        from_name=from_name,
-        reply_to=reply_to,
-    )
+    if EMAIL_DRY_RUN:
+        logger.info(
+            "email_sender: DRY_RUN — would send to %s | subject: %s", to, subject
+        )
+        return True, {"message_id": "dry_run", "status": "dry_run", "provider": "dry_run"}
+
+    if not to:
+        return False, {"error": "No recipient address provided", "provider": "none"}
+
+    reply_to_addr = reply_to or EMAIL_REPLY_TO
+
+    # Try SendGrid first (better deliverability for bulk/cold outreach)
+    if SENDGRID_API_KEY:
+        sg_from = from_addr or SENDGRID_FROM or SMTP_FROM
+        if sg_from:
+            return _sendgrid_send(to, subject, body, html_body, reply_to_addr, sg_from)
+        logger.warning(
+            "email_sender: SENDGRID_API_KEY set but no from address — "
+            "set SENDGRID_FROM in ~/.ai-employee/.env"
+        )
+
+    # Fall back to SMTP
+    if SMTP_HOST and SMTP_USER and SMTP_PASS:
+        return _smtp_send(to, subject, body, html_body, reply_to_addr)
+
+    return False, {
+        "error": (
+            "No email provider configured. "
+            "Set SMTP_HOST + SMTP_USER + SMTP_PASS "
+            "or SENDGRID_API_KEY + SENDGRID_FROM in ~/.ai-employee/.env"
+        ),
+        "provider": "none",
+    }
+
+
+def is_email_configured() -> bool:
+    """Return True if at least one email provider is configured."""
+    smtp_ok = bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
+    sg_ok = bool(SENDGRID_API_KEY and (SENDGRID_FROM or SMTP_FROM))
+    return smtp_ok or sg_ok

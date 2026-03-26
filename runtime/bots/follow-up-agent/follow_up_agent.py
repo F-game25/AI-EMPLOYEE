@@ -74,11 +74,24 @@ if str(_memory_path) not in sys.path:
     sys.path.insert(0, str(_memory_path))
 try:
     from memory_store import MemoryStore as _MemoryStore  # type: ignore
-    _memory = _MemoryStore()
-    _MEMORY_AVAILABLE = True
+    _MEMORY: "_MemoryStore | None" = _MemoryStore()
 except ImportError:
-    _MEMORY_AVAILABLE = False
-    _memory = None
+    _MEMORY = None
+
+# ── Feedback loop (optional) ──────────────────────────────────────────────────
+
+_feedback_path = AI_HOME / "bots" / "feedback-loop"
+if str(_feedback_path) not in sys.path:
+    sys.path.insert(0, str(_feedback_path))
+try:
+    from feedback_loop import record_message as _record_message, get_best_template_as_example as _best_template  # type: ignore
+    _FEEDBACK_AVAILABLE = True
+except ImportError:
+    _FEEDBACK_AVAILABLE = False
+    def _record_message(*a, **kw):  # type: ignore
+        return ""
+    def _best_template(*a, **kw):  # type: ignore
+        return ""
 
 # Tone progression: attempt index → (label, system prompt)
 _TONE = {
@@ -142,7 +155,7 @@ def append_chatlog(e: dict) -> None:
         f.write(json.dumps(e) + "\n")
 
 
-def _ai(prompt: str, system: str = "", lead_id: str = "") -> str:
+def _ai(prompt: str, system: str = "") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
     return (_query_ai_for_agent("sales", prompt, system_prompt=system) or {}).get("answer", "")
@@ -226,7 +239,6 @@ def _send_followup(lead: dict, crm: dict) -> str:
         f"Naam: {lead['name']}\nNiche: {lead['niche']}\nLocatie: {lead.get('location', '')}"
         f"{previous}{memory_context}{example_hint}",
         system=system_prompt,
-        lead_id=lead.get("id", ""),
     )
 
     lead["outreach_messages"].append({
