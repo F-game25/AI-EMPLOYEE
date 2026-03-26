@@ -275,6 +275,22 @@ curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-ins
 - Select mode (starter/business/power)
 - Set ports and number of agents
 
+### macOS native installer:
+```bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install-mac.sh | bash
+```
+macOS-specific installer with Homebrew integration, automatic dependency setup, and `.command` desktop launcher.
+
+### Windows native installer (PowerShell):
+```powershell
+# Run in PowerShell as your regular user:
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+Invoke-WebRequest https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/install-windows.ps1 -OutFile install-windows.ps1
+.\install-windows.ps1
+```
+Or use the one-click batch file: download and run `quick-install-windows.bat`.
+No WSL or Git Bash required — installs Python, Git, Ollama, and all 33 bots natively.
+
 Everything is installed into **`~/.ai-employee/`**.
 
 ### Update (re-run installer):
