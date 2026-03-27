@@ -10,7 +10,7 @@ When a lead replies on WhatsApp, Twilio sends a POST request here. This server:
 Config env vars:
     TWILIO_AUTH_TOKEN         — used to validate webhook signatures (recommended)
     TWILIO_WHATSAPP_FROM      — your Twilio WhatsApp number
-    WHATSAPP_WEBHOOK_PORT     — port to listen on (default: 8788)
+    WHATSAPP_WEBHOOK_PORT     — port to listen on (default: 8790)
     WHATSAPP_WEBHOOK_HOST     — host to bind (default: 0.0.0.0)
     AI_HOME                   — path to the AI Employee data directory
 """
@@ -43,7 +43,7 @@ CRM_FILE = AI_HOME / "state" / "lead-generator-crm.json"
 STATE_FILE = AI_HOME / "state" / "whatsapp-webhook.state.json"
 
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
-WEBHOOK_PORT = int(os.environ.get("WHATSAPP_WEBHOOK_PORT", "8788"))
+WEBHOOK_PORT = int(os.environ.get("WHATSAPP_WEBHOOK_PORT", "8790"))
 WEBHOOK_HOST = os.environ.get("WHATSAPP_WEBHOOK_HOST", "0.0.0.0")
 
 # ── CRM helpers ───────────────────────────────────────────────────────────────
