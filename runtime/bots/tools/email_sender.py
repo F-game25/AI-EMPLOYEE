@@ -56,6 +56,7 @@ SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
 SMTP_FROM = os.environ.get("SMTP_FROM", "") or SMTP_USER
 SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() != "false"
+SMTP_USE_SSL = os.environ.get("SMTP_USE_SSL", "false").lower() == "true"
 
 # ── SendGrid configuration ────────────────────────────────────────────────────
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
@@ -151,14 +152,6 @@ def _sendgrid_send(
     except Exception as exc:
         logger.error("email_sender: SendGrid send failed — %s", exc)
         return False, {"error": str(exc), "provider": "sendgrid"}
-SMTP_USE_SSL = os.environ.get("SMTP_USE_SSL", "false").lower() == "true"
-
-# ── SendGrid configuration ────────────────────────────────────────────────────
-SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
-SENDGRID_FROM = os.environ.get("SENDGRID_FROM", "")
-
-EMAIL_DRY_RUN = os.environ.get("EMAIL_DRY_RUN", "false").lower() == "true"
-EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO", "")
 
 
 def send_email(

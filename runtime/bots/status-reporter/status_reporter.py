@@ -2,11 +2,13 @@
 
 Generates compact hourly status summaries and can send them via WhatsApp
 through the OpenClaw gateway (if configured). Also writes status to state files.
+Optionally posts status summaries to a Discord channel via a webhook URL.
 
 Usage: can be triggered by openclaw cron hourly, or run as a long-running daemon.
 """
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +22,19 @@ REPORT_INTERVAL = int(os.environ.get("STATUS_REPORT_INTERVAL_SECONDS", "3600"))
 PHONE = os.environ.get("WHATSAPP_PHONE", "")
 GATEWAY_TOKEN = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
 GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "http://localhost:18789")
+
+# ── Discord webhook (optional) ────────────────────────────────────────────────
+
+_tools_path = AI_HOME / "bots" / "tools"
+if str(_tools_path) not in sys.path:
+    sys.path.insert(0, str(_tools_path))
+try:
+    from discord_notify import notify_discord as _notify_discord, is_discord_configured as _discord_ok  # type: ignore
+    _DISCORD_AVAILABLE = _discord_ok()
+except ImportError:
+    _DISCORD_AVAILABLE = False
+    def _notify_discord(*a, **kw):  # type: ignore
+        return False
 
 
 def now_iso() -> str:
@@ -178,11 +193,13 @@ def main():
         print(f"[{now_iso()}] status report:\n{msg}\n")
 
         sent = send_whatsapp(msg)
+        sent_discord = _notify_discord(msg)
         entry = {
             "ts": now_iso(),
             "type": "status_report",
             "message": msg,
             "sent_whatsapp": sent,
+            "sent_discord": sent_discord,
         }
         append_chatlog(entry)
         write_state(
@@ -190,6 +207,7 @@ def main():
                 "bot": "status-reporter",
                 "last_report": now_iso(),
                 "last_sent_whatsapp": sent,
+                "last_sent_discord": sent_discord,
                 "status": "running",
             }
         )

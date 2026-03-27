@@ -380,11 +380,21 @@ def _execute_subtask_inline(st: dict, plan: dict, capabilities: dict) -> dict:
     )
 
     # Use per-agent model routing
-    res = _query_ai_for_agent(
-        agent_id,
-        instructions,
-        system_prompt=system_prompt,
-    )
+    try:
+        res = _query_ai_for_agent(
+            agent_id,
+            instructions,
+            system_prompt=system_prompt,
+        )
+    except Exception as exc:
+        logger.error(
+            "task-orchestrator: AI call failed for subtask '%s' [%s] — %s",
+            title, agent_id, exc,
+        )
+        st["status"] = "error"
+        st["result"] = f"[AI call failed: {exc}]"
+        st["completed_at"] = now_iso()
+        return st
     answer = res.get("answer", "")
 
     # Optionally run peer review on the result

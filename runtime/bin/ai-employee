@@ -42,6 +42,13 @@ is_running() {
 
 start_bot() {
   local bot="$1"
+
+  # Validate bot name — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}
+  if [[ ! "$bot" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$ ]]; then
+    echo "ERROR: invalid bot name: '$bot' — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
+    return 1
+  fi
+
   local bot_dir="$BOTS_DIR/$bot"
   local entry="$bot_dir/run.sh"
   local log="$LOGS_DIR/$bot.log"
@@ -75,6 +82,13 @@ start_bot() {
 
 stop_bot() {
   local bot="$1"
+
+  # Validate bot name — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}
+  if [[ ! "$bot" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$ ]]; then
+    echo "ERROR: invalid bot name: '$bot' — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
+    return 1
+  fi
+
   local pid_file
   pid_file="$(bot_pid_file "$bot")"
   if ! [[ -f "$pid_file" ]]; then
