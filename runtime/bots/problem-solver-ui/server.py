@@ -13,6 +13,7 @@ Config is read/written in ~/.ai-employee/config/
 import json
 import logging
 import os
+import secrets
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -73,6 +74,7 @@ _REPO_TEMPLATES_FILE = Path(__file__).parent.parent.parent / "config" / "agent_t
 
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
+MAX_CHAT_MESSAGE_LENGTH = 10000
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -2695,7 +2697,11 @@ def get_chat():
 
 @app.post("/api/chat")
 def post_chat(payload: dict):
-    message = (payload or {}).get("message", "").strip()
+    raw_message = (payload or {}).get("message", "").strip()
+    if _SECURITY_AVAILABLE:
+        message = InputSanitizer.sanitize_input(raw_message, max_length=MAX_CHAT_MESSAGE_LENGTH)
+    else:
+        message = raw_message[:MAX_CHAT_MESSAGE_LENGTH].replace('\x00', '')
     if not message:
         raise HTTPException(400, "message required")
 
