@@ -159,8 +159,9 @@ ai-employee do <task>               # Send any task to your AI employee
 ai-employee start                   # Start all services
 ai-employee stop                    # Stop all services
 ai-employee status                  # Show running bots
-ai-employee logs <bot>              # Tail logs
+ai-employee logs <bot>              # Tail logs for a specific bot
 ai-employee doctor                  # Health check (✅/❌ per service)
+ai-employee selftest                # Safety self-test (see below)
 ai-employee onboard                 # First 15 Minutes Value Flow
 ai-employee mode [starter|business|power]  # Show or set mode
 ai-employee ui                      # Open dashboard in browser
@@ -448,6 +449,153 @@ Send these to your own WhatsApp number:
 | **data-analyst** | Market trends + reports + KPI tracking |
 | **creative-studio** | Ad copy + design briefs + campaign concepts |
 | **web-sales** | Website audits + UX + sales pitches |
+
+---
+
+## 🎮 Discord Bot — Control Panel & Live Notifications
+
+> **Why Discord?** Keep an eye on your AI employee from your phone or PC — without leaving Discord. The bot posts automatic alerts when leads are found or follow-ups are sent, and lets you control the CRM with simple `!commands`.
+
+### There are two Discord features:
+
+| Feature | What it does | What you need |
+|---|---|---|
+| **Incoming Webhook** | Bot *posts* automatic alerts to a channel | A Discord webhook URL |
+| **Discord Bot (!commands)** | You *talk to* the bot with `!lead list` etc. | A Discord Bot Token |
+
+You can use one or both.
+
+---
+
+### 🔔 Part 1 — Automatic Notifications via Webhook (easiest)
+
+When a webhook URL is set the system automatically posts:
+- 🎯 **New leads found** (how many, for which niche)
+- 📤 **Follow-ups sent** (which leads, attempt number)
+- 🤖 **Hourly status report** (all bot statuses)
+
+#### Step 1 — Create a webhook in Discord
+
+1. Open Discord → go to the channel where you want notifications
+2. Click the ⚙️ gear icon next to the channel name → **Edit Channel**
+3. Click **Integrations** → **Webhooks** → **New Webhook**
+4. Give it a name (e.g. `AI Employee`) and click **Copy Webhook URL**
+
+#### Step 2 — Add the URL to your config
+
+Open `~/.ai-employee/.env` in a text editor:
+
+```bash
+nano ~/.ai-employee/.env
+```
+
+Add (or uncomment) this line:
+
+```env
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN
+```
+
+Save (`Ctrl+X → Y → Enter`) and restart:
+
+```bash
+cd ~/.ai-employee && ./stop.sh && ./start.sh
+```
+
+That's it — the next time a lead is found you'll see a message in Discord. ✅
+
+---
+
+### 🤖 Part 2 — Discord Bot with !commands (interactive control panel)
+
+The bot lets you manage leads and trigger follow-ups directly from Discord.
+
+#### Step 1 — Create a Discord application & bot
+
+1. Go to → https://discord.com/developers/applications
+2. Click **New Application** → give it a name (e.g. `AI Employee`)
+3. In the left menu click **Bot** → click **Add Bot** → confirm
+4. Under **Privileged Gateway Intents** turn ON **Message Content Intent**
+5. Click **Reset Token** → **Copy** the token (you only see it once!)
+
+#### Step 2 — Invite the bot to your server
+
+1. Still in the Developer Portal → click **OAuth2** → **URL Generator**
+2. Under **Scopes** tick `bot`
+3. Under **Bot Permissions** tick `Send Messages` and `Read Message History`
+4. Copy the generated URL → open it in your browser → select your server → **Authorize**
+
+#### Step 3 — Add the token to your config
+
+```bash
+nano ~/.ai-employee/.env
+```
+
+Add:
+
+```env
+DISCORD_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+DISCORD_COMMAND_PREFIX=!
+```
+
+#### Step 4 — Start the Discord bot
+
+```bash
+cd ~/.ai-employee/bots/discord-bot
+python3 discord_bot.py
+```
+
+Or start it in the background (it will keep running):
+
+```bash
+nohup python3 ~/.ai-employee/bots/discord-bot/discord_bot.py \
+  >> ~/.ai-employee/logs/discord-bot.log 2>&1 &
+echo "Discord bot started (PID $!)"
+```
+
+#### Step 5 — Test it
+
+In Discord, type in the channel where the bot is present:
+
+```
+!help
+```
+
+You should see the command overview. 🎉
+
+---
+
+### 📋 Discord Bot Commands Reference
+
+| Command | What it does |
+|---|---|
+| `!help` | Show all available commands |
+| `!lead list` | List all leads in the CRM |
+| `!lead show <id>` | Show full details of a lead |
+| `!lead add <name>\|<niche>\|<phone>` | Add a new lead (pipe-separated) |
+| `!lead lost <id>` | Mark a lead as lost |
+| `!followup run` | Process all leads due for a follow-up |
+| `!followup status` | Show follow-up stats for every lead |
+| `!followup lead <id>` | Force a follow-up for one specific lead |
+| `!followup reset <id>` | Reset the follow-up counter for a lead |
+
+**Example:**
+```
+!lead add Jan de Vries|webdesign|+31612345678
+!followup run
+!lead list
+```
+
+---
+
+### 🛠️ Discord Bot Logs
+
+```bash
+# View live logs
+tail -f ~/.ai-employee/logs/discord-bot.log
+
+# Stop the background bot
+kill $(pgrep -f discord_bot.py)
+```
 
 ---
 
@@ -759,6 +907,276 @@ Then open: http://127.0.0.1:8787
 ~/.ai-employee/bin/ai-employee logs problem-solver-ui
 ~/.ai-employee/bin/ai-employee logs status-reporter
 ~/.ai-employee/bin/ai-employee status
+```
+
+---
+
+## 🧪 Safety Self-Test — Verify Everything Works
+
+Before going live, run the safety self-test. It checks every component and shows a clear ✅ or ❌ for each:
+
+```bash
+python3 ~/.ai-employee/bots/bot_selftest.py
+```
+
+Or (after install):
+
+```bash
+ai-employee selftest
+```
+
+**What it checks:**
+
+| Category | Checks |
+|---|---|
+| Environment | Python version, `.env` file, `JWT_SECRET_KEY`, state directory, CRM file |
+| Discord | Webhook URL reachable, bot token format, `discord.py` installed, bot last state |
+| Integrations | Twilio / WhatsApp credentials |
+| Bot modules | `ai_router`, `follow_up_agent` importable |
+| Running services | OpenClaw gateway, Problem Solver UI |
+
+**Example output:**
+
+```
+====================================================
+  🧪 AI Employee — Safety & Health Self-Test
+====================================================
+  AI_HOME : /home/you/.ai-employee
+  Time    : 2026-03-27T20:00:00Z
+
+── Environment ──────────────────────────────────────
+  ✅ Python version — 3.11.2
+  ✅ .env file — /home/you/.ai-employee/.env
+  ✅ JWT_SECRET_KEY — set ✓
+  ✅ State directory — /home/you/.ai-employee/state
+  ✅ CRM file — 24 leads in CRM
+
+── Discord ──────────────────────────────────────────
+  ✅ discord_notify module — importable ✓
+  ✅ Discord webhook URL — reachable ✓
+  ✅ Discord bot token — format OK ✓
+  ✅ discord.py library — v2.3.2
+  ✅ Discord bot state — running as MyBot#1234
+
+── Integrations ─────────────────────────────────────
+  ✅ Twilio / WhatsApp config — credentials set ✓
+
+── Bot Modules ──────────────────────────────────────
+  ✅ ai_router module — importable ✓
+  ✅ follow_up_agent module — importable ✓
+
+── Running Services ─────────────────────────────────
+  ✅ OpenClaw gateway — reachable at http://localhost:18789
+  ✅ Problem Solver UI — reachable at http://127.0.0.1:8787
+
+====================================================
+  Result: 14/14 checks passed
+  ✅ All required checks passed — bot is safe to run!
+====================================================
+```
+
+**Send a real Discord test ping** (proves the webhook actually works):
+
+```bash
+python3 ~/.ai-employee/bots/bot_selftest.py --live
+```
+
+---
+
+## 💻 Complete Terminal Command Reference
+
+Everything you can do from your terminal, in one place.
+
+### Install & Update
+
+```bash
+# Install (Linux / macOS — zero config)
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash -s -- --zero-config
+
+# Install (Linux / macOS — choose your settings)
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+
+# Install (macOS — native installer with Homebrew)
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install-mac.sh | bash
+
+# Update (re-run installer — does NOT overwrite .env or config)
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+```
+
+### Start / Stop
+
+```bash
+# Start everything (opens dashboard in browser automatically)
+cd ~/.ai-employee && ./start.sh
+
+# Stop everything
+cd ~/.ai-employee && ./stop.sh
+
+# Or use the CLI from any directory
+ai-employee start
+ai-employee stop
+ai-employee status          # Shows which bots are running
+```
+
+### Send Tasks
+
+```bash
+ai-employee do "find 10 leads for my web design agency in Amsterdam"
+ai-employee do "write a cold sales email for my SaaS product"
+ai-employee do "analyse my competitor and find 3 gaps I can exploit"
+ai-employee do "create a 30-day content calendar for LinkedIn"
+ai-employee do "deploy template get-10-leads-24h"
+```
+
+### Modes
+
+```bash
+ai-employee mode                  # Show current mode
+ai-employee mode starter          # 3 agents — no overwhelm
+ai-employee mode business         # 8 agents — recommended
+ai-employee mode power            # All 20 agents, full dashboard
+```
+
+### Logs & Debugging
+
+```bash
+ai-employee logs <bot>                     # Tail logs for a bot
+ai-employee logs discord-bot               # Discord bot logs
+ai-employee logs follow-up-agent           # Follow-up agent logs
+ai-employee logs lead-generator            # Lead generator logs
+ai-employee logs status-reporter           # Status reporter logs
+ai-employee logs problem-solver-ui         # Dashboard logs
+ai-employee doctor                         # Health check
+ai-employee selftest                       # Safety self-test (✅/❌)
+python3 ~/.ai-employee/bots/bot_selftest.py         # Same — direct
+python3 ~/.ai-employee/bots/bot_selftest.py --live  # + real Discord ping
+```
+
+### ROI & Metrics
+
+```bash
+ai-employee do "metrics"                        # Show ROI summary
+ai-employee do "metrics record lead_generated"
+ai-employee do "metrics record deal_closed:5000"
+```
+
+### CRM & Leads (via chatlog / dashboard chat)
+
+```
+leads webdesign Amsterdam          # Find 10 leads, add to CRM
+leads status                       # CRM stats (total/contacted/won/…)
+leads pipeline                     # Recent leads with status
+leads followup                     # Follow-up leads silent for 3+ days
+leads export                       # Dump CRM as CSV text
+outreach <lead_id> email           # Send personalised email to a lead
+outreach <lead_id> whatsapp        # Send personalised WhatsApp to a lead
+```
+
+### Follow-Up Agent (via chatlog / dashboard chat)
+
+```
+followup run                       # Process all leads due for a follow-up
+followup lead <lead_id>            # Force a follow-up for one lead
+followup status                    # Show follow-up stats
+followup reset <lead_id>           # Reset follow-up counter for a lead
+```
+
+### Discord Bot Commands (in Discord)
+
+```
+!help                              # Show all commands
+!lead list                         # List all leads
+!lead show <id>                    # Show details for one lead
+!lead add Name|Niche|+31612345678  # Add a new lead
+!lead lost <id>                    # Mark a lead as lost
+!followup run                      # Trigger follow-ups now
+!followup status                   # Follow-up stats
+!followup lead <id>                # Follow-up for one lead
+!followup reset <id>               # Reset follow-up counter
+```
+
+### Discord Bot (terminal)
+
+```bash
+# Start the Discord bot
+python3 ~/.ai-employee/bots/discord-bot/discord_bot.py
+
+# Start in background (stays running after you close terminal)
+nohup python3 ~/.ai-employee/bots/discord-bot/discord_bot.py \
+  >> ~/.ai-employee/logs/discord-bot.log 2>&1 &
+echo "Discord bot PID: $!"
+
+# View Discord bot logs
+tail -f ~/.ai-employee/logs/discord-bot.log
+
+# Stop the Discord bot
+kill $(pgrep -f discord_bot.py)
+```
+
+### WhatsApp
+
+```bash
+openclaw channels login            # Link WhatsApp (scan QR code once)
+```
+
+### Individual Bots
+
+```bash
+ai-employee start <bot>            # Start one bot
+ai-employee stop <bot>             # Stop one bot
+ai-employee logs <bot>             # Tail logs for one bot
+ai-employee start --all            # Start all enabled bots
+ai-employee stop --all             # Stop all bots
+
+# Direct bot start (fallback if CLI unavailable)
+python3 ~/.ai-employee/bots/status-reporter/status_reporter.py
+python3 ~/.ai-employee/bots/follow-up-agent/follow_up_agent.py
+python3 ~/.ai-employee/bots/lead-generator/lead_generator.py
+python3 ~/.ai-employee/bots/discord-bot/discord_bot.py
+```
+
+### Config & Environment
+
+```bash
+# Edit your config
+nano ~/.ai-employee/.env
+
+# Generate a new JWT secret (security)
+python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# Check what bots are configured
+cat ~/.ai-employee/config.json | python3 -m json.tool
+```
+
+### Guardrails (Approval Queue)
+
+```bash
+ai-employee do "guardrails"        # View pending approvals
+ai-employee do "approve <id>"      # Approve a high-risk action
+ai-employee do "reject <id>"       # Reject a high-risk action
+```
+
+### MiroFish (Trading / Prediction)
+
+```bash
+ai-employee start mirofish-researcher
+ai-employee stop  mirofish-researcher
+ai-employee logs  mirofish-researcher
+```
+
+### Onboarding
+
+```bash
+ai-employee onboard                # First 15 Minutes Value Flow (first time)
+ai-employee ui                     # Open dashboard in browser
+```
+
+### Uninstall
+
+```bash
+cd ~/.ai-employee && ./stop.sh || true
+rm -rf ~/.ai-employee
+rm -f ~/.openclaw/openclaw.json
 ```
 
 ---

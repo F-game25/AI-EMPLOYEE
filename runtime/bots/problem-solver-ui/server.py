@@ -20,6 +20,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+# ── Python version guard ──────────────────────────────────────────────────────
+if sys.version_info < (3, 10):
+    print("ERROR: Python 3.10+ is required. Current version: "
+          f"{sys.version_info.major}.{sys.version_info.minor}")
+    sys.exit(1)
+
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -40,14 +46,63 @@ _SEC_DIR = Path(__file__).parent
 if str(_SEC_DIR) not in sys.path:
     sys.path.insert(0, str(_SEC_DIR))
 
+# ── JWT secret startup validation ─────────────────────────────────────────────
+_KNOWN_WEAK_SECRETS = frozenset({
+    "", "secret", "changeme", "change-me", "your-secret-here", "default",
+    "password", "1234", "12345678", "test", "dev",
+    "CHANGE_THIS_IN_SECURITY_LOCAL_YML_OR_SET_JWT_SECRET_KEY_ENV_VAR",
+})
+
+def _validate_jwt_secret_on_startup(secret: str) -> None:
+    """Refuse to start if JWT_SECRET_KEY is missing, too short, or a known default."""
+    # Normalise to lowercase for case-insensitive weak-value detection
+    if secret.lower() in _KNOWN_WEAK_SECRETS:
+        print(
+            "\n❌  STARTUP BLOCKED: JWT_SECRET_KEY is not set or uses a known default.\n"
+            "    Generate a strong secret and export it:\n\n"
+            "        export JWT_SECRET_KEY=$(python3 -c "
+            "\"import secrets; print(secrets.token_hex(32))\")\n\n"
+            "    Or add JWT_SECRET_KEY=<value> to ~/.ai-employee/.env\n"
+        )
+        sys.exit(1)
+    if len(secret) < 32:
+        print(
+            "\n❌  STARTUP BLOCKED: JWT_SECRET_KEY must be at least 32 characters.\n"
+            "    Generate a strong secret:\n\n"
+            "        python3 -c \"import secrets; print(secrets.token_hex(32))\"\n"
+        )
+        sys.exit(1)
+
+_jwt_secret_env = os.environ.get("JWT_SECRET_KEY", "")
+_validate_jwt_secret_on_startup(_jwt_secret_env)
+
+# ── Bot name validation ────────────────────────────────────────────────────────
+_BOT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+
+def _validate_bot_name(name: str) -> str:
+    """Raise HTTP 400 if *name* is not a valid bot name. Returns the name unchanged."""
+    if not name or not _BOT_NAME_RE.match(name):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid bot name. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}.",
+        )
+    return name
+
 try:
     from security import AuthManager, InputSanitizer, PasswordValidator
     from config_manager import load_config, validate_security_config, Config as _Cfg
     _security_config: Optional[_Cfg] = None
     try:
         _security_config = load_config()
-    except (ValueError, Exception):
-        # JWT secret not set — security features degraded, app still starts
+    except ValueError as _jwt_err:
+        # load_config() raises ValueError when JWT_SECRET_KEY is missing/default.
+        # _validate_jwt_secret_on_startup() above already handles the empty-env case;
+        # this catches the case where security.yml still has the placeholder value.
+        print(f"\n❌  STARTUP BLOCKED: {_jwt_err}\n")
+        sys.exit(1)
+    except Exception:
+        # Other config errors (YAML parse, etc.) — still start but without
+        # the richer config object; JWT is already validated above.
         _security_config = None
     _SECURITY_AVAILABLE = True
 except ImportError:
@@ -107,6 +162,18 @@ if _SLOWAPI_AVAILABLE:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 else:
     limiter = None
+
+
+def _auth_rate_limit(f):
+    """Apply 5/minute per-IP rate limit to auth endpoints.
+
+    Uses the slowapi limiter if available; otherwise returns the function unchanged
+    (rate limiting is then handled only by the global default limit).
+    Endpoints must accept ``request: Request`` as a parameter for the decorator to work.
+    """
+    if _SLOWAPI_AVAILABLE and limiter is not None:
+        return limiter.limit("5/minute")(f)
+    return f
 
 # ── CORS (openclaw-2) ─────────────────────────────────────────────────────────
 _cors_origins = (
@@ -2567,11 +2634,13 @@ def security_status():
 
 @app.post("/auth/register", response_model=_TokenResponse,
           status_code=status.HTTP_201_CREATED)
-def auth_register(user_data: _UserCreate):
+@_auth_rate_limit
+def auth_register(request: Request, user_data: _UserCreate):
     """
     Register a dashboard user and return a JWT bearer token.
 
     Password is validated against the configured strength policy (openclaw-2).
+    Rate limited to 5 requests/minute per IP to prevent abuse.
     """
     if not _SECURITY_AVAILABLE:
         raise HTTPException(
@@ -2597,15 +2666,92 @@ def auth_register(user_data: _UserCreate):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg)
 
     username = InputSanitizer.sanitize_input(user_data.username, max_length=50)
-    auth = AuthManager(
-        secret_key=cfg.security.jwt_secret_key,
-        algorithm=cfg.security.jwt_algorithm,
-        expire_minutes=cfg.security.access_token_expire_minutes,
-    )
-    token = auth.create_access_token({"sub": username, "type": "user"})
 
+    # ── Persist user with bcrypt-hashed password ───────────────────────────────
+    _users_file = STATE_DIR / "users.json"
+    try:
+        users: dict = json.loads(_users_file.read_text()) if _users_file.exists() else {}
+    except Exception as _ue:
+        logger.warning("users.json could not be parsed (%s) — starting with empty store", _ue)
+        users = {}
+    if username in users:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Username already exists.")
+    auth = AuthManager(
+        secret_key=(cfg.security.jwt_secret_key if cfg else _jwt_secret_env),
+        algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
+        expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+    )
+    users[username] = {"password_hash": auth.hash_password(user_data.password)}
+    _users_file.parent.mkdir(parents=True, exist_ok=True)
+    _users_file.write_text(json.dumps(users, indent=2))
+    _users_file.chmod(0o600)
+
+    token = auth.create_access_token({"sub": username, "type": "user"})
     _audit_logger.info(json.dumps({
         "event": "user_registered",
+        "username": username,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }))
+    return _TokenResponse(access_token=token)
+
+
+class _LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=50)
+    password: str = Field(..., min_length=1)
+
+
+@app.post("/auth/login", response_model=_TokenResponse)
+@_auth_rate_limit
+def auth_login(request: Request, login_data: _LoginRequest):
+    """
+    Authenticate a registered user and return a JWT bearer token.
+
+    Rate limited to 5 requests/minute per IP to prevent brute-force attacks.
+    Returns the same 401 error for both unknown user and wrong password (no user enumeration).
+    """
+    if not _SECURITY_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Security module not available.",
+        )
+
+    cfg = _security_config
+    username = InputSanitizer.sanitize_input(login_data.username, max_length=50)
+
+    _users_file = STATE_DIR / "users.json"
+    try:
+        users: dict = json.loads(_users_file.read_text()) if _users_file.exists() else {}
+    except Exception as _ue:
+        logger.warning("users.json could not be parsed (%s) — treating as empty", _ue)
+        users = {}
+
+    _generic_fail = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid username or password.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    user_record = users.get(username)
+    auth = AuthManager(
+        secret_key=(cfg.security.jwt_secret_key if cfg else _jwt_secret_env),
+        algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
+        expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+    )
+
+    if not user_record or not auth.verify_password(
+        login_data.password, user_record.get("password_hash", "")
+    ):
+        _audit_logger.warning(json.dumps({
+            "event": "login_failed",
+            "username": username,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }))
+        raise _generic_fail
+
+    token = auth.create_access_token({"sub": username, "type": "user"})
+    _audit_logger.info(json.dumps({
+        "event": "login_success",
         "username": username,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }))
@@ -2646,8 +2792,7 @@ def stop_all_bots():
 @app.post("/api/bots/start")
 def start_bot(payload: dict):
     bot = payload.get("bot", "")
-    if not bot:
-        raise HTTPException(400, "bot name required")
+    _validate_bot_name(bot)
     rc, out = ai_employee("start", bot)
     return JSONResponse({"ok": rc == 0, "output": out})
 
@@ -2655,8 +2800,7 @@ def start_bot(payload: dict):
 @app.post("/api/bots/stop")
 def stop_bot(payload: dict):
     bot = payload.get("bot", "")
-    if not bot:
-        raise HTTPException(400, "bot name required")
+    _validate_bot_name(bot)
     rc, out = ai_employee("stop", bot)
     return JSONResponse({"ok": rc == 0, "output": out})
 
@@ -2682,6 +2826,17 @@ def get_workers():
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────
 
+# ── Chatlog sanitizer — strip accidental API key leakage ─────────────────────
+_API_KEY_PATTERN = re.compile(
+    r"(sk-ant-[a-zA-Z0-9\-]{20,}|sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9\-_]{30,})",
+    re.IGNORECASE,
+)
+
+def _sanitize_for_log(text: str) -> str:
+    """Replace any API key patterns with [REDACTED] before writing to chatlog."""
+    return _API_KEY_PATTERN.sub("[REDACTED_API_KEY]", text)
+
+
 @app.get("/api/chat")
 def get_chat():
     messages = []
@@ -2698,12 +2853,15 @@ def get_chat():
 @app.post("/api/chat")
 def post_chat(payload: dict):
     raw_message = (payload or {}).get("message", "").strip()
-    if _SECURITY_AVAILABLE:
-        message = InputSanitizer.sanitize_input(raw_message, max_length=MAX_CHAT_MESSAGE_LENGTH)
-    else:
-        message = raw_message[:MAX_CHAT_MESSAGE_LENGTH].replace('\x00', '')
-    if not message:
+    if not raw_message:
         raise HTTPException(400, "message required")
+
+    # Enforce max length and strip null bytes; redact any accidental API keys
+    if _SECURITY_AVAILABLE:
+        message = InputSanitizer.sanitize_input(raw_message, max_length=10000)
+    else:
+        message = raw_message[:10000].replace("\x00", "")
+    message = _sanitize_for_log(message)
 
     entry = {"ts": now_iso(), "type": "user", "message": message}
     CHATLOG.parent.mkdir(parents=True, exist_ok=True)
@@ -2712,7 +2870,8 @@ def post_chat(payload: dict):
 
     # Simple command handling
     response = handle_command(message)
-    resp_entry = {"ts": now_iso(), "type": "bot", "message": response}
+    safe_response = _sanitize_for_log(response)
+    resp_entry = {"ts": now_iso(), "type": "bot", "message": safe_response}
     with open(CHATLOG, "a") as f:
         f.write(json.dumps(resp_entry) + "\n")
 
@@ -2732,11 +2891,15 @@ def handle_command(message: str) -> str:
 
     if msg_lower.startswith("start "):
         bot = message[6:].strip()
+        if not _BOT_NAME_RE.match(bot):
+            return f"Invalid bot name '{bot}'. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{{0,63}}."
         rc, out = ai_employee("start", bot)
         return f"Started {bot}. {out}"
 
     if msg_lower.startswith("stop "):
         bot = message[5:].strip()
+        if not _BOT_NAME_RE.match(bot):
+            return f"Invalid bot name '{bot}'. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{{0,63}}."
         rc, out = ai_employee("stop", bot)
         return f"Stopped {bot}. {out}"
 

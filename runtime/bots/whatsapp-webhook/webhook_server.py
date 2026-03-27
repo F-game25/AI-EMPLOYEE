@@ -8,10 +8,15 @@ When a lead replies on WhatsApp, Twilio sends a POST request here. This server:
   5. Returns an empty TwiML response so Twilio is satisfied.
 
 Config env vars:
-    TWILIO_AUTH_TOKEN         — used to validate webhook signatures (recommended)
+    TWILIO_AUTH_TOKEN         — used to validate webhook signatures (REQUIRED for production)
     TWILIO_WHATSAPP_FROM      — your Twilio WhatsApp number
     WHATSAPP_WEBHOOK_PORT     — port to listen on (default: 8790)
-    WHATSAPP_WEBHOOK_HOST     — host to bind (default: 0.0.0.0)
+    WHATSAPP_WEBHOOK_HOST     — host to bind.
+                                Default is 127.0.0.1 (localhost only).
+                                Set to 0.0.0.0 ONLY when you need Twilio to reach this server
+                                directly from the internet (e.g. behind a public IP / ngrok).
+                                When exposed to the internet, TWILIO_AUTH_TOKEN MUST be set
+                                to validate Twilio request signatures.
     AI_HOME                   — path to the AI Employee data directory
 """
 import hashlib
@@ -44,7 +49,7 @@ STATE_FILE = AI_HOME / "state" / "whatsapp-webhook.state.json"
 
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 WEBHOOK_PORT = int(os.environ.get("WHATSAPP_WEBHOOK_PORT", "8790"))
-WEBHOOK_HOST = os.environ.get("WHATSAPP_WEBHOOK_HOST", "0.0.0.0")
+WEBHOOK_HOST = os.environ.get("WHATSAPP_WEBHOOK_HOST", "127.0.0.1")
 
 # ── CRM helpers ───────────────────────────────────────────────────────────────
 

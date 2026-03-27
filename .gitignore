@@ -22,3 +22,13 @@ data/
 models/
 venv/
 .venv/
+
+# Certificate / key files — never commit private keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Runtime secrets — never commit live state/user data
+state/users.json
