@@ -31,7 +31,7 @@ import uvicorn
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
     format="%(asctime)s [webhook] %(levelname)s %(message)s",
 )
 logger = logging.getLogger("whatsapp-webhook")

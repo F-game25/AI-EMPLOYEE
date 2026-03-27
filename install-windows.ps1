@@ -10,6 +10,12 @@
     Run as a normal user (not Administrator).
     Execution policy must allow running scripts:
         Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
+    ⚠  WINDOWS SUPPORT STATUS: This script has not yet been fully tested on
+       real Windows hardware.  Mac/Linux users are better served by install.sh
+       or install-mac.sh which are production-validated.  If you encounter
+       issues on Windows please open a GitHub issue with your PowerShell version
+       and the error output.
 #>
 
 $ErrorActionPreference = 'Continue'
