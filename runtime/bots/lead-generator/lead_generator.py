@@ -41,7 +41,7 @@ _ai_router_path = AI_HOME / "bots" / "ai-router"
 if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 try:
-    from ai_router import query_ai as _query_ai, query_ai_for_agent as _query_ai_for_agent, search_web as _search_web  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent, search_web as _search_web  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -94,50 +94,6 @@ except ImportError:
     _WHATSAPP_AVAILABLE = False
     def _send_whatsapp(*a, **kw):  # type: ignore
         return False, {"error": "whatsapp not available"}
-
-_memory_path = AI_HOME / "bots" / "memory"
-if str(_memory_path) not in sys.path:
-    sys.path.insert(0, str(_memory_path))
-try:
-    from memory_store import MemoryStore as _MemoryStore  # type: ignore
-    _MEMORY: "_MemoryStore | None" = _MemoryStore()
-except ImportError:
-    _MEMORY = None
-
-# ── Feedback loop (optional) ──────────────────────────────────────────────────
-
-_feedback_path = AI_HOME / "bots" / "feedback-loop"
-if str(_feedback_path) not in sys.path:
-    sys.path.insert(0, str(_feedback_path))
-try:
-    from feedback_loop import record_message as _record_message, get_best_template_as_example as _best_template  # type: ignore
-    _FEEDBACK_AVAILABLE = True
-except ImportError:
-    _FEEDBACK_AVAILABLE = False
-    def _record_message(*a, **kw):  # type: ignore
-        return ""
-    def _best_template(*a, **kw):  # type: ignore
-        return ""
-
-# ── Real tool integrations (optional) ────────────────────────────────────────
-
-_tools_path = AI_HOME / "bots" / "tools"
-if str(_tools_path) not in sys.path:
-    sys.path.insert(0, str(_tools_path))
-try:
-    from email_sender import send_email as _send_email, is_email_configured as _email_ok  # type: ignore
-    _EMAIL_AVAILABLE = _email_ok()
-except ImportError:
-    _EMAIL_AVAILABLE = False
-    def _send_email(*a, **kw):  # type: ignore
-        return False, {"error": "email_sender not available"}
-
-try:
-    from whatsapp import send_whatsapp as _send_whatsapp, is_whatsapp_configured as _wa_ok  # type: ignore
-    _WHATSAPP_AVAILABLE = _wa_ok()
-except ImportError:
-    _WHATSAPP_AVAILABLE = False
-    def _send_whatsapp(*a, **kw):  # type: ignore
         return False, {"error": "whatsapp not available"}
 
 
@@ -167,14 +123,13 @@ def append_chatlog(e: dict) -> None:
         f.write(json.dumps(e) + "\n")
 
 
-def _ai(prompt: str, system: str = "", agent_type: str = "sales") -> str:
+def _ai(prompt: str, system: str = "", agent_type: str = "sales",
+        history: list | None = None) -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
-    return (_query_ai_for_agent(agent_type, prompt, system_prompt=system) or {}).get("answer", "")
-def _ai(prompt: str, system: str = "", lead_id: str = "") -> str:
-    if not _AI_AVAILABLE:
-        return "[AI unavailable]"
-    return (_query_ai_for_agent(agent_type, prompt, system_prompt=system) or {}).get("answer", "")
+    return (
+        _query_ai_for_agent(agent_type, prompt, system_prompt=system, history=history) or {}
+    ).get("answer", "")
 
 
 def _web(query: str) -> str:
@@ -441,6 +396,7 @@ def outreach_lead(lead_id: str, channel: str) -> str:
                "(150 words max), value-focused outreach message tailored to the channel. "
                "Be specific and end with a clear CTA.",
         agent_type="sales",
+        history=history,
     )
     lead["outreach_messages"].append({"channel": channel, "message": msg, "ts": now_iso()})
     lead["status"] = "contacted"
