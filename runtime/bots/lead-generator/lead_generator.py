@@ -94,7 +94,14 @@ except ImportError:
     _WHATSAPP_AVAILABLE = False
     def _send_whatsapp(*a, **kw):  # type: ignore
         return False, {"error": "whatsapp not available"}
-        return False, {"error": "whatsapp not available"}
+
+try:
+    from discord_notify import notify_discord as _notify_discord, is_discord_configured as _discord_ok  # type: ignore
+    _DISCORD_AVAILABLE = _discord_ok()
+except ImportError:
+    _DISCORD_AVAILABLE = False
+    def _notify_discord(*a, **kw):  # type: ignore
+        return False
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -298,7 +305,10 @@ def find_leads(niche: str, location: str, is_real_estate: bool = False) -> str:
         added.append(f"[{lead['id']}] {name}")
 
     save_crm(crm)
-    return f"Added {len(added)} leads for '{category}' in {location}:\n" + "\n".join(added)
+    summary = f"Added {len(added)} leads for '{category}' in {location}:\n" + "\n".join(added)
+    if added and _DISCORD_AVAILABLE:
+        _notify_discord(f"🎯 **{len(added)} new leads** found for *{category}* in {location}:\n" + "\n".join(added))
+    return summary
 
 
 def followup_leads() -> str:
