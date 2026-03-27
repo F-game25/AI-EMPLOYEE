@@ -380,7 +380,13 @@ def check_agent_queue() -> list:
     if not queue_file.exists():
         return []
     lines = queue_file.read_text().splitlines()
-    pending = [json.loads(l) for l in lines if l.strip()]
+    pending = []
+    for line in lines:
+        if line.strip():
+            try:
+                pending.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
     if pending:
         queue_file.write_text("")
     return pending
