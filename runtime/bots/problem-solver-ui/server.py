@@ -3086,7 +3086,10 @@ def handle_command(message: str) -> str:
 
     if msg_lower in ("schedule", "schedules"):
         if SCHEDULES_FILE.exists():
-            tasks = json.loads(SCHEDULES_FILE.read_text())
+            try:
+                tasks = json.loads(SCHEDULES_FILE.read_text())
+            except (json.JSONDecodeError, OSError):
+                tasks = []
             if tasks:
                 lines = [f"• {t.get('label',t.get('id'))} ({t.get('action')})" for t in tasks[:10]]
                 return "Scheduled tasks:\n" + "\n".join(lines)
@@ -3094,7 +3097,10 @@ def handle_command(message: str) -> str:
 
     if msg_lower in ("improvements", "i"):
         if IMPROVEMENTS_FILE.exists():
-            items = json.loads(IMPROVEMENTS_FILE.read_text())
+            try:
+                items = json.loads(IMPROVEMENTS_FILE.read_text())
+            except (json.JSONDecodeError, OSError):
+                items = []
             pending = [i for i in items if i.get("status") == "pending"]
             if pending:
                 lines = [f"• {i.get('title', i.get('id'))}" for i in pending[:5]]
@@ -3484,7 +3490,10 @@ def review_improvement(improvement_id: str, payload: dict):
     if not IMPROVEMENTS_FILE.exists():
         raise HTTPException(404, "no improvements found")
 
-    items = json.loads(IMPROVEMENTS_FILE.read_text())
+    try:
+        items = json.loads(IMPROVEMENTS_FILE.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(500, f"improvements file is corrupt: {exc}") from exc
     found = False
     for item in items:
         if item.get("id") == improvement_id:

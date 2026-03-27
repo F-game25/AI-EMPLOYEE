@@ -84,7 +84,7 @@ class Config(BaseSettings):
     logging: LoggingConfig
     limits: LimitsConfig
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
 def load_config(config_path: Optional[str] = None) -> Config:
