@@ -52,7 +52,10 @@ MAX_PLANS_HISTORY = int(os.environ.get("TASK_ORCHESTRATOR_MAX_HISTORY", "20"))
 # Enable peer-review validation between agents (default: on)
 PEER_REVIEW_ENABLED = os.environ.get("TASK_ORCHESTRATOR_PEER_REVIEW", "true").lower() == "true"
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(message)s",
+)
 logger = logging.getLogger("task-orchestrator")
 
 # ── AI router ────────────────────────────────────────────────────────────────
