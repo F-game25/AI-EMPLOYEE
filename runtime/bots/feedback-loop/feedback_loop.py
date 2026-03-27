@@ -94,7 +94,7 @@ def _load_crm() -> dict:
 def _load_state() -> dict:
     if STATE_FILE.exists():
         try:
-            return json.loads(FEEDBACK_FILE.read_text())
+            return json.loads(STATE_FILE.read_text())
         except Exception:
             pass
     return {
