@@ -35,6 +35,11 @@ UI_PORT="${PROBLEM_SOLVER_UI_PORT:-$UI_PORT}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
 
 mkdir -p "$AI_HOME/logs" "$AI_HOME/run"
+chmod 700 "$AI_HOME/logs" "$AI_HOME/run" 2>/dev/null || true
+
+# Ensure state dir exists with restricted permissions
+mkdir -p "$AI_HOME/state"
+chmod 700 "$AI_HOME/state" 2>/dev/null || true
 
 # ── Port-in-use helper (Bug 4) ─────────────────────────────────────────────────
 _port_in_use() {
