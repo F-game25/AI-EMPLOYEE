@@ -1211,6 +1211,35 @@ rm -f ~/.openclaw/openclaw.json
 - Review scripts before running, especially if you modify install sources.
 - Your Anthropic API key is stored in `~/.ai-employee/.env` (chmod 600).
 - The Ollama agent processes all data locally — no external API calls are made.
+## Keeping Your Local Copy Up to Date
+
+### One-time sync (manual):
+```bash
+bash scripts/sync.sh
+```
+
+### Auto-sync every 30 minutes (runs in terminal):
+```bash
+bash scripts/sync-watch.sh
+```
+
+### Auto-sync via cron (runs in background, survives terminal close):
+```bash
+bash scripts/setup-cron.sh
+```
+
+### View sync history:
+```bash
+cat ~/.ai-employee/logs/sync.log
+```
+
+### Stop auto-sync:
+```bash
+crontab -e   # delete the sync line
+```
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
