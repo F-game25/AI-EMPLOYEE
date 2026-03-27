@@ -15,7 +15,6 @@ Covers:
 """
 import os
 import sys
-import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -222,7 +221,6 @@ class TestEncryptionManager:
 
     def test_different_passwords_cannot_decrypt(self):
         from security import EncryptionManager
-        from cryptography.fernet import InvalidToken
         enc1 = EncryptionManager(password="password1")
         enc2 = EncryptionManager(password="password2")
         ciphertext = enc1.encrypt("secret")

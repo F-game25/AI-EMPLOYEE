@@ -156,7 +156,6 @@ def info() -> JSONResponse:
 
 @app.post("/api/ask")
 def ask(payload: dict) -> JSONResponse:
-    global _history
     q = (payload or {}).get("question", "").strip()
     if not q:
         return JSONResponse({"error": "Empty question"}, status_code=400)

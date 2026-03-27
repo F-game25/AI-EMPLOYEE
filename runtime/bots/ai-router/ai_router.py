@@ -327,9 +327,9 @@ def query_ai_for_agent(
     agent_key = agent_type.lower()
 
     # Look up preferred provider/model for this agent type
-    preferred_provider, preferred_model = _AGENT_ROUTING.get(
-        agent_key, _AGENT_ROUTING.get("general", ("ollama", OLLAMA_MODEL))
-    )
+    routing = _route_for_agent(None, agent_key)
+    preferred_provider = routing["provider"]
+    preferred_model = os.environ.get(routing["model_env"], routing["default_model"])
 
     logger.debug(
         "ai_router: agent_type=%s → preferred_provider=%s model=%s",

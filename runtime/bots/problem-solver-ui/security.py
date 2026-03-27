@@ -4,6 +4,7 @@ Handles authentication, authorization, encryption, and input validation.
 """
 import re
 import hashlib
+import base64
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Union
@@ -184,7 +185,6 @@ class EncryptionManager:
                 salt=salt,
                 iterations=100000,
             )
-            import base64
             self.key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
 
         self.cipher = Fernet(self.key)

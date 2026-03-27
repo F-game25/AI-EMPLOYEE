@@ -29,7 +29,6 @@ State files:
 import json
 import logging
 import os
-import re
 import sys
 import time
 import uuid
@@ -56,7 +55,7 @@ if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
 try:
-    from ai_router import query_ai as _query_ai, search_web as _search_web  # type: ignore
+    from ai_router import query_ai as _query_ai  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
