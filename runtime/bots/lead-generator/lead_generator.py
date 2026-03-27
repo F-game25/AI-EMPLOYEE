@@ -94,7 +94,6 @@ except ImportError:
     _WHATSAPP_AVAILABLE = False
     def _send_whatsapp(*a, **kw):  # type: ignore
         return False, {"error": "whatsapp not available"}
-        return False, {"error": "whatsapp not available"}
 
 try:
     from discord_notify import notify_discord as _notify_discord, is_discord_configured as _discord_ok  # type: ignore

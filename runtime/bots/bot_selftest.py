@@ -164,11 +164,10 @@ def check_discord_notify_module() -> None:
 def check_discord_bot_module() -> None:
     """discord.py library must be installed for the Discord bot."""
     try:
-        import discord  # noqa: F401
         import importlib.metadata
         version = importlib.metadata.version("discord.py")
         _ok("discord.py library", f"v{version}")
-    except ImportError:
+    except importlib.metadata.PackageNotFoundError:
         _fail("discord.py library", "not installed — run: pip install discord.py", required=False)
     except Exception as exc:
         _fail("discord.py library", str(exc), required=False)

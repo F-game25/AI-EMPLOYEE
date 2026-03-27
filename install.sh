@@ -379,6 +379,7 @@ setup_directories() {
     done
 
     chmod 700 "$AI_HOME/credentials"
+    chmod 700 "$AI_HOME/state"
     ok "Directories created"
 }
 
