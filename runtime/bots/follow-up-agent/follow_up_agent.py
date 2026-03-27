@@ -45,6 +45,14 @@ except ImportError:
     def _send_whatsapp(*a, **kw):  # type: ignore
         return False, {"error": "whatsapp not available"}
 
+try:
+    from discord_notify import notify_discord as _notify_discord, is_discord_configured as _discord_ok  # type: ignore
+    _DISCORD_AVAILABLE = _discord_ok()
+except ImportError:
+    _DISCORD_AVAILABLE = False
+    def _notify_discord(*a, **kw):  # type: ignore
+        return False
+
 POLL_INTERVAL  = int(os.environ.get("FOLLOWUP_POLL_INTERVAL", "5"))
 WAIT_HOURS     = int(os.environ.get("FOLLOWUP_WAIT_HOURS", "48"))
 MAX_ATTEMPTS   = int(os.environ.get("FOLLOWUP_MAX_ATTEMPTS", "5"))
@@ -312,7 +320,13 @@ def run_followups() -> str:
     for lead in due:
         results.append(_send_followup(lead, crm))
 
-    return "\n\n".join(results)
+    summary = "\n\n".join(results)
+    if results and _DISCORD_AVAILABLE:
+        _notify_discord(
+            f"📤 **{len(results)} follow-up(s) verstuurd**\n"
+            + "\n".join(r.split("\n")[0] for r in results)
+        )
+    return summary
 
 
 def followup_lead(lead_id: str) -> str:
