@@ -36,28 +36,7 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-REM ── Nothing found ─────────────────────────────────────────────────────────
-echo ERROR: No Bash environment found.
-echo.
-echo To run AI Employee on Windows, install one of:
-echo   1. Git for Windows (recommended): https://git-scm.com/download/win
-echo      Then re-run this installer.
-echo.
-echo   2. Windows Subsystem for Linux (WSL):
-echo      Run in PowerShell (Admin): wsl --install
-echo      Then restart and re-run this installer.
-echo.
-echo   3. Or use install-windows.ps1 (native PowerShell, no Git Bash needed):
-echo      Right-click install-windows.ps1 > "Run with PowerShell"
-echo      Or: powershell -ExecutionPolicy Bypass -File install-windows.ps1
-pause
-exit /b 1
-
-:run_gitbash
-echo Found: Git Bash at %GIT_BASH%
-echo Running installer...
-echo.
-%GIT_BASH% --login -c "cd '%~dp0' && bash install.sh"
+powershell -ExecutionPolicy Bypass -File "%TEMP_DIR%\install-windows.ps1"
 goto :done
 
 :done
