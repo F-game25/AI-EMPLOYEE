@@ -7,7 +7,7 @@ R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; C='\033[0;36m'; NC='\033[0m'
 
 GITHUB_USER="F-game25"
 GITHUB_REPO="AI-EMPLOYEE"
-GITHUB_BRANCH="mac"
+GITHUB_BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${GITHUB_BRANCH}"
 
 err()  { echo -e "${R}✗ $1${NC}"; exit 1; }
@@ -18,6 +18,11 @@ warn() { echo -e "${Y}⚠ $1${NC}"; }
 # ── Pre-flight checks ──────────────────────────────────────────────────────────
 [ "$EUID" -eq 0 ] && err "Do not run as root. Run as your regular user."
 command -v curl >/dev/null 2>&1 || err "curl is required. Install it first: brew install curl"
+
+# Verify that the installer file exists on the target branch
+if ! curl -fsSL --head "$BASE_URL/install-mac.sh" 2>/dev/null | grep -q "200"; then
+    err "Cannot reach install-mac.sh on the '${GITHUB_BRANCH}' branch. Check your internet connection or try: bash create-branches.sh && git push origin main"
+fi
 
 # macOS check
 if [[ "$(uname)" != "Darwin" ]]; then

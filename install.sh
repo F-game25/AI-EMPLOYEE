@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="$SCRIPT_DIR/runtime"
 START_TIME=$(date +%s)
 CONFIG_FILES_UPDATED=0
-CLAUDE_MODEL="claude-opus-4-5"
+CLAUDE_MODEL="claude-opus-4-6"
 OLLAMA_HOST="http://localhost:11434"
 OLLAMA_MODEL="llama3.2"
 ZERO_CONFIG="${ZERO_CONFIG:-0}"
@@ -194,7 +194,7 @@ wizard() {
         MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
         ok "Ollama model: $OLLAMA_MODEL (primary AI -- free & private)"
     else
-        MODEL_PRIMARY="anthropic/claude-opus-4-5"
+        MODEL_PRIMARY="anthropic/claude-opus-4-6"
         ok "Cloud LLM selected (Ollama will still be tried first if running)"
     fi
 
