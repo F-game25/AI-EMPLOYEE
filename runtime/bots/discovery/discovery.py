@@ -26,7 +26,10 @@ IMPROVEMENTS_DIR = AI_HOME / "improvements"
 
 SCAN_INTERVAL = int(os.environ.get("DISCOVERY_SCAN_INTERVAL", "3600"))
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
+    format="%(message)s",
+)
 logger = logging.getLogger("discovery")
 
 # ── AI router (Ollama first, cloud fallback) ──────────────────────────────────

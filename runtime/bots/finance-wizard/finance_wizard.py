@@ -47,7 +47,10 @@ RESULTS_DIR = AI_HOME / "state" / "orchestrator_results"
 
 POLL_INTERVAL = int(os.environ.get("FINANCE_WIZARD_POLL_INTERVAL", "5"))
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
+    format="%(message)s",
+)
 logger = logging.getLogger("finance-wizard")
 
 _ai_router_path = AI_HOME / "bots" / "ai-router"
