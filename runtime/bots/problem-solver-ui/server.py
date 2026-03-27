@@ -13,7 +13,7 @@ Config is read/written in ~/.ai-employee/config/
 import json
 import logging
 import os
-import re
+import secrets
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -129,6 +129,7 @@ _REPO_TEMPLATES_FILE = Path(__file__).parent.parent.parent / "config" / "agent_t
 
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
+MAX_CHAT_MESSAGE_LENGTH = 10000
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
