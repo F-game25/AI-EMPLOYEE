@@ -46,7 +46,10 @@ CHATLOG = AI_HOME / "state" / "chatlog.jsonl"
 POLL_INTERVAL = int(os.environ.get("SKILLS_MANAGER_POLL_INTERVAL", "5"))
 MAX_SKILLS_PER_AGENT = int(os.environ.get("SKILLS_MANAGER_MAX_SKILLS", "20"))
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
+    format="%(message)s",
+)
 logger = logging.getLogger("skills-manager")
 
 # ── AI router (Ollama first, cloud fallback) ──────────────────────────────────

@@ -11,6 +11,11 @@
     Gateway Port:   18789
     Bot manifest:   31 background bots + problem-solver-ui = 32 Python services started
                     (ai-router is a shared module, not a standalone service; total bot count is 33)
+
+    ⚠  WINDOWS SUPPORT STATUS: This script has not yet been fully tested on
+       real Windows hardware.  Mac/Linux users are better served by start.sh
+       which is production-validated.  If you encounter issues on Windows
+       please open a GitHub issue with your PowerShell version and the error output.
 #>
 
 $ErrorActionPreference = 'Continue'

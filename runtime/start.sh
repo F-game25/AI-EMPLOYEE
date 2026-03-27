@@ -3,6 +3,16 @@
 # Starts OpenClaw gateway + UI bot first, then all remaining bots, then opens the browser.
 set -euo pipefail
 
+# ── Re-entrancy guard (Bug 1) ─────────────────────────────────────────────────
+# Prevent an infinite loop if any bot's run.sh somehow calls start.sh again.
+if [[ -n "${_AI_EMPLOYEE_START_ACTIVE:-}" ]]; then
+  exit 0
+fi
+export _AI_EMPLOYEE_START_ACTIVE=1
+
+# Cleanup guard — prevents double-invocation when both INT and EXIT traps fire
+_AI_CLEANUP_DONE=0
+
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
@@ -25,6 +35,18 @@ UI_PORT="${PROBLEM_SOLVER_UI_PORT:-$UI_PORT}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
 
 mkdir -p "$AI_HOME/logs" "$AI_HOME/run"
+
+# ── Port-in-use helper (Bug 4) ─────────────────────────────────────────────────
+_port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnp 2>/dev/null | grep -qE ":${port}([[:space:]]|$)" && return 0
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -ti ":${port}" >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
 
 echo ""
 echo -e "${G}╔══════════════════════════════════════╗${NC}"
@@ -93,21 +115,32 @@ fi
 # ── Static dashboard ───────────────────────────────────────────────────────────
 log "Starting dashboard on port $DASHBOARD_PORT..."
 if [[ -f "$AI_HOME/ui/index.html" ]]; then
-  cd "$AI_HOME/ui"
-  nohup python3 -m http.server "$DASHBOARD_PORT" --bind 127.0.0.1 \
-    >> "$AI_HOME/logs/dashboard.log" 2>&1 &
-  echo $! > "$AI_HOME/run/dashboard.pid"
-  cd - >/dev/null
-  ok "Dashboard started (http://localhost:$DASHBOARD_PORT)"
+  if _port_in_use "$DASHBOARD_PORT"; then
+    warn "Dashboard port $DASHBOARD_PORT already in use -- skipping (run: ai-employee doctor)"
+  else
+    cd "$AI_HOME/ui"
+    nohup python3 -m http.server "$DASHBOARD_PORT" --bind 127.0.0.1 \
+      >> "$AI_HOME/logs/dashboard.log" 2>&1 &
+    echo $! > "$AI_HOME/run/dashboard.pid"
+    cd - >/dev/null
+    ok "Dashboard started (http://localhost:$DASHBOARD_PORT)"
+  fi
 fi
 
 # ── Start Problem Solver UI first (critical — browser will open this) ──────────
 log "Starting Problem Solver UI (port $UI_PORT)..."
-"$AI_HOME/bin/ai-employee" start problem-solver-ui || warn "UI bot start returned non-zero (check logs)"
+if [[ -x "$AI_HOME/bin/ai-employee" ]]; then
+  "$AI_HOME/bin/ai-employee" start problem-solver-ui || warn "UI bot start returned non-zero (check logs)"
+else
+  warn "ai-employee binary not found at $AI_HOME/bin/ai-employee — skipping bot start."
+  warn "  Re-run the installer: cd ~/.ai-employee && bash install.sh"
+fi
 
 # ── Start remaining bots in background ────────────────────────────────────────
 log "Starting remaining bots..."
-"$AI_HOME/bin/ai-employee" start --all >> "$AI_HOME/logs/startup.log" 2>&1 || warn "Some bots failed to start (see $AI_HOME/logs/startup.log)"
+if [[ -x "$AI_HOME/bin/ai-employee" ]]; then
+  "$AI_HOME/bin/ai-employee" start --all >> "$AI_HOME/logs/startup.log" 2>&1 || warn "Some bots failed to start (see $AI_HOME/logs/startup.log)"
+fi
 
 echo ""
 ok "AI Employee started!"
@@ -187,9 +220,14 @@ echo -e "${Y}Press Ctrl+C to stop all services.${NC}"
 echo ""
 
 cleanup() {
+  # Guard against double-invocation (EXIT fires after INT/TERM has already cleaned up)
+  [[ "$_AI_CLEANUP_DONE" -eq 1 ]] && return 0
+  _AI_CLEANUP_DONE=1
   echo ""
   log "Stopping services..."
-  "$AI_HOME/bin/ai-employee" stop --all >/dev/null 2>&1 || true
+  if [[ -x "$AI_HOME/bin/ai-employee" ]]; then
+    "$AI_HOME/bin/ai-employee" stop --all >/dev/null 2>&1 || true
+  fi
   [[ -f "$AI_HOME/run/gateway.pid" ]] && kill "$(cat "$AI_HOME/run/gateway.pid")" 2>/dev/null || true
   [[ -f "$AI_HOME/run/dashboard.pid" ]] && kill "$(cat "$AI_HOME/run/dashboard.pid")" 2>/dev/null || true
   rm -f "$AI_HOME/run/gateway.pid" "$AI_HOME/run/dashboard.pid"
