@@ -17,7 +17,6 @@ import logging
 import os
 import signal
 import stat
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -300,6 +299,8 @@ def _handle_sigusr1(sig, frame):
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    global _force_check  # modified by _handle_sigusr1 and the trigger-file check
+
     logger.info("Auto-updater started  repo=%s  branch=%s  interval=%ds",
                 REPO, BRANCH, INTERVAL)
 
@@ -321,7 +322,6 @@ def main() -> None:
     time.sleep(30)
 
     while True:
-        global _force_check
         force = _force_check
         _force_check = False
 
