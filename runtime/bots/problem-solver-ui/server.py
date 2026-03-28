@@ -17,6 +17,7 @@ import re
 import secrets
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -115,6 +116,7 @@ STATE_DIR = AI_HOME / "state"
 CONFIG_DIR = AI_HOME / "config"
 BOTS_DIR = AI_HOME / "bots"
 CHATLOG = STATE_DIR / "chatlog.jsonl"
+ACTIVITY_LOG = STATE_DIR / "activity_log.jsonl"
 SCHEDULES_FILE = CONFIG_DIR / "schedules.json"
 IMPROVEMENTS_FILE = STATE_DIR / "improvements.json"
 SKILLS_LIBRARY_FILE = CONFIG_DIR / "skills_library.json"
@@ -138,7 +140,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger("problem-solver-ui")
 
-# ── AI router (Ollama first, cloud fallback) ──────────────────────────────────
+_ACTIVITY_LOCK = threading.Lock()
+
+def _log_activity(
+    event_type: str,
+    description: str,
+    details: "dict | None" = None,
+    source: str = "system",
+) -> None:
+    """Append one entry to the persistent activity log (activity_log.jsonl)."""
+    entry: dict = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "event_type": event_type,
+        "description": description,
+        "source": source,
+    }
+    if details:
+        entry["details"] = details
+    try:
+        ACTIVITY_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _ACTIVITY_LOCK:
+            with open(ACTIVITY_LOG, "a") as _fh:
+                _fh.write(json.dumps(entry) + "\n")
+    except Exception as _exc:
+        logger.warning("Failed to write activity log: %s", _exc)
+
 
 _ai_router_path = AI_HOME / "bots" / "ai-router"
 if str(_ai_router_path) not in sys.path:
@@ -535,6 +561,7 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('guardrails',this)">🔒 Guardrails</button>
   <button onclick="switchTab('memory',this)">🧠 Memory</button>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
+  <button onclick="switchTab('history',this)">🕐 History</button>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
 </nav>
 
@@ -1147,6 +1174,57 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- ── History ── -->
+<div id="tab-history" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🕐</span> Activity History</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-ghost btn-sm" onclick="loadHistory()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger)"
+                onclick="clearHistory()">🗑️ Clear</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+      A persistent log of all agent activities, security checks, settings changes and more — from all time.
+    </p>
+
+    <!-- Filter bar -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+      <input id="history-search" placeholder="🔍 Search…"
+             style="flex:1;min-width:160px;max-width:280px;font-size:.84em"
+             oninput="filterHistory()"/>
+      <select id="history-type-filter" style="font-size:.84em;min-width:160px"
+              onchange="filterHistory()">
+        <option value="">All event types</option>
+        <option value="security_check">🛡️ Security Check</option>
+        <option value="security_action_done">✅ Security Action</option>
+        <option value="settings_saved">⚙️ Settings Saved</option>
+        <option value="guardrail_approved">✅ Guardrail Approved</option>
+        <option value="guardrail_rejected">🚫 Guardrail Rejected</option>
+        <option value="agent_command">💬 Agent Command</option>
+        <option value="task_run">🚀 Task Run</option>
+        <option value="worker_triggered">👷 Worker</option>
+        <option value="system">ℹ️ System</option>
+      </select>
+      <select id="history-source-filter" style="font-size:.84em;min-width:140px"
+              onchange="filterHistory()">
+        <option value="">All sources</option>
+        <option value="chat">Chat</option>
+        <option value="dashboard">Dashboard</option>
+        <option value="guardrails">Guardrails</option>
+        <option value="security-checklist">Security</option>
+        <option value="system">System</option>
+      </select>
+      <span id="history-count" style="font-size:.78em;color:var(--text-muted);white-space:nowrap"></span>
+    </div>
+
+    <div id="history-timeline">
+      <div class="empty"><div class="icon">🕐</div><p>Loading history…</p></div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Options ── -->
 <div id="tab-options" class="tab-content">
   <div class="grid2">
@@ -1314,6 +1392,7 @@ function switchTab(tab, btn) {
   if (tab === 'guardrails') loadGuardrails();
   if (tab === 'memory') loadMemory();
   if (tab === 'integrations') loadIntegrations();
+  if (tab === 'history') loadHistory();
   if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
 }
 
@@ -2853,6 +2932,20 @@ async function runSecurityCheck() {
         }
       }
 
+      let markDoneHtml = '';
+      if (f.level !== 'ok' && f.action) {
+        const btnId = `sec-done-btn-${idx}`;
+        const fbId  = `sec-done-fb-${idx}`;
+        markDoneHtml = `
+          <div style="margin-top:8px;padding-left:26px;display:flex;align-items:center;gap:8px" id="${fbId}">
+            <button id="${btnId}" class="btn btn-ghost btn-sm"
+                    style="font-size:.74em;padding:3px 10px;border-color:var(--border)"
+                    onclick="markSecurityActionDone(${idx+1},${JSON.stringify(f.title)},${JSON.stringify(f.action)},${JSON.stringify(f.action_type)},'${btnId}','${fbId}')">
+              ${f.action_type === 'command' ? '📋 Copy & Mark Done' : '✓ Mark Done'}
+            </button>
+          </div>`;
+      }
+
       return `
         <div style="display:flex;gap:10px;padding:10px 12px;border-radius:7px;
              background:var(--surface2);border:1px solid var(--border);margin-bottom:6px;
@@ -2869,13 +2962,138 @@ async function runSecurityCheck() {
               ${escHtml(f.detail)}
             </div>
             ${actionHtml ? `<div style="padding-left:26px">${actionHtml}</div>` : ''}
+            ${markDoneHtml}
           </div>
         </div>`;
     }).join('')}`;
 }
 
+async function markSecurityActionDone(num, title, action, actionType, btnId, fbId) {
+  const btn = document.getElementById(btnId);
+  const fb  = document.getElementById(fbId);
+  if (btn) btn.disabled = true;
+  if (actionType === 'command' && action) {
+    try { await navigator.clipboard.writeText(action); } catch(e) {}
+  }
+  await api('/api/history/mark-action', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({title, action, action_type: actionType, check_number: num}),
+  });
+  if (fb) {
+    fb.innerHTML = `<span style="font-size:.78em;color:var(--success);font-weight:600">
+      ✅ ${actionType === 'command' ? 'Copied to clipboard — ' : ''}Marked as done and logged to History
+    </span>`;
+  }
+}
+
+
+// ── Activity History ──────────────────────────────────────────────────────────
+let _historyEntries = [];
+
+async function loadHistory() {
+  const el = document.getElementById('history-timeline');
+  if (!el) return;
+  el.innerHTML = '<div class="empty"><div class="icon">⏳</div><p>Loading…</p></div>';
+  const d = await api('/api/history?limit=1000');
+  _historyEntries = d.entries || [];
+  document.getElementById('history-count').textContent =
+    `${_historyEntries.length} entr${_historyEntries.length === 1 ? 'y' : 'ies'}`;
+  renderHistory(_historyEntries);
+}
+
+function filterHistory() {
+  const q      = (document.getElementById('history-search')?.value || '').toLowerCase();
+  const type   = document.getElementById('history-type-filter')?.value || '';
+  const source = document.getElementById('history-source-filter')?.value || '';
+  const filtered = _historyEntries.filter(e => {
+    if (type   && e.event_type !== type)   return false;
+    if (source && e.source     !== source) return false;
+    if (q) {
+      const hay = (e.description + ' ' + e.event_type + ' ' + (e.source||'')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  document.getElementById('history-count').textContent =
+    `${filtered.length} / ${_historyEntries.length} entr${_historyEntries.length === 1 ? 'y' : 'ies'}`;
+  renderHistory(filtered);
+}
+
+function renderHistory(entries) {
+  const el = document.getElementById('history-timeline');
+  if (!el) return;
+  if (!entries.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">🕐</div><p>No activity recorded yet.</p></div>';
+    return;
+  }
+
+  const typeColor = {
+    security_check:       'var(--accent)',
+    security_action_done: 'var(--success)',
+    settings_saved:       '#6366f1',
+    guardrail_approved:   'var(--success)',
+    guardrail_rejected:   'var(--danger)',
+    agent_command:        'var(--text)',
+    task_run:             'var(--accent)',
+    worker_triggered:     '#f59e0b',
+    system:               'var(--text-muted)',
+  };
+
+  // Group entries by date
+  const groups = {};
+  for (const e of entries) {
+    const day = e.ts ? e.ts.slice(0, 10) : 'Unknown';
+    (groups[day] = groups[day] || []).push(e);
+  }
+
+  el.innerHTML = Object.entries(groups).map(([day, items]) => `
+    <div style="margin-bottom:18px">
+      <div style="font-size:.74em;font-weight:700;color:var(--text-muted);letter-spacing:.06em;
+           text-transform:uppercase;margin-bottom:8px;padding-left:4px">${escHtml(day)}</div>
+      ${items.map(e => {
+        const color = typeColor[e.event_type] || 'var(--text-muted)';
+        const ts    = e.ts ? e.ts.slice(11, 19) : '';
+        let detailsHtml = '';
+        if (e.details && Object.keys(e.details).length) {
+          const dLines = Object.entries(e.details)
+            .filter(([,v]) => v !== '' && v !== null && v !== undefined)
+            .map(([k, v]) => `<span style="color:var(--text-muted)">${escHtml(k)}:</span> ${escHtml(String(v))}`)
+            .join('  ·  ');
+          if (dLines) detailsHtml = `
+            <div style="font-size:.76em;color:var(--text-muted);margin-top:3px;
+                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${dLines}</div>`;
+        }
+        return `
+          <div style="display:flex;gap:10px;padding:9px 12px;border-radius:6px;
+               background:var(--surface2);border:1px solid var(--border);margin-bottom:5px;
+               border-left:3px solid ${color};align-items:flex-start">
+            <span style="flex-shrink:0;font-size:1em">${escHtml(e.icon||'📋')}</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:.86em;font-weight:600;color:${color}">${escHtml(e.description)}</span>
+                <span style="font-size:.7em;padding:1px 7px;border-radius:99px;background:var(--bg);
+                     border:1px solid var(--border);color:var(--text-muted);flex-shrink:0">
+                  ${escHtml(e.source || e.event_type || '')}
+                </span>
+              </div>
+              ${detailsHtml}
+            </div>
+            <span style="flex-shrink:0;font-size:.74em;color:var(--text-muted);white-space:nowrap;
+                 padding-top:2px">${escHtml(ts)}</span>
+          </div>`;
+      }).join('')}
+    </div>`).join('');
+}
+
+async function clearHistory() {
+  if (!confirm('Clear all activity history? This cannot be undone.')) return;
+  const r = await api('/api/history/clear', {method:'POST'});
+  if (r.ok) { _historyEntries = []; renderHistory([]); toast('History cleared'); }
+  else toast('Failed to clear history', '#ef4444');
+}
+
 // ── Auto-updater ──────────────────────────────────────────────────────────────
-async function loadUpdaterStatus() {
   const el = document.getElementById('opt-updater-status');
   if (!el) return;
   const d = await api('/api/updater/status');
@@ -3333,6 +3551,12 @@ def post_chat(payload: dict):
     with open(CHATLOG, "a") as f:
         f.write(json.dumps(resp_entry) + "\n")
 
+    _log_activity(
+        "agent_command",
+        f"Command: {message[:120]}",
+        details={"command": message[:500], "response_preview": safe_response[:200]},
+        source="chat",
+    )
     return JSONResponse({"ok": True, "response": response})
 
 
@@ -4902,10 +5126,15 @@ def approve_guardrail_action(action_id: str):
     data.setdefault("log", []).append(action)
     data["log"] = data["log"][-200:]
     _save_guardrails(data)
+    _log_activity(
+        "guardrail_approved",
+        f"Guardrail action approved: {action.get('action_type', action_id)}",
+        details={"action_id": action_id,
+                 "action_type": action.get("action_type"),
+                 "description": action.get("description", "")},
+        source="guardrails",
+    )
     return JSONResponse({"ok": True, "action_id": action_id})
-
-
-@app.post("/api/guardrails/{action_id}/reject")
 def reject_guardrail_action(action_id: str, payload: dict = None):
     data = _load_guardrails()
     pending = data.get("pending", [])
@@ -4920,10 +5149,16 @@ def reject_guardrail_action(action_id: str, payload: dict = None):
     data.setdefault("log", []).append(action)
     data["log"] = data["log"][-200:]
     _save_guardrails(data)
+    _log_activity(
+        "guardrail_rejected",
+        f"Guardrail action rejected: {action.get('action_type', action_id)}",
+        details={"action_id": action_id,
+                 "action_type": action.get("action_type"),
+                 "description": action.get("description", ""),
+                 "reason": action.get("reject_reason", "")},
+        source="guardrails",
+    )
     return JSONResponse({"ok": True, "action_id": action_id})
-
-
-@app.post("/api/guardrails/settings")
 def save_guardrail_settings(payload: dict):
     data = _load_guardrails()
     data["settings"] = payload
@@ -5372,6 +5607,13 @@ def save_settings(body: _SettingsUpdateRequest):
     if not clean:
         return JSONResponse({"ok": True, "saved": 0})
     _write_env(clean)
+    keys_saved = [k for k in clean if k not in _SECRET_KEYS]
+    secret_count = sum(1 for k in clean if k in _SECRET_KEYS)
+    desc = f"Settings saved: {', '.join(keys_saved)}" + (
+        f" + {secret_count} secret key(s)" if secret_count else ""
+    )
+    _log_activity("settings_saved", desc,
+                  details={"count": len(clean)}, source="dashboard")
     return JSONResponse({"ok": True, "saved": len(clean)})
 
 
@@ -5583,7 +5825,94 @@ def security_check():
         _add("info", "No secrets check — not a git repository",
              "No .git directory found; version-control check skipped.")
 
+    _ok  = sum(1 for f in findings if f["level"] == "ok")
+    _err = sum(1 for f in findings if f["level"] == "error")
+    _wrn = sum(1 for f in findings if f["level"] == "warning")
+    _log_activity(
+        "security_check",
+        f"Security checklist run: {_ok} passed, {_err} critical, {_wrn} warnings",
+        details={"passed": _ok, "errors": _err, "warnings": _wrn,
+                 "total": len(findings)},
+        source="security-checklist",
+    )
     return JSONResponse({"findings": findings})
+
+
+# ─── Activity History API ──────────────────────────────────────────────────────
+
+_ACTIVITY_EVENT_ICONS: dict = {
+    "security_check":      "🛡️",
+    "security_action_done": "✅",
+    "settings_saved":      "⚙️",
+    "guardrail_approved":  "✅",
+    "guardrail_rejected":  "🚫",
+    "agent_command":       "💬",
+    "task_run":            "🚀",
+    "agent_started":       "▶️",
+    "agent_stopped":       "⏹️",
+    "worker_triggered":    "👷",
+    "system":              "ℹ️",
+}
+
+
+@app.get("/api/history")
+def get_history(limit: int = 500):
+    """Return the most recent *limit* activity log entries, newest first."""
+    entries: list = []
+    if ACTIVITY_LOG.exists():
+        try:
+            for line in ACTIVITY_LOG.read_text(errors="replace").splitlines():
+                if line.strip():
+                    try:
+                        entries.append(json.loads(line))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    entries.sort(key=lambda e: e.get("ts", ""), reverse=True)
+    entries = entries[:limit]
+    # Attach display icons
+    for e in entries:
+        e["icon"] = _ACTIVITY_EVENT_ICONS.get(e.get("event_type", ""), "📋")
+    return JSONResponse({"entries": entries, "total": len(entries)})
+
+
+class _MarkActionRequest(BaseModel):
+    title: str = ""
+    action: str = ""
+    action_type: str = ""
+    check_number: int = 0
+
+
+@app.post("/api/history/mark-action")
+def mark_security_action(body: _MarkActionRequest):
+    """Record that the user acknowledged a security checklist action."""
+    desc = f"Security action acknowledged: {body.title}" if body.title else \
+           "Security checklist action acknowledged"
+    _log_activity(
+        "security_action_done",
+        desc,
+        details={
+            "check_number": body.check_number,
+            "title": body.title,
+            "action": body.action[:200] if body.action else "",
+            "action_type": body.action_type,
+        },
+        source="security-checklist",
+    )
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/history/clear")
+def clear_history():
+    """Wipe the activity log."""
+    try:
+        if ACTIVITY_LOG.exists():
+            ACTIVITY_LOG.unlink()
+        _log_activity("system", "Activity history cleared", source="dashboard")
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
 
 
 class _NukeRequest(BaseModel):
@@ -5603,6 +5932,7 @@ def nuke_data(body: _NukeRequest):
 
     targets = [
         CHATLOG,
+        ACTIVITY_LOG,
         METRICS_FILE,
         MEMORY_FILE,
         GUARDRAILS_FILE,
