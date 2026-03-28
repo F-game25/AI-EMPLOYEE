@@ -272,13 +272,59 @@ while ($true) {
     Write-Warn "  Invalid format. Must start with + followed by 7-15 digits."
 }
 
+# Ollama model catalogue
+$OllamaModelNames = @(
+    'llama3.2',
+    'gemma3',
+    'llama3.1',
+    'mistral',
+    'gemma2',
+    'phi3',
+    'qwen2.5',
+    'deepseek-r1',
+    'codellama'
+)
+$OllamaModelDescs = @(
+    'Meta Llama 3.2 3B  — best all-round, fast          (2 GB RAM)',
+    'Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM) * best free model',
+    'Meta Llama 3.1 8B  — smarter, slower               (5 GB RAM)',
+    'Mistral 7B         — great instruction following   (4 GB RAM)',
+    'Google Gemma 2 9B  — strong reasoning              (5 GB RAM)',
+    'Microsoft Phi-3    — tiny but capable, very fast   (2 GB RAM)',
+    'Alibaba Qwen 2.5   — multilingual, 7B              (4 GB RAM)',
+    'DeepSeek R1 7B     — chain-of-thought reasoning    (4 GB RAM)',
+    'CodeLlama 7B       — coding-focused                (4 GB RAM)'
+)
+
 # Ollama
 $useOllama = Read-Host "  Use Ollama (local LLM)? [Y/n]"
 $USE_OLLAMA = ($useOllama -ne 'n' -and $useOllama -ne 'N')
 $OLLAMA_MODEL = ''
 if ($USE_OLLAMA) {
-    $OLLAMA_MODEL = Read-Host "  Ollama model name [default: llama3]"
-    if ([string]::IsNullOrWhiteSpace($OLLAMA_MODEL)) { $OLLAMA_MODEL = 'llama3' }
+    Write-Host ""
+    Write-Host "  Available local AI models:" -ForegroundColor Cyan
+    Write-Host ""
+    for ($mi = 0; $mi -lt $OllamaModelNames.Count; $mi++) {
+        $num = $mi + 1
+        if ($mi -eq 0) {
+            Write-Host ("    {0,2}) {1}  <- recommended" -f $num, $OllamaModelDescs[$mi]) -ForegroundColor Green
+        } else {
+            Write-Host ("    {0,2}) {1}" -f $num, $OllamaModelDescs[$mi]) -ForegroundColor Cyan
+        }
+    }
+    Write-Host ""
+    $modelChoice = Read-Host ("  Choose a model [1-{0}, default: 1]" -f $OllamaModelNames.Count)
+    $modelChoice = $modelChoice.Trim()
+    $choiceIdx = 0
+    if ($modelChoice -match '^\d+$') {
+        $choiceIdx = [int]$modelChoice - 1
+        if ($choiceIdx -lt 0 -or $choiceIdx -ge $OllamaModelNames.Count) {
+            Write-Warn "Invalid choice. Using default: $($OllamaModelNames[0])"
+            $choiceIdx = 0
+        }
+    }
+    $OLLAMA_MODEL = $OllamaModelNames[$choiceIdx]
+    Write-Host "  Selected: $OLLAMA_MODEL" -ForegroundColor Green
 }
 
 # API keys (optional, sensitive ones use secure input)
