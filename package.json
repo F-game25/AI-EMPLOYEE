@@ -1,0 +1,11 @@
+{
+  "name": "ai-employee",
+  "version": "1.0.0",
+  "description": "AI automation system for solo founders and small agencies",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "install:deps": "bash install.sh",
+    "start": "bash -c 'cd ~/.ai-employee && ./start.sh'"
+  }
+}
