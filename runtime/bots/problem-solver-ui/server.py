@@ -1219,6 +1219,55 @@ INDEX_HTML = r"""<!doctype html>
         <button class="btn btn-danger" style="width:100%" onclick="nukeData()">🗑️ Delete All Runtime Data</button>
         <div id="nuke-result" style="margin-top:8px;font-size:.82em"></div>
       </div>
+
+      <!-- Delete Complete Bot -->
+      <div class="card" style="border-color:rgba(239,68,68,.6);margin-top:0">
+        <div class="card-header">
+          <div class="card-title" style="color:var(--danger)"><span class="icon">☠️</span> Delete Complete Bot</div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+          Stops all running bots and <strong style="color:var(--danger)">permanently removes</strong>
+          the entire <code>~/.ai-employee</code> installation — all data, config, and code.
+          <strong style="color:var(--text)">This cannot be undone.</strong>
+        </p>
+
+        <!-- Step 1 -->
+        <div id="uninstall-step1">
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+            <input type="checkbox" id="uninstall-check1" style="width:auto;margin:0;cursor:pointer;accent-color:var(--danger)"/>
+            <label for="uninstall-check1" style="margin:0;font-size:.86em;cursor:pointer">
+              I understand this will <strong style="color:var(--danger)">permanently delete</strong> everything
+            </label>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+            <input type="checkbox" id="uninstall-check2" style="width:auto;margin:0;cursor:pointer;accent-color:var(--danger)"/>
+            <label for="uninstall-check2" style="margin:0;font-size:.86em;cursor:pointer">
+              I have backed up anything I want to keep
+            </label>
+          </div>
+          <button class="btn btn-danger" style="width:100%" onclick="deleteBotStep2()">
+            ☠️ Continue to Final Confirmation…
+          </button>
+        </div>
+
+        <!-- Step 2 (hidden until step 1 passes) -->
+        <div id="uninstall-step2" style="display:none;border-top:1px solid rgba(239,68,68,.3);padding-top:14px;margin-top:14px">
+          <div class="form-group">
+            <label>Type <strong style="color:var(--danger)">UNINSTALL AI EMPLOYEE</strong> to confirm</label>
+            <input id="uninstall-confirm" placeholder="UNINSTALL AI EMPLOYEE"
+              style="border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.05)"
+              autocomplete="off"/>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" style="flex:1" onclick="deleteBotCancel()">↩ Cancel</button>
+            <button class="btn btn-danger" style="flex:2" onclick="deleteBotFinal()">
+              ☠️ PERMANENTLY DELETE EVERYTHING
+            </button>
+          </div>
+        </div>
+
+        <div id="uninstall-result" style="margin-top:10px;font-size:.82em"></div>
+      </div>
     </div>
 
   </div>
