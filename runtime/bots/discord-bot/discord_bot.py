@@ -97,7 +97,7 @@ def _save_crm(crm: dict) -> None:
 
 
 def _new_lead(name: str, niche: str, phone: str) -> dict:
-    ts = _now_iso() if not _FOLLOWUP_AVAILABLE else now_iso()
+    ts = _now_iso()
     return {
         "id": str(uuid.uuid4())[:8],
         "name": name.strip(),
@@ -352,7 +352,7 @@ async def lead_lost(ctx: commands.Context, lead_id: str = "") -> None:
         await ctx.send(f"❌ Lead `{lead_id}` not found.")
         return
     lead["status"] = "lost"
-    lead["updated_at"] = _now_iso() if not _FOLLOWUP_AVAILABLE else now_iso()
+    lead["updated_at"] = _now_iso()
     _save_crm(crm)
     await ctx.send(f"❌ Lead `{lead_id}` ({lead['name']}) marked as **lost**.")
 
