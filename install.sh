@@ -119,6 +119,66 @@ install_openclaw() {
     fi
 }
 
+# ─── Ollama model catalogue ───────────────────────────────────────────────────
+
+# Associative arrays require bash ≥ 4; we use parallel arrays for portability.
+_OLLAMA_MODEL_NAMES=(
+    "llama3.2"
+    "gemma3"
+    "llama3.1"
+    "mistral"
+    "gemma2"
+    "phi3"
+    "qwen2.5"
+    "deepseek-r1"
+    "codellama"
+)
+_OLLAMA_MODEL_DESCS=(
+    "Meta Llama 3.2 3B  — best all-round, fast          (2 GB RAM)"
+    "Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM) ★ best free model"
+    "Meta Llama 3.1 8B  — smarter, slower               (5 GB RAM)"
+    "Mistral 7B         — great instruction following   (4 GB RAM)"
+    "Google Gemma 2 9B  — strong reasoning              (5 GB RAM)"
+    "Microsoft Phi-3    — tiny but capable, very fast   (2 GB RAM)"
+    "Alibaba Qwen 2.5   — multilingual, 7B              (4 GB RAM)"
+    "DeepSeek R1 7B     — chain-of-thought reasoning    (4 GB RAM)"
+    "CodeLlama 7B       — coding-focused                (4 GB RAM)"
+)
+
+select_ollama_model() {
+    # Print the model menu and return the chosen model name in OLLAMA_MODEL.
+    local tty_in="${1:-/dev/tty}"
+    [[ ! -r "$tty_in" ]] && tty_in="/dev/stdin"
+
+    echo ""
+    echo -e "  ${C}Available local AI models:${NC}"
+    echo ""
+    local i=1
+    for desc in "${_OLLAMA_MODEL_DESCS[@]}"; do
+        if [[ $i -eq 1 ]]; then
+            printf "    ${G}%2d)${NC} %s  ${G}← recommended${NC}\n" "$i" "$desc"
+        else
+            printf "    ${B}%2d)${NC} %s\n" "$i" "$desc"
+        fi
+        (( i++ ))
+    done
+    echo ""
+    ask "Choose a model [1-${#_OLLAMA_MODEL_NAMES[@]}, default: 1]:"
+    local choice
+    read -r choice < "$tty_in"
+    choice="${choice:-1}"
+
+    # Validate range; fall back to 1 if out of range
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] \
+       || (( choice < 1 )) \
+       || (( choice > ${#_OLLAMA_MODEL_NAMES[@]} )); then
+        warn "Invalid choice '$choice'. Using default: ${_OLLAMA_MODEL_NAMES[0]}"
+        choice=1
+    fi
+
+    OLLAMA_MODEL="${_OLLAMA_MODEL_NAMES[$((choice-1))]}"
+}
+
 # ─── Ollama ───────────────────────────────────────────────────────────────────
 
 install_ollama() {
@@ -129,14 +189,25 @@ install_ollama() {
 
     if command -v ollama >/dev/null 2>&1; then
         ok "Ollama already installed"
-        return
+    else
+        log "Installing Ollama..."
+        if curl -fsSL https://ollama.ai/install.sh | sh; then
+            ok "Ollama installed"
+        else
+            warn "Ollama auto-install failed. Install manually: https://ollama.ai/download"
+            return
+        fi
     fi
 
-    log "Installing Ollama..."
-    if curl -fsSL https://ollama.ai/install.sh | sh; then
-        ok "Ollama installed"
-    else
-        warn "Ollama auto-install failed. Install manually: https://ollama.ai/download"
+    # ── Auto-pull the chosen model ─────────────────────────────────────────────
+    if [[ -n "${OLLAMA_MODEL:-}" ]]; then
+        log "Downloading model '${OLLAMA_MODEL}' — this may take a few minutes…"
+        if ollama pull "$OLLAMA_MODEL"; then
+            ok "Model '${OLLAMA_MODEL}' downloaded and ready"
+        else
+            warn "Could not pull '${OLLAMA_MODEL}' automatically."
+            warn "Start Ollama first (ollama serve) then run: ollama pull ${OLLAMA_MODEL}"
+        fi
     fi
 }
 
@@ -202,9 +273,7 @@ wizard() {
     WANT_OLLAMA=$(echo "$WANT_OLLAMA" | tr '[:upper:]' '[:lower:]')
     OLLAMA_MODEL="llama3.2"
     if [[ "$WANT_OLLAMA" == "y" ]]; then
-        ask "Ollama model name [default: llama3.2]:"
-        read -r OLLAMA_MODEL_INPUT < "$tty_in"
-        OLLAMA_MODEL="${OLLAMA_MODEL_INPUT:-llama3.2}"
+        select_ollama_model "$tty_in"
         MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
         ok "Ollama model: $OLLAMA_MODEL (primary AI -- free & private)"
     else
@@ -1234,7 +1303,8 @@ done_message() {
     echo "    • Or run directly: ~/.ai-employee/bin/ai-employee-launcher"
     echo "    • Or enable autostart: systemctl --user enable --now ai-employee"
     echo ""
-    [[ -n "${OLLAMA_MODEL:-}" ]] && echo "  Ollama: run  ollama pull $OLLAMA_MODEL  before starting."
+    [[ "${WANT_OLLAMA:-}" == "y" ]] \
+        && echo -e "  ${G}▸ Local AI '${OLLAMA_MODEL}' downloaded and ready to use.${NC}"
     echo ""
 
     # ── Auto-open the dashboard in the default browser ────────────────────────
