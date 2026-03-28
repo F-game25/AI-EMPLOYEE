@@ -544,6 +544,8 @@ install_runtime() {
         dl "config/task_plans.json"
         dl "start.sh"
         dl "stop.sh"
+        dl "bots/auto-updater/run.sh"
+        dl "bots/auto-updater/auto_updater.py"
 
         src="$TMP_RUNTIME"
     fi
@@ -608,6 +610,24 @@ install_runtime() {
     fi
 
     ok "Runtime files installed"
+
+    # ── Record the current GitHub commit SHA so the auto-updater has a baseline ─
+    mkdir -p "$AI_HOME/state"
+    local _commit_sha=""
+    if command -v curl >/dev/null 2>&1; then
+        _commit_sha=$(curl -sf --max-time 10 \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "User-Agent: ai-employee-installer/4.0" \
+            "https://api.github.com/repos/F-game25/AI-EMPLOYEE/commits/main" \
+            2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('sha',''))" \
+            2>/dev/null || true)
+    fi
+    if [[ -n "${_commit_sha:-}" ]]; then
+        echo "$_commit_sha" > "$AI_HOME/state/installed_commit.txt"
+        ok "Recorded install baseline: ${_commit_sha:0:8}"
+    else
+        warn "Could not record install commit SHA (offline install?) — auto-updater will bootstrap on first run"
+    fi
 }
 
 # ─── Claude AI bot ───────────────────────────────────────────────────────────
