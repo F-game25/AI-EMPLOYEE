@@ -10,7 +10,7 @@
 
 **AI Employee is built for solo founders and small agencies** who want leverage — not complexity.
 
-You run a business. You don't have time to manage 20 agents and 126 skills. You just want results:
+You run a business. You don't have time to manage 35 agents and 147 skills. You just want results:
 - 10 qualified leads today
 - A sales email in your inbox
 - Your customer support running on autopilot
@@ -73,14 +73,14 @@ Your AI employee handles it — routing to the right specialist agents internall
 ```bash
 ai-employee mode starter    # 3 agents, 5 commands — zero overwhelm
 ai-employee mode business   # templates, ROI tracking, scheduling (recommended)
-ai-employee mode power      # all 20 agents, 126 skills, full dashboard
+ai-employee mode power      # all 35 agents, 147 skills, full dashboard
 ```
 
 | Mode | Agents | What you see | Best for |
 |---|---|---|---|
 | **Starter** | 3 | 5 commands, no dashboard overload | Getting your first results |
 | **Business** | 8 | Templates, ROI, scheduling | Daily business automation |
-| **Power** | 20 | Everything — full dashboard, all skills | Advanced users |
+| **Power** | 35 | Everything — full dashboard, all skills | Advanced users |
 
 Change mode any time: `ai-employee mode business`
 
@@ -98,8 +98,18 @@ Deploy a pre-configured AI team in one click from the **📋 Templates** tab:
 | **Hire Your Best Candidate Faster** | 2 weeks | €4,000–€10,000/hire saved |
 | **10x Your Content Output This Week** | 1 week | €2,000–€6,000/month |
 | **Run Your E-commerce Store on Autopilot** | 3 days | €5,000–€15,000/month saved |
+| **Hunt 20 Qualified Leads in 24h** | 24 hours | €500–€5,000/week pipeline |
+| **Launch Cold Outreach Campaign** | 2 hours | €2,000–€15,000/month |
+| **LinkedIn Growth Blitz (30 Days)** | 30 days | €3,000–€20,000 pipeline |
+| **Close 5 Deals This Week** | 1 week | €5,000–€50,000 |
+| **Launch Paid Ads with 3x ROAS** | 1 day | €5,000–€50,000/month |
+| **Launch a Referral Program** | 3 days | 20% new revenue from referrals |
+| **Build JV Partnership Pipeline** | 1 week | €2,000–€20,000/partner/mo |
+| **Boost Conversion Rate by 50%** | 1 week | €1,000–€30,000/month |
 
 ```bash
+ai-employee do "deploy template hunt-20-leads-24h"
+ai-employee do "deploy template cold-outreach-campaign"
 ai-employee do "deploy template get-10-leads-24h"
 ```
 
@@ -107,7 +117,7 @@ ai-employee do "deploy template get-10-leads-24h"
 
 ## 🖥️ Dashboard (Primary Control)
 
-Open the dashboard at **http://localhost:8787** after starting.
+Open the dashboard at **http://127.0.0.1:8787** after starting.
 
 The dashboard is your primary control center. Use it for full control over tasks, scheduling, ROI tracking, and agent management.
 
@@ -116,7 +126,7 @@ The dashboard is your primary control center. Use it for full control over tasks
 | 📊 Dashboard | Bot status overview, quick actions |
 | 💬 Chat | Send tasks, view chat history |
 | 🚀 Tasks | Build & launch multi-agent tasks |
-| 🐝 Swarm | All agents — status, workload |
+| 🐝 Swarm | All agents — status, workload (filterable by category) |
 | 📅 Scheduler | Create & manage scheduled tasks |
 | 👷 Workers | Start/stop individual bots |
 | 📈 ROI | Tasks done, leads, hours saved, €€ saved |
@@ -336,7 +346,7 @@ Invoke-WebRequest https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/in
 .\install-windows.ps1
 ```
 Or use the one-click batch file: download and run `quick-install-windows.bat`.
-No WSL or Git Bash required — installs Python, Git, Ollama, and all 33 bots natively.
+No WSL or Git Bash required — installs Python, Git, Ollama, and all 35 bots natively.
 
 Everything is installed into **`~/.ai-employee/`** (Linux/macOS) or **`%USERPROFILE%\.ai-employee\`** (Windows).
 
@@ -356,8 +366,8 @@ The step-by-step wizard asks:
 4. Alpha Insider, Tavily, NewsAPI keys (optional)
 5. Telegram / Discord / SMTP (optional)
 6. Enable hourly WhatsApp status updates?
-7. Dashboard port (default: 3000) and UI port (default: 8787)
-8. Number of workers (1–20, default: 20)
+7. Dashboard port (default: 8787)
+8. Number of workers (1–35, default: 35)
 
 ---
 
@@ -381,13 +391,19 @@ ai-employee status
 
 Stop: `./stop.sh` or Ctrl+C in the terminal.
 
-**Desktop launchers** (created by installer):
-| Platform | How to start |
-|---|---|
-| **Linux** | Double-click `~/Desktop/ai-employee.desktop` or search "AI Employee" in app menu |
-| **macOS** | Double-click `~/Desktop/AI-Employee.command` |
-| **Linux autostart** | `systemctl --user enable --now ai-employee` |
-| **macOS autostart** | `launchctl load -w ~/Library/LaunchAgents/com.ai-employee.plist` |
+**Desktop launchers** (created by installer — smart, no terminal needed):
+
+The desktop button is *smart*: it checks whether the bot is already running.
+- **Bot running** → opens the dashboard in your browser instantly
+- **Bot not running** → starts the bot (which opens the browser automatically)
+
+| Platform | Button | How it works |
+|---|---|---|
+| **Linux** | `~/Desktop/ai-employee.desktop` or "AI Employee" in app menu | Smart launcher: open UI or start bot |
+| **macOS** | `~/Desktop/AI-Employee.command` | Smart launcher: open UI or start bot in Terminal |
+| **Windows** | `AI Employee.bat` on Desktop | Smart launcher: open UI or start bot in PowerShell |
+| **Linux autostart** | `systemctl --user enable --now ai-employee` | Auto-starts on login |
+| **macOS autostart** | `launchctl load -w ~/Library/LaunchAgents/com.ai-employee.plist` | Auto-starts on login |
 
 ### 🪟 Windows
 
@@ -662,9 +678,71 @@ The **problem-solver watchdog** auto-restarts any enabled bot that crashes.
 
 ---
 
-## Skills Library (100+ Skills)
+## 🚀 New Niche Specialists — AI Growth Agency
 
-AI Employee includes a library of **111 reusable skills** across 11 categories. Skills are the building blocks for creating custom specialised agents.
+8 specialist agents focused on B2B growth, lead generation, and revenue — added on top of the existing 27 general agents.
+
+### Agent overview
+
+| Agent | Command prefix | What it does |
+|---|---|---|
+| **LeadHunterElite** | `leadelite` | Scrapes, qualifies (ICP scoring) and enriches B2B leads; generates outreach scripts |
+| **ColdOutreachAssassin** | `outreach` | Multi-channel sequences (email/LinkedIn/WhatsApp), A/B testing, reply tracking |
+| **SalesCloserPro** | `closer` | Objection handling, negotiation tactics, deal-closing scripts (SPIN / MEDDIC) |
+| **LinkedInGrowthHacker** | `linkedin` | Profile optimisation, viral post creation, connection campaigns |
+| **AdCampaignWizard** | `ads` | Ad copy (Meta/Google/LinkedIn), budget allocation, ROAS prediction, performance analysis |
+| **ReferralRocket** | `referral` | Referral program design, incentive modelling, launch plan |
+| **PartnershipMatchmaker** | `partner` | JV/partner scoring, pitch deck outlines, deal structure templates |
+| **ConversionRateOptimizer** | `cro` | Funnel analysis, A/B test design, quick-win CRO recommendations |
+
+### Usage examples
+
+```bash
+# Via CLI
+ai-employee do "Hunt 15 leads for my SaaS product"
+ai-employee do "Build cold outreach sequence for B2B agencies"
+ai-employee do "Close deal with objection: it's too expensive"
+ai-employee do "Optimize my LinkedIn profile for lead generation"
+ai-employee do "Launch Meta ads for my course with 3x ROAS target"
+ai-employee do "Design referral program for SaaS with €500 LTV"
+ai-employee do "Find JV partners in the marketing niche"
+ai-employee do "Analyze conversion funnel and suggest A/B tests"
+
+# Via direct commands in Chat / WhatsApp
+leadelite hunt Get 20 qualified SaaS leads in Germany
+outreach sequence saas-founders email
+closer objection it's too expensive
+linkedin content thought leadership post about AI tools
+ads roas my online course 30
+referral design my subscription product
+partner find digital marketing agency space
+cro audit landing page 12% conversion rate
+```
+
+### Auto-routing
+
+The problem-solver automatically routes tasks to the right specialist agent:
+
+| Keywords in your task | Routed to |
+|---|---|
+| "leads hunt", "b2b leads", "find leads", "hunt leads" | LeadHunterElite |
+| "cold outreach", "cold sequence", "outreach sequence" | ColdOutreachAssassin |
+| "close deal", "objection", "negotiate", "closing" | SalesCloserPro |
+| "linkedin growth", "linkedin content", "linkedin profile" | LinkedInGrowthHacker |
+| "paid ads", "meta ads", "google ads", "roas", "ppc" | AdCampaignWizard |
+| "referral program", "refer a friend", "k-factor" | ReferralRocket |
+| "partnership", "joint venture", "jv partner" | PartnershipMatchmaker |
+| "conversion rate", "cro", "funnel optimization", "ab test" | ConversionRateOptimizer |
+
+### New skills added (147 total)
+
+21 new reusable skills: `lead_scraping`, `qualification_scoring`, `crm_enrichment`, `outreach_script_generator`, `sequence_builder`, `ab_testing`, `reply_tracker`, `objection_handler`, `negotiation_tactics`, `close_deal`, `linkedin_optimizer`, `viral_content_generator`, `ad_copy_generator`, `budget_allocator`, `performance_analyzer`, `referral_program_design`, `incentive_calculator`, `partner_scoring`, `pitch_deck_generator`, `funnel_analyzer`, `ab_test_design`.
+
+---
+
+## Skills Library (147 Skills)
+
+AI Employee includes a library of **147 reusable skills** across 13 categories. Skills are the building blocks for creating custom specialised agents.
 
 ### Categories & skill counts
 
@@ -674,18 +752,20 @@ AI Employee includes a library of **111 reusable skills** across 11 categories. 
 | Research & Analysis | 12 |
 | Trading & Finance | 12 |
 | Social Media | 10 |
-| Lead Generation & Sales | 10 |
+| Lead Generation & Sales | 19 |
 | Development & Technical | 10 |
 | E-commerce & Product | 10 |
 | Data Analysis | 8 |
 | Customer Support | 8 |
-| Marketing & SEO | 8 |
+| Marketing & SEO | 14 |
 | Automation & Productivity | 8 |
+| Growth & Marketing | 11 |
+| **Total** | **147** |
 
 ### Managing skills via the Dashboard
 
 Open the **🛠️ Skills** tab (http://127.0.0.1:8787):
-- **Browse** all 111 skills with search and category filters
+- **Browse** all 147 skills with search and category filters
 - **Click** skill cards to select them
 - **Create** a new custom agent from the selected skills
 - **View** and delete your custom agents
