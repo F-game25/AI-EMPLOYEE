@@ -982,15 +982,15 @@ LAUNCHER
     ok "Smart launcher written: $launcher_script"
 
     # ── macOS: .command file on Desktop (double-click to launch) ──────────────
-    if [[ -d "$HOME/Desktop" ]]; then
-        local cmd_file="$HOME/Desktop/AI-Employee.command"
-        cat > "$cmd_file" << CMD
+    # ~/Desktop always exists on macOS, but create it defensively just in case.
+    mkdir -p "$HOME/Desktop"
+    local cmd_file="$HOME/Desktop/AI-Employee.command"
+    cat > "$cmd_file" << CMD
 #!/usr/bin/env bash
 exec "$AI_HOME/bin/ai-employee-launcher"
 CMD
-        chmod +x "$cmd_file"
-        ok "Desktop launcher created: ~/Desktop/AI-Employee.command (double-click to start or open UI)"
-    fi
+    chmod +x "$cmd_file"
+    ok "Desktop launcher placed: ~/Desktop/AI-Employee.command (double-click to start or open UI)"
 
     # ── macOS LaunchAgent (auto-start on login) ────────────────────────────────
     local launch_agents_dir="$HOME/Library/LaunchAgents"

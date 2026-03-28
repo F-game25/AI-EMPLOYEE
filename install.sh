@@ -1117,13 +1117,31 @@ StartupNotify=false
 DESK
     chmod +x "$app_dir/ai-employee.desktop"
     ok "App launcher added — search 'AI Employee' in your app menu"
+    # Refresh the XDG app-menu index so the entry is searchable immediately
+    command -v update-desktop-database >/dev/null 2>&1 && \
+        update-desktop-database "$app_dir" 2>/dev/null || true
 
-    # Copy to Desktop if it exists
-    if [[ -d "$HOME/Desktop" ]]; then
-        cp "$app_dir/ai-employee.desktop" "$HOME/Desktop/ai-employee.desktop"
-        chmod +x "$HOME/Desktop/ai-employee.desktop"
-        ok "Desktop shortcut created: ~/Desktop/ai-employee.desktop (double-click to start)"
+    # ── Place shortcut on the Desktop ────────────────────────────────────────
+    # Prefer the XDG-standard path (handles non-English locales such as
+    # ~/Schreibtisch, ~/Bureau, ~/桌面 …); fall back to ~/Desktop.
+    local xdg_desktop
+    xdg_desktop="$(xdg-user-dir DESKTOP 2>/dev/null)" || xdg_desktop=""
+    [[ -z "$xdg_desktop" || "$xdg_desktop" == "$HOME" ]] && xdg_desktop="$HOME/Desktop"
+
+    # Create the directory if it doesn't exist yet (headless or first-boot)
+    mkdir -p "$xdg_desktop"
+
+    local desk_file="$xdg_desktop/ai-employee.desktop"
+    cp "$app_dir/ai-employee.desktop" "$desk_file"
+    chmod +x "$desk_file"
+
+    # Mark the file as trusted so GNOME doesn't show the "Untrusted launcher"
+    # dialog when the user double-clicks it.
+    if command -v gio >/dev/null 2>&1; then
+        gio set "$desk_file" metadata::trusted true 2>/dev/null || true
     fi
+
+    ok "Desktop shortcut placed: $desk_file  (double-click to start or open UI)"
 
     # ── Systemd user service (optional autostart on login) ─────────────
     if command -v systemctl >/dev/null 2>&1; then
