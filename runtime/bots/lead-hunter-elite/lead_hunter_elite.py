@@ -144,6 +144,19 @@ def process_subtask(subtask: dict) -> None:
     logger.info("lead-hunter-elite: completed subtask '%s'", subtask_id)
 
 
+def notify_agent(agent_id: str, instructions: str) -> None:
+    """Write a subtask to another agent's queue file."""
+    queue_file = AGENT_TASKS_DIR / f"{agent_id}.queue.jsonl"
+    AGENT_TASKS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(queue_file, "a") as f:
+        f.write(json.dumps({
+            "subtask_id": str(uuid.uuid4())[:8],
+            "from": "lead-hunter-elite",
+            "instructions": instructions,
+        }) + "\n")
+
+
+
 SYSTEM_PROMPT = (
     "You are LeadHunterElite, a world-class B2B lead generation specialist with 10+ years of "
     "experience in prospecting, qualification, and CRM enrichment. You excel at finding "
@@ -228,14 +241,7 @@ def cmd_enrich(lead_id: str) -> str:
     crm.insert(0, enriched)
     save_crm(crm[:200])
     # Notify email-ninja agent about the enriched lead
-    email_ninja_queue = AGENT_TASKS_DIR / "email-ninja.queue.jsonl"
-    AGENT_TASKS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(email_ninja_queue, "a") as f:
-        f.write(json.dumps({
-            "subtask_id": str(uuid.uuid4())[:8],
-            "from": "lead-hunter-elite",
-            "instructions": f"Enriched lead {lead_id} is ready. Draft a personalized cold email.",
-        }) + "\n")
+    notify_agent("email-ninja", f"Enriched lead {lead_id} is ready. Draft a personalized cold email.")
     return result
 
 
@@ -263,14 +269,7 @@ def cmd_outreach(niche: str) -> str:
         SYSTEM_PROMPT,
     )
     # Notify lead-generator agent
-    lead_gen_queue = AGENT_TASKS_DIR / "lead-generator.queue.jsonl"
-    AGENT_TASKS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(lead_gen_queue, "a") as f:
-        f.write(json.dumps({
-            "subtask_id": str(uuid.uuid4())[:8],
-            "from": "lead-hunter-elite",
-            "instructions": f"Outreach script ready for niche: {niche}. Generate additional leads.",
-        }) + "\n")
+    notify_agent("lead-generator", f"Outreach script ready for niche: {niche}. Generate additional leads.")
     return result
 
 

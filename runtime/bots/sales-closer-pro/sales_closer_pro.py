@@ -300,9 +300,10 @@ def cmd_status() -> str:
     active = sum(1 for d in deals if d.get("status") not in ("won", "lost"))
     lines = ["💼 *SalesCloserPro — Deal Stats:*"]
     lines.append(f"  Total deals: {len(deals)} | Won: {won} | Lost: {lost} | Active: {active}")
-    if len(deals) > 0:
-        win_rate = round(won / len(deals) * 100, 1) if deals else 0
-        lines.append(f"  Win rate: {win_rate}%")
+    closed = won + lost
+    if closed > 0:
+        win_rate = round(won / closed * 100, 1)
+        lines.append(f"  Win rate: {win_rate}% (of closed deals)")
     lines.append("\n*Recent deals:*")
     for d in deals[:5]:
         lines.append(f"  • `{d.get('id','?')}` — {d.get('context','?')[:50]} ({d.get('status','?')})")

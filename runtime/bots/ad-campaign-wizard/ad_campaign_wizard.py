@@ -40,6 +40,9 @@ RESULTS_DIR = AI_HOME / "state" / "orchestrator_results"
 
 POLL_INTERVAL = int(os.environ.get("AD_CAMPAIGN_WIZARD_POLL_INTERVAL", "5"))
 
+DEFAULT_PLATFORM = "meta"
+DEFAULT_AD_BUDGET = "1000"
+
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
     format="%(message)s",
@@ -370,7 +373,7 @@ def handle_command(message: str) -> str | None:
     if rest_lower.startswith("copy "):
         parts = rest[5:].strip().split(None, 1)
         product = parts[0] if parts else "product"
-        platform = parts[1] if len(parts) > 1 else "meta"
+        platform = parts[1] if len(parts) > 1 else DEFAULT_PLATFORM
         return cmd_copy(product, platform)
     if rest_lower.startswith("budget "):
         parts = rest[7:].strip().split(None, 1)
@@ -387,7 +390,7 @@ def handle_command(message: str) -> str | None:
     if rest_lower.startswith("launch "):
         parts = rest[7:].strip().split(None, 1)
         product = parts[0] if parts else "product"
-        budget = parts[1] if len(parts) > 1 else "1000"
+        budget = parts[1] if len(parts) > 1 else DEFAULT_AD_BUDGET
         return cmd_launch(product, budget)
     if rest_lower.startswith("creative "):
         return cmd_creative(rest[9:].strip())

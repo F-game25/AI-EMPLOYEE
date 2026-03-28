@@ -38,6 +38,8 @@ RESULTS_DIR = AI_HOME / "state" / "orchestrator_results"
 
 POLL_INTERVAL = int(os.environ.get("COLD_OUTREACH_ASSASSIN_POLL_INTERVAL", "5"))
 
+DEFAULT_CHANNEL = "email"
+
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
     format="%(message)s",
@@ -333,7 +335,7 @@ def handle_command(message: str) -> str | None:
     if rest_lower.startswith("sequence "):
         parts = rest[9:].strip().split(None, 1)
         target = parts[0] if parts else "general"
-        channel = parts[1] if len(parts) > 1 else "email"
+        channel = parts[1] if len(parts) > 1 else DEFAULT_CHANNEL
         return cmd_sequence(target, channel)
     if rest_lower.startswith("abtest "):
         return cmd_abtest(rest[7:].strip())
