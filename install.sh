@@ -87,6 +87,20 @@ install_openclaw() {
         log "OpenClaw not found. Attempting install..."
         if curl -fsSL https://openclaw.ai/install.sh | bash; then
             export PATH="$HOME/.local/bin:$HOME/.openclaw/bin:$PATH"
+            # Also pick up the npm global bin dir (used when installed via npm)
+            local npm_prefix npm_bin
+            npm_prefix="$(npm config get prefix 2>/dev/null)"
+            npm_bin="${npm_prefix:+$npm_prefix/bin}"
+            if [[ -n "$npm_bin" ]] && [[ -d "$npm_bin" ]] && [[ ":$PATH:" != *":$npm_bin:"* ]]; then
+                export PATH="$npm_bin:$PATH"
+                local npm_path_line="export PATH=\"$npm_bin:\$PATH\""
+                for profile in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc"; do
+                    if [[ -f "$profile" ]] && ! grep -qF "$npm_bin" "$profile" 2>/dev/null; then
+                        { echo ""; echo "# OpenClaw (npm global bin)"; echo "$npm_path_line"; } >> "$profile"
+                    fi
+                done
+                ok "npm global bin dir added to PATH ($npm_bin)"
+            fi
             ok "OpenClaw installed"
         else
             warn "OpenClaw auto-install failed. Install manually:
