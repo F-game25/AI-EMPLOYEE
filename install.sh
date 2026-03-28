@@ -28,7 +28,7 @@ banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
 ║      AI EMPLOYEE - v4.0 INSTALLER  (Linux)           ║
-║  33 Agents • Claude AI • Ollama Local • WhatsApp     ║
+║  35 Agents • Claude AI • Ollama Local • WhatsApp     ║
 ╚══════════════════════════════════════════════════════╝
 EOF
 }
@@ -324,7 +324,7 @@ wizard() {
     echo -e "  ${C}Mode options:${NC}"
     echo "    starter  — 3 agents, 5 commands, zero overwhelm (best to start)"
     echo "    business — templates, ROI tracking, scheduling (recommended)"
-    echo "    power    — all 20 agents, 126 skills, full dashboard (advanced)"
+    echo "    power    — all 35 agents, 147 skills, full dashboard (advanced)"
     ask "Which mode? [default: business]:"
     read -r MODE_INPUT < "$tty_in"
     AI_EMPLOYEE_MODE="${MODE_INPUT:-business}"
@@ -1133,6 +1133,23 @@ done_message() {
     echo "    • Or enable autostart: systemctl --user enable --now ai-employee"
     echo ""
     [[ -n "${OLLAMA_MODEL:-}" ]] && echo "  Ollama: run  ollama pull $OLLAMA_MODEL  before starting."
+    echo ""
+
+    # ── Auto-open the dashboard in the default browser ────────────────────────
+    local dashboard_url="http://localhost:${DASHBOARD_PORT:-3000}"
+    echo -e "  ${C}▸ Opening dashboard in your browser…${NC}  $dashboard_url"
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        # WSL
+        powershell.exe start "$dashboard_url" 2>/dev/null \
+            || cmd.exe /c start "$dashboard_url" 2>/dev/null \
+            || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$dashboard_url" 2>/dev/null &
+    elif command -v sensible-browser >/dev/null 2>&1; then
+        sensible-browser "$dashboard_url" 2>/dev/null &
+    else
+        echo "    Open manually: $dashboard_url"
+    fi
     echo ""
 }
 
