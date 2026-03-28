@@ -311,11 +311,11 @@ wizard() {
 
     # 8) Number of workers
     echo ""
-    ask "How many AI agents to enable? (1-20, default 20 = all):"
+    ask "How many AI agents to enable? (1-35, default 35 = all):"
     read -r WORKERS_INPUT < "$tty_in"
-    WORKERS="${WORKERS_INPUT:-20}"
-    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 20"; WORKERS=20; }
-    if (( WORKERS > 20 )); then warn "Maximum is 20; clamping to 20"; WORKERS=20; fi
+    WORKERS="${WORKERS_INPUT:-35}"
+    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 35"; WORKERS=35; }
+    if (( WORKERS > 35 )); then warn "Maximum is 35; clamping to 35"; WORKERS=35; fi
     if (( WORKERS < 1  )); then warn "Minimum is 1; clamping to 1";  WORKERS=1;  fi
     ok "Workers: $WORKERS enabled"
 
@@ -1037,16 +1037,80 @@ add_to_path() {
 # ─── Desktop launcher & autostart ────────────────────────────────────────────
 
 create_desktop_launcher() {
+    # ── Write a smart launcher script that starts the bot OR opens the UI ───────
+    # If the bot is already running (UI responds), just open the browser.
+    # If it isn't running, launch start.sh in a new terminal window.
+    local launcher_script="$AI_HOME/bin/ai-employee-launcher"
+    cat > "$launcher_script" << 'LAUNCHER'
+#!/usr/bin/env bash
+# AI Employee Smart Launcher
+# • If the bot is already running  → open the dashboard in the browser
+# • If the bot is NOT running      → start the bot (which opens the browser)
+
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+
+# Load .env so ports are respected
+if [[ -f "$AI_HOME/.env" ]]; then
+    set -a; source "$AI_HOME/.env"; set +a
+fi
+
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+DASHBOARD_URL="http://127.0.0.1:${UI_PORT}"
+
+_open_url() {
+    local url="$1"
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        powershell.exe start "$url" 2>/dev/null || cmd.exe /c start "$url" 2>/dev/null || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" &
+    elif command -v sensible-browser >/dev/null 2>&1; then
+        sensible-browser "$url" &
+    else
+        echo "Open: $url"
+    fi
+}
+
+_bot_running() {
+    curl -sf --max-time 2 "$DASHBOARD_URL" >/dev/null 2>&1
+}
+
+if _bot_running; then
+    echo "AI Employee is running — opening dashboard…"
+    _open_url "$DASHBOARD_URL"
+else
+    echo "Starting AI Employee…"
+    # Try to open a terminal emulator with start.sh
+    if command -v gnome-terminal >/dev/null 2>&1; then
+        gnome-terminal -- bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash"
+    elif command -v xterm >/dev/null 2>&1; then
+        xterm -e bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash" &
+    elif command -v konsole >/dev/null 2>&1; then
+        konsole -e bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash" &
+    elif command -v xfce4-terminal >/dev/null 2>&1; then
+        xfce4-terminal -e "bash -c \"cd \\\"$AI_HOME\\\" && ./start.sh; exec bash\"" &
+    elif command -v tilix >/dev/null 2>&1; then
+        tilix -e "bash -c \"cd \\\"$AI_HOME\\\" && ./start.sh; exec bash\"" &
+    else
+        # Fallback: run in background, open browser after a delay
+        cd "$AI_HOME" && nohup ./start.sh >/dev/null 2>&1 &
+        echo "Bot started in background — opening browser in 8s…"
+        sleep 8 && _open_url "$DASHBOARD_URL"
+    fi
+fi
+LAUNCHER
+    chmod +x "$launcher_script"
+    ok "Smart launcher written: $launcher_script"
+
     # ── Linux: .desktop entry (app menu + Desktop shortcut) ───────────────────
     local app_dir="$HOME/.local/share/applications"
     mkdir -p "$app_dir"
     cat > "$app_dir/ai-employee.desktop" << DESK
 [Desktop Entry]
 Name=AI Employee
-Comment=Start the AI Employee multi-agent system
-Exec=bash -c 'cd $AI_HOME && ./start.sh; exec bash'
+Comment=Start AI Employee or open the dashboard if already running
+Exec=$launcher_script
 Icon=utilities-terminal
-Terminal=true
+Terminal=false
 Type=Application
 Categories=Utility;Network;
 StartupNotify=false
@@ -1105,8 +1169,7 @@ done_message() {
     echo "  Ollama model: $OLLAMA_MODEL  (host: $OLLAMA_HOST)"
     echo "  Token:        ${TOKEN:0:16}...${TOKEN: -8}"
     echo "  Config:       ~/.ai-employee/config.json"
-    echo "  Dashboard:    http://localhost:${DASHBOARD_PORT:-3000}  ← primary control"
-    echo "  Problem UI:   http://127.0.0.1:${UI_PORT:-8787}"
+    echo "  Dashboard:    http://127.0.0.1:${UI_PORT:-8787}  ← primary control"
     echo ""
     echo -e "${Y}Next steps:${NC}"
     echo ""
@@ -1125,18 +1188,19 @@ done_message() {
     echo "     openclaw channels login  (scan QR code)"
     echo "     Use WhatsApp for status checks. Use the dashboard for full control."
     echo ""
-    echo -e "  ${G}▸ No-terminal start (after first-time setup):${NC}"
+    echo -e "  ${G}▸ Desktop launcher (smart — starts bot or opens UI if already running):${NC}"
     if [[ -d "$HOME/Desktop" ]]; then
         echo "    • Double-click  ~/Desktop/ai-employee.desktop  (Linux)"
     fi
     echo "    • Or search 'AI Employee' in your application menu"
+    echo "    • Or run directly: ~/.ai-employee/bin/ai-employee-launcher"
     echo "    • Or enable autostart: systemctl --user enable --now ai-employee"
     echo ""
     [[ -n "${OLLAMA_MODEL:-}" ]] && echo "  Ollama: run  ollama pull $OLLAMA_MODEL  before starting."
     echo ""
 
     # ── Auto-open the dashboard in the default browser ────────────────────────
-    local dashboard_url="http://localhost:${DASHBOARD_PORT:-3000}"
+    local dashboard_url="http://127.0.0.1:${UI_PORT:-8787}"
     echo -e "  ${C}▸ Opening dashboard in your browser…${NC}  $dashboard_url"
     if grep -qi microsoft /proc/version 2>/dev/null; then
         # WSL
