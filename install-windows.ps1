@@ -781,6 +781,39 @@ powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%USERPROFILE%\.ai-
 Set-Content -Path (Join-Path $desktop 'AI Employee.bat') -Value $launchBat -Encoding ASCII
 Write-OK "Created 'AI Employee.bat' on Desktop (smart: starts bot or opens UI)."
 
+# ── Proper .lnk shortcut on Desktop (looks like a real icon, not a .bat) ─────
+try {
+    $wsh = New-Object -ComObject WScript.Shell
+    $lnk = $wsh.CreateShortcut((Join-Path $desktop 'AI Employee.lnk'))
+    $lnk.TargetPath       = 'powershell.exe'
+    $lnk.Arguments        = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$smartLauncherPath`""
+    $lnk.WorkingDirectory = $AI_HOME
+    $lnk.Description      = 'Start AI Employee or open the dashboard if already running'
+    $lnk.IconLocation     = 'powershell.exe,0'
+    $lnk.Save()
+    Write-OK "Created 'AI Employee.lnk' icon shortcut on Desktop."
+} catch {
+    Write-Warn "Could not create .lnk shortcut (bat fallback is fine): $_"
+}
+
+# ── Start Menu entry (Programs folder) ────────────────────────────────────────
+try {
+    $startMenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\AI Employee'
+    New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
+    # Reuse the same .lnk in the Start Menu
+    $wsh2 = New-Object -ComObject WScript.Shell
+    $lnk2 = $wsh2.CreateShortcut((Join-Path $startMenu 'AI Employee.lnk'))
+    $lnk2.TargetPath       = 'powershell.exe'
+    $lnk2.Arguments        = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$smartLauncherPath`""
+    $lnk2.WorkingDirectory = $AI_HOME
+    $lnk2.Description      = 'Start AI Employee or open the dashboard if already running'
+    $lnk2.IconLocation     = 'powershell.exe,0'
+    $lnk2.Save()
+    Write-OK "Added 'AI Employee' to Start Menu > Programs."
+} catch {
+    Write-Warn "Could not add Start Menu entry: $_"
+}
+
 # ── Stop shortcut (.bat) – kills AI Employee processes using saved PID files ──
 $stopBat = @"
 @echo off
