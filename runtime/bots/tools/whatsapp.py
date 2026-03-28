@@ -100,7 +100,7 @@ def _meta_send(to: str, message: str) -> tuple[bool, dict]:
     payload = json.dumps({
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
-        "to": to.lstrip("+"),
+        "to": to.removeprefix("+"),
         "type": "text",
         "text": {"preview_url": False, "body": message},
     }).encode("utf-8")
