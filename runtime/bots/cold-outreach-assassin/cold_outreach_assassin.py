@@ -224,7 +224,6 @@ def cmd_abtest(sequence_id: str) -> str:
 
 
 def cmd_track(lead_id: str) -> str:
-    sequences = load_sequences()
     return ai_query(
         f"Analyze reply tracking for lead ID: {lead_id}\n\n"
         "## Reply Status Analysis\n"

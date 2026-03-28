@@ -900,7 +900,17 @@ INDEX_HTML = r"""<!doctype html>
       <div class="card-title"><span class="icon">🐝</span> Agent Swarm Overview</div>
       <button class="btn btn-ghost btn-sm" onclick="loadSwarm()">↻ Refresh</button>
     </div>
-    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px">All 20 AI agents — their capabilities, current status, and workload.</p>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:12px">All AI agents — their capabilities, current status, and workload.</p>
+    <div id="swarm-filter-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+      <button class="btn btn-ghost btn-sm swarm-pill active" onclick="filterSwarm('all',this)">All</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('sales',this)">💼 Sales</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('marketing',this)">📢 Marketing</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('social',this)">📱 Social</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('analytics',this)">📊 Analytics</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('content',this)">✍️ Content</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('ecommerce',this)">🛒 E-commerce</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('coordination',this)">🎯 Core</button>
+    </div>
     <div id="swarm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"><div class="empty"><div class="icon">🐝</div><p>Loading agents…</p></div></div>
   </div>
 </div>
@@ -1939,6 +1949,10 @@ async function loadSwarm() {
   const d = await r.json();
   const agents = d.agents || [];
   _allAgents = agents; // cache for task picker
+  renderSwarmGrid(agents);
+}
+
+function renderSwarmGrid(agents) {
   const grid = document.getElementById('swarm-grid');
   if (!agents.length) {
     grid.innerHTML = '<div class="empty"><div class="icon">🐝</div><p>No agent data.</p></div>';
@@ -1949,7 +1963,7 @@ async function loadSwarm() {
     const dotColor = a.running ? '#10b981' : '#ef4444';
     const runningDot = `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};display:inline-block;margin-left:6px"></span>`;
     const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:var(--surface);padding:2px 6px;border-radius:3px;font-size:.73em;color:var(--text-secondary)">${escHtml(s)}</span>`).join('');
-    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color}">
+    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-weight:600;font-size:.95em">${escHtml(a.id)}</div>
         ${runningDot}
@@ -1959,6 +1973,13 @@ async function loadSwarm() {
       <div style="margin-top:8px;font-size:.75em;color:var(--text-muted)">Category: ${escHtml(a.category||'')}</div>
     </div>`;
   }).join('');
+}
+
+function filterSwarm(category, btn) {
+  document.querySelectorAll('.swarm-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  const filtered = category === 'all' ? _allAgents : _allAgents.filter(a => a.category === category);
+  renderSwarmGrid(filtered);
 }
 
 // ── Commands Tab ─────────────────────────────────────────────────────────────
@@ -4074,6 +4095,15 @@ _AGENT_KEYWORDS: dict[str, list[str]] = {
     "social-poster":     ["tiktok post", "instagram post", "twitter post", "social schedule", "viral script", "auto post", "social media automation"],
     "product-researcher":["product research", "trending product", "tiktok trend", "amazon trend", "junglescout", "product listing", "auto-list", "shopify product"],
     "ecom-dashboard":    ["ecom metrics", "revenue report", "profit margin report", "daily digest", "order analytics", "ecommerce kpi", "ecom dashboard"],
+    # Niche Growth Agency specialists
+    "lead-hunter-elite": ["leads hunt", "b2b leads", "lead scraping", "qualify leads", "enrich crm", "lead enrichment", "icp scoring", "find leads", "hunt leads", "lead list", "prospect list", "decision maker"],
+    "cold-outreach-assassin": ["cold outreach", "cold sequence", "outreach sequence", "email sequence", "linkedin sequence", "whatsapp outreach", "multi-channel outreach", "follow-up sequence", "ab test outreach", "reply rate", "cold email campaign"],
+    "sales-closer-pro": ["close deal", "closing", "objection", "negotiate", "negotiation", "sales script", "deal close", "handle objection", "sales closer", "spin sell", "meddic", "sales pipeline"],
+    "linkedin-growth-hacker": ["linkedin growth", "linkedin profile", "linkedin content", "linkedin campaign", "linkedin audience", "linkedin connections", "linkedin post", "linkedin optimize", "ssi score", "linkedin leads"],
+    "ad-campaign-wizard": ["paid ads", "meta ads", "google ads", "linkedin ads", "facebook ads", "ad campaign", "ad copy", "roas", "budget allocation", "ad performance", "ppc", "cpm", "performance marketing"],
+    "referral-rocket": ["referral program", "referral", "viral referral", "refer a friend", "referral incentive", "referral tracking", "ambassador program", "word of mouth", "k-factor"],
+    "partnership-matchmaker": ["partnership", "joint venture", "jv partner", "affiliate partner", "co-marketing", "partnership pitch", "partner scoring", "business development", "biz dev", "strategic alliance"],
+    "conversion-rate-optimizer": ["conversion rate", "cro", "funnel optimization", "ab test", "a/b test", "landing page cro", "checkout optimization", "conversion funnel", "funnel analysis", "funnel leak", "optimize conversion"],
 }
 
 
