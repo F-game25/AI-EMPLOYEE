@@ -275,6 +275,7 @@ while ($true) {
 # Ollama model catalogue
 $OllamaModelNames = @(
     'llama3.2',
+    'gemma3',
     'llama3.1',
     'mistral',
     'gemma2',
@@ -285,6 +286,7 @@ $OllamaModelNames = @(
 )
 $OllamaModelDescs = @(
     'Meta Llama 3.2 3B  — best all-round, fast          (2 GB RAM)',
+    'Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM) * best free model',
     'Meta Llama 3.1 8B  — smarter, slower               (5 GB RAM)',
     'Mistral 7B         — great instruction following   (4 GB RAM)',
     'Google Gemma 2 9B  — strong reasoning              (5 GB RAM)',
