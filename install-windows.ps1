@@ -4,7 +4,7 @@
     AI EMPLOYEE v4.0 - Windows Native Installer
 .DESCRIPTION
     One-click installer for AI Employee on Windows (no WSL or Git Bash required).
-    Installs Python, Git, OpenClaw, Ollama (optional), all 33 bots, and configures
+    Installs Python, Git, OpenClaw, Ollama (optional), all 35 bots, and configures
     everything for immediate use.
 .NOTES
     Run as a normal user (not Administrator).
@@ -724,21 +724,97 @@ Set-Content -Path (Join-Path $AI_HOME 'ui\index.html') -Value $htmlContent -Enco
 Write-OK "Dashboard UI written to $AI_HOME\ui\index.html"
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  STEP 11 – DESKTOP SHORTCUTS
+#  STEP 11 – DESKTOP SHORTCUTS + SMART LAUNCHER
 # ─────────────────────────────────────────────────────────────────────────────
-Write-Step "Creating Desktop shortcuts..."
+Write-Step "Creating Desktop shortcuts and smart launcher..."
 
 $desktop = [Environment]::GetFolderPath('Desktop')
 
-# Start shortcut (.bat)
-$startBat = @"
-@echo off
-powershell -ExecutionPolicy Bypass -WindowStyle Normal -File "%USERPROFILE%\.ai-employee\start-windows.ps1"
-"@
-Set-Content -Path (Join-Path $desktop 'Start AI Employee.bat') -Value $startBat -Encoding ASCII
-Write-OK "Created 'Start AI Employee.bat' on Desktop."
+# ── Smart launcher PowerShell script ─────────────────────────────────────────
+# Clicking the desktop button:
+#   • If the bot is already running (UI responds) → open the dashboard in browser
+#   • If it is NOT running → open a new PowerShell window and start the bot
+$smartLauncherContent = @"
+# AI Employee Smart Launcher (Windows)
+# Opens the dashboard if already running; starts the bot if it is not.
 
-# Stop shortcut (.bat) – kills AI Employee processes using saved PID files
+`$AI_HOME  = Join-Path `$env:USERPROFILE '.ai-employee'
+`$envFile  = Join-Path `$AI_HOME '.env'
+`$UI_PORT  = '8787'
+
+# Read port from .env if present
+if (Test-Path `$envFile) {
+    Get-Content `$envFile | ForEach-Object {
+        if (`$_ -match '^PROBLEM_SOLVER_UI_PORT\s*=\s*(.+)') { `$UI_PORT = `$Matches[1].Trim() }
+    }
+}
+
+`$dashboardUrl = "http://127.0.0.1:`$UI_PORT"
+
+function Test-BotRunning {
+    try {
+        `$r = Invoke-WebRequest -Uri `$dashboardUrl -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+        return `$r.StatusCode -eq 200
+    } catch { return `$false }
+}
+
+if (Test-BotRunning) {
+    Write-Host "AI Employee is running — opening dashboard…" -ForegroundColor Green
+    Start-Process `$dashboardUrl
+} else {
+    Write-Host "Starting AI Employee…" -ForegroundColor Cyan
+    `$startScript = Join-Path `$AI_HOME 'start-windows.ps1'
+    Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File `"`$startScript`"" -WindowStyle Normal
+}
+"@
+
+$smartLauncherPath = Join-Path $AI_HOME 'bin\ai-employee-launcher.ps1'
+New-Item -ItemType Directory -Path (Join-Path $AI_HOME 'bin') -Force | Out-Null
+Set-Content -Path $smartLauncherPath -Value $smartLauncherContent -Encoding UTF8
+Write-OK "Smart launcher written: $smartLauncherPath"
+
+# ── Desktop .bat that calls the smart launcher ────────────────────────────────
+$launchBat = @"
+@echo off
+powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%USERPROFILE%\.ai-employee\bin\ai-employee-launcher.ps1"
+"@
+Set-Content -Path (Join-Path $desktop 'AI Employee.bat') -Value $launchBat -Encoding ASCII
+Write-OK "Created 'AI Employee.bat' on Desktop (smart: starts bot or opens UI)."
+
+# ── Proper .lnk shortcut on Desktop (looks like a real icon, not a .bat) ─────
+try {
+    $wsh = New-Object -ComObject WScript.Shell
+    $lnk = $wsh.CreateShortcut((Join-Path $desktop 'AI Employee.lnk'))
+    $lnk.TargetPath       = 'powershell.exe'
+    $lnk.Arguments        = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$smartLauncherPath`""
+    $lnk.WorkingDirectory = $AI_HOME
+    $lnk.Description      = 'Start AI Employee or open the dashboard if already running'
+    $lnk.IconLocation     = 'powershell.exe,0'
+    $lnk.Save()
+    Write-OK "Created 'AI Employee.lnk' icon shortcut on Desktop."
+} catch {
+    Write-Warn "Could not create .lnk shortcut (bat fallback is fine): $_"
+}
+
+# ── Start Menu entry (Programs folder) ────────────────────────────────────────
+try {
+    $startMenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\AI Employee'
+    New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
+    # Reuse the same .lnk in the Start Menu
+    $wsh2 = New-Object -ComObject WScript.Shell
+    $lnk2 = $wsh2.CreateShortcut((Join-Path $startMenu 'AI Employee.lnk'))
+    $lnk2.TargetPath       = 'powershell.exe'
+    $lnk2.Arguments        = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$smartLauncherPath`""
+    $lnk2.WorkingDirectory = $AI_HOME
+    $lnk2.Description      = 'Start AI Employee or open the dashboard if already running'
+    $lnk2.IconLocation     = 'powershell.exe,0'
+    $lnk2.Save()
+    Write-OK "Added 'AI Employee' to Start Menu > Programs."
+} catch {
+    Write-Warn "Could not add Start Menu entry: $_"
+}
+
+# ── Stop shortcut (.bat) – kills AI Employee processes using saved PID files ──
 $stopBat = @"
 @echo off
 echo Stopping AI Employee...
@@ -749,9 +825,9 @@ pause
 Set-Content -Path (Join-Path $desktop 'Stop AI Employee.bat') -Value $stopBat -Encoding ASCII
 Write-OK "Created 'Stop AI Employee.bat' on Desktop."
 
-# Create a .url Internet shortcut for the dashboard (proper URL shortcut format)
+# ── Dashboard URL shortcut ────────────────────────────────────────────────────
 try {
-    $urlShortcutContent = "[InternetShortcut]`r`nURL=http://localhost:$DASHBOARD_PORT`r`nIconIndex=0`r`n"
+    $urlShortcutContent = "[InternetShortcut]`r`nURL=http://127.0.0.1:$UI_PORT`r`nIconIndex=0`r`n"
     Set-Content -Path (Join-Path $desktop 'AI Employee Dashboard.url') -Value $urlShortcutContent -Encoding ASCII
     Write-OK "Created 'AI Employee Dashboard.url' on Desktop."
 } catch {
@@ -787,22 +863,29 @@ Write-Host "╚═════════════════════�
 Write-Host ""
 Write-Host "  Configured settings:" -ForegroundColor Cyan
 Write-Host "    WhatsApp phone  : $WHATSAPP_PHONE"
-Write-Host "    Dashboard port  : $DASHBOARD_PORT"
-Write-Host "    UI port         : $UI_PORT"
+Write-Host "    Dashboard port  : $UI_PORT"
 Write-Host "    Workers         : $NUM_WORKERS"
 Write-Host "    Ollama           : $(if ($USE_OLLAMA) { $OLLAMA_MODEL } else { 'disabled' })"
 Write-Host "    Install path    : $AI_HOME"
 Write-Host ""
+Write-Host "  Desktop launcher (smart):" -ForegroundColor Green
+Write-Host "    Double-click  'AI Employee.bat'  on your Desktop"
+Write-Host "    • If bot is already running → opens the dashboard in your browser"
+Write-Host "    • If bot is NOT running     → starts the bot (and opens the browser)"
+Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor Yellow
-Write-Host "    1.  Double-click  'Start AI Employee'  on your Desktop"
+Write-Host "    1.  Double-click  'AI Employee.bat'  on your Desktop"
 Write-Host "    2.  Link WhatsApp: run  openclaw channels login"
 Write-Host "    3.  Scan the QR code shown in the terminal"
 Write-Host "    4.  Send  'Hello!'  to yourself on WhatsApp to verify"
 Write-Host ""
 Write-Host "  URLs:" -ForegroundColor Cyan
-Write-Host "    Dashboard  →  http://localhost:$DASHBOARD_PORT"
-Write-Host "    UI         →  http://127.0.0.1:$UI_PORT"
+Write-Host "    Dashboard  →  http://127.0.0.1:$UI_PORT"
 Write-Host ""
 Write-Host "  Tip: If scripts are blocked, run once as admin:" -ForegroundColor Yellow
 Write-Host "       Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned"
 Write-Host ""
+
+# ── Auto-open the dashboard in the default browser ────────────────────────────
+Write-Host "  Opening dashboard in your browser…" -ForegroundColor Cyan
+Start-Process "http://127.0.0.1:$UI_PORT"

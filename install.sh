@@ -28,7 +28,7 @@ banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
 ║      AI EMPLOYEE - v4.0 INSTALLER  (Linux)           ║
-║  33 Agents • Claude AI • Ollama Local • WhatsApp     ║
+║  35 Agents • Claude AI • Ollama Local • WhatsApp     ║
 ╚══════════════════════════════════════════════════════╝
 EOF
 }
@@ -311,11 +311,11 @@ wizard() {
 
     # 8) Number of workers
     echo ""
-    ask "How many AI agents to enable? (1-20, default 20 = all):"
+    ask "How many AI agents to enable? (1-35, default 35 = all):"
     read -r WORKERS_INPUT < "$tty_in"
-    WORKERS="${WORKERS_INPUT:-20}"
-    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 20"; WORKERS=20; }
-    if (( WORKERS > 20 )); then warn "Maximum is 20; clamping to 20"; WORKERS=20; fi
+    WORKERS="${WORKERS_INPUT:-35}"
+    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 35"; WORKERS=35; }
+    if (( WORKERS > 35 )); then warn "Maximum is 35; clamping to 35"; WORKERS=35; fi
     if (( WORKERS < 1  )); then warn "Minimum is 1; clamping to 1";  WORKERS=1;  fi
     ok "Workers: $WORKERS enabled"
 
@@ -324,7 +324,7 @@ wizard() {
     echo -e "  ${C}Mode options:${NC}"
     echo "    starter  — 3 agents, 5 commands, zero overwhelm (best to start)"
     echo "    business — templates, ROI tracking, scheduling (recommended)"
-    echo "    power    — all 20 agents, 126 skills, full dashboard (advanced)"
+    echo "    power    — all 35 agents, 147 skills, full dashboard (advanced)"
     ask "Which mode? [default: business]:"
     read -r MODE_INPUT < "$tty_in"
     AI_EMPLOYEE_MODE="${MODE_INPUT:-business}"
@@ -544,6 +544,8 @@ install_runtime() {
         dl "config/task_plans.json"
         dl "start.sh"
         dl "stop.sh"
+        dl "bots/auto-updater/run.sh"
+        dl "bots/auto-updater/auto_updater.py"
 
         src="$TMP_RUNTIME"
     fi
@@ -608,6 +610,24 @@ install_runtime() {
     fi
 
     ok "Runtime files installed"
+
+    # ── Record the current GitHub commit SHA so the auto-updater has a baseline ─
+    mkdir -p "$AI_HOME/state"
+    local _commit_sha=""
+    if command -v curl >/dev/null 2>&1; then
+        _commit_sha=$(curl -sf --max-time 10 \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "User-Agent: ai-employee-installer/4.0" \
+            "https://api.github.com/repos/F-game25/AI-EMPLOYEE/commits/main" \
+            2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('sha',''))" \
+            2>/dev/null || true)
+    fi
+    if [[ -n "${_commit_sha:-}" ]]; then
+        echo "$_commit_sha" > "$AI_HOME/state/installed_commit.txt"
+        ok "Recorded install baseline: ${_commit_sha:0:8}"
+    else
+        warn "Could not record install commit SHA (offline install?) — auto-updater will bootstrap on first run"
+    fi
 }
 
 # ─── Claude AI bot ───────────────────────────────────────────────────────────
@@ -1037,29 +1057,111 @@ add_to_path() {
 # ─── Desktop launcher & autostart ────────────────────────────────────────────
 
 create_desktop_launcher() {
+    # ── Write a smart launcher script that starts the bot OR opens the UI ───────
+    # If the bot is already running (UI responds), just open the browser.
+    # If it isn't running, launch start.sh in a new terminal window.
+    local launcher_script="$AI_HOME/bin/ai-employee-launcher"
+    cat > "$launcher_script" << 'LAUNCHER'
+#!/usr/bin/env bash
+# AI Employee Smart Launcher
+# • If the bot is already running  → open the dashboard in the browser
+# • If the bot is NOT running      → start the bot (which opens the browser)
+
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+
+# Load .env so ports are respected
+if [[ -f "$AI_HOME/.env" ]]; then
+    set -a; source "$AI_HOME/.env"; set +a
+fi
+
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+DASHBOARD_URL="http://127.0.0.1:${UI_PORT}"
+
+_open_url() {
+    local url="$1"
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        powershell.exe start "$url" 2>/dev/null || cmd.exe /c start "$url" 2>/dev/null || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" &
+    elif command -v sensible-browser >/dev/null 2>&1; then
+        sensible-browser "$url" &
+    else
+        echo "Open: $url"
+    fi
+}
+
+_bot_running() {
+    curl -sf --max-time 2 "$DASHBOARD_URL" >/dev/null 2>&1
+}
+
+if _bot_running; then
+    echo "AI Employee is running — opening dashboard…"
+    _open_url "$DASHBOARD_URL"
+else
+    echo "Starting AI Employee…"
+    # Try to open a terminal emulator with start.sh
+    if command -v gnome-terminal >/dev/null 2>&1; then
+        gnome-terminal -- bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash"
+    elif command -v xterm >/dev/null 2>&1; then
+        xterm -e bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash" &
+    elif command -v konsole >/dev/null 2>&1; then
+        konsole -e bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash" &
+    elif command -v xfce4-terminal >/dev/null 2>&1; then
+        xfce4-terminal -e "bash -c \"cd \\\"$AI_HOME\\\" && ./start.sh; exec bash\"" &
+    elif command -v tilix >/dev/null 2>&1; then
+        tilix -e "bash -c \"cd \\\"$AI_HOME\\\" && ./start.sh; exec bash\"" &
+    else
+        # Fallback: run in background, open browser after a delay
+        cd "$AI_HOME" && nohup ./start.sh >/dev/null 2>&1 &
+        echo "Bot started in background — opening browser in 8s…"
+        sleep 8 && _open_url "$DASHBOARD_URL"
+    fi
+fi
+LAUNCHER
+    chmod +x "$launcher_script"
+    ok "Smart launcher written: $launcher_script"
+
     # ── Linux: .desktop entry (app menu + Desktop shortcut) ───────────────────
     local app_dir="$HOME/.local/share/applications"
     mkdir -p "$app_dir"
     cat > "$app_dir/ai-employee.desktop" << DESK
 [Desktop Entry]
 Name=AI Employee
-Comment=Start the AI Employee multi-agent system
-Exec=bash -c 'cd $AI_HOME && ./start.sh; exec bash'
+Comment=Start AI Employee or open the dashboard if already running
+Exec=$launcher_script
 Icon=utilities-terminal
-Terminal=true
+Terminal=false
 Type=Application
 Categories=Utility;Network;
 StartupNotify=false
 DESK
     chmod +x "$app_dir/ai-employee.desktop"
     ok "App launcher added — search 'AI Employee' in your app menu"
+    # Refresh the XDG app-menu index so the entry is searchable immediately
+    command -v update-desktop-database >/dev/null 2>&1 && \
+        update-desktop-database "$app_dir" 2>/dev/null || true
 
-    # Copy to Desktop if it exists
-    if [[ -d "$HOME/Desktop" ]]; then
-        cp "$app_dir/ai-employee.desktop" "$HOME/Desktop/ai-employee.desktop"
-        chmod +x "$HOME/Desktop/ai-employee.desktop"
-        ok "Desktop shortcut created: ~/Desktop/ai-employee.desktop (double-click to start)"
+    # ── Place shortcut on the Desktop ────────────────────────────────────────
+    # Prefer the XDG-standard path (handles non-English locales such as
+    # ~/Schreibtisch, ~/Bureau, ~/桌面 …); fall back to ~/Desktop.
+    local xdg_desktop
+    xdg_desktop="$(xdg-user-dir DESKTOP 2>/dev/null)" || xdg_desktop=""
+    [[ -z "$xdg_desktop" || "$xdg_desktop" == "$HOME" ]] && xdg_desktop="$HOME/Desktop"
+
+    # Create the directory if it doesn't exist yet (headless or first-boot)
+    mkdir -p "$xdg_desktop"
+
+    local desk_file="$xdg_desktop/ai-employee.desktop"
+    cp "$app_dir/ai-employee.desktop" "$desk_file"
+    chmod +x "$desk_file"
+
+    # Mark the file as trusted so GNOME doesn't show the "Untrusted launcher"
+    # dialog when the user double-clicks it.
+    if command -v gio >/dev/null 2>&1; then
+        gio set "$desk_file" metadata::trusted true 2>/dev/null || true
     fi
+
+    ok "Desktop shortcut placed: $desk_file  (double-click to start or open UI)"
 
     # ── Systemd user service (optional autostart on login) ─────────────
     if command -v systemctl >/dev/null 2>&1; then
@@ -1105,8 +1207,7 @@ done_message() {
     echo "  Ollama model: $OLLAMA_MODEL  (host: $OLLAMA_HOST)"
     echo "  Token:        ${TOKEN:0:16}...${TOKEN: -8}"
     echo "  Config:       ~/.ai-employee/config.json"
-    echo "  Dashboard:    http://localhost:${DASHBOARD_PORT:-3000}  ← primary control"
-    echo "  Problem UI:   http://127.0.0.1:${UI_PORT:-8787}"
+    echo "  Dashboard:    http://127.0.0.1:${UI_PORT:-8787}  ← primary control"
     echo ""
     echo -e "${Y}Next steps:${NC}"
     echo ""
@@ -1125,14 +1226,32 @@ done_message() {
     echo "     openclaw channels login  (scan QR code)"
     echo "     Use WhatsApp for status checks. Use the dashboard for full control."
     echo ""
-    echo -e "  ${G}▸ No-terminal start (after first-time setup):${NC}"
+    echo -e "  ${G}▸ Desktop launcher (smart — starts bot or opens UI if already running):${NC}"
     if [[ -d "$HOME/Desktop" ]]; then
         echo "    • Double-click  ~/Desktop/ai-employee.desktop  (Linux)"
     fi
     echo "    • Or search 'AI Employee' in your application menu"
+    echo "    • Or run directly: ~/.ai-employee/bin/ai-employee-launcher"
     echo "    • Or enable autostart: systemctl --user enable --now ai-employee"
     echo ""
     [[ -n "${OLLAMA_MODEL:-}" ]] && echo "  Ollama: run  ollama pull $OLLAMA_MODEL  before starting."
+    echo ""
+
+    # ── Auto-open the dashboard in the default browser ────────────────────────
+    local dashboard_url="http://127.0.0.1:${UI_PORT:-8787}"
+    echo -e "  ${C}▸ Opening dashboard in your browser…${NC}  $dashboard_url"
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        # WSL
+        powershell.exe start "$dashboard_url" 2>/dev/null \
+            || cmd.exe /c start "$dashboard_url" 2>/dev/null \
+            || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$dashboard_url" 2>/dev/null &
+    elif command -v sensible-browser >/dev/null 2>&1; then
+        sensible-browser "$dashboard_url" 2>/dev/null &
+    else
+        echo "    Open manually: $dashboard_url"
+    fi
     echo ""
 }
 

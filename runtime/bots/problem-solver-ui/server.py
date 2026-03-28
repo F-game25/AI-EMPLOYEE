@@ -535,6 +535,7 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('guardrails',this)">🔒 Guardrails</button>
   <button onclick="switchTab('memory',this)">🧠 Memory</button>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
+  <button onclick="switchTab('options',this)">⚙️ Options</button>
 </nav>
 
 <main>
@@ -900,7 +901,17 @@ INDEX_HTML = r"""<!doctype html>
       <div class="card-title"><span class="icon">🐝</span> Agent Swarm Overview</div>
       <button class="btn btn-ghost btn-sm" onclick="loadSwarm()">↻ Refresh</button>
     </div>
-    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px">All 20 AI agents — their capabilities, current status, and workload.</p>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:12px">All AI agents — their capabilities, current status, and workload.</p>
+    <div id="swarm-filter-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+      <button class="btn btn-ghost btn-sm swarm-pill active" onclick="filterSwarm('all',this)">All</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('sales',this)">💼 Sales</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('marketing',this)">📢 Marketing</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('social',this)">📱 Social</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('analytics',this)">📊 Analytics</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('content',this)">✍️ Content</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('ecommerce',this)">🛒 E-commerce</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('coordination',this)">🎯 Core</button>
+    </div>
     <div id="swarm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"><div class="empty"><div class="icon">🐝</div><p>Loading agents…</p></div></div>
   </div>
 </div>
@@ -1136,6 +1147,132 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- ── Options ── -->
+<div id="tab-options" class="tab-content">
+  <div class="grid2">
+
+    <!-- Left column: API Keys -->
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🔑</span> API Keys</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadOptions()">↻ Refresh</button>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+          Secret values are masked. Paste a new value to update; leave unchanged to keep existing.
+        </p>
+        <div id="opt-api-keys"></div>
+        <button class="btn btn-primary" style="margin-top:10px;width:100%" onclick="saveSettings('api_keys')">💾 Save API Keys</button>
+      </div>
+    </div>
+
+    <!-- Right column -->
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">⚙️</span> Preferences</div>
+        </div>
+        <div id="opt-preferences"></div>
+        <button class="btn btn-primary" style="margin-top:10px;width:100%" onclick="saveSettings('preferences')">💾 Save Preferences</button>
+      </div>
+
+      <!-- Auto-Update -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🔄</span> Auto Update</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="checkForUpdates()">🔍 Check Now</button>
+            <button class="btn btn-success btn-sm" onclick="triggerUpdate()">⬇ Update Now</button>
+          </div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+          The bot auto-updates from GitHub while running. Only changed bots are restarted — the rest stay live.
+        </p>
+        <div id="opt-updater-status" style="font-size:.84em"></div>
+      </div>
+
+      <!-- Security Check -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🛡️</span> Security Check</div>
+          <button class="btn btn-ghost btn-sm" onclick="runSecurityCheck()">▶ Run Check</button>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+          Audit your configuration for common security issues.
+        </p>
+        <div id="opt-security-results"></div>
+      </div>
+
+      <!-- Danger Zone -->
+      <div class="card" style="border-color:rgba(239,68,68,.35)">
+        <div class="card-header">
+          <div class="card-title" style="color:var(--danger)"><span class="icon">💣</span> Danger Zone</div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+          Permanently delete all runtime data — chat logs, metrics, memory, guardrails, improvements.
+          Your <code>.env</code> and config files are <strong style="color:var(--text)">not</strong> deleted.
+        </p>
+        <div class="form-group">
+          <label>Type <strong style="color:var(--danger)">DELETE ALL DATA</strong> to confirm</label>
+          <input id="nuke-confirm" placeholder="DELETE ALL DATA" style="border-color:rgba(239,68,68,.3)" autocomplete="off"/>
+        </div>
+        <button class="btn btn-danger" style="width:100%" onclick="nukeData()">🗑️ Delete All Runtime Data</button>
+        <div id="nuke-result" style="margin-top:8px;font-size:.82em"></div>
+      </div>
+
+      <!-- Delete Complete Bot -->
+      <div class="card" style="border-color:rgba(239,68,68,.6);margin-top:0">
+        <div class="card-header">
+          <div class="card-title" style="color:var(--danger)"><span class="icon">☠️</span> Delete Complete Bot</div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+          Stops all running bots and <strong style="color:var(--danger)">permanently removes</strong>
+          the entire <code>~/.ai-employee</code> installation — all data, config, and code.
+          <strong style="color:var(--text)">This cannot be undone.</strong>
+        </p>
+
+        <!-- Step 1 -->
+        <div id="uninstall-step1">
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+            <input type="checkbox" id="uninstall-check1" style="width:auto;margin:0;cursor:pointer;accent-color:var(--danger)"/>
+            <label for="uninstall-check1" style="margin:0;font-size:.86em;cursor:pointer">
+              I understand this will <strong style="color:var(--danger)">permanently delete</strong> everything
+            </label>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+            <input type="checkbox" id="uninstall-check2" style="width:auto;margin:0;cursor:pointer;accent-color:var(--danger)"/>
+            <label for="uninstall-check2" style="margin:0;font-size:.86em;cursor:pointer">
+              I have backed up anything I want to keep
+            </label>
+          </div>
+          <button class="btn btn-danger" style="width:100%" onclick="deleteBotStep2()">
+            ☠️ Continue to Final Confirmation…
+          </button>
+        </div>
+
+        <!-- Step 2 (hidden until step 1 passes) -->
+        <div id="uninstall-step2" style="display:none;border-top:1px solid rgba(239,68,68,.3);padding-top:14px;margin-top:14px">
+          <div class="form-group">
+            <label>Type <strong style="color:var(--danger)">UNINSTALL AI EMPLOYEE</strong> to confirm</label>
+            <input id="uninstall-confirm" placeholder="UNINSTALL AI EMPLOYEE"
+              style="border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.05)"
+              autocomplete="off"/>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" style="flex:1" onclick="deleteBotCancel()">↩ Cancel</button>
+            <button class="btn btn-danger" style="flex:2" onclick="deleteBotFinal()">
+              ☠️ PERMANENTLY DELETE EVERYTHING
+            </button>
+          </div>
+        </div>
+
+        <div id="uninstall-result" style="margin-top:10px;font-size:.82em"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 </main>
 
 <div id="toast"></div>
@@ -1164,6 +1301,7 @@ function switchTab(tab, btn) {
   if (tab === 'guardrails') loadGuardrails();
   if (tab === 'memory') loadMemory();
   if (tab === 'integrations') loadIntegrations();
+  if (tab === 'options') { loadOptions(); loadUpdaterStatus(); }
 }
 
 function toast(msg, color='#10b981') {
@@ -1939,6 +2077,10 @@ async function loadSwarm() {
   const d = await r.json();
   const agents = d.agents || [];
   _allAgents = agents; // cache for task picker
+  renderSwarmGrid(agents);
+}
+
+function renderSwarmGrid(agents) {
   const grid = document.getElementById('swarm-grid');
   if (!agents.length) {
     grid.innerHTML = '<div class="empty"><div class="icon">🐝</div><p>No agent data.</p></div>';
@@ -1949,7 +2091,7 @@ async function loadSwarm() {
     const dotColor = a.running ? '#10b981' : '#ef4444';
     const runningDot = `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};display:inline-block;margin-left:6px"></span>`;
     const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:var(--surface);padding:2px 6px;border-radius:3px;font-size:.73em;color:var(--text-secondary)">${escHtml(s)}</span>`).join('');
-    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color}">
+    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-weight:600;font-size:.95em">${escHtml(a.id)}</div>
         ${runningDot}
@@ -1959,6 +2101,13 @@ async function loadSwarm() {
       <div style="margin-top:8px;font-size:.75em;color:var(--text-muted)">Category: ${escHtml(a.category||'')}</div>
     </div>`;
   }).join('');
+}
+
+function filterSwarm(category, btn) {
+  document.querySelectorAll('.swarm-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  const filtered = category === 'all' ? _allAgents : _allAgents.filter(a => a.category === category);
+  renderSwarmGrid(filtered);
 }
 
 // ── Commands Tab ─────────────────────────────────────────────────────────────
@@ -2552,6 +2701,229 @@ async function testIntegration(id) {
   }
 }
 
+
+// ── Options / Settings ────────────────────────────────────────────────────────
+async function loadOptions() {
+  const d = await api('/api/settings');
+  renderSettingsSection('opt-api-keys',   d.api_keys    || []);
+  renderSettingsSection('opt-preferences', d.preferences || []);
+}
+
+function renderSettingsSection(containerId, fields) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = fields.map(f => `
+    <div class="form-group" style="margin-bottom:10px">
+      <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <span>${escHtml(f.label)}</span>
+        ${f.has_value
+          ? '<span style="font-size:.73em;color:var(--success);font-weight:600">● set</span>'
+          : '<span style="font-size:.73em;color:var(--text-muted)">○ not set</span>'}
+      </label>
+      <div style="display:flex;gap:6px">
+        <input id="opt-field-${escHtml(f.key)}"
+          type="${f.type === 'password' ? 'password' : 'text'}"
+          placeholder="${escHtml(f.placeholder)}"
+          value="${escHtml(f.value)}"
+          autocomplete="off"
+          style="flex:1"/>
+        ${f.type === 'password'
+          ? `<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:5px 9px"
+               onclick="toggleSecret('opt-field-${jsEsc(f.key)}',this)" title="Show/hide">👁</button>`
+          : ''}
+      </div>
+    </div>`).join('');
+}
+
+function toggleSecret(inputId, btn) {
+  const el = document.getElementById(inputId);
+  if (!el) return;
+  el.type = el.type === 'password' ? 'text' : 'password';
+  btn.textContent = el.type === 'password' ? '👁' : '🙈';
+}
+
+async function saveSettings(category) {
+  const containerId = 'opt-' + category.replace(/_/g, '-');
+  const inputs = document.querySelectorAll('#' + containerId + ' input');
+  const updates = {};
+  inputs.forEach(el => {
+    const key = el.id.replace('opt-field-', '');
+    if (key) updates[key] = el.value;
+  });
+  if (!Object.keys(updates).length) { toast('Nothing to save'); return; }
+  const r = await api('/api/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({updates})
+  });
+  if (r.ok) {
+    const msg = r.saved
+      ? `✅ Saved ${r.saved} setting${r.saved !== 1 ? 's' : ''}`
+      : 'No changes (all values were unchanged)';
+    toast(msg, r.saved ? '#10b981' : '#64748b');
+    if (r.saved) loadOptions();
+  } else {
+    toast(r.detail || 'Error saving', '#ef4444');
+  }
+}
+
+async function runSecurityCheck() {
+  const el = document.getElementById('opt-security-results');
+  el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em;padding:8px 0">⏳ Running…</p>';
+  const d = await api('/api/settings/security-check');
+  const findings = d.findings || [];
+  const colorMap = {ok:'var(--success)', warning:'var(--warning)', error:'var(--danger)', info:'var(--accent)'};
+  const iconMap  = {ok:'✅', warning:'⚠️', error:'❌', info:'ℹ️'};
+  el.innerHTML = findings.length
+    ? findings.map(f => `
+        <div style="display:flex;gap:10px;padding:8px 10px;border-radius:6px;
+             background:var(--surface2);border:1px solid var(--border);margin-bottom:6px">
+          <span style="flex-shrink:0;font-size:1em">${iconMap[f.level] || '•'}</span>
+          <div>
+            <div style="font-size:.86em;font-weight:600;color:${colorMap[f.level]||'var(--text)'}">
+              ${escHtml(f.title)}</div>
+            <div style="font-size:.8em;color:var(--text-muted);margin-top:2px">
+              ${escHtml(f.detail)}</div>
+          </div>
+        </div>`).join('')
+    : '<p style="color:var(--text-muted);font-size:.85em">No findings.</p>';
+}
+
+// ── Auto-updater ──────────────────────────────────────────────────────────────
+async function loadUpdaterStatus() {
+  const el = document.getElementById('opt-updater-status');
+  if (!el) return;
+  const d = await api('/api/updater/status');
+  if (d.error) {
+    el.innerHTML = '<p style="color:var(--text-muted)">Updater not running yet — starts automatically with the bot.</p>';
+    return;
+  }
+  const statusColor = {
+    up_to_date: 'var(--success)', updated: 'var(--accent)',
+    updating: 'var(--warning)', check_failed: 'var(--danger)',
+    started: 'var(--text-muted)', initialized: 'var(--text-muted)',
+  };
+  const local  = d.local_sha  ? d.local_sha.slice(0,8)  : '—';
+  const remote = d.remote_sha ? d.remote_sha.slice(0,8) : '—';
+  const col    = statusColor[d.status] || 'var(--text-muted)';
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
+        <div style="font-size:.75em;color:var(--text-muted);margin-bottom:2px">INSTALLED</div>
+        <code style="font-size:.9em">${escHtml(local)}</code>
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
+        <div style="font-size:.75em;color:var(--text-muted);margin-bottom:2px">LATEST ON ${escHtml((d.branch||'main').toUpperCase())}</div>
+        <code style="font-size:.9em">${escHtml(remote)}</code>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="font-size:.8em;font-weight:700;color:${col}">${escHtml(d.status||'unknown')}</span>
+      ${d.last_check ? `<span style="font-size:.76em;color:var(--text-muted)">Last check: ${escHtml(d.last_check.slice(0,19).replace('T',' '))} UTC</span>` : ''}
+    </div>
+    ${d.last_update ? `<div style="font-size:.78em;color:var(--text-muted)">Last update: ${escHtml(d.last_update.slice(0,19).replace('T',' '))} UTC</div>` : ''}
+    ${d.restarted_bots && d.restarted_bots.length
+      ? `<div style="font-size:.78em;color:var(--text-muted);margin-top:4px">Restarted: ${escHtml(d.restarted_bots.join(', '))}</div>` : ''}
+    <div style="font-size:.76em;color:var(--text-muted);margin-top:6px">
+      Polls every ${d.interval_seconds || 300}s · Repo: ${escHtml(d.repo||'F-game25/AI-EMPLOYEE')}
+    </div>`;
+}
+
+async function checkForUpdates() {
+  const el = document.getElementById('opt-updater-status');
+  if (el) el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em;padding:8px 0">⏳ Checking GitHub…</p>';
+  const r = await api('/api/updater/check', {method:'POST'});
+  if (r.ok) {
+    toast(r.message || 'Check triggered');
+    setTimeout(loadUpdaterStatus, 3000);
+  } else {
+    toast(r.detail || 'Check failed', '#ef4444');
+  }
+}
+
+async function triggerUpdate() {
+  const el = document.getElementById('opt-updater-status');
+  if (el) el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em;padding:8px 0">⏳ Downloading update…</p>';
+  const r = await api('/api/updater/update', {method:'POST'});
+  if (r.ok) {
+    toast(r.message || 'Update triggered — affected bots restarting…', '#22d3ee');
+    setTimeout(loadUpdaterStatus, 8000);
+  } else {
+    toast(r.detail || 'Update failed', '#ef4444');
+  }
+}
+
+// ── Nuke data ─────────────────────────────────────────────────────────────────
+async function nukeData() {
+  const confirm_val = document.getElementById('nuke-confirm').value;
+  const el = document.getElementById('nuke-result');
+  el.textContent = '⏳ Processing…';
+  el.style.color = 'var(--text-muted)';
+  const r = await api('/api/settings/nuke', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({confirm: confirm_val})
+  });
+  if (r.ok) {
+    el.style.color = 'var(--success)';
+    el.textContent = `✅ Deleted ${r.deleted.length} file(s)${r.deleted.length ? ': ' + r.deleted.join(', ') : ''}`;
+    document.getElementById('nuke-confirm').value = '';
+    if (r.errors && r.errors.length) {
+      el.textContent += ' | Errors: ' + r.errors.join(', ');
+      el.style.color = 'var(--warning)';
+    }
+  } else {
+    el.style.color = 'var(--danger)';
+    el.textContent = '❌ ' + (r.detail || 'Error');
+  }
+}
+
+// ── Delete Complete Bot (two-step confirmation) ───────────────────────────────
+function deleteBotStep2() {
+  const c1 = document.getElementById('uninstall-check1');
+  const c2 = document.getElementById('uninstall-check2');
+  const el = document.getElementById('uninstall-result');
+  if (!c1 || !c2) return;
+  if (!c1.checked || !c2.checked) {
+    el.style.color = 'var(--danger)';
+    el.textContent = '❌ Please tick both checkboxes before continuing.';
+    return;
+  }
+  el.textContent = '';
+  document.getElementById('uninstall-step2').style.display = 'block';
+  document.getElementById('uninstall-confirm').focus();
+}
+
+function deleteBotCancel() {
+  document.getElementById('uninstall-step2').style.display = 'none';
+  document.getElementById('uninstall-confirm').value = '';
+  document.getElementById('uninstall-check1').checked = false;
+  document.getElementById('uninstall-check2').checked = false;
+  const el = document.getElementById('uninstall-result');
+  el.textContent = '';
+}
+
+async function deleteBotFinal() {
+  const confirm_val = document.getElementById('uninstall-confirm').value;
+  const el = document.getElementById('uninstall-result');
+  el.style.color = 'var(--text-muted)';
+  el.textContent = '⏳ Stopping all bots and removing installation…';
+  const r = await api('/api/settings/uninstall', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({confirm: confirm_val})
+  });
+  if (r.ok) {
+    el.style.color = 'var(--success)';
+    el.textContent = '✅ AI Employee has been fully uninstalled. You can close this tab.';
+    // Disable all further interaction
+    document.querySelectorAll('#tab-options button, #tab-options input').forEach(b => b.disabled = true);
+  } else {
+    el.style.color = 'var(--danger)';
+    el.textContent = '❌ ' + (r.detail || 'Uninstall failed');
+    document.getElementById('uninstall-confirm').value = '';
+  }
+}
 
 // Auto-refresh dashboard every 30s
 setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
@@ -4074,6 +4446,15 @@ _AGENT_KEYWORDS: dict[str, list[str]] = {
     "social-poster":     ["tiktok post", "instagram post", "twitter post", "social schedule", "viral script", "auto post", "social media automation"],
     "product-researcher":["product research", "trending product", "tiktok trend", "amazon trend", "junglescout", "product listing", "auto-list", "shopify product"],
     "ecom-dashboard":    ["ecom metrics", "revenue report", "profit margin report", "daily digest", "order analytics", "ecommerce kpi", "ecom dashboard"],
+    # Niche Growth Agency specialists
+    "lead-hunter-elite": ["leads hunt", "b2b leads", "lead scraping", "qualify leads", "enrich crm", "lead enrichment", "icp scoring", "find leads", "hunt leads", "lead list", "prospect list", "decision maker"],
+    "cold-outreach-assassin": ["cold outreach", "cold sequence", "outreach sequence", "email sequence", "linkedin sequence", "whatsapp outreach", "multi-channel outreach", "follow-up sequence", "ab test outreach", "reply rate", "cold email campaign"],
+    "sales-closer-pro": ["close deal", "closing", "objection", "negotiate", "negotiation", "sales script", "deal close", "handle objection", "sales closer", "spin sell", "meddic", "sales pipeline"],
+    "linkedin-growth-hacker": ["linkedin growth", "linkedin profile", "linkedin content", "linkedin campaign", "linkedin audience", "linkedin connections", "linkedin post", "linkedin optimize", "ssi score", "linkedin leads"],
+    "ad-campaign-wizard": ["paid ads", "meta ads", "google ads", "linkedin ads", "facebook ads", "ad campaign", "ad copy", "roas", "budget allocation", "ad performance", "ppc", "cpm", "performance marketing"],
+    "referral-rocket": ["referral program", "referral", "viral referral", "refer a friend", "referral incentive", "referral tracking", "ambassador program", "word of mouth", "k-factor"],
+    "partnership-matchmaker": ["partnership", "joint venture", "jv partner", "affiliate partner", "co-marketing", "partnership pitch", "partner scoring", "business development", "biz dev", "strategic alliance"],
+    "conversion-rate-optimizer": ["conversion rate", "cro", "funnel optimization", "ab test", "a/b test", "landing page cro", "checkout optimization", "conversion funnel", "funnel analysis", "funnel leak", "optimize conversion"],
 }
 
 
@@ -4766,6 +5147,383 @@ def test_integration(integration_id: str):
     return JSONResponse({"ok": True, "message": "Configuration looks complete — deploy agents to test live"})
 
 
+# ── Settings: read/write .env + security audit + data nuke ────────────────────
+
+_SECRET_KEYS: frozenset = frozenset({
+    "JWT_SECRET_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+    "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "SENDGRID_API_KEY",
+    "SMTP_PASS", "DISCORD_BOT_TOKEN", "TELEGRAM_BOT_TOKEN",
+    "WHATSAPP_TOKEN", "TAVILY_API_KEY", "SERP_API_KEY",
+    "NEWS_API_KEY", "ELEVEN_LABS_KEY", "ALPHA_INSIDER_KEY",
+    "DISCORD_WEBHOOK_URL",
+})
+_MASK = "••••••••"
+
+_SETTINGS_SCHEMA: list = [
+    # (key, label, input_type, placeholder, category)
+    # API Keys
+    ("OPENAI_API_KEY",        "OpenAI API Key",              "password", "sk-…",                          "api_keys"),
+    ("ANTHROPIC_API_KEY",     "Anthropic API Key",           "password", "sk-ant-…",                      "api_keys"),
+    ("TAVILY_API_KEY",        "Tavily Search Key",           "password", "tvly-…",                        "api_keys"),
+    ("SERP_API_KEY",          "SerpAPI Key",                 "password", "your-serpapi-key",              "api_keys"),
+    ("NEWS_API_KEY",          "NewsAPI Key",                 "password", "your-newsapi-key",              "api_keys"),
+    ("ELEVEN_LABS_KEY",       "ElevenLabs API Key",          "password", "your-elevenlabs-key",           "api_keys"),
+    ("ALPHA_INSIDER_KEY",     "Alpha Insider Key",           "password", "your-key",                      "api_keys"),
+    ("DISCORD_BOT_TOKEN",     "Discord Bot Token",           "password", "MTxxxxxxx",                     "api_keys"),
+    ("DISCORD_WEBHOOK_URL",   "Discord Webhook URL",         "password", "https://discord.com/api/webhooks/…", "api_keys"),
+    ("TELEGRAM_BOT_TOKEN",    "Telegram Bot Token",          "password", "1234567:ABC…",                  "api_keys"),
+    ("TWILIO_ACCOUNT_SID",    "Twilio Account SID",          "password", "ACxxxxxxxx",                    "api_keys"),
+    ("TWILIO_AUTH_TOKEN",     "Twilio Auth Token",           "password", "your-auth-token",               "api_keys"),
+    ("TWILIO_WHATSAPP_FROM",  "Twilio WhatsApp Number",      "text",     "whatsapp:+14155238886",         "api_keys"),
+    ("SENDGRID_API_KEY",      "SendGrid API Key",            "password", "SG.…",                          "api_keys"),
+    ("WHATSAPP_TOKEN",        "WhatsApp Cloud API Token",    "password", "your-meta-token",               "api_keys"),
+    ("WHATSAPP_PHONE_ID",     "WhatsApp Phone ID",           "text",     "your-phone-id",                 "api_keys"),
+    ("SMTP_USER",             "SMTP Username / Email",       "text",     "you@example.com",               "api_keys"),
+    ("SMTP_PASS",             "SMTP Password",               "password", "your-app-password",             "api_keys"),
+    # Preferences
+    ("PROBLEM_SOLVER_UI_PORT","Dashboard Port",              "text",     "8787",                          "preferences"),
+    ("DASHBOARD_PORT",        "Legacy Dashboard Port",       "text",     "3000",                          "preferences"),
+    ("OLLAMA_HOST",           "Ollama Host URL",             "text",     "http://localhost:11434",        "preferences"),
+    ("OLLAMA_MODEL",          "Ollama Model",                "text",     "llama3.2",                      "preferences"),
+    ("LOG_LEVEL",             "Log Level",                   "text",     "INFO",                          "preferences"),
+    ("RATE_LIMIT_PER_MINUTE", "Rate Limit (req/min)",        "text",     "60",                            "preferences"),
+    ("TASK_ORCHESTRATOR_MAX_PARALLEL", "Max Parallel Tasks", "text",    "10",                            "preferences"),
+    ("TASK_ORCHESTRATOR_PEER_REVIEW",  "Peer Review",        "text",    "true",                          "preferences"),
+    ("MEMORY_MAX_CONVERSATION","Memory Max Turns",           "text",     "50",                            "preferences"),
+    ("EMAIL_DRY_RUN",         "Email Dry Run",               "text",     "false",                         "preferences"),
+    ("WHATSAPP_DRY_RUN",      "WhatsApp Dry Run",            "text",     "false",                         "preferences"),
+    ("SMTP_HOST",             "SMTP Host",                   "text",     "smtp.gmail.com",                "preferences"),
+    ("SMTP_PORT",             "SMTP Port",                   "text",     "587",                           "preferences"),
+    ("SMTP_FROM",             "SMTP From Address",           "text",     "you@example.com",               "preferences"),
+    ("AI_EMPLOYEE_REPO",      "GitHub Repo (owner/name)",    "text",     "F-game25/AI-EMPLOYEE",          "preferences"),
+    ("AI_EMPLOYEE_BRANCH",    "GitHub Branch",               "text",     "main",                          "preferences"),
+    ("AI_EMPLOYEE_UPDATE_INTERVAL", "Update Poll Interval (s)", "text", "300",                           "preferences"),
+]
+
+
+def _env_path() -> Path:
+    return AI_HOME / ".env"
+
+
+def _read_env() -> dict:
+    result: dict = {}
+    p = _env_path()
+    if not p.exists():
+        return result
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key:
+            result[key] = val
+    return result
+
+
+def _write_env(updates: dict) -> None:
+    p = _env_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = p.read_text(encoding="utf-8", errors="replace").splitlines() if p.exists() else []
+    updated_keys: set = set()
+    new_lines: list = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped or "=" not in stripped:
+            new_lines.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key in updates:
+            new_lines.append(f"{key}={updates[key]}")
+            updated_keys.add(key)
+        else:
+            new_lines.append(line)
+    for key, val in updates.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={val}")
+    # Atomic write via temp file
+    tmp = p.parent / f".env.tmp.{os.getpid()}"
+    try:
+        tmp.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        tmp.replace(p)
+    finally:
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+    try:
+        p.chmod(0o600)
+    except Exception:
+        pass
+
+
+@app.get("/api/settings")
+def get_settings():
+    env = _read_env()
+    result: dict = {"api_keys": [], "preferences": []}
+    for key, label, input_type, placeholder, category in _SETTINGS_SCHEMA:
+        raw = env.get(key, "")
+        is_secret = key in _SECRET_KEYS
+        result[category].append({
+            "key":         key,
+            "label":       label,
+            "type":        input_type,
+            "placeholder": placeholder,
+            "value":       _MASK if (is_secret and raw) else raw,
+            "has_value":   bool(raw),
+        })
+    return JSONResponse(result)
+
+
+class _SettingsUpdateRequest(BaseModel):
+    updates: dict = Field(default_factory=dict)
+
+
+@app.post("/api/settings")
+def save_settings(body: _SettingsUpdateRequest):
+    # Skip masked values — user didn't change them
+    clean = {k: v for k, v in body.updates.items() if v != _MASK and k.strip()}
+    if not clean:
+        return JSONResponse({"ok": True, "saved": 0})
+    _write_env(clean)
+    return JSONResponse({"ok": True, "saved": len(clean)})
+
+
+@app.get("/api/settings/security-check")
+def security_check():
+    findings: list = []
+    env = _read_env()
+
+    def _add(level: str, title: str, detail: str) -> None:
+        findings.append({"level": level, "title": title, "detail": detail})
+
+    # 1. JWT secret
+    jwt = env.get("JWT_SECRET_KEY", os.environ.get("JWT_SECRET_KEY", ""))
+    if not jwt:
+        _add("error", "JWT secret missing",
+             "JWT_SECRET_KEY is not set. The server will refuse to start without it.")
+    elif jwt.lower() in _KNOWN_WEAK_SECRETS:
+        _add("error", "JWT secret is a known default",
+             "Replace it with a random 64-char hex string: python3 -c \"import secrets; print(secrets.token_hex(32))\"")
+    elif len(jwt) < 32:
+        _add("error", "JWT secret too short",
+             f"Current length: {len(jwt)}. Minimum: 32 characters.")
+    elif len(jwt) < 64:
+        _add("warning", "JWT secret could be stronger",
+             f"Length {len(jwt)} is acceptable but 64+ chars is recommended.")
+    else:
+        _add("ok", "JWT secret is strong", f"Length: {len(jwt)} characters ✅")
+
+    # 2. .env file permissions
+    env_file = _env_path()
+    if env_file.exists():
+        mode = oct(env_file.stat().st_mode & 0o777)
+        if env_file.stat().st_mode & 0o077:
+            _add("warning", ".env file is world/group readable",
+                 f"Permissions: {mode}. Run: chmod 600 ~/.ai-employee/.env")
+        else:
+            _add("ok", ".env file permissions are secure", f"Mode: {mode} ✅")
+    else:
+        _add("warning", ".env file not found", f"Expected at {env_file}")
+
+    # 3. OpenAI key format
+    oai = env.get("OPENAI_API_KEY", "")
+    if oai and not oai.startswith("sk-"):
+        _add("warning", "OpenAI API key looks incorrect", "Should start with 'sk-'.")
+    elif oai:
+        _add("ok", "OpenAI API key present", "Key found ✅")
+
+    # 4. Host binding
+    host = os.environ.get("PROBLEM_SOLVER_UI_HOST", HOST)
+    if host in ("0.0.0.0", "::"):
+        _add("warning", "Dashboard bound to all interfaces",
+             f"HOST={host} — anyone on the network can reach the dashboard. "
+             "Use 127.0.0.1 for localhost-only.")
+    else:
+        _add("ok", "Dashboard bound to localhost only", f"HOST={host} ✅")
+
+    # 5. Dry-run flags
+    if env.get("EMAIL_DRY_RUN", "").lower() == "true":
+        _add("info", "Email dry-run is ON",
+             "Emails are logged, not sent. Set EMAIL_DRY_RUN=false for live mode.")
+    if env.get("WHATSAPP_DRY_RUN", "").lower() == "true":
+        _add("info", "WhatsApp dry-run is ON", "Messages are logged, not sent.")
+
+    # 6. Secret keys inventory
+    filled = sum(1 for k in _SECRET_KEYS if env.get(k))
+    _add("info", f"{filled} of {len(_SECRET_KEYS)} secret keys configured",
+         "Open API Keys above to fill in any missing keys.")
+
+    return JSONResponse({"findings": findings})
+
+
+class _NukeRequest(BaseModel):
+    confirm: str = ""
+
+
+@app.post("/api/settings/nuke")
+def nuke_data(body: _NukeRequest):
+    if body.confirm != "DELETE ALL DATA":
+        raise HTTPException(
+            400,
+            "Confirmation text does not match. "
+            "Type exactly: DELETE ALL DATA",
+        )
+    deleted: list = []
+    errors:  list = []
+
+    targets = [
+        CHATLOG,
+        METRICS_FILE,
+        MEMORY_FILE,
+        GUARDRAILS_FILE,
+        IMPROVEMENTS_FILE,
+        STATE_DIR / "guardrails_settings.json",
+        STATE_DIR / "memory_interactions.json",
+    ]
+    for f in targets:
+        try:
+            if f.exists():
+                f.unlink()
+                deleted.append(f.name)
+        except Exception as exc:
+            errors.append(f"{f.name}: {exc}")
+
+    # Also clear any extra .jsonl chat files
+    try:
+        for jsonl in STATE_DIR.glob("*.jsonl"):
+            jsonl.unlink()
+            deleted.append(jsonl.name)
+    except Exception as exc:
+        errors.append(str(exc))
+
+    logger.warning("DATA NUKE performed — deleted: %s", deleted)
+    return JSONResponse({"ok": True, "deleted": deleted, "errors": errors})
+
+
+class _UninstallRequest(BaseModel):
+    confirm: str = ""
+
+
+@app.post("/api/settings/uninstall")
+def uninstall_bot(body: _UninstallRequest):
+    """Stop all bots and remove the entire AI_HOME directory tree.
+
+    Requires the exact confirmation phrase "UNINSTALL AI EMPLOYEE".
+    This endpoint stops accepting requests mid-execution since the process
+    itself is inside AI_HOME — the response is sent before the directory
+    is removed.
+    """
+    if body.confirm != "UNINSTALL AI EMPLOYEE":
+        raise HTTPException(
+            400,
+            "Confirmation text does not match. "
+            "Type exactly: UNINSTALL AI EMPLOYEE",
+        )
+
+    import shutil
+    import threading
+
+    errors: list = []
+
+    # ── Step 1: stop all bots gracefully ──────────────────────────────────────
+    ai_bin = AI_HOME / "bin" / "ai-employee"
+    try:
+        import subprocess as _sp
+        _sp.run([str(ai_bin), "stop", "--all"], timeout=30,
+                capture_output=True)
+        logger.warning("UNINSTALL: all bots stopped")
+    except Exception as exc:
+        errors.append(f"stop-all: {exc}")
+        logger.warning("UNINSTALL: stop-all warning: %s", exc)
+
+    logger.warning("UNINSTALL initiated by user — removing %s", AI_HOME)
+
+    # ── Step 2: remove the directory tree in a background thread ──────────────
+    # We respond first so the browser gets the confirmation, then delete.
+    def _do_remove():
+        import time as _t
+        _t.sleep(1)   # give uvicorn time to flush the HTTP response
+        try:
+            if AI_HOME.exists():
+                shutil.rmtree(AI_HOME, ignore_errors=True)
+        except Exception as exc:
+            logger.error("UNINSTALL rmtree error: %s", exc)
+
+    threading.Thread(target=_do_remove, daemon=True).start()
+
+    return JSONResponse({
+        "ok": True,
+        "message": (
+            "AI Employee is being uninstalled. "
+            "All bots have been stopped and the installation directory "
+            f"({AI_HOME}) will be deleted in seconds."
+        ),
+    })
+
+
+# ── Updater status / trigger ──────────────────────────────────────────────────
+
+_UPDATER_STATE_FILE = STATE_DIR / "updater.json"
+_UPDATER_COMMIT_FILE = STATE_DIR / "installed_commit.txt"
+_UPDATER_TRIGGER_FILE = AI_HOME / "run" / "updater.trigger"
+
+
+@app.get("/api/updater/status")
+def updater_status():
+    try:
+        if _UPDATER_STATE_FILE.exists():
+            data = json.loads(_UPDATER_STATE_FILE.read_text())
+            return JSONResponse(data)
+    except Exception:
+        pass
+    # Fallback: return minimal info
+    local_sha = ""
+    try:
+        if _UPDATER_COMMIT_FILE.exists():
+            local_sha = _UPDATER_COMMIT_FILE.read_text().strip()
+    except Exception:
+        pass
+    return JSONResponse({
+        "status":    "not_started",
+        "local_sha": local_sha,
+        "repo":      "F-game25/AI-EMPLOYEE",
+        "branch":    "main",
+    })
+
+
+@app.post("/api/updater/check")
+def updater_check():
+    """Trigger an immediate update check by writing the trigger file."""
+    try:
+        _UPDATER_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _UPDATER_TRIGGER_FILE.write_text("check")
+        return JSONResponse({"ok": True, "message": "Check triggered — results appear in Auto Update card within seconds"})
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/api/updater/update")
+def updater_update():
+    """Trigger an immediate forced update (downloads + restarts even if already up to date)."""
+    try:
+        _UPDATER_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _UPDATER_TRIGGER_FILE.write_text("force")
+        # Also send SIGUSR1 to the updater process if its PID is known
+        try:
+            if _UPDATER_STATE_FILE.exists():
+                state = json.loads(_UPDATER_STATE_FILE.read_text())
+                pid = state.get("pid")
+                if pid:
+                    import signal as _sig
+                    os.kill(int(pid), _sig.SIGUSR1)
+        except Exception:
+            pass
+        return JSONResponse({"ok": True, "message": "Update triggered — bots will restart momentarily if changes are found"})
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host=HOST, port=PORT)
-

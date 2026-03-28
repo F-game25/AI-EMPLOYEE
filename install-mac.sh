@@ -26,7 +26,7 @@ banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
 ║      AI EMPLOYEE - v4.0 INSTALLER  (macOS)           ║
-║  33 Agents • Claude AI • Ollama Local • WhatsApp     ║
+║  35 Agents • Claude AI • Ollama Local • WhatsApp     ║
 ╚══════════════════════════════════════════════════════╝
 EOF
 }
@@ -293,11 +293,11 @@ wizard() {
 
     # 8) Number of workers
     echo ""
-    ask "How many AI agents to enable? (1-20, default 20 = all):"
+    ask "How many AI agents to enable? (1-35, default 35 = all):"
     read -r WORKERS_INPUT < "$tty_in"
-    WORKERS="${WORKERS_INPUT:-20}"
-    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 20"; WORKERS=20; }
-    if (( WORKERS > 20 )); then warn "Maximum is 20; clamping to 20"; WORKERS=20; fi
+    WORKERS="${WORKERS_INPUT:-35}"
+    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 35"; WORKERS=35; }
+    if (( WORKERS > 35 )); then warn "Maximum is 35; clamping to 35"; WORKERS=35; fi
     if (( WORKERS < 1  )); then warn "Minimum is 1; clamping to 1";  WORKERS=1;  fi
     ok "Workers: $WORKERS enabled"
 
@@ -942,16 +942,55 @@ add_to_path() {
 # ─── Desktop launcher & autostart ────────────────────────────────────────────
 
 create_desktop_launcher() {
-    # ── macOS: .command file on Desktop ───────────────────────────────────────
-    if [[ -d "$HOME/Desktop" ]]; then
-        local cmd_file="$HOME/Desktop/AI-Employee.command"
-        cat > "$cmd_file" << CMD
+    # ── Write a smart launcher script that starts the bot OR opens the UI ───────
+    # If the bot is already running (UI responds), just open the browser.
+    # If it isn't running, open a new Terminal window and run start.sh.
+    local launcher_script="$AI_HOME/bin/ai-employee-launcher"
+    cat > "$launcher_script" << 'LAUNCHER'
 #!/usr/bin/env bash
-cd "$AI_HOME" && ./start.sh
+# AI Employee Smart Launcher (macOS)
+# • If the bot is already running  → open the dashboard in the browser
+# • If the bot is NOT running      → open Terminal and start the bot
+
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+
+# Load .env so ports are respected
+if [[ -f "$AI_HOME/.env" ]]; then
+    set -a; source "$AI_HOME/.env"; set +a
+fi
+
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+DASHBOARD_URL="http://127.0.0.1:${UI_PORT}"
+
+_bot_running() {
+    curl -sf --max-time 2 "$DASHBOARD_URL" >/dev/null 2>&1
+}
+
+if _bot_running; then
+    echo "AI Employee is running — opening dashboard…"
+    open "$DASHBOARD_URL"
+else
+    echo "Starting AI Employee…"
+    # Open a new Terminal window running start.sh
+    osascript -e "tell application \"Terminal\"
+        activate
+        do script \"cd \\\"$AI_HOME\\\" && ./start.sh\"
+    end tell"
+fi
+LAUNCHER
+    chmod +x "$launcher_script"
+    ok "Smart launcher written: $launcher_script"
+
+    # ── macOS: .command file on Desktop (double-click to launch) ──────────────
+    # ~/Desktop always exists on macOS, but create it defensively just in case.
+    mkdir -p "$HOME/Desktop"
+    local cmd_file="$HOME/Desktop/AI-Employee.command"
+    cat > "$cmd_file" << CMD
+#!/usr/bin/env bash
+exec "$AI_HOME/bin/ai-employee-launcher"
 CMD
-        chmod +x "$cmd_file"
-        ok "Desktop launcher created: ~/Desktop/AI-Employee.command (double-click to start)"
-    fi
+    chmod +x "$cmd_file"
+    ok "Desktop launcher placed: ~/Desktop/AI-Employee.command (double-click to start or open UI)"
 
     # ── macOS LaunchAgent (auto-start on login) ────────────────────────────────
     local launch_agents_dir="$HOME/Library/LaunchAgents"
@@ -1009,17 +1048,17 @@ done_message() {
     echo "  Ollama model: $OLLAMA_MODEL  (host: $OLLAMA_HOST)"
     echo "  Token:        ${TOKEN:0:16}...${TOKEN: -8}"
     echo "  Config:       ~/.ai-employee/config.json"
-    echo "  Dashboard:    http://localhost:${DASHBOARD_PORT:-3000}"
-    echo "  Problem UI:   http://127.0.0.1:${UI_PORT:-8787}"
+    echo "  Dashboard:    http://127.0.0.1:${UI_PORT:-8787}  ← primary control"
     echo "  Claude Agent: http://127.0.0.1:8788"
     echo "  Ollama Agent: http://127.0.0.1:8789"
     echo ""
     echo -e "${Y}Next steps:${NC}"
     echo ""
-    echo -e "  ${G}▸ No-terminal start (after first-time setup):${NC}"
+    echo -e "  ${G}▸ Desktop launcher (smart — starts bot or opens UI if already running):${NC}"
     if [[ -d "$HOME/Desktop" ]]; then
         echo "    • Double-click  ~/Desktop/AI-Employee.command  (macOS)"
     fi
+    echo "    • Or run directly: ~/.ai-employee/bin/ai-employee-launcher"
     echo "    • Or enable autostart: launchctl load -w ~/Library/LaunchAgents/com.ai-employee.plist"
     echo ""
     echo "  1. First start (terminal needed once to link WhatsApp):"
@@ -1033,10 +1072,17 @@ done_message() {
     echo "  3. Send 'Hello!' to yourself on WhatsApp"
     echo "     You will receive a welcome message confirming it works"
     echo ""
-    echo "  4. Switch agents via WhatsApp:"
-    echo "     switch to claude-agent   → visit http://127.0.0.1:8788"
-    echo "     switch to ollama-agent   → visit http://127.0.0.1:8789"
-    [[ -n "${OLLAMA_MODEL:-}" ]] && echo "     (run first: ollama pull $OLLAMA_MODEL)"
+    echo "  4. Send any task:"
+    echo "     ai-employee do \"find 10 leads for my business\""
+    echo "     ai-employee do \"write a sales email for my agency\""
+    [[ -n "${OLLAMA_MODEL:-}" ]] && echo ""
+    [[ -n "${OLLAMA_MODEL:-}" ]] && echo "  Ollama: run  ollama pull $OLLAMA_MODEL  before starting."
+    echo ""
+
+    # ── Auto-open the dashboard in the default browser ────────────────────────
+    local dashboard_url="http://127.0.0.1:${UI_PORT:-8787}"
+    echo -e "  ${C}▸ Opening dashboard in your browser…${NC}  $dashboard_url"
+    open "$dashboard_url" 2>/dev/null || true
     echo ""
 }
 
