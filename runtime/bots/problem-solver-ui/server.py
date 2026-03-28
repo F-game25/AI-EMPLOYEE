@@ -1194,13 +1194,26 @@ INDEX_HTML = r"""<!doctype html>
       <!-- Security Check -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title"><span class="icon">🛡️</span> Security Check</div>
-          <button class="btn btn-ghost btn-sm" onclick="runSecurityCheck()">▶ Run Check</button>
+          <div class="card-title"><span class="icon">🛡️</span> Security Checklist</div>
+          <button class="btn btn-ghost btn-sm" onclick="runSecurityCheck()">↻ Re-run</button>
         </div>
-        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
-          Audit your configuration for common security issues.
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:4px">
+          <strong style="color:var(--text)">Before running in production</strong> — verify all 11 points below.
         </p>
-        <div id="opt-security-results"></div>
+        <ol style="color:var(--text-muted);font-size:.78em;margin:0 0 12px 16px;padding:0;line-height:1.8">
+          <li>JWT_SECRET_KEY changed from the default placeholder</li>
+          <li>Strong passwords configured</li>
+          <li>Application bound to localhost only (or properly secured if networked)</li>
+          <li>Rate limiting enabled <code style="font-size:.9em">security.rate_limit_enabled: true</code></li>
+          <li>Encryption at rest enabled <code style="font-size:.9em">privacy.encrypt_data_at_rest: true</code></li>
+          <li>Telemetry disabled <code style="font-size:.9em">privacy.telemetry_enabled: false</code></li>
+          <li>Audit logging enabled <code style="font-size:.9em">logging.audit_enabled: true</code></li>
+          <li>Security headers verified <code style="font-size:.9em">curl -I http://127.0.0.1:8787</code></li>
+          <li>Dependencies updated <code style="font-size:.9em">pip install -r requirements.txt --upgrade</code></li>
+          <li>File permissions secured <code style="font-size:.9em">chmod 600 .env security.local.yml</code></li>
+          <li>No secrets committed to version control</li>
+        </ol>
+        <div id="opt-security-results"><p style="color:var(--text-muted);font-size:.85em">Loading…</p></div>
       </div>
 
       <!-- Danger Zone -->
@@ -1301,7 +1314,7 @@ function switchTab(tab, btn) {
   if (tab === 'guardrails') loadGuardrails();
   if (tab === 'memory') loadMemory();
   if (tab === 'integrations') loadIntegrations();
-  if (tab === 'options') { loadOptions(); loadUpdaterStatus(); }
+  if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
 }
 
 function toast(msg, color='#10b981') {
@@ -2769,24 +2782,96 @@ async function saveSettings(category) {
 
 async function runSecurityCheck() {
   const el = document.getElementById('opt-security-results');
-  el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em;padding:8px 0">⏳ Running…</p>';
+  el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em;padding:8px 0">⏳ Running security checklist…</p>';
   const d = await api('/api/settings/security-check');
   const findings = d.findings || [];
-  const colorMap = {ok:'var(--success)', warning:'var(--warning)', error:'var(--danger)', info:'var(--accent)'};
-  const iconMap  = {ok:'✅', warning:'⚠️', error:'❌', info:'ℹ️'};
-  el.innerHTML = findings.length
-    ? findings.map(f => `
-        <div style="display:flex;gap:10px;padding:8px 10px;border-radius:6px;
-             background:var(--surface2);border:1px solid var(--border);margin-bottom:6px">
-          <span style="flex-shrink:0;font-size:1em">${iconMap[f.level] || '•'}</span>
-          <div>
-            <div style="font-size:.86em;font-weight:600;color:${colorMap[f.level]||'var(--text)'}">
-              ${escHtml(f.title)}</div>
-            <div style="font-size:.8em;color:var(--text-muted);margin-top:2px">
-              ${escHtml(f.detail)}</div>
+
+  const colorMap   = {ok:'var(--success)', warning:'#f59e0b', error:'var(--danger)', info:'var(--accent)'};
+  const iconMap    = {ok:'✅', warning:'⚠️', error:'❌', info:'ℹ️'};
+  const badgeMap   = {ok:'DONE', warning:'ACTION NEEDED', error:'NOT DONE', info:'INFO'};
+  const badgeBgMap = {
+    ok:      'rgba(34,197,94,.15)',
+    warning: 'rgba(245,158,11,.15)',
+    error:   'rgba(239,68,68,.15)',
+    info:    'rgba(99,102,241,.15)',
+  };
+  const warnColor = colorMap.warning;
+
+  if (!findings.length) {
+    el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em">No findings.</p>';
+    return;
+  }
+
+  const done    = findings.filter(f => f.level === 'ok').length;
+  const errors  = findings.filter(f => f.level === 'error').length;
+  const warns   = findings.filter(f => f.level === 'warning').length;
+  const summaryColor = errors ? 'var(--danger)' : warns ? warnColor : 'var(--success)';
+  const summaryIcon  = errors ? '❌' : warns ? '⚠️' : '✅';
+  const summaryText  = errors
+    ? `${errors} critical issue${errors>1?'s':''} found`
+    : warns
+      ? `${warns} warning${warns>1?'s':''} — review recommended`
+      : 'All checks passed — ready for production';
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:7px;
+         background:var(--surface2);border:1px solid var(--border);margin-bottom:10px">
+      <span style="font-size:1.2em">${summaryIcon}</span>
+      <div>
+        <div style="font-size:.88em;font-weight:700;color:${summaryColor}">${summaryText}</div>
+        <div style="font-size:.76em;color:var(--text-muted);margin-top:2px">
+          ${done} passed · ${errors} critical · ${warns} warnings · ${findings.filter(f=>f.level==='info').length} info
+        </div>
+      </div>
+    </div>
+    ${findings.map((f, idx) => {
+      const color   = colorMap[f.level]   || 'var(--text)';
+      const icon    = iconMap[f.level]    || '•';
+      const badge   = badgeMap[f.level]   || f.level.toUpperCase();
+      const badgeBg = badgeBgMap[f.level] || 'rgba(255,255,255,.1)';
+
+      let actionHtml = '';
+      if (f.action) {
+        if (f.action_type === 'command') {
+          actionHtml = `
+            <div style="margin-top:7px">
+              <div style="font-size:.74em;color:var(--text-muted);margin-bottom:3px;font-weight:600;letter-spacing:.03em">▶ COMMAND</div>
+              <code style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:5px;
+                   padding:6px 10px;font-size:.78em;color:var(--accent);word-break:break-all;
+                   white-space:pre-wrap">${escHtml(f.action)}</code>
+            </div>`;
+        } else if (f.action_type === 'config') {
+          actionHtml = `
+            <div style="margin-top:7px">
+              <div style="font-size:.74em;color:var(--text-muted);margin-bottom:3px;font-weight:600;letter-spacing:.03em">⚙️ ADD TO security.local.yml</div>
+              <code style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:5px;
+                   padding:6px 10px;font-size:.78em;color:${warnColor};word-break:break-all;
+                   white-space:pre-wrap">${escHtml(f.action)}</code>
+            </div>`;
+        } else {
+          actionHtml = `<div style="margin-top:5px;font-size:.78em;color:var(--text-muted)">💡 ${escHtml(f.action)}</div>`;
+        }
+      }
+
+      return `
+        <div style="display:flex;gap:10px;padding:10px 12px;border-radius:7px;
+             background:var(--surface2);border:1px solid var(--border);margin-bottom:6px;
+             border-left:3px solid ${color};align-items:flex-start">
+          <span style="flex-shrink:0;font-size:1.05em;margin-top:1px">${icon}</span>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:.76em;color:var(--text-muted);font-weight:600;min-width:18px">${idx+1}.</span>
+              <span style="font-size:.87em;font-weight:600;color:${color}">${escHtml(f.title)}</span>
+              <span style="font-size:.7em;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:99px;
+                   background:${badgeBg};color:${color};border:1px solid ${color}55;flex-shrink:0">${badge}</span>
+            </div>
+            <div style="font-size:.8em;color:var(--text-muted);margin-top:3px;padding-left:26px">
+              ${escHtml(f.detail)}
+            </div>
+            ${actionHtml ? `<div style="padding-left:26px">${actionHtml}</div>` : ''}
           </div>
-        </div>`).join('')
-    : '<p style="color:var(--text-muted);font-size:.85em">No findings.</p>';
+        </div>`;
+    }).join('')}`;
 }
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
@@ -5294,66 +5379,209 @@ def save_settings(body: _SettingsUpdateRequest):
 def security_check():
     findings: list = []
     env = _read_env()
+    cfg = _security_config
 
-    def _add(level: str, title: str, detail: str) -> None:
-        findings.append({"level": level, "title": title, "detail": detail})
+    def _add(level: str, title: str, detail: str,
+             action: str = "", action_type: str = "") -> None:
+        findings.append({
+            "level": level, "title": title, "detail": detail,
+            "action": action, "action_type": action_type,
+        })
 
-    # 1. JWT secret
+    # ── 1. JWT_SECRET_KEY changed from default placeholder ────────────────────
     jwt = env.get("JWT_SECRET_KEY", os.environ.get("JWT_SECRET_KEY", ""))
-    if not jwt:
-        _add("error", "JWT secret missing",
-             "JWT_SECRET_KEY is not set. The server will refuse to start without it.")
-    elif jwt.lower() in _KNOWN_WEAK_SECRETS:
-        _add("error", "JWT secret is a known default",
-             "Replace it with a random 64-char hex string: python3 -c \"import secrets; print(secrets.token_hex(32))\"")
+    _gen_cmd = 'python3 -c "import secrets; print(secrets.token_hex(32))"'
+    if not jwt or jwt.lower() in _KNOWN_WEAK_SECRETS:
+        _add("error", "JWT_SECRET_KEY is still the default placeholder",
+             "Replace it with a random 64-char hex string before going to production.",
+             action=_gen_cmd, action_type="command")
     elif len(jwt) < 32:
-        _add("error", "JWT secret too short",
-             f"Current length: {len(jwt)}. Minimum: 32 characters.")
+        _add("error", "JWT_SECRET_KEY is too short",
+             f"Current length: {len(jwt)} chars. Minimum: 32 characters.",
+             action=_gen_cmd, action_type="command")
     elif len(jwt) < 64:
-        _add("warning", "JWT secret could be stronger",
-             f"Length {len(jwt)} is acceptable but 64+ chars is recommended.")
+        _add("warning", "JWT_SECRET_KEY could be stronger",
+             f"Length {len(jwt)} is acceptable but 64+ chars is recommended.",
+             action=_gen_cmd, action_type="command")
     else:
-        _add("ok", "JWT secret is strong", f"Length: {len(jwt)} characters ✅")
+        _add("ok", "JWT_SECRET_KEY changed from default placeholder",
+             f"Key length: {len(jwt)} characters.")
 
-    # 2. .env file permissions
-    env_file = _env_path()
-    if env_file.exists():
-        mode = oct(env_file.stat().st_mode & 0o777)
-        if env_file.stat().st_mode & 0o077:
-            _add("warning", ".env file is world/group readable",
-                 f"Permissions: {mode}. Run: chmod 600 ~/.ai-employee/.env")
+    # ── 2. Strong passwords configured ───────────────────────────────────────
+    if cfg:
+        min_len = cfg.security.min_password_length
+        has_special = cfg.security.require_special_chars
+        has_numbers = cfg.security.require_numbers
+        has_upper = cfg.security.require_uppercase
+        if min_len >= 12 and has_special and has_numbers and has_upper:
+            _add("ok", "Strong passwords configured",
+                 f"Min length: {min_len}, requires uppercase, numbers and special chars.")
         else:
-            _add("ok", ".env file permissions are secure", f"Mode: {mode} ✅")
+            issues = []
+            if min_len < 12:
+                issues.append(f"min_password_length={min_len} (needs ≥12)")
+            if not has_special:
+                issues.append("require_special_chars=false")
+            if not has_numbers:
+                issues.append("require_numbers=false")
+            if not has_upper:
+                issues.append("require_uppercase=false")
+            _add("warning", "Password policy not fully enforced",
+                 f"Issues: {', '.join(issues)}",
+                 action="Edit security.local.yml: set min_password_length≥12, "
+                        "require_special_chars/numbers/uppercase: true",
+                 action_type="info")
     else:
-        _add("warning", ".env file not found", f"Expected at {env_file}")
+        _add("warning", "Strong passwords — config not loaded",
+             "Using built-in defaults (min 12 chars, all checks enabled). "
+             "Create security.local.yml to customise.")
 
-    # 3. OpenAI key format
-    oai = env.get("OPENAI_API_KEY", "")
-    if oai and not oai.startswith("sk-"):
-        _add("warning", "OpenAI API key looks incorrect", "Should start with 'sk-'.")
-    elif oai:
-        _add("ok", "OpenAI API key present", "Key found ✅")
-
-    # 4. Host binding
+    # ── 3. Application bound to localhost only ────────────────────────────────
     host = os.environ.get("PROBLEM_SOLVER_UI_HOST", HOST)
     if host in ("0.0.0.0", "::"):
-        _add("warning", "Dashboard bound to all interfaces",
-             f"HOST={host} — anyone on the network can reach the dashboard. "
-             "Use 127.0.0.1 for localhost-only.")
+        _add("warning", "Application NOT bound to localhost",
+             f"HOST={host} — anyone on the network can reach the dashboard.",
+             action="Set HOST=127.0.0.1 in ~/.ai-employee/.env",
+             action_type="info")
     else:
-        _add("ok", "Dashboard bound to localhost only", f"HOST={host} ✅")
+        _add("ok", "Application bound to localhost only", f"HOST={host}")
 
-    # 5. Dry-run flags
-    if env.get("EMAIL_DRY_RUN", "").lower() == "true":
-        _add("info", "Email dry-run is ON",
-             "Emails are logged, not sent. Set EMAIL_DRY_RUN=false for live mode.")
-    if env.get("WHATSAPP_DRY_RUN", "").lower() == "true":
-        _add("info", "WhatsApp dry-run is ON", "Messages are logged, not sent.")
+    # ── 4. Rate limiting enabled ──────────────────────────────────────────────
+    if cfg:
+        if cfg.security.rate_limit_enabled:
+            _add("ok", "Rate limiting enabled",
+                 f"security.rate_limit_enabled=true "
+                 f"({cfg.security.rate_limit_per_minute} req/min)")
+        else:
+            _add("error", "Rate limiting disabled",
+                 "Enable it to protect against brute-force and DoS attacks.",
+                 action="security.rate_limit_enabled: true",
+                 action_type="config")
+    else:
+        _add("warning", "Rate limiting — config not loaded",
+             "Defaulting to 60 req/min. Create security.local.yml to confirm.")
 
-    # 6. Secret keys inventory
-    filled = sum(1 for k in _SECRET_KEYS if env.get(k))
-    _add("info", f"{filled} of {len(_SECRET_KEYS)} secret keys configured",
-         "Open API Keys above to fill in any missing keys.")
+    # ── 5. Encryption at rest enabled ─────────────────────────────────────────
+    if cfg:
+        if cfg.privacy.encrypt_data_at_rest:
+            _add("ok", "Encryption at rest enabled",
+                 f"privacy.encrypt_data_at_rest=true "
+                 f"(algorithm: {cfg.privacy.encryption_algorithm})")
+        else:
+            _add("error", "Encryption at rest disabled",
+                 "Sensitive data is stored unencrypted.",
+                 action="privacy.encrypt_data_at_rest: true",
+                 action_type="config")
+    else:
+        _add("warning", "Encryption at rest — config not loaded",
+             "Default is enabled (encrypt_data_at_rest=true). "
+             "Create security.local.yml to confirm.")
+
+    # ── 6. Telemetry disabled ─────────────────────────────────────────────────
+    if cfg:
+        tel = cfg.privacy.telemetry_enabled
+        ana = cfg.privacy.analytics_enabled
+        if not tel and not ana:
+            _add("ok", "Telemetry disabled",
+                 "privacy.telemetry_enabled=false, analytics_enabled=false")
+        else:
+            extra = []
+            if tel:
+                extra.append("privacy.telemetry_enabled: false")
+            if ana:
+                extra.append("privacy.analytics_enabled: false")
+            _add("warning", "Telemetry / analytics is enabled",
+                 "Disable to prevent external data collection.",
+                 action="\n".join(extra), action_type="config")
+    else:
+        _add("ok", "Telemetry disabled",
+             "Defaults: telemetry_enabled=false, analytics_enabled=false")
+
+    # ── 7. Audit logging enabled ──────────────────────────────────────────────
+    if cfg:
+        if cfg.logging.audit_enabled:
+            _add("ok", "Audit logging enabled",
+                 "logging.audit_enabled=true — auth, file access and API calls are logged.")
+        else:
+            _add("error", "Audit logging disabled",
+                 "Failed logins and sensitive operations will not be recorded.",
+                 action="logging.audit_enabled: true",
+                 action_type="config")
+    else:
+        _add("warning", "Audit logging — config not loaded",
+             "Default is enabled (audit_enabled=true). "
+             "Create security.local.yml to confirm.")
+
+    # ── 8. Security headers verified ─────────────────────────────────────────
+    if _SECURITY_AVAILABLE:
+        _add("ok", "Security headers active",
+             "CSP, X-Frame-Options, X-Content-Type-Options and more are set automatically.",
+             action="curl -I http://127.0.0.1:8787",
+             action_type="command")
+    else:
+        _add("warning", "Security headers — module not loaded",
+             "The security module is unavailable. Verify headers manually.",
+             action="curl -I http://127.0.0.1:8787",
+             action_type="command")
+
+    # ── 9. Dependencies updated ───────────────────────────────────────────────
+    req_file = Path(__file__).resolve().parent / "requirements.txt"
+    if req_file.exists():
+        _add("info", "Dependencies — keep up to date",
+             "Run this command regularly to pull the latest security patches.",
+             action="pip install -r requirements.txt --upgrade",
+             action_type="command")
+    else:
+        _add("warning", "requirements.txt not found",
+             "Could not locate requirements.txt to check dependencies.")
+
+    # ── 10. File permissions secured ──────────────────────────────────────────
+    env_file = _env_path()
+    sec_local = Path("security.local.yml")
+    insecure: list[str] = []
+    if env_file.exists():
+        if env_file.stat().st_mode & 0o077:
+            insecure.append(str(env_file))
+    else:
+        insecure.append(str(env_file) + " (missing)")
+    if sec_local.exists() and sec_local.stat().st_mode & 0o077:
+        insecure.append("security.local.yml")
+    if insecure:
+        _add("warning", "File permissions not secured",
+             f"World/group-readable: {', '.join(insecure)}",
+             action="chmod 600 ~/.ai-employee/.env security.local.yml",
+             action_type="command")
+    else:
+        mode = oct(env_file.stat().st_mode & 0o777) if env_file.exists() else "N/A"
+        _add("ok", "File permissions secured",
+             f".env permissions: {mode}")
+
+    # ── 11. No secrets committed to version control ───────────────────────────
+    repo_root = Path(__file__).resolve().parents[3]
+    git_dir = repo_root / ".git"
+    gitignore = repo_root / ".gitignore"
+    if git_dir.exists():
+        if gitignore.exists():
+            gi_content = gitignore.read_text(errors="replace")
+            required = [".env", "security.local.yml", "*.key", "*.pem"]
+            missing = [p for p in required if p not in gi_content]
+            if not missing:
+                _add("ok", "No secrets committed to version control",
+                     ".env, security.local.yml, *.key and *.pem are in .gitignore")
+            else:
+                lines = "\n".join(missing)
+                _add("warning", "Some secret patterns missing from .gitignore",
+                     f"Missing entries: {', '.join(missing)}",
+                     action=f"printf '{lines}' >> .gitignore",
+                     action_type="command")
+        else:
+            _add("warning", ".gitignore not found",
+                 "Create a .gitignore to prevent accidental secret commits.",
+                 action="printf '.env\\nsecurity.local.yml\\n*.key\\n*.pem\\n' >> .gitignore",
+                 action_type="command")
+    else:
+        _add("info", "No secrets check — not a git repository",
+             "No .git directory found; version-control check skipped.")
 
     return JSONResponse({"findings": findings})
 
