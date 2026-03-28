@@ -2878,6 +2878,53 @@ async function nukeData() {
   }
 }
 
+// ── Delete Complete Bot (two-step confirmation) ───────────────────────────────
+function deleteBotStep2() {
+  const c1 = document.getElementById('uninstall-check1');
+  const c2 = document.getElementById('uninstall-check2');
+  const el = document.getElementById('uninstall-result');
+  if (!c1 || !c2) return;
+  if (!c1.checked || !c2.checked) {
+    el.style.color = 'var(--danger)';
+    el.textContent = '❌ Please tick both checkboxes before continuing.';
+    return;
+  }
+  el.textContent = '';
+  document.getElementById('uninstall-step2').style.display = 'block';
+  document.getElementById('uninstall-confirm').focus();
+}
+
+function deleteBotCancel() {
+  document.getElementById('uninstall-step2').style.display = 'none';
+  document.getElementById('uninstall-confirm').value = '';
+  document.getElementById('uninstall-check1').checked = false;
+  document.getElementById('uninstall-check2').checked = false;
+  const el = document.getElementById('uninstall-result');
+  el.textContent = '';
+}
+
+async function deleteBotFinal() {
+  const confirm_val = document.getElementById('uninstall-confirm').value;
+  const el = document.getElementById('uninstall-result');
+  el.style.color = 'var(--text-muted)';
+  el.textContent = '⏳ Stopping all bots and removing installation…';
+  const r = await api('/api/settings/uninstall', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({confirm: confirm_val})
+  });
+  if (r.ok) {
+    el.style.color = 'var(--success)';
+    el.textContent = '✅ AI Employee has been fully uninstalled. You can close this tab.';
+    // Disable all further interaction
+    document.querySelectorAll('#tab-options button, #tab-options input').forEach(b => b.disabled = true);
+  } else {
+    el.style.color = 'var(--danger)';
+    el.textContent = '❌ ' + (r.detail || 'Uninstall failed');
+    document.getElementById('uninstall-confirm').value = '';
+  }
+}
+
 // Auto-refresh dashboard every 30s
 setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 </script>
@@ -5353,6 +5400,67 @@ def nuke_data(body: _NukeRequest):
 
     logger.warning("DATA NUKE performed — deleted: %s", deleted)
     return JSONResponse({"ok": True, "deleted": deleted, "errors": errors})
+
+
+class _UninstallRequest(BaseModel):
+    confirm: str = ""
+
+
+@app.post("/api/settings/uninstall")
+def uninstall_bot(body: _UninstallRequest):
+    """Stop all bots and remove the entire AI_HOME directory tree.
+
+    Requires the exact confirmation phrase "UNINSTALL AI EMPLOYEE".
+    This endpoint stops accepting requests mid-execution since the process
+    itself is inside AI_HOME — the response is sent before the directory
+    is removed.
+    """
+    if body.confirm != "UNINSTALL AI EMPLOYEE":
+        raise HTTPException(
+            400,
+            "Confirmation text does not match. "
+            "Type exactly: UNINSTALL AI EMPLOYEE",
+        )
+
+    import shutil
+    import threading
+
+    errors: list = []
+
+    # ── Step 1: stop all bots gracefully ──────────────────────────────────────
+    ai_bin = AI_HOME / "bin" / "ai-employee"
+    try:
+        import subprocess as _sp
+        _sp.run([str(ai_bin), "stop", "--all"], timeout=30,
+                capture_output=True)
+        logger.warning("UNINSTALL: all bots stopped")
+    except Exception as exc:
+        errors.append(f"stop-all: {exc}")
+        logger.warning("UNINSTALL: stop-all warning: %s", exc)
+
+    logger.warning("UNINSTALL initiated by user — removing %s", AI_HOME)
+
+    # ── Step 2: remove the directory tree in a background thread ──────────────
+    # We respond first so the browser gets the confirmation, then delete.
+    def _do_remove():
+        import time as _t
+        _t.sleep(1)   # give uvicorn time to flush the HTTP response
+        try:
+            if AI_HOME.exists():
+                shutil.rmtree(AI_HOME, ignore_errors=True)
+        except Exception as exc:
+            logger.error("UNINSTALL rmtree error: %s", exc)
+
+    threading.Thread(target=_do_remove, daemon=True).start()
+
+    return JSONResponse({
+        "ok": True,
+        "message": (
+            "AI Employee is being uninstalled. "
+            "All bots have been stopped and the installation directory "
+            f"({AI_HOME}) will be deleted in seconds."
+        ),
+    })
 
 
 # ── Updater status / trigger ──────────────────────────────────────────────────
