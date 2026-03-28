@@ -91,19 +91,6 @@ def _load_crm() -> dict:
         except Exception:
             pass
     return {"items": []}
-def _load_state() -> dict:
-    if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text())
-        except Exception:
-            pass
-    return {
-        "templates": {},
-        "stats": {"total_messages": 0, "total_replies": 0, "reply_rate": 0.0},
-        "last_updated": _now_iso(),
-    }
-
-
 
 
 

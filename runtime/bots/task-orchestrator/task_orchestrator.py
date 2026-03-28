@@ -24,7 +24,6 @@ State files:
   ~/.ai-employee/config/agent_capabilities.json       — 20-agent capabilities map
   ~/.ai-employee/state/agent_tasks/<agent>.queue.jsonl — per-agent task queues
 """
-import concurrent.futures
 import json
 import logging
 import os
