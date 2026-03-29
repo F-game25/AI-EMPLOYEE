@@ -3,6 +3,60 @@
 > **Your AI leverage machine for solo founders & small agencies** — one install, one command, and your AI employee starts generating leads, writing sales emails, and automating your ops.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Platform: Linux](https://img.shields.io/badge/Platform-Linux-informational.svg)](#-install--choose-your-platform)
+[![Platform: macOS](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)](#-install--choose-your-platform)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078d4.svg)](#-install--choose-your-platform)
+[![Agents: 35](https://img.shields.io/badge/Agents-35-success.svg)](#-new-niche-specialists--ai-growth-agency)
+[![Skills: 147](https://img.shields.io/badge/Skills-147-orange.svg)](#skills-library-147-skills)
+
+---
+
+## 📑 Table of Contents
+
+- [Who is this for?](#who-is-this-for)
+- [✨ Key Features](#-key-features)
+- [⚡ Quickstart](#-quickstart--your-first-business-result-in-15-minutes)
+- [🎯 Use Cases](#-use-cases)
+- [🗂️ Three Modes](#️-three-modes--start-simple-scale-when-ready)
+- [📋 Goal-Based Templates](#-goal-based-templates)
+- [🏗️ Architecture Overview](#️-architecture-overview)
+- [🖥️ Dashboard](#️-dashboard-primary-control)
+- [📱 WhatsApp Commands](#-whatsapp--quick-commands--notifications)
+- [🔧 CLI Reference](#-cli-reference)
+- [📈 ROI Metrics](#-roi-metrics)
+- [🔒 Guardrails](#-guardrails)
+- [Requirements](#requirements)
+- [🖥️ Install](#️-install--choose-your-platform)
+- [🎮 Discord Bot](#-discord-bot--control-panel--live-notifications)
+- [🔌 Integrations](#-integrations)
+- [🚀 New Niche Specialists](#-new-niche-specialists--ai-growth-agency)
+- [Skills Library](#skills-library-147-skills)
+- [🧪 Safety Self-Test](#-safety-self-test--verify-everything-works)
+- [💻 Complete Terminal Reference](#-complete-terminal-command-reference)
+- [Security](#security)
+- [Troubleshooting](#troubleshooting)
+- [🤝 Contributing](#-contributing)
+- [License](#license)
+
+---
+
+## ✨ Key Features
+
+| Feature | Description |
+|---|---|
+| 🤖 **35 Specialist Agents** | A full team of AI agents — each expert in a specific business domain |
+| 🛠️ **147 Reusable Skills** | Modular skill library you can compose into custom agents |
+| 🖥️ **Web Dashboard** | Full control panel at `http://127.0.0.1:8787` — no terminal needed |
+| 🗂️ **Three Modes** | Start with 3 agents (Starter), grow to 8 (Business), or unleash all 35 (Power) |
+| 📋 **Goal Templates** | One-click business templates: 10 leads in 24h, close €1k deal, automate support |
+| 🧠 **AI Router** | Automatically routes tasks to the best model (GPT-4o, Claude, or local Ollama) |
+| 📊 **ROI Tracking** | Tracks leads generated, deals closed, hours saved, and € value created |
+| 🔒 **Guardrails** | Human-in-the-loop approval queue for high-risk actions (bulk email, purchases) |
+| 📱 **WhatsApp + Discord** | Get notified and send commands from your phone or Discord server |
+| 🆓 **Works Locally** | Fully operational without any paid API — uses Ollama for free local AI |
+| 🔄 **Memory & CRM** | Built-in lead CRM with follow-up tracking and per-lead memory |
+| ⏱️ **Scheduler** | Schedule recurring tasks (daily lead generation, weekly reports, etc.) |
 
 ---
 
@@ -65,6 +119,133 @@ ai-employee do "create a 30-day content calendar for LinkedIn"
 ```
 
 Your AI employee handles it — routing to the right specialist agents internally. From the outside, it's just one AI you talk to.
+
+---
+
+## 🎯 Use Cases
+
+AI Employee is designed for real-world business automation. Here are common scenarios:
+
+### 🏢 Solo Founder / Freelancer
+> *"I need leads but can't afford a sales team."*
+
+```bash
+ai-employee do "find 10 qualified leads for my web design agency in London"
+ai-employee do "write personalised cold emails for each lead"
+ai-employee do "schedule follow-up messages for leads that don't reply in 3 days"
+```
+
+**Result:** Automated lead generation + outreach pipeline running 24/7 — no SDR needed.
+
+---
+
+### 🛍️ E-commerce Store Owner
+> *"I spend hours on content and customer support every day."*
+
+```bash
+ai-employee do "deploy template run-ecommerce-on-autopilot"
+ai-employee do "create 30-day Instagram content calendar for my supplement brand"
+ai-employee do "draft answers for the top 20 FAQs from my customers"
+```
+
+**Result:** Content created in minutes, support FAQs handled automatically, store running on autopilot.
+
+---
+
+### 📊 Digital Marketing Agency
+> *"I need to deliver reports and campaigns faster for more clients."*
+
+```bash
+ai-employee do "analyse competitor SEO for my client in the fitness niche"
+ai-employee do "create Meta ad copy with 3 variants for A/B testing"
+ai-employee do "generate monthly performance report with KPIs"
+```
+
+**Result:** Deliverables produced at 10× speed — handle more clients without more headcount.
+
+---
+
+### 💼 B2B Sales Professional
+> *"I need to hit my quota but prospecting takes all my time."*
+
+```bash
+ai-employee do "hunt 20 qualified SaaS leads in Germany"
+ai-employee do "build a 5-step cold outreach sequence for fintech decision makers"
+ai-employee do "help me handle the objection: it's too expensive"
+```
+
+**Result:** Fully automated prospecting + personalised outreach + objection-handling scripts on demand.
+
+---
+
+### 📱 Content Creator / Coach
+> *"I can't keep up with posting consistently across platforms."*
+
+```bash
+ai-employee do "repurpose this blog post into 5 LinkedIn posts and 3 tweet threads"
+ai-employee do "write a YouTube video script about my coaching framework for online entrepreneurs"
+ai-employee do "create a 30-day LinkedIn growth plan to reach 10k followers"
+```
+
+**Result:** One piece of content becomes a full multi-platform campaign in seconds.
+
+---
+
+## 🏗️ Architecture Overview
+
+AI Employee is a multi-layer system where a single user command fans out across specialised agents:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        User Interfaces                          │
+│   Dashboard (port 8787)  │  CLI (ai-employee do)  │  WhatsApp  │
+│                          │                        │  Discord   │
+└──────────────────────────┬─────────────────────────────────────┘
+                           │
+                    ┌──────▼───────┐
+                    │  Problem     │
+                    │  Solver      │  ← Watchdog + task router
+                    │  (Orchestr.) │
+                    └──────┬───────┘
+                           │
+             ┌─────────────┼─────────────────┐
+             │             │                 │
+      ┌──────▼──────┐ ┌────▼─────┐  ┌───────▼──────┐
+      │  AI Router  │ │ Scheduler│  │  Guardrails  │
+      │ (GPT-4o /   │ │ (cron-   │  │  (approval   │
+      │  Claude /   │ │  based)  │  │   queue)     │
+      │  Ollama)    │ └──────────┘  └──────────────┘
+      └──────┬──────┘
+             │
+   ┌─────────┼─────────────────────────────────┐
+   │         │                                 │
+┌──▼──┐  ┌───▼───┐  ┌───────┐  ┌──────────┐  ┌▼──────────────┐
+│Lead │  │Content│  │Sales  │  │Analytics │  │ 27+ more      │
+│Hunt.│  │Master │  │Closer │  │& Reports │  │ specialist    │
+│Elite│  │       │  │Pro    │  │          │  │ agents...     │
+└──┬──┘  └───┬───┘  └───┬───┘  └────┬─────┘  └───────┬───────┘
+   │         │           │           │                │
+   └─────────┴───────────┴───────────┴────────────────┘
+                         │
+               ┌─────────▼──────────┐
+               │  Shared Services   │
+               │  Memory / CRM      │
+               │  ROI Tracker       │
+               │  Feedback Loop     │
+               └────────────────────┘
+```
+
+**Key components:**
+
+| Component | Role |
+|---|---|
+| **Problem Solver** | Orchestrator — watches all bots, routes tasks, restarts crashed bots |
+| **AI Router** | Picks the best LLM per task type (sales→GPT-4o, analysis→Claude, local→Ollama) |
+| **35 Specialist Agents** | Each expert in one domain; task execution mode: Auto (orchestrator decides), Parallel (all at once), or Single (one agent) |
+| **Skills Library** | 147 reusable building blocks composed into agents |
+| **Memory / CRM** | Per-lead memory and interaction history persisted in JSON |
+| **Guardrails** | Human approval queue for high-risk actions before execution |
+| **Scheduler** | Cron-based task runner for recurring automation |
 
 ---
 
@@ -1317,6 +1498,34 @@ cat ~/.ai-employee/logs/sync.log
 ```bash
 crontab -e   # delete the sync line
 ```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Whether you're fixing a bug, adding a new agent skill, or improving documentation — every contribution helps.
+
+### How to contribute
+
+1. **Fork** the repository and create your branch from `main`
+2. **Make your changes** — follow the existing code style and patterns
+3. **Test your changes** locally with `ai-employee selftest`
+4. **Open a Pull Request** with a clear description of what you changed and why
+
+### Ideas for contributions
+
+- 🤖 **New agent skills** — add skills to the 147-skill library (see `runtime/bots/skills/`)
+- 🐛 **Bug fixes** — check the [open issues](https://github.com/F-game25/AI-EMPLOYEE/issues)
+- 📖 **Documentation** — improve guides, add examples, fix typos
+- 🌍 **Translations** — translate the README or UI to other languages
+- 🔌 **Integrations** — add new platform integrations (Slack, Notion, HubSpot, etc.)
+
+### Reporting bugs
+
+Open an [issue](https://github.com/F-game25/AI-EMPLOYEE/issues) and include:
+- Your operating system and Python version (`python3 --version`)
+- The exact command or action that triggered the bug
+- The error output from `ai-employee logs <bot>` or `ai-employee doctor`
 
 ---
 
