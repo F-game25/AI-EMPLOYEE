@@ -340,8 +340,6 @@ INDEX_HTML = r"""<!doctype html>
     @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
     @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
     @keyframes countUp{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
-    @keyframes progressFill{from{width:0}to{width:var(--target-width,100%)}}
-    @keyframes orbitDot{0%{transform:rotate(0deg) translateX(18px) rotate(0deg)}100%{transform:rotate(360deg) translateX(18px) rotate(-360deg)}}
     @keyframes headerGlow{0%,100%{box-shadow:0 2px 30px rgba(99,102,241,.2)}50%{box-shadow:0 2px 50px rgba(99,102,241,.45)}}
 
     /* ── Header ── */
@@ -691,12 +689,8 @@ INDEX_HTML = r"""<!doctype html>
     .empty .icon{font-size:2.5em;margin-bottom:10px;opacity:.4}
     .empty p{font-size:.88em}
 
-    /* ── Shimmer skeleton ── */
-    .skeleton{
-      background:linear-gradient(90deg,var(--surface2) 25%,rgba(255,255,255,.05) 50%,var(--surface2) 75%);
-      background-size:400px 100%;animation:shimmer 1.5s infinite;
-      border-radius:4px;height:14px;
-    }
+    /* ── Spinner (for button loading states) ── */
+    .spinner{display:inline-block;animation:spin .8s linear infinite}
 
     /* ── Divider ── */
     hr{border:none;border-top:1px solid var(--border);margin:16px 0}
@@ -1661,10 +1655,11 @@ function animateCount(id, target) {
   const duration = 500;
   const startTime = performance.now();
   const diff = target - prev;
+  const round = diff >= 0 ? Math.ceil : Math.floor;
   function step(now) {
     const elapsed = Math.min(now - startTime, duration);
     const eased = 1 - Math.pow(1 - elapsed / duration, 3);
-    el.textContent = Math.round(prev + diff * eased);
+    el.textContent = round(prev + diff * eased);
     if (elapsed < duration) requestAnimationFrame(step);
     else el.textContent = target;
   }
@@ -1746,7 +1741,7 @@ async function startAll() {
   _setStartStopDisabled(true);
   // Update hero button text to show loading state
   const heroBtn = document.getElementById('hero-start-btn');
-  if (heroBtn) heroBtn.innerHTML = '<span style="animation:spin .8s linear infinite;display:inline-block">⟳</span> Starting…';
+  if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Starting…';
   await api('/api/bots/start-all', {method:'POST'});
   toast('▶ Starting all bots…');
   setTimeout(() => {
@@ -1760,7 +1755,7 @@ async function stopAll() {
   if (!confirm('Stop all running bots?')) return;
   _setStartStopDisabled(true);
   const heroBtn = document.getElementById('hero-stop-btn');
-  if (heroBtn) heroBtn.innerHTML = '<span style="animation:spin .8s linear infinite;display:inline-block">⟳</span> Stopping…';
+  if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Stopping…';
   await api('/api/bots/stop-all', {method:'POST'});
   toast('■ Stopping all bots…', '#ef4444');
   setTimeout(() => {
