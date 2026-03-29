@@ -1,9 +1,9 @@
 {
     "_meta": {
         "version": "2.1",
-        "description": "Capabilities map for all 20 AI agents \u2014 used by task-orchestrator for intelligent routing",
-        "total_agents": 35,
-        "updated_at": "2026-03-28",
+        "description": "Capabilities map for all AI agents \u2014 used by task-orchestrator for intelligent routing",
+        "total_agents": 39,
+        "updated_at": "2026-03-29",
         "model_routing": {
             "sales": {
                 "provider": "openai",
@@ -889,6 +889,175 @@
                 "UX heatmap insights",
                 "conversion copy",
                 "quick-win CRO"
+            ],
+            "parallel_capable": true
+        },
+        "engineering-assistant": {
+            "description": "Engineering Assistant \u2014 full-stack software engineering help: frontend (React/Vue/TS), backend (APIs/DBs), AI/ML engineering, code review, DevOps, database design, security, and architecture",
+            "category": "engineering",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "frontend_development",
+                "backend_architecture",
+                "ai_ml_engineering",
+                "code_review",
+                "devops_infrastructure",
+                "database_design",
+                "security_review",
+                "system_architecture",
+                "refactoring",
+                "debugging"
+            ],
+            "commands": [
+                "eng frontend",
+                "eng backend",
+                "eng aiml",
+                "eng review",
+                "eng devops",
+                "eng database",
+                "eng security",
+                "eng architecture",
+                "eng refactor",
+                "eng debug",
+                "eng status"
+            ],
+            "specialties": [
+                "React/Vue/TypeScript",
+                "FastAPI/Node.js/Go",
+                "LLM integration & RAG",
+                "code review",
+                "Docker/Kubernetes",
+                "PostgreSQL optimization",
+                "OWASP security",
+                "microservices architecture"
+            ],
+            "parallel_capable": true
+        },
+        "ui-designer": {
+            "description": "UI Designer \u2014 design systems, component specs, accessibility audits (WCAG 2.1), color palettes, typography, responsive layouts, dark mode, and developer handoff documentation",
+            "category": "design",
+            "skills": [
+                "design_system_creation",
+                "component_specification",
+                "ui_audit",
+                "color_palette_design",
+                "typography_system",
+                "responsive_layout",
+                "accessibility_audit",
+                "dark_mode_design",
+                "user_flow_design",
+                "developer_handoff"
+            ],
+            "commands": [
+                "design system",
+                "design component",
+                "design audit",
+                "design colors",
+                "design typography",
+                "design layout",
+                "design accessibility",
+                "design darkmode",
+                "design flows",
+                "design handoff",
+                "design status"
+            ],
+            "specialties": [
+                "design token systems",
+                "WCAG 2.1 AA compliance",
+                "Figma component specs",
+                "CSS design tokens",
+                "responsive design",
+                "dark mode strategy",
+                "developer handoff"
+            ],
+            "parallel_capable": true
+        },
+        "qa-tester": {
+            "description": "QA Tester \u2014 test plans, test case generation, API testing, bug reports, performance testing, security testing (OWASP), accessibility testing, and production readiness certification",
+            "category": "testing",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "test_plan_creation",
+                "test_case_generation",
+                "api_testing",
+                "bug_reporting",
+                "performance_testing",
+                "security_testing",
+                "accessibility_testing",
+                "coverage_analysis",
+                "readiness_certification",
+                "test_automation_strategy"
+            ],
+            "commands": [
+                "qa plan",
+                "qa testcases",
+                "qa api",
+                "qa bug",
+                "qa performance",
+                "qa security",
+                "qa accessibility",
+                "qa coverage",
+                "qa readiness",
+                "qa automate",
+                "qa status"
+            ],
+            "specialties": [
+                "BDD test cases (Given/When/Then)",
+                "pytest/Jest/Playwright",
+                "OWASP security testing",
+                "WCAG accessibility audits",
+                "k6/Locust load testing",
+                "production readiness review",
+                "evidence-based certification"
+            ],
+            "parallel_capable": true
+        },
+        "paid-media-specialist": {
+            "description": "Paid Media Specialist \u2014 Google Ads and Meta Ads strategy, campaign architecture, keyword research, ad copy, audience targeting, conversion tracking, budget allocation, and performance diagnosis",
+            "category": "marketing",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "ppc_campaign_architecture",
+                "google_ads_strategy",
+                "meta_ads_strategy",
+                "keyword_research",
+                "ad_copy_creation",
+                "audience_strategy",
+                "conversion_tracking",
+                "budget_allocation",
+                "performance_diagnosis",
+                "forecasting"
+            ],
+            "commands": [
+                "ppc build",
+                "ppc audit",
+                "ppc budget",
+                "ppc keywords",
+                "ppc adcopy",
+                "ppc audiences",
+                "ppc tracking",
+                "ppc report",
+                "ppc forecast",
+                "ppc diagnose",
+                "ppc status"
+            ],
+            "specialties": [
+                "Google Ads account architecture",
+                "Meta/Facebook Ads strategy",
+                "Performance Max campaigns",
+                "bidding strategy selection",
+                "negative keyword management",
+                "RSA ad copy",
+                "audience segmentation",
+                "ROAS optimization"
+            ],
+            "collaborates_with": [
+                "ad-campaign-wizard",
+                "conversion-rate-optimizer",
+                "growth-hacker"
             ],
             "parallel_capable": true
         }
