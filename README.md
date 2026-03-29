@@ -73,16 +73,69 @@ Your AI employee handles it — routing to the right specialist agents internall
 ```bash
 ai-employee mode starter    # 3 agents, 5 commands — zero overwhelm
 ai-employee mode business   # templates, ROI tracking, scheduling (recommended)
-ai-employee mode power      # all 35 agents, 147 skills, full dashboard
+ai-employee mode power      # all 39 agents, 147+ skills, full dashboard
 ```
 
 | Mode | Agents | What you see | Best for |
 |---|---|---|---|
 | **Starter** | 3 | 5 commands, no dashboard overload | Getting your first results |
 | **Business** | 8 | Templates, ROI, scheduling | Daily business automation |
-| **Power** | 35 | Everything — full dashboard, all skills | Advanced users |
+| **Power** | 39 | Everything — full dashboard, all skills | Advanced users |
 
 Change mode any time: `ai-employee mode business`
+
+---
+
+## 🆕 New Agent Divisions (inspired by [agency-agents](https://github.com/msitarzewski/agency-agents))
+
+Four new specialist divisions have been added, bringing the total to **39 agents**:
+
+### 💻 Engineering Division
+| Agent | Commands | What it does |
+|---|---|---|
+| **Engineering Assistant** | `eng frontend`, `eng backend`, `eng aiml`, `eng review`, `eng devops`, `eng database`, `eng security`, `eng architecture`, `eng refactor`, `eng debug` | Full-stack dev help: React/Vue, FastAPI/Node, AI/ML engineering, code review, Docker/K8s, PostgreSQL, OWASP security, system architecture |
+
+### 🎨 Design Division
+| Agent | Commands | What it does |
+|---|---|---|
+| **UI Designer** | `design system`, `design component`, `design audit`, `design colors`, `design typography`, `design layout`, `design accessibility`, `design darkmode`, `design flows`, `design handoff` | Design systems, WCAG accessibility, component specs, color palettes, dark mode strategy, developer handoff |
+
+### 🧪 Testing Division
+| Agent | Commands | What it does |
+|---|---|---|
+| **QA Tester** | `qa plan`, `qa testcases`, `qa api`, `qa bug`, `qa performance`, `qa security`, `qa accessibility`, `qa coverage`, `qa readiness`, `qa automate` | Test plans, BDD test cases, API testing, load testing, OWASP security tests, production readiness certification |
+
+### 💰 Paid Media Division
+| Agent | Commands | What it does |
+|---|---|---|
+| **Paid Media Specialist** | `ppc build`, `ppc audit`, `ppc budget`, `ppc keywords`, `ppc adcopy`, `ppc audiences`, `ppc tracking`, `ppc report`, `ppc forecast`, `ppc diagnose` | Google Ads/Meta Ads strategy, account architecture, PPC audits, ad copy (RSA), audience targeting, conversion tracking |
+
+### 🤖 Claude Code Integration (`.claude/agents/`)
+
+AI Employee now includes agent prompt files compatible with **[Claude Code](https://docs.anthropic.com/en/docs/claude-code/)**. Copy them to activate in your Claude Code sessions:
+
+```bash
+# Copy agents to your Claude Code directory
+cp -r .claude/agents/* ~/.claude/agents/
+
+# Then activate in Claude Code:
+# "Activate Engineering Assistant and review this code for security issues"
+# "Activate UI Designer and create a design system for my SaaS product"
+# "Activate QA Tester and write test cases for the checkout flow"
+# "Activate PPC Strategist and build a Google Ads campaign structure"
+```
+
+**Available Claude Code agents:**
+- `engineering-frontend-developer.md` — React/Vue/TypeScript, performance, accessibility
+- `engineering-backend-architect.md` — APIs, databases, microservices, cloud
+- `engineering-ai-engineer.md` — ML models, LLM integration, MLOps
+- `engineering-security-engineer.md` — threat modeling, OWASP, secure code review
+- `design-ui-designer.md` — design systems, WCAG, component specs
+- `testing-reality-checker.md` — evidence-based QA certification
+- `product-manager.md` — PRDs, roadmaps, sprint planning, outcome measurement
+- `sales-outbound-strategist.md` — signal-based prospecting, ICP, sequences
+- `paid-media-ppc-strategist.md` — Google Ads, Meta Ads, campaign architecture
+- `marketing-growth-hacker.md` — viral loops, funnel optimization, experiments
 
 ---
 
