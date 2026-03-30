@@ -298,9 +298,61 @@ def _handle_sigusr1(sig, frame):
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
+def _once() -> None:
+    """One-shot startup check: run check_and_update() once, print a brief
+    summary to stdout, then exit.  Used by start.sh at boot time so that
+    the latest code is in place before any bot is started."""
+    import sys
+
+    # Silence the console log handler for the one-shot run so the terminal
+    # only shows the clean summary line we print ourselves.
+    for h in logging.getLogger().handlers:
+        if isinstance(h, logging.StreamHandler) and h.stream in (
+            sys.stdout, sys.stderr
+        ):
+            h.setLevel(logging.ERROR)
+
+    try:
+        result = check_and_update()
+    except Exception as e:
+        print(
+            f"\033[1;33m⚠\033[0m Update check error: {type(e).__name__}: {e}",
+            flush=True,
+        )
+        sys.exit(1)
+
+    status = result.get("status", "unknown")
+    if status == "updated":
+        sha   = (result.get("update_sha") or "unknown")[:8]
+        n     = len(result.get("downloaded_files", []))
+        bots  = result.get("restarted_bots") or []
+        bline = f", restarted: {', '.join(bots)}" if bots else ""
+        print(
+            f"\033[0;32m✓\033[0m Updated to {sha} — {n} file(s) downloaded{bline}",
+            flush=True,
+        )
+    elif status in ("up_to_date", "initialized"):
+        sha = (result.get("local_sha") or "unknown")[:8]
+        print(f"\033[0;32m✓\033[0m AI Employee is up to date ({sha})", flush=True)
+    else:
+        print(
+            f"\033[1;33m⚠\033[0m Update check returned: {status} "
+            "(check logs for details)",
+            flush=True,
+        )
+
+
 def main() -> None:
+    import sys
+
     global _force_check  # modified by _handle_sigusr1 and the trigger-file check
 
+    # ── One-shot startup mode (called by start.sh) ────────────────────────────
+    if "--once" in sys.argv:
+        _once()
+        return
+
+    # ── Background polling mode ───────────────────────────────────────────────
     logger.info("Auto-updater started  repo=%s  branch=%s  interval=%ds",
                 REPO, BRANCH, INTERVAL)
 
