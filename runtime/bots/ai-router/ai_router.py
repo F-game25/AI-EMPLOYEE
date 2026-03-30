@@ -2,19 +2,25 @@
 
 Routes AI queries to the best available provider in priority order:
   1. Ollama  (local, free, private — preferred for general tasks)
-  2. Anthropic Claude  (cloud, costs tokens — preferred for analytics tasks)
-  3. OpenAI GPT-4o  (cloud, costs tokens — preferred for sales/persuasion tasks)
+  2. NVIDIA NIM  (cloud, free-tier — reasoning/coding/bulk via Nemotron/Qwen/Llama)
+  3. Anthropic Claude  (cloud, costs tokens — preferred for analytics tasks)
+  4. OpenAI GPT-4o  (cloud, costs tokens — preferred for sales/persuasion tasks)
 
 Per-agent model routing selects the optimal provider for each agent category:
   - sales / persuasion (lead-hunter, email-ninja, web-sales) → OpenAI GPT-4o
   - analytics / research (data-analyst, intel-agent) → Anthropic Claude
+  - reasoning / deep logic → NVIDIA Nemotron (nvidia/llama-3.3-nemotron-super-49b-v1)
+  - coding → NVIDIA Qwen Coder (qwen/qwen2.5-coder-32b-instruct)
+  - bulk / simple → NVIDIA Llama 8B (meta/llama-3.1-8b-instruct)
   - general / all others → Ollama (local, free)
 
 Per-agent model routing (query_ai_for_agent):
   - sales / persuasive   → OpenAI GPT-4o (best persuasive writing)
   - analytical / data    → Anthropic Claude (long context, deep reasoning)
+  - reasoning            → NVIDIA Nemotron (deep logic, complex analysis)
+  - coding               → NVIDIA Qwen Coder (code generation, review)
+  - bulk                 → NVIDIA Llama 8B (fast, high-volume tasks)
   - creative             → OpenAI GPT-4o (best creative output)
-  - coding               → OpenAI GPT-4o (strong code generation)
   - general / local      → Ollama (free, privacy-preserving)
 
 Also provides search_web() for web research tasks:
@@ -34,11 +40,13 @@ Usage (from any bot that adds this directory to sys.path):
 
     result = query_ai("Explain quantum computing in simple terms")
     print(result["answer"])    # the response text
-    print(result["provider"])  # "ollama" | "anthropic" | "openai" | "error"
+    print(result["provider"])  # "ollama" | "nvidia_nim" | "anthropic" | "openai" | "error"
 
     # Agent-aware routing: picks the best model for the task type
     result = query_ai_for_agent("sales", "Write a cold email for a SaaS product")
     result = query_ai_for_agent("analytical", "Analyse this dataset...", history=[...])
+    result = query_ai_for_agent("coding", "Write a Python function to parse JSON")
+    result = query_ai_for_agent("reasoning", "Analyse this complex business scenario...")
     # Route to best model for a specific agent
     result = query_ai_for_agent("Write a cold email", agent_id="lead-hunter")
     print(result["answer"])
@@ -51,6 +59,10 @@ Environment variables (loaded from ~/.ai-employee/.env):
     OLLAMA_HOST           — Ollama server URL (default: http://localhost:11434)
     OLLAMA_MODEL          — model name (default: llama3.2)
     OLLAMA_TIMEOUT        — request timeout in seconds (default: 60)
+    NVIDIA_API_KEY        — NVIDIA NIM API key (free-tier cloud models)
+    NIM_REASONING_MODEL   — reasoning model (default: nvidia/llama-3.3-nemotron-super-49b-v1)
+    NIM_CODING_MODEL      — coding model    (default: qwen/qwen2.5-coder-32b-instruct)
+    NIM_BULK_MODEL        — bulk model      (default: meta/llama-3.1-8b-instruct)
     ANTHROPIC_API_KEY     — Anthropic key (optional cloud fallback)
     CLAUDE_MODEL          — Claude model name (default: claude-opus-4-5)
     OPENAI_API_KEY        — OpenAI key (optional last-resort fallback)
@@ -65,8 +77,10 @@ Environment variables (loaded from ~/.ai-employee/.env):
 import json
 import logging
 import os
+import sys
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("ai_router")
@@ -74,6 +88,15 @@ logger = logging.getLogger("ai_router")
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "60"))
+
+# ── NVIDIA NIM (free-tier cloud models) ───────────────────────────────────────
+NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+NIM_BASE_URL = os.environ.get("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")
+NIM_REASONING_MODEL = os.environ.get(
+    "NIM_REASONING_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1"
+)
+NIM_CODING_MODEL = os.environ.get("NIM_CODING_MODEL", "qwen/qwen2.5-coder-32b-instruct")
+NIM_BULK_MODEL = os.environ.get("NIM_BULK_MODEL", "meta/llama-3.1-8b-instruct")
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-5")
@@ -87,7 +110,7 @@ CLOUD_AI_TIMEOUT = int(os.environ.get("CLOUD_AI_TIMEOUT", "30"))
 
 # ── Per-agent model routing ───────────────────────────────────────────────────
 # Maps agent categories and IDs to their preferred AI provider + model.
-# Provider values: "openai" | "anthropic" | "ollama"
+# Provider values: "openai" | "anthropic" | "ollama" | "nvidia_nim"
 _AGENT_ROUTING: dict = {
     # Sales & persuasion agents → GPT-4o (best at persuasive, human-like copy)
     "sales": {"provider": "openai", "model_env": "OPENAI_SALES_MODEL", "default_model": "gpt-4o"},
@@ -95,6 +118,24 @@ _AGENT_ROUTING: dict = {
     "analytics": {"provider": "anthropic", "model_env": "CLAUDE_MODEL", "default_model": "claude-opus-4-5"},
     # Research category also → Claude
     "research": {"provider": "anthropic", "model_env": "CLAUDE_MODEL", "default_model": "claude-opus-4-5"},
+    # Reasoning tasks → NVIDIA Nemotron (deep logic, complex analysis, free-tier)
+    "reasoning": {
+        "provider": "nvidia_nim",
+        "model_env": "NIM_REASONING_MODEL",
+        "default_model": "nvidia/llama-3.3-nemotron-super-49b-v1",
+    },
+    # Coding tasks → NVIDIA Qwen Coder (code generation, review, debugging)
+    "coding": {
+        "provider": "nvidia_nim",
+        "model_env": "NIM_CODING_MODEL",
+        "default_model": "qwen/qwen2.5-coder-32b-instruct",
+    },
+    # Bulk/simple tasks → NVIDIA Llama 8B (fast, low-latency, high-volume)
+    "bulk": {
+        "provider": "nvidia_nim",
+        "model_env": "NIM_BULK_MODEL",
+        "default_model": "meta/llama-3.1-8b-instruct",
+    },
     # General / all others → Ollama (local, free, private)
     "general": {"provider": "ollama", "model_env": "OLLAMA_MODEL", "default_model": "llama3.2"},
 }
@@ -102,12 +143,18 @@ _AGENT_ROUTING: dict = {
 # Explicit per-agent-ID overrides (take priority over category routing)
 _AGENT_ID_ROUTING: dict = {
     "lead-hunter": "sales",
+    "lead-hunter-agent": "reasoning",
+    "lead-scoring-agent": "reasoning",
+    "outreach-agent": "sales",
+    "deal-matching-agent": "reasoning",
     "email-ninja": "sales",
     "web-sales": "sales",
     "email-marketer": "sales",
     "data-analyst": "analytics",
     "intel-agent": "analytics",
     "ecom-dashboard": "analytics",
+    "engineering-assistant": "coding",
+    "qa-tester": "coding",
 }
 
 
@@ -162,6 +209,92 @@ def _try_ollama(prompt: str, system_prompt: str, history: list, model: Optional[
             }
     except Exception as exc:
         logger.debug("ai_router: Ollama unavailable — %s", exc)
+    return None
+
+
+def _try_nvidia_nim(
+    prompt: str,
+    system_prompt: str,
+    history: list,
+    model: Optional[str] = None,
+) -> Optional[dict]:
+    """Attempt to get a response from NVIDIA NIM (free-tier cloud models).
+
+    Uses the NIM client from runtime/bots/nvidia-nim/nim_client.py when
+    available; falls back to a direct urllib call so the router never requires
+    nim_client to be installed.
+
+    Model selection (if model is None):
+      - Defaults to NIM_REASONING_MODEL (Nemotron) for general queries.
+      - Callers can pass NIM_CODING_MODEL or NIM_BULK_MODEL explicitly.
+    """
+    if not NVIDIA_API_KEY:
+        return None
+
+    use_model = model or NIM_REASONING_MODEL
+
+    # Try nim_client (preferred — handles rate-limit retries)
+    _nim_dir = Path(__file__).parent.parent / "nvidia-nim"
+    if str(_nim_dir) not in sys.path:
+        sys.path.insert(0, str(_nim_dir))
+    try:
+        from nim_client import NIMClient  # type: ignore
+        client = NIMClient(api_key=NVIDIA_API_KEY)
+        result = client.chat(
+            prompt,
+            system_prompt=system_prompt,
+            history=history,
+            model=use_model,
+        )
+        if result.get("answer"):
+            logger.debug("ai_router: used NVIDIA NIM/%s (via nim_client)", use_model)
+            return result
+        return None
+    except ImportError:
+        pass  # nim_client not yet in path — fall through to direct call
+    except Exception as exc:
+        logger.debug("ai_router: nim_client failed — %s", exc)
+        return None
+
+    # Direct urllib fallback (no external deps)
+    try:
+        messages = _build_messages(prompt, system_prompt, history)
+        payload = json.dumps({
+            "model": use_model,
+            "messages": messages,
+            "max_tokens": 2048,
+            "temperature": 0.7,
+            "stream": False,
+        }).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {NVIDIA_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "AI-Employee/1.0",
+        }
+        req = urllib.request.Request(
+            f"{NIM_BASE_URL}/chat/completions",
+            data=payload,
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=CLOUD_AI_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        answer = data["choices"][0]["message"]["content"].strip()
+        usage = data.get("usage", {})
+        logger.debug("ai_router: used NVIDIA NIM/%s (direct)", use_model)
+        return {
+            "answer": answer,
+            "provider": "nvidia_nim",
+            "model": use_model,
+            "error": None,
+            "usage": {
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+            },
+        }
+    except Exception as exc:
+        logger.debug("ai_router: NVIDIA NIM unavailable — %s", exc)
     return None
 
 
@@ -241,8 +374,9 @@ def query_ai(
 
     Priority:
         1. Ollama (local, free) — always tried first
-        2. Anthropic Claude (cloud) — only if Ollama unavailable and key set
-        3. OpenAI (cloud) — only if both above fail and key set
+        2. NVIDIA NIM (cloud, free-tier) — Nemotron reasoning model
+        3. Anthropic Claude (cloud) — only if above unavailable and key set
+        4. OpenAI (cloud) — only if all above fail and key set
 
     Args:
         prompt: The user message or question.
@@ -253,7 +387,7 @@ def query_ai(
     Returns:
         dict with keys:
             answer   (str)  — AI response text, empty string on failure
-            provider (str)  — "ollama" | "anthropic" | "openai" | "error"
+            provider (str)  — "ollama" | "nvidia_nim" | "anthropic" | "openai" | "error"
             model    (str)  — model identifier used
             error    (str|None) — error description if all providers failed
             usage    (dict|None) — token usage for cloud providers
@@ -265,12 +399,17 @@ def query_ai(
     if result:
         return result
 
-    # 2. Try Anthropic Claude (cloud, costs tokens — fallback)
+    # 2. Try NVIDIA NIM (free-tier cloud — Nemotron reasoning model)
+    result = _try_nvidia_nim(prompt, system_prompt, history)
+    if result:
+        return result
+
+    # 3. Try Anthropic Claude (cloud, costs tokens — fallback)
     result = _try_anthropic(prompt, system_prompt, history)
     if result:
         return result
 
-    # 3. Try OpenAI (cloud, costs tokens — last resort)
+    # 4. Try OpenAI (cloud, costs tokens — last resort)
     result = _try_openai(prompt, system_prompt, history)
     if result:
         return result
@@ -282,7 +421,8 @@ def query_ai(
         "model": "",
         "error": (
             "No AI provider available. "
-            "Start Ollama (`ollama serve`) or set ANTHROPIC_API_KEY / OPENAI_API_KEY "
+            "Start Ollama (`ollama serve`), set NVIDIA_API_KEY, "
+            "ANTHROPIC_API_KEY, or OPENAI_API_KEY "
             "in ~/.ai-employee/.env and restart."
         ),
         "usage": None,
@@ -308,16 +448,20 @@ def query_ai_for_agent(
     """Route an AI query to the best model for a specific agent type.
 
     Uses _AGENT_ROUTING to select the optimal provider/model for each task
-    category (e.g. sales → GPT-4o, analytics → Claude, general → Ollama),
-    then falls back through the standard provider chain if the preferred
-    provider is unavailable.
+    category, then falls back through the standard provider chain if the
+    preferred provider is unavailable.
+
+    NVIDIA NIM routing (free-tier):
+      - reasoning → Nemotron (nvidia/llama-3.3-nemotron-super-49b-v1)
+      - coding    → Qwen Coder (qwen/qwen2.5-coder-32b-instruct)
+      - bulk      → Llama 8B (meta/llama-3.1-8b-instruct)
 
     Args:
-        agent_type:   Agent category key (e.g. "sales", "analytical", "creative").
-                      Case-insensitive. Falls back to general routing if unknown.
-        prompt:       The user message or question.
+        agent_type:    Agent category key (e.g. "sales", "coding", "reasoning").
+                       Case-insensitive. Falls back to general routing if unknown.
+        prompt:        The user message or question.
         system_prompt: Optional system/role instructions.
-        history:      Optional conversation history.
+        history:       Optional conversation history.
 
     Returns:
         Same dict structure as query_ai():
@@ -336,9 +480,14 @@ def query_ai_for_agent(
         agent_type, preferred_provider, preferred_model,
     )
 
-    # Override model env vars temporarily for this call using local variables
     result = None
-    if preferred_provider == "openai" and OPENAI_API_KEY:
+
+    if preferred_provider == "nvidia_nim":
+        result = _try_nvidia_nim(prompt, system_prompt, history, model=preferred_model)
+        if result:
+            logger.debug("ai_router: agent=%s used NVIDIA NIM/%s", agent_type, preferred_model)
+
+    elif preferred_provider == "openai" and OPENAI_API_KEY:
         try:
             import openai
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
