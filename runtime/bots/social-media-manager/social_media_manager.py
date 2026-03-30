@@ -55,7 +55,7 @@ if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
 try:
-    from ai_router import query_ai as _query_ai, search_web as _search_web  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent, search_web as _search_web  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -140,7 +140,8 @@ def quick_research(query: str, context: str = "") -> str:
             f"[{i+1}] {h.get('title','')}: {h.get('snippet','')[:250]}"
             for i, h in enumerate(hits[:4])
         )
-        result = _query_ai(
+        result = _query_ai_for_agent(
+            "social-media-manager",
             f"Research topic: {query}\n\nWeb results:\n{snippets}\n\n"
             f"Summarize the key facts, trends, and insights relevant to {context or query} "
             f"for social media content creation.",
@@ -218,7 +219,7 @@ def _ai(prompt: str, system: str = "") -> str:
     """Call AI router, return answer string."""
     if not _AI_AVAILABLE:
         return "[AI not available — install dependencies]"
-    result = _query_ai(prompt, system_prompt=system)
+    result = _query_ai_for_agent("social-media-manager", prompt, system_prompt=system)
     return result.get("answer", "")
 
 

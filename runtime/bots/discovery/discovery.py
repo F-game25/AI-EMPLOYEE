@@ -39,7 +39,7 @@ if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
 try:
-    from ai_router import query_ai as _query_ai  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -165,7 +165,7 @@ def _ai_scan_skill_gaps(existing_ids: set, current_skill_count: int) -> list:
     )
 
     try:
-        result = _query_ai(prompt, system_prompt=system)
+        result = _query_ai_for_agent("discovery", prompt, system_prompt=system)
         if not result.get("answer"):
             return []
 

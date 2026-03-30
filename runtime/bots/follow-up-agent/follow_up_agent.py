@@ -159,7 +159,7 @@ def append_chatlog(e: dict) -> None:
 def _ai(prompt: str, system: str = "") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
-    return (_query_ai_for_agent("sales", prompt, system_prompt=system) or {}).get("answer", "")
+    return (_query_ai_for_agent("follow-up-agent", prompt, system_prompt=system) or {}).get("answer", "")
 
 
 def load_crm() -> dict:

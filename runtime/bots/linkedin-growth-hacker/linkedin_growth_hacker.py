@@ -51,7 +51,7 @@ if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
 try:
-    from ai_router import query_ai as _query_ai  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -104,7 +104,7 @@ def ai_query(prompt: str, system_prompt: str = "") -> str:
     if not _AI_AVAILABLE:
         return "AI router not available."
     try:
-        result = _query_ai(prompt, system_prompt=system_prompt)
+        result = _query_ai_for_agent("linkedin-growth-hacker", prompt, system_prompt=system_prompt)
         return result.get("answer", "No response generated.")
     except Exception as exc:
         return f"AI query failed: {exc}"

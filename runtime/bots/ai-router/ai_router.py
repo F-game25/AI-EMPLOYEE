@@ -15,10 +15,12 @@ Set LOCAL_AI_FIRST=0 to disable and use preferred-provider-first routing instead
 
 Per-agent model routing (query_ai_for_agent):
   - reasoning      → Layer 1b: NVIDIA Nemotron (deep logic, complex analysis)
+  - orchestrator   → Layer 1b: NVIDIA Nemotron (multi-agent planning, synthesis)
   - coding         → Layer 1b: NVIDIA Qwen Coder (code generation, review)
   - bulk           → Layer 1b: NVIDIA Llama 8B (fast, high-volume tasks)
   - general/local  → Layer 1a: Ollama (free, privacy-preserving)
   - analytics/data → Layer 2a: Anthropic Claude (only if Layer 1 fails)
+  - research       → Layer 2a: Anthropic Claude (only if Layer 1 fails)
   - sales/creative → Layer 2b: OpenAI GPT-4o (only if Layer 1 fails)
 
 Also provides search_web() for web research tasks:
@@ -118,12 +120,20 @@ LOCAL_AI_FIRST = os.environ.get("LOCAL_AI_FIRST", "1").strip() not in ("0", "fal
 _AGENT_ROUTING: dict = {
     # Sales & persuasion agents → GPT-4o (best at persuasive, human-like copy)
     "sales": {"provider": "openai", "model_env": "OPENAI_SALES_MODEL", "default_model": "gpt-4o"},
+    # Creative agents → GPT-4o (best creative writing, campaigns, social content)
+    "creative": {"provider": "openai", "model_env": "OPENAI_MODEL_CREATIVE", "default_model": "gpt-4o"},
     # Analytics & research agents → Claude (superior at long-context analysis)
     "analytics": {"provider": "anthropic", "model_env": "CLAUDE_MODEL", "default_model": "claude-opus-4-5"},
     # Research category also → Claude
     "research": {"provider": "anthropic", "model_env": "CLAUDE_MODEL", "default_model": "claude-opus-4-5"},
     # Reasoning tasks → NVIDIA Nemotron (deep logic, complex analysis, free-tier)
     "reasoning": {
+        "provider": "nvidia_nim",
+        "model_env": "NIM_REASONING_MODEL",
+        "default_model": "nvidia/llama-3.3-nemotron-super-49b-v1",
+    },
+    # Orchestrator / multi-agent planning → NVIDIA Nemotron (synthesis, planning)
+    "orchestrator": {
         "provider": "nvidia_nim",
         "model_env": "NIM_REASONING_MODEL",
         "default_model": "nvidia/llama-3.3-nemotron-super-49b-v1",
@@ -146,19 +156,66 @@ _AGENT_ROUTING: dict = {
 
 # Explicit per-agent-ID overrides (take priority over category routing)
 _AGENT_ID_ROUTING: dict = {
-    "lead-hunter": "sales",
-    "lead-hunter-agent": "reasoning",
-    "lead-scoring-agent": "reasoning",
-    "outreach-agent": "sales",
-    "deal-matching-agent": "reasoning",
-    "email-ninja": "sales",
-    "web-sales": "sales",
-    "email-marketer": "sales",
-    "data-analyst": "analytics",
-    "intel-agent": "analytics",
-    "ecom-dashboard": "analytics",
-    "engineering-assistant": "coding",
-    "qa-tester": "coding",
+    # ── Lead intelligence pipeline ─────────────────────────────────────────
+    "lead-hunter":          "sales",       # outbound prospect hunting
+    "lead-hunter-agent":    "reasoning",   # ICP reasoning & vector dedup
+    "lead-scoring-agent":   "reasoning",   # embed + rerank scoring
+    "outreach-agent":       "sales",       # Nemotron-personalized messages
+    "deal-matching-agent":  "reasoning",   # compatibility + clustering
+    # ── Sales & persuasion ────────────────────────────────────────────────
+    "email-ninja":              "sales",
+    "web-sales":                "sales",
+    "email-marketer":           "sales",
+    "cold-outreach-assassin":   "sales",   # cold-email copy
+    "sales-closer-pro":         "sales",   # closing scripts
+    "lead-hunter-elite":        "sales",   # hunter outreach copy
+    "appointment-setter":       "sales",   # booking / scheduling
+    "offer-agent":              "sales",   # offer creation
+    "referral-rocket":          "sales",   # referral campaign copy
+    "qualification-agent":      "sales",   # lead qualification dialogue
+    "signal-community":         "sales",   # community-based outreach
+    "linkedin-growth-hacker":   "sales",   # LinkedIn outreach
+    "follow-up-agent":          "sales",   # follow-up sequences
+    # ── Creative content ──────────────────────────────────────────────────
+    "ad-campaign-wizard":   "creative",    # ad creative & copy
+    "brand-strategist":     "creative",    # brand identity & narrative
+    "social-media-manager": "creative",    # social posts & campaigns
+    "newsletter-bot":       "creative",    # newsletter content
+    "course-creator":       "creative",    # educational content
+    "creator-agency":       "creative",    # content creation
+    "faceless-video":       "creative",    # video scripts
+    "print-on-demand":      "creative",    # product design concepts
+    "memecoin-creator":     "creative",    # meme & viral content
+    "ui-designer":          "creative",    # UI/UX concepts & copy
+    # ── Analytics & data ──────────────────────────────────────────────────
+    "finance-wizard":           "analytics",   # financial modelling
+    "conversion-rate-optimizer":"analytics",   # CRO data analysis
+    "skills-manager":           "analytics",   # skills gap analysis
+    "growth-hacker":            "analytics",   # growth metrics
+    "ecom-agent":               "analytics",   # ecommerce analytics
+    "arbitrage-bot":            "analytics",   # market data analysis
+    "hr-manager":               "analytics",   # HR metrics & decisions
+    "paid-media-specialist":    "analytics",   # media-spend analysis
+    "ecom-dashboard":           "analytics",
+    "data-analyst":             "analytics",
+    "intel-agent":              "analytics",
+    # ── Research ──────────────────────────────────────────────────────────
+    "discovery":            "research",    # skill / agent gap research
+    "partnership-matchmaker":"research",   # partner & market research
+    # ── Reasoning / planning ──────────────────────────────────────────────
+    "company-builder":  "reasoning",   # business strategy
+    "project-manager":  "reasoning",   # project planning
+    # ── Orchestrator ─────────────────────────────────────────────────────
+    "task-orchestrator": "orchestrator",  # multi-agent synthesis
+    "orchestrator":      "orchestrator",
+    # ── Problem-solving UI ────────────────────────────────────────────────
+    "problem-solver-ui": "reasoning",     # catch-all assistant queries
+    # ── Coding ────────────────────────────────────────────────────────────
+    "engineering-assistant": "coding",    # engineering / code tasks
+    "qa-tester":             "coding",    # QA & test generation
+    "chatbot-builder":       "coding",    # chatbot logic & code
+    # ── General / local ───────────────────────────────────────────────────
+    "recruiter": "general",   # HR recruiting (broad, free)
 }
 
 
