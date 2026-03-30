@@ -213,6 +213,43 @@ def check_follow_up_agent() -> None:
         _fail("follow_up_agent module", f"import failed: {exc}")
 
 
+def _check_bot_module(bot_dir_name: str, module_name: str) -> None:
+    """Check that a bot's Python module is importable and its run.sh is executable."""
+    bot_dir = AI_HOME / "bots" / bot_dir_name
+    if str(bot_dir) not in sys.path:
+        sys.path.insert(0, str(bot_dir))
+    try:
+        importlib.import_module(module_name)
+        _ok(f"{module_name} module", "importable ✓")
+    except ImportError as exc:
+        _fail(f"{module_name} module", f"import failed: {exc}")
+    run_sh = bot_dir / "run.sh"
+    if run_sh.exists() and run_sh.stat().st_mode & 0o111:
+        _ok(f"{bot_dir_name} run.sh", "executable ✓")
+    else:
+        _fail(f"{bot_dir_name} run.sh", "not executable — run: chmod +x run.sh")
+
+
+def check_engineering_assistant() -> None:
+    """engineering_assistant module must be importable and its run.sh executable."""
+    _check_bot_module("engineering-assistant", "engineering_assistant")
+
+
+def check_ui_designer() -> None:
+    """ui_designer module must be importable and its run.sh executable."""
+    _check_bot_module("ui-designer", "ui_designer")
+
+
+def check_qa_tester() -> None:
+    """qa_tester module must be importable and its run.sh executable."""
+    _check_bot_module("qa-tester", "qa_tester")
+
+
+def check_paid_media_specialist() -> None:
+    """paid_media_specialist module must be importable and its run.sh executable."""
+    _check_bot_module("paid-media-specialist", "paid_media_specialist")
+
+
 def check_discord_bot_state() -> None:
     """If the Discord bot ran before, its state file should say 'running'."""
     state = AI_HOME / "state" / "discord-bot.state.json"
@@ -318,6 +355,10 @@ def main() -> None:
     _section("Bot Modules")
     check_ai_router()
     check_follow_up_agent()
+    check_engineering_assistant()
+    check_ui_designer()
+    check_qa_tester()
+    check_paid_media_specialist()
 
     _section("Running Services")
     check_gateway_reachable()
