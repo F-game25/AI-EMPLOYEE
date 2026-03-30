@@ -203,17 +203,55 @@ case "$cmd" in
     command -v curl     >/dev/null 2>&1 \
       && echo "  $OK curl       : $(curl --version 2>&1 | head -1)" \
       || echo "  $FAIL curl      : NOT FOUND (required)"
+    if command -v openclaw >/dev/null 2>&1; then
+      echo "  $OK openclaw   : $(openclaw --version 2>/dev/null || echo installed)"
+    else
+      echo "  $WARN openclaw  : not installed (optional — needed for gateway)"
+      if [[ -t 0 ]] && command -v curl >/dev/null 2>&1; then
+        printf "     ↳ Install openclaw on this machine now? [y/N] "
+        read -r _oc_ans 2>/dev/null || _oc_ans=""
+        if [[ "${_oc_ans}" =~ ^[Yy]$ ]]; then
+          echo "     Installing openclaw ..."
+          if curl -fsSL https://openclaw.ai/install.sh | bash; then
+            echo "  $OK openclaw   : installed — restart your shell or run: source ~/.bashrc"
+          else
+            echo "  $FAIL openclaw  : install failed — try manually: curl -fsSL https://openclaw.ai/install.sh | bash"
+          fi
+        fi
+      else
+        echo "     To install: curl -fsSL https://openclaw.ai/install.sh | bash"
+      fi
+    fi
     command -v ollama   >/dev/null 2>&1 \
       && echo "  $OK ollama     : $(ollama --version 2>/dev/null || echo installed)" \
       || echo "  $WARN ollama    : not installed (optional — enables local/private LLM)"
     command -v node     >/dev/null 2>&1 \
       && echo "  $OK node       : $(node --version 2>&1)" \
       || echo "  $WARN node      : not installed (optional)"
+    command -v docker   >/dev/null 2>&1 \
+      && echo "  $OK docker     : $(docker --version 2>/dev/null | head -1)" \
+      || echo "  $WARN docker    : not installed (optional — enables sandbox mode)"
     echo ""
 
     # Running services
     echo "── Services ──────────────────────────────────"
     _UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+    _DASH_PORT="${DASHBOARD_PORT:-3000}"
+    _GW_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
+
+    # Gateway
+    if [[ -f "$RUN_DIR/gateway.pid" ]] && kill -0 "$(cat "$RUN_DIR/gateway.pid" 2>/dev/null)" 2>/dev/null; then
+      echo "  $OK Gateway        : running (port $_GW_PORT)"
+    else
+      echo "  $FAIL Gateway       : not running — run: ai-employee start"
+    fi
+
+    # Dashboard
+    if [[ -f "$RUN_DIR/dashboard.pid" ]] && kill -0 "$(cat "$RUN_DIR/dashboard.pid" 2>/dev/null)" 2>/dev/null; then
+      echo "  $OK Dashboard      : running (port $_DASH_PORT) → http://localhost:$_DASH_PORT"
+    else
+      echo "  $WARN Dashboard     : not running"
+    fi
 
     # Problem Solver UI
     if is_running "problem-solver-ui"; then
@@ -240,7 +278,25 @@ case "$cmd" in
       || echo "  $WARN OpenAI API key   : not set (optional)"
     [[ -n "${JWT_SECRET_KEY:-}" ]] \
       && echo "  $OK JWT secret       : set" \
-      || echo "  $FAIL JWT secret      : NOT SET — add JWT_SECRET_KEY to ~/.ai-employee/.env"
+      || echo "  $FAIL JWT secret      : NOT SET — run: ai-employee start (auto-generates)"
+    echo ""
+
+    # Port conflicts
+    echo "── Port Conflicts ────────────────────────────"
+    for _port in "$_UI_PORT" "$_DASH_PORT" "$_GW_PORT" 8788 8789; do
+      if command -v ss >/dev/null 2>&1; then
+        _owner=$(ss -tlnp 2>/dev/null | grep ":${_port} " | grep -o 'pid=[0-9]*' | head -1 | sed 's/pid=//')
+      elif command -v lsof >/dev/null 2>&1; then
+        _owner=$(lsof -ti ":${_port}" 2>/dev/null | head -1 || true)
+      else
+        _owner=""
+      fi
+      if [[ -n "${_owner:-}" ]]; then
+        echo "  $OK Port $_port     : in use (pid=$_owner)"
+      else
+        echo "  $WARN Port $_port     : not in use (service on this port is stopped)"
+      fi
+    done
     echo ""
 
     # Mode
