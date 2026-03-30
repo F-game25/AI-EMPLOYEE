@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import re
-import secrets
 import subprocess
 import sys
 import threading
@@ -1368,7 +1367,7 @@ INDEX_HTML = r"""<!doctype html>
 
 <div id="toast"></div>
 
-<script nonce="__CSP_NONCE__">
+<script>
 let currentTab = 'dashboard';
 const _startTime = Date.now();
 
@@ -3239,17 +3238,15 @@ setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    nonce = secrets.token_urlsafe(16)
-    html = INDEX_HTML.replace("__CSP_NONCE__", nonce)
     csp = (
         "default-src 'self'; "
-        f"script-src 'nonce-{nonce}'; "
+        "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: blob:; "
         "connect-src 'self'"
     )
-    return HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
+    return HTMLResponse(content=INDEX_HTML, headers={"Content-Security-Policy": csp})
 
 
 # ── Security endpoints (openclaw-2) ───────────────────────────────────────────
