@@ -190,15 +190,93 @@ def check_whatsapp_config() -> None:
 
 
 def check_ai_router() -> None:
-    """AI router module must be importable."""
+    """AI router module must be importable and LOCAL_AI_FIRST should be enabled."""
     _router_path = AI_HOME / "bots" / "ai-router"
     if str(_router_path) not in sys.path:
         sys.path.insert(0, str(_router_path))
     try:
-        importlib.import_module("ai_router")
+        mod = importlib.import_module("ai_router")
         _ok("ai_router module", "importable ✓")
+        local_first = getattr(mod, "LOCAL_AI_FIRST", None)
+        if local_first is True:
+            _ok(
+                "LOCAL_AI_FIRST routing",
+                "enabled ✓ — Ollama + NIM (Layer 1) tried before paid APIs (Layer 2)",
+            )
+        elif local_first is False:
+            _fail(
+                "LOCAL_AI_FIRST routing",
+                "disabled — paid cloud APIs may be called before Ollama/NIM. "
+                "Remove LOCAL_AI_FIRST=0 from .env to restore two-layer routing.",
+                required=False,
+            )
+        else:
+            _fail("LOCAL_AI_FIRST routing", "attribute not found in ai_router", required=False)
     except ImportError as exc:
         _fail("ai_router module", f"import failed: {exc}")
+
+
+def check_nvidia_nim_config() -> None:
+    """NVIDIA NIM API key configuration check (optional but recommended)."""
+    api_key = os.environ.get("NVIDIA_API_KEY", "")
+    if not api_key:
+        _fail(
+            "NVIDIA NIM API key",
+            "NVIDIA_API_KEY not set — free models won't be used. "
+            "Get a key at https://build.nvidia.com",
+            required=False,
+        )
+        return
+    if not api_key.startswith("nvapi-"):
+        _fail(
+            "NVIDIA NIM API key",
+            "key does not start with 'nvapi-' — check your key format",
+            required=False,
+        )
+        return
+    _ok("NVIDIA NIM API key", "set (nvapi-…) ✓")
+
+
+def check_nvidia_nim_client() -> None:
+    """NVIDIA NIM client module must be importable."""
+    _nim_path = AI_HOME / "bots" / "nvidia-nim"
+    if str(_nim_path) not in sys.path:
+        sys.path.insert(0, str(_nim_path))
+    try:
+        importlib.import_module("nim_client")
+        _ok("nim_client module", "importable ✓")
+    except ImportError as exc:
+        _fail("nim_client module", f"import failed: {exc}", required=False)
+
+
+def check_vector_memory() -> None:
+    """Vector memory module must be importable."""
+    _mem_path = AI_HOME / "bots" / "memory"
+    if str(_mem_path) not in sys.path:
+        sys.path.insert(0, str(_mem_path))
+    try:
+        importlib.import_module("vector_memory")
+        _ok("vector_memory module", "importable ✓")
+    except ImportError as exc:
+        _fail("vector_memory module", f"import failed: {exc}", required=False)
+
+
+def check_lead_intelligence_agents() -> None:
+    """Lead intelligence agent modules must be importable."""
+    _li_path = AI_HOME / "bots" / "lead-intelligence"
+    if str(_li_path) not in sys.path:
+        sys.path.insert(0, str(_li_path))
+    for module_name in (
+        "lead_hunter_agent",
+        "lead_scoring_agent",
+        "outreach_agent",
+        "deal_matching_agent",
+    ):
+        try:
+            importlib.import_module(module_name)
+            _ok(f"{module_name} module", "importable ✓")
+        except ImportError as exc:
+            _fail(f"{module_name} module", f"import failed: {exc}", required=False)
 
 
 def check_follow_up_agent() -> None:
@@ -359,6 +437,12 @@ def main() -> None:
     check_ui_designer()
     check_qa_tester()
     check_paid_media_specialist()
+
+    _section("NVIDIA NIM Integration")
+    check_nvidia_nim_config()
+    check_nvidia_nim_client()
+    check_vector_memory()
+    check_lead_intelligence_agents()
 
     _section("Running Services")
     check_gateway_reachable()

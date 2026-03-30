@@ -170,7 +170,7 @@ if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
 try:
-    from ai_router import query_ai as _query_ai  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent  # type: ignore
     _AI_ROUTER_AVAILABLE = True
 except ImportError:
     _AI_ROUTER_AVAILABLE = False
@@ -4535,7 +4535,8 @@ def handle_command(message: str) -> str:
 
     if _AI_ROUTER_AVAILABLE:
         try:
-            result = _query_ai(
+            result = _query_ai_for_agent(
+                "problem-solver-ui",
                 message,
                 system_prompt=(
                     "You are an AI employee assistant. "

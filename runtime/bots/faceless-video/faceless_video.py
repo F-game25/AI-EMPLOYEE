@@ -35,7 +35,7 @@ _ai_router_path = AI_HOME / "bots" / "ai-router"
 if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 try:
-    from ai_router import query_ai as _query_ai, search_web as _search_web  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent, search_web as _search_web  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -68,7 +68,7 @@ def append_chatlog(e):
 def _ai(prompt, system=""):
     if not _AI_AVAILABLE:
         return "[AI unavailable]"
-    return (_query_ai(prompt, system_prompt=system) or {}).get("answer", "")
+    return (_query_ai_for_agent("faceless-video", prompt, system_prompt=system) or {}).get("answer", "")
 
 
 def _search(query):

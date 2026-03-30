@@ -59,7 +59,7 @@ if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
 try:
-    from ai_router import query_ai as _query_ai  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -381,7 +381,7 @@ def _ai_skills_help(message: str, library: dict, agents: dict) -> str | None:
         "guide them with the exact command syntax."
     )
     try:
-        result = _query_ai(message, system_prompt=system)
+        result = _query_ai_for_agent("skills-manager", message, system_prompt=system)
         if result.get("answer"):
             provider = result.get("provider", "ai")
             suffix = f"\n_[answered by {provider}]_" if provider not in ("error",) else ""
