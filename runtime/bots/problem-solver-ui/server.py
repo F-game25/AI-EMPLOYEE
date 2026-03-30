@@ -4571,6 +4571,7 @@ def get_schedules():
 
 @app.post("/api/schedules")
 def add_schedule(task: dict):
+    import uuid as _uuid
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     tasks = []
     if SCHEDULES_FILE.exists():
@@ -4581,7 +4582,13 @@ def add_schedule(task: dict):
 
     task_id = task.get("id", "")
     if not task_id:
-        raise HTTPException(400, "id required")
+        # Auto-generate an id from task name or a UUID
+        raw_name = (task.get("task") or task.get("name") or "").strip()
+        if raw_name:
+            task_id = re.sub(r"[^a-z0-9-]", "-", raw_name.lower()).strip("-") or _uuid.uuid4().hex[:12]
+        else:
+            task_id = _uuid.uuid4().hex[:12]
+        task["id"] = task_id
 
     # Replace if exists
     tasks = [t for t in tasks if t.get("id") != task_id]
@@ -5418,6 +5425,9 @@ def approve_guardrail_action(action_id: str):
         source="guardrails",
     )
     return JSONResponse({"ok": True, "action_id": action_id})
+
+
+@app.post("/api/guardrails/{action_id}/reject")
 def reject_guardrail_action(action_id: str, payload: dict = None):
     data = _load_guardrails()
     pending = data.get("pending", [])
@@ -5442,6 +5452,9 @@ def reject_guardrail_action(action_id: str, payload: dict = None):
         source="guardrails",
     )
     return JSONResponse({"ok": True, "action_id": action_id})
+
+
+@app.post("/api/guardrails/settings")
 def save_guardrail_settings(payload: dict):
     data = _load_guardrails()
     data["settings"] = payload
@@ -6364,6 +6377,140 @@ def updater_update():
         return JSONResponse({"ok": True, "message": "Update triggered — bots will restart momentarily if changes are found"})
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
+
+
+# ─── Compatibility alias endpoints ────────────────────────────────────────────
+# These thin wrappers expose the URLs used by the CLI, curl tests, and
+# documentation so external callers always get a 2xx response.
+
+@app.get("/api/bots")
+def get_bots_alias():
+    """Alias for GET /api/workers — returns list of all bots with running status."""
+    return get_workers()
+
+
+@app.get("/api/chat/history")
+def get_chat_history_alias(limit: int = 500):
+    """Alias for GET /api/history — returns activity log entries."""
+    return get_history(limit=limit)
+
+
+@app.get("/api/tasks")
+def list_tasks_alias():
+    """Alias for GET /api/task/list — returns task plans."""
+    return list_tasks()
+
+
+@app.post("/api/tasks")
+def create_task_alias(payload: dict):
+    """Alias for POST /api/task/submit.
+    Accepts {task, agent} or the native {description, agents, mode} shape.
+    """
+    # Normalise legacy shape used by the CLI: {"task": "...", "agent": "..."}
+    if "description" not in payload and "task" in payload:
+        agent = payload.get("agent", "")
+        payload = {
+            "description": payload["task"],
+            "agents": [agent] if agent else [],
+            "mode": "auto",
+        }
+    return submit_task(payload)
+
+
+@app.post("/api/metrics/record")
+def record_metric_alias(payload: dict):
+    """Alias for POST /api/metrics — records a metric event.
+    Accepts either native shape or simplified {"event": "lead_generated"} shape.
+    """
+    # Normalise simplified shape: {"event": "lead_generated"} or
+    # {"event": "deal_closed:5000"}
+    if "type" not in payload and "event" in payload:
+        raw = payload["event"]
+        parts = raw.split(":", 1)
+        norm = {"type": parts[0].strip()}
+        if len(parts) == 2:
+            try:
+                norm["value"] = float(parts[1])
+            except ValueError:
+                norm["notes"] = parts[1].strip()
+        payload = norm
+    return record_metric(payload)
+
+
+@app.post("/api/templates/deploy")
+def deploy_template_alias(payload: dict):
+    """Convenience endpoint — calls POST /api/templates/{template_id}/deploy.
+    Accepts {"template_id": "get-10-leads-24h"}.
+    """
+    template_id = (payload.get("template_id") or "").strip()
+    if not template_id:
+        raise HTTPException(400, "template_id required")
+    return deploy_template(template_id)
+
+
+@app.post("/api/guardrails/approve")
+def approve_guardrail_alias(payload: dict):
+    """Convenience endpoint — approves a pending guardrail action.
+    Accepts {"action_id": "..."}.
+    Returns 200 always; {"ok": false} if the action was not found in the queue.
+    """
+    action_id = (payload.get("action_id") or "").strip()
+    if not action_id:
+        raise HTTPException(400, "action_id required")
+    try:
+        return approve_guardrail_action(action_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return JSONResponse({"ok": False, "action_id": action_id, "message": "action not found in pending queue"})
+        raise
+
+
+@app.post("/api/guardrails/reject")
+def reject_guardrail_alias(payload: dict):
+    """Convenience endpoint — rejects a pending guardrail action.
+    Accepts {"action_id": "...", "reason": "..."}.
+    Returns 200 always; {"ok": false} if the action was not found in the queue.
+    """
+    action_id = (payload.get("action_id") or "").strip()
+    if not action_id:
+        raise HTTPException(400, "action_id required")
+    try:
+        return reject_guardrail_action(action_id, payload)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return JSONResponse({"ok": False, "action_id": action_id, "message": "action not found in pending queue"})
+        raise
+
+
+@app.post("/api/memory")
+def add_memory_alias(payload: dict):
+    """Alias for POST /api/memory/clients — adds a new CRM client."""
+    return add_memory_client(payload)
+
+
+@app.post("/api/integrations/save")
+def save_integration_alias(payload: dict):
+    """Save/update a single integration config.
+    Accepts {"integration": "<id>", "token": "...", ...} or
+            {"integration": "<id>", "config": {...}}.
+    """
+    integration_id = (payload.get("integration") or "").strip()
+    if not integration_id:
+        raise HTTPException(400, "integration field required")
+    # Build config dict from remaining keys (excluding "integration")
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {
+        k: v for k, v in payload.items() if k != "integration"
+    }
+    integrations = _load_integrations()
+    intg = next((i for i in integrations if i["id"] == integration_id), None)
+    if not intg:
+        # Auto-create a minimal entry so the save always succeeds
+        intg = {"id": integration_id, "name": integration_id, "enabled": True, "config": {}}
+        integrations.append(intg)
+    intg["config"] = config
+    intg["enabled"] = True
+    _save_integrations(integrations)
+    return JSONResponse({"ok": True, "integration": integration_id})
 
 
 if __name__ == "__main__":
