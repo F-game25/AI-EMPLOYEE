@@ -1,27 +1,25 @@
-"""AI Router — Ollama-first with cloud AI fallback + per-agent model routing + web search.
+"""AI Router — Two-layer AI routing: free/local first, paid cloud fallback.
 
-Routes AI queries to the best available provider in priority order:
-  1. Ollama  (local, free, private — preferred for general tasks)
-  2. NVIDIA NIM  (cloud, free-tier — reasoning/coding/bulk via Nemotron/Qwen/Llama)
-  3. Anthropic Claude  (cloud, costs tokens — preferred for analytics tasks)
-  4. OpenAI GPT-4o  (cloud, costs tokens — preferred for sales/persuasion tasks)
+Routing Architecture (two layers, always enforced by default):
 
-Per-agent model routing selects the optimal provider for each agent category:
-  - sales / persuasion (lead-hunter, email-ninja, web-sales) → OpenAI GPT-4o
-  - analytics / research (data-analyst, intel-agent) → Anthropic Claude
-  - reasoning / deep logic → NVIDIA Nemotron (nvidia/llama-3.3-nemotron-super-49b-v1)
-  - coding → NVIDIA Qwen Coder (qwen/qwen2.5-coder-32b-instruct)
-  - bulk / simple → NVIDIA Llama 8B (meta/llama-3.1-8b-instruct)
-  - general / all others → Ollama (local, free)
+  ┌─ LAYER 1 — Free / Local (always tried first) ───────────────────────────┐
+  │  1a. Ollama  (local, completely free, private, no API key needed)        │
+  │  1b. NVIDIA NIM  (free-tier cloud — Nemotron / Qwen / Llama 8B)         │
+  └─────────────────────────────────────────────────────────────────────────┘
+  ┌─ LAYER 2 — Paid Cloud (only if Layer 1 fully unavailable) ──────────────┐
+  │  2a. Anthropic Claude  (costs tokens — preferred for analytics tasks)    │
+  │  2b. OpenAI GPT-4o  (costs tokens — preferred for sales/persuasion)     │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+Set LOCAL_AI_FIRST=0 to disable and use preferred-provider-first routing instead.
 
 Per-agent model routing (query_ai_for_agent):
-  - sales / persuasive   → OpenAI GPT-4o (best persuasive writing)
-  - analytical / data    → Anthropic Claude (long context, deep reasoning)
-  - reasoning            → NVIDIA Nemotron (deep logic, complex analysis)
-  - coding               → NVIDIA Qwen Coder (code generation, review)
-  - bulk                 → NVIDIA Llama 8B (fast, high-volume tasks)
-  - creative             → OpenAI GPT-4o (best creative output)
-  - general / local      → Ollama (free, privacy-preserving)
+  - reasoning      → Layer 1b: NVIDIA Nemotron (deep logic, complex analysis)
+  - coding         → Layer 1b: NVIDIA Qwen Coder (code generation, review)
+  - bulk           → Layer 1b: NVIDIA Llama 8B (fast, high-volume tasks)
+  - general/local  → Layer 1a: Ollama (free, privacy-preserving)
+  - analytics/data → Layer 2a: Anthropic Claude (only if Layer 1 fails)
+  - sales/creative → Layer 2b: OpenAI GPT-4o (only if Layer 1 fails)
 
 Also provides search_web() for web research tasks:
   - DuckDuckGo Instant Answers (free, no API key)
@@ -42,13 +40,12 @@ Usage (from any bot that adds this directory to sys.path):
     print(result["answer"])    # the response text
     print(result["provider"])  # "ollama" | "nvidia_nim" | "anthropic" | "openai" | "error"
 
-    # Agent-aware routing: picks the best model for the task type
+    # Agent-aware routing (LOCAL_AI_FIRST=1 by default):
+    #   Always tries Ollama → NIM first, then preferred cloud provider.
     result = query_ai_for_agent("sales", "Write a cold email for a SaaS product")
     result = query_ai_for_agent("analytical", "Analyse this dataset...", history=[...])
     result = query_ai_for_agent("coding", "Write a Python function to parse JSON")
     result = query_ai_for_agent("reasoning", "Analyse this complex business scenario...")
-    # Route to best model for a specific agent
-    result = query_ai_for_agent("Write a cold email", agent_id="lead-hunter")
     print(result["answer"])
 
     hits = search_web("latest AI news 2025")
@@ -56,6 +53,7 @@ Usage (from any bot that adds this directory to sys.path):
         print(h["title"], h["url"], h["snippet"])
 
 Environment variables (loaded from ~/.ai-employee/.env):
+    LOCAL_AI_FIRST        — "1" (default) = always try free/local before paid cloud
     OLLAMA_HOST           — Ollama server URL (default: http://localhost:11434)
     OLLAMA_MODEL          — model name (default: llama3.2)
     OLLAMA_TIMEOUT        — request timeout in seconds (default: 60)
@@ -107,6 +105,12 @@ OPENAI_MODEL_SALES = os.environ.get("OPENAI_MODEL_SALES", "gpt-4o")
 OPENAI_MODEL_CREATIVE = os.environ.get("OPENAI_MODEL_CREATIVE", "gpt-4o")
 
 CLOUD_AI_TIMEOUT = int(os.environ.get("CLOUD_AI_TIMEOUT", "30"))
+
+# ── Two-layer routing control ─────────────────────────────────────────────────
+# When LOCAL_AI_FIRST=1 (default), free/local providers (Ollama + NVIDIA NIM)
+# are ALWAYS tried before any paid cloud provider, regardless of agent preference.
+# Set LOCAL_AI_FIRST=0 to use preferred-provider-first routing instead.
+LOCAL_AI_FIRST = os.environ.get("LOCAL_AI_FIRST", "1").strip() not in ("0", "false", "no")
 
 # ── Per-agent model routing ───────────────────────────────────────────────────
 # Maps agent categories and IDs to their preferred AI provider + model.
@@ -370,13 +374,15 @@ def query_ai(
     system_prompt: str = "",
     history: Optional[list] = None,
 ) -> dict:
-    """Route an AI query through providers in priority order.
+    """Route an AI query through providers in two-layer priority order.
 
-    Priority:
-        1. Ollama (local, free) — always tried first
-        2. NVIDIA NIM (cloud, free-tier) — Nemotron reasoning model
-        3. Anthropic Claude (cloud) — only if above unavailable and key set
-        4. OpenAI (cloud) — only if all above fail and key set
+    LAYER 1 — Free / Local (always tried first):
+        1a. Ollama  (local model, completely free, privacy-preserving)
+        1b. NVIDIA NIM  (free-tier cloud — Nemotron reasoning model)
+
+    LAYER 2 — Paid Cloud (only if Layer 1 fully unavailable):
+        2a. Anthropic Claude  (cloud, costs tokens)
+        2b. OpenAI GPT  (cloud, costs tokens — last resort)
 
     Args:
         prompt: The user message or question.
@@ -394,22 +400,26 @@ def query_ai(
     """
     history = history or []
 
-    # 1. Try Ollama first (local, free, privacy-preserving)
+    # ── Layer 1: Free / Local ─────────────────────────────────────────────────
+    # 1a. Ollama (local, completely free)
     result = _try_ollama(prompt, system_prompt, history)
     if result:
         return result
 
-    # 2. Try NVIDIA NIM (free-tier cloud — Nemotron reasoning model)
+    # 1b. NVIDIA NIM (free-tier cloud — Nemotron reasoning model)
     result = _try_nvidia_nim(prompt, system_prompt, history)
     if result:
         return result
 
-    # 3. Try Anthropic Claude (cloud, costs tokens — fallback)
+    # ── Layer 2: Paid Cloud ───────────────────────────────────────────────────
+    logger.debug("ai_router: Layer 1 (free/local) unavailable — trying paid cloud providers")
+
+    # 2a. Anthropic Claude
     result = _try_anthropic(prompt, system_prompt, history)
     if result:
         return result
 
-    # 4. Try OpenAI (cloud, costs tokens — last resort)
+    # 2b. OpenAI (last resort)
     result = _try_openai(prompt, system_prompt, history)
     if result:
         return result
@@ -447,14 +457,23 @@ def query_ai_for_agent(
 ) -> dict:
     """Route an AI query to the best model for a specific agent type.
 
-    Uses _AGENT_ROUTING to select the optimal provider/model for each task
-    category, then falls back through the standard provider chain if the
-    preferred provider is unavailable.
+    Two-Layer Routing (LOCAL_AI_FIRST=1, default):
+    ──────────────────────────────────────────────
+    LAYER 1 — Free / Local (always run first, regardless of agent preference):
+      1a. Ollama  (local model — truly free and private)
+      1b. NVIDIA NIM  (free-tier cloud — uses agent-specific model when applicable)
 
-    NVIDIA NIM routing (free-tier):
-      - reasoning → Nemotron (nvidia/llama-3.3-nemotron-super-49b-v1)
-      - coding    → Qwen Coder (qwen/qwen2.5-coder-32b-instruct)
-      - bulk      → Llama 8B (meta/llama-3.1-8b-instruct)
+    LAYER 2 — Paid Cloud (only if Layer 1 fully unavailable):
+      Uses the agent's preferred paid provider with its specialist model, then
+      falls back to the remaining cloud provider.
+
+    Agent → paid-cloud preference (only reached if Ollama + NIM both fail):
+      sales / persuasive → OpenAI GPT-4o   (best persuasive copy)
+      analytics / data   → Anthropic Claude  (superior long-context analysis)
+      general / other    → Anthropic → OpenAI
+
+    Legacy Mode (LOCAL_AI_FIRST=0):
+      Tries the preferred provider first, then falls back via query_ai().
 
     Args:
         agent_type:    Agent category key (e.g. "sales", "coding", "reasoning").
@@ -470,16 +489,58 @@ def query_ai_for_agent(
     history = history or []
     agent_key = agent_type.lower()
 
-    # Look up preferred provider/model for this agent type
     routing = _route_for_agent(None, agent_key)
     preferred_provider = routing["provider"]
     preferred_model = os.environ.get(routing["model_env"], routing["default_model"])
 
     logger.debug(
-        "ai_router: agent_type=%s → preferred_provider=%s model=%s",
-        agent_type, preferred_provider, preferred_model,
+        "ai_router: agent_type=%s → preferred_provider=%s model=%s LOCAL_AI_FIRST=%s",
+        agent_type, preferred_provider, preferred_model, LOCAL_AI_FIRST,
     )
 
+    if LOCAL_AI_FIRST:
+        # ── Layer 1: Free / Local ─────────────────────────────────────────────
+        # 1a. Ollama — always first, completely free and private
+        result = _try_ollama(prompt, system_prompt, history)
+        if result:
+            return result
+
+        # 1b. NVIDIA NIM — free-tier cloud.
+        #   Use the agent's specific NIM model when the agent prefers NIM;
+        #   otherwise use the default NIM reasoning model.
+        nim_model = preferred_model if preferred_provider == "nvidia_nim" else None
+        result = _try_nvidia_nim(prompt, system_prompt, history, model=nim_model)
+        if result:
+            return result
+
+        # ── Layer 2: Paid Cloud ───────────────────────────────────────────────
+        logger.debug(
+            "ai_router: Layer 1 exhausted for agent=%s — falling back to paid cloud",
+            agent_type,
+        )
+
+        # Try the agent's preferred paid provider with its specialist model first.
+        if preferred_provider == "openai":
+            result = _try_openai(prompt, system_prompt, history, model=preferred_model)
+            if result:
+                return result
+            # Remaining cloud fallback
+            return _try_anthropic(prompt, system_prompt, history) or _error_response()
+
+        if preferred_provider == "anthropic":
+            result = _try_anthropic(prompt, system_prompt, history, model=preferred_model)
+            if result:
+                return result
+            # Remaining cloud fallback
+            return _try_openai(prompt, system_prompt, history) or _error_response()
+
+        # NIM / Ollama preferred (both already exhausted in Layer 1): try all cloud
+        result = _try_anthropic(prompt, system_prompt, history)
+        if result:
+            return result
+        return _try_openai(prompt, system_prompt, history) or _error_response()
+
+    # ── Legacy mode: preferred-provider-first ────────────────────────────────
     result = None
 
     if preferred_provider == "nvidia_nim":
@@ -543,7 +604,6 @@ def query_ai_for_agent(
     elif preferred_provider == "ollama":
         result = _try_ollama(prompt, system_prompt, history)
 
-    # Fall back to the standard chain if preferred provider failed
     if result:
         return result
 
@@ -552,6 +612,22 @@ def query_ai_for_agent(
         agent_type,
     )
     return query_ai(prompt, system_prompt=system_prompt, history=history)
+
+
+def _error_response() -> dict:
+    """Return a standard all-providers-failed response."""
+    return {
+        "answer": "",
+        "provider": "error",
+        "model": "",
+        "error": (
+            "No AI provider available. "
+            "Start Ollama (`ollama serve`), set NVIDIA_API_KEY, "
+            "ANTHROPIC_API_KEY, or OPENAI_API_KEY "
+            "in ~/.ai-employee/.env and restart."
+        ),
+        "usage": None,
+    }
 
 
 # ── Web Search ────────────────────────────────────────────────────────────────

@@ -190,13 +190,28 @@ def check_whatsapp_config() -> None:
 
 
 def check_ai_router() -> None:
-    """AI router module must be importable."""
+    """AI router module must be importable and LOCAL_AI_FIRST should be enabled."""
     _router_path = AI_HOME / "bots" / "ai-router"
     if str(_router_path) not in sys.path:
         sys.path.insert(0, str(_router_path))
     try:
-        importlib.import_module("ai_router")
+        mod = importlib.import_module("ai_router")
         _ok("ai_router module", "importable ✓")
+        local_first = getattr(mod, "LOCAL_AI_FIRST", None)
+        if local_first is True:
+            _ok(
+                "LOCAL_AI_FIRST routing",
+                "enabled ✓ — Ollama + NIM (Layer 1) tried before paid APIs (Layer 2)",
+            )
+        elif local_first is False:
+            _fail(
+                "LOCAL_AI_FIRST routing",
+                "disabled — paid cloud APIs may be called before Ollama/NIM. "
+                "Remove LOCAL_AI_FIRST=0 from .env to restore two-layer routing.",
+                required=False,
+            )
+        else:
+            _fail("LOCAL_AI_FIRST routing", "attribute not found in ai_router", required=False)
     except ImportError as exc:
         _fail("ai_router module", f"import failed: {exc}")
 
