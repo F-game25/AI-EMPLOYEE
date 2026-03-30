@@ -63,7 +63,7 @@ if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
 try:
-    from ai_router import query_ai as _query_ai, query_ai_for_agent as _query_ai_for_agent  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -229,7 +229,7 @@ def decompose_task(task_description: str, capabilities: dict) -> list:
     subtasks = []
     if _AI_AVAILABLE:
         try:
-            result = _query_ai(user_prompt, system_prompt=system_prompt)
+            result = _query_ai_for_agent("orchestrator", user_prompt, system_prompt=system_prompt)
             raw = result.get("answer", "")
             # Extract JSON array from response
             match = re.search(r"\[[\s\S]*\]", raw)
@@ -279,7 +279,7 @@ def select_skills_for_agent(agent_id: str, subtask_instructions: str, capabiliti
         "Which skills are most relevant? Return JSON array of skill IDs."
     )
     try:
-        result = _query_ai(user_prompt, system_prompt=system_prompt)
+        result = _query_ai_for_agent("orchestrator", user_prompt, system_prompt=system_prompt)
         raw = result.get("answer", "")
         match = re.search(r"\[[\s\S]*?\]", raw)
         if match:
@@ -554,7 +554,8 @@ def peer_review_subtask(subtask: dict, capabilities: dict) -> dict:
         "Note any issues or gaps. Rate quality 1-5."
     )
     try:
-        review_result = _query_ai(
+        review_result = _query_ai_for_agent(
+            "reasoning",
             review_prompt,
             system_prompt=(
                 "You are a critical peer reviewer in a multi-agent AI company. "
@@ -597,7 +598,7 @@ def _execute_subtask_in_thread(subtask: dict, plan: dict, capabilities: dict) ->
                 f"'{plan.get('title', '')}'. "
                 "Be thorough, specific, and return a complete, structured result."
             )
-            result = _query_ai(instructions, system_prompt=system_prompt)
+            result = _query_ai_for_agent(agent_id, instructions, system_prompt=system_prompt)
             answer = result.get("answer", "")
         else:
             answer = f"[{agent_id}] Subtask queued (AI unavailable): {instructions[:100]}"

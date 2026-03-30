@@ -53,7 +53,7 @@ for _p in [_ai_router_path, _nim_path, _memory_path]:
         sys.path.insert(0, str(_p))
 
 try:
-    from ai_router import query_ai, search_web  # type: ignore
+    from ai_router import query_ai_for_agent, search_web  # type: ignore
     _ROUTER_AVAILABLE = True
 except ImportError:
     _ROUTER_AVAILABLE = False
@@ -116,7 +116,7 @@ def _query_ai_reasoning(prompt: str, system: str = "") -> str:
         if result.get("answer"):
             return result["answer"]
     if _ROUTER_AVAILABLE:
-        result = query_ai(prompt, system_prompt=system)
+        result = query_ai_for_agent("lead-hunter-agent", prompt, system_prompt=system)
         return result.get("answer", "")
     return ""
 

@@ -68,7 +68,7 @@ except ImportError:
     _NIM_AVAILABLE = False
 
 try:
-    from ai_router import query_ai  # type: ignore
+    from ai_router import query_ai_for_agent  # type: ignore
     _ROUTER_AVAILABLE = True
 except ImportError:
     _ROUTER_AVAILABLE = False
@@ -127,7 +127,7 @@ def _query_ai(prompt: str, system: str = "") -> str:
         if result.get("answer"):
             return result["answer"]
     if _ROUTER_AVAILABLE:
-        result = query_ai(prompt, system_prompt=system)
+        result = query_ai_for_agent("outreach-agent", prompt, system_prompt=system)
         return result.get("answer", "")
     return ""
 

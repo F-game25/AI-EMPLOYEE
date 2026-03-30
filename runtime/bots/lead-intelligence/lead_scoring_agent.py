@@ -72,7 +72,7 @@ except ImportError:
     _VMEM_AVAILABLE = False
 
 try:
-    from ai_router import query_ai  # type: ignore
+    from ai_router import query_ai_for_agent  # type: ignore
     _ROUTER_AVAILABLE = True
 except ImportError:
     _ROUTER_AVAILABLE = False
