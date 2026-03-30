@@ -35,7 +35,7 @@ _ai_router_path = AI_HOME / "bots" / "ai-router"
 if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 try:
-    from ai_router import query_ai as _query_ai  # type: ignore
+    from ai_router import query_ai_for_agent as _query_ai_for_agent  # type: ignore
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -66,7 +66,7 @@ def append_chatlog(e):
 def _ai(prompt: str, system: str = "") -> str:
     if not _AI_AVAILABLE:
         return "[AI unavailable — install deps]"
-    return (_query_ai(prompt, system_prompt=system) or {}).get("answer", "")
+    return (_query_ai_for_agent("chatbot-builder", prompt, system_prompt=system) or {}).get("answer", "")
 
 def slug(niche: str) -> str:
     return re.sub(r"[^a-z0-9\-]", "-", niche.lower().strip())
