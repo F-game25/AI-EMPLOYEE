@@ -51,6 +51,26 @@ try:
 except ImportError:
     _FOLLOWUP_AVAILABLE = False
 
+# Add financial-deepsearch to path so we can reuse its functions directly
+_deepsearch_path = AI_HOME / "bots" / "financial-deepsearch"
+if str(_deepsearch_path) not in sys.path:
+    sys.path.insert(0, str(_deepsearch_path))
+
+try:
+    from financial_deepsearch import (  # type: ignore
+        cmd_company as _ds_company,
+        cmd_market as _ds_market,
+        cmd_news as _ds_news,
+        cmd_compare as _ds_compare,
+        cmd_macro as _ds_macro,
+        cmd_sec as _ds_sec,
+        cmd_earnings as _ds_earnings,
+        cmd_status as _ds_status,
+    )
+    _DEEPSEARCH_AVAILABLE = True
+except ImportError:
+    _DEEPSEARCH_AVAILABLE = False
+
 import discord
 from discord.ext import commands
 
@@ -170,6 +190,16 @@ async def help_cmd(ctx: commands.Context) -> None:
         "`!lead list` — list all leads",
         "`!lead show <id>` — show full details of a lead",
         "`!lead lost <id>` — manually mark a lead as lost",
+        "",
+        "**Financial DeepSearch (Dexter AI)**",
+        "`!deepsearch company <ticker>` — comprehensive company deep-dive",
+        "`!deepsearch market <sector>` — sector market analysis",
+        "`!deepsearch news <ticker>` — latest financial news synthesis",
+        "`!deepsearch compare <t1> vs <t2>` — side-by-side company comparison",
+        "`!deepsearch macro <topic>` — macroeconomic analysis",
+        "`!deepsearch sec <ticker>` — SEC EDGAR filing insights",
+        "`!deepsearch earnings <ticker>` — earnings deep dive",
+        "`!deepsearch status` — recent searches & active sources",
     ]
     await ctx.send("\n".join(lines))
 
@@ -355,6 +385,175 @@ async def lead_lost(ctx: commands.Context, lead_id: str = "") -> None:
     lead["updated_at"] = _now_iso()
     _save_crm(crm)
     await ctx.send(f"❌ Lead `{lead_id}` ({lead['name']}) marked as **lost**.")
+
+
+# ── !deepsearch ───────────────────────────────────────────────────────────────
+
+
+@bot.group(name="deepsearch", invoke_without_command=True)
+async def deepsearch_group(ctx: commands.Context) -> None:
+    await ctx.send(
+        "Usage: `!deepsearch company <ticker>` | `market <sector>` | "
+        "`news <ticker>` | `compare <t1> vs <t2>` | `macro <topic>` | "
+        "`sec <ticker>` | `earnings <ticker>` | `status`"
+    )
+
+
+@deepsearch_group.command(name="company")
+async def deepsearch_company_cmd(ctx: commands.Context, *, ticker: str = "") -> None:
+    """Comprehensive company deep-dive analysis."""
+    if not ticker:
+        await ctx.send("Usage: `!deepsearch company <ticker>` — e.g. `!deepsearch company AAPL`")
+        return
+    if not _DEEPSEARCH_AVAILABLE:
+        await ctx.send("❌ financial_deepsearch module not available.")
+        return
+    await ctx.send(f"🔬 Running deep financial search for `{ticker.upper()}`… (this may take a moment)")
+    try:
+        result = _ds_company(ticker)
+        for chunk in _split_message(result, 1900):
+            await ctx.send(chunk)
+    except Exception as exc:
+        logger.exception("deepsearch company error")
+        await ctx.send(f"❌ Error: {exc}")
+
+
+@deepsearch_group.command(name="market")
+async def deepsearch_market_cmd(ctx: commands.Context, *, sector: str = "") -> None:
+    """Market sector deep analysis."""
+    if not sector:
+        await ctx.send("Usage: `!deepsearch market <sector>` — e.g. `!deepsearch market technology`")
+        return
+    if not _DEEPSEARCH_AVAILABLE:
+        await ctx.send("❌ financial_deepsearch module not available.")
+        return
+    await ctx.send(f"📊 Analysing `{sector}` sector… (this may take a moment)")
+    try:
+        result = _ds_market(sector)
+        for chunk in _split_message(result, 1900):
+            await ctx.send(chunk)
+    except Exception as exc:
+        logger.exception("deepsearch market error")
+        await ctx.send(f"❌ Error: {exc}")
+
+
+@deepsearch_group.command(name="news")
+async def deepsearch_news_cmd(ctx: commands.Context, *, ticker: str = "") -> None:
+    """Latest financial news synthesis for a ticker."""
+    if not ticker:
+        await ctx.send("Usage: `!deepsearch news <ticker>` — e.g. `!deepsearch news TSLA`")
+        return
+    if not _DEEPSEARCH_AVAILABLE:
+        await ctx.send("❌ financial_deepsearch module not available.")
+        return
+    await ctx.send(f"📰 Gathering financial news for `{ticker.upper()}`…")
+    try:
+        result = _ds_news(ticker)
+        for chunk in _split_message(result, 1900):
+            await ctx.send(chunk)
+    except Exception as exc:
+        logger.exception("deepsearch news error")
+        await ctx.send(f"❌ Error: {exc}")
+
+
+@deepsearch_group.command(name="compare")
+async def deepsearch_compare_cmd(ctx: commands.Context, *, args: str = "") -> None:
+    """Side-by-side company comparison. Format: !deepsearch compare AAPL vs MSFT"""
+    if not args:
+        await ctx.send("Usage: `!deepsearch compare <t1> vs <t2>` — e.g. `!deepsearch compare AAPL vs MSFT`")
+        return
+    if not _DEEPSEARCH_AVAILABLE:
+        await ctx.send("❌ financial_deepsearch module not available.")
+        return
+    parts = args.upper().split(" VS ")
+    if len(parts) == 2:
+        t1, t2 = parts[0].strip(), parts[1].strip()
+    else:
+        tokens = args.split()
+        if len(tokens) >= 2:
+            t1, t2 = tokens[0].upper(), tokens[-1].upper()
+        else:
+            await ctx.send("Usage: `!deepsearch compare AAPL vs MSFT`")
+            return
+    await ctx.send(f"⚖️ Comparing `{t1}` vs `{t2}`… (this may take a moment)")
+    try:
+        result = _ds_compare(t1, t2)
+        for chunk in _split_message(result, 1900):
+            await ctx.send(chunk)
+    except Exception as exc:
+        logger.exception("deepsearch compare error")
+        await ctx.send(f"❌ Error: {exc}")
+
+
+@deepsearch_group.command(name="macro")
+async def deepsearch_macro_cmd(ctx: commands.Context, *, topic: str = "") -> None:
+    """Macroeconomic deep research."""
+    if not topic:
+        await ctx.send("Usage: `!deepsearch macro <topic>` — e.g. `!deepsearch macro inflation`")
+        return
+    if not _DEEPSEARCH_AVAILABLE:
+        await ctx.send("❌ financial_deepsearch module not available.")
+        return
+    await ctx.send(f"🌍 Running macro deep-search: `{topic}`…")
+    try:
+        result = _ds_macro(topic)
+        for chunk in _split_message(result, 1900):
+            await ctx.send(chunk)
+    except Exception as exc:
+        logger.exception("deepsearch macro error")
+        await ctx.send(f"❌ Error: {exc}")
+
+
+@deepsearch_group.command(name="sec")
+async def deepsearch_sec_cmd(ctx: commands.Context, *, ticker: str = "") -> None:
+    """SEC EDGAR filing insights for a ticker."""
+    if not ticker:
+        await ctx.send("Usage: `!deepsearch sec <ticker>` — e.g. `!deepsearch sec NVDA`")
+        return
+    if not _DEEPSEARCH_AVAILABLE:
+        await ctx.send("❌ financial_deepsearch module not available.")
+        return
+    await ctx.send(f"📋 Fetching SEC filings for `{ticker.upper()}` from EDGAR…")
+    try:
+        result = _ds_sec(ticker)
+        for chunk in _split_message(result, 1900):
+            await ctx.send(chunk)
+    except Exception as exc:
+        logger.exception("deepsearch sec error")
+        await ctx.send(f"❌ Error: {exc}")
+
+
+@deepsearch_group.command(name="earnings")
+async def deepsearch_earnings_cmd(ctx: commands.Context, *, ticker: str = "") -> None:
+    """Earnings history and quality analysis."""
+    if not ticker:
+        await ctx.send("Usage: `!deepsearch earnings <ticker>` — e.g. `!deepsearch earnings AMZN`")
+        return
+    if not _DEEPSEARCH_AVAILABLE:
+        await ctx.send("❌ financial_deepsearch module not available.")
+        return
+    await ctx.send(f"📈 Earnings deep-dive for `{ticker.upper()}`…")
+    try:
+        result = _ds_earnings(ticker)
+        for chunk in _split_message(result, 1900):
+            await ctx.send(chunk)
+    except Exception as exc:
+        logger.exception("deepsearch earnings error")
+        await ctx.send(f"❌ Error: {exc}")
+
+
+@deepsearch_group.command(name="status")
+async def deepsearch_status_cmd(ctx: commands.Context) -> None:
+    """Show recent financial deep searches and active data sources."""
+    if not _DEEPSEARCH_AVAILABLE:
+        await ctx.send("❌ financial_deepsearch module not available.")
+        return
+    try:
+        result = _ds_status()
+        await ctx.send(result)
+    except Exception as exc:
+        logger.exception("deepsearch status error")
+        await ctx.send(f"❌ Error: {exc}")
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
