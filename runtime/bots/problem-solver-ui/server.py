@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import re
-import secrets
 import subprocess
 import sys
 import threading
@@ -311,6 +310,9 @@ INDEX_HTML = r"""<!doctype html>
       --success:#10b981;--danger:#ef4444;--warning:#f59e0b;
       --text:#e2e8f0;--text-muted:#64748b;--text-secondary:#94a3b8;
       --radius:12px;--radius-sm:8px;--shadow:0 4px 24px rgba(0,0,0,.4);
+      --glow-primary:0 0 20px rgba(99,102,241,.35);
+      --glow-success:0 0 20px rgba(16,185,129,.35);
+      --glow-danger:0 0 20px rgba(239,68,68,.35);
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth}
@@ -325,51 +327,93 @@ INDEX_HTML = r"""<!doctype html>
     /* ── Layout ── */
     .app{display:flex;flex-direction:column;min-height:100vh}
 
+    /* ── Keyframe animations ── */
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    @keyframes slideInLeft{from{opacity:0;transform:translateX(-18px)}to{opacity:1;transform:none}}
+    @keyframes slideInRight{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
+    @keyframes slideInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+    @keyframes pulseRing{0%{transform:scale(1);opacity:.8}70%{transform:scale(1.9);opacity:0}100%{transform:scale(1.9);opacity:0}}
+    @keyframes gradientShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+    @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+    @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+    @keyframes countUp{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
+    @keyframes headerGlow{0%,100%{box-shadow:0 2px 30px rgba(99,102,241,.2)}50%{box-shadow:0 2px 50px rgba(99,102,241,.45)}}
+
     /* ── Header ── */
     header{
-      background:linear-gradient(135deg,var(--primary-dark) 0%,#312e81 50%,#1e1b4b 100%);
+      background:linear-gradient(135deg,#1e1b4b 0%,#312e81 35%,var(--primary-dark) 65%,#1e1b4b 100%);
+      background-size:300% 300%;
+      animation:gradientShift 12s ease infinite, headerGlow 6s ease infinite;
       padding:16px 28px;display:flex;align-items:center;justify-content:space-between;
-      border-bottom:1px solid rgba(99,102,241,.25);
-      position:sticky;top:0;z-index:100;backdrop-filter:blur(10px);
+      border-bottom:1px solid rgba(99,102,241,.3);
+      position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);
     }
     .header-left{display:flex;align-items:center;gap:14px}
-    .logo{width:40px;height:40px;background:rgba(255,255,255,.1);border-radius:10px;
-      display:flex;align-items:center;justify-content:center;font-size:1.4em;
-      border:1px solid rgba(255,255,255,.15)}
-    .header-title h1{color:#fff;font-size:1.2em;font-weight:700;letter-spacing:-.02em}
-    .header-title .sub{color:rgba(255,255,255,.6);font-size:.8em;margin-top:1px}
+    .logo{
+      width:44px;height:44px;
+      background:linear-gradient(135deg,rgba(99,102,241,.3),rgba(34,211,238,.2));
+      border-radius:12px;display:flex;align-items:center;justify-content:center;
+      font-size:1.5em;border:1px solid rgba(255,255,255,.2);
+      animation:float 4s ease-in-out infinite;
+      box-shadow:0 0 14px rgba(99,102,241,.4);
+    }
+    .header-title h1{color:#fff;font-size:1.25em;font-weight:700;letter-spacing:-.02em;
+      text-shadow:0 0 20px rgba(255,255,255,.3)}
+    .header-title .sub{color:rgba(255,255,255,.65);font-size:.8em;margin-top:2px}
     .header-right{display:flex;align-items:center;gap:10px}
-    .status-pill{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.07);
-      border:1px solid rgba(255,255,255,.12);border-radius:20px;
-      padding:5px 12px;font-size:.8em;color:rgba(255,255,255,.75)}
-    .status-dot{width:7px;height:7px;border-radius:50%;background:var(--success);
-      box-shadow:0 0 6px var(--success);animation:blink 2s infinite}
-    @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+    .status-pill{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.15);border-radius:20px;
+      padding:6px 14px;font-size:.8em;color:rgba(255,255,255,.8);
+      backdrop-filter:blur(6px);transition:all .3s}
+    .status-pill:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25)}
+    .status-dot{width:8px;height:8px;border-radius:50%;background:var(--success);
+      box-shadow:0 0 8px var(--success);animation:blink 2s infinite;flex-shrink:0}
+    /* Header quick-control buttons */
+    .hdr-ctrl{display:flex;align-items:center;gap:8px}
+    .hdr-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border:none;
+      border-radius:20px;cursor:pointer;font-size:.78em;font-weight:600;
+      transition:all .2s;font-family:inherit;white-space:nowrap;position:relative;overflow:hidden}
+    .hdr-btn-start{background:rgba(16,185,129,.2);color:var(--success);border:1px solid rgba(16,185,129,.35)}
+    .hdr-btn-start:hover{background:rgba(16,185,129,.35);box-shadow:var(--glow-success);transform:translateY(-1px)}
+    .hdr-btn-stop{background:rgba(239,68,68,.15);color:var(--danger);border:1px solid rgba(239,68,68,.3)}
+    .hdr-btn-stop:hover{background:rgba(239,68,68,.28);box-shadow:var(--glow-danger);transform:translateY(-1px)}
+    .hdr-btn:disabled{opacity:.45;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
     /* ── Navigation ── */
     nav{background:var(--surface);border-bottom:1px solid var(--border);
-      padding:0 28px;display:flex;gap:2px;overflow-x:auto}
+      padding:0 28px;display:flex;gap:2px;overflow-x:auto;
+      box-shadow:0 2px 12px rgba(0,0,0,.3)}
     nav button{
       background:none;border:none;color:var(--text-secondary);
       padding:12px 16px;cursor:pointer;font-size:.875em;font-weight:500;
-      border-bottom:2px solid transparent;transition:all .2s;
+      border-bottom:2px solid transparent;transition:all .25s;
       white-space:nowrap;display:flex;align-items:center;gap:6px;
-      font-family:inherit;
+      font-family:inherit;position:relative;
     }
-    nav button:hover{color:var(--text);background:rgba(255,255,255,.03)}
-    nav button.active{color:var(--primary);border-bottom-color:var(--primary);background:rgba(99,102,241,.05)}
+    nav button::after{content:'';position:absolute;bottom:0;left:50%;right:50%;height:2px;
+      background:var(--primary);border-radius:2px 2px 0 0;transition:all .25s}
+    nav button:hover{color:var(--text);background:rgba(255,255,255,.04)}
+    nav button:hover::after{left:0;right:0}
+    nav button.active{color:var(--primary);background:rgba(99,102,241,.06)}
+    nav button.active::after{left:0;right:0}
 
     /* ── Main content ── */
     main{flex:1;padding:24px 28px;max-width:1280px;margin:0 auto;width:100%}
-    @media(max-width:768px){main{padding:16px}}
+    @media(max-width:768px){main{padding:14px}}
 
     /* ── Tab panels ── */
     .tab-content{display:none}
-    .tab-content.active{display:block;animation:fadeIn .2s ease}
-    @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+    .tab-content.active{display:block;animation:fadeIn .28s ease}
 
     /* ── Cards ── */
-    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+    .card{
+      background:var(--surface);border:1px solid var(--border);
+      border-radius:var(--radius);padding:20px;margin-bottom:16px;
+      transition:border-color .3s,box-shadow .3s;
+    }
+    .card:hover{border-color:rgba(99,102,241,.2);box-shadow:0 4px 20px rgba(0,0,0,.25)}
     .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
     .card-title{font-size:.95em;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
     .card-title .icon{color:var(--primary)}
@@ -382,26 +426,123 @@ INDEX_HTML = r"""<!doctype html>
     @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
 
     /* ── Stat cards ── */
-    .stat-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:16px;display:flex;align-items:center;gap:12px}
-    .stat-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;
-      justify-content:center;font-size:1.1em;flex-shrink:0}
-    .stat-icon.green{background:rgba(16,185,129,.15);color:var(--success)}
-    .stat-icon.blue{background:rgba(99,102,241,.15);color:var(--primary)}
-    .stat-icon.cyan{background:rgba(34,211,238,.15);color:var(--accent)}
-    .stat-icon.yellow{background:rgba(245,158,11,.15);color:var(--warning)}
-    .stat-body .val{font-size:1.5em;font-weight:700;color:var(--text)}
-    .stat-body .lbl{font-size:.78em;color:var(--text-muted);margin-top:1px}
+    .stat-card{
+      background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);
+      padding:18px 16px;display:flex;align-items:center;gap:13px;
+      transition:all .3s;cursor:default;position:relative;overflow:hidden;
+    }
+    .stat-card::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:2px;
+      background:linear-gradient(90deg,transparent,var(--stat-color,var(--primary)),transparent);
+      opacity:0;transition:opacity .3s;
+    }
+    .stat-card:hover{transform:translateY(-2px);box-shadow:0 6px 24px rgba(0,0,0,.3)}
+    .stat-card:hover::before{opacity:1}
+    .stat-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;
+      justify-content:center;font-size:1.2em;flex-shrink:0;transition:transform .3s}
+    .stat-card:hover .stat-icon{transform:scale(1.1) rotate(-4deg)}
+    .stat-icon.green{background:rgba(16,185,129,.15);color:var(--success);--stat-color:var(--success)}
+    .stat-icon.blue{background:rgba(99,102,241,.15);color:var(--primary);--stat-color:var(--primary)}
+    .stat-icon.cyan{background:rgba(34,211,238,.15);color:var(--accent);--stat-color:var(--accent)}
+    .stat-icon.yellow{background:rgba(245,158,11,.15);color:var(--warning);--stat-color:var(--warning)}
+    .stat-body .val{font-size:1.55em;font-weight:700;color:var(--text);
+      animation:countUp .4s ease;letter-spacing:-.02em}
+    .stat-body .lbl{font-size:.78em;color:var(--text-muted);margin-top:2px}
+
+    /* ── System control hero ── */
+    .sys-control{
+      background:linear-gradient(135deg,rgba(99,102,241,.08) 0%,rgba(34,211,238,.05) 100%);
+      border:1px solid rgba(99,102,241,.25);border-radius:var(--radius);
+      padding:24px 28px;margin-bottom:16px;
+      display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;
+      position:relative;overflow:hidden;
+    }
+    .sys-control::before{
+      content:'';position:absolute;top:-50%;right:-10%;width:300px;height:300px;
+      background:radial-gradient(circle,rgba(99,102,241,.08) 0%,transparent 70%);
+      pointer-events:none;animation:float 8s ease-in-out infinite;
+    }
+    .sys-control-left{display:flex;align-items:center;gap:18px}
+    .sys-status-ring{position:relative;width:56px;height:56px;flex-shrink:0}
+    .sys-status-ring .ring-bg{
+      width:56px;height:56px;border-radius:50%;
+      border:3px solid rgba(99,102,241,.2);
+      display:flex;align-items:center;justify-content:center;
+      font-size:1.6em;background:rgba(99,102,241,.08);
+    }
+    .sys-status-ring .ring-pulse{
+      position:absolute;inset:0;border-radius:50%;
+      border:3px solid var(--success);
+      animation:pulseRing 2.5s ease-out infinite;
+    }
+    .sys-status-ring.offline .ring-pulse{border-color:var(--danger)}
+    .sys-control-info h2{font-size:1.1em;font-weight:700;color:var(--text);margin-bottom:3px}
+    .sys-control-info p{font-size:.84em;color:var(--text-secondary)}
+    .sys-control-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .btn-hero{
+      display:inline-flex;align-items:center;gap:8px;padding:12px 28px;border:none;
+      border-radius:10px;cursor:pointer;font-size:.95em;font-weight:600;
+      transition:all .25s;font-family:inherit;white-space:nowrap;
+      position:relative;overflow:hidden;
+    }
+    .btn-hero::after{
+      content:'';position:absolute;top:50%;left:50%;width:0;height:0;
+      background:rgba(255,255,255,.15);border-radius:50%;
+      transform:translate(-50%,-50%);transition:width .4s ease,height .4s ease,opacity .4s ease;
+      opacity:0;
+    }
+    .btn-hero:active::after{width:300px;height:300px;opacity:0}
+    .btn-hero-start{
+      background:linear-gradient(135deg,#059669,#10b981);
+      color:#fff;box-shadow:0 4px 16px rgba(16,185,129,.3);
+    }
+    .btn-hero-start:hover{
+      background:linear-gradient(135deg,#10b981,#34d399);
+      box-shadow:0 6px 24px rgba(16,185,129,.5);transform:translateY(-2px);
+    }
+    .btn-hero-stop{
+      background:linear-gradient(135deg,#b91c1c,#ef4444);
+      color:#fff;box-shadow:0 4px 16px rgba(239,68,68,.3);
+    }
+    .btn-hero-stop:hover{
+      background:linear-gradient(135deg,#ef4444,#f87171);
+      box-shadow:0 6px 24px rgba(239,68,68,.5);transform:translateY(-2px);
+    }
+    .btn-hero:disabled{opacity:.45;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+    .btn-hero .btn-icon{font-size:1.1em}
+
+    /* ── Bot health progress bar ── */
+    .health-bar-wrap{margin:10px 0 4px;position:relative}
+    .health-bar-track{height:6px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden}
+    .health-bar-fill{
+      height:100%;border-radius:3px;
+      background:linear-gradient(90deg,var(--success),#34d399);
+      transition:width .8s cubic-bezier(.4,0,.2,1);
+      box-shadow:0 0 8px rgba(16,185,129,.4);
+      width:0%;
+    }
+    .health-bar-fill.warn{background:linear-gradient(90deg,var(--warning),#fbbf24)}
+    .health-bar-fill.danger{background:linear-gradient(90deg,var(--danger),#f87171)}
+    .health-label{display:flex;justify-content:space-between;font-size:.74em;color:var(--text-muted);margin-top:4px}
 
     /* ── Bot rows ── */
-    .bot-row{display:flex;align-items:center;gap:10px;padding:9px 0;
-      border-bottom:1px solid var(--border)}
-    .bot-row:last-child{border:none}
-    .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:background .3s}
-    .dot.on{background:var(--success);box-shadow:0 0 8px rgba(16,185,129,.5)}
+    .bot-row{
+      display:flex;align-items:center;gap:10px;padding:9px 8px;
+      border-bottom:1px solid var(--border);border-radius:6px;
+      transition:background .2s;animation:slideInLeft .3s ease both;
+    }
+    .bot-row:last-child{border-bottom:none}
+    .bot-row:hover{background:rgba(255,255,255,.03)}
+    .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:all .4s;position:relative}
+    .dot.on{background:var(--success);box-shadow:0 0 8px rgba(16,185,129,.6)}
+    .dot.on::after{
+      content:'';position:absolute;inset:-3px;border-radius:50%;
+      border:1.5px solid rgba(16,185,129,.4);
+      animation:pulseRing 2.5s ease-out infinite;
+    }
     .dot.off{background:#374151}
     .dot.unknown{background:var(--warning)}
-    .bot-name{flex:1;font-size:.88em;color:var(--text)}
+    .bot-name{flex:1;font-size:.875em;color:var(--text)}
 
     /* ── Badges ── */
     .badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;
@@ -413,19 +554,29 @@ INDEX_HTML = r"""<!doctype html>
     .badge.disabled{background:rgba(100,116,139,.12);color:var(--text-muted);border:1px solid rgba(100,116,139,.25)}
 
     /* ── Buttons ── */
-    .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border:none;
+    .btn{
+      display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border:none;
       border-radius:var(--radius-sm);cursor:pointer;font-size:.875em;font-weight:500;
-      transition:all .2s;font-family:inherit;text-decoration:none;white-space:nowrap}
+      transition:all .22s;font-family:inherit;text-decoration:none;white-space:nowrap;
+      position:relative;overflow:hidden;
+    }
+    .btn::after{
+      content:'';position:absolute;top:50%;left:50%;width:0;height:0;
+      background:rgba(255,255,255,.12);border-radius:50%;
+      transform:translate(-50%,-50%);transition:width .35s ease,height .35s ease,opacity .35s ease;
+      opacity:0;
+    }
+    .btn:active::after{width:240px;height:240px;opacity:0}
     .btn-primary{background:var(--primary);color:#fff}
-    .btn-primary:hover{background:var(--primary-dark);transform:translateY(-1px);box-shadow:0 4px 12px rgba(99,102,241,.4)}
+    .btn-primary:hover{background:var(--primary-dark);transform:translateY(-1px);box-shadow:0 4px 14px rgba(99,102,241,.45)}
     .btn-danger{background:rgba(239,68,68,.15);color:var(--danger);border:1px solid rgba(239,68,68,.25)}
-    .btn-danger:hover{background:rgba(239,68,68,.25)}
+    .btn-danger:hover{background:rgba(239,68,68,.28);box-shadow:0 3px 10px rgba(239,68,68,.25)}
     .btn-success{background:rgba(16,185,129,.15);color:var(--success);border:1px solid rgba(16,185,129,.25)}
-    .btn-success:hover{background:rgba(16,185,129,.25)}
+    .btn-success:hover{background:rgba(16,185,129,.28);box-shadow:0 3px 10px rgba(16,185,129,.25)}
     .btn-ghost{background:rgba(255,255,255,.05);color:var(--text-secondary);border:1px solid var(--border)}
-    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text)}
+    .btn-ghost:hover{background:rgba(255,255,255,.09);color:var(--text);border-color:rgba(99,102,241,.3)}
     .btn-sm{padding:5px 11px;font-size:.8em}
-    .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important}
+    .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
     /* ── Form controls ── */
     .form-group{margin-bottom:14px}
@@ -433,10 +584,29 @@ INDEX_HTML = r"""<!doctype html>
     input,textarea,select{
       width:100%;background:var(--surface2);border:1px solid var(--border);
       color:var(--text);border-radius:var(--radius-sm);padding:9px 12px;
-      font-size:.875em;font-family:inherit;transition:border-color .2s;outline:none}
-    input:focus,textarea:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+      font-size:.875em;font-family:inherit;transition:border-color .2s,box-shadow .2s;outline:none}
+    input:focus,textarea:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.14)}
+    input:hover,select:hover{border-color:rgba(99,102,241,.35)}
     textarea{resize:vertical;min-height:80px}
     select option{background:var(--surface)}
+
+    /* ── Toggle (enhanced) ── */
+    .toggle{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
+    .toggle input{opacity:0;width:0;height:0}
+    .slider{
+      position:absolute;cursor:pointer;inset:0;
+      background:var(--border);border-radius:24px;
+      transition:.35s cubic-bezier(.4,0,.2,1);
+      box-shadow:inset 0 1px 3px rgba(0,0,0,.3);
+    }
+    .slider:before{
+      content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;
+      background:#64748b;border-radius:50%;
+      transition:.35s cubic-bezier(.4,0,.2,1);
+      box-shadow:0 1px 4px rgba(0,0,0,.4);
+    }
+    input:checked+.slider{background:var(--primary);box-shadow:0 0 10px rgba(99,102,241,.4)}
+    input:checked+.slider:before{transform:translateX(18px);background:#fff}
 
     /* ── Code / pre ── */
     pre{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);
@@ -449,42 +619,40 @@ INDEX_HTML = r"""<!doctype html>
     /* ── Chat ── */
     #chat-log{max-height:400px;overflow-y:auto;padding:12px;border:1px solid var(--border);
       border-radius:var(--radius-sm);background:var(--bg);margin-bottom:12px}
-    .chat-msg{padding:10px 14px;border-radius:10px;margin-bottom:8px;max-width:82%;word-break:break-word}
+    .chat-msg{padding:10px 14px;border-radius:10px;margin-bottom:8px;max-width:82%;
+      word-break:break-word;animation:slideInUp .2s ease}
     .chat-msg.user{background:linear-gradient(135deg,var(--primary),var(--primary-dark));
-      margin-left:auto;text-align:right;color:#fff}
+      margin-left:auto;text-align:right;color:#fff;box-shadow:0 2px 10px rgba(99,102,241,.3)}
     .chat-msg.bot{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
     .chat-msg .ts{font-size:.72em;opacity:.55;margin-top:4px}
     .chat-input-row{display:flex;gap:8px;align-items:flex-end}
 
     /* ── Improvements ── */
     .improv-row{border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:14px;margin-bottom:10px;background:var(--surface2);transition:border-color .2s}
-    .improv-row:hover{border-color:rgba(99,102,241,.3)}
+      padding:14px;margin-bottom:10px;background:var(--surface2);
+      transition:border-color .25s,transform .2s,box-shadow .25s}
+    .improv-row:hover{border-color:rgba(99,102,241,.35);transform:translateX(3px);box-shadow:var(--glow-primary)}
     .improv-row h4{color:var(--text);font-size:.9em;margin-bottom:4px}
     .improv-row p{font-size:.83em;color:var(--text-secondary);margin-bottom:8px;line-height:1.5}
 
     /* ── Scheduler ── */
     .sched-row{border:1px solid var(--border);border-radius:var(--radius-sm);
       padding:12px 14px;margin-bottom:10px;background:var(--surface2);
-      display:flex;align-items:flex-start;gap:12px}
+      display:flex;align-items:flex-start;gap:12px;
+      transition:border-color .25s,box-shadow .25s}
+    .sched-row:hover{border-color:rgba(99,102,241,.3);box-shadow:0 2px 12px rgba(0,0,0,.2)}
     .sched-info{flex:1}
     .sched-info h4{color:var(--text);font-size:.88em;margin-bottom:3px;display:flex;align-items:center;gap:8px}
     .sched-info p{font-size:.8em;color:var(--text-muted)}
 
-    /* ── Toggle ── */
-    .toggle{position:relative;display:inline-block;width:38px;height:22px;flex-shrink:0}
-    .toggle input{opacity:0;width:0;height:0}
-    .slider{position:absolute;cursor:pointer;inset:0;background:var(--border);border-radius:22px;transition:.3s}
-    .slider:before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;
-      background:#64748b;border-radius:50%;transition:.3s}
-    input:checked+.slider{background:var(--primary)}
-    input:checked+.slider:before{transform:translateX(16px);background:#fff}
-
     /* ── Skills ── */
     .skill-card{border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:12px;margin-bottom:8px;cursor:pointer;transition:all .2s;background:var(--surface2)}
-    .skill-card:hover{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.05)}
-    .skill-card.selected{border-color:var(--success);background:rgba(16,185,129,.05)}
+      padding:12px;margin-bottom:8px;cursor:pointer;
+      transition:all .22s;background:var(--surface2)}
+    .skill-card:hover{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.06);
+      transform:translateY(-1px);box-shadow:0 3px 12px rgba(0,0,0,.2)}
+    .skill-card.selected{border-color:var(--success);background:rgba(16,185,129,.06);
+      box-shadow:0 0 12px rgba(16,185,129,.15)}
     .skill-card h5{color:var(--text);font-size:.88em;margin-bottom:3px;font-weight:600}
     .skill-card p{font-size:.8em;color:var(--text-muted);margin:0;line-height:1.4}
     .skill-card .tags{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px}
@@ -494,26 +662,34 @@ INDEX_HTML = r"""<!doctype html>
       cursor:pointer;border:1px solid var(--border);color:var(--text-secondary);
       margin:2px;transition:all .2s;font-weight:500}
     .cat-pill:hover{border-color:var(--primary);color:var(--primary)}
-    .cat-pill.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .cat-pill.active{background:var(--primary);color:#fff;border-color:var(--primary);
+      box-shadow:0 2px 8px rgba(99,102,241,.3)}
     .skill-grid{max-height:500px;overflow-y:auto;padding-right:4px}
     .agent-card{border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:14px;margin-bottom:8px;background:var(--surface2)}
+      padding:14px;margin-bottom:8px;background:var(--surface2);transition:all .2s}
+    .agent-card:hover{border-color:rgba(99,102,241,.3);transform:translateY(-1px)}
     .agent-card h4{color:var(--text);margin-bottom:4px;font-size:.9em;font-weight:600}
     .agent-card p{font-size:.83em;color:var(--text-muted)}
     #skill-search{margin-bottom:10px}
 
     /* ── Toast ── */
-    #toast{position:fixed;bottom:24px;right:24px;min-width:220px;padding:12px 18px;
-      border-radius:var(--radius-sm);color:#fff;opacity:0;
+    #toast{
+      position:fixed;bottom:24px;right:24px;min-width:240px;padding:13px 20px;
+      border-radius:10px;color:#fff;opacity:0;
       transition:opacity .3s,transform .3s;pointer-events:none;z-index:9999;
-      font-size:.875em;font-weight:500;box-shadow:var(--shadow);
-      transform:translateY(10px);display:flex;align-items:center;gap:8px}
+      font-size:.875em;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,.5);
+      transform:translateY(12px);display:flex;align-items:center;gap:10px;
+      border-left:3px solid rgba(255,255,255,.3);
+    }
     #toast.show{opacity:1;transform:translateY(0)}
 
     /* ── Empty states ── */
     .empty{text-align:center;padding:32px 16px;color:var(--text-muted)}
-    .empty .icon{font-size:2.5em;margin-bottom:10px;opacity:.5}
+    .empty .icon{font-size:2.5em;margin-bottom:10px;opacity:.4}
     .empty p{font-size:.88em}
+
+    /* ── Spinner (for button loading states) ── */
+    .spinner{display:inline-block;animation:spin .8s linear infinite}
 
     /* ── Divider ── */
     hr{border:none;border-top:1px solid var(--border);margin:16px 0}
@@ -523,9 +699,23 @@ INDEX_HTML = r"""<!doctype html>
 
     /* ── Cmd reference ── */
     .cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
-    .cmd-item{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px}
+    .cmd-item{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);
+      padding:10px 14px;transition:all .2s;cursor:pointer}
+    .cmd-item:hover{border-color:rgba(99,102,241,.3);background:rgba(99,102,241,.05)}
     .cmd-item code{display:block;margin-bottom:4px;font-size:.82em}
     .cmd-item span{font-size:.78em;color:var(--text-muted)}
+
+    /* ── Staggered animation delays for bot rows ── */
+    .bot-row:nth-child(1){animation-delay:.02s}
+    .bot-row:nth-child(2){animation-delay:.04s}
+    .bot-row:nth-child(3){animation-delay:.06s}
+    .bot-row:nth-child(4){animation-delay:.08s}
+    .bot-row:nth-child(5){animation-delay:.1s}
+    .bot-row:nth-child(6){animation-delay:.12s}
+    .bot-row:nth-child(7){animation-delay:.14s}
+    .bot-row:nth-child(8){animation-delay:.16s}
+    .bot-row:nth-child(9){animation-delay:.18s}
+    .bot-row:nth-child(n+10){animation-delay:.2s}
   </style>
 </head>
 <body>
@@ -541,6 +731,10 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
   <div class="header-right">
+    <div class="hdr-ctrl">
+      <button class="hdr-btn hdr-btn-start" id="hdr-start-btn" onclick="startAll()" title="Start all bots">▶ Start</button>
+      <button class="hdr-btn hdr-btn-stop" id="hdr-stop-btn" onclick="stopAll()" title="Stop all bots">■ Stop</button>
+    </div>
     <div class="status-pill"><div class="status-dot"></div><span id="header-status">Running</span></div>
   </div>
 </header>
@@ -569,6 +763,33 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Dashboard ── -->
 <div id="tab-dashboard" class="tab-content active">
+
+  <!-- System Control Hero -->
+  <div class="sys-control">
+    <div class="sys-control-left">
+      <div class="sys-status-ring" id="sys-ring">
+        <div class="ring-bg">🤖</div>
+        <div class="ring-pulse"></div>
+      </div>
+      <div class="sys-control-info">
+        <h2>AI Employee System</h2>
+        <p id="sys-control-sub">Loading system status…</p>
+        <div class="health-bar-wrap" style="min-width:200px">
+          <div class="health-bar-track"><div class="health-bar-fill" id="health-bar"></div></div>
+          <div class="health-label"><span id="health-label-left">Bot Health</span><span id="health-label-right">–</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="sys-control-right">
+      <button class="btn-hero btn-hero-start" id="hero-start-btn" onclick="startAll()">
+        <span class="btn-icon">▶</span> Start All Bots
+      </button>
+      <button class="btn-hero btn-hero-stop" id="hero-stop-btn" onclick="stopAll()">
+        <span class="btn-icon">■</span> Stop All Bots
+      </button>
+    </div>
+  </div>
+
   <div class="grid-stat" id="stat-cards">
     <div class="stat-card">
       <div class="stat-icon green">🟢</div>
@@ -1368,7 +1589,7 @@ INDEX_HTML = r"""<!doctype html>
 
 <div id="toast"></div>
 
-<script nonce="__CSP_NONCE__">
+<script>
 let currentTab = 'dashboard';
 const _startTime = Date.now();
 
@@ -1424,6 +1645,33 @@ function jsEsc(str) {
   return String(str ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"');
 }
 
+// ── Animated count-up helper ─────────────────────────────────────────────────
+function animateCount(id, target) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const prev = parseInt(el.textContent) || 0;
+  if (prev === target) return;
+  const duration = 500;
+  const startTime = performance.now();
+  const diff = target - prev;
+  const round = diff >= 0 ? Math.ceil : Math.floor;
+  function step(now) {
+    const elapsed = Math.min(now - startTime, duration);
+    const eased = 1 - Math.pow(1 - elapsed / duration, 3);
+    el.textContent = round(prev + diff * eased);
+    if (elapsed < duration) requestAnimationFrame(step);
+    else el.textContent = target;
+  }
+  requestAnimationFrame(step);
+}
+
+// ── Disable / re-enable all start-stop controls during action ────────────────
+function _setStartStopDisabled(disabled) {
+  ['hero-start-btn','hero-stop-btn','hdr-start-btn','hdr-stop-btn'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = disabled;
+  });
+}
 
 async function loadDashboard() {
   const d = await api('/api/status');
@@ -1431,9 +1679,33 @@ async function loadDashboard() {
   const running = bots.filter(b => b.running).length;
   const total = bots.length;
 
-  document.getElementById('stat-running').textContent = running;
-  document.getElementById('stat-total').textContent = total;
+  // Animate stat numbers
+  animateCount('stat-running', running);
+  animateCount('stat-total', total);
   document.getElementById('header-sub').textContent = `${running}/${total} bots running`;
+
+  // Update system control hero
+  const pct = total > 0 ? Math.round((running / total) * 100) : 0;
+  const healthBar = document.getElementById('health-bar');
+  const sysRing = document.getElementById('sys-ring');
+  const sysControlSub = document.getElementById('sys-control-sub');
+  healthBar.style.width = pct + '%';
+  healthBar.className = 'health-bar-fill' + (pct < 40 ? ' danger' : pct < 70 ? ' warn' : '');
+  document.getElementById('health-label-right').textContent = pct + '%';
+  document.getElementById('health-label-left').textContent = running + ' / ' + total + ' running';
+  if (pct === 0 && total > 0) {
+    sysRing.classList.add('offline');
+    sysControlSub.textContent = 'All bots stopped — click Start All to launch';
+  } else if (pct === 100) {
+    sysRing.classList.remove('offline');
+    sysControlSub.textContent = 'All systems operational ✓';
+  } else if (total === 0) {
+    sysRing.classList.add('offline');
+    sysControlSub.textContent = 'No bot state data yet — start bots first';
+  } else {
+    sysRing.classList.remove('offline');
+    sysControlSub.textContent = `${running} of ${total} bots active`;
+  }
 
   // Uptime
   const secs = Math.floor((Date.now() - _startTime) / 1000);
@@ -1465,19 +1737,31 @@ async function loadDashboard() {
 }
 
 async function startAll() {
-  const btn = event.target;
-  btn.disabled = true;
-  btn.textContent = '…';
+  _setStartStopDisabled(true);
+  // Update hero button text to show loading state
+  const heroBtn = document.getElementById('hero-start-btn');
+  if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Starting…';
   await api('/api/bots/start-all', {method:'POST'});
-  toast('Starting all bots…');
-  setTimeout(() => { loadDashboard(); btn.disabled=false; btn.textContent='▶ Start All'; }, 2500);
+  toast('▶ Starting all bots…');
+  setTimeout(() => {
+    loadDashboard();
+    _setStartStopDisabled(false);
+    if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">▶</span> Start All Bots';
+  }, 2500);
 }
 
 async function stopAll() {
   if (!confirm('Stop all running bots?')) return;
+  _setStartStopDisabled(true);
+  const heroBtn = document.getElementById('hero-stop-btn');
+  if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Stopping…';
   await api('/api/bots/stop-all', {method:'POST'});
-  toast('Stopping all bots…', '#ef4444');
-  setTimeout(loadDashboard, 2000);
+  toast('■ Stopping all bots…', '#ef4444');
+  setTimeout(() => {
+    loadDashboard();
+    _setStartStopDisabled(false);
+    if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">■</span> Stop All Bots';
+  }, 2000);
 }
 
 // ── Chat ────────────────────────────────────────────────────────────────────
@@ -3239,17 +3523,15 @@ setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    nonce = secrets.token_urlsafe(16)
-    html = INDEX_HTML.replace("__CSP_NONCE__", nonce)
     csp = (
         "default-src 'self'; "
-        f"script-src 'nonce-{nonce}'; "
+        "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: blob:; "
         "connect-src 'self'"
     )
-    return HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
+    return HTMLResponse(content=INDEX_HTML, headers={"Content-Security-Policy": csp})
 
 
 # ── Security endpoints (openclaw-2) ───────────────────────────────────────────

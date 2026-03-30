@@ -1,5 +1,6 @@
 """AI Router — Two-layer AI routing: free/local first, paid cloud fallback.
 
+<<<<<<< copilot/upgrade-ai-employee-system
 Routing Architecture (two layers, always enforced by default):
 
   ┌─ LAYER 1 — Free / Local (always tried first) ───────────────────────────┐
@@ -12,6 +13,22 @@ Routing Architecture (two layers, always enforced by default):
   └─────────────────────────────────────────────────────────────────────────┘
 
 Set LOCAL_AI_FIRST=0 to disable and use preferred-provider-first routing instead.
+=======
+Routes AI queries to the best available provider in priority order:
+  1. Ollama  (local, free, private — preferred for ALL tasks when LOCAL_AI_FIRST=1)
+  2. Anthropic Claude  (cloud, costs tokens — preferred for analytics tasks)
+  3. OpenAI GPT-4o  (cloud, costs tokens — preferred for sales/persuasion tasks)
+
+LOCAL_AI_FIRST mode (enabled by default via LOCAL_AI_FIRST=1 env var):
+  Every query — regardless of agent type — tries Ollama first.  Cloud providers
+  are only contacted when Ollama is unreachable or returns an empty answer.
+  Set LOCAL_AI_FIRST=0 to restore the original preferred-provider-first behaviour.
+
+Per-agent model routing selects the optimal provider for each agent category:
+  - sales / persuasion (lead-hunter, email-ninja, web-sales) → OpenAI GPT-4o
+  - analytics / research (data-analyst, intel-agent) → Anthropic Claude
+  - general / all others → Ollama (local, free)
+>>>>>>> main
 
 Per-agent model routing (query_ai_for_agent):
   - reasoning      → Layer 1b: NVIDIA Nemotron (deep logic, complex analysis)
@@ -22,6 +39,11 @@ Per-agent model routing (query_ai_for_agent):
   - analytics/data → Layer 2a: Anthropic Claude (only if Layer 1 fails)
   - research       → Layer 2a: Anthropic Claude (only if Layer 1 fails)
   - sales/creative → Layer 2b: OpenAI GPT-4o (only if Layer 1 fails)
+
+Batch processing (query_ai_batch):
+  Sends multiple prompts to Ollama concurrently (ThreadPoolExecutor), minimising
+  latency and cloud API usage.  Each prompt that Ollama cannot handle falls back
+  individually through the standard Anthropic → OpenAI chain.
 
 Also provides search_web() for web research tasks:
   - DuckDuckGo Instant Answers (free, no API key)
@@ -36,25 +58,38 @@ Usage (from any bot that adds this directory to sys.path):
     from pathlib import Path
     AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
     sys.path.insert(0, str(AI_HOME / "bots" / "ai-router"))
-    from ai_router import query_ai, query_ai_for_agent, search_web
+    from ai_router import query_ai, query_ai_for_agent, query_ai_batch, search_web
 
     result = query_ai("Explain quantum computing in simple terms")
     print(result["answer"])    # the response text
     print(result["provider"])  # "ollama" | "nvidia_nim" | "anthropic" | "openai" | "error"
 
+<<<<<<< copilot/upgrade-ai-employee-system
     # Agent-aware routing (LOCAL_AI_FIRST=1 by default):
     #   Always tries Ollama → NIM first, then preferred cloud provider.
     result = query_ai_for_agent("sales", "Write a cold email for a SaaS product")
     result = query_ai_for_agent("analytical", "Analyse this dataset...", history=[...])
     result = query_ai_for_agent("coding", "Write a Python function to parse JSON")
     result = query_ai_for_agent("reasoning", "Analyse this complex business scenario...")
+=======
+    # Agent-aware routing: picks the best model for the task type
+    # With LOCAL_AI_FIRST=1 (default), Ollama is always tried first.
+    result = query_ai_for_agent("sales", "Write a cold email for a SaaS product")
+    result = query_ai_for_agent("analytical", "Analyse this dataset...", history=[...])
+>>>>>>> main
     print(result["answer"])
+
+    # Batch: process many prompts concurrently via local Ollama
+    results = query_ai_batch(["Summarise topic A", "Summarise topic B", "Summarise topic C"])
+    for r in results:
+        print(r["answer"], r["provider"])
 
     hits = search_web("latest AI news 2025")
     for h in hits:
         print(h["title"], h["url"], h["snippet"])
 
 Environment variables (loaded from ~/.ai-employee/.env):
+<<<<<<< copilot/upgrade-ai-employee-system
     LOCAL_AI_FIRST        — "1" (default) = always try free/local before paid cloud
     OLLAMA_HOST           — Ollama server URL (default: http://localhost:11434)
     OLLAMA_MODEL          — model name (default: llama3.2)
@@ -73,7 +108,25 @@ Environment variables (loaded from ~/.ai-employee/.env):
     SERP_API_KEY          — SerpAPI key (optional)
     NEWS_API_KEY          — NewsAPI key (optional, for news searches)
     WEB_SEARCH_TIMEOUT    — web search timeout in seconds (default: 15)
+=======
+    OLLAMA_HOST              — Ollama server URL (default: http://localhost:11434)
+    OLLAMA_MODEL             — model name (default: llama3.2)
+    OLLAMA_TIMEOUT           — request timeout in seconds (default: 60)
+    OLLAMA_BATCH_MAX_WORKERS — max concurrent Ollama workers for query_ai_batch (default: 4)
+    LOCAL_AI_FIRST           — always try Ollama before cloud providers (default: 1)
+    ANTHROPIC_API_KEY        — Anthropic key (optional cloud fallback)
+    CLAUDE_MODEL             — Claude model name (default: claude-opus-4-5)
+    OPENAI_API_KEY           — OpenAI key (optional last-resort fallback)
+    OPENAI_MODEL             — OpenAI model name (default: gpt-4o-mini)
+    OPENAI_SALES_MODEL       — OpenAI model for sales agents (default: gpt-4o)
+    CLOUD_AI_TIMEOUT         — cloud request timeout in seconds (default: 30)
+    TAVILY_API_KEY           — Tavily AI search key (optional, best quality)
+    SERP_API_KEY             — SerpAPI key (optional)
+    NEWS_API_KEY             — NewsAPI key (optional, for news searches)
+    WEB_SEARCH_TIMEOUT       — web search timeout in seconds (default: 15)
+>>>>>>> main
 """
+import concurrent.futures
 import json
 import logging
 import os
@@ -108,11 +161,20 @@ OPENAI_MODEL_CREATIVE = os.environ.get("OPENAI_MODEL_CREATIVE", "gpt-4o")
 
 CLOUD_AI_TIMEOUT = int(os.environ.get("CLOUD_AI_TIMEOUT", "30"))
 
+<<<<<<< copilot/upgrade-ai-employee-system
 # ── Two-layer routing control ─────────────────────────────────────────────────
 # When LOCAL_AI_FIRST=1 (default), free/local providers (Ollama + NVIDIA NIM)
 # are ALWAYS tried before any paid cloud provider, regardless of agent preference.
 # Set LOCAL_AI_FIRST=0 to use preferred-provider-first routing instead.
 LOCAL_AI_FIRST = os.environ.get("LOCAL_AI_FIRST", "1").strip() not in ("0", "false", "no")
+=======
+# Always try local Ollama before cloud providers (default: enabled).
+# Set LOCAL_AI_FIRST=0 in .env to restore preferred-provider-first behaviour.
+LOCAL_AI_FIRST: bool = os.environ.get("LOCAL_AI_FIRST", "1").strip().lower() not in ("0", "false", "no")
+
+# Maximum concurrent Ollama workers used by query_ai_batch().
+OLLAMA_BATCH_MAX_WORKERS: int = int(os.environ.get("OLLAMA_BATCH_MAX_WORKERS", "4"))
+>>>>>>> main
 
 # ── Per-agent model routing ───────────────────────────────────────────────────
 # Maps agent categories and IDs to their preferred AI provider + model.
@@ -506,6 +568,67 @@ def is_ollama_available() -> bool:
         return False
 
 
+def query_ai_batch(
+    prompts: list,
+    system_prompt: str = "",
+    history: Optional[list] = None,
+    max_workers: Optional[int] = None,
+) -> list:
+    """Process a list of prompts concurrently using local AI (Ollama) first.
+
+    Sends all prompts to Ollama in parallel via a thread pool, maximising
+    throughput and local AI utilisation.  Any prompt for which Ollama is
+    unavailable or returns an empty answer falls back individually through
+    the standard cloud provider chain (Anthropic → OpenAI), keeping external
+    API usage to the minimum necessary.
+
+    Args:
+        prompts:      List of prompt strings to process.
+        system_prompt: Optional system instructions applied to every prompt.
+        history:      Optional conversation history applied to every prompt.
+        max_workers:  Max concurrent Ollama workers.  Defaults to the
+                      OLLAMA_BATCH_MAX_WORKERS env var (default: 4).
+
+    Returns:
+        List of result dicts (same structure as query_ai()), one per input
+        prompt, in the same order as the input list.
+    """
+    if not prompts:
+        return []
+
+    workers = max_workers if max_workers and max_workers > 0 else OLLAMA_BATCH_MAX_WORKERS
+    hist = history or []
+
+    def _process_one(prompt: str) -> dict:
+        # Always try local Ollama first for every item in the batch
+        result = _try_ollama(prompt, system_prompt, hist)
+        if result:
+            return result
+        # Per-item cloud fallback: Anthropic → OpenAI
+        result = _try_anthropic(prompt, system_prompt, hist)
+        if result:
+            return result
+        result = _try_openai(prompt, system_prompt, hist)
+        if result:
+            return result
+        return {
+            "answer": "",
+            "provider": "error",
+            "model": "",
+            "error": (
+                "No AI provider available. "
+                "Start Ollama (`ollama serve`) or set ANTHROPIC_API_KEY / OPENAI_API_KEY "
+                "in ~/.ai-employee/.env and restart."
+            ),
+            "usage": None,
+        }
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        results = list(executor.map(_process_one, prompts))
+
+    return results
+
+
 def query_ai_for_agent(
     agent_type: str,
     prompt: str,
@@ -546,6 +669,23 @@ def query_ai_for_agent(
     history = history or []
     agent_key = agent_type.lower()
 
+<<<<<<< copilot/upgrade-ai-employee-system
+=======
+    # LOCAL_AI_FIRST: always try Ollama before any cloud provider.
+    # This maximises local AI usage and keeps cloud API costs as low as possible.
+    if LOCAL_AI_FIRST:
+        result = _try_ollama(prompt, system_prompt, history)
+        if result:
+            logger.debug("ai_router: LOCAL_AI_FIRST — agent=%s served by Ollama", agent_type)
+            return result
+        logger.debug(
+            "ai_router: LOCAL_AI_FIRST — Ollama unavailable for agent=%s, "
+            "trying preferred cloud provider",
+            agent_type,
+        )
+
+    # Look up preferred provider/model for this agent type
+>>>>>>> main
     routing = _route_for_agent(None, agent_key)
     preferred_provider = routing["provider"]
     preferred_model = os.environ.get(routing["model_env"], routing["default_model"])
