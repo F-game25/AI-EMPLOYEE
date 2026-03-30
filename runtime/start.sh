@@ -75,6 +75,15 @@ else
   ok "JWT_SECRET_KEY is set"
 fi
 
+# ── Startup update check ──────────────────────────────────────────────────────
+log "Checking for updates..."
+_UPDATER_PY="$AI_HOME/bots/auto-updater/auto_updater.py"
+if command -v python3 >/dev/null 2>&1 && [[ -f "$_UPDATER_PY" ]]; then
+  python3 "$_UPDATER_PY" --once || warn "Update check failed (no internet?) — continuing with installed version."
+else
+  warn "Auto-updater not found — skipping update check."
+fi
+
 # ── OpenClaw gateway ───────────────────────────────────────────────────────────
 log "Starting OpenClaw gateway..."
 # Support openclaw 2.0 (safe version): set OPENCLAW_BIN=openclaw2 in .env
