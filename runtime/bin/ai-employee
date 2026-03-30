@@ -204,9 +204,25 @@ case "$cmd" in
     command -v curl     >/dev/null 2>&1 \
       && echo "  $OK curl       : $(curl --version 2>&1 | head -1)" \
       || echo "  $FAIL curl      : NOT FOUND (required)"
-    command -v openclaw >/dev/null 2>&1 \
-      && echo "  $OK openclaw   : $(openclaw --version 2>/dev/null || echo installed)" \
-      || echo "  $WARN openclaw  : not installed (optional — needed for gateway: curl -fsSL https://openclaw.ai/install.sh | bash)"
+    if command -v openclaw >/dev/null 2>&1; then
+      echo "  $OK openclaw   : $(openclaw --version 2>/dev/null || echo installed)"
+    else
+      echo "  $WARN openclaw  : not installed (optional — needed for gateway)"
+      if [[ -t 0 ]] && command -v curl >/dev/null 2>&1; then
+        printf "     ↳ Install openclaw on this machine now? [y/N] "
+        read -r _oc_ans 2>/dev/null || _oc_ans=""
+        if [[ "${_oc_ans}" =~ ^[Yy]$ ]]; then
+          echo "     Installing openclaw ..."
+          if curl -fsSL https://openclaw.ai/install.sh | bash; then
+            echo "  $OK openclaw   : installed — restart your shell or run: source ~/.bashrc"
+          else
+            echo "  $FAIL openclaw  : install failed — try manually: curl -fsSL https://openclaw.ai/install.sh | bash"
+          fi
+        fi
+      else
+        echo "     To install: curl -fsSL https://openclaw.ai/install.sh | bash"
+      fi
+    fi
     command -v ollama   >/dev/null 2>&1 \
       && echo "  $OK ollama     : $(ollama --version 2>/dev/null || echo installed)" \
       || echo "  $WARN ollama    : not installed (optional — enables local/private LLM)"
