@@ -8,10 +8,19 @@ BOT_HOME="$AI_HOME/bots/problem-solver-ui"
 REQ="$BOT_HOME/requirements.txt"
 
 # ── Load config ────────────────────────────────────────────────────────────────
+# Load bot-specific env defaults first.
 if [[ -f "$AI_HOME/config/problem-solver-ui.env" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$AI_HOME/config/problem-solver-ui.env"
+  set +a
+fi
+
+# Load global AI Employee env last so runtime/user overrides win.
+if [[ -f "$AI_HOME/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$AI_HOME/.env"
   set +a
 fi
 

@@ -15,6 +15,8 @@ CLAUDE_MODEL="claude-opus-4-6"
 OLLAMA_HOST="http://localhost:11434"
 OLLAMA_MODEL="llama3.2"
 ZERO_CONFIG="${ZERO_CONFIG:-0}"
+AUTO_INSTALL_OPENCLAW="${AUTO_INSTALL_OPENCLAW:-1}"
+AUTO_INSTALL_DOCKER="${AUTO_INSTALL_DOCKER:-0}"
 
 log()   { echo -e "${C}▸${NC} $1"; }
 ok()    { echo -e "${G}✓${NC} $1"; }
@@ -239,6 +241,8 @@ wizard() {
         UI_PORT=8787
         WORKERS=5
         AI_EMPLOYEE_MODE="starter"
+        AUTO_INSTALL_OPENCLAW="1"
+        AUTO_INSTALL_DOCKER="0"
         TOKEN=$(openssl rand -hex 32)
         ok "Zero-config defaults set (5 agents, Starter mode, local Ollama)"
         ok "WhatsApp: set placeholder phone — update ~/.ai-employee/config.json to connect"
@@ -401,6 +405,30 @@ wizard() {
       starter|business|power) ok "Mode: $AI_EMPLOYEE_MODE" ;;
       *) warn "Unknown mode '$AI_EMPLOYEE_MODE'; defaulting to business"; AI_EMPLOYEE_MODE="business" ;;
     esac
+
+    # 10) Runtime self-healing preferences
+    echo ""
+    ask "Auto-install OpenClaw at runtime if missing? [Y/n]:"
+    read -r AUTO_OPENCLAW_INPUT < "$tty_in"
+    AUTO_OPENCLAW_INPUT="${AUTO_OPENCLAW_INPUT:-y}"
+    if [[ "$(echo "$AUTO_OPENCLAW_INPUT" | tr '[:upper:]' '[:lower:]')" =~ ^(y|yes)$ ]]; then
+        AUTO_INSTALL_OPENCLAW="1"
+        ok "OpenClaw runtime auto-install: enabled"
+    else
+        AUTO_INSTALL_OPENCLAW="0"
+        info "OpenClaw runtime auto-install: disabled"
+    fi
+
+    ask "Auto-install Docker + sandbox safety setup if missing? [y/N]:"
+    read -r AUTO_DOCKER_INPUT < "$tty_in"
+    AUTO_DOCKER_INPUT="${AUTO_DOCKER_INPUT:-n}"
+    if [[ "$(echo "$AUTO_DOCKER_INPUT" | tr '[:upper:]' '[:lower:]')" =~ ^(y|yes)$ ]]; then
+        AUTO_INSTALL_DOCKER="1"
+        ok "Docker runtime auto-install: enabled"
+    else
+        AUTO_INSTALL_DOCKER="0"
+        info "Docker runtime auto-install: disabled"
+    fi
 
     TOKEN=$(openssl rand -hex 32)
     ok "Wizard complete"
@@ -853,6 +881,8 @@ OLLAMA_HOST=$OLLAMA_HOST
 OLLAMA_MODEL=$OLLAMA_MODEL
 CLAUDE_MODEL=$CLAUDE_MODEL
 AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}
+AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}
+AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}
 OPENCLAW_DISABLE_BONJOUR=1
 TZ=Europe/Amsterdam
 ENV
@@ -873,20 +903,48 @@ generate_configs() {
             cp "$template" "$AI_HOME/config.json"
         else
             # Minimal fallback
-            cat > "$AI_HOME/config.json" << 'CFG_END'
+                        cat > "$AI_HOME/config.json" << 'CFG_END'
 {
-  "gateway": {
-    "mode": "local",
-    "bind": "loopback",
-    "port": 18789,
-    "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
-    "controlUi": { "enabled": true, "port": 18789 }
-  },
-  "channels": {
-    "whatsapp": { "dmPolicy": "allowlist", "allowFrom": ["PHONE_PLACEHOLDER"] }
-  },
-  "cron": { "enabled": true },
-  "discovery": { "mdns": { "mode": "off" } }
+    "wizard": {
+        "lastRunCommand": "install",
+        "lastRunMode": "local"
+    },
+    "agents": {
+        "defaults": {
+            "workspace": "AI_HOME_PLACEHOLDER/workspace"
+        }
+    },
+    "tools": {
+        "profile": "coding"
+    },
+    "commands": {
+        "native": "auto",
+        "nativeSkills": "auto",
+        "restart": true,
+        "ownerDisplay": "raw"
+    },
+    "session": {
+        "dmScope": "per-channel-peer"
+    },
+    "gateway": {
+        "port": 18789,
+        "mode": "local",
+        "bind": "loopback",
+        "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
+        "tailscale": { "mode": "off", "resetOnExit": false }
+    },
+    "channels": {
+        "whatsapp": {
+            "dmPolicy": "allowlist",
+            "allowFrom": ["PHONE_PLACEHOLDER"],
+            "groups": { "*": { "requireMention": true } },
+            "mediaMaxMb": 50,
+            "sendReadReceipts": true
+        }
+    },
+    "skills": {
+        "install": { "nodeManager": "npm" }
+    }
 }
 CFG_END
         fi
@@ -907,20 +965,48 @@ CFG_END
             if [[ -f "$template" ]]; then
                 cp "$template" "$AI_HOME/config.json"
             else
-                cat > "$AI_HOME/config.json" << 'CFG_END'
+                                cat > "$AI_HOME/config.json" << 'CFG_END'
 {
-  "gateway": {
-    "mode": "local",
-    "bind": "loopback",
-    "port": 18789,
-    "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
-    "controlUi": { "enabled": true, "port": 18789 }
-  },
-  "channels": {
-    "whatsapp": { "dmPolicy": "allowlist", "allowFrom": ["PHONE_PLACEHOLDER"] }
-  },
-  "cron": { "enabled": true },
-  "discovery": { "mdns": { "mode": "off" } }
+    "wizard": {
+        "lastRunCommand": "install",
+        "lastRunMode": "local"
+    },
+    "agents": {
+        "defaults": {
+            "workspace": "AI_HOME_PLACEHOLDER/workspace"
+        }
+    },
+    "tools": {
+        "profile": "coding"
+    },
+    "commands": {
+        "native": "auto",
+        "nativeSkills": "auto",
+        "restart": true,
+        "ownerDisplay": "raw"
+    },
+    "session": {
+        "dmScope": "per-channel-peer"
+    },
+    "gateway": {
+        "port": 18789,
+        "mode": "local",
+        "bind": "loopback",
+        "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
+        "tailscale": { "mode": "off", "resetOnExit": false }
+    },
+    "channels": {
+        "whatsapp": {
+            "dmPolicy": "allowlist",
+            "allowFrom": ["PHONE_PLACEHOLDER"],
+            "groups": { "*": { "requireMention": true } },
+            "mediaMaxMb": 50,
+            "sendReadReceipts": true
+        }
+    },
+    "skills": {
+        "install": { "nodeManager": "npm" }
+    }
 }
 CFG_END
             fi
@@ -958,6 +1044,8 @@ CFG_END
             [[ -n "${SMTP_PASS:-}" ]]              && echo "SMTP_PASS=$SMTP_PASS"
             [[ -n "${ELEVEN_LABS_KEY:-}" ]]       && echo "ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY"
             echo "AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}"
+            echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}"
+            echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}"
             echo "OPENCLAW_DISABLE_BONJOUR=1"
             echo "DASHBOARD_PORT=${DASHBOARD_PORT:-3000}"
             echo "TZ=Europe/Amsterdam"
@@ -967,6 +1055,28 @@ CFG_END
     else
         ok ".env already exists — not overwritten"
     fi
+
+        # Ensure runtime self-healing flags exist for older installs.
+        grep -q "^AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=" "$AI_HOME/.env" \
+            || echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}" >> "$AI_HOME/.env"
+        grep -q "^AI_EMPLOYEE_AUTO_INSTALL_DOCKER=" "$AI_HOME/.env" \
+            || echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}" >> "$AI_HOME/.env"
+
+    # Keep gateway token in .env aligned with config.json to avoid auth mismatch.
+    local cfg_token
+    cfg_token="$(python3 -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1]);
+try:
+ d=json.loads(p.read_text()); print(d.get("gateway",{}).get("auth",{}).get("token",""))
+except Exception:
+ print("")' "$AI_HOME/config.json" 2>/dev/null)"
+        if [[ -n "${cfg_token:-}" ]]; then
+            if grep -q "^OPENCLAW_GATEWAY_TOKEN=" "$AI_HOME/.env"; then
+                sed -i.bak "s|^OPENCLAW_GATEWAY_TOKEN=.*|OPENCLAW_GATEWAY_TOKEN=$cfg_token|" "$AI_HOME/.env"
+                rm -f "$AI_HOME/.env.bak"
+            else
+                echo "OPENCLAW_GATEWAY_TOKEN=$cfg_token" >> "$AI_HOME/.env"
+            fi
+        fi
 
     # Patch status-reporter.env
     local sr_env="$AI_HOME/config/status-reporter.env"

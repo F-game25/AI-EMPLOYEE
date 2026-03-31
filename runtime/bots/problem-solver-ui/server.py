@@ -11,12 +11,18 @@ State files are read from ~/.ai-employee/state/
 Config is read/written in ~/.ai-employee/config/
 """
 import json
+import hashlib
+import hmac
 import logging
 import os
 import re
+import secrets
+import socket
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -110,6 +116,60 @@ except ImportError:
     _SECURITY_AVAILABLE = False
     _security_config = None
 
+    # Fallback security primitives so auth endpoints remain functional even
+    # when optional security dependencies are not installed.
+    class InputSanitizer:  # type: ignore[no-redef]
+        @staticmethod
+        def sanitize_input(value: str, max_length: int = 50) -> str:
+            v = (value or "").strip()
+            v = re.sub(r"[^a-zA-Z0-9._@-]", "", v)
+            return v[:max_length]
+
+    class PasswordValidator:  # type: ignore[no-redef]
+        @staticmethod
+        def validate(
+            password: str,
+            min_length: int = 12,
+            require_special: bool = True,
+            require_numbers: bool = True,
+            require_uppercase: bool = True,
+        ) -> tuple[bool, str]:
+            if len(password or "") < min_length:
+                return False, f"Password must be at least {min_length} characters."
+            if require_numbers and not re.search(r"\d", password):
+                return False, "Password must include at least one number."
+            if require_uppercase and not re.search(r"[A-Z]", password):
+                return False, "Password must include at least one uppercase letter."
+            if require_special and not re.search(r"[^a-zA-Z0-9]", password):
+                return False, "Password must include at least one special character."
+            return True, "ok"
+
+    class AuthManager:  # type: ignore[no-redef]
+        def __init__(self, secret_key: str, algorithm: str = "HS256", expire_minutes: int = 30):
+            self.secret_key = secret_key
+            self.algorithm = algorithm
+            self.expire_minutes = expire_minutes
+
+        def hash_password(self, password: str) -> str:
+            salt = secrets.token_bytes(16)
+            digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 120000)
+            return f"pbkdf2_sha256${salt.hex()}${digest.hex()}"
+
+        def verify_password(self, password: str, hashed: str) -> bool:
+            try:
+                _prefix, salt_hex, digest_hex = hashed.split("$", 2)
+                calc = hashlib.pbkdf2_hmac(
+                    "sha256", password.encode(), bytes.fromhex(salt_hex), 120000
+                ).hex()
+                return hmac.compare_digest(calc, digest_hex)
+            except Exception:
+                return False
+
+        def create_access_token(self, payload: dict) -> str:
+            user = str(payload.get("sub", "user"))
+            nonce = secrets.token_urlsafe(24)
+            return f"fallback.{user}.{nonce}"
+
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_DIR = AI_HOME / "state"
 CONFIG_DIR = AI_HOME / "config"
@@ -132,6 +192,94 @@ _REPO_TEMPLATES_FILE = Path(__file__).parent.parent.parent / "config" / "agent_t
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
 MAX_CHAT_MESSAGE_LENGTH = 10000
+CHATLOG_MAX_ENTRIES = 1000
+LLM_TIMEOUT_SECONDS = 30
+
+ROUTING_MAP = {
+  "business plan": "company-builder",
+  "customer": "support-bot",
+  "support": "support-bot",
+  "prospect": "lead-generator",
+  "lead": "lead-generator",
+  "outreach": "email-ninja",
+  "email": "email-ninja",
+  "blog": "content-master",
+  "article": "content-master",
+  "seo": "content-master",
+  "linkedin": "social-guru",
+  "instagram": "social-guru",
+  "twitter": "social-guru",
+  "post": "social-guru",
+  "competitor": "intel-agent",
+  "research": "intel-agent",
+  "market": "data-analyst",
+  "analyse": "data-analyst",
+  "analyze": "data-analyst",
+  "ad": "creative-studio",
+  "copy": "creative-studio",
+  "website": "web-sales",
+  "hire": "hr-manager",
+  "recruit": "hr-manager",
+  "finance": "finance-wizard",
+  "revenue": "finance-wizard",
+  "grow": "growth-hacker",
+  "project": "project-manager",
+}
+
+AGENTS_BY_MODE = {
+  "starter": [
+    "task-orchestrator",
+    "lead-generator",
+    "offer-agent",
+  ],
+  "business": [
+    "task-orchestrator",
+    "lead-generator",
+    "offer-agent",
+    "company-builder",
+    "brand-strategist",
+    "finance-wizard",
+    "growth-hacker",
+    "project-manager",
+  ],
+  "power": [
+    "task-orchestrator",
+    "lead-generator",
+    "offer-agent",
+    "company-builder",
+    "brand-strategist",
+    "finance-wizard",
+    "growth-hacker",
+    "project-manager",
+    "social-media-manager",
+    "paid-media-specialist",
+    "qualification-agent",
+    "follow-up-agent",
+    "appointment-setter",
+    "ui-designer",
+    "web-researcher",
+    "engineering-assistant",
+    "ecom-agent",
+    "chatbot-builder",
+    "creator-agency",
+    "recruiter",
+  ],
+}
+
+AGENT_ALIASES = {
+  "task-orchestrator": ["task-orchestrator", "orchestrator"],
+  "lead-generator": ["lead-generator", "lead-hunter", "lead-hunter-elite"],
+  "lead-hunter": ["lead-hunter", "lead-generator", "lead-hunter-elite"],
+}
+
+INFRA_AGENTS = {
+  "problem-solver-ui",
+  "problem-solver",
+  "scheduler-runner",
+  "status-reporter",
+  "auto-updater",
+  "discovery",
+}
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -140,6 +288,295 @@ logging.basicConfig(
 logger = logging.getLogger("problem-solver-ui")
 
 _ACTIVITY_LOCK = threading.Lock()
+
+
+def _load_runtime_env_map() -> dict[str, str]:
+  env_map: dict[str, str] = {}
+  env_file = AI_HOME / ".env"
+  if not env_file.exists():
+    return env_map
+  try:
+    for raw_line in env_file.read_text().splitlines():
+      line = raw_line.strip()
+      if not line or line.startswith("#") or "=" not in line:
+        continue
+      key, value = line.split("=", 1)
+      env_map[key.strip()] = value.strip().strip('"').strip("'")
+  except Exception as exc:
+    logger.warning("Failed to read %s: %s", env_file, exc)
+  return env_map
+
+
+def _runtime_env_value(key: str, default: str = "") -> str:
+  value = _load_runtime_env_map().get(key)
+  if value not in (None, ""):
+    return value
+  return os.environ.get(key, default)
+
+
+def _current_mode() -> str:
+  mode = _runtime_env_value("AI_EMPLOYEE_MODE", "power").strip().lower()
+  return mode if mode in AGENTS_BY_MODE else "power"
+
+
+def _available_agent_ids(mode: Optional[str] = None) -> list[str]:
+  return list(AGENTS_BY_MODE.get(mode or _current_mode(), AGENTS_BY_MODE["power"]))
+
+
+def _agent_aliases(agent_id: str) -> list[str]:
+  aliases = AGENT_ALIASES.get(agent_id, [agent_id])
+  return aliases if agent_id in aliases else [agent_id, *aliases]
+
+
+def _agent_allowed_in_mode(agent_id: str, mode: Optional[str] = None) -> bool:
+  allowed = set(_available_agent_ids(mode))
+  if agent_id in allowed:
+    return True
+  for allowed_id in allowed:
+    if agent_id in _agent_aliases(allowed_id):
+      return True
+  return False
+
+
+def _agent_dir_exists(agent_id: str) -> bool:
+  return (BOTS_DIR / agent_id / "run.sh").exists()
+
+
+def _resolve_agent_target(agent_id: str) -> Optional[str]:
+  """Resolve an agent ID to a runnable folder name (supports aliases)."""
+  for candidate in _agent_aliases(agent_id):
+    if _agent_dir_exists(candidate):
+      return candidate
+  return None
+
+
+def _mode_agent_targets(mode: Optional[str] = None) -> list[str]:
+  """Return unique runnable agent folders for the current mode."""
+  targets: list[str] = []
+  for agent_id in _available_agent_ids(mode):
+    resolved = _resolve_agent_target(agent_id)
+    if resolved and resolved not in targets:
+      targets.append(resolved)
+  return targets
+
+
+def route_to_agent(message: str) -> str:
+  message_lower = message.lower()
+  for keyword in sorted(ROUTING_MAP, key=len, reverse=True):
+    if keyword in message_lower:
+      return ROUTING_MAP[keyword]
+  if "all 20 agents" in message_lower or "all agents" in message_lower:
+    return "task-orchestrator"
+  return "task-orchestrator"
+
+
+def append_chatlog(entry: dict) -> None:
+  try:
+    CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+    lines = CHATLOG.read_text().splitlines() if CHATLOG.exists() else []
+    lines.append(json.dumps(entry))
+    CHATLOG.write_text("\n".join(lines[-CHATLOG_MAX_ENTRIES:]) + "\n")
+  except Exception as exc:
+    logger.warning("Failed to write chatlog: %s", exc)
+
+
+def _ollama_reachable(ollama_host: str) -> bool:
+  try:
+    req = urllib.request.Request(
+      f"{ollama_host.rstrip('/')}/api/tags",
+      headers={"User-Agent": "AI-Employee/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=0.25) as resp:
+      return resp.status == 200
+  except Exception:
+    return False
+
+
+def _detect_llm_provider(model_route: Optional[str] = None) -> tuple[Optional[str], str, dict[str, str]]:
+  runtime_env = _load_runtime_env_map()
+  route = (model_route or "").strip().lower()
+
+  if route == "groq":
+    groq_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+    if groq_key:
+      return "groq", runtime_env.get("GROQ_MODEL") or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"), runtime_env
+
+  if route == "external":
+    anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+      return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
+    openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
+      return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o"), runtime_env
+
+  if route == "ollama":
+    ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    if _ollama_reachable(ollama_host):
+      return "ollama", runtime_env.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL", "llama3.2"), runtime_env
+
+  anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+  if anthropic_key:
+    return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
+  openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+  if openai_key:
+    return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o"), runtime_env
+  ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+  if _ollama_reachable(ollama_host):
+    return "ollama", runtime_env.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL", "llama3.2"), runtime_env
+  return None, "", runtime_env
+
+
+def _llm_auth_failed(exc: Exception) -> bool:
+  text = str(exc).lower()
+  return "401" in text or "403" in text or "unauthorized" in text or "invalid api key" in text or "authentication" in text
+
+
+def _build_llm_system_prompt(message: str, routed_agent: str, mode: str) -> str:
+  available_agents = ", ".join(_available_agent_ids(mode))
+  return (
+    "You are AI Employee, a high-agency execution assistant with a natural human tone. "
+    f"Current mode: {mode}. "
+    f"Available agents in this mode: {available_agents}. "
+    f"Routed specialist agent: {routed_agent}. "
+    f"User task: {message}. "
+    "Produce real output immediately. Do not ask follow-up questions. "
+    "Write conversationally, with clear structure, and avoid robotic phrasing. "
+    "If live data or browsing is unavailable, say that clearly and provide the exact plan, structure, or draft you would deliver instead. "
+    "Be concrete, concise, and useful."
+  )
+
+
+def _call_groq_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
+  payload = {
+    "model": model,
+    "messages": [
+      {"role": "system", "content": system_prompt},
+      {"role": "user", "content": prompt},
+    ],
+    "temperature": 0.7,
+  }
+  req = urllib.request.Request(
+    "https://api.groq.com/openai/v1/chat/completions",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+      "Content-Type": "application/json",
+      "Authorization": f"Bearer {api_key}",
+    },
+    method="POST",
+  )
+  with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+    body = json.loads(resp.read().decode("utf-8", errors="replace"))
+  return (((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+
+
+def _call_openai_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
+  payload = {
+    "model": model,
+    "messages": [
+      {"role": "system", "content": system_prompt},
+      {"role": "user", "content": prompt},
+    ],
+    "temperature": 0.7,
+  }
+  req = urllib.request.Request(
+    "https://api.openai.com/v1/chat/completions",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+      "Content-Type": "application/json",
+      "Authorization": f"Bearer {api_key}",
+    },
+    method="POST",
+  )
+  with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+    body = json.loads(resp.read().decode("utf-8", errors="replace"))
+  return (((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+
+
+def _call_anthropic_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
+  payload = {
+    "model": model,
+    "max_tokens": 1200,
+    "system": system_prompt,
+    "messages": [{"role": "user", "content": prompt}],
+  }
+  req = urllib.request.Request(
+    "https://api.anthropic.com/v1/messages",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+      "Content-Type": "application/json",
+      "x-api-key": api_key,
+      "anthropic-version": "2023-06-01",
+    },
+    method="POST",
+  )
+  with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+    body = json.loads(resp.read().decode("utf-8", errors="replace"))
+  parts = body.get("content") or []
+  return "\n".join(part.get("text", "") for part in parts if part.get("type") == "text").strip()
+
+
+def _call_ollama_chat(prompt: str, system_prompt: str, model: str, ollama_host: str) -> str:
+  payload = {
+    "model": model,
+    "stream": False,
+    "messages": [
+      {"role": "system", "content": system_prompt},
+      {"role": "user", "content": prompt},
+    ],
+  }
+  req = urllib.request.Request(
+    f"{ollama_host.rstrip('/')}/api/chat",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+  )
+  with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+    body = json.loads(resp.read().decode("utf-8", errors="replace"))
+  return ((body.get("message") or {}).get("content") or "").strip()
+
+
+def _generate_llm_response(message: str, routed_agent: str, mode: str, model_route: Optional[str] = None) -> str:
+  provider, model, runtime_env = _detect_llm_provider(model_route)
+  if not provider:
+    return (
+      "No model is available for the selected route. Add GROQ_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to ~/.ai-employee/.env, "
+      "or run Ollama locally: https://ollama.ai"
+    )
+
+  system_prompt = _build_llm_system_prompt(message, routed_agent, mode)
+  try:
+    if provider == "anthropic":
+      api_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+      answer = _call_anthropic_chat(message, system_prompt, model, api_key)
+    elif provider == "openai":
+      api_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+      answer = _call_openai_chat(message, system_prompt, model, api_key)
+    elif provider == "groq":
+      api_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+      answer = _call_groq_chat(message, system_prompt, model, api_key)
+    else:
+      ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+      answer = _call_ollama_chat(message, system_prompt, model, ollama_host)
+  except urllib.error.HTTPError as exc:
+    if _llm_auth_failed(exc):
+      return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
+    return "Task is taking longer than expected. Check dashboard for results."
+  except (socket.timeout, TimeoutError, urllib.error.URLError) as exc:
+    if _llm_auth_failed(exc):
+      return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
+    return "Request timed out. Try a simpler task or check your connection."
+  except Exception as exc:
+    logger.warning("LLM request failed for agent %s: %s", routed_agent, exc)
+    if _llm_auth_failed(exc):
+      return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
+    return "Task is taking longer than expected. Check dashboard for results."
+
+  if not answer:
+    return (
+      "No model response was returned. Check your selected route credentials or model availability."
+    )
+
+  return f"Agent: {routed_agent}\n\n{answer}"
 
 def _log_activity(
     event_type: str,
@@ -302,237 +739,303 @@ INDEX_HTML = r"""<!doctype html>
   <title>AI Employee Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg:#080e1a;--surface:#0d1626;--surface2:#111d30;--border:#1e2d45;
-      --primary:#6366f1;--primary-dark:#4f46e5;--accent:#22d3ee;
-      --success:#10b981;--danger:#ef4444;--warning:#f59e0b;
-      --text:#e2e8f0;--text-muted:#64748b;--text-secondary:#94a3b8;
-      --radius:12px;--radius-sm:8px;--shadow:0 4px 24px rgba(0,0,0,.4);
-      --glow-primary:0 0 20px rgba(99,102,241,.35);
-      --glow-success:0 0 20px rgba(16,185,129,.35);
-      --glow-danger:0 0 20px rgba(239,68,68,.35);
+      --bg:#040b18;--surface:rgba(10,18,35,0.95);--surface2:rgba(15,25,48,0.9);
+      --glass:rgba(255,255,255,0.04);--border:rgba(148,163,184,0.1);
+      --primary:#818cf8;--primary-dark:#6366f1;--primary-light:#a5b4fc;--accent:#34d399;--accent2:#22d3ee;
+      --success:#10b981;--danger:#f43f5e;--warning:#f59e0b;
+      --text:#f0f4ff;--text-muted:#475569;--text-secondary:#94a3b8;
+      --radius:14px;--radius-sm:9px;--shadow:0 8px 40px rgba(0,0,0,.7);
+      --glow-primary:0 0 28px rgba(99,102,241,.35);
+      --glow-success:0 0 28px rgba(16,185,129,.35);
+      --glow-danger:0 0 28px rgba(244,63,94,.35);
+      --sidebar-w:220px;
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth}
-    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
+    body{
+      font-family:'Inter','Space Grotesk',system-ui,sans-serif;
+      background:var(--bg);
+      color:var(--text);min-height:100vh;line-height:1.6;
+      overflow-x:hidden;
+    }
+    /* Animated background blobs */
+    body::before,body::after{
+      content:'';position:fixed;border-radius:50%;pointer-events:none;z-index:0;filter:blur(80px);
+    }
+    body::before{
+      width:900px;height:700px;top:-200px;left:-200px;
+      background:radial-gradient(circle,rgba(99,102,241,.18) 0%,transparent 65%);
+      animation:blobDrift 18s ease-in-out infinite alternate;
+    }
+    body::after{
+      width:700px;height:600px;bottom:-100px;right:-100px;
+      background:radial-gradient(circle,rgba(16,185,129,.13) 0%,transparent 65%);
+      animation:blobDrift2 22s ease-in-out infinite alternate;
+    }
+    @keyframes blobDrift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(80px,50px) scale(1.1)}100%{transform:translate(-40px,80px) scale(0.95)}}
+    @keyframes blobDrift2{0%{transform:translate(0,0) scale(1)}50%{transform:translate(-60px,-40px) scale(1.08)}100%{transform:translate(50px,-80px) scale(0.92)}}
 
     /* ── Scrollbars ── */
-    ::-webkit-scrollbar{width:6px;height:6px}
-    ::-webkit-scrollbar-track{background:var(--surface)}
-    ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-    ::-webkit-scrollbar-thumb:hover{background:#2a3d5a}
+    ::-webkit-scrollbar{width:5px;height:5px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:rgba(148,163,184,.15);border-radius:10px}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(129,140,248,.35)}
 
     /* ── Layout ── */
-    .app{display:flex;flex-direction:column;min-height:100vh}
+    .app{display:flex;flex-direction:column;min-height:100vh;position:relative;z-index:1}
 
     /* ── Keyframe animations ── */
     @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
-    @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-    @keyframes slideInLeft{from{opacity:0;transform:translateX(-18px)}to{opacity:1;transform:none}}
-    @keyframes slideInRight{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
-    @keyframes slideInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
-    @keyframes pulseRing{0%{transform:scale(1);opacity:.8}70%{transform:scale(1.9);opacity:0}100%{transform:scale(1.9);opacity:0}}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+    @keyframes slideInLeft{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:none}}
+    @keyframes slideInRight{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+    @keyframes slideInUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+    @keyframes pulseRing{0%{transform:scale(1);opacity:.8}70%{transform:scale(2);opacity:0}100%{transform:scale(2);opacity:0}}
     @keyframes gradientShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
     @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
-    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
     @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-    @keyframes countUp{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
-    @keyframes headerGlow{0%,100%{box-shadow:0 2px 30px rgba(99,102,241,.2)}50%{box-shadow:0 2px 50px rgba(99,102,241,.45)}}
+    @keyframes countUp{from{opacity:0;transform:scale(.8) translateY(6px)}to{opacity:1;transform:none}}
+    @keyframes glowPulse{0%,100%{box-shadow:0 0 20px rgba(99,102,241,.25),0 0 0 rgba(99,102,241,.1)}50%{box-shadow:0 0 40px rgba(99,102,241,.45),0 0 80px rgba(99,102,241,.12)}}
+    @keyframes borderGlow{0%,100%{border-color:rgba(99,102,241,.25)}50%{border-color:rgba(129,140,248,.6)}}
 
     /* ── Header ── */
     header{
-      background:linear-gradient(135deg,#1e1b4b 0%,#312e81 35%,var(--primary-dark) 65%,#1e1b4b 100%);
-      background-size:300% 300%;
-      animation:gradientShift 12s ease infinite, headerGlow 6s ease infinite;
-      padding:16px 28px;display:flex;align-items:center;justify-content:space-between;
-      border-bottom:1px solid rgba(99,102,241,.3);
-      position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);
+      background:linear-gradient(100deg,rgba(6,12,28,0.98) 0%,rgba(10,18,42,0.98) 60%,rgba(8,15,35,0.98) 100%);
+      backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+      padding:14px 32px;display:flex;align-items:center;justify-content:space-between;
+      border-bottom:1px solid rgba(129,140,248,.15);
+      position:sticky;top:0;z-index:200;
+      animation:glowPulse 8s ease infinite;
     }
     .header-left{display:flex;align-items:center;gap:14px}
     .logo{
-      width:44px;height:44px;
-      background:linear-gradient(135deg,rgba(99,102,241,.3),rgba(34,211,238,.2));
+      width:42px;height:42px;
+      background:linear-gradient(135deg,#4f46e5,#818cf8);
       border-radius:12px;display:flex;align-items:center;justify-content:center;
-      font-size:1.5em;border:1px solid rgba(255,255,255,.2);
-      animation:float 4s ease-in-out infinite;
-      box-shadow:0 0 14px rgba(99,102,241,.4);
+      font-size:1.3em;border:1px solid rgba(165,180,252,.25);
+      animation:float 5s ease-in-out infinite;
+      box-shadow:0 0 20px rgba(99,102,241,.5),inset 0 1px 0 rgba(255,255,255,.15);
     }
-    .header-title h1{color:#fff;font-size:1.25em;font-weight:700;letter-spacing:-.02em;
-      text-shadow:0 0 20px rgba(255,255,255,.3)}
-    .header-title .sub{color:rgba(255,255,255,.65);font-size:.8em;margin-top:2px}
+    .header-title h1{
+      font-size:1.18em;font-weight:700;letter-spacing:-.03em;
+      background:linear-gradient(135deg,#fff 30%,rgba(165,180,252,.9) 100%);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    }
+    .header-title .sub{color:rgba(148,163,184,.75);font-size:.78em;margin-top:1px;letter-spacing:.01em}
     .header-right{display:flex;align-items:center;gap:10px}
-    .status-pill{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.08);
-      border:1px solid rgba(255,255,255,.15);border-radius:20px;
-      padding:6px 14px;font-size:.8em;color:rgba(255,255,255,.8);
-      backdrop-filter:blur(6px);transition:all .3s}
-    .status-pill:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25)}
-    .status-dot{width:8px;height:8px;border-radius:50%;background:var(--success);
-      box-shadow:0 0 8px var(--success);animation:blink 2s infinite;flex-shrink:0}
-    /* Header quick-control buttons */
+    .status-pill{display:flex;align-items:center;gap:7px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.1);border-radius:20px;
+      padding:5px 13px;font-size:.78em;color:rgba(240,244,255,.8);
+      backdrop-filter:blur(8px);transition:all .3s}
+    .status-pill:hover{background:rgba(255,255,255,.09);border-color:rgba(129,140,248,.3)}
+    .status-dot{width:7px;height:7px;border-radius:50%;background:var(--success);
+      box-shadow:0 0 9px var(--success);animation:blink 2.5s infinite;flex-shrink:0}
     .hdr-ctrl{display:flex;align-items:center;gap:8px}
-    .hdr-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border:none;
-      border-radius:20px;cursor:pointer;font-size:.78em;font-weight:600;
-      transition:all .2s;font-family:inherit;white-space:nowrap;position:relative;overflow:hidden}
-    .hdr-btn-start{background:rgba(16,185,129,.2);color:var(--success);border:1px solid rgba(16,185,129,.35)}
-    .hdr-btn-start:hover{background:rgba(16,185,129,.35);box-shadow:var(--glow-success);transform:translateY(-1px)}
-    .hdr-btn-stop{background:rgba(239,68,68,.15);color:var(--danger);border:1px solid rgba(239,68,68,.3)}
-    .hdr-btn-stop:hover{background:rgba(239,68,68,.28);box-shadow:var(--glow-danger);transform:translateY(-1px)}
-    .hdr-btn:disabled{opacity:.45;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+    .hdr-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 15px;border:none;
+      border-radius:20px;cursor:pointer;font-size:.775em;font-weight:600;
+      transition:all .2s;font-family:inherit;white-space:nowrap;position:relative;overflow:hidden;
+      letter-spacing:.01em}
+    .hdr-btn-start{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3)}
+    .hdr-btn-start:hover{background:rgba(16,185,129,.3);box-shadow:0 0 18px rgba(16,185,129,.4);transform:translateY(-1px)}
+    .hdr-btn-stop{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.28)}
+    .hdr-btn-stop:hover{background:rgba(244,63,94,.25);box-shadow:0 0 18px rgba(244,63,94,.35);transform:translateY(-1px)}
+    .hdr-btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
-    /* ── Navigation ── */
-    nav{background:var(--surface);border-bottom:1px solid var(--border);
-      padding:0 28px;display:flex;gap:2px;overflow-x:auto;
-      box-shadow:0 2px 12px rgba(0,0,0,.3)}
-    nav button{
-      background:none;border:none;color:var(--text-secondary);
-      padding:12px 16px;cursor:pointer;font-size:.875em;font-weight:500;
-      border-bottom:2px solid transparent;transition:all .25s;
-      white-space:nowrap;display:flex;align-items:center;gap:6px;
-      font-family:inherit;position:relative;
+    /* ── Navigation (horizontal scrollable tab bar) ── */
+    nav{
+      background:rgba(6,10,22,0.92);
+      border-bottom:1px solid rgba(148,163,184,.08);
+      padding:0 28px;display:flex;gap:0;overflow-x:auto;
+      box-shadow:0 4px 20px rgba(0,0,0,.4);
+      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      scrollbar-width:none;
     }
-    nav button::after{content:'';position:absolute;bottom:0;left:50%;right:50%;height:2px;
-      background:var(--primary);border-radius:2px 2px 0 0;transition:all .25s}
+    nav::-webkit-scrollbar{display:none}
+    nav button{
+      background:none;border:none;color:rgba(148,163,184,.7);
+      padding:13px 15px;cursor:pointer;font-size:.82em;font-weight:500;
+      border-bottom:2px solid transparent;transition:all .22s;
+      white-space:nowrap;display:flex;align-items:center;gap:5px;
+      font-family:inherit;position:relative;letter-spacing:.01em;
+    }
     nav button:hover{color:var(--text);background:rgba(255,255,255,.04)}
-    nav button:hover::after{left:0;right:0}
-    nav button.active{color:var(--primary);background:rgba(99,102,241,.06)}
-    nav button.active::after{left:0;right:0}
+    nav button.active{color:var(--primary-light);border-bottom-color:var(--primary);
+      background:rgba(99,102,241,.07)}
+    nav button.active::after{content:'';position:absolute;bottom:0;left:20%;right:20%;height:2px;
+      background:linear-gradient(90deg,transparent,var(--primary),transparent);
+      border-radius:2px 2px 0 0;filter:blur(1px)}
 
     /* ── Main content ── */
-    main{flex:1;padding:24px 28px;max-width:1280px;margin:0 auto;width:100%}
-    @media(max-width:768px){main{padding:14px}}
+    main{flex:1;padding:24px 28px;max-width:1320px;margin:0 auto;width:100%;position:relative;z-index:1}
+    @media(max-width:768px){main{padding:12px 14px}}
 
     /* ── Tab panels ── */
     .tab-content{display:none}
-    .tab-content.active{display:block;animation:fadeIn .28s ease}
+    .tab-content.active{display:block;animation:fadeIn .3s ease}
 
     /* ── Cards ── */
     .card{
-      background:var(--surface);border:1px solid var(--border);
-      border-radius:var(--radius);padding:20px;margin-bottom:16px;
-      transition:border-color .3s,box-shadow .3s;
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius);padding:22px;margin-bottom:16px;
+      transition:border-color .3s,box-shadow .35s,transform .3s;
+      backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+      position:relative;overflow:hidden;
     }
-    .card:hover{border-color:rgba(99,102,241,.2);box-shadow:0 4px 20px rgba(0,0,0,.25)}
-    .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-    .card-title{font-size:.95em;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
-    .card-title .icon{color:var(--primary)}
-    .section-title{font-size:.8em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+    .card::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);
+    }
+    .card:hover{border-color:rgba(129,140,248,.2);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(129,140,248,.06);transform:translateY(-1px)}
+    .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    .card-title{font-size:.92em;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;letter-spacing:.005em}
+    .card-title .icon{color:var(--primary-light)}
+    .section-title{font-size:.76em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
 
     /* ── Grid layouts ── */
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-    .grid-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+    .grid-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin-bottom:16px}
     @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
 
     /* ── Stat cards ── */
     .stat-card{
-      background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:18px 16px;display:flex;align-items:center;gap:13px;
-      transition:all .3s;cursor:default;position:relative;overflow:hidden;
+      background:var(--surface2);
+      border:1px solid var(--border);border-radius:var(--radius);
+      padding:20px 18px;display:flex;align-items:center;gap:14px;
+      transition:all .3s ease;cursor:default;position:relative;overflow:hidden;
+      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
     }
     .stat-card::before{
-      content:'';position:absolute;top:0;left:0;right:0;height:2px;
-      background:linear-gradient(90deg,transparent,var(--stat-color,var(--primary)),transparent);
-      opacity:0;transition:opacity .3s;
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(255,255,255,.03) 0%,transparent 60%);
+      pointer-events:none;
     }
-    .stat-card:hover{transform:translateY(-2px);box-shadow:0 6px 24px rgba(0,0,0,.3)}
+    .stat-card::after{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,var(--stat-top,rgba(255,255,255,.1)),transparent);
+    }
+    .stat-card:hover{transform:translateY(-3px);box-shadow:0 10px 32px rgba(0,0,0,.4),0 0 0 1px rgba(129,140,248,.09);border-color:rgba(129,140,248,.2)}
     .stat-card:hover::before{opacity:1}
-    .stat-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;
-      justify-content:center;font-size:1.2em;flex-shrink:0;transition:transform .3s}
-    .stat-card:hover .stat-icon{transform:scale(1.1) rotate(-4deg)}
-    .stat-icon.green{background:rgba(16,185,129,.15);color:var(--success);--stat-color:var(--success)}
-    .stat-icon.blue{background:rgba(99,102,241,.15);color:var(--primary);--stat-color:var(--primary)}
-    .stat-icon.cyan{background:rgba(34,211,238,.15);color:var(--accent);--stat-color:var(--accent)}
-    .stat-icon.yellow{background:rgba(245,158,11,.15);color:var(--warning);--stat-color:var(--warning)}
-    .stat-body .val{font-size:1.55em;font-weight:700;color:var(--text);
-      animation:countUp .4s ease;letter-spacing:-.02em}
-    .stat-body .lbl{font-size:.78em;color:var(--text-muted);margin-top:2px}
+    .stat-icon{
+      width:48px;height:48px;border-radius:14px;display:flex;align-items:center;
+      justify-content:center;font-size:1.3em;flex-shrink:0;transition:transform .3s,box-shadow .3s;
+      position:relative;overflow:hidden;
+    }
+    .stat-icon::before{content:'';position:absolute;inset:0;border-radius:inherit;
+      background:linear-gradient(135deg,rgba(255,255,255,.12) 0%,transparent 50%)}
+    .stat-card:hover .stat-icon{transform:scale(1.1) rotate(-5deg);box-shadow:0 0 16px var(--stat-glow,rgba(99,102,241,.4))}
+    .stat-icon.green{background:linear-gradient(135deg,rgba(16,185,129,.2),rgba(52,211,153,.08));color:#34d399;--stat-glow:rgba(16,185,129,.45)}
+    .stat-icon.blue{background:linear-gradient(135deg,rgba(99,102,241,.2),rgba(129,140,248,.08));color:var(--primary-light);--stat-glow:rgba(99,102,241,.45)}
+    .stat-icon.cyan{background:linear-gradient(135deg,rgba(34,211,238,.2),rgba(52,211,238,.08));color:var(--accent2);--stat-glow:rgba(34,211,238,.45)}
+    .stat-icon.yellow{background:linear-gradient(135deg,rgba(245,158,11,.2),rgba(251,191,36,.08));color:#fbbf24;--stat-glow:rgba(245,158,11,.45)}
+    .stat-body .val{font-size:1.65em;font-weight:700;color:var(--text);
+      animation:countUp .5s ease;letter-spacing:-.03em;line-height:1}
+    .stat-body .lbl{font-size:.76em;color:var(--text-muted);margin-top:5px;letter-spacing:.02em}
 
     /* ── System control hero ── */
     .sys-control{
-      background:linear-gradient(135deg,rgba(99,102,241,.08) 0%,rgba(34,211,238,.05) 100%);
-      border:1px solid rgba(99,102,241,.25);border-radius:var(--radius);
-      padding:24px 28px;margin-bottom:16px;
+      background:linear-gradient(135deg,rgba(79,70,229,.1) 0%,rgba(99,102,241,.06) 50%,rgba(34,211,238,.04) 100%);
+      border:1px solid rgba(99,102,241,.2);border-radius:var(--radius);
+      padding:26px 30px;margin-bottom:16px;
       display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;
       position:relative;overflow:hidden;
+      backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+      animation:borderGlow 8s ease infinite;
     }
     .sys-control::before{
-      content:'';position:absolute;top:-50%;right:-10%;width:300px;height:300px;
-      background:radial-gradient(circle,rgba(99,102,241,.08) 0%,transparent 70%);
-      pointer-events:none;animation:float 8s ease-in-out infinite;
+      content:'';position:absolute;top:-80%;right:-5%;width:400px;height:400px;
+      background:radial-gradient(circle,rgba(99,102,241,.1) 0%,transparent 65%);
+      pointer-events:none;animation:float 10s ease-in-out infinite;
     }
-    .sys-control-left{display:flex;align-items:center;gap:18px}
-    .sys-status-ring{position:relative;width:56px;height:56px;flex-shrink:0}
+    .sys-control::after{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+    }
+    .sys-control-left{display:flex;align-items:center;gap:20px}
+    .sys-status-ring{position:relative;width:60px;height:60px;flex-shrink:0}
     .sys-status-ring .ring-bg{
-      width:56px;height:56px;border-radius:50%;
-      border:3px solid rgba(99,102,241,.2);
+      width:60px;height:60px;border-radius:50%;
+      border:2px solid rgba(129,140,248,.25);
       display:flex;align-items:center;justify-content:center;
-      font-size:1.6em;background:rgba(99,102,241,.08);
+      font-size:1.65em;
+      background:linear-gradient(135deg,rgba(99,102,241,.15),rgba(79,70,229,.08));
+      box-shadow:0 0 20px rgba(99,102,241,.25);
     }
     .sys-status-ring .ring-pulse{
-      position:absolute;inset:0;border-radius:50%;
-      border:3px solid var(--success);
-      animation:pulseRing 2.5s ease-out infinite;
+      position:absolute;inset:-4px;border-radius:50%;
+      border:2px solid var(--success);
+      animation:pulseRing 2.8s ease-out infinite;
     }
     .sys-status-ring.offline .ring-pulse{border-color:var(--danger)}
-    .sys-control-info h2{font-size:1.1em;font-weight:700;color:var(--text);margin-bottom:3px}
-    .sys-control-info p{font-size:.84em;color:var(--text-secondary)}
+    .sys-control-info h2{font-size:1.1em;font-weight:700;color:var(--text);margin-bottom:4px;letter-spacing:-.02em}
+    .sys-control-info p{font-size:.83em;color:var(--text-secondary);line-height:1.5}
     .sys-control-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
     .btn-hero{
-      display:inline-flex;align-items:center;gap:8px;padding:12px 28px;border:none;
-      border-radius:10px;cursor:pointer;font-size:.95em;font-weight:600;
-      transition:all .25s;font-family:inherit;white-space:nowrap;
-      position:relative;overflow:hidden;
+      display:inline-flex;align-items:center;gap:9px;padding:12px 26px;border:none;
+      border-radius:11px;cursor:pointer;font-size:.9em;font-weight:600;
+      transition:all .22s cubic-bezier(.4,0,.2,1);font-family:inherit;white-space:nowrap;
+      position:relative;overflow:hidden;letter-spacing:.01em;
     }
+    .btn-hero::before{
+      content:'';position:absolute;inset:0;border-radius:inherit;
+      background:linear-gradient(135deg,rgba(255,255,255,.12) 0%,transparent 50%);
+      opacity:0;transition:opacity .22s;
+    }
+    .btn-hero:hover::before{opacity:1}
     .btn-hero::after{
       content:'';position:absolute;top:50%;left:50%;width:0;height:0;
-      background:rgba(255,255,255,.15);border-radius:50%;
-      transform:translate(-50%,-50%);transition:width .4s ease,height .4s ease,opacity .4s ease;
+      background:rgba(255,255,255,.18);border-radius:50%;
+      transform:translate(-50%,-50%);transition:width .45s ease,height .45s ease,opacity .45s ease;
       opacity:0;
     }
-    .btn-hero:active::after{width:300px;height:300px;opacity:0}
+    .btn-hero:active::after{width:350px;height:350px;opacity:0}
     .btn-hero-start{
-      background:linear-gradient(135deg,#059669,#10b981);
-      color:#fff;box-shadow:0 4px 16px rgba(16,185,129,.3);
+      background:linear-gradient(135deg,#047857,#059669,#10b981);
+      color:#fff;box-shadow:0 4px 18px rgba(16,185,129,.35),inset 0 1px 0 rgba(255,255,255,.15);
     }
     .btn-hero-start:hover{
-      background:linear-gradient(135deg,#10b981,#34d399);
-      box-shadow:0 6px 24px rgba(16,185,129,.5);transform:translateY(-2px);
+      box-shadow:0 8px 28px rgba(16,185,129,.55),inset 0 1px 0 rgba(255,255,255,.2);
+      transform:translateY(-2px);
     }
     .btn-hero-stop{
-      background:linear-gradient(135deg,#b91c1c,#ef4444);
-      color:#fff;box-shadow:0 4px 16px rgba(239,68,68,.3);
+      background:linear-gradient(135deg,#9f1239,#be123c,#f43f5e);
+      color:#fff;box-shadow:0 4px 18px rgba(244,63,94,.3),inset 0 1px 0 rgba(255,255,255,.12);
     }
     .btn-hero-stop:hover{
-      background:linear-gradient(135deg,#ef4444,#f87171);
-      box-shadow:0 6px 24px rgba(239,68,68,.5);transform:translateY(-2px);
+      box-shadow:0 8px 28px rgba(244,63,94,.5),inset 0 1px 0 rgba(255,255,255,.18);
+      transform:translateY(-2px);
     }
-    .btn-hero:disabled{opacity:.45;cursor:not-allowed;transform:none!important;box-shadow:none!important}
-    .btn-hero .btn-icon{font-size:1.1em}
+    .btn-hero:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+    .btn-hero .btn-icon{font-size:1em}
 
     /* ── Bot health progress bar ── */
     .health-bar-wrap{margin:10px 0 4px;position:relative}
-    .health-bar-track{height:6px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden}
+    .health-bar-track{height:5px;background:rgba(255,255,255,.06);border-radius:10px;overflow:hidden}
     .health-bar-fill{
-      height:100%;border-radius:3px;
-      background:linear-gradient(90deg,var(--success),#34d399);
-      transition:width .8s cubic-bezier(.4,0,.2,1);
-      box-shadow:0 0 8px rgba(16,185,129,.4);
+      height:100%;border-radius:10px;
+      background:linear-gradient(90deg,#059669,#34d399);
+      transition:width .9s cubic-bezier(.4,0,.2,1);
+      box-shadow:0 0 10px rgba(16,185,129,.5);
       width:0%;
     }
-    .health-bar-fill.warn{background:linear-gradient(90deg,var(--warning),#fbbf24)}
-    .health-bar-fill.danger{background:linear-gradient(90deg,var(--danger),#f87171)}
-    .health-label{display:flex;justify-content:space-between;font-size:.74em;color:var(--text-muted);margin-top:4px}
+    .health-bar-fill.warn{background:linear-gradient(90deg,#d97706,#fbbf24)}
+    .health-bar-fill.danger{background:linear-gradient(90deg,#be123c,#fb7185)}
+    .health-label{display:flex;justify-content:space-between;font-size:.73em;color:var(--text-muted);margin-top:4px}
 
     /* ── Bot rows ── */
     .bot-row{
-      display:flex;align-items:center;gap:10px;padding:9px 8px;
-      border-bottom:1px solid var(--border);border-radius:6px;
+      display:flex;align-items:center;gap:10px;padding:10px 10px;
+      border-bottom:1px solid rgba(148,163,184,.06);border-radius:8px;
       transition:background .2s;animation:slideInLeft .3s ease both;
     }
     .bot-row:last-child{border-bottom:none}
-    .bot-row:hover{background:rgba(255,255,255,.03)}
+    .bot-row:hover{background:rgba(129,140,248,.05)}
     .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:all .4s;position:relative}
     .dot.on{background:var(--success);box-shadow:0 0 8px rgba(16,185,129,.6)}
     .dot.on::after{
@@ -556,166 +1059,323 @@ INDEX_HTML = r"""<!doctype html>
     /* ── Buttons ── */
     .btn{
       display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border:none;
-      border-radius:var(--radius-sm);cursor:pointer;font-size:.875em;font-weight:500;
-      transition:all .22s;font-family:inherit;text-decoration:none;white-space:nowrap;
-      position:relative;overflow:hidden;
+      border-radius:var(--radius-sm);cursor:pointer;font-size:.855em;font-weight:500;
+      transition:all .2s cubic-bezier(.4,0,.2,1);font-family:inherit;text-decoration:none;
+      white-space:nowrap;position:relative;overflow:hidden;letter-spacing:.01em;
     }
     .btn::after{
       content:'';position:absolute;top:50%;left:50%;width:0;height:0;
-      background:rgba(255,255,255,.12);border-radius:50%;
-      transform:translate(-50%,-50%);transition:width .35s ease,height .35s ease,opacity .35s ease;
+      background:rgba(255,255,255,.14);border-radius:50%;
+      transform:translate(-50%,-50%);transition:width .4s ease,height .4s ease,opacity .4s ease;
       opacity:0;
     }
-    .btn:active::after{width:240px;height:240px;opacity:0}
-    .btn-primary{background:var(--primary);color:#fff}
-    .btn-primary:hover{background:var(--primary-dark);transform:translateY(-1px);box-shadow:0 4px 14px rgba(99,102,241,.45)}
-    .btn-danger{background:rgba(239,68,68,.15);color:var(--danger);border:1px solid rgba(239,68,68,.25)}
-    .btn-danger:hover{background:rgba(239,68,68,.28);box-shadow:0 3px 10px rgba(239,68,68,.25)}
-    .btn-success{background:rgba(16,185,129,.15);color:var(--success);border:1px solid rgba(16,185,129,.25)}
-    .btn-success:hover{background:rgba(16,185,129,.28);box-shadow:0 3px 10px rgba(16,185,129,.25)}
-    .btn-ghost{background:rgba(255,255,255,.05);color:var(--text-secondary);border:1px solid var(--border)}
-    .btn-ghost:hover{background:rgba(255,255,255,.09);color:var(--text);border-color:rgba(99,102,241,.3)}
-    .btn-sm{padding:5px 11px;font-size:.8em}
+    .btn:active::after{width:250px;height:250px;opacity:0}
+    .btn-primary{
+      background:linear-gradient(135deg,var(--primary-dark),var(--primary));
+      color:#fff;box-shadow:0 2px 12px rgba(99,102,241,.35);
+    }
+    .btn-primary:hover{transform:translateY(-1px);box-shadow:0 5px 18px rgba(99,102,241,.5);filter:brightness(1.08)}
+    .btn-danger{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.22)}
+    .btn-danger:hover{background:rgba(244,63,94,.22);box-shadow:0 3px 12px rgba(244,63,94,.28);border-color:rgba(244,63,94,.4)}
+    .btn-success{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(16,185,129,.22)}
+    .btn-success:hover{background:rgba(16,185,129,.24);box-shadow:0 3px 12px rgba(16,185,129,.3);border-color:rgba(16,185,129,.4)}
+    .btn-ghost{background:rgba(255,255,255,.04);color:var(--text-secondary);border:1px solid rgba(148,163,184,.12)}
+    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(129,140,248,.3)}
+    .btn-sm{padding:5px 12px;font-size:.78em}
     .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
     /* ── Form controls ── */
     .form-group{margin-bottom:14px}
-    label{display:block;font-size:.82em;font-weight:500;color:var(--text-secondary);margin-bottom:5px}
+    label{display:block;font-size:.8em;font-weight:500;color:var(--text-secondary);margin-bottom:5px;letter-spacing:.02em}
     input,textarea,select{
-      width:100%;background:var(--surface2);border:1px solid var(--border);
-      color:var(--text);border-radius:var(--radius-sm);padding:9px 12px;
-      font-size:.875em;font-family:inherit;transition:border-color .2s,box-shadow .2s;outline:none}
-    input:focus,textarea:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.14)}
-    input:hover,select:hover{border-color:rgba(99,102,241,.35)}
+      width:100%;
+      background:rgba(15,25,48,.7);
+      border:1px solid rgba(148,163,184,.12);
+      color:var(--text);border-radius:var(--radius-sm);padding:9px 13px;
+      font-size:.875em;font-family:inherit;transition:border-color .2s,box-shadow .2s,background .2s;outline:none;
+      backdrop-filter:blur(4px);
+    }
+    input:focus,textarea:focus,select:focus{
+      border-color:rgba(129,140,248,.6);
+      box-shadow:0 0 0 3px rgba(99,102,241,.12),0 0 16px rgba(99,102,241,.1);
+      background:rgba(15,25,55,.9);
+    }
+    input:hover:not(:focus),select:hover:not(:focus){border-color:rgba(129,140,248,.3)}
     textarea{resize:vertical;min-height:80px}
-    select option{background:var(--surface)}
+    select option{background:#0d1b33;color:var(--text)}
 
     /* ── Toggle (enhanced) ── */
-    .toggle{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
+    .toggle{position:relative;display:inline-block;width:44px;height:25px;flex-shrink:0}
     .toggle input{opacity:0;width:0;height:0}
     .slider{
       position:absolute;cursor:pointer;inset:0;
-      background:var(--border);border-radius:24px;
+      background:rgba(148,163,184,.15);border-radius:25px;
       transition:.35s cubic-bezier(.4,0,.2,1);
-      box-shadow:inset 0 1px 3px rgba(0,0,0,.3);
+      border:1px solid rgba(148,163,184,.1);
     }
     .slider:before{
-      content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;
-      background:#64748b;border-radius:50%;
+      content:"";position:absolute;width:19px;height:19px;left:3px;top:2px;
+      background:#475569;border-radius:50%;
       transition:.35s cubic-bezier(.4,0,.2,1);
-      box-shadow:0 1px 4px rgba(0,0,0,.4);
+      box-shadow:0 1px 4px rgba(0,0,0,.5);
     }
-    input:checked+.slider{background:var(--primary);box-shadow:0 0 10px rgba(99,102,241,.4)}
-    input:checked+.slider:before{transform:translateX(18px);background:#fff}
+    input:checked+.slider{background:linear-gradient(135deg,var(--primary-dark),var(--primary));box-shadow:0 0 14px rgba(99,102,241,.45)}
+    input:checked+.slider:before{transform:translateX(19px);background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.4)}
 
     /* ── Code / pre ── */
-    pre{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:14px;overflow:auto;font-size:.82em;max-height:280px;
+    pre{
+      background:rgba(4,8,18,.7);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius-sm);
+      padding:16px;overflow:auto;font-size:.8em;max-height:280px;
       white-space:pre-wrap;word-break:break-word;color:var(--text-secondary);
-      font-family:'JetBrains Mono','Fira Code',monospace}
-    code{background:rgba(99,102,241,.12);color:var(--primary);
-      padding:1px 6px;border-radius:4px;font-size:.88em;font-family:monospace}
+      font-family:'JetBrains Mono','Fira Code','Consolas',monospace;
+      backdrop-filter:blur(4px);
+    }
+    code{background:rgba(99,102,241,.14);color:var(--primary-light);
+      padding:1px 7px;border-radius:5px;font-size:.875em;font-family:monospace}
 
     /* ── Chat ── */
-    #chat-log{max-height:400px;overflow-y:auto;padding:12px;border:1px solid var(--border);
-      border-radius:var(--radius-sm);background:var(--bg);margin-bottom:12px}
-    .chat-msg{padding:10px 14px;border-radius:10px;margin-bottom:8px;max-width:82%;
-      word-break:break-word;animation:slideInUp .2s ease}
-    .chat-msg.user{background:linear-gradient(135deg,var(--primary),var(--primary-dark));
-      margin-left:auto;text-align:right;color:#fff;box-shadow:0 2px 10px rgba(99,102,241,.3)}
-    .chat-msg.bot{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+    #chat-log{
+      max-height:480px;overflow-y:auto;padding:16px;
+      border:1px solid rgba(148,163,184,.09);
+      border-radius:16px;
+      background:linear-gradient(180deg,rgba(4,8,20,.95),rgba(7,12,28,.98));
+      margin-bottom:14px;
+      backdrop-filter:blur(8px);
+    }
+    .chat-msg{padding:12px 16px;border-radius:14px;margin-bottom:10px;max-width:86%;
+      word-break:break-word;animation:slideInUp .22s ease}
+    .chat-msg.user{
+      background:linear-gradient(135deg,var(--primary-dark),var(--primary));
+      margin-left:auto;color:#fff;
+      box-shadow:0 3px 14px rgba(99,102,241,.35),inset 0 1px 0 rgba(255,255,255,.12);
+      border-radius:14px 14px 4px 14px;
+    }
+    .chat-msg.bot,.chat-msg.agent{
+      background:rgba(15,25,48,.85);
+      border:1px solid rgba(148,163,184,.1);color:var(--text);
+      border-radius:14px 14px 14px 4px;
+      backdrop-filter:blur(6px);
+    }
+    .chat-msg-header{display:flex;align-items:center;gap:8px;font-size:.72em;margin-bottom:6px;opacity:.85}
+    .chat-msg-avatar{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08)}
+    .chat-msg-source{font-weight:600;letter-spacing:.01em}
+    .chat-model-row{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+    .chat-model-row select{max-width:240px}
     .chat-msg .ts{font-size:.72em;opacity:.55;margin-top:4px}
     .chat-input-row{display:flex;gap:8px;align-items:flex-end}
 
+    /* ── Live Office ── */
+    .office-wrap{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;min-height:420px;
+      background:
+        linear-gradient(180deg,rgba(35,199,255,.08),rgba(9,17,31,.9) 38%),
+        repeating-linear-gradient(90deg,rgba(255,255,255,.02) 0 2px,transparent 2px 120px),
+        linear-gradient(0deg,#0a1220,#0a1424)}
+    .office-floor{position:absolute;left:0;right:0;bottom:0;height:48%;background:linear-gradient(180deg,#121b2b,#0a0f17);
+      border-top:1px solid rgba(255,255,255,.08)}
+    .office-window{position:absolute;top:24px;width:160px;height:90px;border-radius:10px;border:1px solid rgba(159,232,255,.35);
+      background:linear-gradient(180deg,rgba(35,199,255,.28),rgba(35,199,255,.06));box-shadow:0 0 22px rgba(35,199,255,.18)}
+    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(159,232,255,.35)}
+    .office-plant{position:absolute;bottom:104px;width:22px;height:36px;background:#143027;border-radius:6px 6px 3px 3px;border:1px solid rgba(65,217,147,.3)}
+    .office-plant::before{content:'';position:absolute;left:-5px;top:-22px;width:32px;height:24px;border-radius:50%;background:radial-gradient(circle,#3fdc94,#1f7f56)}
+    .office-desk{position:absolute;bottom:120px;width:175px;height:15px;
+      background:linear-gradient(135deg,#1e3a52,#243d5e);border-radius:9px;
+      box-shadow:0 4px 12px rgba(0,0,0,.4)}
+    .office-desk::after{content:'';position:absolute;left:12px;top:-18px;width:36px;height:18px;
+      border-radius:5px 5px 3px 3px;background:linear-gradient(135deg,#2a5080,#193559)}
+    .office-agent{position:absolute;bottom:88px;width:42px;height:42px;border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      background:radial-gradient(circle at 30% 30%,#c4eeff,#818cf8);
+      border:2px solid rgba(255,255,255,.3);cursor:pointer;
+      animation:officeWalk linear infinite;
+      will-change:transform;
+      box-shadow:0 0 20px rgba(129,140,248,.5),0 4px 12px rgba(0,0,0,.4)}
+    .office-agent.warning{box-shadow:0 0 24px rgba(244,63,94,.7);border-color:rgba(244,63,94,.9)}
+    .office-agent:hover{transform:scale(1.15)!important;z-index:10}
+    .office-agent .agent-emoji{font-size:18px}
+    .office-agent .agent-tag{
+      position:absolute;top:-24px;left:50%;transform:translateX(-50%);
+      font-size:.62em;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;
+      background:rgba(4,8,20,.92);
+      padding:2px 8px;border-radius:999px;
+      border:1px solid rgba(129,140,248,.3);
+      box-shadow:0 0 8px rgba(99,102,241,.2);
+    }
+    @keyframes officeWalk{
+      0%{translate:0}25%{translate:32px 0}75%{translate:-16px 0}100%{translate:0}
+    }
+    .office-modal{position:fixed;inset:0;background:rgba(2,4,12,.8);display:none;align-items:center;justify-content:center;z-index:4000;backdrop-filter:blur(6px)}
+    .office-modal.open{display:flex;animation:fadeIn .2s ease}
+    .office-modal-card{
+      width:min(540px,92vw);
+      background:rgba(12,20,40,.96);
+      border:1px solid rgba(129,140,248,.2);border-radius:18px;padding:22px;
+      box-shadow:0 24px 64px rgba(0,0,0,.6),0 0 0 1px rgba(129,140,248,.08);
+      backdrop-filter:blur(20px);
+    }
+    #office-modal-action{overflow-wrap:anywhere;word-break:break-word}
+    .office-progress{height:8px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;border:1px solid rgba(148,163,184,.08)}
+    .office-progress > div{height:100%;background:linear-gradient(90deg,var(--accent),var(--primary-light));width:0;transition:width .5s cubic-bezier(.4,0,.2,1)}
+
     /* ── Improvements ── */
-    .improv-row{border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:14px;margin-bottom:10px;background:var(--surface2);
-      transition:border-color .25s,transform .2s,box-shadow .25s}
-    .improv-row:hover{border-color:rgba(99,102,241,.35);transform:translateX(3px);box-shadow:var(--glow-primary)}
-    .improv-row h4{color:var(--text);font-size:.9em;margin-bottom:4px}
-    .improv-row p{font-size:.83em;color:var(--text-secondary);margin-bottom:8px;line-height:1.5}
+    .improv-row{
+      border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:16px;margin-bottom:10px;
+      background:rgba(15,25,48,.7);
+      transition:border-color .25s,transform .2s,box-shadow .25s;
+      backdrop-filter:blur(8px);
+    }
+    .improv-row:hover{border-color:rgba(129,140,248,.3);transform:translateX(4px);box-shadow:0 0 20px rgba(99,102,241,.15),-4px 0 0 rgba(129,140,248,.3)}
+    .improv-row h4{color:var(--text);font-size:.9em;margin-bottom:5px;font-weight:600}
+    .improv-row p{font-size:.83em;color:var(--text-secondary);margin-bottom:8px;line-height:1.55}
 
     /* ── Scheduler ── */
-    .sched-row{border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:12px 14px;margin-bottom:10px;background:var(--surface2);
+    .sched-row{
+      border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:13px 16px;margin-bottom:10px;
+      background:rgba(15,25,48,.7);
       display:flex;align-items:flex-start;gap:12px;
-      transition:border-color .25s,box-shadow .25s}
-    .sched-row:hover{border-color:rgba(99,102,241,.3);box-shadow:0 2px 12px rgba(0,0,0,.2)}
+      transition:border-color .25s,box-shadow .25s;
+      backdrop-filter:blur(6px);
+    }
+    .sched-row:hover{border-color:rgba(129,140,248,.25);box-shadow:0 4px 16px rgba(0,0,0,.3)}
     .sched-info{flex:1}
-    .sched-info h4{color:var(--text);font-size:.88em;margin-bottom:3px;display:flex;align-items:center;gap:8px}
+    .sched-info h4{color:var(--text);font-size:.875em;margin-bottom:3px;display:flex;align-items:center;gap:8px;font-weight:600}
     .sched-info p{font-size:.8em;color:var(--text-muted)}
 
     /* ── Skills ── */
-    .skill-card{border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:12px;margin-bottom:8px;cursor:pointer;
-      transition:all .22s;background:var(--surface2)}
-    .skill-card:hover{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.06);
-      transform:translateY(-1px);box-shadow:0 3px 12px rgba(0,0,0,.2)}
-    .skill-card.selected{border-color:var(--success);background:rgba(16,185,129,.06);
-      box-shadow:0 0 12px rgba(16,185,129,.15)}
-    .skill-card h5{color:var(--text);font-size:.88em;margin-bottom:3px;font-weight:600}
-    .skill-card p{font-size:.8em;color:var(--text-muted);margin:0;line-height:1.4}
-    .skill-card .tags{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px}
-    .tag{background:rgba(99,102,241,.12);color:var(--primary);border-radius:4px;
-      padding:2px 7px;font-size:.72em;font-weight:500}
+    .skill-card{
+      border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:13px;margin-bottom:8px;cursor:pointer;
+      transition:all .22s;
+      background:rgba(15,25,48,.7);
+      backdrop-filter:blur(6px);
+    }
+    .skill-card:hover{border-color:rgba(129,140,248,.35);background:rgba(99,102,241,.08);
+      transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.3)}
+    .skill-card.selected{border-color:rgba(52,211,153,.5);background:rgba(16,185,129,.08);
+      box-shadow:0 0 16px rgba(16,185,129,.18)}
+    .skill-card h5{color:var(--text);font-size:.875em;margin-bottom:4px;font-weight:600}
+    .skill-card p{font-size:.8em;color:var(--text-muted);margin:0;line-height:1.45}
+    .skill-card .tags{margin-top:7px;display:flex;flex-wrap:wrap;gap:4px}
+    .tag{background:rgba(99,102,241,.14);color:var(--primary-light);border-radius:5px;
+      padding:2px 8px;font-size:.72em;font-weight:500;letter-spacing:.01em}
     .cat-pill{display:inline-block;padding:4px 12px;border-radius:20px;font-size:.8em;
       cursor:pointer;border:1px solid var(--border);color:var(--text-secondary);
       margin:2px;transition:all .2s;font-weight:500}
     .cat-pill:hover{border-color:var(--primary);color:var(--primary)}
     .cat-pill.active{background:var(--primary);color:#fff;border-color:var(--primary);
-      box-shadow:0 2px 8px rgba(99,102,241,.3)}
+      box-shadow:0 2px 10px rgba(99,102,241,.35);}
     .skill-grid{max-height:500px;overflow-y:auto;padding-right:4px}
-    .agent-card{border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:14px;margin-bottom:8px;background:var(--surface2);transition:all .2s}
-    .agent-card:hover{border-color:rgba(99,102,241,.3);transform:translateY(-1px)}
-    .agent-card h4{color:var(--text);margin-bottom:4px;font-size:.9em;font-weight:600}
-    .agent-card p{font-size:.83em;color:var(--text-muted)}
-    #skill-search{margin-bottom:10px}
+    .agent-card{
+      border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:15px;margin-bottom:8px;
+      background:rgba(15,25,48,.7);transition:all .22s;
+      backdrop-filter:blur(6px);
+    }
+    .agent-card:hover{border-color:rgba(129,140,248,.3);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.3)}
+    .agent-card h4{color:var(--text);margin-bottom:5px;font-size:.9em;font-weight:600}
+    .agent-card p{font-size:.82em;color:var(--text-muted);line-height:1.45}
+    #skill-search{margin-bottom:12px}
 
     /* ── Toast ── */
     #toast{
-      position:fixed;bottom:24px;right:24px;min-width:240px;padding:13px 20px;
-      border-radius:10px;color:#fff;opacity:0;
-      transition:opacity .3s,transform .3s;pointer-events:none;z-index:9999;
-      font-size:.875em;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,.5);
-      transform:translateY(12px);display:flex;align-items:center;gap:10px;
-      border-left:3px solid rgba(255,255,255,.3);
+      position:fixed;bottom:24px;right:24px;min-width:260px;padding:14px 20px;
+      border-radius:13px;color:#fff;opacity:0;
+      transition:opacity .3s cubic-bezier(.4,0,.2,1),transform .3s cubic-bezier(.4,0,.2,1);
+      pointer-events:none;z-index:9999;
+      font-size:.855em;font-weight:500;
+      box-shadow:0 16px 48px rgba(0,0,0,.6),0 4px 16px rgba(0,0,0,.4);
+      transform:translateY(16px) scale(.96);
+      display:flex;align-items:center;gap:10px;
+      backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
     }
-    #toast.show{opacity:1;transform:translateY(0)}
+    #toast.show{opacity:1;transform:translateY(0) scale(1)}
+    #toast.success{background:rgba(16,67,30,.9);border:1px solid rgba(52,211,153,.25);border-left:3px solid #34d399}
+    #toast.error{background:rgba(67,10,20,.9);border:1px solid rgba(244,63,94,.25);border-left:3px solid #f43f5e}
+    #toast.info{background:rgba(20,25,60,.95);border:1px solid rgba(129,140,248,.25);border-left:3px solid #818cf8}
 
     /* ── Empty states ── */
-    .empty{text-align:center;padding:32px 16px;color:var(--text-muted)}
-    .empty .icon{font-size:2.5em;margin-bottom:10px;opacity:.4}
-    .empty p{font-size:.88em}
+    .empty{text-align:center;padding:40px 16px;color:var(--text-muted)}
+    .empty .icon{font-size:2.8em;margin-bottom:12px;opacity:.3;display:block}
+    .empty p{font-size:.875em;line-height:1.5}
 
-    /* ── Spinner (for button loading states) ── */
-    .spinner{display:inline-block;animation:spin .8s linear infinite}
+    /* ── Spinner ── */
+    .spinner{display:inline-block;animation:spin .7s linear infinite}
 
     /* ── Divider ── */
-    hr{border:none;border-top:1px solid var(--border);margin:16px 0}
+    hr{border:none;border-top:1px solid rgba(148,163,184,.08);margin:18px 0}
 
     /* ── Quick actions bar ── */
     .actions-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
 
     /* ── Cmd reference ── */
-    .cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
-    .cmd-item{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:10px 14px;transition:all .2s;cursor:pointer}
-    .cmd-item:hover{border-color:rgba(99,102,241,.3);background:rgba(99,102,241,.05)}
-    .cmd-item code{display:block;margin-bottom:4px;font-size:.82em}
-    .cmd-item span{font-size:.78em;color:var(--text-muted)}
+    .cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:8px}
+    .cmd-item{
+      background:rgba(15,25,48,.7);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:11px 14px;transition:all .2s;cursor:pointer;backdrop-filter:blur(6px);
+    }
+    .cmd-item:hover{border-color:rgba(129,140,248,.3);background:rgba(99,102,241,.08);transform:translateY(-1px)}
+    .cmd-item code{display:block;margin-bottom:4px;font-size:.8em;color:var(--primary-light)}
+    .cmd-item span{font-size:.77em;color:var(--text-muted)}
+
+    /* ── Badges ── */
+    .badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;
+      font-size:.74em;font-weight:600;letter-spacing:.02em}
+    .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(52,211,153,.2)}
+    .badge.stopped,.badge.rejected{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.2)}
+    .badge.pending{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.2)}
+    .badge.enabled{background:rgba(129,140,248,.12);color:var(--primary-light);border:1px solid rgba(129,140,248,.2)}
+    .badge.disabled{background:rgba(100,116,139,.08);color:var(--text-muted);border:1px solid rgba(100,116,139,.15)}
+
+    /* ── Dots ── */
+    .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:all .4s;position:relative}
+    .dot.on{background:#34d399;box-shadow:0 0 9px rgba(52,211,153,.7)}
+    .dot.on::after{
+      content:'';position:absolute;inset:-3px;border-radius:50%;
+      border:1.5px solid rgba(52,211,153,.4);
+      animation:pulseRing 2.8s ease-out infinite;
+    }
+    .dot.off{background:rgba(100,116,139,.4)}
+    .dot.unknown{background:var(--warning)}
+    .bot-name{flex:1;font-size:.855em;color:var(--text);font-weight:500}
 
     /* ── Staggered animation delays for bot rows ── */
-    .bot-row:nth-child(1){animation-delay:.02s}
-    .bot-row:nth-child(2){animation-delay:.04s}
-    .bot-row:nth-child(3){animation-delay:.06s}
-    .bot-row:nth-child(4){animation-delay:.08s}
-    .bot-row:nth-child(5){animation-delay:.1s}
-    .bot-row:nth-child(6){animation-delay:.12s}
-    .bot-row:nth-child(7){animation-delay:.14s}
-    .bot-row:nth-child(8){animation-delay:.16s}
-    .bot-row:nth-child(9){animation-delay:.18s}
-    .bot-row:nth-child(n+10){animation-delay:.2s}
+    .bot-row:nth-child(1){animation-delay:.02s}.bot-row:nth-child(2){animation-delay:.04s}
+    .bot-row:nth-child(3){animation-delay:.06s}.bot-row:nth-child(4){animation-delay:.08s}
+    .bot-row:nth-child(5){animation-delay:.1s}.bot-row:nth-child(6){animation-delay:.12s}
+    .bot-row:nth-child(7){animation-delay:.14s}.bot-row:nth-child(8){animation-delay:.16s}
+    .bot-row:nth-child(9){animation-delay:.18s}.bot-row:nth-child(n+10){animation-delay:.2s}
+
+    /* ── Live Office enhanced ── */
+    .office-wrap{
+      position:relative;overflow:hidden;
+      border:1px solid rgba(148,163,184,.1);border-radius:18px;min-height:440px;
+      background:
+        linear-gradient(180deg,rgba(79,70,229,.12) 0%,rgba(9,15,30,.95) 35%),
+        repeating-linear-gradient(90deg,rgba(255,255,255,.018) 0 1px,transparent 1px 100px),
+        repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 1px,transparent 1px 80px),
+        linear-gradient(180deg,#080f1e,#070c18);
+      backdrop-filter:blur(4px);
+    }
+    .office-floor{
+      position:absolute;left:0;right:0;bottom:0;height:46%;
+      background:linear-gradient(180deg,#0e1928,#08111c);
+      border-top:1px solid rgba(129,140,248,.15);
+    }
+    .office-floor::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+    }
+    .office-window{
+      position:absolute;top:20px;width:150px;height:88px;border-radius:10px;
+      border:1px solid rgba(129,140,248,.3);
+      background:linear-gradient(180deg,rgba(99,102,241,.25),rgba(79,70,229,.06));
+      box-shadow:0 0 28px rgba(99,102,241,.2),inset 0 1px 0 rgba(255,255,255,.12);
+    }
+    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(129,140,248,.3)}
+    .office-window::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(129,140,248,.2)}
+    .office-plant{position:absolute;bottom:106px;width:18px;height:32px;background:linear-gradient(180deg,#0f2e1c,#0b2016);border-radius:5px 5px 2px 2px;border:1px solid rgba(52,211,153,.2)}
+    .office-plant::before{content:'';position:absolute;left:-8px;top:-28px;width:34px;height:30px;border-radius:50% 50% 0 50%;background:radial-gradient(circle at 40% 40%,#34d399,#059669);box-shadow:0 0 14px rgba(52,211,153,.3)}
   </style>
 </head>
 <body>
@@ -732,8 +1392,8 @@ INDEX_HTML = r"""<!doctype html>
   </div>
   <div class="header-right">
     <div class="hdr-ctrl">
-      <button class="hdr-btn hdr-btn-start" id="hdr-start-btn" onclick="startAll()" title="Start all bots">▶ Start</button>
-      <button class="hdr-btn hdr-btn-stop" id="hdr-stop-btn" onclick="stopAll()" title="Stop all bots">■ Stop</button>
+      <button class="hdr-btn hdr-btn-start" id="hdr-start-btn" onclick="startAll()" title="Start all agents">▶ Start</button>
+      <button class="hdr-btn hdr-btn-stop" id="hdr-stop-btn" onclick="stopAll()" title="Stop all agents">■ Stop</button>
     </div>
     <div class="status-pill"><div class="status-dot"></div><span id="header-status">Running</span></div>
   </div>
@@ -745,9 +1405,10 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('chat',this)">💬 Chat</button>
   <button onclick="switchTab('tasks',this)">🚀 Tasks</button>
   <button onclick="switchTab('swarm',this)">🐝 Swarm</button>
+  <button onclick="switchTab('live-office',this)">🏢 Live Office</button>
   <button onclick="switchTab('commands',this)">📜 Commands</button>
   <button onclick="switchTab('scheduler',this)">📅 Scheduler</button>
-  <button onclick="switchTab('workers',this)">👷 Workers</button>
+  <button onclick="switchTab('workers',this)">👷 Agents</button>
   <button onclick="switchTab('improvements',this)">💡 Improvements</button>
   <button onclick="switchTab('skills',this)">🛠️ Skills</button>
   <button onclick="switchTab('metrics',this)">📈 ROI</button>
@@ -776,16 +1437,16 @@ INDEX_HTML = r"""<!doctype html>
         <p id="sys-control-sub">Loading system status…</p>
         <div class="health-bar-wrap" style="min-width:200px">
           <div class="health-bar-track"><div class="health-bar-fill" id="health-bar"></div></div>
-          <div class="health-label"><span id="health-label-left">Bot Health</span><span id="health-label-right">–</span></div>
+          <div class="health-label"><span id="health-label-left">Agent Health</span><span id="health-label-right">–</span></div>
         </div>
       </div>
     </div>
     <div class="sys-control-right">
       <button class="btn-hero btn-hero-start" id="hero-start-btn" onclick="startAll()">
-        <span class="btn-icon">▶</span> Start All Bots
+        <span class="btn-icon">▶</span> Start All Agents
       </button>
       <button class="btn-hero btn-hero-stop" id="hero-stop-btn" onclick="stopAll()">
-        <span class="btn-icon">■</span> Stop All Bots
+        <span class="btn-icon">■</span> Stop All Agents
       </button>
     </div>
   </div>
@@ -793,11 +1454,11 @@ INDEX_HTML = r"""<!doctype html>
   <div class="grid-stat" id="stat-cards">
     <div class="stat-card">
       <div class="stat-icon green">🟢</div>
-      <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Bots Running</div></div>
+      <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Agents Running</div></div>
     </div>
     <div class="stat-card">
       <div class="stat-icon blue">🤖</div>
-      <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Bots</div></div>
+      <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Agents</div></div>
     </div>
     <div class="stat-card">
       <div class="stat-icon cyan">📡</div>
@@ -812,18 +1473,19 @@ INDEX_HTML = r"""<!doctype html>
   <div class="grid2">
     <div class="card">
       <div class="card-header">
-        <div class="card-title"><span class="icon">🤖</span> Bot Status</div>
+        <div class="card-title"><span class="icon">🤖</span> Agent Status</div>
         <button class="btn btn-ghost btn-sm" onclick="loadDashboard()">↻ Refresh</button>
       </div>
-      <div id="bot-status-list"><div class="empty"><div class="icon">🔍</div><p>Loading bots…</p></div></div>
+      <div id="bot-status-list"><div class="empty"><div class="icon">🔍</div><p>Loading agents…</p></div></div>
     </div>
     <div class="card">
       <div class="card-header">
         <div class="card-title"><span class="icon">⚡</span> Quick Actions</div>
       </div>
       <div class="actions-bar">
-        <button class="btn btn-success" onclick="startAll()">▶ Start All</button>
-        <button class="btn btn-danger" onclick="stopAll()">■ Stop All</button>
+        <button class="btn btn-success" onclick="startAll()">▶ Start All Agents</button>
+        <button class="btn btn-danger" onclick="stopAll()">■ Stop All Agents</button>
+        <button class="btn btn-primary" onclick="runOnboard()">⚡ Run Onboard</button>
         <a class="btn btn-ghost btn-sm" href="http://localhost:18789" target="_blank">📡 Gateway</a>
       </div>
       <hr>
@@ -838,7 +1500,7 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <div class="cmd-grid">
       <div class="cmd-item"><code>status</code><span>Get current status report</span></div>
-      <div class="cmd-item"><code>workers</code><span>List active workers</span></div>
+      <div class="cmd-item"><code>workers</code><span>List active agents</span></div>
       <div class="cmd-item"><code>schedule</code><span>List scheduled tasks</span></div>
       <div class="cmd-item"><code>improvements</code><span>List pending proposals</span></div>
       <div class="cmd-item"><code>switch to &lt;agent&gt;</code><span>Switch active agent</span></div>
@@ -855,8 +1517,16 @@ INDEX_HTML = r"""<!doctype html>
       <button class="btn btn-ghost btn-sm" onclick="loadChatLog()">↻ Refresh</button>
     </div>
     <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">
-      Send tasks here — same as WhatsApp. Tasks are processed by the active agent.
+      Send tasks here — same as WhatsApp. The selected model and routed agent handle execution.
     </p>
+    <div class="chat-model-row">
+      <label for="chat-model" style="margin:0;min-width:120px">Model Route</label>
+      <select id="chat-model">
+        <option value="ollama">🦙 Ollama • Llama</option>
+        <option value="groq">🧠 Groq • Llama 3.3</option>
+        <option value="external">🌐 External AI</option>
+      </select>
+    </div>
     <div id="chat-log"><div class="empty"><div class="icon">💬</div><p>No messages yet.</p></div></div>
     <div class="chat-input-row">
       <div style="flex:1">
@@ -866,6 +1536,44 @@ INDEX_HTML = r"""<!doctype html>
       <button class="btn btn-primary" onclick="sendChat()" style="height:44px">Send ↗</button>
     </div>
     <p style="font-size:.75em;color:var(--text-muted);margin-top:6px">Press Enter to send · Shift+Enter for new line</p>
+  </div>
+</div>
+
+<!-- ── Live Office ── -->
+<div id="tab-live-office" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🏢</span> Live Office</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadLiveOffice()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Running agents appear as live office avatars. Click an avatar to inspect workload, progress, and latest action.</p>
+    <div class="office-wrap" id="office-wrap">
+      <div class="office-window" style="left:6%"></div>
+      <div class="office-window" style="left:41%"></div>
+      <div class="office-window" style="left:76%"></div>
+      <div class="office-floor"></div>
+      <div class="office-desk" style="left:8%"></div>
+      <div class="office-desk" style="left:42%"></div>
+      <div class="office-desk" style="left:74%"></div>
+      <div class="office-plant" style="left:3%"></div>
+      <div class="office-plant" style="left:94%"></div>
+      <div id="office-agents"></div>
+    </div>
+  </div>
+</div>
+
+<div class="office-modal" id="office-modal">
+  <div class="office-modal-card">
+    <div class="card-header" style="margin-bottom:10px">
+      <div class="card-title"><span class="icon">🧠</span> <span id="office-modal-title">Agent</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="closeOfficeModal()">Close</button>
+    </div>
+    <div style="font-size:.86em;color:var(--text-secondary);margin-bottom:8px" id="office-modal-status">Status</div>
+    <div class="office-progress"><div id="office-modal-progress"></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;font-size:.82em;color:var(--text-secondary)">
+      <div><strong style="color:var(--text)">Time Busy:</strong> <span id="office-modal-time">-</span></div>
+      <div><strong style="color:var(--text)">Last Action:</strong> <span id="office-modal-action">-</span></div>
+    </div>
   </div>
 </div>
 
@@ -889,13 +1597,13 @@ INDEX_HTML = r"""<!doctype html>
         <label>Action</label>
         <select id="sched-action">
           <option value="log">Log message</option>
-          <option value="start_bot">Start bot</option>
-          <option value="stop_bot">Stop bot</option>
+          <option value="start_bot">Start agent</option>
+          <option value="stop_bot">Stop agent</option>
           <option value="status_report">Send status report</option>
         </select>
       </div>
       <div class="form-group" id="sched-bot-row" style="display:none">
-        <label>Bot name</label><input id="sched-bot" placeholder="status-reporter"/>
+        <label>Agent name</label><input id="sched-bot" placeholder="status-reporter"/>
       </div>
       <div class="form-group"><label>Message (for log action)</label><input id="sched-msg" placeholder="Task ran"/></div>
       <div class="form-group">
@@ -919,32 +1627,32 @@ INDEX_HTML = r"""<!doctype html>
 <!-- ── Workers ── -->
 <div id="tab-workers" class="tab-content">
 
-  <!-- Worker Bundles section -->
+  <!-- Agent Team Bundles section -->
   <div class="card">
     <div class="card-header">
-      <div class="card-title"><span class="icon">🏭</span> Worker Bundles</div>
+      <div class="card-title"><span class="icon">🏭</span> Agent Teams</div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="loadWorkers()">↻ Refresh</button>
-        <button class="btn btn-primary btn-sm" onclick="openCreateWorker()">＋ New Worker</button>
+        <button class="btn btn-primary btn-sm" onclick="openCreateWorker()">＋ New Agent Team</button>
       </div>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
-      Bundle agents together with a recurring task. Workers run on a schedule and always perform their assigned role.
-      <strong style="color:var(--accent)">Ecom Workers auto-preset</strong> is included below.
+      Bundle agents together with a recurring task. Agent teams run on a schedule and always perform their assigned role.
+      <strong style="color:var(--accent)">Ecom Agent Team auto-preset</strong> is included below.
     </p>
-    <div id="bundle-list"><div class="empty"><div class="icon">🏭</div><p>No worker bundles yet. Click <strong>+ New Worker</strong> to create one.</p></div></div>
+    <div id="bundle-list"><div class="empty"><div class="icon">🏭</div><p>No agent teams yet. Click <strong>+ New Agent Team</strong> to create one.</p></div></div>
   </div>
 
-  <!-- Create / Edit Worker Bundle form (inline, hidden by default) -->
+  <!-- Create / Edit Agent Team form (inline, hidden by default) -->
   <div id="worker-form-card" class="card" style="display:none;border:2px solid var(--primary)">
     <div class="card-header">
-      <div class="card-title"><span class="icon">✏️</span> <span id="worker-form-title">Create Worker Bundle</span></div>
+      <div class="card-title"><span class="icon">✏️</span> <span id="worker-form-title">Create Agent Team</span></div>
       <button class="btn btn-ghost btn-sm" onclick="closeWorkerForm()">✕ Cancel</button>
     </div>
     <div class="grid2" style="gap:12px">
       <div>
         <div class="form-group">
-          <label>Worker Name</label>
+          <label>Agent Team Name</label>
           <input id="wf-name" placeholder="e.g. Ecom Order Processor" />
         </div>
         <div class="form-group">
@@ -966,7 +1674,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div class="form-group">
           <label>Description (optional)</label>
-          <input id="wf-desc" placeholder="Short description of what this worker does" />
+          <input id="wf-desc" placeholder="Short description of what this agent team does" />
         </div>
       </div>
       <div>
@@ -981,23 +1689,23 @@ INDEX_HTML = r"""<!doctype html>
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-success" onclick="saveWorkerBundle()" style="flex:1" id="wf-save-btn">💾 Save Worker</button>
+      <button class="btn btn-success" onclick="saveWorkerBundle()" style="flex:1" id="wf-save-btn">💾 Save Agent Team</button>
       <button class="btn btn-ghost" onclick="presetEcomWorker()" title="Fill in the full ecom automation preset">🛒 Ecom Preset</button>
     </div>
     <div id="wf-save-result" style="margin-top:8px;font-size:.84em"></div>
     <input type="hidden" id="wf-editing-id" value="" />
   </div>
 
-  <!-- Bot Workers section (raw bots start/stop) -->
+  <!-- Individual Agents section (raw start/stop controls) -->
   <div class="card">
     <div class="card-header">
-      <div class="card-title"><span class="icon">👷</span> Bot Workers</div>
+      <div class="card-title"><span class="icon">👷</span> Individual Agents</div>
       <button class="btn btn-ghost btn-sm" onclick="loadWorkers()">↻ Refresh</button>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
-      Start or stop individual bots. The problem-solver watchdog auto-restarts enabled bots if they crash.
+      Start or stop individual agents. The problem-solver watchdog auto-restarts enabled agents if they crash.
     </p>
-    <div id="worker-list"><div class="empty"><div class="icon">👷</div><p>Loading workers…</p></div></div>
+    <div id="worker-list"><div class="empty"><div class="icon">👷</div><p>Loading agents…</p></div></div>
   </div>
 </div>
 
@@ -1009,10 +1717,10 @@ INDEX_HTML = r"""<!doctype html>
       <button class="btn btn-ghost btn-sm" onclick="loadImprovements()">↻ Refresh</button>
     </div>
     <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">
-      The discovery bot proposes new skills and markets. Review and approve or reject below.
+      The discovery agent proposes new skills and markets. Review and approve or reject below.
       <strong style="color:var(--warning)">No changes are applied automatically.</strong>
     </p>
-    <div id="improvement-list"><div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery bot will add proposals over time.</p></div></div>
+    <div id="improvement-list"><div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery agent will add proposals over time.</p></div></div>
   </div>
 </div>
 
@@ -1485,7 +2193,7 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
         <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
-          The bot auto-updates from GitHub while running. Only changed bots are restarted — the rest stay live.
+          Auto-update runs from GitHub while the system is running. Only changed agents are restarted — the rest stay live.
         </p>
         <div id="opt-updater-status" style="font-size:.84em"></div>
       </div>
@@ -1532,13 +2240,13 @@ INDEX_HTML = r"""<!doctype html>
         <div id="nuke-result" style="margin-top:8px;font-size:.82em"></div>
       </div>
 
-      <!-- Delete Complete Bot -->
+      <!-- Delete Complete Installation -->
       <div class="card" style="border-color:rgba(239,68,68,.6);margin-top:0">
         <div class="card-header">
-          <div class="card-title" style="color:var(--danger)"><span class="icon">☠️</span> Delete Complete Bot</div>
+          <div class="card-title" style="color:var(--danger)"><span class="icon">☠️</span> Delete Complete Installation</div>
         </div>
         <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
-          Stops all running bots and <strong style="color:var(--danger)">permanently removes</strong>
+          Stops all running agents and <strong style="color:var(--danger)">permanently removes</strong>
           the entire <code>~/.ai-employee</code> installation — all data, config, and code.
           <strong style="color:var(--text)">This cannot be undone.</strong>
         </p>
@@ -1607,6 +2315,7 @@ function switchTab(tab, btn) {
   if (tab === 'skills') loadSkills();
   if (tab === 'tasks') loadTasks();
   if (tab === 'swarm') loadSwarm();
+  if (tab === 'live-office') loadLiveOffice();
   if (tab === 'commands') loadCommandsTab();
   if (tab === 'metrics') loadMetrics();
   if (tab === 'templates') loadTemplates();
@@ -1617,20 +2326,52 @@ function switchTab(tab, btn) {
   if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
 }
 
-function toast(msg, color='#10b981') {
+function toast(msg, type='success') {
   const el = document.getElementById('toast');
   el.textContent = msg;
-  el.style.background = color;
+  el.className = '';
+  el.classList.add(type);
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 3000);
+  setTimeout(() => el.classList.remove('show'), 3200);
 }
 
 async function api(path, opts={}) {
+  const fetchOpts = {...opts};
+  const headers = new Headers(fetchOpts.headers || {});
+  const hasBody = fetchOpts.body !== undefined && fetchOpts.body !== null;
+
+  if (hasBody && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (hasBody && typeof fetchOpts.body === 'object' && !(fetchOpts.body instanceof FormData)) {
+    fetchOpts.body = JSON.stringify(fetchOpts.body);
+  }
+  fetchOpts.headers = headers;
+
   try {
-    const r = await fetch(path, opts);
-    return r.json();
+    const r = await fetch(path, fetchOpts);
+    let data = {};
+
+    try {
+      data = await r.json();
+    } catch {
+      const text = await r.text();
+      data = text ? {message: text} : {};
+    }
+
+    if (!data || typeof data !== 'object') {
+      data = {value: data};
+    }
+    if (data.ok === undefined) {
+      data.ok = r.ok;
+    }
+    if (!r.ok && !data.error && !data.detail) {
+      data.detail = `Request failed: ${r.status}`;
+    }
+    data.status_code = r.status;
+    return data;
   } catch(e) {
-    return {error: String(e)};
+    return {ok: false, error: String(e)};
   }
 }
 
@@ -1666,6 +2407,16 @@ function animateCount(id, target) {
 }
 
 // ── Disable / re-enable all start-stop controls during action ────────────────
+function normalizeAgents(statusPayload) {
+  const raw = statusPayload?.agents || statusPayload?.bots || statusPayload?.workers || [];
+  return raw.map((entry, idx) => {
+    const id = entry?.agent || entry?.name || entry?.bot || entry?.id || `agent-${idx + 1}`;
+    const running = entry?.running === true || entry?.status === 'running';
+    return { id, running };
+  });
+}
+
+// ── Disable / re-enable all start-stop controls during action ────────────────
 function _setStartStopDisabled(disabled) {
   ['hero-start-btn','hero-stop-btn','hdr-start-btn','hdr-stop-btn'].forEach(id => {
     const b = document.getElementById(id);
@@ -1675,14 +2426,15 @@ function _setStartStopDisabled(disabled) {
 
 async function loadDashboard() {
   const d = await api('/api/status');
-  const bots = d.bots || [];
-  const running = bots.filter(b => b.running).length;
-  const total = bots.length;
+  const agents = normalizeAgents(d);
+  const running = agents.filter(a => a.running).length;
+  const total = agents.length;
 
   // Animate stat numbers
   animateCount('stat-running', running);
   animateCount('stat-total', total);
-  document.getElementById('header-sub').textContent = `${running}/${total} bots running`;
+  const modeLabel = d.mode ? ` · ${d.mode}` : '';
+  document.getElementById('header-sub').textContent = `${running}/${total} agents running${modeLabel}`;
 
   // Update system control hero
   const pct = total > 0 ? Math.round((running / total) * 100) : 0;
@@ -1695,16 +2447,16 @@ async function loadDashboard() {
   document.getElementById('health-label-left').textContent = running + ' / ' + total + ' running';
   if (pct === 0 && total > 0) {
     sysRing.classList.add('offline');
-    sysControlSub.textContent = 'All bots stopped — click Start All to launch';
+    sysControlSub.textContent = 'All agents stopped — click Start All to launch';
   } else if (pct === 100) {
     sysRing.classList.remove('offline');
     sysControlSub.textContent = 'All systems operational ✓';
   } else if (total === 0) {
     sysRing.classList.add('offline');
-    sysControlSub.textContent = 'No bot state data yet — start bots first';
+    sysControlSub.textContent = 'No agent state data yet — start agents first';
   } else {
     sysRing.classList.remove('offline');
-    sysControlSub.textContent = `${running} of ${total} bots active`;
+    sysControlSub.textContent = `${running} of ${total} agents active`;
   }
 
   // Uptime
@@ -1718,15 +2470,15 @@ async function loadDashboard() {
     .catch(() => document.getElementById('stat-gateway').textContent = 'Offline');
 
   const el = document.getElementById('bot-status-list');
-  if (!bots.length) {
-    el.innerHTML = '<div class="empty"><div class="icon">🤖</div><p>No bot state data yet. Start the bots first.</p></div>';
+  if (!agents.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">🤖</div><p>No agent state data yet. Start the agents first.</p></div>';
   } else {
-    el.innerHTML = bots.map(b => {
-      const cls = b.running ? 'on' : 'off';
-      const lbl = b.running ? 'running' : 'stopped';
+    el.innerHTML = agents.map(a => {
+      const cls = a.running ? 'on' : 'off';
+      const lbl = a.running ? 'running' : 'stopped';
       return `<div class="bot-row">
         <div class="dot ${cls}"></div>
-        <span class="bot-name">${b.bot}</span>
+        <span class="bot-name">${escHtml(a.id)}</span>
         <span class="badge ${lbl}">${lbl}</span>
       </div>`;
     }).join('');
@@ -1736,32 +2488,121 @@ async function loadDashboard() {
   document.getElementById('system-info').textContent = sys.output || '(no output)';
 }
 
+async function loadLiveOffice() {
+  const container = document.getElementById('office-agents');
+  if (!container) return;
+  const data = await api('/api/workers');
+  if (!data || data.ok === false) {
+    container.innerHTML = '<div class="empty" style="padding-top:80px"><div class="icon">⚠️</div><p>Live office unavailable right now.</p></div>';
+    return;
+  }
+
+  const list = Array.isArray(data.agents) ? data.agents : [];
+  const agents = list.filter(a => a && a.running).slice(0, 20);
+  if (!agents.length) {
+    container.innerHTML = '<div class="empty" style="padding-top:80px"><div class="icon">🏢</div><p>No running agents right now.</p></div>';
+    return;
+  }
+
+  container.innerHTML = agents.map((agent, idx) => {
+    const name = agent.name || agent.id || 'agent';
+    const left = 5 + (idx % 5) * 18;
+    const row = Math.floor(idx / 5);
+    const danger = !!agent.alert;
+    const duration = 4 + (idx % 4);
+    return `<div class="office-agent ${danger ? 'warning' : ''}" style="left:${left}%;bottom:${80 + row * 58}px;animation-duration:${duration}s" onclick="openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')">
+      <span class="agent-tag">${escHtml(name)}</span>
+      <span class="agent-emoji">${danger ? '⚠️' : (agent.progress >= 70 ? '⚙️' : '🧠')}</span>
+    </div>`;
+  }).join('');
+}
+
+function openOfficeModal(agentJson) {
+  let agent;
+  try {
+    agent = JSON.parse(decodeURIComponent(agentJson));
+  } catch {
+    toast('Could not open agent details', 'error');
+    return;
+  }
+  if (!agent || typeof agent !== 'object') return;
+
+  const modal = document.getElementById('office-modal');
+  if (!modal) return;
+  modal.classList.add('open');
+  const titleEl = document.getElementById('office-modal-title');
+  const statusEl = document.getElementById('office-modal-status');
+  const progressEl = document.getElementById('office-modal-progress');
+  const timeEl = document.getElementById('office-modal-time');
+  const actionEl = document.getElementById('office-modal-action');
+  if (!titleEl || !statusEl || !progressEl || !timeEl || !actionEl) return;
+
+  titleEl.textContent = agent.name || agent.id || 'Agent';
+  statusEl.textContent = agent.running
+    ? 'Status: Running and processing tasks'
+    : 'Status: Currently stopped';
+  const progress = agent.running ? (agent.progress || 15) : 0;
+  progressEl.style.width = progress + '%';
+  timeEl.textContent = agent.running ? `${agent.elapsed_minutes || 0} min` : '-';
+  actionEl.textContent = agent.running
+    ? (agent.alert ? `Issue detected: ${agent.alert_reason || 'Unknown error'}` : (agent.last_action || 'Analyzing assigned workload'))
+    : 'Waiting for assignment';
+}
+
+function closeOfficeModal() {
+  document.getElementById('office-modal')?.classList.remove('open');
+}
+
 async function startAll() {
   _setStartStopDisabled(true);
   // Update hero button text to show loading state
   const heroBtn = document.getElementById('hero-start-btn');
   if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Starting…';
-  await api('/api/bots/start-all', {method:'POST'});
-  toast('▶ Starting all bots…');
+  const res = await api('/api/bots/start-all', {method:'POST'});
+  if (res.ok) {
+    toast(`▶ Starting ${res.started || 0} agents (${res.mode || 'mode'})…`);
+  } else {
+    toast(`⚠ Started ${res.started || 0}, failed: ${(res.failed || []).join(', ')}`, 'info');
+  }
   setTimeout(() => {
     loadDashboard();
     _setStartStopDisabled(false);
-    if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">▶</span> Start All Bots';
+    if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">▶</span> Start All Agents';
   }, 2500);
 }
 
 async function stopAll() {
-  if (!confirm('Stop all running bots?')) return;
+  if (!confirm('Stop all running agents?')) return;
   _setStartStopDisabled(true);
   const heroBtn = document.getElementById('hero-stop-btn');
   if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Stopping…';
-  await api('/api/bots/stop-all', {method:'POST'});
-  toast('■ Stopping all bots…', '#ef4444');
+  const res = await api('/api/bots/stop-all', {method:'POST'});
+  if (res.ok) {
+    toast(`■ Stopping ${res.stopped || 0} agents…`, 'error');
+  } else {
+    toast(`⚠ Stopped ${res.stopped || 0}, failed: ${(res.failed || []).join(', ')}`, 'info');
+  }
   setTimeout(() => {
     loadDashboard();
     _setStartStopDisabled(false);
-    if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">■</span> Stop All Bots';
+    if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">■</span> Stop All Agents';
   }, 2000);
+}
+
+async function runOnboard() {
+  const btn = document.querySelector('button[onclick="runOnboard()"]');
+  if (btn) btn.disabled = true;
+  toast('⚡ Running onboarding workflow…', 'info');
+  const r = await api('/api/quick-actions/onboard', {method:'POST'});
+  if (r.ok) {
+    toast('✅ Onboard started. Check Chat, Tasks, and ROI tabs for progress.', 'success');
+    loadChatLog();
+    loadTasks();
+    loadMetrics();
+  } else {
+    toast(r.detail || r.error || 'Failed to run onboard', 'error');
+  }
+  if (btn) btn.disabled = false;
 }
 
 // ── Chat ────────────────────────────────────────────────────────────────────
@@ -1773,14 +2614,44 @@ async function loadChatLog() {
     log.innerHTML = '<div class="empty"><div class="icon">💬</div><p>No messages yet.</p></div>';
     return;
   }
+
+  function sourceFromMessage(m) {
+    if (m.type === 'user') return {avatar: '👤', label: 'You'};
+    const text = String(m.message || '');
+    if (text.includes('Agent: finance-wizard')) return {avatar: '🧮', label: 'Finance Wizard'};
+    if (text.includes('Agent: social-guru')) return {avatar: '📣', label: 'Social Guru'};
+    if (text.includes('Agent: intel-agent')) return {avatar: '🔎', label: 'Intel Agent'};
+    if (text.includes('Agent: email-ninja')) return {avatar: '✉️', label: 'Email Ninja'};
+    if (text.includes('Agent: lead-generator')) return {avatar: '🎯', label: 'Lead Generator'};
+    if (text.includes('Agent:')) return {avatar: '🤖', label: text.split('Agent:')[1].split('\n')[0].trim()};
+    return {avatar: '🤖', label: 'AI Employee'};
+  }
+
+  function modelBadge(routeHint) {
+    const route = routeHint || document.getElementById('chat-model')?.value || 'ollama';
+    if (route === 'groq') return '🧠 Groq • Llama 3.3';
+    if (route === 'external') return '🌐 External AI';
+    return '🦙 Ollama • Llama';
+  }
+
   log.innerHTML = msgs.slice(-60).map(m => {
-    const type = m.type === 'user' ? 'user' : 'bot';
+    const type = m.type === 'user' ? 'user' : 'agent';
+    const source = sourceFromMessage(m);
     const raw = m.message || m.question || JSON.stringify(m);
     // HTML-escape to prevent XSS, then convert newlines to <br>
     const text = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                     .replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/\n/g,'<br>');
     const ts = (m.ts||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    return `<div class="chat-msg ${type}"><div>${text}</div><div class="ts">${ts}</div></div>`;
+    return `<div class="chat-msg ${type}">
+      <div class="chat-msg-header">
+        <span class="chat-msg-avatar">${source.avatar}</span>
+        <span class="chat-msg-source">${escHtml(source.label)}</span>
+        <span style="opacity:.6">•</span>
+        <span>${type === 'user' ? 'You' : modelBadge(m.model_route)}</span>
+      </div>
+      <div>${text}</div>
+      <div class="ts">${ts}</div>
+    </div>`;
   }).join('');
   log.scrollTop = log.scrollHeight;
 }
@@ -1789,20 +2660,39 @@ async function sendChat() {
   const input = document.getElementById('chat-input');
   const q = input.value.trim();
   if (!q) return;
+  const route = document.getElementById('chat-model')?.value || 'ollama';
   input.value = '';
-  await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q})});
+  await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q, model_route: route})});
   loadChatLog();
 }
 
 // ── Scheduler ───────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('sched-action').addEventListener('change', function() {
-    document.getElementById('sched-bot-row').style.display = (this.value==='start_bot'||this.value==='stop_bot') ? '' : 'none';
-  });
-  document.getElementById('sched-type').addEventListener('change', function() {
-    document.getElementById('sched-interval-row').style.display = this.value==='interval' ? '' : 'none';
-    document.getElementById('sched-daily-row').style.display = this.value==='daily' ? '' : 'none';
-  });
+  const actionEl = document.getElementById('sched-action');
+  const typeEl = document.getElementById('sched-type');
+  const botRow = document.getElementById('sched-bot-row');
+  const intervalRow = document.getElementById('sched-interval-row');
+  const dailyRow = document.getElementById('sched-daily-row');
+
+  if (actionEl && botRow) {
+    const updateAction = () => {
+      botRow.style.display = (actionEl.value === 'start_bot' || actionEl.value === 'stop_bot') ? 'block' : 'none';
+    };
+    actionEl.addEventListener('change', updateAction);
+    updateAction();
+  }
+
+  if (typeEl && intervalRow && dailyRow) {
+    const updateType = () => {
+      intervalRow.style.display = typeEl.value === 'interval' ? 'block' : 'none';
+      dailyRow.style.display = typeEl.value === 'daily' ? 'block' : 'none';
+    };
+    typeEl.addEventListener('change', updateType);
+    updateType();
+  }
+
+  loadDashboard();
+  if (!_allAgents.length) loadSwarm();
 });
 
 async function loadSchedules() {
@@ -1833,7 +2723,7 @@ async function addSchedule() {
   const interval = parseInt(document.getElementById('sched-interval').value) || 60;
   const dailyTime = document.getElementById('sched-daily-time').value.trim();
 
-  if (!id || !label) { toast('ID and label are required', '#ef4444'); return; }
+  if (!id || !label) { toast('ID and label are required', 'error'); return; }
 
   const task = {id, label, action, type, enabled: true,
     ...(bot && {bot}), ...(msg && {message: msg}),
@@ -1843,7 +2733,7 @@ async function addSchedule() {
 
   const r = await api('/api/schedules', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(task)});
   if (r.ok) { toast('Task added!'); loadSchedules(); }
-  else { toast(r.error||'Error', '#ef4444'); }
+  else { toast(r.error||'Error', 'error'); }
 }
 
 async function deleteSchedule(id) {
@@ -1855,14 +2745,16 @@ async function deleteSchedule(id) {
 // ── Workers ─────────────────────────────────────────────────────────────────
 // ── Bundle management ───────────────────────────────────────────────────────
 let _wfSelectedAgents = new Set();
+let _workerBundlesById = {};
 
 async function loadWorkers() {
   // Load bundles
   const bd = await api('/api/workers/bundles');
   const bundles = (bd && bd.bundles) || [];
+  _workerBundlesById = Object.fromEntries(bundles.map(b => [b.id, b]));
   const bundleEl = document.getElementById('bundle-list');
   if (!bundles.length) {
-    bundleEl.innerHTML = '<div class="empty"><div class="icon">🏭</div><p>No worker bundles yet. Click <strong>+ New Worker</strong> to create one.</p></div>';
+    bundleEl.innerHTML = '<div class="empty"><div class="icon">🏭</div><p>No agent teams yet. Click <strong>+ New Agent Team</strong> to create one.</p></div>';
   } else {
     bundleEl.innerHTML = bundles.map(b => {
       const enabled = b.enabled !== false;
@@ -1886,7 +2778,7 @@ async function loadWorkers() {
           </div>
           <div style="display:flex;flex-direction:column;gap:5px;min-width:90px">
             <button class="btn btn-primary btn-sm" onclick="runBundle('${escHtml(b.id)}')">▶ Run</button>
-            <button class="btn btn-ghost btn-sm" onclick="editBundle(${escHtml(JSON.stringify(b))})">✏️ Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="editBundleById('${escHtml(b.id)}')">✏️ Edit</button>
             <button class="btn btn-ghost btn-sm" onclick="toggleBundle('${escHtml(b.id)}', ${!enabled})">${enabled ? '⏸ Disable' : '▶ Enable'}</button>
             <button class="btn btn-danger btn-sm" onclick="deleteBundle('${escHtml(b.id)}')">🗑</button>
           </div>
@@ -1895,11 +2787,11 @@ async function loadWorkers() {
     }).join('');
   }
 
-  // Load bot workers
+  // Load agent workers
   const wd = await api('/api/workers');
-  const bots = (wd && wd.bots) || [];
+  const bots = (wd && wd.agents) || [];
   const el = document.getElementById('worker-list');
-  if (!bots.length) { el.innerHTML = '<div class="empty"><div class="icon">👷</div><p>No bots found.</p></div>'; return; }
+  if (!bots.length) { el.innerHTML = '<div class="empty"><div class="icon">👷</div><p>No agents found.</p></div>'; return; }
   el.innerHTML = bots.map(b => {
     const cls = b.running ? 'on' : 'off';
     const lbl = b.running ? 'running' : 'stopped';
@@ -1913,16 +2805,19 @@ async function loadWorkers() {
   }).join('');
 }
 
-function openCreateWorker(prefill) {
+async function openCreateWorker(prefill) {
   document.getElementById('wf-editing-id').value = '';
   document.getElementById('wf-name').value = (prefill && prefill.name) || '';
   document.getElementById('wf-task').value = (prefill && prefill.task_description) || '';
   document.getElementById('wf-desc').value = (prefill && prefill.description) || '';
   document.getElementById('wf-schedule').value = (prefill && prefill.schedule) || 'continuous';
-  document.getElementById('worker-form-title').textContent = 'Create Worker Bundle';
-  document.getElementById('wf-save-btn').textContent = '💾 Save Worker';
+  document.getElementById('worker-form-title').textContent = 'Create Agent Team';
+  document.getElementById('wf-save-btn').textContent = '💾 Save Agent Team';
   document.getElementById('wf-save-result').textContent = '';
   _wfSelectedAgents = new Set((prefill && prefill.agents) || []);
+  if (!_allAgents.length) {
+    await loadSwarm();
+  }
   renderWfAgentGrid();
   document.getElementById('worker-form-card').style.display = 'block';
   document.getElementById('worker-form-card').scrollIntoView({behavior:'smooth', block:'start'});
@@ -1931,8 +2826,17 @@ function openCreateWorker(prefill) {
 function editBundle(b) {
   openCreateWorker(b);
   document.getElementById('wf-editing-id').value = b.id;
-  document.getElementById('worker-form-title').textContent = 'Edit Worker Bundle';
-  document.getElementById('wf-save-btn').textContent = '💾 Update Worker';
+  document.getElementById('worker-form-title').textContent = 'Edit Agent Team';
+  document.getElementById('wf-save-btn').textContent = '💾 Update Agent Team';
+}
+
+function editBundleById(id) {
+  const bundle = _workerBundlesById[id];
+  if (!bundle) {
+    toast('Bundle not found', 'error');
+    return;
+  }
+  editBundle(bundle);
 }
 
 function closeWorkerForm() {
@@ -1984,7 +2888,7 @@ function presetEcomWorker() {
     agents: ['order-processor','support-bot','bookkeeper','inventory-sync','email-marketer','social-poster','product-researcher','ecom-dashboard']
   };
   openCreateWorker(preset);
-  toast('E-commerce preset loaded! Adjust agents and save.', '#10b981');
+  toast('E-commerce preset loaded! Adjust agents and save.', 'success');
 }
 
 async function saveWorkerBundle() {
@@ -1996,9 +2900,9 @@ async function saveWorkerBundle() {
   const editingId = document.getElementById('wf-editing-id').value.trim();
   const resultEl = document.getElementById('wf-save-result');
 
-  if (!name) { toast('Worker name is required', '#ef4444'); return; }
-  if (!task_description) { toast('Task description is required', '#ef4444'); return; }
-  if (!agents.length) { toast('Select at least one agent', '#ef4444'); return; }
+  if (!name) { toast('Agent team name is required', 'error'); return; }
+  if (!task_description) { toast('Task description is required', 'error'); return; }
+  if (!agents.length) { toast('Select at least one agent', 'error'); return; }
 
   resultEl.textContent = '⏳ Saving…';
   const payload = {name, description, task_description, schedule, agents, enabled: true};
@@ -2011,7 +2915,7 @@ async function saveWorkerBundle() {
   }
 
   if (r && r.ok !== false) {
-    resultEl.innerHTML = `<span style="color:var(--success)">✅ Worker ${editingId ? 'updated' : 'created'}!</span>`;
+    resultEl.innerHTML = `<span style="color:var(--success)">✅ Agent team ${editingId ? 'updated' : 'created'}!</span>`;
     setTimeout(() => { closeWorkerForm(); loadWorkers(); }, 800);
   } else {
     resultEl.innerHTML = `<span style="color:var(--danger)">❌ Save failed. Check API.</span>`;
@@ -2020,23 +2924,23 @@ async function saveWorkerBundle() {
 
 async function runBundle(id) {
   const r = await api(`/api/workers/bundles/${id}/run`, {method:'POST'});
-  if (r && r.ok !== false) toast('Worker triggered ▶', '#10b981');
-  else toast('Run failed', '#ef4444');
+  if (r && r.ok !== false) toast('Agent team triggered ▶', 'success');
+  else toast('Run failed', 'error');
   setTimeout(loadWorkers, 1500);
 }
 
 async function toggleBundle(id, enabled) {
   const r = await api(`/api/workers/bundles/${id}`, {method:'PATCH', body: JSON.stringify({enabled})});
-  if (r && r.ok !== false) toast(enabled ? 'Worker enabled ✅' : 'Worker disabled ⏸', enabled ? '#10b981' : '#f59e0b');
-  else toast('Update failed', '#ef4444');
+  if (r && r.ok !== false) toast(enabled ? 'Agent team enabled ✅' : 'Agent team disabled ⏸', enabled ? 'success' : 'info');
+  else toast('Update failed', 'error');
   loadWorkers();
 }
 
 async function deleteBundle(id) {
-  if (!confirm('Delete this worker bundle?')) return;
+  if (!confirm('Delete this agent team?')) return;
   const r = await api(`/api/workers/bundles/${id}`, {method:'DELETE'});
-  if (r && r.ok !== false) { toast('Worker deleted', '#ef4444'); loadWorkers(); }
-  else toast('Delete failed', '#ef4444');
+  if (r && r.ok !== false) { toast('Agent team deleted', 'error'); loadWorkers(); }
+  else toast('Delete failed', 'error');
 }
 
 async function startBot(name) {
@@ -2048,7 +2952,7 @@ async function startBot(name) {
 async function stopBot(name) {
   if (!confirm(`Stop ${name}?`)) return;
   await api('/api/bots/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
-  toast(`Stopping ${name}…`, '#ef4444');
+  toast(`Stopping ${name}…`, 'error');
   setTimeout(loadWorkers, 1800);
 }
 
@@ -2057,7 +2961,7 @@ async function loadImprovements() {
   const data = await api('/api/improvements');
   const items = data.improvements || [];
   const el = document.getElementById('improvement-list');
-  if (!items.length) { el.innerHTML = '<div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery bot will add them over time.</p></div>'; return; }
+  if (!items.length) { el.innerHTML = '<div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery agent will add them over time.</p></div>'; return; }
   el.innerHTML = items.map(imp => `
     <div class="improv-row">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
@@ -2074,7 +2978,7 @@ async function loadImprovements() {
 
 async function reviewImprovement(id, decision) {
   const r = await api(`/api/improvements/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status: decision})});
-  if (r.ok) { toast(decision==='approved' ? '✓ Approved' : '✕ Rejected', decision==='approved'?'#10b981':'#ef4444'); loadImprovements(); }
+  if (r.ok) { toast(decision==='approved' ? '✓ Approved' : '✕ Rejected', decision==='approved'?'success':'error'); loadImprovements(); }
 }
 
 // ── Skills ───────────────────────────────────────────────────────────────────
@@ -2103,7 +3007,7 @@ async function loadSkills() {
 function renderCategoryPills(cats) {
   const el = document.getElementById('category-pills');
   el.innerHTML = `<span class="cat-pill active" onclick="setCat('',this)">All</span>` +
-    cats.map(c => `<span class="cat-pill" onclick="setCat(${JSON.stringify(c)},this)">${c}</span>`).join('');
+    cats.map(c => `<span class="cat-pill" onclick="setCat('${escHtml(c)}',this)">${c}</span>`).join('');
 }
 
 function setCat(cat, btn) {
@@ -2164,8 +3068,8 @@ function updateSelectedPanel() {
 async function createAgent() {
   const name = document.getElementById('agent-name-input').value.trim();
   const desc = document.getElementById('agent-desc-input').value.trim();
-  if (!name) { toast('Agent name is required', '#ef4444'); return; }
-  if (!selectedSkillIds.size) { toast('Select at least one skill', '#ef4444'); return; }
+  if (!name) { toast('Agent name is required', 'error'); return; }
+  if (!selectedSkillIds.size) { toast('Select at least one skill', 'error'); return; }
   const r = await api('/api/agents/custom', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({name, description: desc, skills: [...selectedSkillIds]}),
@@ -2178,7 +3082,7 @@ async function createAgent() {
     updateSelectedPanel();
     filterSkills();
     loadAgents();
-  } else { toast(r.error || 'Error creating agent', '#ef4444'); }
+  } else { toast(r.error || 'Error creating agent', 'error'); }
 }
 
 async function loadAgents() {
@@ -2200,7 +3104,7 @@ async function loadAgents() {
 async function deleteAgent(id) {
   if (!confirm('Delete this agent?')) return;
   const r = await api('/api/agents/custom/' + id, {method:'DELETE'});
-  if (r.ok) { toast('Agent deleted', '#ef4444'); loadAgents(); }
+  if (r.ok) { toast('Agent deleted', 'error'); loadAgents(); }
 }
 
 // ── Tasks — agent selector state ─────────────────────────────────────────────
@@ -2233,13 +3137,12 @@ async function runAutoSelect() {
   // Fetch all agents if we don't have them yet
   if (!_allAgents.length) {
     const r = await api('/api/agents');
-    if (r.ok) { const d = await r.json(); _allAgents = d.agents || []; }
+    if (r.ok) { _allAgents = r.agents || []; }
   }
 
   const r = await api('/api/task/auto-agents', {method:'POST', body: JSON.stringify({description: desc})});
   if (r.ok) {
-    const d = await r.json();
-    _autoSelectedIds = new Set(d.suggested || []);
+    _autoSelectedIds = new Set(r.suggested || []);
     _selectedAgentIds = new Set(_autoSelectedIds);
     statusEl.innerHTML = `<span style="color:var(--success)">✅ ${_autoSelectedIds.size} agent${_autoSelectedIds.size!==1?'s':''} auto-selected</span>`;
     renderAgentPicker();
@@ -2256,7 +3159,7 @@ async function runAutoSelect() {
 async function showManualAgentPicker() {
   if (!_allAgents.length) {
     const r = await api('/api/agents');
-    if (r.ok) { const d = await r.json(); _allAgents = d.agents || []; }
+    if (r.ok) { _allAgents = r.agents || []; }
   }
   renderAgentPicker();
   document.getElementById('task-step2').style.display = 'block';
@@ -2340,7 +3243,7 @@ function updateAgentSelCount() {
 
 async function submitTask() {
   const desc = document.getElementById('task-input').value.trim();
-  if (!desc) { toast('Please enter a task description', '#ef4444'); return; }
+  if (!desc) { toast('Please enter a task description', 'error'); return; }
   const resultEl = document.getElementById('task-submit-result');
   resultEl.innerHTML = '⏳ Submitting…';
   const agents = [..._selectedAgentIds];
@@ -2350,8 +3253,7 @@ async function submitTask() {
     mode: _taskMode
   })});
   if (r.ok) {
-    const d = await r.json();
-    resultEl.innerHTML = `<span style="color:var(--success)">✅ Task launched! ID: <code>${d.task_id||'?'}</code> | ${agents.length || 'auto'} agent${agents.length!==1?'s':''} | mode: ${_taskMode}</span>`;
+    resultEl.innerHTML = `<span style="color:var(--success)">✅ Task launched! ID: <code>${r.task_id||'?'}</code> | ${agents.length || 'auto'} agent${agents.length!==1?'s':''} | mode: ${_taskMode}</span>`;
     document.getElementById('task-input').value = '';
     _selectedAgentIds.clear();
     _autoSelectedIds.clear();
@@ -2368,8 +3270,7 @@ async function submitTask() {
 async function loadTasks() {
   const r = await api('/api/task/list');
   if (!r.ok) return;
-  const d = await r.json();
-  const plans = d.plans || [];
+  const plans = r.plans || [];
 
   const activePanel = document.getElementById('active-task-panel');
   const active = plans.find(p => p.status === 'running' || p.status === 'planning');
@@ -2428,13 +3329,13 @@ async function loadTasks() {
 
 async function cancelTask() {
   const r = await api('/api/task/cancel', {method:'POST'});
-  if (r.ok) { toast('Task cancelled', '#f59e0b'); loadTasks(); }
+  if (r.ok) { toast('Task cancelled', 'info'); loadTasks(); }
 }
 
 async function reassignSubtask(taskId, subtaskId) {
   if (!_allAgents.length) {
     const r = await api('/api/agents');
-    if (r.ok) { const d = await r.json(); _allAgents = d.agents || []; }
+    if (r.ok) { _allAgents = r.agents || []; }
   }
   const agentId = prompt(
     'Reassign subtask to which agent?\nAvailable: ' +
@@ -2442,16 +3343,15 @@ async function reassignSubtask(taskId, subtaskId) {
   );
   if (!agentId) return;
   const r = await api('/api/task/reassign', {method:'POST', body: JSON.stringify({task_id: taskId, subtask_id: subtaskId, agent_id: agentId.trim()})});
-  if (r.ok) { toast('Subtask reassigned ✅', '#10b981'); loadTasks(); }
-  else toast('Reassign failed', '#ef4444');
+  if (r.ok) { toast('Subtask reassigned ✅', 'success'); loadTasks(); }
+  else toast('Reassign failed', 'error');
 }
 
 // ── Swarm ────────────────────────────────────────────────────────────────────
 async function loadSwarm() {
   const r = await api('/api/agents');
   if (!r.ok) return;
-  const d = await r.json();
-  const agents = d.agents || [];
+  const agents = r.agents || [];
   _allAgents = agents; // cache for task picker
   renderSwarmGrid(agents);
 }
@@ -2491,10 +3391,10 @@ const COMMAND_GROUPS = [
   {
     cat: '⚙️ System',
     cmds: [
-      ['status', 'Get current bot status report'],
+      ['status', 'Get current agent status report'],
       ['workers', 'List all active workers'],
-      ['start <bot>', 'Start a specific bot'],
-      ['stop <bot>', 'Stop a specific bot'],
+      ['start <agent>', 'Start a specific agent'],
+      ['stop <agent>', 'Stop a specific agent'],
       ['schedule', 'List all scheduled tasks'],
       ['improvements', 'List pending skill proposals'],
       ['skills', 'Show skills library summary'],
@@ -2744,7 +3644,7 @@ function renderCommands() {
 }
 
 function copyCmd(cmd) {
-  navigator.clipboard.writeText(cmd).then(() => toast(`Copied: ${cmd}`, '#6366f1')).catch(() => {});
+  navigator.clipboard.writeText(cmd).then(() => toast(`Copied: ${cmd}`, 'info')).catch(() => {});
 }
 
 // ── ROI Metrics ──────────────────────────────────────────────────────────────
@@ -2794,7 +3694,7 @@ async function recordMetric() {
     document.getElementById('metric-value').value = '';
     document.getElementById('metric-notes').value = '';
     loadMetrics();
-  } else { toast(r.detail || r.error || 'Error', '#ef4444'); }
+  } else { toast(r.detail || r.error || 'Error', 'error'); }
 }
 
 // ── Templates ────────────────────────────────────────────────────────────────
@@ -2840,8 +3740,8 @@ async function deployTemplate(id, name) {
   if (!confirm(`Deploy template "${name}"?\n\nThis will create a new Worker Bundle with pre-configured agents and schedule.`)) return;
   const r = await api(`/api/templates/${id}/deploy`, {method:'POST'});
   if (r.ok) {
-    toast(`✅ Template "${name}" deployed! Check Workers tab.`, '#10b981');
-  } else { toast(r.detail || r.error || 'Deployment failed', '#ef4444'); }
+    toast(`✅ Template "${name}" deployed! Check Agents tab.`, 'success');
+  } else { toast(r.detail || r.error || 'Deployment failed', 'error'); }
 }
 
 // ── Guardrails ───────────────────────────────────────────────────────────────
@@ -2902,15 +3802,15 @@ async function loadGuardrails() {
 async function approveAction(id) {
   const r = await api(`/api/guardrails/${id}/approve`, {method:'POST'});
   if (r.ok) { toast('Action approved ✅'); loadGuardrails(); }
-  else { toast(r.detail || 'Error', '#ef4444'); }
+  else { toast(r.detail || 'Error', 'error'); }
 }
 
 async function rejectAction(id) {
   const reason = prompt('Reason for rejection (optional):') || '';
   const r = await api(`/api/guardrails/${id}/reject`, {method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason})});
-  if (r.ok) { toast('Action rejected 🚫', '#ef4444'); loadGuardrails(); }
-  else { toast(r.detail || 'Error', '#ef4444'); }
+  if (r.ok) { toast('Action rejected 🚫', 'error'); loadGuardrails(); }
+  else { toast(r.detail || 'Error', 'error'); }
 }
 
 async function saveGuardrailSettings() {
@@ -2931,7 +3831,7 @@ async function saveGuardrailSettings() {
   const r = await api('/api/guardrails/settings', {method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(settings)});
   if (r.ok) { toast('Settings saved ✅'); }
-  else { toast(r.detail || 'Error', '#ef4444'); }
+  else { toast(r.detail || 'Error', 'error'); }
 }
 
 // ── Memory ───────────────────────────────────────────────────────────────────
@@ -2986,7 +3886,7 @@ async function addClient() {
   const email   = document.getElementById('mem-email').value.trim();
   const status  = document.getElementById('mem-status').value;
   const notes   = document.getElementById('mem-notes').value.trim();
-  if (!name) { toast('Name is required', '#ef4444'); return; }
+  if (!name) { toast('Name is required', 'error'); return; }
   const r = await api('/api/memory/clients', {method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({name, company: company||null, email: email||null, status, notes: notes||null})});
@@ -2997,7 +3897,7 @@ async function addClient() {
     document.getElementById('mem-email').value   = '';
     document.getElementById('mem-notes').value   = '';
     loadMemory();
-  } else { toast(r.detail || 'Error', '#ef4444'); }
+  } else { toast(r.detail || 'Error', 'error'); }
 }
 
 async function updateClientStatus(id, status) {
@@ -3054,7 +3954,7 @@ async function loadIntegrations() {
 async function saveIntegration(id) {
   const d = await api('/api/integrations');
   const intg = (d.integrations||[]).find(i => i.id === id);
-  if (!intg) { toast('Integration not found', '#ef4444'); return; }
+  if (!intg) { toast('Integration not found', 'error'); return; }
   const config = {};
   (intg.fields||[]).forEach(f => {
     const el = document.getElementById(`intg-${id}-${f.key}`);
@@ -3064,7 +3964,7 @@ async function saveIntegration(id) {
   const r = await api(`/api/integrations/${id}`, {method:'PATCH',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({config, enabled})});
   if (r.ok) { toast(`${intg.name} saved ✅`); loadIntegrations(); }
-  else { toast(r.detail || 'Error', '#ef4444'); }
+  else { toast(r.detail || 'Error', 'error'); }
 }
 
 async function testIntegration(id) {
@@ -3136,10 +4036,10 @@ async function saveSettings(category) {
     const msg = r.saved
       ? `✅ Saved ${r.saved} setting${r.saved !== 1 ? 's' : ''}`
       : 'No changes (all values were unchanged)';
-    toast(msg, r.saved ? '#10b981' : '#64748b');
+    toast(msg, r.saved ? 'success' : 'info');
     if (r.saved) loadOptions();
   } else {
-    toast(r.detail || 'Error saving', '#ef4444');
+    toast(r.detail || 'Error saving', 'error');
   }
 }
 
@@ -3374,15 +4274,16 @@ async function clearHistory() {
   if (!confirm('Clear all activity history? This cannot be undone.')) return;
   const r = await api('/api/history/clear', {method:'POST'});
   if (r.ok) { _historyEntries = []; renderHistory([]); toast('History cleared'); }
-  else toast('Failed to clear history', '#ef4444');
+  else toast('Failed to clear history', 'error');
 }
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
+async function loadUpdaterStatus() {
   const el = document.getElementById('opt-updater-status');
   if (!el) return;
   const d = await api('/api/updater/status');
   if (d.error) {
-    el.innerHTML = '<p style="color:var(--text-muted)">Updater not running yet — starts automatically with the bot.</p>';
+    el.innerHTML = '<p style="color:var(--text-muted)">Updater not running yet — starts automatically with the agent runtime.</p>';
     return;
   }
   const statusColor = {
@@ -3410,7 +4311,7 @@ async function clearHistory() {
     </div>
     ${d.last_update ? `<div style="font-size:.78em;color:var(--text-muted)">Last update: ${escHtml(d.last_update.slice(0,19).replace('T',' '))} UTC</div>` : ''}
     ${d.restarted_bots && d.restarted_bots.length
-      ? `<div style="font-size:.78em;color:var(--text-muted);margin-top:4px">Restarted: ${escHtml(d.restarted_bots.join(', '))}</div>` : ''}
+      ? `<div style="font-size:.78em;color:var(--text-muted);margin-top:4px">Restarted agents: ${escHtml(d.restarted_bots.join(', '))}</div>` : ''}
     <div style="font-size:.76em;color:var(--text-muted);margin-top:6px">
       Polls every ${d.interval_seconds || 300}s · Repo: ${escHtml(d.repo||'F-game25/AI-EMPLOYEE')}
     </div>`;
@@ -3424,7 +4325,7 @@ async function checkForUpdates() {
     toast(r.message || 'Check triggered');
     setTimeout(loadUpdaterStatus, 3000);
   } else {
-    toast(r.detail || 'Check failed', '#ef4444');
+    toast(r.detail || 'Check failed', 'error');
   }
 }
 
@@ -3433,10 +4334,10 @@ async function triggerUpdate() {
   if (el) el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em;padding:8px 0">⏳ Downloading update…</p>';
   const r = await api('/api/updater/update', {method:'POST'});
   if (r.ok) {
-    toast(r.message || 'Update triggered — affected bots restarting…', '#22d3ee');
+    toast(r.message || 'Update triggered — affected agents restarting…', 'info');
     setTimeout(loadUpdaterStatus, 8000);
   } else {
-    toast(r.detail || 'Update failed', '#ef4444');
+    toast(r.detail || 'Update failed', 'error');
   }
 }
 
@@ -3494,7 +4395,7 @@ async function deleteBotFinal() {
   const confirm_val = document.getElementById('uninstall-confirm').value;
   const el = document.getElementById('uninstall-result');
   el.style.color = 'var(--text-muted)';
-  el.textContent = '⏳ Stopping all bots and removing installation…';
+  el.textContent = '⏳ Stopping all agents and removing installation…';
   const r = await api('/api/settings/uninstall', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -3601,10 +4502,7 @@ def auth_register(request: Request, user_data: _UserCreate):
     Rate limited to 5 requests/minute per IP to prevent abuse.
     """
     if not _SECURITY_AVAILABLE:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Security module not available. Install security dependencies.",
-        )
+      logger.warning("Security module unavailable — using fallback auth primitives.")
 
     cfg = _security_config
     is_valid, err_msg = PasswordValidator.validate(
@@ -3669,10 +4567,7 @@ def auth_login(request: Request, login_data: _LoginRequest):
     Returns the same 401 error for both unknown user and wrong password (no user enumeration).
     """
     if not _SECURITY_AVAILABLE:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Security module not available.",
-        )
+      logger.warning("Security module unavailable — using fallback auth primitives.")
 
     cfg = _security_config
     username = InputSanitizer.sanitize_input(login_data.username, max_length=50)
@@ -3720,13 +4615,29 @@ def auth_login(request: Request, login_data: _LoginRequest):
 
 @app.get("/api/status")
 def get_status():
-    state_file = STATE_DIR / "problem-solver.state.json"
-    if state_file.exists():
-        try:
-            return JSONResponse(json.loads(state_file.read_text()))
-        except Exception:
-            pass
-    return JSONResponse({"ts": None, "bots": [], "note": "No state yet. Start problem-solver."})
+  agents = []
+  mode = _current_mode()
+  for agent_name in _mode_agent_targets(mode):
+    if agent_name in INFRA_AGENTS:
+      continue
+    pid_file = AI_HOME / "run" / f"{agent_name}.pid"
+    running = False
+    if pid_file.exists():
+      try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)
+        running = True
+      except Exception:
+        running = False
+    agents.append({"agent": agent_name, "running": running})
+
+  return JSONResponse({
+    "ts": now_iso(),
+    "mode": mode,
+    "agents": agents,
+    "total": len(agents),
+    "running": sum(1 for a in agents if a["running"]),
+  })
 
 
 @app.get("/api/doctor")
@@ -3737,14 +4648,58 @@ def get_doctor():
 
 @app.post("/api/bots/start-all")
 def start_all_bots():
-    rc, out = ai_employee("start", "--all")
-    return JSONResponse({"ok": rc == 0, "output": out})
+    mode = _current_mode()
+    targets = _mode_agent_targets(mode)
+    outputs = []
+    failures = []
+    for agent_name in targets:
+      if agent_name in INFRA_AGENTS:
+        continue
+      rc, out = ai_employee("start", agent_name)
+      outputs.append(f"[{agent_name}] {out.strip()}")
+      if rc != 0:
+        failures.append(agent_name)
+    return JSONResponse({
+      "ok": len(failures) == 0,
+      "mode": mode,
+      "targets": targets,
+      "started": len(targets) - len(failures),
+      "failed": failures,
+      "output": "\n".join(outputs),
+    })
 
 
 @app.post("/api/bots/stop-all")
 def stop_all_bots():
-    rc, out = ai_employee("stop", "--all")
-    return JSONResponse({"ok": rc == 0, "output": out})
+    mode = _current_mode()
+    targets = _mode_agent_targets(mode)
+    outputs = []
+    failures = []
+    for agent_name in targets:
+      if agent_name in INFRA_AGENTS:
+        continue
+      rc, out = ai_employee("stop", agent_name)
+      outputs.append(f"[{agent_name}] {out.strip()}")
+      if rc != 0:
+        failures.append(agent_name)
+    return JSONResponse({
+      "ok": len(failures) == 0,
+      "mode": mode,
+      "targets": targets,
+      "stopped": len(targets) - len(failures),
+      "failed": failures,
+      "output": "\n".join(outputs),
+    })
+
+
+@app.post("/api/quick-actions/onboard")
+def run_onboard_quick_action():
+  rc, out = ai_employee("do", "onboard")
+  return JSONResponse({
+    "ok": rc == 0,
+    "output": out,
+    "message": "Onboard workflow started." if rc == 0 else "Failed to start onboard workflow.",
+  })
 
 
 @app.post("/api/bots/start")
@@ -3765,21 +4720,63 @@ def stop_bot(payload: dict):
 
 @app.get("/api/workers")
 def get_workers():
-    bots = []
-    if BOTS_DIR.exists():
-        for d in sorted(BOTS_DIR.iterdir()):
-            if d.is_dir():
-                pid_file = AI_HOME / "run" / f"{d.name}.pid"
-                running = False
-                if pid_file.exists():
-                    try:
-                        pid = int(pid_file.read_text().strip())
-                        os.kill(pid, 0)
-                        running = True
-                    except Exception:
-                        pass
-                bots.append({"name": d.name, "running": running})
-    return JSONResponse({"bots": bots})
+  agents = []
+  if BOTS_DIR.exists():
+    for d in sorted(BOTS_DIR.iterdir()):
+      if not d.is_dir() or not (d / "run.sh").exists():
+        continue
+      if d.name in INFRA_AGENTS:
+        continue
+      pid_file = AI_HOME / "run" / f"{d.name}.pid"
+      running = False
+      if pid_file.exists():
+        try:
+          pid = int(pid_file.read_text().strip())
+          os.kill(pid, 0)
+          running = True
+        except Exception:
+          pass
+
+      progress = 0
+      elapsed_minutes = 0
+      last_action = "Waiting for assignment"
+      alert = False
+      alert_reason = ""
+      state_file = STATE_DIR / f"{d.name}.state.json"
+      if state_file.exists():
+        try:
+          st = json.loads(state_file.read_text())
+          progress = int(st.get("progress", 0) or 0)
+          progress = max(0, min(progress, 100))
+          last_action = st.get("last_action") or st.get("active_plan_title") or st.get("current_task") or last_action
+          err = st.get("last_error") or st.get("error")
+          if err:
+            alert = True
+            alert_reason = str(err)[:160]
+
+          started_at = st.get("started_at")
+          if started_at:
+            try:
+              start_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+              elapsed_minutes = max(0, int((datetime.now(timezone.utc) - start_dt).total_seconds() / 60))
+            except Exception:
+              elapsed_minutes = 0
+        except Exception:
+          pass
+
+      if running and progress == 0:
+        progress = 15
+
+      agents.append({
+        "name": d.name,
+        "running": running,
+        "progress": progress,
+        "elapsed_minutes": elapsed_minutes,
+        "last_action": last_action,
+        "alert": alert,
+        "alert_reason": alert_reason,
+      })
+  return JSONResponse({"agents": agents})
 
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -3811,6 +4808,7 @@ def get_chat():
 @app.post("/api/chat")
 def post_chat(payload: dict):
     raw_message = (payload or {}).get("message", "").strip()
+    model_route = ((payload or {}).get("model_route") or "").strip().lower()
     if not raw_message:
         raise HTTPException(400, "message required")
 
@@ -3821,17 +4819,14 @@ def post_chat(payload: dict):
         message = raw_message[:10000].replace("\x00", "")
     message = _sanitize_for_log(message)
 
-    entry = {"ts": now_iso(), "type": "user", "message": message}
-    CHATLOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(CHATLOG, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    entry = {"ts": now_iso(), "type": "user", "message": message, "model_route": model_route}
+    append_chatlog(entry)
 
     # Simple command handling
-    response = handle_command(message)
+    response = handle_command(message, model_route=model_route)
     safe_response = _sanitize_for_log(response)
-    resp_entry = {"ts": now_iso(), "type": "bot", "message": safe_response}
-    with open(CHATLOG, "a") as f:
-        f.write(json.dumps(resp_entry) + "\n")
+    resp_entry = {"ts": now_iso(), "type": "agent", "message": safe_response, "model_route": model_route}
+    append_chatlog(resp_entry)
 
     _log_activity(
         "agent_command",
@@ -3842,28 +4837,28 @@ def post_chat(payload: dict):
     return JSONResponse({"ok": True, "response": response})
 
 
-def handle_command(message: str) -> str:
+def handle_command(message: str, model_route: Optional[str] = None) -> str:
     msg_lower = message.lower().strip()
 
     if msg_lower in ("status", "s"):
         rc, out = ai_employee("status")
-        return f"Bot status:\n{out}" if out.strip() else "No status data."
+        return f"Agent status:\n{out}" if out.strip() else "No status data."
 
     if msg_lower in ("workers", "w"):
         rc, out = ai_employee("status")
-        return f"Workers:\n{out}"
+        return f"Agents:\n{out}"
 
     if msg_lower.startswith("start "):
         bot = message[6:].strip()
         if not _BOT_NAME_RE.match(bot):
-            return f"Invalid bot name '{bot}'. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{{0,63}}."
+          return f"Invalid agent name '{bot}'. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{{0,63}}."
         rc, out = ai_employee("start", bot)
         return f"Started {bot}. {out}"
 
     if msg_lower.startswith("stop "):
         bot = message[5:].strip()
         if not _BOT_NAME_RE.match(bot):
-            return f"Invalid bot name '{bot}'. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{{0,63}}."
+          return f"Invalid agent name '{bot}'. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{{0,63}}."
         rc, out = ai_employee("stop", bot)
         return f"Stopped {bot}. {out}"
 
@@ -4122,7 +5117,7 @@ def handle_command(message: str) -> str:
     if msg_lower in ("cmds", "commands", "cmd list"):
         return (
             "📜 Command categories — open *📜 Commands* tab in dashboard for full list.\n\n"
-            "⚙️ System: status, workers, start/stop <bot>\n"
+            "⚙️ System: status, workers, start/stop <agent>\n"
             "🏭 Workers: worker list, worker create, worker run, worker enable/disable, worker delete, worker ecom\n"
             "🚀 Tasks: task <desc>, task agents <a1,a2>, task mode <m>, task config, task cancel\n"
             "🏢 Company: company build/validate/plan/simulate/gtm/pitch/org/swot\n"
@@ -4140,8 +5135,8 @@ def handle_command(message: str) -> str:
     if msg_lower == "help":
         return (
             "Available commands:\n"
-            "  status / workers — bot status\n"
-            "  start <bot> / stop <bot> — control bots\n"
+            "  status / workers — agent status\n"
+            "  start <agent> / stop <agent> — control agents\n"
             "  schedule / improvements — view tasks & proposals\n"
             "  skills / agents — skills library & custom agents\n"
             "  worker list — list all worker bundles\n"
@@ -4260,23 +5255,22 @@ def handle_command(message: str) -> str:
         return "Skills library not loaded yet. Ensure skills-manager is running."
 
     # ── Research commands (pass-through; web-researcher processes these) ──
-    if (msg_lower.startswith("research ") or msg_lower.startswith("find ")
-            or msg_lower.startswith("web search ") or msg_lower.startswith("search web ")
+    if ((msg_lower.startswith("web search ") or msg_lower.startswith("search web ")
             or msg_lower.startswith("latest news ") or msg_lower.startswith("news about ")
-            or msg_lower.startswith("lookup ")):
+        or msg_lower.startswith("lookup "))):
         web_bot_state = STATE_DIR / "web-researcher.state.json"
         if web_bot_state.exists():
             try:
                 st = json.loads(web_bot_state.read_text())
                 if st.get("status") == "running":
                     return (
-                        "🔍 Research request queued — web-researcher bot is processing it.\n"
+                        "🔍 Research request queued — web-researcher agent is processing it.\n"
                         "The answer will appear in the chat shortly."
                     )
             except (json.JSONDecodeError, OSError):
                 pass
         return (
-            "🔍 Research request noted — ensure web-researcher bot is running.\n"
+            "🔍 Research request noted — ensure web-researcher agent is running.\n"
             "Start it: `start web-researcher`"
         )
 
@@ -4289,13 +5283,13 @@ def handle_command(message: str) -> str:
                 st = json.loads(social_bot_state.read_text())
                 if st.get("status") == "running":
                     return (
-                        "🎨 Content creation request queued — social-media-manager bot is processing it.\n"
+                        "🎨 Content creation request queued — social-media-manager agent is processing it.\n"
                         "Full content package will appear in the chat shortly (30-90 seconds)."
                     )
             except (json.JSONDecodeError, OSError):
                 pass
         return (
-            "🎨 Content request noted — ensure social-media-manager bot is running.\n"
+            "🎨 Content request noted — ensure social-media-manager agent is running.\n"
             "Start it: `start social-media-manager`"
         )
 
@@ -4310,7 +5304,7 @@ def handle_command(message: str) -> str:
                 st = json.loads(st_file.read_text())
                 if st.get("status") == "running":
                     return (
-                        f"{emoji} Request queued — {bot_name} bot is processing it.\n"
+                        f"{emoji} Request queued — {bot_name} agent is processing it.\n"
                         f"Result will appear in chat shortly."
                     )
             except (json.JSONDecodeError, OSError):
@@ -4336,8 +5330,7 @@ def handle_command(message: str) -> str:
         enriched_msg = f"task {desc_part}{agents_str}{mode_str}"
         entry = {"ts": now_iso(), "type": "user", "message": enriched_msg}
         CHATLOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(CHATLOG, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        append_chatlog(entry)
         config_note = ""
         if _agents_hint:
             config_note = f"\nAgents: {', '.join(_agents_hint)} | Mode: {_mode_hint}"
@@ -4357,12 +5350,12 @@ def handle_command(message: str) -> str:
         (["creator "], "creator-agency", "🎭", "Creator agency not running."),
         (["signals", "signal ", "community update"], "signal-community", "📊", "Signal community not running."),
         (["prospect ", "pipeline", "setter "], "appointment-setter", "📅", "Appointment setter not running."),
-        (["newsletter "], "newsletter-bot", "📧", "Newsletter bot not running."),
-        (["chatbot "], "chatbot-builder", "🤖", "Chatbot builder not running."),
-        (["video "], "faceless-video", "🎬", "Faceless video bot not running."),
-        (["pod "], "print-on-demand", "👕", "Print-on-demand bot not running."),
-        (["course "], "course-creator", "🎓", "Course creator not running."),
-        (["arb "], "arbitrage-bot", "💹", "Arbitrage bot not running."),
+        (['newsletter '], "newsletter-bot", "📧", "Newsletter agent not running."),
+        (['chatbot '], "chatbot-builder", "🤖", "Chatbot builder agent not running."),
+        (['video '], "faceless-video", "🎬", "Faceless video agent not running."),
+        (['pod '], "print-on-demand", "👕", "Print-on-demand agent not running."),
+        (['course '], "course-creator", "🎓", "Course creator agent not running."),
+        (['arb '], "arbitrage-bot", "💹", "Arbitrage agent not running."),
         (["orchestrate "], "task-orchestrator", "🚀", "Task orchestrator not running. Start it: `start task-orchestrator`"),
         (["company "], "company-builder", "🏢", "Company builder not running. Start it: `start company-builder`"),
         (["memecoin "], "memecoin-creator", "🪙", "Memecoin creator not running. Start it: `start memecoin-creator`"),
@@ -4533,27 +5526,25 @@ def handle_command(message: str) -> str:
                 f"Use `worker run {tmpl['name']}` to start it now.")
 
 
-    if _AI_ROUTER_AVAILABLE:
-        try:
-            result = _query_ai_for_agent(
-                "problem-solver-ui",
-                message,
-                system_prompt=(
-                    "You are an AI employee assistant. "
-                    "Help the user with their task or question concisely and practically. "
-                    "If the task requires running a specific bot command, suggest the right command."
-                ),
-            )
-            if result.get("answer"):
-                provider = result.get("provider", "ai")
-                suffix = f"\n_[{provider}]_" if provider not in ("error",) else ""
-                return result["answer"] + suffix
-        except Exception as exc:
-            logger.debug("handle_command: AI router error — %s", exc)
+    routed_agent = route_to_agent(message)
+    mode = _current_mode()
+    if ("all 20 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
+      allowed = ", ".join(_available_agent_ids(mode))
+      return (
+        f"Only {len(_available_agent_ids(mode))} agents are available in {mode} mode: {allowed}. "
+        "Switch to power mode to run all 20 agents, or I can handle this with the current set."
+      )
+    if not _agent_allowed_in_mode(routed_agent, mode):
+      return (
+        f"{routed_agent} is not available in {mode} mode. "
+        f"Run: ai-employee mode {'business' if mode == 'starter' else 'power'} to unlock more agents."
+      )
+
+    return _generate_llm_response(message, routed_agent, mode, model_route=model_route)
 
     return (
         f"Task queued: '{message}'\n"
-        "Tip: use 'start <bot>', 'stop <bot>', 'status', 'help' for commands."
+        "Tip: use 'start <agent>', 'stop <agent>', 'status', 'help' for commands."
     )
 
 
@@ -5070,16 +6061,19 @@ def auto_select_agents(payload: dict):
         if score > 0:
             scores[agent_id] = score
 
+    mode = _current_mode()
+    available = set(_available_agent_ids(mode))
+
     # Sort by score descending; take top agents covering the task
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
     # Always include at least 1; cap at 6 unless the description is very broad
     max_agents = 6 if len(description) > 80 else 4
-    suggested = [aid for aid, _ in ranked[:max_agents]]
+    suggested = [aid for aid, _ in ranked if aid in available][:max_agents]
 
     # If nothing matched, fall back to orchestrator
     if not suggested:
-        suggested = ["orchestrator"]
+      suggested = ["task-orchestrator"]
 
     # Attach reasons
     reasons = {aid: [kw for kw in _AGENT_KEYWORDS.get(aid, []) if kw in description][:3] for aid in suggested}
@@ -5106,45 +6100,62 @@ def get_task_status(task_id: str):
 
 @app.get("/api/agents")
 def get_all_agents():
-    """Get all 20 agents with capabilities and running status."""
-    capabilities = _load_agent_capabilities()
-    agents_config = capabilities.get("agents", {})
+  """Get mode-aware agent list with capabilities and running status."""
+  capabilities = _load_agent_capabilities()
+  agents_config = capabilities.get("agents", {})
+  mode = _current_mode()
 
-    result = []
-    for agent_id, info in agents_config.items():
-        pid_file = AI_HOME / "run" / f"{agent_id}.pid"
-        running = False
-        if pid_file.exists():
-            try:
-                pid = int(pid_file.read_text().strip())
-                os.kill(pid, 0)
-                running = True
-            except Exception:
-                pass
+  result = []
+  for agent_id in _available_agent_ids(mode):
+    info = agents_config.get(agent_id)
+    canonical_ids = _agent_aliases(agent_id)
+    if info is None:
+      for alias in canonical_ids:
+        if alias in agents_config:
+          info = agents_config.get(alias)
+          break
+    info = info or {}
 
-        # Get current state if available
-        state_file = STATE_DIR / f"{agent_id}.state.json"
-        current_task = None
-        if state_file.exists():
-            try:
-                st = json.loads(state_file.read_text())
-                current_task = st.get("active_plan_title") or st.get("current_task")
-            except Exception:
-                pass
+    pid_file = None
+    for alias in canonical_ids:
+      candidate = AI_HOME / "run" / f"{alias}.pid"
+      if candidate.exists():
+        pid_file = candidate
+        break
 
-        result.append({
-            "id": agent_id,
-            "description": info.get("description", ""),
-            "category": info.get("category", ""),
-            "skills": info.get("skills", []),
-            "commands": info.get("commands", []),
-            "specialties": info.get("specialties", []),
-            "parallel_capable": info.get("parallel_capable", True),
-            "running": running,
-            "current_task": current_task,
-        })
+    running = False
+    if pid_file and pid_file.exists():
+      try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)
+        running = True
+      except Exception:
+        pass
 
-    return JSONResponse({"agents": result, "total": len(result)})
+    current_task = None
+    for alias in canonical_ids:
+      state_file = STATE_DIR / f"{alias}.state.json"
+      if state_file.exists():
+        try:
+          st = json.loads(state_file.read_text())
+          current_task = st.get("active_plan_title") or st.get("current_task")
+          break
+        except Exception:
+          pass
+
+    result.append({
+      "id": agent_id,
+      "description": info.get("description", ""),
+      "category": info.get("category", ""),
+      "skills": info.get("skills", []),
+      "commands": info.get("commands", []),
+      "specialties": info.get("specialties", []),
+      "parallel_capable": info.get("parallel_capable", True),
+      "running": running,
+      "current_task": current_task,
+    })
+
+  return JSONResponse({"agents": result, "total": len(result), "mode": mode})
 
 
 
@@ -6262,7 +7273,7 @@ class _UninstallRequest(BaseModel):
 
 @app.post("/api/settings/uninstall")
 def uninstall_bot(body: _UninstallRequest):
-    """Stop all bots and remove the entire AI_HOME directory tree.
+    """Stop all agents and remove the entire AI_HOME directory tree.
 
     Requires the exact confirmation phrase "UNINSTALL AI EMPLOYEE".
     This endpoint stops accepting requests mid-execution since the process
@@ -6281,13 +7292,13 @@ def uninstall_bot(body: _UninstallRequest):
 
     errors: list = []
 
-    # ── Step 1: stop all bots gracefully ──────────────────────────────────────
+    # ── Step 1: stop all agents gracefully ────────────────────────────────────
     ai_bin = AI_HOME / "bin" / "ai-employee"
     try:
         import subprocess as _sp
         _sp.run([str(ai_bin), "stop", "--all"], timeout=30,
                 capture_output=True)
-        logger.warning("UNINSTALL: all bots stopped")
+        logger.warning("UNINSTALL: all agents stopped")
     except Exception as exc:
         errors.append(f"stop-all: {exc}")
         logger.warning("UNINSTALL: stop-all warning: %s", exc)
@@ -6311,7 +7322,7 @@ def uninstall_bot(body: _UninstallRequest):
         "ok": True,
         "message": (
             "AI Employee is being uninstalled. "
-            "All bots have been stopped and the installation directory "
+            "All agents have been stopped and the installation directory "
             f"({AI_HOME}) will be deleted in seconds."
         ),
     })
@@ -6374,7 +7385,7 @@ def updater_update():
                     os.kill(int(pid), _sig.SIGUSR1)
         except Exception:
             pass
-        return JSONResponse({"ok": True, "message": "Update triggered — bots will restart momentarily if changes are found"})
+        return JSONResponse({"ok": True, "message": "Update triggered — agents will restart momentarily if changes are found"})
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
 
