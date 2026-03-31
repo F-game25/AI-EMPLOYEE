@@ -11,15 +11,158 @@ STATE_DIR="$AI_HOME/state"
 
 mkdir -p "$LOGS_DIR" "$RUN_DIR" "$STATE_DIR"
 
+# Load persisted runtime environment overrides.
+if [[ -f "$AI_HOME/.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a; source "$AI_HOME/.env" 2>/dev/null || true; set +a
+fi
+
+# Ensure common user-local bin paths are visible in non-login shells.
+_add_to_path_if_dir() {
+  local d="$1"
+  [[ -d "$d" ]] || return 0
+  [[ ":$PATH:" == *":$d:"* ]] || PATH="$d:$PATH"
+}
+
+_bootstrap_runtime_path() {
+  _add_to_path_if_dir "$HOME/.local/bin"
+  _add_to_path_if_dir "$HOME/.openclaw/bin"
+  _add_to_path_if_dir "$HOME/.npm-global/bin"
+  if command -v npm >/dev/null 2>&1; then
+    local npm_prefix npm_bin
+    npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+    npm_bin="${npm_prefix:+$npm_prefix/bin}"
+    [[ -n "$npm_bin" ]] && _add_to_path_if_dir "$npm_bin"
+  fi
+  export PATH
+}
+
+_bootstrap_runtime_path
+
+find_openclaw_cmd() {
+  if [[ -x "$AI_HOME/bin/openclaw" ]]; then
+    echo "$AI_HOME/bin/openclaw"
+    return 0
+  fi
+  if command -v openclaw >/dev/null 2>&1; then
+    command -v openclaw
+    return 0
+  fi
+  return 1
+}
+
+_env_true() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|y|Y|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+auto_install_openclaw_if_enabled() {
+  find_openclaw_cmd >/dev/null 2>&1 && return 0
+  if _env_true "${AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW:-0}"; then
+    echo "  -> OpenClaw missing, auto-install enabled. Installing..."
+    if curl -fsSL https://openclaw.ai/install.sh | bash; then
+      _bootstrap_runtime_path
+      return 0
+    fi
+  fi
+  return 1
+}
+
+auto_install_docker_if_enabled() {
+  # Skip if Docker already installed and running
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! _env_true "${AI_EMPLOYEE_AUTO_INSTALL_DOCKER:-0}"; then
+    return 1
+  fi
+  echo "  -> Docker missing or not running, auto-install enabled. Installing Docker..."
+  # Detect OS
+  if [[ -f /etc/os-release ]]; then
+    . /etc/os-release
+    OS_ID="${ID:-unknown}"
+  else
+    OS_ID="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  fi
+  case "$OS_ID" in
+    ubuntu|debian|pop|linuxmint)
+      if command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update -qq 2>&1 | tail -3
+        sudo apt-get install -y -qq docker.io 2>&1 | tail -5
+        sudo systemctl enable docker 2>/dev/null || true
+        sudo systemctl start docker 2>/dev/null || true
+        # Add user to docker group so no sudo needed
+        sudo usermod -aG docker "${USER:-$(whoami)}" 2>/dev/null || true
+        echo "  -> Docker installed. You may need to log out/in for group membership."
+        return 0
+      fi
+      ;;
+    fedora|rhel|centos|rocky|almalinux)
+      if command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y docker 2>&1 | tail -5
+        sudo systemctl enable --now docker 2>/dev/null || true
+        sudo usermod -aG docker "${USER:-$(whoami)}" 2>/dev/null || true
+        return 0
+      fi
+      ;;
+    arch|manjaro)
+      if command -v pacman >/dev/null 2>&1; then
+        sudo pacman -Sy --noconfirm docker 2>&1 | tail -5
+        sudo systemctl enable --now docker 2>/dev/null || true
+        sudo usermod -aG docker "${USER:-$(whoami)}" 2>/dev/null || true
+        return 0
+      fi
+      ;;
+    darwin)
+      echo "  -> On macOS: please install Docker Desktop from https://docker.com"
+      return 1
+      ;;
+    *)
+      # Generic fallback via get.docker.com
+      if command -v curl >/dev/null 2>&1; then
+        echo "  -> Using get.docker.com installer..."
+        curl -fsSL https://get.docker.com | sh
+        sudo systemctl enable docker 2>/dev/null || true
+        sudo systemctl start docker 2>/dev/null || true
+        sudo usermod -aG docker "${USER:-$(whoami)}" 2>/dev/null || true
+        return 0
+      fi
+      ;;
+  esac
+  echo "  -> Docker auto-install failed. Please install manually: https://docs.docker.com/get-docker/"
+  return 1
+}
+
+gateway_running() {
+  local oc
+  oc="$(find_openclaw_cmd 2>/dev/null || true)"
+  if [[ -n "$oc" ]] && "$oc" health >/dev/null 2>&1; then
+    return 0
+  fi
+  local gw_port
+  gw_port="${OPENCLAW_GATEWAY_PORT:-18789}"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnp 2>/dev/null | grep -qE ":${gw_port}([[:space:]]|$)" && return 0
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -ti ":${gw_port}" >/dev/null 2>&1 && return 0
+  fi
+  if [[ -f "$RUN_DIR/gateway.pid" ]] && kill -0 "$(cat "$RUN_DIR/gateway.pid" 2>/dev/null)" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 usage() {
   cat <<'USAGE'
 ai-employee commands:
   do <task>              Send any task to your AI employee (e.g. ai-employee do "find 10 leads")
-  start --all | <bot>    Start one or all bots
-  stop  --all | <bot>    Stop one or all bots
-  restart --all | <bot>  Restart one or all bots
-  status                 Show running status of all bots
-  logs <bot>             Tail logs for a bot
+  start --all | <agent>    Start one or all agents
+  stop  --all | <agent>    Stop one or all agents
+  restart --all | <agent>  Restart one or all agents
+  status                   Show running status of all agents
+  logs <agent>             Tail logs for an agent
   doctor                 Health-check all services (✅/❌ per component)
   onboard                Run the First 15 Minutes Value Flow (3 starter tasks)
   mode [starter|business|power]  Show or set the active mode
@@ -126,6 +269,74 @@ list_bots() {
   done
 }
 
+_current_mode() {
+  local mode
+  mode="${AI_EMPLOYEE_MODE:-power}"
+  mode="$(echo "$mode" | tr '[:upper:]' '[:lower:]')"
+  case "$mode" in
+    starter|business|power) echo "$mode" ;;
+    *) echo "power" ;;
+  esac
+}
+
+_mode_agents() {
+  local mode
+  mode="$(_current_mode)"
+  case "$mode" in
+    starter)
+      cat <<'EOF'
+task-orchestrator
+lead-generator
+offer-agent
+EOF
+      ;;
+    business)
+      cat <<'EOF'
+task-orchestrator
+lead-generator
+offer-agent
+company-builder
+brand-strategist
+finance-wizard
+growth-hacker
+project-manager
+EOF
+      ;;
+    power|*)
+      cat <<'EOF'
+task-orchestrator
+lead-generator
+offer-agent
+company-builder
+brand-strategist
+finance-wizard
+growth-hacker
+project-manager
+social-media-manager
+paid-media-specialist
+qualification-agent
+follow-up-agent
+appointment-setter
+ui-designer
+web-researcher
+engineering-assistant
+ecom-agent
+chatbot-builder
+creator-agency
+recruiter
+EOF
+      ;;
+  esac
+}
+
+list_mode_agents() {
+  while read -r agent; do
+    [[ -n "$agent" ]] || continue
+    [[ -x "$BOTS_DIR/$agent/run.sh" ]] || continue
+    echo "$agent"
+  done < <(_mode_agents)
+}
+
 cmd="${1:-}"
 shift || true
 
@@ -133,9 +344,21 @@ case "$cmd" in
   start)
     arg="${1:-}"
     if [[ "$arg" == "--all" ]]; then
+      # Best-effort Docker + gateway bootstrap when starting the full stack.
+      auto_install_docker_if_enabled || true
+      if ! gateway_running; then
+        auto_install_openclaw_if_enabled || true
+        oc="$(find_openclaw_cmd 2>/dev/null || true)"
+        if [[ -n "$oc" ]]; then
+          mkdir -p "$HOME/.openclaw"
+          ln -sf "$AI_HOME/config.json" "$HOME/.openclaw/openclaw.json" 2>/dev/null || true
+          nohup "$oc" gateway >>"$LOGS_DIR/gateway.log" 2>&1 &
+          echo $! > "$RUN_DIR/gateway.pid"
+        fi
+      fi
       while read -r bot; do
         [[ -n "$bot" ]] && start_bot "$bot" || true
-      done < <(list_bots)
+      done < <(list_mode_agents)
     else
       [[ -n "$arg" ]] || { usage; exit 1; }
       start_bot "$arg"
@@ -146,7 +369,7 @@ case "$cmd" in
     if [[ "$arg" == "--all" ]]; then
       while read -r bot; do
         [[ -n "$bot" ]] && stop_bot "$bot" || true
-      done < <(list_bots)
+      done < <(list_mode_agents)
     else
       [[ -n "$arg" ]] || { usage; exit 1; }
       stop_bot "$arg"
@@ -157,11 +380,11 @@ case "$cmd" in
     if [[ "$arg" == "--all" ]]; then
       while read -r bot; do
         [[ -n "$bot" ]] && stop_bot "$bot" || true
-      done < <(list_bots)
+      done < <(list_mode_agents)
       sleep 1
       while read -r bot; do
         [[ -n "$bot" ]] && start_bot "$bot" || true
-      done < <(list_bots)
+      done < <(list_mode_agents)
     else
       [[ -n "$arg" ]] || { usage; exit 1; }
       stop_bot "$arg"
@@ -177,7 +400,7 @@ case "$cmd" in
       else
         echo "STOPPED  $bot"
       fi
-    done < <(list_bots)
+    done < <(list_mode_agents)
     ;;
   logs)
     bot="${1:-}"
@@ -204,9 +427,18 @@ case "$cmd" in
     command -v curl     >/dev/null 2>&1 \
       && echo "  $OK curl       : $(curl --version 2>&1 | head -1)" \
       || echo "  $FAIL curl      : NOT FOUND (required)"
-    command -v openclaw >/dev/null 2>&1 \
-      && echo "  $OK openclaw   : $(openclaw --version 2>/dev/null || echo installed)" \
-      || echo "  $FAIL openclaw  : NOT FOUND — install: curl -fsSL https://openclaw.ai/install.sh | bash"
+    _oc="$(find_openclaw_cmd 2>/dev/null || true)"
+    if [[ -n "${_oc:-}" ]]; then
+      echo "  $OK openclaw   : $($_oc --version 2>/dev/null || echo installed)"
+    else
+      auto_install_openclaw_if_enabled || true
+      _oc="$(find_openclaw_cmd 2>/dev/null || true)"
+      if [[ -n "${_oc:-}" ]]; then
+        echo "  $OK openclaw   : $($_oc --version 2>/dev/null || echo installed)"
+      else
+        echo "  $FAIL openclaw  : NOT FOUND — install: curl -fsSL https://openclaw.ai/install.sh | bash"
+      fi
+    fi
     command -v ollama   >/dev/null 2>&1 \
       && echo "  $OK ollama     : $(ollama --version 2>/dev/null || echo installed)" \
       || echo "  $WARN ollama    : not installed (optional — enables local/private LLM)"
@@ -225,7 +457,7 @@ case "$cmd" in
     _GW_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 
     # Gateway
-    if [[ -f "$RUN_DIR/gateway.pid" ]] && kill -0 "$(cat "$RUN_DIR/gateway.pid" 2>/dev/null)" 2>/dev/null; then
+    if gateway_running; then
       echo "  $OK Gateway        : running (port $_GW_PORT)"
     else
       echo "  $FAIL Gateway       : not running — run: ai-employee start"
@@ -270,7 +502,10 @@ case "$cmd" in
     echo "── Port Conflicts ────────────────────────────"
     for _port in "$_UI_PORT" "$_DASH_PORT" "$_GW_PORT" 8788 8789; do
       if command -v ss >/dev/null 2>&1; then
-        _owner=$(ss -tlnp 2>/dev/null | awk -v p=":${_port} " '$0 ~ p {match($NF,/pid=([0-9]+)/,a); print a[1]}' | head -1)
+        _owner=$(ss -tlnp 2>/dev/null \
+          | awk -v p=":${_port}" '$0 ~ p {print $0}' \
+          | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' \
+          | head -1)
       elif command -v lsof >/dev/null 2>&1; then
         _owner=$(lsof -ti ":${_port}" 2>/dev/null | head -1 || true)
       else
@@ -448,14 +683,14 @@ case "$cmd" in
     _new_mode="${1:-}"
     case "${_new_mode:-}" in
       starter|business|power)
+        mkdir -p "$AI_HOME"
+        [[ -f "$AI_HOME/.env" ]] || touch "$AI_HOME/.env"
         # Update mode in .env
-        if [[ -f "$AI_HOME/.env" ]]; then
-          if grep -q "^AI_EMPLOYEE_MODE=" "$AI_HOME/.env"; then
-            sed -i.bak "s|^AI_EMPLOYEE_MODE=.*|AI_EMPLOYEE_MODE=$_new_mode|" "$AI_HOME/.env"
-            rm -f "$AI_HOME/.env.bak"
-          else
-            echo "AI_EMPLOYEE_MODE=$_new_mode" >> "$AI_HOME/.env"
-          fi
+        if grep -q "^AI_EMPLOYEE_MODE=" "$AI_HOME/.env"; then
+          sed -i.bak "s|^AI_EMPLOYEE_MODE=.*|AI_EMPLOYEE_MODE=$_new_mode|" "$AI_HOME/.env"
+          rm -f "$AI_HOME/.env.bak"
+        else
+          echo "AI_EMPLOYEE_MODE=$_new_mode" >> "$AI_HOME/.env"
         fi
         export AI_EMPLOYEE_MODE="$_new_mode"
         echo "✅ Mode set to: $_new_mode"

@@ -54,8 +54,11 @@ def ai_employee(*args: str) -> tuple:
 
 
 def write_state(state: dict):
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    try:
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STATE_FILE.write_text(json.dumps(state, indent=2))
+    except Exception as e:
+        print(f"[{now_iso()}] warning: failed to write watchdog state: {e}")
 
 
 def main():
@@ -70,6 +73,7 @@ def main():
             ok = bot_running(bot)
             entry: dict = {"bot": bot, "running": ok, "ts": now_iso()}
             if not ok and AUTO_RESTART:
+                print(f"[{now_iso()}] restarting {bot}")
                 rc, out = ai_employee("start", bot)
                 restart_counts[bot] = restart_counts.get(bot, 0) + 1
                 entry["action"] = "restarted"
