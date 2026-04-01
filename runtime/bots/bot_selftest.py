@@ -333,6 +333,49 @@ def check_financial_deepsearch() -> None:
     _check_bot_module("financial-deepsearch", "financial_deepsearch")
 
 
+def check_call_agent() -> None:
+    """call_agent module must be importable and its run.sh executable."""
+    bot_dir = AI_HOME / "bots" / "call-agent"
+    for sub in ("llm", "memory", "stt", "telephony", "tts"):
+        _p = str(bot_dir / sub)
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+    if str(bot_dir) not in sys.path:
+        sys.path.insert(0, str(bot_dir))
+    for module_name in ("llm_engine", "conversation_manager", "whisper_stt", "twilio_handler", "voxtral_tts"):
+        try:
+            importlib.import_module(module_name)
+            _ok(f"call-agent/{module_name}", "importable ✓", required=False)
+        except ImportError as exc:
+            _fail(f"call-agent/{module_name}", f"import failed: {exc}", required=False)
+    run_sh = bot_dir / "run.sh"
+    if run_sh.exists() and run_sh.stat().st_mode & 0o111:
+        _ok("call-agent run.sh", "executable ✓", required=False)
+    else:
+        _fail("call-agent run.sh", "not executable — run: chmod +x run.sh", required=False)
+    call_agent_config = bot_dir / "config.example.env"
+    if call_agent_config.exists():
+        _ok("call-agent config.example.env", "present ✓", required=False)
+    else:
+        _fail("call-agent config.example.env", "missing", required=False)
+
+
+def check_twilio_call_config() -> None:
+    """Twilio call agent credentials check (optional)."""
+    sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+    auth = os.environ.get("TWILIO_AUTH_TOKEN", "")
+    base_url = os.environ.get("CALL_AGENT_BASE_URL", "")
+    if sid and auth and base_url:
+        _ok("Call agent Twilio config", "credentials + base URL set ✓", required=False)
+    else:
+        missing = [k for k, v in [
+            ("TWILIO_ACCOUNT_SID", sid),
+            ("TWILIO_AUTH_TOKEN", auth),
+            ("CALL_AGENT_BASE_URL", base_url),
+        ] if not v]
+        _fail("Call agent Twilio config", f"missing: {', '.join(missing)}", required=False)
+
+
 def check_discord_bot_state() -> None:
     """If the Discord bot ran before, its state file should say 'running'."""
     state = AI_HOME / "state" / "discord-bot.state.json"
@@ -443,6 +486,10 @@ def main() -> None:
     check_qa_tester()
     check_paid_media_specialist()
     check_financial_deepsearch()
+
+    _section("Call Agent")
+    check_call_agent()
+    check_twilio_call_config()
 
     _section("NVIDIA NIM Integration")
     check_nvidia_nim_config()

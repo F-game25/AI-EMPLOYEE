@@ -230,6 +230,8 @@ _AGENT_ID_ROUTING: dict = {
     "chatbot-builder":       "coding",    # chatbot logic & code
     # ── General / local ───────────────────────────────────────────────────
     "recruiter": "general",   # HR recruiting (broad, free)
+    # ── Call agent ────────────────────────────────────────────────────────
+    "call-agent": "sales",    # real-time voice call sales agent
 }
 
 
