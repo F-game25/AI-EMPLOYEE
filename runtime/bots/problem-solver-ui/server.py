@@ -1380,8 +1380,11 @@ INDEX_HTML = r"""<!doctype html>
     .health-check-item{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)}
     .health-check-item .hc-dot{font-size:.65em;color:var(--text-muted)}
     .health-check-item.ok .hc-dot{color:var(--success)}
+    .health-check-item.ok .hc-dot::after{content:' ✓'}
     .health-check-item.warn .hc-dot{color:var(--warning)}
+    .health-check-item.warn .hc-dot::after{content:' ⚠'}
     .health-check-item.err .hc-dot{color:var(--danger)}
+    .health-check-item.err .hc-dot::after{content:' ✕'}
     .health-check-item .hc-val{margin-left:auto;font-weight:600;font-size:.88em}
     .health-check-item.ok .hc-val{color:var(--success)}
     .health-check-item.warn .hc-val{color:var(--warning)}
@@ -2974,8 +2977,9 @@ function renderAgenda() {
     const days = ['Su','Mo','Tu','We','Th','Fr','Sa'];
     let html = days.map(dy => '<div style="text-align:center;color:var(--text-muted);padding:4px;font-size:.7em">' + dy + '</div>').join('');
     for (let i = 0; i < first.getDay(); i++) html += '<div></div>';
+    const today = new Date();
     for (let i = 1; i <= last.getDate(); i++) {
-      const isToday = i === new Date().getDate() && d.getMonth() === new Date().getMonth() && d.getFullYear() === new Date().getFullYear();
+      const isToday = i === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
       html += '<div onclick="selectAgendaDay(' + i + ')" style="text-align:center;padding:5px 2px;border-radius:4px;cursor:pointer;font-size:.78em;' + (isToday ? 'background:rgba(212,175,55,.2);color:var(--gold);font-weight:700;' : '') + '">' + i + '</div>';
     }
     g.style.display = 'grid';
@@ -3570,7 +3574,7 @@ function renderTaskRow(t) {
   return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid rgba(212,175,55,.08);margin-bottom:6px">' +
     '<div><div style="font-weight:600;font-size:.87em;color:var(--text)">' + desc + '</div>' +
     '<div style="font-size:.74em;color:var(--text-muted);margin-top:2px">' + status + ' · ' + agent + ' · ' + ts + '</div></div>' +
-    '<button class="btn btn-ghost btn-sm" onclick="openTaskDetail(' + JSON.stringify(escHtml(tid)) + ')" style="border:1px solid rgba(212,175,55,.3);color:var(--gold)">View \u2192</button></div>';
+    '<button class="btn btn-ghost btn-sm" onclick="openTaskDetail(' + JSON.stringify(tid) + ')" style="border:1px solid rgba(212,175,55,.3);color:var(--gold)">View \u2192</button></div>';
 }
 function openTaskDetail(tid) {
   const t = _taskStore.get(tid);
@@ -4013,9 +4017,9 @@ async function loadMetrics() {
   // ROI Summary
   const effEl = document.getElementById('roi-efficiency');
   // Use server-provided efficiency_rate if available, otherwise omit the default rather than fabricate
-  if (effEl) effEl.textContent = s.efficiency_rate ? s.efficiency_rate + '%' : (s.tasks_completed > 0 ? (s.efficiency_rate || '–') + '%' : '–%');
+  if (effEl) effEl.textContent = s.efficiency_rate ? s.efficiency_rate + '%' : '–%';
   const avgDurEl = document.getElementById('roi-avg-duration');
-  if (avgDurEl) avgDurEl.textContent = s.avg_task_duration || (s.tasks_completed > 0 ? '~8m' : '–');
+  if (avgDurEl) avgDurEl.textContent = s.avg_task_duration || '–';
   const topBotEl = document.getElementById('roi-top-bot');
   if (topBotEl) topBotEl.textContent = s.top_bot || '–';
   const valueEl = document.getElementById('roi-value');
