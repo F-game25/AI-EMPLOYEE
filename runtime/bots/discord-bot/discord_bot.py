@@ -71,6 +71,24 @@ try:
 except ImportError:
     _DEEPSEARCH_AVAILABLE = False
 
+# Add obsidian-memory to path so we can reuse its functions directly
+_obsidian_path = AI_HOME / "bots" / "obsidian-memory"
+if str(_obsidian_path) not in sys.path:
+    sys.path.insert(0, str(_obsidian_path))
+
+try:
+    from obsidian_memory import (  # type: ignore
+        cmd_ask as _ob_ask,
+        cmd_search as _ob_search,
+        cmd_note as _ob_note,
+        cmd_index as _ob_index,
+        cmd_status as _ob_status,
+        SESSION_GREETING as _OB_GREETING,
+    )
+    _OBSIDIAN_AVAILABLE = True
+except ImportError:
+    _OBSIDIAN_AVAILABLE = False
+
 import discord
 from discord.ext import commands
 
@@ -200,6 +218,13 @@ async def help_cmd(ctx: commands.Context) -> None:
         "`!deepsearch sec <ticker>` — SEC EDGAR filing insights",
         "`!deepsearch earnings <ticker>` — earnings deep dive",
         "`!deepsearch status` — recent searches & active sources",
+        "",
+        "**Obsidian Memory Base (Zelf-lerende AI)**",
+        "`!obsidian ask <vraag>` — stel een vraag met vault-context en AI-antwoord",
+        "`!obsidian search <query>` — zoek notities in de Obsidian vault",
+        "`!obsidian note <pad> <inhoud>` — schrijf een notitie naar de vault",
+        "`!obsidian index` — herbouw de vault-index en master index",
+        "`!obsidian status` — toon vault-statistieken",
     ]
     await ctx.send("\n".join(lines))
 
@@ -554,6 +579,102 @@ async def deepsearch_status_cmd(ctx: commands.Context) -> None:
     except Exception as exc:
         logger.exception("deepsearch status error")
         await ctx.send(f"❌ Error: {exc}")
+
+
+# ── !obsidian ─────────────────────────────────────────────────────────────────
+
+
+@bot.group(name="obsidian", invoke_without_command=True)
+async def obsidian_group(ctx: commands.Context) -> None:
+    await ctx.send(
+        "Gebruik: `!obsidian ask <vraag>` | `search <query>` | "
+        "`note <pad> <inhoud>` | `index` | `status`"
+    )
+
+
+@obsidian_group.command(name="ask")
+async def obsidian_ask_cmd(ctx: commands.Context, *, question: str = "") -> None:
+    """Stel een vraag met vault-context en AI-antwoord."""
+    if not question:
+        await ctx.send("Gebruik: `!obsidian ask <vraag>` — bijv. `!obsidian ask Hoe werkt FastAPI?`")
+        return
+    if not _OBSIDIAN_AVAILABLE:
+        await ctx.send("❌ obsidian_memory module niet beschikbaar.")
+        return
+    await ctx.send("⏳ Vault doorzoeken en antwoord genereren…")
+    try:
+        result = _ob_ask(question)
+        for chunk in _split_message(result):
+            await ctx.send(chunk)
+    except Exception as exc:
+        logger.exception("obsidian ask error")
+        await ctx.send(f"❌ Fout: {exc}")
+
+
+@obsidian_group.command(name="search")
+async def obsidian_search_cmd(ctx: commands.Context, *, query: str = "") -> None:
+    """Zoek notities in de Obsidian vault."""
+    if not query:
+        await ctx.send("Gebruik: `!obsidian search <zoekopdracht>`")
+        return
+    if not _OBSIDIAN_AVAILABLE:
+        await ctx.send("❌ obsidian_memory module niet beschikbaar.")
+        return
+    try:
+        result = _ob_search(query)
+        for chunk in _split_message(result):
+            await ctx.send(chunk)
+    except Exception as exc:
+        logger.exception("obsidian search error")
+        await ctx.send(f"❌ Fout: {exc}")
+
+
+@obsidian_group.command(name="note")
+async def obsidian_note_cmd(ctx: commands.Context, *, args: str = "") -> None:
+    """Schrijf een notitie naar de Obsidian vault."""
+    if not args:
+        await ctx.send("Gebruik: `!obsidian note <pad> <markdown-inhoud>`")
+        return
+    if not _OBSIDIAN_AVAILABLE:
+        await ctx.send("❌ obsidian_memory module niet beschikbaar.")
+        return
+    parts = args.split(None, 1)
+    note_path = parts[0] if parts else ""
+    note_content = parts[1] if len(parts) > 1 else ""
+    try:
+        result = _ob_note(note_path, note_content)
+        await ctx.send(result)
+    except Exception as exc:
+        logger.exception("obsidian note error")
+        await ctx.send(f"❌ Fout: {exc}")
+
+
+@obsidian_group.command(name="index")
+async def obsidian_index_cmd(ctx: commands.Context) -> None:
+    """Herbouw de vault-index en master index."""
+    if not _OBSIDIAN_AVAILABLE:
+        await ctx.send("❌ obsidian_memory module niet beschikbaar.")
+        return
+    try:
+        result = _ob_index()
+        await ctx.send(result)
+    except Exception as exc:
+        logger.exception("obsidian index error")
+        await ctx.send(f"❌ Fout: {exc}")
+
+
+@obsidian_group.command(name="status")
+async def obsidian_status_cmd(ctx: commands.Context) -> None:
+    """Toon vault-statistieken en sessie-info."""
+    if not _OBSIDIAN_AVAILABLE:
+        await ctx.send("❌ obsidian_memory module niet beschikbaar.")
+        return
+    try:
+        result = _ob_status()
+        await ctx.send(result)
+    except Exception as exc:
+        logger.exception("obsidian status error")
+        await ctx.send(f"❌ Fout: {exc}")
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
