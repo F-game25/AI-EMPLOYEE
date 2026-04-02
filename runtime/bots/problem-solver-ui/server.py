@@ -263,6 +263,30 @@ AGENTS_BY_MODE = {
     "chatbot-builder",
     "creator-agency",
     "recruiter",
+    # Additional agents with run.sh
+    "arbitrage-bot",
+    "course-creator",
+    "faceless-video",
+    "financial-deepsearch",
+    "hr-manager",
+    "memecoin-creator",
+    "mirofish-researcher",
+    "newsletter-bot",
+    "polymarket-trader",
+    "print-on-demand",
+    "qa-tester",
+    "signal-community",
+    "skills-manager",
+    "status-reporter",
+    # Agents without run.sh but with Python implementation
+    "ad-campaign-wizard",
+    "cold-outreach-assassin",
+    "conversion-rate-optimizer",
+    "lead-hunter-elite",
+    "linkedin-growth-hacker",
+    "partnership-matchmaker",
+    "referral-rocket",
+    "sales-closer-pro",
   ],
 }
 
@@ -1565,7 +1589,7 @@ INDEX_HTML = r"""<!doctype html>
       <div style="display:flex;align-items:center;gap:10px">
         <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.04);border:1px solid rgba(212,175,55,.2);border-radius:8px;padding:6px 12px">
           <span style="font-size:.78em;color:var(--text-muted);white-space:nowrap">Model:</span>
-          <select id="chat-model" style="background:transparent;border:none;color:var(--gold-light);font-size:.82em;font-weight:600;cursor:pointer;outline:none;font-family:inherit">
+          <select id="chat-model" onchange="updateChatModelBadge()" style="background:transparent;border:none;color:var(--gold-light);font-size:.82em;font-weight:600;cursor:pointer;outline:none;font-family:inherit">
             <option value="auto">⚡ Auto (Cost-Effective)</option>
             <option value="ollama">🦙 Ollama • Local AI</option>
             <option value="nvidia">🔷 NVIDIA NIM</option>
@@ -2868,10 +2892,9 @@ async function loadChatLog() {
   }
 
   function modelBadge(routeHint) {
-    const route = routeHint || document.getElementById('chat-model')?.value || 'ollama';
-    if (route === 'groq') return '🧠 Groq • Llama 3.3';
-    if (route === 'external') return '🌐 External AI';
-    return '🦙 Ollama • Llama';
+    const route = routeHint || document.getElementById('chat-model')?.value || 'auto';
+    const labels = {auto:'⚡ Auto',ollama:'🦙 Ollama',nvidia:'🔷 NVIDIA',openai:'🌐 OpenAI',anthropic:'🤖 Claude',groq:'⚡ Groq',external:'🌐 External'};
+    return labels[route] || '🤖 AI';
   }
 
   log.innerHTML = msgs.slice(-60).map(m => {
@@ -2894,6 +2917,14 @@ async function loadChatLog() {
     </div>`;
   }).join('');
   log.scrollTop = log.scrollHeight;
+}
+
+function updateChatModelBadge() {
+  const sel = document.getElementById('chat-model');
+  const badge = document.getElementById('chat-model-badge');
+  if (!sel || !badge) return;
+  const labels = {auto:'Auto',ollama:'Ollama',nvidia:'NVIDIA NIM',openai:'OpenAI',anthropic:'Claude',groq:'Groq',external:'External'};
+  badge.textContent = labels[sel.value] || sel.value;
 }
 
 async function sendChat() {
@@ -3980,6 +4011,7 @@ function switchCmdType(type, btn) {
 
 function renderCommands() {
   const q = (document.getElementById('cmd-search')?.value || '').toLowerCase();
+  const isWA = _cmdType === 'whatsapp';
   const groups = _cmdActiveFilter !== null ? [COMMAND_GROUPS[_cmdActiveFilter]] : COMMAND_GROUPS;
   const list = document.getElementById('cmd-list');
   if (!list) return;
@@ -3988,9 +4020,10 @@ function renderCommands() {
       .filter(([cmd, desc]) => !q || cmd.toLowerCase().includes(q) || desc.toLowerCase().includes(q))
       .map(([cmd, desc]) => `
         <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
-          <code onclick="copyCmd('${escHtml(cmd)}')" title="Click to copy" style="cursor:pointer;min-width:200px;background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:.84em;color:var(--accent)">${escHtml(cmd)}</code>
+          <code onclick="copyCmd('${escHtml(cmd)}')" title="Click to copy" style="cursor:pointer;min-width:180px;background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:.84em;color:var(--gold-light)">${escHtml(cmd)}</code>
           <span style="color:var(--text-secondary);font-size:.85em;flex:1">${escHtml(desc)}</span>
-          <button class="btn btn-ghost btn-sm" onclick="copyCmd('${escHtml(cmd)}')" style="padding:2px 8px;font-size:.72em">📋</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyCmd('${escHtml(cmd)}')" style="padding:2px 8px;font-size:.72em" title="Copy">📋</button>
+          ${isWA ? `<button class="btn btn-ghost btn-sm" onclick="executeCmd('${escHtml(cmd)}')" style="padding:2px 8px;font-size:.72em;border:1px solid rgba(212,175,55,.3);color:var(--gold)" title="Execute in Chat">▶ Run</button>` : ''}
         </div>`
       ).join('');
     if (!rows) return '';
@@ -4003,6 +4036,20 @@ function renderCommands() {
 
 function copyCmd(cmd) {
   navigator.clipboard.writeText(cmd).then(() => toast(`Copied: ${cmd}`, 'info')).catch(() => {});
+}
+
+function executeCmd(cmd) {
+  // Switch to chat tab and send the command
+  const chatTabBtn = document.querySelector('nav button[onclick*="chat"]');
+  if (chatTabBtn) chatTabBtn.click();
+  setTimeout(() => {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.value = cmd;
+      sendChat();
+      toast(`Executing: ${cmd}`, 'info');
+    }
+  }, 200);
 }
 
 // ── ROI Metrics ──────────────────────────────────────────────────────────────
@@ -6548,6 +6595,7 @@ _HOURS_PER_EVENT = {
     "call_booked": 0.25,
     "deal_closed": 0.0,
     "ticket_resolved": 0.2,
+    "hours_saved": 0.0,  # uses explicit "hours" field
     "custom": 0.0,
 }
 
@@ -6576,8 +6624,12 @@ def _recalc_summary(events: list) -> dict:
         "deals_closed": 0,
         "tickets_resolved": 0,
         "hours_saved": 0.0,
+        "human_hours_saved": 0.0,
         "cost_saved": 0.0,
         "revenue": 0.0,
+        "by_agent": {},
+        "bots_used": 0,
+        "top_bot": None,
     }
     for e in events:
         t = e.get("type", "")
@@ -6597,10 +6649,27 @@ def _recalc_summary(events: list) -> dict:
                 s["revenue"] += float(e["value"])
         elif t == "ticket_resolved":
             s["tickets_resolved"] += 1
-        hours = _HOURS_PER_EVENT.get(t, 0.0)
+        # Use explicit hours field if provided, otherwise default estimate
+        explicit_hours = e.get("hours")
+        if explicit_hours is not None:
+            try:
+                hours = float(explicit_hours)
+            except (TypeError, ValueError):
+                hours = _HOURS_PER_EVENT.get(t, 0.0)
+        else:
+            hours = _HOURS_PER_EVENT.get(t, 0.0)
         s["hours_saved"] += hours
+        # Track by-agent usage
+        agent = e.get("agent")
+        if agent:
+            s["by_agent"][agent] = s["by_agent"].get(agent, 0) + 1
     s["hours_saved"] = round(s["hours_saved"], 2)
+    # Human hours saved = 3× AI hours (AI works ~3× faster than a human)
+    s["human_hours_saved"] = round(s["hours_saved"] * 3, 2)
     s["cost_saved"] = round(s["hours_saved"] * _COST_PER_HOUR_EUR, 2)
+    s["bots_used"] = len(s["by_agent"])
+    if s["by_agent"]:
+        s["top_bot"] = max(s["by_agent"], key=lambda k: s["by_agent"][k])
     return s
 
 
@@ -6624,18 +6693,28 @@ def record_metric(payload: dict):
             value = float(value)
         except (TypeError, ValueError):
             value = None
+    # Accept explicit hours field for direct hour-tracking events
+    hours = payload.get("hours")
+    if hours is not None:
+        try:
+            hours = float(hours)
+        except (TypeError, ValueError):
+            hours = None
     notes = (payload.get("notes") or "").strip() or None
 
     data = _load_metrics()
     events = data.get("events", [])
-    events.append({
+    event: dict = {
         "id": _uuid.uuid4().hex[:10],
         "type": event_type,
         "agent": agent,
         "value": value,
         "notes": notes,
         "ts": now_iso(),
-    })
+    }
+    if hours is not None:
+        event["hours"] = hours
+    events.append(event)
     # Keep last 500 events
     data["events"] = events[-500:]
     data["summary"] = _recalc_summary(data["events"])
