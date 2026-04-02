@@ -221,7 +221,6 @@ if [[ -n "$OPENCLAW_CMD" ]]; then
     >> "$AI_HOME/logs/gateway.log" 2>&1 &
   GATEWAY_PID=$!
   echo "$GATEWAY_PID" > "$AI_HOME/run/gateway.pid"
-  sleep 2
   if "$OPENCLAW_CMD" health >/dev/null 2>&1 || _port_in_use "${OPENCLAW_GATEWAY_PORT:-18789}"; then
     ok "OpenClaw gateway started (pid=$GATEWAY_PID)"
   else

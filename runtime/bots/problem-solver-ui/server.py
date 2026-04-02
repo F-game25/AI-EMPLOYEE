@@ -21,6 +21,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -34,7 +35,9 @@ if sys.version_info < (3, 10):
     sys.exit(1)
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
@@ -651,6 +654,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ── Security headers middleware (openclaw-2) ──────────────────────────────────
 @app.middleware("http")
@@ -687,6 +691,10 @@ if not _audit_logger.handlers:
 @app.middleware("http")
 async def audit_logging_middleware(request: Request, call_next):
     """Log every inbound request and outbound status for the audit trail."""
+    # Skip high-frequency health/status probes to reduce I/O noise
+    if request.url.path in ("/health", "/api/status", "/api/gateway/status"):
+        return await call_next(request)
+
     _audit_enabled = (
         _security_config.logging.audit_enabled if _security_config else True
     )
@@ -716,6 +724,68 @@ async def audit_logging_middleware(request: Request, call_next):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ── In-memory file read cache (reduces disk I/O for high-frequency reads) ─────
+_cache: dict = {}
+
+def _cached_read(path: Path, ttl: int = 5) -> "dict | list":
+    """Read a JSON file with a short TTL cache to avoid repeated disk hits."""
+    key = str(path)
+    now = time.time()
+    if key in _cache and now - _cache[key]["ts"] < ttl:
+        return _cache[key]["data"]
+    try:
+        data: "dict | list" = json.loads(path.read_text()) if path.exists() else {}
+    except Exception:
+        data = {}
+    _cache[key] = {"ts": now, "data": data}
+    return data
+
+
+def _invalidate_cache(path: Path) -> None:
+    """Evict a path from the read cache after a write."""
+    _cache.pop(str(path), None)
+
+
+# ── Efficient last-N-lines reader for growing JSONL logs ──────────────────────
+def _read_last_n_lines(path: Path, n: int = 100) -> list:
+    """Return the last *n* non-empty JSONL lines without reading the whole file."""
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        buf = b""
+        lines: list[bytes] = []
+        pos = size
+        while pos > 0 and len(lines) < n + 1:
+            chunk = min(4096, pos)
+            pos -= chunk
+            f.seek(pos)
+            buf = f.read(chunk) + buf
+            lines = buf.split(b"\n")
+        result = [l for l in lines[-n:] if l.strip()]
+    parsed = []
+    for l in result:
+        try:
+            parsed.append(json.loads(l))
+        except Exception:
+            pass
+    return parsed
+
+
+# ── JSONL trim helper (keeps state files from growing unbounded) ──────────────
+def _trim_jsonl(path: Path, max_lines: int = 1000) -> None:
+    if not path.exists():
+        return
+    try:
+        lines = path.read_bytes().split(b"\n")
+        lines = [l for l in lines if l.strip()]
+        if len(lines) > max_lines:
+            path.write_bytes(b"\n".join(lines[-max_lines:]) + b"\n")
+    except Exception:
+        pass
 
 
 def ai_employee(*args: str) -> tuple:
@@ -4794,19 +4864,12 @@ def _sanitize_for_log(text: str) -> str:
 
 @app.get("/api/chat")
 def get_chat():
-    messages = []
-    if CHATLOG.exists():
-        try:
-            for line in CHATLOG.read_text().splitlines():
-                if line.strip():
-                    messages.append(json.loads(line))
-        except Exception:
-            pass
-    return JSONResponse({"messages": messages[-100:]})
+    messages = _read_last_n_lines(CHATLOG, 100)
+    return JSONResponse({"messages": messages})
 
 
 @app.post("/api/chat")
-def post_chat(payload: dict):
+async def post_chat(payload: dict):
     raw_message = (payload or {}).get("message", "").strip()
     model_route = ((payload or {}).get("model_route") or "").strip().lower()
     if not raw_message:
@@ -4822,8 +4885,8 @@ def post_chat(payload: dict):
     entry = {"ts": now_iso(), "type": "user", "message": message, "model_route": model_route}
     append_chatlog(entry)
 
-    # Simple command handling
-    response = handle_command(message, model_route=model_route)
+    # Run handle_command in a thread pool to avoid blocking the async event loop
+    response = await run_in_threadpool(handle_command, message, model_route)
     safe_response = _sanitize_for_log(response)
     resp_entry = {"ts": now_iso(), "type": "agent", "message": safe_response, "model_route": model_route}
     append_chatlog(resp_entry)
@@ -5784,17 +5847,14 @@ WORKER_BUNDLES_FILE = CONFIG_DIR / "worker_bundles.json"
 
 
 def _load_worker_bundles() -> list:
-    if not WORKER_BUNDLES_FILE.exists():
-        return []
-    try:
-        return json.loads(WORKER_BUNDLES_FILE.read_text())
-    except Exception:
-        return []
+    data = _cached_read(WORKER_BUNDLES_FILE)
+    return data if isinstance(data, list) else []
 
 
 def _save_worker_bundles(bundles: list) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     WORKER_BUNDLES_FILE.write_text(json.dumps(bundles, indent=2))
+    _invalidate_cache(WORKER_BUNDLES_FILE)
 
 
 # ─── Worker Bundle API ────────────────────────────────────────────────────────
@@ -5894,12 +5954,8 @@ def run_worker_bundle(bundle_id: str):
 
 
 def _load_agent_capabilities() -> dict:
-    if not AGENT_CAPS_FILE.exists():
-        return {}
-    try:
-        return json.loads(AGENT_CAPS_FILE.read_text())
-    except Exception:
-        return {}
+    data = _cached_read(AGENT_CAPS_FILE)
+    return data if isinstance(data, dict) else {}
 
 
 def _load_task_plans() -> list:
@@ -6177,17 +6233,14 @@ _HOURS_PER_EVENT = {
 
 
 def _load_metrics() -> dict:
-    if not METRICS_FILE.exists():
-        return {"summary": {}, "events": []}
-    try:
-        return json.loads(METRICS_FILE.read_text())
-    except Exception:
-        return {"summary": {}, "events": []}
+    data = _cached_read(METRICS_FILE)
+    return data if data else {"summary": {}, "events": []}
 
 
 def _save_metrics(data: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     METRICS_FILE.write_text(json.dumps(data, indent=2))
+    _invalidate_cache(METRICS_FILE)
 
 
 def _recalc_summary(events: list) -> dict:
@@ -6321,17 +6374,14 @@ def deploy_template(template_id: str):
 # ─── Guardrails API ───────────────────────────────────────────────────────────
 
 def _load_guardrails() -> dict:
-    if not GUARDRAILS_FILE.exists():
-        return {"pending": [], "log": [], "settings": {}, "summary": {}}
-    try:
-        return json.loads(GUARDRAILS_FILE.read_text())
-    except Exception:
-        return {"pending": [], "log": [], "settings": {}, "summary": {}}
+    data = _cached_read(GUARDRAILS_FILE)
+    return data if data else {"pending": [], "log": [], "settings": {}, "summary": {}}
 
 
 def _save_guardrails(data: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     GUARDRAILS_FILE.write_text(json.dumps(data, indent=2))
+    _invalidate_cache(GUARDRAILS_FILE)
 
 
 def _recalc_guardrail_summary(data: dict) -> dict:
@@ -6476,17 +6526,14 @@ def save_guardrail_settings(payload: dict):
 # ─── Memory API ───────────────────────────────────────────────────────────────
 
 def _load_memory() -> dict:
-    if not MEMORY_FILE.exists():
-        return {"clients": {}, "recent_interactions": []}
-    try:
-        return json.loads(MEMORY_FILE.read_text())
-    except Exception:
-        return {"clients": {}, "recent_interactions": []}
+    data = _cached_read(MEMORY_FILE)
+    return data if data else {"clients": {}, "recent_interactions": []}
 
 
 def _save_memory(data: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     MEMORY_FILE.write_text(json.dumps(data, indent=2))
+    _invalidate_cache(MEMORY_FILE)
 
 
 @app.get("/api/memory")
@@ -7525,4 +7572,22 @@ def save_integration_alias(payload: dict):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=HOST, port=PORT)
+    _trim_jsonl(CHATLOG, 1000)
+    _trim_jsonl(ACTIVITY_LOG, 2000)
+
+    try:
+        import uvloop as _uvloop  # noqa: F401
+        _loop = "uvloop"
+    except ImportError:
+        _loop = "asyncio"
+
+    uvicorn.run(
+        app,
+        host=HOST,
+        port=PORT,
+        workers=1,
+        loop=_loop,
+        http="httptools",
+        access_log=False,
+        server_header=False,
+    )
