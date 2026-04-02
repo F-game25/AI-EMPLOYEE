@@ -4886,7 +4886,7 @@ async def post_chat(payload: dict):
     append_chatlog(entry)
 
     # Run handle_command in a thread pool to avoid blocking the async event loop
-    response = await run_in_threadpool(handle_command, message, model_route)
+    response = await run_in_threadpool(handle_command, message, model_route=model_route)
     safe_response = _sanitize_for_log(response)
     resp_entry = {"ts": now_iso(), "type": "agent", "message": safe_response, "model_route": model_route}
     append_chatlog(resp_entry)
@@ -7576,7 +7576,7 @@ if __name__ == "__main__":
     _trim_jsonl(ACTIVITY_LOG, 2000)
 
     try:
-        import uvloop as _uvloop  # noqa: F401
+        import uvloop  # noqa: F401
         _loop = "uvloop"
     except ImportError:
         _loop = "asyncio"
