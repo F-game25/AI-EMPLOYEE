@@ -46,6 +46,15 @@ POLL_INTERVAL = int(os.environ.get("OBSIDIAN_POLL_INTERVAL", "5"))
 MAX_CONTEXT_NOTES = int(os.environ.get("OBSIDIAN_MAX_CONTEXT_NOTES", "5"))
 LANGUAGE = os.environ.get("OBSIDIAN_LANGUAGE", "nl").lower()
 
+# Number of characters used for index snippets
+_INDEX_SNIPPET_LENGTH = 200
+
+# Stopwords filtered out during keyword search, keyed by language
+_STOPWORDS: dict = {
+    "nl": {"", "de", "het", "een", "en", "van", "in", "is", "op", "dat", "er", "te", "voor", "met"},
+    "en": {"", "the", "a", "an", "and", "of", "in", "is", "to", "for", "with", "that", "on", "it"},
+}
+
 # ── Vault helpers ─────────────────────────────────────────────────────────────
 
 
@@ -208,12 +217,12 @@ def _strip_frontmatter(text: str) -> str:
 
 
 def build_vault_index() -> dict:
-    """Build a lightweight index: {relative_path: first_200_chars_of_body}."""
+    """Build a lightweight index: {relative_path: first snippet of body}."""
     index: dict = {}
     for note in list_vault_notes():
         rel = _note_relative(note)
         body = _strip_frontmatter(read_note(note))
-        index[rel] = body[:200].replace("\n", " ").strip()
+        index[rel] = body[:_INDEX_SNIPPET_LENGTH].replace("\n", " ").strip()
     return index
 
 
@@ -226,7 +235,8 @@ def search_vault(query: str, *, top_k: int = MAX_CONTEXT_NOTES) -> list[dict]:
         return []
 
     query_lower = query.lower()
-    keywords = set(re.split(r"\W+", query_lower)) - {"", "de", "het", "een", "en", "van", "in", "is"}
+    stopwords = _STOPWORDS.get(LANGUAGE, _STOPWORDS["nl"])
+    keywords = set(re.split(r"\W+", query_lower)) - stopwords
     if not keywords:
         return []
 
