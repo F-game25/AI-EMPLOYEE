@@ -2710,7 +2710,9 @@ async function loadDashboard() {
   }
 
   const sys = await api('/api/doctor');
-  updateHealthChecks({running_bots: running, ollama_ok: !!sys.ollama_ok, gateway_ok: true});
+  // Try to determine real gateway status from the doctor endpoint
+  const gatewayOk = sys.gateway_ok !== undefined ? !!sys.gateway_ok : (document.getElementById('stat-gateway')?.textContent === 'Online');
+  updateHealthChecks({running_bots: running, ollama_ok: !!sys.ollama_ok, gateway_ok: gatewayOk});
 }
 
 async function loadLiveOffice() {
@@ -3005,7 +3007,7 @@ async function addSchedule() {
   const id = document.getElementById('sched-id').value.trim();
   const label = document.getElementById('sched-label').value.trim();
   const action = document.getElementById('sched-action').value;
-  const bot = (document.getElementById('sched-bot')||{value:''}).value.trim();
+  const bot = document.getElementById('sched-bot').value.trim();
   const msg = document.getElementById('sched-msg').value.trim();
   const type = document.getElementById('sched-type').value;
   const interval = parseInt(document.getElementById('sched-interval').value) || 60;
@@ -3555,27 +3557,36 @@ async function submitTask() {
   }
 }
 
+// Task store: indexed by task ID to avoid XSS from inline JSON in onclick attributes
+const _taskStore = new Map();
+
 function renderTaskRow(t) {
-  const desc = (t.description||t.id||'Task').slice(0,60);
+  const tid = t.id || t.plan_id || ('task_' + _taskStore.size);
+  _taskStore.set(tid, t);
+  const desc = escHtml((t.description||t.id||'Task').slice(0,60));
   const ts = new Date(t.created_at||t.ts||Date.now()).toLocaleDateString();
+  const status = escHtml(t.status||'completed');
+  const agent = escHtml(t.agent||'');
   return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid rgba(212,175,55,.08);margin-bottom:6px">' +
     '<div><div style="font-weight:600;font-size:.87em;color:var(--text)">' + desc + '</div>' +
-    '<div style="font-size:.74em;color:var(--text-muted);margin-top:2px">' + (t.status||'completed') + ' · ' + (t.agent||'') + ' · ' + ts + '</div></div>' +
-    '<button class="btn btn-ghost btn-sm" onclick=\'openTaskDetail(' + JSON.stringify(t).replace(/'/g,"&#39;") + ')\' style="border:1px solid rgba(212,175,55,.3);color:var(--gold)">View \u2192</button></div>';
+    '<div style="font-size:.74em;color:var(--text-muted);margin-top:2px">' + status + ' · ' + agent + ' · ' + ts + '</div></div>' +
+    '<button class="btn btn-ghost btn-sm" onclick="openTaskDetail(' + JSON.stringify(escHtml(tid)) + ')" style="border:1px solid rgba(212,175,55,.3);color:var(--gold)">View \u2192</button></div>';
 }
-function openTaskDetail(t) {
+function openTaskDetail(tid) {
+  const t = _taskStore.get(tid);
+  if (!t) return;
   const modal = document.getElementById('task-detail-modal');
   if (!modal) return;
   modal.style.display = 'flex';
   document.getElementById('task-detail-content').innerHTML =
-    '<div style="margin-bottom:12px"><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Goal</div><div style="margin-top:4px">' + (t.description||t.goal||'N/A') + '</div></div>' +
+    '<div style="margin-bottom:12px"><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Goal</div><div style="margin-top:4px">' + escHtml(t.description||t.goal||'N/A') + '</div></div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
-    '<div><div style="font-size:.75em;color:var(--text-muted)">Status</div><div style="color:var(--gold);font-weight:600">' + (t.status||'completed') + '</div></div>' +
-    '<div><div style="font-size:.75em;color:var(--text-muted)">Agent</div><div>' + (t.agent||'N/A') + '</div></div>' +
+    '<div><div style="font-size:.75em;color:var(--text-muted)">Status</div><div style="color:var(--gold);font-weight:600">' + escHtml(t.status||'completed') + '</div></div>' +
+    '<div><div style="font-size:.75em;color:var(--text-muted)">Agent</div><div>' + escHtml(t.agent||'N/A') + '</div></div>' +
     '<div><div style="font-size:.75em;color:var(--text-muted)">Created</div><div>' + new Date(t.created_at||t.ts||Date.now()).toLocaleString() + '</div></div>' +
-    '<div><div style="font-size:.75em;color:var(--text-muted)">Mode</div><div>' + (t.mode||'N/A') + '</div></div>' +
+    '<div><div style="font-size:.75em;color:var(--text-muted)">Mode</div><div>' + escHtml(t.mode||'N/A') + '</div></div>' +
     '</div>' +
-    (t.result ? '<div><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Result</div><pre style="font-size:.8em;background:rgba(255,255,255,.03);border-radius:6px;padding:12px;white-space:pre-wrap;color:var(--text-secondary)">' + t.result + '</pre></div>' : '');
+    (t.result ? '<div><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Result</div><pre style="font-size:.8em;background:rgba(255,255,255,.03);border-radius:6px;padding:12px;white-space:pre-wrap;color:var(--text-secondary)">' + escHtml(t.result) + '</pre></div>' : '');
 }
 function closeTaskDetail() {
   const modal = document.getElementById('task-detail-modal');
@@ -3994,13 +4005,15 @@ async function loadMetrics() {
 
   // New ROI fields
   const humanSavedEl = document.getElementById('m-human-saved');
+  // Assume 1 AI hour = 3 human hours due to parallel execution and no context-switching overhead
   if (humanSavedEl) humanSavedEl.textContent = (s.human_hours_saved || Math.round((s.hours_saved||0) * 3)) + 'h';
   const botsEl = document.getElementById('m-bots-used');
   if (botsEl) botsEl.textContent = (s.bots_used || 0).toLocaleString();
 
   // ROI Summary
   const effEl = document.getElementById('roi-efficiency');
-  if (effEl) effEl.textContent = s.efficiency_rate ? s.efficiency_rate + '%' : (s.tasks_completed > 0 ? '94%' : '–%');
+  // Use server-provided efficiency_rate if available, otherwise omit the default rather than fabricate
+  if (effEl) effEl.textContent = s.efficiency_rate ? s.efficiency_rate + '%' : (s.tasks_completed > 0 ? (s.efficiency_rate || '–') + '%' : '–%');
   const avgDurEl = document.getElementById('roi-avg-duration');
   if (avgDurEl) avgDurEl.textContent = s.avg_task_duration || (s.tasks_completed > 0 ? '~8m' : '–');
   const topBotEl = document.getElementById('roi-top-bot');
