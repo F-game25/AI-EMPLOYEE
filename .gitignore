@@ -32,3 +32,4 @@ venv/
 
 # Runtime secrets — never commit live state/user data
 state/users.json
+AI/AI-Memory-Log.md
