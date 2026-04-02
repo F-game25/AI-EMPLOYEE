@@ -1477,19 +1477,19 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <div class="grid-stat" id="stat-cards">
-    <div class="stat-card" onclick="showStatDetail('running')" style="cursor:pointer" title="Click for details">
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('running')" style="cursor:pointer" aria-label="Agents Running – click for details">
       <div class="stat-icon green">●</div>
       <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Agents Running</div><div class="stat-trend" id="stat-running-sub" style="font-size:.7em;color:var(--gold);margin-top:3px"></div></div>
     </div>
-    <div class="stat-card" onclick="showStatDetail('total')" style="cursor:pointer" title="Click for details">
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('total')" style="cursor:pointer" aria-label="Total Agents – click for details">
       <div class="stat-icon blue">◆</div>
       <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Agents</div><div class="stat-trend" id="stat-total-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
     </div>
-    <div class="stat-card" onclick="showStatDetail('gateway')" style="cursor:pointer" title="Click for details">
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('gateway')" style="cursor:pointer" aria-label="Gateway – click for details">
       <div class="stat-icon cyan">◉</div>
       <div class="stat-body"><div class="val" id="stat-gateway">–</div><div class="lbl">Gateway</div><div class="stat-trend" id="stat-gateway-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
     </div>
-    <div class="stat-card" onclick="showStatDetail('uptime')" style="cursor:pointer" title="Click for details">
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('uptime')" style="cursor:pointer" aria-label="Uptime – click for details">
       <div class="stat-icon yellow">◎</div>
       <div class="stat-body"><div class="val" id="stat-uptime">–</div><div class="lbl">Uptime</div><div class="stat-trend" id="stat-uptime-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
     </div>
@@ -1979,11 +1979,11 @@ INDEX_HTML = r"""<!doctype html>
     <div id="task-history-list"><div class="empty"><p>No completed tasks yet.</p></div></div>
   </div>
   <!-- Task detail modal -->
-  <div id="task-detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;align-items:center;justify-content:center">
-    <div style="background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:24px;max-width:640px;width:90%;max-height:80vh;overflow-y:auto">
+  <div id="task-detail-modal" role="dialog" aria-modal="true" aria-labelledby="task-detail-heading" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:24px;max-width:640px;width:90%;max-height:80vh;overflow-y:auto" tabindex="-1" id="task-detail-dialog">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <div class="card-title">Task Detail</div>
-        <button class="btn btn-ghost btn-sm" onclick="closeTaskDetail()">✕ Close</button>
+        <div class="card-title" id="task-detail-heading">Task Detail</div>
+        <button class="btn btn-ghost btn-sm" id="task-detail-close-btn" onclick="closeTaskDetail()" aria-label="Close task detail">✕ Close</button>
       </div>
       <div id="task-detail-content"></div>
     </div>
@@ -2635,6 +2635,9 @@ function showStatDetail(type) {
   const d = details[type] || {t:'Details', c:'No details available.'};
   title.textContent = d.t;
   content.innerHTML = '<p style="line-height:1.7">' + d.c + '</p>';
+  // Move focus to close button for screen reader / keyboard users
+  const closeBtn = panel.querySelector('button');
+  if (closeBtn) closeBtn.focus();
 }
 
 function updateHealthChecks(data) {
@@ -2746,7 +2749,7 @@ async function loadLiveOffice() {
     const icon = icons[idx % icons.length];
     const animDur = 2.5 + (idx % 4) * 0.7;
     const animName = idx % 2 === 0 ? 'robotWalk' : 'robotWalk2';
-    return `<div class="robot-agent" style="left:${left}%;bottom:${140 + row * 80}px;animation-name:${animName};animation-duration:${animDur}s" onclick="openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')">
+    return `<div class="robot-agent" role="button" tabindex="0" aria-label="${escHtml(name)} – ${isBusy ? 'busy' : 'idle'}" style="left:${left}%;bottom:${140 + row * 80}px;animation-name:${animName};animation-duration:${animDur}s" onclick="openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')" onkeydown="if(event.key==='Enter'||event.key===' ')openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')">
       <div class="robot-body ${isBusy ? 'busy' : ''}">${icon}</div>
       <div class="robot-status-dot ${agent.running ? (isBusy ? 'busy' : 'running') : ''}"></div>
       <div class="robot-name">${escHtml(name)}</div>
@@ -3574,13 +3577,15 @@ function renderTaskRow(t) {
   return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid rgba(212,175,55,.08);margin-bottom:6px">' +
     '<div><div style="font-weight:600;font-size:.87em;color:var(--text)">' + desc + '</div>' +
     '<div style="font-size:.74em;color:var(--text-muted);margin-top:2px">' + status + ' · ' + agent + ' · ' + ts + '</div></div>' +
-    '<button class="btn btn-ghost btn-sm" onclick="openTaskDetail(' + JSON.stringify(tid) + ')" style="border:1px solid rgba(212,175,55,.3);color:var(--gold)">View \u2192</button></div>';
+    '<button class="btn btn-ghost btn-sm" aria-label="View task details" onclick="openTaskDetail(' + JSON.stringify(tid) + ')" style="border:1px solid rgba(212,175,55,.3);color:var(--gold)">View →</button></div>';
 }
+let _taskDetailTrigger = null;
 function openTaskDetail(tid) {
   const t = _taskStore.get(tid);
   if (!t) return;
   const modal = document.getElementById('task-detail-modal');
   if (!modal) return;
+  _taskDetailTrigger = document.activeElement;
   modal.style.display = 'flex';
   document.getElementById('task-detail-content').innerHTML =
     '<div style="margin-bottom:12px"><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Goal</div><div style="margin-top:4px">' + escHtml(t.description||t.goal||'N/A') + '</div></div>' +
@@ -3591,10 +3596,14 @@ function openTaskDetail(tid) {
     '<div><div style="font-size:.75em;color:var(--text-muted)">Mode</div><div>' + escHtml(t.mode||'N/A') + '</div></div>' +
     '</div>' +
     (t.result ? '<div><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Result</div><pre style="font-size:.8em;background:rgba(255,255,255,.03);border-radius:6px;padding:12px;white-space:pre-wrap;color:var(--text-secondary)">' + escHtml(t.result) + '</pre></div>' : '');
+  const dlg = document.getElementById('task-detail-dialog');
+  if (dlg) dlg.focus();
 }
 function closeTaskDetail() {
   const modal = document.getElementById('task-detail-modal');
   if (modal) modal.style.display = 'none';
+  if (_taskDetailTrigger && typeof _taskDetailTrigger.focus === 'function') _taskDetailTrigger.focus();
+  _taskDetailTrigger = null;
 }
 
 async function loadTasks() {
