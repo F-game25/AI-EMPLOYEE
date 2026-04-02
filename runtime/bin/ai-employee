@@ -213,6 +213,13 @@ start_bot() {
     return 1
   fi
 
+  # ── Log rotation (5 MB cap) ──────────────────────────────────────────────
+  local _max_log_size=5242880
+  if [[ -f "$log" ]] && [[ "$(stat -c%s "$log" 2>/dev/null || echo 0)" -gt $_max_log_size ]]; then
+    mv "$log" "${log}.1"
+    gzip -f "${log}.1" &
+  fi
+
   echo "Starting $bot ..."
   nohup "$entry" >>"$log" 2>&1 &
   echo $! > "$pid_file"
@@ -247,7 +254,7 @@ stop_bot() {
   fi
   if kill -0 "$pid" 2>/dev/null; then
     echo "Stopping $bot pid=$pid ..."
-    kill "$pid" || true
+    kill "$pid" 2>/dev/null || true
     sleep 1
     kill -9 "$pid" 2>/dev/null || true
   fi
@@ -259,14 +266,50 @@ stop_bot() {
   echo "Stopped $bot"
 }
 
-list_bots() {
-  if [[ ! -d "$BOTS_DIR" ]]; then
-    return 0
-  fi
-  # Portable: works on Linux and macOS
-  find "$BOTS_DIR" -maxdepth 1 -mindepth 1 -type d | sort | while read -r d; do
-    basename "$d"
+# Batch stop: send SIGTERM to all, wait once, then SIGKILL stragglers.
+# Reduces stop-all time from (N bots × 1s) to just 1s total.
+stop_all_bots() {
+  local bots=()
+  while read -r bot; do
+    [[ -n "$bot" ]] || continue
+    bots+=("$bot")
+  done < <(list_mode_agents)
+
+  # Phase 1: SIGTERM all
+  for bot in "${bots[@]}"; do
+    local pid_file
+    pid_file="$(bot_pid_file "$bot")"
+    if [[ -f "$pid_file" ]]; then
+      local pid
+      pid="$(cat "$pid_file" 2>/dev/null || true)"
+      [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+    fi
   done
+
+  # Phase 2: wait once for all to exit
+  sleep 1
+
+  # Phase 3: SIGKILL anything still alive and clean up state
+  for bot in "${bots[@]}"; do
+    local pid_file
+    pid_file="$(bot_pid_file "$bot")"
+    if [[ -f "$pid_file" ]]; then
+      local pid
+      pid="$(cat "$pid_file" 2>/dev/null || true)"
+      [[ -n "$pid" ]] && kill -9 "$pid" 2>/dev/null || true
+      rm -f "$pid_file"
+      local state_file="$STATE_DIR/$bot.state.json"
+      echo "{\"bot\":\"$bot\",\"status\":\"stopped\",\"stopped_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$state_file"
+      echo "Stopped $bot"
+    fi
+  done
+}
+
+list_bots() {
+  [[ -d "$BOTS_DIR" ]] || return 0
+  for d in "$BOTS_DIR"/*/; do
+    [[ -d "$d" ]] && basename "$d"
+  done | sort
 }
 
 _current_mode() {
@@ -367,9 +410,7 @@ case "$cmd" in
   stop)
     arg="${1:-}"
     if [[ "$arg" == "--all" ]]; then
-      while read -r bot; do
-        [[ -n "$bot" ]] && stop_bot "$bot" || true
-      done < <(list_mode_agents)
+      stop_all_bots
     else
       [[ -n "$arg" ]] || { usage; exit 1; }
       stop_bot "$arg"
@@ -378,10 +419,7 @@ case "$cmd" in
   restart)
     arg="${1:-}"
     if [[ "$arg" == "--all" ]]; then
-      while read -r bot; do
-        [[ -n "$bot" ]] && stop_bot "$bot" || true
-      done < <(list_mode_agents)
-      sleep 1
+      stop_all_bots
       while read -r bot; do
         [[ -n "$bot" ]] && start_bot "$bot" || true
       done < <(list_mode_agents)
