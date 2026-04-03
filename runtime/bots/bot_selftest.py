@@ -359,6 +359,12 @@ def check_obsidian_vault_path() -> None:
             f"directory not found: {vault}",
             required=False,
         )
+def check_hermes_agent() -> None:
+    """hermes_agent module must be importable and its run.sh executable."""
+    _check_bot_module("hermes-agent", "hermes_agent")
+def check_blacklight() -> None:
+    """blacklight module must be importable and its run.sh executable."""
+    _check_bot_module("blacklight", "blacklight")
 
 
 def check_blacklight() -> None:

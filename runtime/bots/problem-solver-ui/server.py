@@ -1655,6 +1655,16 @@ INDEX_HTML = r"""<!doctype html>
         <a class="btn btn-ghost btn-sm" href="http://localhost:18789" target="_blank">📡 Gateway</a>
       </div>
       <hr>
+      <div class="card-title" style="margin-bottom:10px"><span class="icon" style="color:var(--gold)">◈</span> System Health</div>
+      <div id="system-health-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.84em">
+        <div class="health-check-item" id="hc-api"><span class="hc-dot">●</span> API Server <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-ollama"><span class="hc-dot">●</span> Ollama LLM <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-agents"><span class="hc-dot">●</span> Agents <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-db"><span class="hc-dot">●</span> State Store <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
+      </div>
+      <div id="system-info" style="display:none"></div>
       <!-- BLACKLIGHT quick-toggle -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:10px">
