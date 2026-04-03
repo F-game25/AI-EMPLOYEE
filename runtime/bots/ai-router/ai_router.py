@@ -643,12 +643,12 @@ def classify_task(prompt: str) -> str:
     This is intentionally lightweight — no external calls, runs in microseconds.
     """
     text = prompt.lower()
-    scores: dict[str, int] = {cat: 0 for cat in _TASK_KEYWORDS}
+    scores: dict[str, int] = {category: 0 for category in _TASK_KEYWORDS}
     for category, keywords in _TASK_KEYWORDS.items():
         for kw in keywords:
             if kw in text:
                 scores[category] += 1
-    best = max(scores, key=lambda c: scores[c])
+    best = max(scores, key=lambda category: scores[category])
     if scores[best] == 0:
         return "general"
     return best

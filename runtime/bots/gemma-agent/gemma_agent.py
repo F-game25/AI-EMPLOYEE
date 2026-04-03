@@ -26,6 +26,7 @@ Configuration (in ~/.ai-employee/config/gemma-agent.env):
     ACTIVE_AI_PROVIDER    — set to "gemma" to make all sub-agents use this provider
 """
 import json
+import logging
 import os
 import urllib.request
 from pathlib import Path
@@ -54,6 +55,7 @@ SYSTEM_PROMPT = os.environ.get(
 )
 
 app = FastAPI(title="Gemma AI Agent")
+logger = logging.getLogger("gemma_agent")
 
 _INDEX_HTML = """<!doctype html>
 <html lang="en">
@@ -102,8 +104,8 @@ function addMsg(role, text, ts){
   if(empty){ log.innerHTML=''; empty=false; }
   const d=document.createElement('div');
   d.className='msg '+role;
-  const safeText=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');
-  const safeTs=(ts||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const safeText=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');
+  const safeTs=(ts||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   d.innerHTML='<div>'+safeText+'</div><div class="ts">'+safeTs+'</div>';
   log.appendChild(d);
   log.scrollTop=log.scrollHeight;
@@ -161,7 +163,10 @@ def _gemma_ready() -> tuple[bool, str, str]:
             r = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=3)
             if r.status_code == 200:
                 tags = r.json().get("models", [])
-                has_gemma = any(GEMMA_MODEL.split(":")[0] in m.get("name", "") for m in tags)
+                has_gemma = any(
+                    m.get("name", "").split(":")[0] == GEMMA_MODEL.split(":")[0]
+                    for m in tags
+                )
                 if has_gemma:
                     return True, "ollama", "ready"
                 return (
@@ -170,11 +175,11 @@ def _gemma_ready() -> tuple[bool, str, str]:
                     f"Gemma model not found. Run: ollama pull {GEMMA_MODEL}",
                 )
             return False, "ollama", f"Ollama returned status {r.status_code}"
-        except Exception as exc:
+        except Exception:
             return (
                 False,
                 "ollama",
-                f"Cannot connect to Ollama at {OLLAMA_HOST}. Run: ollama serve | {exc}",
+                f"Cannot connect to Ollama at {OLLAMA_HOST}. Run: ollama serve",
             )
     # Google AI Studio backend
     if GOOGLE_API_KEY:
@@ -294,9 +299,10 @@ def ask(payload: dict) -> JSONResponse:
             },
             status_code=503,
         )
-    except Exception as exc:
+    except Exception:
         _history.pop()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        logger.exception("gemma-agent: unexpected error processing request")
+        return JSONResponse({"error": "An internal error occurred. Check server logs."}, status_code=500)
 
 
 @app.post("/api/clear")
