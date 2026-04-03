@@ -168,16 +168,19 @@ def write_orchestrator_result(subtask_id: str, result_text: str, status: str = "
 
 
 def ai_query(prompt: str, system_prompt: str = "") -> str:
+    router_unavailable = "AI router not available." if LANGUAGE == "en" else "AI router niet beschikbaar."
+    missing_answer = "No answer generated." if LANGUAGE == "en" else "Geen antwoord gegenereerd."
+    query_failed = "AI query failed" if LANGUAGE == "en" else "AI-query mislukt"
     if not _AI_AVAILABLE:
-        return "AI router niet beschikbaar." if LANGUAGE != "en" else "AI router not available."
+        return router_unavailable
     try:
         result = _query_ai_for_agent(
             "obsidian-memory", prompt,
             system_prompt=system_prompt or _system_prompt(),
         )
-        return result.get("answer", "Geen antwoord gegenereerd.")
+        return result.get("answer", missing_answer)
     except Exception as exc:
-        return f"AI-query mislukt: {exc}"
+        return f"{query_failed}: {exc}"
 
 
 # ── Vault helpers ─────────────────────────────────────────────────────────────
@@ -261,21 +264,43 @@ def search_vault(query: str, *, top_k: int = MAX_CONTEXT_NOTES) -> list[dict]:
 
 
 def write_vault_note(rel_path: str, content: str) -> tuple[bool, str]:
-    """Write or overwrite a note in the vault.
+    """Write or overwrite a note in the vault at the given relative path.
+
+    The path is validated: it must be a relative path that stays within the
+    vault root (no ``..`` traversal, no absolute paths).
 
     Returns (success, message).
     """
     if not vault_available():
         return False, (
-            "Vault niet geconfigureerd. Stel OBSIDIAN_VAULT_PATH in."
-            if LANGUAGE != "en" else
             "Vault not configured. Set OBSIDIAN_VAULT_PATH."
+            if LANGUAGE == "en" else
+            "Vault niet geconfigureerd. Stel OBSIDIAN_VAULT_PATH in."
         )
-    note_path = VAULT_PATH / rel_path
+
+    # Security: reject absolute paths and prevent path-traversal
+    raw = rel_path.strip()
+    if not raw:
+        err = "Path may not be empty." if LANGUAGE == "en" else "Pad mag niet leeg zijn."
+        return False, err
+    if raw.startswith("/") or raw.startswith("\\"):
+        err = "Absolute paths are not allowed." if LANGUAGE == "en" else "Absolute paden zijn niet toegestaan."
+        return False, err
+
+    note_path = (VAULT_PATH / raw).resolve()
+    vault_resolved = VAULT_PATH.resolve()
+    if not str(note_path).startswith(str(vault_resolved) + os.sep) and note_path != vault_resolved:
+        err = (
+            "Path traversal detected: target is outside the vault."
+            if LANGUAGE == "en" else
+            "Padtraversal gedetecteerd: doel ligt buiten de vault."
+        )
+        return False, err
+
     try:
         note_path.parent.mkdir(parents=True, exist_ok=True)
         note_path.write_text(content, encoding="utf-8")
-        logger.info("obsidian-memory: wrote note %s", rel_path)
+        logger.info("obsidian-memory: wrote note %s", raw)
         return True, note_path.as_posix()
     except Exception as exc:
         return False, str(exc)
@@ -381,8 +406,9 @@ def cmd_ask(question: str) -> str:
     full_prompt = "\n\n".join(context_parts)
     answer = ai_query(full_prompt)
 
-    # Suggest a session note
-    note_path = f"AI/Sessies/{now_iso()[:10]}_vraag.md"
+    # Suggest a session note with a unique filename (timestamp + question slug)
+    _slug = re.sub(r"\W+", "-", question.lower().strip())[:40].strip("-")
+    note_path = f"AI/Sessies/{now_iso()[:16].replace(':', '').replace('T', '_')}_{_slug}.md"
     note_content = _build_session_note_content(question, answer, sources)
 
     suggestion = (
@@ -455,31 +481,34 @@ def cmd_note(rel_path: str, content: str) -> str:
 
 
 def cmd_index() -> str:
-    """Rebuild the vault index and update the Master Index note."""
+    """Build and persist a vault index, then update the Master Index note."""
     if not vault_available():
         return (
-            "⚠️ Vault niet geconfigureerd. Stel `OBSIDIAN_VAULT_PATH` in."
-            if LANGUAGE != "en" else
             "⚠️ Vault not configured. Set `OBSIDIAN_VAULT_PATH`."
+            if LANGUAGE == "en" else
+            "⚠️ Vault niet geconfigureerd. Stel `OBSIDIAN_VAULT_PATH` in."
         )
 
-    notes = list_vault_notes()
-    note_count = len(notes)
+    # Build the in-memory index and persist it to state
+    index = build_vault_index()
+    note_count = len(index)
+    index_state_path = STATE_FILE.parent / "obsidian-vault-index.json"
+    index_state_path.parent.mkdir(parents=True, exist_ok=True)
+    index_state_path.write_text(json.dumps({"built_at": now_iso(), "notes": index}, indent=2))
+    logger.info("obsidian-memory: persisted vault index with %d notes to %s", note_count, index_state_path)
 
-    # Build or update master index note
-    session_entries: list[str] = []
+    # Update master index note in vault
     state = _load_state()
     session_entries = state.get("session_log", [])
-
     master_content = _build_master_index_content(session_entries, note_count)
     write_vault_note("AI/AI-Memory-Log.md", master_content)
 
     return (
-        f"✅ Vault-index herbouwd: **{note_count}** notities geïndexeerd. "
-        f"Master index bijgewerkt: `AI/AI-Memory-Log.md`"
-        if LANGUAGE != "en" else
-        f"✅ Vault index rebuilt: **{note_count}** notes indexed. "
+        f"✅ Vault index built and saved: **{note_count}** notes indexed. "
         f"Master index updated: `AI/AI-Memory-Log.md`"
+        if LANGUAGE == "en" else
+        f"✅ Vault-index gebouwd en opgeslagen: **{note_count}** notities geïndexeerd. "
+        f"Master index bijgewerkt: `AI/AI-Memory-Log.md`"
     )
 
 
@@ -611,62 +640,57 @@ def handle_agent_task(task: dict) -> None:
 # ── Chatlog poll loop ──────────────────────────────────────────────────────────
 
 
-def run_once() -> int:
-    """Process all pending chatlog entries. Returns number of commands handled."""
-    entries = load_chatlog()
-    if not entries:
-        return 0
+def process_new_entries(chatlog: list, last_idx: int) -> tuple[int, int]:
+    """Process new chatlog entries starting from last_idx.
 
+    Only processes entries with ``type == "user"`` to avoid feedback loops.
+
+    Returns (new_last_idx, handled_count).
+    """
+    new_entries = chatlog[last_idx:]
+    new_last_idx = len(chatlog)
     handled = 0
-    for entry in entries:
+
+    for entry in new_entries:
+        if entry.get("type") != "user":
+            continue
         text = entry.get("message", "") or entry.get("text", "")
         if not text:
             continue
-        response = dispatch(text)
+        response = dispatch(text.strip())
         if response is None:
             continue
-        reply = {
+        append_chatlog({
             "ts": now_iso(),
-            "from": "obsidian-memory",
+            "type": "bot",
+            "bot": "obsidian-memory",
             "message": response,
-            "in_reply_to": entry.get("ts", ""),
-        }
-        append_chatlog(reply)
+        })
         handled += 1
 
-    return handled
+    return new_last_idx, handled
 
 
 def main() -> None:
     print(SESSION_GREETING)
 
-    state = _load_state()
-    state["last_run"] = now_iso()
-    write_state(state)
+    # Write initial state
+    init_state = _load_state()
+    init_state["last_run"] = now_iso()
+    write_state(init_state)
 
     vault_status = str(VAULT_PATH) if vault_available() else (
-        "NIET geconfigureerd — stel OBSIDIAN_VAULT_PATH in" if LANGUAGE != "en"
-        else "NOT configured — set OBSIDIAN_VAULT_PATH"
+        "NOT configured — set OBSIDIAN_VAULT_PATH" if LANGUAGE == "en"
+        else "NIET geconfigureerd — stel OBSIDIAN_VAULT_PATH in"
     )
     print(f"[{now_iso()}] obsidian-memory gestart; vault={vault_status}")
 
-    # Process any pending agent tasks on start
-    if AGENT_TASKS_DIR.exists():
-        for task_file in sorted(AGENT_TASKS_DIR.glob("obsidian-memory_*.json")):
-            try:
-                task = json.loads(task_file.read_text())
-                handle_agent_task(task)
-                task_file.unlink()
-            except Exception as exc:
-                logger.warning("obsidian-memory: task error %s — %s", task_file.name, exc)
+    # Start tracking from the current end of the chatlog to avoid replaying history
+    last_processed_idx = len(load_chatlog())
 
     while True:
         try:
-            count = run_once()
-            if count:
-                print(f"[{now_iso()}] verwerkt {count} commando(s)")
-
-            # Also check for orchestrator agent tasks
+            # Process agent tasks from the orchestrator
             if AGENT_TASKS_DIR.exists():
                 for task_file in sorted(AGENT_TASKS_DIR.glob("obsidian-memory_*.json")):
                     try:
@@ -675,11 +699,21 @@ def main() -> None:
                         task_file.unlink()
                     except Exception as exc:
                         logger.warning("obsidian-memory: task error %s — %s", task_file.name, exc)
+
+            # Process new chatlog entries (only type=user, from last_processed_idx onwards)
+            chatlog = load_chatlog()
+            last_processed_idx, count = process_new_entries(chatlog, last_processed_idx)
+            if count:
+                print(f"[{now_iso()}] verwerkt {count} commando(s)")
+
         except Exception as exc:
             logger.error("obsidian-memory: loop error — %s", exc)
 
-        state["last_run"] = now_iso()
-        write_state(state)
+        # Read-modify-write to avoid clobbering session_log written by _save_session()
+        current_state = _load_state()
+        current_state["last_run"] = now_iso()
+        write_state(current_state)
+
         time.sleep(POLL_INTERVAL)
 
 

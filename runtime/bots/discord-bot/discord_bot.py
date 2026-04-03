@@ -83,7 +83,6 @@ try:
         cmd_note as _ob_note,
         cmd_index as _ob_index,
         cmd_status as _ob_status,
-        SESSION_GREETING as _OB_GREETING,
     )
     _OBSIDIAN_AVAILABLE = True
 except ImportError:
