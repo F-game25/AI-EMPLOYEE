@@ -23,7 +23,7 @@ import sys
 import threading
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -190,6 +190,8 @@ AGENT_TEMPLATES_FILE = CONFIG_DIR / "agent_templates.json"
 _REPO_TEMPLATES_FILE = Path(__file__).parent.parent.parent / "config" / "agent_templates.json"
 # Source skills_library.json path (bundled in repo config directory)
 _REPO_SKILLS_FILE = Path(__file__).parent.parent.parent / "config" / "skills_library.json"
+# Source agent_capabilities.json path (bundled in repo config directory)
+_REPO_CAPS_FILE = Path(__file__).parent.parent.parent / "config" / "agent_capabilities.json"
 
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
@@ -3845,12 +3847,13 @@ const COMMAND_GROUPS = [
     cmds: [
       ['status', 'Get current agent status report'],
       ['workers', 'List all active workers'],
-      ['start <agent>', 'Start a specific agent'],
-      ['stop <agent>', 'Stop a specific agent'],
+      ['start <agent>', 'Start a specific agent', true],
+      ['stop <agent>', 'Stop a specific agent', true],
       ['schedule', 'List all scheduled tasks'],
       ['improvements', 'List pending skill proposals'],
       ['skills', 'Show skills library summary'],
       ['agents', 'List all AI agents'],
+      ['switch to <agent>', 'Switch active agent (WhatsApp session)', true],
       ['help', 'Show full command list'],
       ['cmds', 'Show this commands reference'],
     ]
@@ -4088,15 +4091,22 @@ function renderCommands() {
   if (!list) return;
   list.innerHTML = groups.map(g => {
     const rows = g.cmds
-      .filter(([cmd, desc]) => !q || cmd.toLowerCase().includes(q) || desc.toLowerCase().includes(q))
-      .map(([cmd, desc]) => `
-        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
-          <code onclick="copyCmd('${escHtml(cmd)}')" title="Click to copy" style="cursor:pointer;min-width:180px;background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:.84em;color:var(--gold-light)">${escHtml(cmd)}</code>
+      .filter(cmd => !q || cmd[0].toLowerCase().includes(q) || cmd[1].toLowerCase().includes(q))
+      .map(cmd => {
+        const [cmdStr, desc, waOnly] = cmd;
+        let execBtn = '';
+        if (isWA) {
+          execBtn = waOnly
+            ? `<button class="btn btn-ghost btn-sm" disabled title="WhatsApp only — cannot run in chat" style="padding:2px 8px;font-size:.72em;opacity:.45;cursor:not-allowed">📱 WA</button>`
+            : `<button class="btn btn-ghost btn-sm" onclick="executeCmd('${escHtml(cmdStr)}')" style="padding:2px 8px;font-size:.72em;border:1px solid rgba(212,175,55,.3);color:var(--gold)" title="Execute in Chat">▶ Run</button>`;
+        }
+        return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+          <code onclick="copyCmd('${escHtml(cmdStr)}')" title="Click to copy" style="cursor:pointer;min-width:180px;background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:.84em;color:var(--gold-light)">${escHtml(cmdStr)}</code>
           <span style="color:var(--text-secondary);font-size:.85em;flex:1">${escHtml(desc)}</span>
-          <button class="btn btn-ghost btn-sm" onclick="copyCmd('${escHtml(cmd)}')" style="padding:2px 8px;font-size:.72em" title="Copy">📋</button>
-          ${isWA ? `<button class="btn btn-ghost btn-sm" onclick="executeCmd('${escHtml(cmd)}')" style="padding:2px 8px;font-size:.72em;border:1px solid rgba(212,175,55,.3);color:var(--gold)" title="Execute in Chat">▶ Run</button>` : ''}
-        </div>`
-      ).join('');
+          <button class="btn btn-ghost btn-sm" onclick="copyCmd('${escHtml(cmdStr)}')" style="padding:2px 8px;font-size:.72em" title="Copy">📋</button>
+          ${execBtn}
+        </div>`;
+      }).join('');
     if (!rows) return '';
     return `<div style="margin-bottom:16px">
       <div style="font-weight:700;font-size:.9em;color:var(--text);margin-bottom:4px">${g.cat}</div>
@@ -5602,9 +5612,9 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
         rest = message[14:].strip()
         # Parse agents: param
         import re as _re
-        agents_match = _re.search(r'agents:\s*([\w,\- ]+?)(?:\s+task:|$)', rest, _re.IGNORECASE)
-        task_match = _re.search(r'task:\s*(.+)', rest, _re.IGNORECASE)
-        worker_name = _re.split(r'\s+agents:', rest, flags=_re.IGNORECASE)[0].strip()
+        agents_match = _re.search(r'agents:([\w,\-]+(?:[ \t]+[\w,\-]+)*)(?:[ \t]+task:|$)', rest, _re.IGNORECASE)
+        task_match = _re.search(r'task:(.+)', rest, _re.IGNORECASE)
+        worker_name = _re.split(r'[ \t]+agents:', rest, maxsplit=1, flags=_re.IGNORECASE)[0].strip()
         if not worker_name:
             return "❌ Usage: worker create <name> agents:<a1,a2> task:<description>"
         agents_raw = agents_match.group(1).strip() if agents_match else ""
@@ -6511,12 +6521,13 @@ def run_worker_bundle(bundle_id: str):
 
 
 def _load_agent_capabilities() -> dict:
-    if not AGENT_CAPS_FILE.exists():
-        return {}
-    try:
-        return json.loads(AGENT_CAPS_FILE.read_text())
-    except Exception:
-        return {}
+    for candidate in (AGENT_CAPS_FILE, _REPO_CAPS_FILE):
+        if candidate.exists():
+            try:
+                return json.loads(candidate.read_text())
+            except Exception:
+                pass
+    return {}
 
 
 def _load_task_plans() -> list:
@@ -6583,11 +6594,12 @@ def submit_task(payload: dict):
                 continue
             target = _resolve_agent_target(agent_id)
             if target and _agent_dir_exists(target):
-                pid_file = AI_HOME / "run" / f"{target}.pid"
+                pid_file = AI_HOME / "run" / (target + ".pid")
                 already_running = False
                 if pid_file.exists():
                     try:
-                        pid = int(pid_file.read_text().strip())
+                        pid_text = pid_file.read_text().strip()
+                        pid = int(pid_text)
                         os.kill(pid, 0)
                         already_running = True
                     except Exception:
