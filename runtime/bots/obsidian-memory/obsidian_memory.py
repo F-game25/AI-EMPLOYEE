@@ -288,18 +288,7 @@ def cmd_index() -> str:
         )
 
     # Actually build and persist the index
-    index = {}
-    for note_rel_path in notes:
-        try:
-            full_path = VAULT_PATH / note_rel_path
-            content = full_path.read_text(encoding="utf-8", errors="replace")
-            index[str(note_rel_path)] = {
-                "size": len(content),
-                "lines": content.count("\n"),
-                "preview": content[:200],
-            }
-        except Exception:
-            pass
+    index = build_vault_index()
 
     state = _load_state()
     state["vault_index"] = index
@@ -394,7 +383,7 @@ def run_once() -> int:
     handled = 0
     for entry in new_entries:
         # Only process user-originated messages
-        if entry.get("type") not in ("user", None) or entry.get("from") == "obsidian-memory":
+        if entry.get("type") not in ("user", None) or entry.get("bot") == "obsidian-memory":
             continue
         text = entry.get("message", "") or entry.get("text", "")
         if not text:
