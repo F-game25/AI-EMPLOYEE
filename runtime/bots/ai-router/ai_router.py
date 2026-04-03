@@ -231,6 +231,8 @@ _AGENT_ID_ROUTING: dict = {
     "obsidian-memory":       "coding",    # Obsidian vault knowledge base
     # ── General / local ───────────────────────────────────────────────────
     "recruiter": "general",   # HR recruiting (broad, free)
+    # ── BLACKLIGHT autonomous agent ───────────────────────────────────────
+    "blacklight": "orchestrator",  # autonomous loop — planning + reasoning
 }
 
 
