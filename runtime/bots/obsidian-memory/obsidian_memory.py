@@ -168,16 +168,19 @@ def write_orchestrator_result(subtask_id: str, result_text: str, status: str = "
 
 
 def ai_query(prompt: str, system_prompt: str = "") -> str:
+    router_unavailable = "AI router not available." if LANGUAGE == "en" else "AI router niet beschikbaar."
+    missing_answer = "No answer generated." if LANGUAGE == "en" else "Geen antwoord gegenereerd."
+    query_failed = "AI query failed" if LANGUAGE == "en" else "AI-query mislukt"
     if not _AI_AVAILABLE:
-        return "AI router niet beschikbaar." if LANGUAGE != "en" else "AI router not available."
+        return router_unavailable
     try:
         result = _query_ai_for_agent(
             "obsidian-memory", prompt,
             system_prompt=system_prompt or _system_prompt(),
         )
-        return result.get("answer", "Geen antwoord gegenereerd.")
+        return result.get("answer", missing_answer)
     except Exception as exc:
-        return f"AI-query mislukt: {exc}"
+        return f"{query_failed}: {exc}"
 
 
 # ── Vault helpers ─────────────────────────────────────────────────────────────
