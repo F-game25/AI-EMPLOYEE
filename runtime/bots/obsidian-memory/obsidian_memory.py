@@ -678,6 +678,7 @@ def main() -> None:
         except Exception as exc:
             logger.error("obsidian-memory: loop error — %s", exc)
 
+        state = _load_state()
         state["last_run"] = now_iso()
         write_state(state)
         time.sleep(POLL_INTERVAL)
