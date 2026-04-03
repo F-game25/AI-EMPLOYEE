@@ -333,6 +333,9 @@ def check_financial_deepsearch() -> None:
     _check_bot_module("financial-deepsearch", "financial_deepsearch")
 
 
+def check_hermes_agent() -> None:
+    """hermes_agent module must be importable and its run.sh executable."""
+    _check_bot_module("hermes-agent", "hermes_agent")
 def check_blacklight() -> None:
     """blacklight module must be importable and its run.sh executable."""
     _check_bot_module("blacklight", "blacklight")
@@ -448,6 +451,7 @@ def main() -> None:
     check_qa_tester()
     check_paid_media_specialist()
     check_financial_deepsearch()
+    check_hermes_agent()
     check_blacklight()
 
     _section("NVIDIA NIM Integration")
