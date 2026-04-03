@@ -233,6 +233,8 @@ _AGENT_ID_ROUTING: dict = {
     "hermes":        "reasoning",
     # ── General / local ───────────────────────────────────────────────────
     "recruiter": "general",   # HR recruiting (broad, free)
+    # ── BLACKLIGHT autonomous agent ───────────────────────────────────────
+    "blacklight": "orchestrator",  # autonomous loop — planning + reasoning
 }
 
 
