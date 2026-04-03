@@ -9003,13 +9003,19 @@ if __name__ == "__main__":
     except ImportError:
         _loop = "asyncio"
 
+    try:
+        import httptools  # noqa: F401
+        _http = "httptools"
+    except ImportError:
+        _http = "auto"
+
     uvicorn.run(
         app,
         host=HOST,
         port=PORT,
         workers=1,
         loop=_loop,
-        http="httptools",
+        http=_http,
         access_log=False,
         server_header=False,
     )
