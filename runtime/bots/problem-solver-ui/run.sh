@@ -27,14 +27,14 @@ fi
 # ── Resolve python binary (python3 on Linux/macOS, python on Windows/Git Bash) ─
 PYTHON=""
 for _py in python3 python; do
-  if command -v "$_py" >/dev/null 2>&1 && "$_py" -c "import sys; assert sys.version_info >= (3,8)" 2>/dev/null; then
+  if command -v "$_py" >/dev/null 2>&1 && "$_py" -c "import sys; assert sys.version_info >= (3,10)" 2>/dev/null; then
     PYTHON="$_py"
     break
   fi
 done
 
 if [[ -z "$PYTHON" ]]; then
-  echo "[problem-solver-ui] ERROR: Python 3.8+ not found."
+  echo "[problem-solver-ui] ERROR: Python 3.10+ not found."
   echo "  Install Python: https://www.python.org/downloads/"
   exit 1
 fi
