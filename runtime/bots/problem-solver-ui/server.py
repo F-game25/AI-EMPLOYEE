@@ -21,6 +21,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -34,7 +35,9 @@ if sys.version_info < (3, 10):
     sys.exit(1)
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
@@ -712,6 +715,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ── Security headers middleware (openclaw-2) ──────────────────────────────────
 @app.middleware("http")
@@ -748,6 +752,10 @@ if not _audit_logger.handlers:
 @app.middleware("http")
 async def audit_logging_middleware(request: Request, call_next):
     """Log every inbound request and outbound status for the audit trail."""
+    # Skip high-frequency health/status probes to reduce I/O noise
+    if request.url.path in ("/health", "/api/status", "/api/gateway/status"):
+        return await call_next(request)
+
     _audit_enabled = (
         _security_config.logging.audit_enabled if _security_config else True
     )
@@ -777,6 +785,68 @@ async def audit_logging_middleware(request: Request, call_next):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ── In-memory file read cache (reduces disk I/O for high-frequency reads) ─────
+_cache: dict = {}
+
+def _cached_read(path: Path, ttl: int = 5) -> "dict | list":
+    """Read a JSON file with a short TTL cache to avoid repeated disk hits."""
+    key = str(path)
+    now = time.time()
+    if key in _cache and now - _cache[key]["ts"] < ttl:
+        return _cache[key]["data"]
+    try:
+        data: "dict | list" = json.loads(path.read_text()) if path.exists() else {}
+    except Exception:
+        data = {}
+    _cache[key] = {"ts": now, "data": data}
+    return data
+
+
+def _invalidate_cache(path: Path) -> None:
+    """Evict a path from the read cache after a write."""
+    _cache.pop(str(path), None)
+
+
+# ── Efficient last-N-lines reader for growing JSONL logs ──────────────────────
+def _read_last_n_lines(path: Path, n: int = 100) -> list:
+    """Return the last *n* non-empty JSONL lines without reading the whole file."""
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        buf = b""
+        lines: list[bytes] = []
+        pos = size
+        while pos > 0 and len(lines) < n + 1:
+            chunk = min(4096, pos)
+            pos -= chunk
+            f.seek(pos)
+            buf = f.read(chunk) + buf
+            lines = buf.split(b"\n")
+        result = [l for l in lines[-n:] if l.strip()]
+    parsed = []
+    for l in result:
+        try:
+            parsed.append(json.loads(l))
+        except Exception:
+            pass
+    return parsed
+
+
+# ── JSONL trim helper (keeps state files from growing unbounded) ──────────────
+def _trim_jsonl(path: Path, max_lines: int = 1000) -> None:
+    if not path.exists():
+        return
+    try:
+        lines = path.read_bytes().split(b"\n")
+        lines = [l for l in lines if l.strip()]
+        if len(lines) > max_lines:
+            path.write_bytes(b"\n".join(lines[-max_lines:]) + b"\n")
+    except Exception:
+        pass
 
 
 def ai_employee(*args: str) -> tuple:
@@ -1504,6 +1574,7 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em">⚡ BLACKLIGHT</button>
 </nav>
 
 <main>
@@ -1593,6 +1664,24 @@ INDEX_HTML = r"""<!doctype html>
         <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
       </div>
       <div id="system-info" style="display:none"></div>
+      <!-- BLACKLIGHT quick-toggle -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:1.1rem">⚡</span>
+          <div>
+            <div style="font-size:.86em;font-weight:600;color:var(--text)">BLACKLIGHT Mode</div>
+            <div style="font-size:.75em;color:var(--text-muted)" id="dash-bl-sublabel">Autonomous agent — idle</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="toggle" title="Toggle BLACKLIGHT on/off">
+            <input type="checkbox" id="dash-bl-toggle" onchange="blToggle(this.checked)"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="card-title" style="margin-bottom:10px"><span class="icon">🔧</span> System Info</div>
+      <pre id="system-info" style="font-size:.78em">Click Refresh on the left to load…</pre>
     </div>
   </div>
 
@@ -2550,6 +2639,80 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- ── BLACKLIGHT ── -->
+<div id="tab-blacklight" class="tab-content">
+
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#1a0a2e 0%,#16213e 60%,#0f172a 100%);border:1px solid #7c3aed;border-radius:12px;padding:20px 24px;margin-bottom:18px;display:flex;align-items:center;gap:18px">
+    <div style="font-size:2.4rem;line-height:1">⚡</div>
+    <div style="flex:1">
+      <div style="font-size:1.18rem;font-weight:700;color:#e2d9f3;letter-spacing:.06em">BLACKLIGHT</div>
+      <div style="font-size:.83em;color:#a78bfa;margin-top:2px">Autonomous money-making agent — runs above Hermes without user input</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div id="bl-status-dot" style="width:10px;height:10px;border-radius:50%;background:#6b7280;box-shadow:0 0 0 0 #7c3aed;transition:background .4s"></div>
+      <span id="bl-status-label" style="font-size:.82em;color:#a78bfa;font-weight:600">Idle</span>
+    </div>
+  </div>
+
+  <!-- Control row -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🎯</span> Goal &amp; Control</div>
+      <button class="btn btn-ghost btn-sm" onclick="blRefresh()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      Set a goal, then hit <strong>Start</strong>. BLACKLIGHT will find opportunities, analyze them with Hermes, generate outreach, and iterate — without waiting for input.
+    </p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:220px">
+        <label style="font-size:.82em;color:var(--text-muted);display:block;margin-bottom:4px">Goal</label>
+        <input id="bl-goal-input" placeholder="e.g. Find local restaurants that need better marketing"
+          style="width:100%;box-sizing:border-box" autocomplete="off"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding-bottom:2px">
+        <label class="toggle" style="width:54px;height:30px" title="Toggle BLACKLIGHT on/off">
+          <input type="checkbox" id="bl-toggle" onchange="blToggle(this.checked)"/>
+          <span class="slider" style="border-radius:30px"></span>
+        </label>
+        <span id="bl-toggle-label" style="font-size:.9em;font-weight:600;color:var(--text-muted);min-width:52px">OFF</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="grid-stat" style="margin-bottom:18px" id="bl-stat-cards">
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#a855f7">🔄</div>
+      <div class="stat-body"><div class="val" id="bl-stat-cycle">0</div><div class="lbl">Cycles Run</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#22d3ee">🎯</div>
+      <div class="stat-body"><div class="val" id="bl-stat-opps">0</div><div class="lbl">Opportunities Found</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#4ade80">⚡</div>
+      <div class="stat-body"><div class="val" id="bl-stat-actions">0</div><div class="lbl">Actions Taken</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#fb923c">🕐</div>
+      <div class="stat-body"><div class="val" id="bl-stat-last" style="font-size:.75em">—</div><div class="lbl">Last Activity</div></div>
+    </div>
+  </div>
+
+  <!-- Live activity log -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📡</span> Live Activity Log</div>
+      <button class="btn btn-ghost btn-sm" onclick="blLoadLogs()">↻ Refresh</button>
+    </div>
+    <div id="bl-log" style="font-family:var(--font-mono,monospace);font-size:.77em;background:var(--bg-deep,#0d1117);border-radius:8px;padding:12px;height:340px;overflow-y:auto;color:#c9d1d9;line-height:1.7">
+      <span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>
+    </div>
+  </div>
+
+</div>
+
 </main>
 
 <div id="toast"></div>
@@ -2581,6 +2744,7 @@ function switchTab(tab, btn) {
   if (tab === 'integrations') loadIntegrations();
   if (tab === 'history') loadHistory();
   if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
+  if (tab === 'blacklight') { blRefresh(); blLoadLogs(); }
 }
 
 function toast(msg, type='success') {
@@ -2784,6 +2948,11 @@ async function loadDashboard() {
   // Try to determine real gateway status from the doctor endpoint
   const gatewayOk = sys.gateway_ok !== undefined ? !!sys.gateway_ok : (document.getElementById('stat-gateway')?.textContent === 'Online');
   updateHealthChecks({running_bots: running, ollama_ok: d.ollama_ok !== undefined ? !!d.ollama_ok : !!sys.ollama_ok, gateway_ok: gatewayOk});
+  document.getElementById('system-info').textContent = sys.output || '(no output)';
+
+  // Sync the BLACKLIGHT quick-toggle on the dashboard
+  const bl = await api('/api/blacklight/status');
+  _blSyncUI(bl.running || false, bl.goal || '');
 }
 
 async function loadLiveOffice() {
@@ -4979,6 +5148,101 @@ function connectSSE() {
   };
 }
 connectSSE();
+// ── BLACKLIGHT ───────────────────────────────────────────────────────────────
+const BL_REFRESH_INTERVAL_MS = 8000;  // auto-refresh rate while BLACKLIGHT is running
+let _blAutoRefreshTimer = null;
+
+function _blSyncUI(running, goal) {
+  // status dot + label (in BLACKLIGHT tab header)
+  const dot = document.getElementById('bl-status-dot');
+  if (dot) dot.style.background = running ? '#a855f7' : '#6b7280';
+  const lbl = document.getElementById('bl-status-label');
+  if (lbl) lbl.textContent = running ? '⚡ Running' : 'Idle';
+
+  // tab toggle
+  const tabToggle = document.getElementById('bl-toggle');
+  if (tabToggle) tabToggle.checked = running;
+  const tabLbl = document.getElementById('bl-toggle-label');
+  if (tabLbl) { tabLbl.textContent = running ? 'ON' : 'OFF'; tabLbl.style.color = running ? '#a855f7' : 'var(--text-muted)'; }
+
+  // dashboard toggle
+  const dashToggle = document.getElementById('dash-bl-toggle');
+  if (dashToggle) dashToggle.checked = running;
+  const dashSub = document.getElementById('dash-bl-sublabel');
+  if (dashSub) dashSub.textContent = running ? `⚡ Running — ${goal || 'no goal set'}` : 'Autonomous agent — idle';
+
+  // goal input (pre-fill if known)
+  const goalEl = document.getElementById('bl-goal-input');
+  if (goalEl && goal && !goalEl.value) goalEl.value = goal;
+
+  // auto-refresh timer
+  if (running && !_blAutoRefreshTimer) {
+    _blAutoRefreshTimer = setInterval(() => { blRefresh(); blLoadLogs(); }, BL_REFRESH_INTERVAL_MS);
+  } else if (!running && _blAutoRefreshTimer) {
+    clearInterval(_blAutoRefreshTimer);
+    _blAutoRefreshTimer = null;
+  }
+}
+
+async function blRefresh() {
+  const d = await api('/api/blacklight/status');
+  const running = d.running || false;
+  document.getElementById('bl-stat-cycle').textContent   = d.cycle   || 0;
+  document.getElementById('bl-stat-opps').textContent    = d.opportunities_found || 0;
+  document.getElementById('bl-stat-actions').textContent = d.actions_taken || 0;
+  const last = d.last_activity ? d.last_activity.replace('T',' ').replace('Z','') : '—';
+  document.getElementById('bl-stat-last').textContent    = last;
+  _blSyncUI(running, d.goal || '');
+}
+
+async function blLoadLogs() {
+  const entries = await api('/api/blacklight/logs?limit=80');
+  const el = document.getElementById('bl-log');
+  if (!el) return;
+  if (!entries || !entries.length) {
+    el.innerHTML = '<span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>';
+    return;
+  }
+  const _levelColor = { system:'#818cf8', cycle:'#a78bfa', info:'#67e8f9', action:'#4ade80',
+                        result:'#facc15', eval:'#fb923c', improve:'#f472b6',
+                        warn:'#fbbf24', error:'#f87171' };
+  const html = entries.slice().reverse().map(e => {
+    const col   = _levelColor[e.level] || '#c9d1d9';
+    const ts    = (e.ts || '').replace('T',' ').replace('Z','');
+    const badge = `<span style="color:${col};font-weight:600;min-width:54px;display:inline-block">[${e.level || 'info'}]</span>`;
+    const msg   = (e.msg || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<div>${badge} <span style="color:#6b7280;font-size:.72em">${ts}</span> ${msg}</div>`;
+  }).join('');
+  el.innerHTML = html;
+}
+
+async function blToggle(on) {
+  // Sync both toggles immediately so neither feels laggy
+  _blSyncUI(on, document.getElementById('bl-goal-input')?.value || '');
+
+  if (on) {
+    const goal = (document.getElementById('bl-goal-input')?.value || '').trim();
+    if (!goal) {
+      toast('Set a goal first — switch to the ⚡ BLACKLIGHT tab', 'error');
+      _blSyncUI(false, '');
+      return;
+    }
+    const r = await api('/api/blacklight/start', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({goal})});
+    if (r.ok) {
+      toast('⚡ BLACKLIGHT started!');
+      blRefresh();
+      blLoadLogs();
+    } else {
+      toast(r.message || 'Failed to start', 'error');
+      _blSyncUI(false, '');
+    }
+  } else {
+    const r = await api('/api/blacklight/stop', {method:'POST'});
+    toast(r.ok ? '■ BLACKLIGHT stopped' : (r.message || 'Stop failed'), r.ok ? 'info' : 'error');
+    setTimeout(blRefresh, 800);
+  }
+}
 </script>
 </body>
 </html>"""
@@ -5419,19 +5683,12 @@ def _sanitize_for_log(text: str) -> str:
 
 @app.get("/api/chat")
 def get_chat():
-    messages = []
-    if CHATLOG.exists():
-        try:
-            for line in CHATLOG.read_text().splitlines():
-                if line.strip():
-                    messages.append(json.loads(line))
-        except Exception:
-            pass
-    return JSONResponse({"messages": messages[-100:]})
+    messages = _read_last_n_lines(CHATLOG, 100)
+    return JSONResponse({"messages": messages})
 
 
 @app.post("/api/chat")
-def post_chat(payload: dict):
+async def post_chat(payload: dict):
     raw_message = (payload or {}).get("message", "").strip()
     model_route = ((payload or {}).get("model_route") or "").strip().lower()
     if not raw_message:
@@ -5447,8 +5704,8 @@ def post_chat(payload: dict):
     entry = {"ts": now_iso(), "type": "user", "message": message, "model_route": model_route}
     append_chatlog(entry)
 
-    # Simple command handling
-    response = handle_command(message, model_route=model_route)
+    # Run handle_command in a thread pool to avoid blocking the async event loop
+    response = await run_in_threadpool(handle_command, message, model_route=model_route)
     safe_response = _sanitize_for_log(response)
     resp_entry = {"ts": now_iso(), "type": "agent", "message": safe_response, "model_route": model_route}
     append_chatlog(resp_entry)
@@ -6411,17 +6668,14 @@ WORKER_BUNDLES_FILE = CONFIG_DIR / "worker_bundles.json"
 
 
 def _load_worker_bundles() -> list:
-    if not WORKER_BUNDLES_FILE.exists():
-        return []
-    try:
-        return json.loads(WORKER_BUNDLES_FILE.read_text())
-    except Exception:
-        return []
+    data = _cached_read(WORKER_BUNDLES_FILE)
+    return data if isinstance(data, list) else []
 
 
 def _save_worker_bundles(bundles: list) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     WORKER_BUNDLES_FILE.write_text(json.dumps(bundles, indent=2))
+    _invalidate_cache(WORKER_BUNDLES_FILE)
 
 
 # ─── Worker Bundle API ────────────────────────────────────────────────────────
@@ -6857,17 +7111,14 @@ _HOURS_PER_EVENT = {
 
 
 def _load_metrics() -> dict:
-    if not METRICS_FILE.exists():
-        return {"summary": {}, "events": []}
-    try:
-        return json.loads(METRICS_FILE.read_text())
-    except Exception:
-        return {"summary": {}, "events": []}
+    data = _cached_read(METRICS_FILE)
+    return data if data else {"summary": {}, "events": []}
 
 
 def _save_metrics(data: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     METRICS_FILE.write_text(json.dumps(data, indent=2))
+    _invalidate_cache(METRICS_FILE)
 
 
 def _recalc_summary(events: list) -> dict:
@@ -7045,17 +7296,14 @@ def deploy_template(template_id: str):
 # ─── Guardrails API ───────────────────────────────────────────────────────────
 
 def _load_guardrails() -> dict:
-    if not GUARDRAILS_FILE.exists():
-        return {"pending": [], "log": [], "settings": {}, "summary": {}}
-    try:
-        return json.loads(GUARDRAILS_FILE.read_text())
-    except Exception:
-        return {"pending": [], "log": [], "settings": {}, "summary": {}}
+    data = _cached_read(GUARDRAILS_FILE)
+    return data if data else {"pending": [], "log": [], "settings": {}, "summary": {}}
 
 
 def _save_guardrails(data: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     GUARDRAILS_FILE.write_text(json.dumps(data, indent=2))
+    _invalidate_cache(GUARDRAILS_FILE)
 
 
 def _recalc_guardrail_summary(data: dict) -> dict:
@@ -7200,17 +7448,14 @@ def save_guardrail_settings(payload: dict):
 # ─── Memory API ───────────────────────────────────────────────────────────────
 
 def _load_memory() -> dict:
-    if not MEMORY_FILE.exists():
-        return {"clients": {}, "recent_interactions": []}
-    try:
-        return json.loads(MEMORY_FILE.read_text())
-    except Exception:
-        return {"clients": {}, "recent_interactions": []}
+    data = _cached_read(MEMORY_FILE)
+    return data if data else {"clients": {}, "recent_interactions": []}
 
 
 def _save_memory(data: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     MEMORY_FILE.write_text(json.dumps(data, indent=2))
+    _invalidate_cache(MEMORY_FILE)
 
 
 @app.get("/api/memory")
@@ -8248,5 +8493,97 @@ def save_integration_alias(payload: dict):
     return JSONResponse({"ok": True, "integration": integration_id})
 
 
+# ── BLACKLIGHT API ────────────────────────────────────────────────────────────
+
+_blacklight_mod = None
+
+
+def _load_blacklight_module():
+    """Lazy-import and cache the blacklight module from the bots directory."""
+    global _blacklight_mod
+    if _blacklight_mod is not None:
+        return _blacklight_mod
+    _bl_path = AI_HOME / "bots" / "blacklight"
+    if str(_bl_path) not in sys.path:
+        sys.path.insert(0, str(_bl_path))
+    import importlib
+    _blacklight_mod = importlib.import_module("blacklight")
+    return _blacklight_mod
+
+
+@app.get("/api/blacklight/status")
+def blacklight_status():
+    """Return BLACKLIGHT running state and stats."""
+    try:
+        bl = _load_blacklight_module()
+        return JSONResponse(bl.get_status())
+    except Exception as exc:
+        logger.warning("blacklight status error: %s", exc)
+        return JSONResponse({"running": False, "goal": "", "cycle": 0,
+                             "opportunities_found": 0, "actions_taken": 0,
+                             "last_activity": None})
+
+
+@app.post("/api/blacklight/start")
+def blacklight_start(payload: dict):
+    """Start the BLACKLIGHT autonomous loop with the given goal."""
+    goal = (payload.get("goal") or "").strip()
+    if not goal:
+        raise HTTPException(400, "goal is required")
+    try:
+        bl = _load_blacklight_module()
+        started = bl.start(goal)
+        if started:
+            return JSONResponse({"ok": True, "goal": goal,
+                                 "message": "BLACKLIGHT started"})
+        return JSONResponse({"ok": False, "message": "BLACKLIGHT is already running"})
+    except Exception as exc:
+        logger.error("blacklight start error: %s", exc)
+        raise HTTPException(500, "Failed to start BLACKLIGHT")
+
+
+@app.post("/api/blacklight/stop")
+def blacklight_stop():
+    """Stop the BLACKLIGHT autonomous loop."""
+    try:
+        bl = _load_blacklight_module()
+        stopped = bl.stop()
+        return JSONResponse({"ok": stopped,
+                             "message": "BLACKLIGHT stopped" if stopped
+                             else "BLACKLIGHT was not running"})
+    except Exception as exc:
+        logger.error("blacklight stop error: %s", exc)
+        raise HTTPException(500, "Failed to stop BLACKLIGHT")
+
+
+@app.get("/api/blacklight/logs")
+def blacklight_logs(limit: int = 100):
+    """Return recent BLACKLIGHT log entries."""
+    try:
+        bl = _load_blacklight_module()
+        return JSONResponse(bl.get_logs(limit=min(limit, 500)))
+    except Exception as exc:
+        logger.warning("blacklight logs error: %s", exc)
+        return JSONResponse([])
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host=HOST, port=PORT)
+    _trim_jsonl(CHATLOG, 1000)
+    _trim_jsonl(ACTIVITY_LOG, 2000)
+
+    try:
+        import uvloop  # noqa: F401
+        _loop = "uvloop"
+    except ImportError:
+        _loop = "asyncio"
+
+    uvicorn.run(
+        app,
+        host=HOST,
+        port=PORT,
+        workers=1,
+        loop=_loop,
+        http="httptools",
+        access_log=False,
+        server_header=False,
+    )
