@@ -24,7 +24,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -191,6 +191,10 @@ AGENT_TEMPLATES_FILE = CONFIG_DIR / "agent_templates.json"
 
 # Source agent_templates.json path (bundled in repo config directory)
 _REPO_TEMPLATES_FILE = Path(__file__).parent.parent.parent / "config" / "agent_templates.json"
+# Source skills_library.json path (bundled in repo config directory)
+_REPO_SKILLS_FILE = Path(__file__).parent.parent.parent / "config" / "skills_library.json"
+# Source agent_capabilities.json path (bundled in repo config directory)
+_REPO_CAPS_FILE = Path(__file__).parent.parent.parent / "config" / "agent_capabilities.json"
 
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
@@ -266,6 +270,30 @@ AGENTS_BY_MODE = {
     "chatbot-builder",
     "creator-agency",
     "recruiter",
+    # Additional agents with run.sh
+    "arbitrage-bot",
+    "course-creator",
+    "faceless-video",
+    "financial-deepsearch",
+    "hr-manager",
+    "memecoin-creator",
+    "mirofish-researcher",
+    "newsletter-bot",
+    "polymarket-trader",
+    "print-on-demand",
+    "qa-tester",
+    "signal-community",
+    "skills-manager",
+    "status-reporter",
+    # Agents without run.sh but with Python implementation
+    "ad-campaign-wizard",
+    "cold-outreach-assassin",
+    "conversion-rate-optimizer",
+    "lead-hunter-elite",
+    "linkedin-growth-hacker",
+    "partnership-matchmaker",
+    "referral-rocket",
+    "sales-closer-pro",
   ],
 }
 
@@ -398,6 +426,39 @@ def _ollama_reachable(ollama_host: str) -> bool:
 def _detect_llm_provider(model_route: Optional[str] = None) -> tuple[Optional[str], str, dict[str, str]]:
   runtime_env = _load_runtime_env_map()
   route = (model_route or "").strip().lower()
+
+  if route == "auto":
+    # Cost-effective order: Ollama (free) → NVIDIA (free) → Groq (fast cheap) → OpenAI → Anthropic
+    ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    if _ollama_reachable(ollama_host):
+      return "ollama", runtime_env.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL", "llama3.2"), runtime_env
+    nvidia_key = runtime_env.get("NVIDIA_API_KEY") or os.environ.get("NVIDIA_API_KEY", "")
+    if nvidia_key:
+      return "nvidia", runtime_env.get("NIM_BULK_MODEL") or os.environ.get("NIM_BULK_MODEL", "meta/llama-3.1-8b-instruct"), runtime_env
+    groq_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+    if groq_key:
+      return "groq", runtime_env.get("GROQ_MODEL") or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"), runtime_env
+    openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
+      return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o-mini"), runtime_env
+    anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+      return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5"), runtime_env
+
+  if route == "nvidia":
+    nvidia_key = runtime_env.get("NVIDIA_API_KEY") or os.environ.get("NVIDIA_API_KEY", "")
+    if nvidia_key:
+      return "nvidia", runtime_env.get("NIM_BULK_MODEL") or os.environ.get("NIM_BULK_MODEL", "meta/llama-3.1-8b-instruct"), runtime_env
+
+  if route == "openai":
+    openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
+      return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o"), runtime_env
+
+  if route == "anthropic":
+    anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+      return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
 
   if route == "groq":
     groq_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
@@ -812,16 +873,17 @@ INDEX_HTML = r"""<!doctype html>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg:#040b18;--surface:rgba(10,18,35,0.95);--surface2:rgba(15,25,48,0.9);
-      --glass:rgba(255,255,255,0.04);--border:rgba(148,163,184,0.1);
-      --primary:#818cf8;--primary-dark:#6366f1;--primary-light:#a5b4fc;--accent:#34d399;--accent2:#22d3ee;
-      --success:#10b981;--danger:#f43f5e;--warning:#f59e0b;
-      --text:#f0f4ff;--text-muted:#475569;--text-secondary:#94a3b8;
-      --radius:14px;--radius-sm:9px;--shadow:0 8px 40px rgba(0,0,0,.7);
-      --glow-primary:0 0 28px rgba(99,102,241,.35);
-      --glow-success:0 0 28px rgba(16,185,129,.35);
-      --glow-danger:0 0 28px rgba(244,63,94,.35);
+      --bg:#0a0a0a;--surface:rgba(18,18,18,0.98);--surface2:rgba(24,24,24,0.95);
+      --glass:rgba(255,255,255,0.03);--border:rgba(212,175,55,0.15);
+      --primary:#D4AF37;--primary-dark:#B8960C;--primary-light:#F0D060;--accent:#C9A227;--accent2:#E8C84A;
+      --success:#22c55e;--danger:#ef4444;--warning:#f59e0b;
+      --text:#f5f5f0;--text-muted:#666;--text-secondary:#999;
+      --radius:12px;--radius-sm:8px;--shadow:0 8px 40px rgba(0,0,0,.9);
+      --glow-primary:0 0 28px rgba(212,175,55,.35);
+      --glow-success:0 0 28px rgba(34,197,94,.35);
+      --glow-danger:0 0 28px rgba(239,68,68,.35);
       --sidebar-w:220px;
+      --gold:#D4AF37;--gold-light:#F0D060;--gold-dark:#B8960C;
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth}
@@ -837,12 +899,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     body::before{
       width:900px;height:700px;top:-200px;left:-200px;
-      background:radial-gradient(circle,rgba(99,102,241,.18) 0%,transparent 65%);
+      background:radial-gradient(circle,rgba(212,175,55,.08) 0%,transparent 65%);
       animation:blobDrift 18s ease-in-out infinite alternate;
     }
     body::after{
       width:700px;height:600px;bottom:-100px;right:-100px;
-      background:radial-gradient(circle,rgba(16,185,129,.13) 0%,transparent 65%);
+      background:radial-gradient(circle,rgba(212,175,55,.05) 0%,transparent 65%);
       animation:blobDrift2 22s ease-in-out infinite alternate;
     }
     @keyframes blobDrift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(80px,50px) scale(1.1)}100%{transform:translate(-40px,80px) scale(0.95)}}
@@ -869,26 +931,26 @@ INDEX_HTML = r"""<!doctype html>
     @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
     @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
     @keyframes countUp{from{opacity:0;transform:scale(.8) translateY(6px)}to{opacity:1;transform:none}}
-    @keyframes glowPulse{0%,100%{box-shadow:0 0 20px rgba(99,102,241,.25),0 0 0 rgba(99,102,241,.1)}50%{box-shadow:0 0 40px rgba(99,102,241,.45),0 0 80px rgba(99,102,241,.12)}}
-    @keyframes borderGlow{0%,100%{border-color:rgba(99,102,241,.25)}50%{border-color:rgba(129,140,248,.6)}}
+    @keyframes glowPulse{0%,100%{box-shadow:0 0 20px rgba(212,175,55,.15),0 0 0 rgba(212,175,55,.05)}50%{box-shadow:0 0 40px rgba(212,175,55,.25),0 0 80px rgba(212,175,55,.08)}}
+    @keyframes borderGlow{0%,100%{border-color:rgba(212,175,55,.2)}50%{border-color:rgba(212,175,55,.5)}}
 
     /* ── Header ── */
     header{
       background:linear-gradient(100deg,rgba(6,12,28,0.98) 0%,rgba(10,18,42,0.98) 60%,rgba(8,15,35,0.98) 100%);
       backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
       padding:14px 32px;display:flex;align-items:center;justify-content:space-between;
-      border-bottom:1px solid rgba(129,140,248,.15);
+      border-bottom:1px solid rgba(212,175,55,.2);
       position:sticky;top:0;z-index:200;
       animation:glowPulse 8s ease infinite;
     }
     .header-left{display:flex;align-items:center;gap:14px}
     .logo{
       width:42px;height:42px;
-      background:linear-gradient(135deg,#4f46e5,#818cf8);
+      background:linear-gradient(135deg,#B8960C,#D4AF37);
       border-radius:12px;display:flex;align-items:center;justify-content:center;
-      font-size:1.3em;border:1px solid rgba(165,180,252,.25);
+      font-size:1.3em;border:1px solid rgba(212,175,55,.3);
       animation:float 5s ease-in-out infinite;
-      box-shadow:0 0 20px rgba(99,102,241,.5),inset 0 1px 0 rgba(255,255,255,.15);
+      box-shadow:0 0 20px rgba(212,175,55,.5),inset 0 1px 0 rgba(255,255,255,.15);
     }
     .header-title h1{
       font-size:1.18em;font-weight:700;letter-spacing:-.03em;
@@ -934,10 +996,10 @@ INDEX_HTML = r"""<!doctype html>
       font-family:inherit;position:relative;letter-spacing:.01em;
     }
     nav button:hover{color:var(--text);background:rgba(255,255,255,.04)}
-    nav button.active{color:var(--primary-light);border-bottom-color:var(--primary);
-      background:rgba(99,102,241,.07)}
+    nav button.active{color:var(--gold-light);border-bottom-color:var(--gold);
+      background:rgba(212,175,55,.07)}
     nav button.active::after{content:'';position:absolute;bottom:0;left:20%;right:20%;height:2px;
-      background:linear-gradient(90deg,transparent,var(--primary),transparent);
+      background:linear-gradient(90deg,transparent,var(--gold),transparent);
       border-radius:2px 2px 0 0;filter:blur(1px)}
 
     /* ── Main content ── */
@@ -961,7 +1023,7 @@ INDEX_HTML = r"""<!doctype html>
       content:'';position:absolute;top:0;left:0;right:0;height:1px;
       background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);
     }
-    .card:hover{border-color:rgba(129,140,248,.2);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(129,140,248,.06);transform:translateY(-1px)}
+    .card:hover{border-color:rgba(212,175,55,.25);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(212,175,55,.08);transform:translateY(-1px)}
     .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
     .card-title{font-size:.92em;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;letter-spacing:.005em}
     .card-title .icon{color:var(--primary-light)}
@@ -990,7 +1052,7 @@ INDEX_HTML = r"""<!doctype html>
       content:'';position:absolute;top:0;left:0;right:0;height:1px;
       background:linear-gradient(90deg,transparent,var(--stat-top,rgba(255,255,255,.1)),transparent);
     }
-    .stat-card:hover{transform:translateY(-3px);box-shadow:0 10px 32px rgba(0,0,0,.4),0 0 0 1px rgba(129,140,248,.09);border-color:rgba(129,140,248,.2)}
+    .stat-card:hover{transform:translateY(-3px);box-shadow:0 10px 32px rgba(0,0,0,.4),0 0 0 1px rgba(212,175,55,.12);border-color:rgba(212,175,55,.25)}
     .stat-card:hover::before{opacity:1}
     .stat-icon{
       width:48px;height:48px;border-radius:14px;display:flex;align-items:center;
@@ -1001,8 +1063,8 @@ INDEX_HTML = r"""<!doctype html>
       background:linear-gradient(135deg,rgba(255,255,255,.12) 0%,transparent 50%)}
     .stat-card:hover .stat-icon{transform:scale(1.1) rotate(-5deg);box-shadow:0 0 16px var(--stat-glow,rgba(99,102,241,.4))}
     .stat-icon.green{background:linear-gradient(135deg,rgba(16,185,129,.2),rgba(52,211,153,.08));color:#34d399;--stat-glow:rgba(16,185,129,.45)}
-    .stat-icon.blue{background:linear-gradient(135deg,rgba(99,102,241,.2),rgba(129,140,248,.08));color:var(--primary-light);--stat-glow:rgba(99,102,241,.45)}
-    .stat-icon.cyan{background:linear-gradient(135deg,rgba(34,211,238,.2),rgba(52,211,238,.08));color:var(--accent2);--stat-glow:rgba(34,211,238,.45)}
+    .stat-icon.blue{background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.08));color:var(--gold-light);--stat-glow:rgba(212,175,55,.45)}
+    .stat-icon.cyan{background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.05));color:var(--accent2);--stat-glow:rgba(212,175,55,.35)}
     .stat-icon.yellow{background:linear-gradient(135deg,rgba(245,158,11,.2),rgba(251,191,36,.08));color:#fbbf24;--stat-glow:rgba(245,158,11,.45)}
     .stat-body .val{font-size:1.65em;font-weight:700;color:var(--text);
       animation:countUp .5s ease;letter-spacing:-.03em;line-height:1}
@@ -1010,8 +1072,8 @@ INDEX_HTML = r"""<!doctype html>
 
     /* ── System control hero ── */
     .sys-control{
-      background:linear-gradient(135deg,rgba(79,70,229,.1) 0%,rgba(99,102,241,.06) 50%,rgba(34,211,238,.04) 100%);
-      border:1px solid rgba(99,102,241,.2);border-radius:var(--radius);
+      background:linear-gradient(135deg,rgba(212,175,55,.08) 0%,rgba(212,175,55,.04) 50%,rgba(212,175,55,.02) 100%);
+      border:1px solid rgba(212,175,55,.25);border-radius:var(--radius);
       padding:26px 30px;margin-bottom:16px;
       display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;
       position:relative;overflow:hidden;
@@ -1031,11 +1093,11 @@ INDEX_HTML = r"""<!doctype html>
     .sys-status-ring{position:relative;width:60px;height:60px;flex-shrink:0}
     .sys-status-ring .ring-bg{
       width:60px;height:60px;border-radius:50%;
-      border:2px solid rgba(129,140,248,.25);
+      border:2px solid rgba(212,175,55,.3);
       display:flex;align-items:center;justify-content:center;
       font-size:1.65em;
-      background:linear-gradient(135deg,rgba(99,102,241,.15),rgba(79,70,229,.08));
-      box-shadow:0 0 20px rgba(99,102,241,.25);
+      background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.05));
+      box-shadow:0 0 20px rgba(212,175,55,.3);
     }
     .sys-status-ring .ring-pulse{
       position:absolute;inset:-4px;border-radius:50%;
@@ -1446,6 +1508,30 @@ INDEX_HTML = r"""<!doctype html>
     .office-window::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(129,140,248,.2)}
     .office-plant{position:absolute;bottom:106px;width:18px;height:32px;background:linear-gradient(180deg,#0f2e1c,#0b2016);border-radius:5px 5px 2px 2px;border:1px solid rgba(52,211,153,.2)}
     .office-plant::before{content:'';position:absolute;left:-8px;top:-28px;width:34px;height:30px;border-radius:50% 50% 0 50%;background:radial-gradient(circle at 40% 40%,#34d399,#059669);box-shadow:0 0 14px rgba(52,211,153,.3)}
+    .health-check-item{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)}
+    .health-check-item .hc-dot{font-size:.65em;color:var(--text-muted)}
+    .health-check-item.ok .hc-dot{color:var(--success)}
+    .health-check-item.ok .hc-dot::after{content:' ✓'}
+    .health-check-item.warn .hc-dot{color:var(--warning)}
+    .health-check-item.warn .hc-dot::after{content:' ⚠'}
+    .health-check-item.err .hc-dot{color:var(--danger)}
+    .health-check-item.err .hc-dot::after{content:' ✕'}
+    .health-check-item .hc-val{margin-left:auto;font-weight:600;font-size:.88em}
+    .health-check-item.ok .hc-val{color:var(--success)}
+    .health-check-item.warn .hc-val{color:var(--warning)}
+    .health-check-item.err .hc-val{color:var(--danger)}
+    .office-desk-item{position:absolute;width:70px;height:40px;background:linear-gradient(180deg,rgba(212,175,55,.15),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.2);border-radius:4px}
+    .robot-agent{position:absolute;cursor:pointer;transition:transform .3s;animation:robotWalk 3s ease-in-out infinite}
+    .robot-agent:hover{transform:scale(1.15)!important;z-index:100}
+    .robot-body{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2em;border:2px solid var(--gold);box-shadow:0 0 12px rgba(212,175,55,.4);background:var(--surface2)}
+    .robot-body.busy{border-color:var(--success);box-shadow:0 0 12px rgba(34,197,94,.4);animation:robotBusy .8s ease-in-out infinite}
+    .robot-name{font-size:.6em;color:var(--gold-light);text-align:center;margin-top:3px;white-space:nowrap;max-width:60px;overflow:hidden;text-overflow:ellipsis}
+    .robot-status-dot{width:8px;height:8px;border-radius:50%;margin:2px auto;background:var(--text-muted)}
+    .robot-status-dot.running{background:var(--success);box-shadow:0 0 6px var(--success);animation:blink 1.5s infinite}
+    .robot-status-dot.busy{background:var(--gold);box-shadow:0 0 6px var(--gold);animation:blink .8s infinite}
+    @keyframes robotWalk{0%,100%{transform:translateY(0) rotate(-1deg)}25%{transform:translateY(-4px) rotate(1deg)}50%{transform:translateY(-2px) rotate(0deg)}75%{transform:translateY(-5px) rotate(-1deg)}}
+    @keyframes robotBusy{0%,100%{box-shadow:0 0 8px rgba(34,197,94,.4)}50%{box-shadow:0 0 20px rgba(34,197,94,.8)}}
+    @keyframes robotWalk2{0%,100%{transform:translateY(0) rotate(1deg)}25%{transform:translateY(-3px) rotate(-1deg)}50%{transform:translateY(-5px) rotate(0deg)}75%{transform:translateY(-2px) rotate(1deg)}}
   </style>
 </head>
 <body>
@@ -1488,6 +1574,8 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em">⚡ BLACKLIGHT</button>
+  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="background:linear-gradient(135deg,#0a1628,#0f2240);color:#f59e0b;border:1px solid #d97706;font-weight:700;letter-spacing:.04em">🔥 ASCEND FORGE</button>
 </nav>
 
 <main>
@@ -1522,22 +1610,30 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <div class="grid-stat" id="stat-cards">
-    <div class="stat-card">
-      <div class="stat-icon green">🟢</div>
-      <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Agents Running</div></div>
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('running')" style="cursor:pointer" aria-label="Agents Running – click for details">
+      <div class="stat-icon green">●</div>
+      <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Agents Running</div><div class="stat-trend" id="stat-running-sub" style="font-size:.7em;color:var(--gold);margin-top:3px"></div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-icon blue">🤖</div>
-      <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Agents</div></div>
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('total')" style="cursor:pointer" aria-label="Total Agents – click for details">
+      <div class="stat-icon blue">◆</div>
+      <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Agents</div><div class="stat-trend" id="stat-total-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-icon cyan">📡</div>
-      <div class="stat-body"><div class="val" id="stat-gateway">–</div><div class="lbl">Gateway</div></div>
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('gateway')" style="cursor:pointer" aria-label="Gateway – click for details">
+      <div class="stat-icon cyan">◉</div>
+      <div class="stat-body"><div class="val" id="stat-gateway">–</div><div class="lbl">Gateway</div><div class="stat-trend" id="stat-gateway-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-icon yellow">⏱️</div>
-      <div class="stat-body"><div class="val" id="stat-uptime">–</div><div class="lbl">Uptime</div></div>
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('uptime')" style="cursor:pointer" aria-label="Uptime – click for details">
+      <div class="stat-icon yellow">◎</div>
+      <div class="stat-body"><div class="val" id="stat-uptime">–</div><div class="lbl">Uptime</div><div class="stat-trend" id="stat-uptime-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
     </div>
+  </div>
+  <!-- Stat detail panel -->
+  <div id="stat-detail-panel" style="display:none;background:var(--surface2);border:1px solid var(--gold);border-radius:var(--radius);padding:16px;margin-bottom:16px;animation:fadeIn .2s ease">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" id="stat-detail-title">Details</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stat-detail-panel').style.display='none'">✕</button>
+    </div>
+    <div id="stat-detail-content" style="font-size:.88em;color:var(--text-secondary)"></div>
   </div>
 
   <div class="grid2">
@@ -1559,6 +1655,32 @@ INDEX_HTML = r"""<!doctype html>
         <a class="btn btn-ghost btn-sm" href="http://localhost:18789" target="_blank">📡 Gateway</a>
       </div>
       <hr>
+      <div class="card-title" style="margin-bottom:10px"><span class="icon" style="color:var(--gold)">◈</span> System Health</div>
+      <div id="system-health-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.84em">
+        <div class="health-check-item" id="hc-api"><span class="hc-dot">●</span> API Server <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-ollama"><span class="hc-dot">●</span> Ollama LLM <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-agents"><span class="hc-dot">●</span> Agents <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-db"><span class="hc-dot">●</span> State Store <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
+      </div>
+      <div id="system-info" style="display:none"></div>
+      <!-- BLACKLIGHT quick-toggle -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:1.1rem">⚡</span>
+          <div>
+            <div style="font-size:.86em;font-weight:600;color:var(--text)">BLACKLIGHT Mode</div>
+            <div style="font-size:.75em;color:var(--text-muted)" id="dash-bl-sublabel">Autonomous agent — idle</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="toggle" title="Toggle BLACKLIGHT on/off">
+            <input type="checkbox" id="dash-bl-toggle" onchange="blToggle(this.checked)"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
       <div class="card-title" style="margin-bottom:10px"><span class="icon">🔧</span> System Info</div>
       <pre id="system-info" style="font-size:.78em">Click Refresh on the left to load…</pre>
     </div>
@@ -1580,54 +1702,84 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 
 <!-- ── Chat ── -->
-<div id="tab-chat" class="tab-content">
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title"><span class="icon">💬</span> Chat / Task Input</div>
-      <button class="btn btn-ghost btn-sm" onclick="loadChatLog()">↻ Refresh</button>
-    </div>
-    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">
-      Send tasks here — same as WhatsApp. The selected model and routed agent handle execution.
-    </p>
-    <div class="chat-model-row">
-      <label for="chat-model" style="margin:0;min-width:120px">Model Route</label>
-      <select id="chat-model">
-        <option value="ollama">🦙 Ollama • Llama</option>
-        <option value="groq">🧠 Groq • Llama 3.3</option>
-        <option value="external">🌐 External AI</option>
-      </select>
-    </div>
-    <div id="chat-log"><div class="empty"><div class="icon">💬</div><p>No messages yet.</p></div></div>
-    <div class="chat-input-row">
-      <div style="flex:1">
-        <textarea id="chat-input" placeholder="Type a task or question…" rows="2"
-          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
+<div id="tab-chat" class="tab-content" style="display:none">
+  <div style="display:flex;flex-direction:column;height:calc(100vh - 115px);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+    <!-- Chat header bar -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:36px;height:36px;background:linear-gradient(135deg,#B8960C,#D4AF37);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1em">◈</div>
+        <div>
+          <div style="font-weight:700;font-size:.95em;color:var(--text)">AI Command Center</div>
+          <div style="font-size:.74em;color:var(--text-muted)">Direct interface to your AI workforce</div>
+        </div>
       </div>
-      <button class="btn btn-primary" onclick="sendChat()" style="height:44px">Send ↗</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.04);border:1px solid rgba(212,175,55,.2);border-radius:8px;padding:6px 12px">
+          <span style="font-size:.78em;color:var(--text-muted);white-space:nowrap">Model:</span>
+          <select id="chat-model" onchange="updateChatModelBadge()" style="background:transparent;border:none;color:var(--gold-light);font-size:.82em;font-weight:600;cursor:pointer;outline:none;font-family:inherit">
+            <option value="auto">⚡ Auto (Cost-Effective)</option>
+            <option value="ollama">🦙 Ollama • Local AI</option>
+            <option value="nvidia">🔷 NVIDIA NIM</option>
+            <option value="openai">🌐 OpenAI</option>
+            <option value="anthropic">🤖 Anthropic Claude</option>
+            <option value="groq">⚡ Groq • Fast</option>
+            <option value="external">🌐 External AI</option>
+          </select>
+        </div>
+        <div id="chat-model-badge" style="font-size:.73em;padding:3px 10px;border-radius:12px;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.25);color:var(--gold)">Auto</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadChatLog()" title="Refresh">↻</button>
+      </div>
     </div>
-    <p style="font-size:.75em;color:var(--text-muted);margin-top:6px">Press Enter to send · Shift+Enter for new line</p>
+    <!-- Chat log -->
+    <div id="chat-log" style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px">
+      <div class="empty"><div class="icon">◈</div><p>No messages yet. Send your first command below.</p></div>
+    </div>
+    <!-- Input bar -->
+    <div style="padding:14px 20px;border-top:1px solid rgba(212,175,55,.12);background:var(--surface2);flex-shrink:0">
+      <div style="display:flex;gap:10px;align-items:flex-end">
+        <textarea id="chat-input" placeholder="Command your AI workforce…" rows="2"
+          style="flex:1;background:rgba(255,255,255,.04);border:1px solid rgba(212,175,55,.2);border-radius:10px;color:var(--text);padding:10px 14px;font-family:inherit;resize:none;font-size:.9em;line-height:1.5;outline:none;transition:border-color .2s"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
+          onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'"></textarea>
+        <button class="btn btn-primary" onclick="sendChat()" style="height:44px;padding:0 20px;background:linear-gradient(135deg,#B8960C,#D4AF37);border:none;color:#000;font-weight:700;border-radius:10px">Send ↗</button>
+      </div>
+      <div style="font-size:.72em;color:var(--text-muted);margin-top:6px">Enter to send · Shift+Enter for new line · <span id="chat-agent-indicator" style="color:var(--gold)">Auto-routing to best agent</span></div>
+    </div>
   </div>
 </div>
 
 <!-- ── Live Office ── -->
-<div id="tab-live-office" class="tab-content">
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title"><span class="icon">🏢</span> Live Office</div>
+<div id="tab-live-office" class="tab-content" style="display:none">
+  <div style="height:calc(100vh - 115px);display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+    <!-- Office header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:32px;height:32px;background:linear-gradient(135deg,#B8960C,#D4AF37);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1em">🏢</div>
+        <div>
+          <div style="font-weight:700;font-size:.92em">Live Office</div>
+          <div id="office-agent-count" style="font-size:.72em;color:var(--text-muted)">Loading agents…</div>
+        </div>
+      </div>
       <button class="btn btn-ghost btn-sm" onclick="loadLiveOffice()">↻ Refresh</button>
     </div>
-    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Running agents appear as live office avatars. Click an avatar to inspect workload, progress, and latest action.</p>
-    <div class="office-wrap" id="office-wrap">
-      <div class="office-window" style="left:6%"></div>
-      <div class="office-window" style="left:41%"></div>
-      <div class="office-window" style="left:76%"></div>
-      <div class="office-floor"></div>
-      <div class="office-desk" style="left:8%"></div>
-      <div class="office-desk" style="left:42%"></div>
-      <div class="office-desk" style="left:74%"></div>
-      <div class="office-plant" style="left:3%"></div>
-      <div class="office-plant" style="left:94%"></div>
-      <div id="office-agents"></div>
+    <!-- Office floor -->
+    <div style="flex:1;position:relative;overflow:hidden;background:linear-gradient(180deg,#111 0%,#0d0d0d 60%,#0a0a0a 100%)">
+      <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(212,175,55,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(212,175,55,.03) 1px,transparent 1px);background-size:60px 60px;pointer-events:none"></div>
+      <div style="position:absolute;bottom:0;left:0;right:0;height:8px;background:linear-gradient(90deg,rgba(212,175,55,.1),rgba(212,175,55,.05),rgba(212,175,55,.1))"></div>
+      <div style="position:absolute;top:20px;left:20px;font-size:.7em;color:rgba(212,175,55,.4);letter-spacing:.1em;text-transform:uppercase">◈ Command Zone</div>
+      <div style="position:absolute;top:20px;left:50%;transform:translateX(-50%);font-size:.7em;color:rgba(212,175,55,.4);letter-spacing:.1em;text-transform:uppercase">◈ Research Zone</div>
+      <div style="position:absolute;top:20px;right:20px;font-size:.7em;color:rgba(212,175,55,.4);letter-spacing:.1em;text-transform:uppercase">◈ Sales Zone</div>
+      <div class="office-desk-item" style="left:5%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:20%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:38%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:55%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:72%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:87%;bottom:100px"></div>
+      <div id="office-agents" style="position:absolute;inset:0"></div>
+    </div>
+    <!-- Agent info bar -->
+    <div style="height:60px;border-top:1px solid rgba(212,175,55,.1);background:var(--surface2);display:flex;align-items:center;padding:0 20px;gap:10px;overflow-x:auto;flex-shrink:0" id="office-agent-bar">
+      <span style="font-size:.78em;color:var(--text-muted);white-space:nowrap">Click a robot to inspect →</span>
     </div>
   </div>
 </div>
@@ -1649,47 +1801,105 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Scheduler ── -->
 <div id="tab-scheduler" class="tab-content">
-  <div class="grid2">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">📅</span> Scheduled Tasks</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadSchedules()">↻ Refresh</button>
+  <div style="display:flex;gap:16px;height:calc(100vh - 130px)">
+    <!-- Left: Agenda calendar -->
+    <div style="width:320px;display:flex;flex-direction:column;gap:12px;flex-shrink:0">
+      <div class="card" style="flex-shrink:0">
+        <div class="card-header">
+          <div class="card-title"><span style="color:var(--gold)">◈</span> Agenda</div>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-ghost btn-sm agenda-view-btn active" onclick="setAgendaView('month',this)">Month</button>
+            <button class="btn btn-ghost btn-sm agenda-view-btn" onclick="setAgendaView('week',this)">Week</button>
+            <button class="btn btn-ghost btn-sm agenda-view-btn" onclick="setAgendaView('day',this)">Day</button>
+          </div>
+        </div>
+        <div id="agenda-nav" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <button class="btn btn-ghost btn-sm" onclick="agendaNav(-1)">&#8249;</button>
+          <span id="agenda-period" style="font-weight:600;font-size:.9em;color:var(--gold)">–</span>
+          <button class="btn btn-ghost btn-sm" onclick="agendaNav(1)">&#8250;</button>
+        </div>
+        <div id="agenda-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:.75em"></div>
       </div>
-      <div id="schedule-list"><div class="empty"><div class="icon">📅</div><p>No tasks yet.</p></div></div>
+      <div class="card" style="flex:1;overflow-y:auto">
+        <div class="card-title" style="margin-bottom:10px"><span style="color:var(--gold)">◈</span> <span id="agenda-day-label">All Tasks</span></div>
+        <div id="schedule-list"><div class="empty"><div class="icon">📅</div><p>No tasks yet.</p></div></div>
+      </div>
     </div>
-    <div class="card">
+    <!-- Right: New task form -->
+    <div class="card" style="flex:1;overflow-y:auto">
       <div class="card-header">
-        <div class="card-title"><span class="icon">➕</span> Add New Task</div>
+        <div class="card-title"><span style="color:var(--gold)">◈</span> Schedule New Task</div>
       </div>
-      <div class="form-group"><label>Task ID (unique)</label><input id="sched-id" placeholder="my_task_1"/></div>
-      <div class="form-group"><label>Label</label><input id="sched-label" placeholder="Hourly status report"/></div>
-      <div class="form-group">
-        <label>Action</label>
-        <select id="sched-action">
-          <option value="log">Log message</option>
-          <option value="start_bot">Start agent</option>
-          <option value="stop_bot">Stop agent</option>
-          <option value="status_report">Send status report</option>
-        </select>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Task Goal / Objective</label>
+          <textarea id="sched-goal" rows="3" placeholder="What should this task achieve? e.g. Generate and send weekly performance report to all stakeholders…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Task ID (unique)</label>
+          <input id="sched-id" placeholder="auto-generated from label" oninput="this.dataset.manuallySet='1'"/>
+        </div>
+        <div class="form-group">
+          <label>Label / Title</label>
+          <input id="sched-label" placeholder="e.g. Weekly Performance Report" oninput="autoSchedId()"/>
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <select id="sched-priority">
+            <option value="high">🔴 High</option>
+            <option value="medium" selected>🟡 Medium</option>
+            <option value="low">🟢 Low</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Action</label>
+          <select id="sched-action" onchange="toggleSchedBot()">
+            <option value="log">Log message</option>
+            <option value="start_bot">Start agent</option>
+            <option value="stop_bot">Stop agent</option>
+            <option value="status_report">Send status report</option>
+            <option value="run_task">Run AI task</option>
+          </select>
+        </div>
+        <div class="form-group" id="sched-bot-row" style="display:none">
+          <label>Agent name</label>
+          <input id="sched-bot" placeholder="e.g. lead-hunter"/>
+        </div>
+        <div class="form-group">
+          <label>Schedule type</label>
+          <select id="sched-type" onchange="toggleSchedType()">
+            <option value="interval">Every N minutes</option>
+            <option value="daily">Daily at time (UTC)</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="once">Once (specific date/time)</option>
+          </select>
+        </div>
+        <div class="form-group" id="sched-interval-row">
+          <label>Interval (minutes)</label>
+          <input id="sched-interval" type="number" value="60" min="1"/>
+        </div>
+        <div class="form-group" id="sched-daily-row" style="display:none">
+          <label>Run at (HH:MM UTC)</label>
+          <input id="sched-daily-time" placeholder="08:00"/>
+        </div>
+        <div class="form-group" id="sched-once-row" style="display:none">
+          <label>Date &amp; Time (UTC)</label>
+          <input id="sched-once-dt" type="datetime-local"/>
+        </div>
+        <div class="form-group" id="sched-weekly-row" style="display:none">
+          <label>Day of Week</label>
+          <select id="sched-weekly-day">
+            <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+            <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+          </select>
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Notes / Instructions</label>
+          <input id="sched-msg" placeholder="Additional instructions or context for this task"/>
+        </div>
       </div>
-      <div class="form-group" id="sched-bot-row" style="display:none">
-        <label>Agent name</label><input id="sched-bot" placeholder="status-reporter"/>
-      </div>
-      <div class="form-group"><label>Message (for log action)</label><input id="sched-msg" placeholder="Task ran"/></div>
-      <div class="form-group">
-        <label>Schedule type</label>
-        <select id="sched-type">
-          <option value="interval">Interval (every N minutes)</option>
-          <option value="daily">Daily at time (UTC)</option>
-        </select>
-      </div>
-      <div class="form-group" id="sched-interval-row">
-        <label>Interval (minutes)</label><input id="sched-interval" type="number" value="60" min="1"/>
-      </div>
-      <div class="form-group" id="sched-daily-row" style="display:none">
-        <label>Run at (HH:MM UTC)</label><input id="sched-daily-time" placeholder="08:00"/>
-      </div>
-      <button class="btn btn-success" onclick="addSchedule()">➕ Add Task</button>
+      <button class="btn btn-success" onclick="addSchedule()" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700">◈ Schedule Task</button>
     </div>
   </div>
 </div>
@@ -1914,9 +2124,20 @@ INDEX_HTML = r"""<!doctype html>
   <!-- Task History -->
   <div class="card" style="margin-top:16px">
     <div class="card-header">
-      <div class="card-title"><span class="icon">📋</span> Recent Tasks</div>
+      <div class="card-title"><span class="icon" style="color:var(--gold)">◈</span> Task History</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadTasks()">↻ Refresh</button>
     </div>
-    <div id="task-history-list"><div class="empty"><p>No task history yet.</p></div></div>
+    <div id="task-history-list"><div class="empty"><p>No completed tasks yet.</p></div></div>
+  </div>
+  <!-- Task detail modal -->
+  <div id="task-detail-modal" role="dialog" aria-modal="true" aria-labelledby="task-detail-heading" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:24px;max-width:640px;width:90%;max-height:80vh;overflow-y:auto" tabindex="-1" id="task-detail-dialog">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div class="card-title" id="task-detail-heading">Task Detail</div>
+        <button class="btn btn-ghost btn-sm" id="task-detail-close-btn" onclick="closeTaskDetail()" aria-label="Close task detail">✕ Close</button>
+      </div>
+      <div id="task-detail-content"></div>
+    </div>
   </div>
 </div>
 
@@ -1928,6 +2149,12 @@ INDEX_HTML = r"""<!doctype html>
       <button class="btn btn-ghost btn-sm" onclick="loadSwarm()">↻ Refresh</button>
     </div>
     <p style="color:var(--text-muted);font-size:.85em;margin-bottom:12px">All AI agents — their capabilities, current status, and workload.</p>
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
+      <input id="swarm-search" placeholder="🔍 Search agents by name, skill, or capability…"
+        style="flex:1;background:var(--surface2);border:1px solid rgba(212,175,55,.2);border-radius:8px;color:var(--text);padding:10px 14px;font-family:inherit;font-size:.88em;outline:none"
+        oninput="filterSwarm(null,null)" onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'" />
+      <button class="btn btn-ghost btn-sm" onclick="loadSwarm()" title="Refresh swarm">↻ Refresh</button>
+    </div>
     <div id="swarm-filter-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
       <button class="btn btn-ghost btn-sm swarm-pill active" onclick="filterSwarm('all',this)">All</button>
       <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('sales',this)">💼 Sales</button>
@@ -1946,9 +2173,12 @@ INDEX_HTML = r"""<!doctype html>
 <div id="tab-commands" class="tab-content">
   <div class="card">
     <div class="card-header">
-      <div class="card-title"><span class="icon">📜</span> WhatsApp Commands Reference</div>
+      <div class="card-title"><span class="icon" style="color:var(--gold)">◈</span> Command Reference</div>
     </div>
-    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Every command works on WhatsApp AND in the Chat tab. Click any command to copy it.</p>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button class="btn btn-primary btn-sm cmd-type-btn active" onclick="switchCmdType('whatsapp',this)" id="cmd-tab-wa" style="background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none">📱 WhatsApp Commands</button>
+      <button class="btn btn-ghost btn-sm cmd-type-btn" onclick="switchCmdType('bot',this)" id="cmd-tab-bot">🤖 Bot Commands</button>
+    </div>
     <input id="cmd-search" placeholder="🔍 Search commands…" oninput="filterCommands()" style="width:100%;margin-bottom:14px" />
     <div id="cmd-category-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px"></div>
     <div id="cmd-list"></div>
@@ -1957,46 +2187,93 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── ROI Metrics ── -->
 <div id="tab-metrics" class="tab-content">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div>
+      <h2 style="font-size:1.1em;font-weight:700;color:var(--text)">ROI &amp; Usage Tracking</h2>
+      <p style="font-size:.8em;color:var(--text-muted)">Real usage data — tracked automatically from all agent activity</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <select id="roi-period" onchange="loadMetrics()" style="font-size:.82em;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:5px 10px">
+        <option value="all">All Time</option>
+        <option value="30d">Last 30 Days</option>
+        <option value="7d">Last 7 Days</option>
+        <option value="today">Today</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="loadMetrics()">↻ Refresh</button>
+    </div>
+  </div>
   <div class="grid-stat" id="roi-stat-cards">
-    <div class="stat-card">
-      <div class="stat-icon blue">✅</div>
-      <div class="stat-body"><div class="val" id="m-tasks">–</div><div class="lbl">Tasks Completed</div></div>
+    <div class="stat-card" style="--stat-top:rgba(212,175,55,.3)">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">✓</div>
+      <div class="stat-body"><div class="val" id="m-tasks">–</div><div class="lbl">Tasks Completed</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-tasks-trend"></div></div>
     </div>
     <div class="stat-card">
-      <div class="stat-icon cyan">🎯</div>
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(34,197,94,.2),rgba(34,197,94,.05));color:var(--success)">⏱</div>
+      <div class="stat-body"><div class="val" id="m-hours">–</div><div class="lbl">AI Hours Worked</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-hours-trend"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold-light)">👤</div>
+      <div class="stat-body"><div class="val" id="m-human-saved">–</div><div class="lbl">Human Hours Saved</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-human-saved-trend"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(34,197,94,.2),rgba(34,197,94,.05));color:var(--success)">€</div>
+      <div class="stat-body"><div class="val" id="m-saved">–</div><div class="lbl">Cost Saved (€)</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-saved-trend"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">◆</div>
+      <div class="stat-body"><div class="val" id="m-bots-used">–</div><div class="lbl">Bots Utilized</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-bots-trend"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">◎</div>
       <div class="stat-body"><div class="val" id="m-leads">–</div><div class="lbl">Leads Generated</div></div>
     </div>
     <div class="stat-card">
-      <div class="stat-icon green">⏱️</div>
-      <div class="stat-body"><div class="val" id="m-hours">–</div><div class="lbl">Hours Saved</div></div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-icon yellow">💶</div>
-      <div class="stat-body"><div class="val" id="m-saved">–</div><div class="lbl">Cost Saved (€)</div></div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-icon green">📧</div>
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(34,197,94,.2),rgba(34,197,94,.05));color:var(--success)">✉</div>
       <div class="stat-body"><div class="val" id="m-emails">–</div><div class="lbl">Emails Sent</div></div>
     </div>
     <div class="stat-card">
-      <div class="stat-icon cyan">📝</div>
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">◈</div>
       <div class="stat-body"><div class="val" id="m-content">–</div><div class="lbl">Content Created</div></div>
+    </div>
+  </div>
+  <!-- ROI Summary bar -->
+  <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.05),transparent)">
+    <div class="card-header">
+      <div class="card-title"><span style="color:var(--gold)">◈</span> ROI Summary</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px" id="roi-summary">
+      <div>
+        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Efficiency Rate</div>
+        <div style="font-size:1.8em;font-weight:700;color:var(--gold)" id="roi-efficiency">–%</div>
+      </div>
+      <div>
+        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Avg Task Duration</div>
+        <div style="font-size:1.8em;font-weight:700;color:var(--gold)" id="roi-avg-duration">–</div>
+      </div>
+      <div>
+        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Most Active Bot</div>
+        <div style="font-size:1.1em;font-weight:700;color:var(--text)" id="roi-top-bot">–</div>
+      </div>
+      <div>
+        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Value Generated</div>
+        <div style="font-size:1.8em;font-weight:700;color:var(--success)" id="roi-value">€–</div>
+      </div>
     </div>
   </div>
 
   <div class="grid2">
     <div class="card">
       <div class="card-header">
-        <div class="card-title"><span class="icon">📊</span> Activity Log</div>
+        <div class="card-title"><span class="icon">◈</span> Activity Log</div>
         <button class="btn btn-ghost btn-sm" onclick="loadMetrics()">↻ Refresh</button>
       </div>
-      <div id="metrics-events"><div class="empty"><div class="icon">📊</div><p>No events yet. Run some tasks to start tracking ROI.</p></div></div>
+      <div id="metrics-events"><div class="empty"><div class="icon">📊</div><p>No events recorded yet. Agent activity is tracked automatically.</p></div></div>
     </div>
     <div class="card">
       <div class="card-header">
-        <div class="card-title"><span class="icon">➕</span> Record Activity</div>
+        <div class="card-title"><span class="icon">◈</span> Manual Entry</div>
       </div>
-      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Manually log a business result to track ROI.</p>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Log business outcomes to track ROI for client reporting.</p>
       <div class="form-group">
         <label>Event Type</label>
         <select id="metric-type">
@@ -2363,6 +2640,184 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- ── BLACKLIGHT ── -->
+<div id="tab-blacklight" class="tab-content">
+
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#1a0a2e 0%,#16213e 60%,#0f172a 100%);border:1px solid #7c3aed;border-radius:12px;padding:20px 24px;margin-bottom:18px;display:flex;align-items:center;gap:18px">
+    <div style="font-size:2.4rem;line-height:1">⚡</div>
+    <div style="flex:1">
+      <div style="font-size:1.18rem;font-weight:700;color:#e2d9f3;letter-spacing:.06em">BLACKLIGHT</div>
+      <div style="font-size:.83em;color:#a78bfa;margin-top:2px">Autonomous money-making agent — runs above Hermes without user input</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div id="bl-status-dot" style="width:10px;height:10px;border-radius:50%;background:#6b7280;box-shadow:0 0 0 0 #7c3aed;transition:background .4s"></div>
+      <span id="bl-status-label" style="font-size:.82em;color:#a78bfa;font-weight:600">Idle</span>
+    </div>
+  </div>
+
+  <!-- Control row -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🎯</span> Goal &amp; Control</div>
+      <button class="btn btn-ghost btn-sm" onclick="blRefresh()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      Set a goal, then hit <strong>Start</strong>. BLACKLIGHT will find opportunities, analyze them with Hermes, generate outreach, and iterate — without waiting for input.
+    </p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:220px">
+        <label style="font-size:.82em;color:var(--text-muted);display:block;margin-bottom:4px">Goal</label>
+        <input id="bl-goal-input" placeholder="e.g. Find local restaurants that need better marketing"
+          style="width:100%;box-sizing:border-box" autocomplete="off"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding-bottom:2px">
+        <label class="toggle" style="width:54px;height:30px" title="Toggle BLACKLIGHT on/off">
+          <input type="checkbox" id="bl-toggle" onchange="blToggle(this.checked)"/>
+          <span class="slider" style="border-radius:30px"></span>
+        </label>
+        <span id="bl-toggle-label" style="font-size:.9em;font-weight:600;color:var(--text-muted);min-width:52px">OFF</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="grid-stat" style="margin-bottom:18px" id="bl-stat-cards">
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#a855f7">🔄</div>
+      <div class="stat-body"><div class="val" id="bl-stat-cycle">0</div><div class="lbl">Cycles Run</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#22d3ee">🎯</div>
+      <div class="stat-body"><div class="val" id="bl-stat-opps">0</div><div class="lbl">Opportunities Found</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#4ade80">⚡</div>
+      <div class="stat-body"><div class="val" id="bl-stat-actions">0</div><div class="lbl">Actions Taken</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#fb923c">🕐</div>
+      <div class="stat-body"><div class="val" id="bl-stat-last" style="font-size:.75em">—</div><div class="lbl">Last Activity</div></div>
+    </div>
+  </div>
+
+  <!-- Live activity log -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📡</span> Live Activity Log</div>
+      <button class="btn btn-ghost btn-sm" onclick="blLoadLogs()">↻ Refresh</button>
+    </div>
+    <div id="bl-log" style="font-family:var(--font-mono,monospace);font-size:.77em;background:var(--bg-deep,#0d1117);border-radius:8px;padding:12px;height:340px;overflow-y:auto;color:#c9d1d9;line-height:1.7">
+      <span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── ASCEND FORGE ── -->
+<div id="tab-ascend" class="tab-content">
+
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#0a1628 0%,#0f2240 60%,#1a0a08 100%);border:1px solid #d97706;border-radius:12px;padding:20px 24px;margin-bottom:18px;display:flex;align-items:center;gap:18px">
+    <div style="font-size:2.4rem;line-height:1">🔥</div>
+    <div style="flex:1">
+      <div style="font-size:1.18rem;font-weight:700;color:#fef3c7;letter-spacing:.06em">ASCEND FORGE</div>
+      <div style="font-size:.83em;color:#f59e0b;margin-top:2px">Top-layer self-improver — continuously improves the system safely</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <!-- Subtle pulsing indicator -->
+      <div id="af-pulse" style="width:10px;height:10px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
+      <span id="af-mode-badge" style="font-size:.78em;font-weight:700;padding:3px 10px;border-radius:20px;background:#d97706;color:#1a0800;letter-spacing:.06em">AUTO</span>
+    </div>
+  </div>
+
+  <style>
+  @keyframes afPulse{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.5)}50%{box-shadow:0 0 0 6px rgba(217,119,6,0)}}
+  </style>
+
+  <!-- Mode + controls -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">⚙️</span> Mode &amp; Controls</div>
+      <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <button class="btn btn-sm" id="af-mode-general" onclick="afSetMode('GENERAL')" style="border:1px solid #6b7280">🛠 GENERAL</button>
+      <button class="btn btn-sm" id="af-mode-money"   onclick="afSetMode('MONEY')"   style="border:1px solid #6b7280">💰 MONEY</button>
+      <button class="btn btn-sm" id="af-mode-auto"    onclick="afSetMode('AUTO')"    style="border:1px solid #6b7280">🤖 AUTO</button>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <label style="font-size:.82em;color:var(--text-muted)">Auto-approve LOW risk:</label>
+        <label class="toggle" style="width:44px;height:24px">
+          <input type="checkbox" id="af-auto-approve" onchange="afSetAutoApprove(this.checked)"/>
+          <span class="slider" style="border-radius:24px"></span>
+        </label>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="afScan()">🔍 Scan System</button>
+      <button class="btn btn-ghost btn-sm"   onclick="afShowPending()">📋 Show Pending</button>
+      <button class="btn btn-ghost btn-sm"   onclick="afApplyAllLow()">✅ Apply All LOW</button>
+      <button class="btn btn-ghost btn-sm"   onclick="afCancelAll()" style="color:#ef4444">🗑 Cancel All</button>
+    </div>
+    <div id="af-current-activity" style="margin-top:10px;font-size:.82em;color:var(--text-muted)">Activity: idle</div>
+    <div id="af-current-target"   style="font-size:.82em;color:var(--text-muted)">Target: —</div>
+  </div>
+
+  <!-- Stats -->
+  <div class="grid-stat" style="margin-bottom:18px">
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#f59e0b">📋</div>
+      <div class="stat-body"><div class="val" id="af-stat-pending">0</div><div class="lbl">Pending</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#4ade80">✅</div>
+      <div class="stat-body"><div class="val" id="af-stat-approved">0</div><div class="lbl">Approved</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#ef4444">❌</div>
+      <div class="stat-body"><div class="val" id="af-stat-rejected">0</div><div class="lbl">Rejected</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#6b7280">📚</div>
+      <div class="stat-body"><div class="val" id="af-stat-total">0</div><div class="lbl">Total Patches</div></div>
+    </div>
+  </div>
+
+  <!-- Pending patches -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">⏳</span> Pending Patches</div>
+      <button class="btn btn-ghost btn-sm" onclick="afLoadPatches()">↻ Refresh</button>
+    </div>
+    <div id="af-patches-list" style="font-size:.84em">
+      <div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>
+    </div>
+  </div>
+
+  <!-- Activity feed -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📡</span> Activity Feed</div>
+      <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
+    </div>
+    <div id="af-activity-log" style="font-family:var(--font-mono,monospace);font-size:.77em;background:var(--bg-deep,#0d1117);border-radius:8px;padding:12px;height:200px;overflow-y:auto;color:#c9d1d9;line-height:1.7">
+      <span style="color:#6b7280">Waiting for activity…</span>
+    </div>
+  </div>
+
+  <!-- Change history -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🕐</span> Change History</div>
+      <button class="btn btn-ghost btn-sm" onclick="afLoadChangelog()">↻ Refresh</button>
+    </div>
+    <div id="af-changelog" style="font-size:.84em">
+      <div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>
+    </div>
+  </div>
+
+</div>
+
 </main>
 
 <div id="toast"></div>
@@ -2394,6 +2849,8 @@ function switchTab(tab, btn) {
   if (tab === 'integrations') loadIntegrations();
   if (tab === 'history') loadHistory();
   if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
+  if (tab === 'blacklight') { blRefresh(); blLoadLogs(); }
+  if (tab === 'ascend') { afRefresh(); afLoadPatches(); afLoadChangelog(); }
 }
 
 function toast(msg, type='success') {
@@ -2494,6 +2951,41 @@ function _setStartStopDisabled(disabled) {
   });
 }
 
+function showStatDetail(type) {
+  const panel = document.getElementById('stat-detail-panel');
+  const title = document.getElementById('stat-detail-title');
+  const content = document.getElementById('stat-detail-content');
+  if (!panel) return;
+  panel.style.display = 'block';
+  const details = {
+    running: {t:'Running Agents', c:'Agents currently active and processing tasks. Click an agent in the Live Office tab to inspect its workload.'},
+    total: {t:'Total System Agents', c:'All registered AI agents in the system. Agents are activated on-demand when tasks matching their specialty arrive.'},
+    gateway: {t:'API Gateway', c:'The gateway routes incoming requests to the correct agent. Status shows whether the routing layer is reachable.'},
+    uptime: {t:'System Uptime', c:'Time since the dashboard server started. Agents have individual uptime tracked in the Agents tab.'}
+  };
+  const d = details[type] || {t:'Details', c:'No details available.'};
+  title.textContent = d.t;
+  content.innerHTML = '<p style="line-height:1.7">' + d.c + '</p>';
+  // Move focus to close button for screen reader / keyboard users
+  const closeBtn = panel.querySelector('button');
+  if (closeBtn) closeBtn.focus();
+}
+
+function updateHealthChecks(data) {
+  const setHC = (id, ok, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.className = 'health-check-item ' + (ok ? 'ok' : 'err');
+    el.querySelector('.hc-val').textContent = val;
+  };
+  setHC('hc-api', true, 'Online');
+  setHC('hc-agents', (data.running_bots||0) > 0, (data.running_bots||0) + ' active');
+  setHC('hc-ollama', data.ollama_ok, data.ollama_ok ? 'Reachable' : 'Offline');
+  setHC('hc-db', true, 'Ready');
+  setHC('hc-gateway', data.gateway_ok !== false, data.gateway_ok !== false ? 'Online' : 'Offline');
+  setHC('hc-memory', true, 'Ready');
+}
+
 async function loadDashboard() {
   const d = await api('/api/status');
   const agents = normalizeAgents(d);
@@ -2543,19 +3035,30 @@ async function loadDashboard() {
   if (!agents.length) {
     el.innerHTML = '<div class="empty"><div class="icon">🤖</div><p>No agent state data yet. Start the agents first.</p></div>';
   } else {
-    el.innerHTML = agents.map(a => {
+    const sorted = [...agents].sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0) || (a.id || '').localeCompare(b.id || ''));
+    el.innerHTML = sorted.map(a => {
       const cls = a.running ? 'on' : 'off';
       const lbl = a.running ? 'running' : 'stopped';
+      const isActive = (d.active_agents || []).includes(a.id);
+      const taskBadge = isActive ? `<span style="font-size:.68em;padding:2px 6px;border-radius:8px;background:rgba(212,175,55,.15);color:var(--gold);border:1px solid rgba(212,175,55,.3);margin-left:4px">◈ on task</span>` : '';
       return `<div class="bot-row">
         <div class="dot ${cls}"></div>
         <span class="bot-name">${escHtml(a.id)}</span>
+        ${taskBadge}
         <span class="badge ${lbl}">${lbl}</span>
       </div>`;
     }).join('');
   }
 
   const sys = await api('/api/doctor');
+  // Try to determine real gateway status from the doctor endpoint
+  const gatewayOk = sys.gateway_ok !== undefined ? !!sys.gateway_ok : (document.getElementById('stat-gateway')?.textContent === 'Online');
+  updateHealthChecks({running_bots: running, ollama_ok: d.ollama_ok !== undefined ? !!d.ollama_ok : !!sys.ollama_ok, gateway_ok: gatewayOk});
   document.getElementById('system-info').textContent = sys.output || '(no output)';
+
+  // Sync the BLACKLIGHT quick-toggle on the dashboard
+  const bl = await api('/api/blacklight/status');
+  _blSyncUI(bl.running || false, bl.goal || '');
 }
 
 async function loadLiveOffice() {
@@ -2569,20 +3072,34 @@ async function loadLiveOffice() {
 
   const list = Array.isArray(data.agents) ? data.agents : [];
   const agents = list.filter(a => a && a.running).slice(0, 20);
+  const countEl = document.getElementById('office-agent-count');
+  if (countEl) countEl.textContent = agents.length + ' agent' + (agents.length !== 1 ? 's' : '') + ' active';
   if (!agents.length) {
-    container.innerHTML = '<div class="empty" style="padding-top:80px"><div class="icon">🏢</div><p>No running agents right now.</p></div>';
+    container.innerHTML = `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px">
+    <div style="width:80px;height:80px;border-radius:50%;border:3px solid rgba(212,175,55,.3);display:flex;align-items:center;justify-content:center;font-size:2em;animation:robotWalk 3s ease-in-out infinite">🤖</div>
+    <div style="text-align:center">
+      <div style="font-size:1em;font-weight:700;color:var(--gold);margin-bottom:6px">No Active Agents</div>
+      <div style="font-size:.8em;color:var(--text-muted);max-width:260px;line-height:1.6">Your AI workforce is standing by. Start agents from the Dashboard to see them appear here and work on your tasks.</div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="startAll();setTimeout(loadLiveOffice,3000)" style="background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700">▶ Start All Agents</button>
+  </div>`;
     return;
   }
 
+  const icons = ['🤖','🦾','🧠','⚙️','🔬','📊','💡','🎯'];
   container.innerHTML = agents.map((agent, idx) => {
     const name = agent.name || agent.id || 'agent';
-    const left = 5 + (idx % 5) * 18;
-    const row = Math.floor(idx / 5);
-    const danger = !!agent.alert;
-    const duration = 4 + (idx % 4);
-    return `<div class="office-agent ${danger ? 'warning' : ''}" style="left:${left}%;bottom:${80 + row * 58}px;animation-duration:${duration}s" onclick="openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')">
-      <span class="agent-tag">${escHtml(name)}</span>
-      <span class="agent-emoji">${danger ? '⚠️' : (agent.progress >= 70 ? '⚙️' : '🧠')}</span>
+    const cols = Math.min(agents.length, 6);
+    const left = 4 + (idx % cols) * (92 / cols);
+    const row = Math.floor(idx / cols);
+    const isBusy = agent.progress >= 50 || !!agent.alert;
+    const icon = icons[idx % icons.length];
+    const animDur = 2.5 + (idx % 4) * 0.7;
+    const animName = idx % 2 === 0 ? 'robotWalk' : 'robotWalk2';
+    return `<div class="robot-agent" role="button" tabindex="0" aria-label="${escHtml(name)} – ${isBusy ? 'busy' : 'idle'}" style="left:${left}%;bottom:${140 + row * 80}px;animation-name:${animName};animation-duration:${animDur}s" onclick="openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')" onkeydown="if(event.key==='Enter'||event.key===' ')openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')">
+      <div class="robot-body ${isBusy ? 'busy' : ''}">${icon}</div>
+      <div class="robot-status-dot ${agent.running ? (isBusy ? 'busy' : 'running') : ''}"></div>
+      <div class="robot-name">${escHtml(name)}</div>
     </div>`;
   }).join('');
 }
@@ -2698,10 +3215,9 @@ async function loadChatLog() {
   }
 
   function modelBadge(routeHint) {
-    const route = routeHint || document.getElementById('chat-model')?.value || 'ollama';
-    if (route === 'groq') return '🧠 Groq • Llama 3.3';
-    if (route === 'external') return '🌐 External AI';
-    return '🦙 Ollama • Llama';
+    const route = routeHint || document.getElementById('chat-model')?.value || 'auto';
+    const labels = {auto:'⚡ Auto',ollama:'🦙 Ollama',nvidia:'🔷 NVIDIA',openai:'🌐 OpenAI',anthropic:'🤖 Claude',groq:'⚡ Groq',external:'🌐 External'};
+    return labels[route] || '🤖 AI';
   }
 
   log.innerHTML = msgs.slice(-60).map(m => {
@@ -2726,12 +3242,42 @@ async function loadChatLog() {
   log.scrollTop = log.scrollHeight;
 }
 
+function updateChatModelBadge() {
+  const sel = document.getElementById('chat-model');
+  const badge = document.getElementById('chat-model-badge');
+  const indicator = document.getElementById('chat-agent-indicator');
+  if (!sel || !badge) return;
+  const labels = {auto:'Auto',ollama:'Ollama',nvidia:'NVIDIA NIM',openai:'OpenAI',anthropic:'Claude',groq:'Groq',external:'External'};
+  const hints = {
+    auto:'Auto-routing: Ollama → NVIDIA → Groq → OpenAI (cost-effective)',
+    ollama:'Using local Ollama (free, private)',
+    nvidia:'Using NVIDIA NIM (fast, free tier)',
+    openai:'Using OpenAI GPT-4o',
+    anthropic:'Using Anthropic Claude',
+    groq:'Using Groq (ultra-fast inference)',
+    external:'Using external AI provider'
+  };
+  badge.textContent = labels[sel.value] || sel.value;
+  if (indicator) indicator.textContent = hints[sel.value] || 'Routing to best agent';
+}
+
 async function sendChat() {
   const input = document.getElementById('chat-input');
   const q = input.value.trim();
   if (!q) return;
   const route = document.getElementById('chat-model')?.value || 'ollama';
   input.value = '';
+  // Optimistically add user message to chat before API response
+  const log = document.getElementById('chat-log');
+  if (log) {
+    const emptyEl = log.querySelector('.empty');
+    if (emptyEl) emptyEl.remove();
+    log.insertAdjacentHTML('beforeend', `<div class="chat-msg user">
+  <div class="chat-msg-header"><span class="chat-msg-avatar">👤</span><span class="chat-msg-source">You</span></div>
+  <div>${q.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</div>
+</div>`);
+    log.scrollTo({top: log.scrollHeight, behavior: 'smooth'});
+  }
   await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q, model_route: route})});
   loadChatLog();
 }
@@ -2763,6 +3309,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadDashboard();
   if (!_allAgents.length) loadSwarm();
+  renderAgenda();
 });
 
 async function loadSchedules() {
@@ -2781,6 +3328,62 @@ async function loadSchedules() {
       <button class="btn btn-danger btn-sm" onclick="deleteSchedule('${t.id}')">✕</button>
     </div>`;
   }).join('');
+}
+
+let _agendaView = 'month';
+let _agendaDate = new Date();
+function setAgendaView(view, btn) {
+  _agendaView = view;
+  document.querySelectorAll('.agenda-view-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderAgenda();
+}
+function agendaNav(dir) {
+  if (_agendaView === 'month') _agendaDate.setMonth(_agendaDate.getMonth() + dir);
+  else if (_agendaView === 'week') _agendaDate.setDate(_agendaDate.getDate() + dir * 7);
+  else _agendaDate.setDate(_agendaDate.getDate() + dir);
+  renderAgenda();
+}
+function renderAgenda() {
+  const p = document.getElementById('agenda-period');
+  const g = document.getElementById('agenda-grid');
+  if (!p || !g) return;
+  const d = _agendaDate;
+  if (_agendaView === 'month') {
+    p.textContent = d.toLocaleDateString('en-US', {month:'long',year:'numeric'});
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    const last = new Date(d.getFullYear(), d.getMonth()+1, 0);
+    const days = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+    let html = days.map(dy => '<div style="text-align:center;color:var(--text-muted);padding:4px;font-size:.7em">' + dy + '</div>').join('');
+    for (let i = 0; i < first.getDay(); i++) html += '<div></div>';
+    const today = new Date();
+    for (let i = 1; i <= last.getDate(); i++) {
+      const isToday = i === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+      html += '<div onclick="selectAgendaDay(' + i + ')" style="text-align:center;padding:5px 2px;border-radius:4px;cursor:pointer;font-size:.78em;' + (isToday ? 'background:rgba(212,175,55,.2);color:var(--gold);font-weight:700;' : '') + '">' + i + '</div>';
+    }
+    g.style.display = 'grid';
+    g.innerHTML = html;
+  }
+}
+function selectAgendaDay(day) {
+  const el = document.getElementById('agenda-day-label');
+  if (el) el.textContent = _agendaDate.toLocaleDateString('en-US',{month:'short'}) + ' ' + day;
+}
+
+function toggleSchedBot() {
+  const v = document.getElementById('sched-action').value;
+  const el = document.getElementById('sched-bot-row');
+  if (el) el.style.display = (v === 'start_bot' || v === 'stop_bot') ? 'block' : 'none';
+}
+
+function toggleSchedType() {
+  const t = document.getElementById('sched-type').value;
+  document.getElementById('sched-interval-row').style.display = t === 'interval' ? '' : 'none';
+  document.getElementById('sched-daily-row').style.display = t === 'daily' ? '' : 'none';
+  const onceRow = document.getElementById('sched-once-row');
+  if (onceRow) onceRow.style.display = t === 'once' ? '' : 'none';
+  const weeklyRow = document.getElementById('sched-weekly-row');
+  if (weeklyRow) weeklyRow.style.display = t === 'weekly' ? '' : 'none';
 }
 
 async function addSchedule() {
@@ -3337,6 +3940,48 @@ async function submitTask() {
   }
 }
 
+// Task store: indexed by task ID to avoid XSS from inline JSON in onclick attributes
+const _taskStore = new Map();
+
+function renderTaskRow(t) {
+  const tid = t.id || t.plan_id || ('task_' + _taskStore.size);
+  _taskStore.set(tid, t);
+  const desc = escHtml((t.description||t.id||'Task').slice(0,60));
+  const ts = new Date(t.created_at||t.ts||Date.now()).toLocaleDateString();
+  const status = escHtml(t.status||'completed');
+  const agent = escHtml(t.agent||'');
+  return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid rgba(212,175,55,.08);margin-bottom:6px">' +
+    '<div><div style="font-weight:600;font-size:.87em;color:var(--text)">' + desc + '</div>' +
+    '<div style="font-size:.74em;color:var(--text-muted);margin-top:2px">' + status + ' · ' + agent + ' · ' + ts + '</div></div>' +
+    '<button class="btn btn-ghost btn-sm" aria-label="View task details" onclick="openTaskDetail(' + JSON.stringify(tid) + ')" style="border:1px solid rgba(212,175,55,.3);color:var(--gold)">View →</button></div>';
+}
+let _taskDetailTrigger = null;
+function openTaskDetail(tid) {
+  const t = _taskStore.get(tid);
+  if (!t) return;
+  const modal = document.getElementById('task-detail-modal');
+  if (!modal) return;
+  _taskDetailTrigger = document.activeElement;
+  modal.style.display = 'flex';
+  document.getElementById('task-detail-content').innerHTML =
+    '<div style="margin-bottom:12px"><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Goal</div><div style="margin-top:4px">' + escHtml(t.description||t.goal||'N/A') + '</div></div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
+    '<div><div style="font-size:.75em;color:var(--text-muted)">Status</div><div style="color:var(--gold);font-weight:600">' + escHtml(t.status||'completed') + '</div></div>' +
+    '<div><div style="font-size:.75em;color:var(--text-muted)">Agent</div><div>' + escHtml(t.agent||'N/A') + '</div></div>' +
+    '<div><div style="font-size:.75em;color:var(--text-muted)">Created</div><div>' + new Date(t.created_at||t.ts||Date.now()).toLocaleString() + '</div></div>' +
+    '<div><div style="font-size:.75em;color:var(--text-muted)">Mode</div><div>' + escHtml(t.mode||'N/A') + '</div></div>' +
+    '</div>' +
+    (t.result ? '<div><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Result</div><pre style="font-size:.8em;background:rgba(255,255,255,.03);border-radius:6px;padding:12px;white-space:pre-wrap;color:var(--text-secondary)">' + escHtml(t.result) + '</pre></div>' : '');
+  const dlg = document.getElementById('task-detail-dialog');
+  if (dlg) dlg.focus();
+}
+function closeTaskDetail() {
+  const modal = document.getElementById('task-detail-modal');
+  if (modal) modal.style.display = 'none';
+  if (_taskDetailTrigger && typeof _taskDetailTrigger.focus === 'function') _taskDetailTrigger.focus();
+  _taskDetailTrigger = null;
+}
+
 async function loadTasks() {
   const r = await api('/api/task/list');
   if (!r.ok) return;
@@ -3437,22 +4082,36 @@ function renderSwarmGrid(agents) {
     const dotColor = a.running ? '#10b981' : '#ef4444';
     const runningDot = `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};display:inline-block;margin-left:6px"></span>`;
     const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:var(--surface);padding:2px 6px;border-radius:3px;font-size:.73em;color:var(--text-secondary)">${escHtml(s)}</span>`).join('');
-    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color}">
+    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color};display:flex;flex-direction:column">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-weight:600;font-size:.95em">${escHtml(a.id)}</div>
         ${runningDot}
       </div>
-      <div style="font-size:.8em;color:var(--text-secondary);margin-bottom:10px;line-height:1.4">${escHtml(a.description||'')}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px">${skills}${(a.skills||[]).length > 4 ? `<span style="font-size:.73em;color:var(--text-muted)">+${(a.skills||[]).length-4} more</span>` : ''}</div>
-      <div style="margin-top:8px;font-size:.75em;color:var(--text-muted)">Category: ${escHtml(a.category||'')}</div>
+      <div style="font-size:.8em;color:var(--text-secondary);margin-bottom:10px;line-height:1.4;flex:1">${escHtml(a.description||'No description available.')}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${skills}${(a.skills||[]).length > 4 ? `<span style="font-size:.73em;color:var(--text-muted)">+${(a.skills||[]).length-4} more</span>` : ''}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:8px;border-top:1px solid rgba(255,255,255,.05)">
+        <span style="font-size:.72em;color:var(--text-muted)">${escHtml(a.category||'General')}</span>
+        <button class="btn btn-ghost btn-sm" onclick="assignTaskToAgent('${escHtml(a.id)}')" style="font-size:.74em;border:1px solid rgba(212,175,55,.3);color:var(--gold);padding:3px 10px">→ Assign Task</button>
+      </div>
     </div>`;
   }).join('');
 }
 
 function filterSwarm(category, btn) {
-  document.querySelectorAll('.swarm-pill').forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
-  const filtered = category === 'all' ? _allAgents : _allAgents.filter(a => a.category === category);
+  if (btn) {
+    document.querySelectorAll('.swarm-pill').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  const searchVal = (document.getElementById('swarm-search')?.value || '').toLowerCase();
+  let filtered = category === 'all' || !category ? _allAgents : _allAgents.filter(a => a.category === category);
+  if (searchVal) {
+    filtered = filtered.filter(a =>
+      (a.id||'').toLowerCase().includes(searchVal) ||
+      (a.description||'').toLowerCase().includes(searchVal) ||
+      (a.skills||[]).some(s => s.toLowerCase().includes(searchVal)) ||
+      (a.category||'').toLowerCase().includes(searchVal)
+    );
+  }
   renderSwarmGrid(filtered);
 }
 
@@ -3463,12 +4122,13 @@ const COMMAND_GROUPS = [
     cmds: [
       ['status', 'Get current agent status report'],
       ['workers', 'List all active workers'],
-      ['start <agent>', 'Start a specific agent'],
-      ['stop <agent>', 'Stop a specific agent'],
+      ['start <agent>', 'Start a specific agent', true],
+      ['stop <agent>', 'Stop a specific agent', true],
       ['schedule', 'List all scheduled tasks'],
       ['improvements', 'List pending skill proposals'],
       ['skills', 'Show skills library summary'],
       ['agents', 'List all AI agents'],
+      ['switch to <agent>', 'Switch active agent (WhatsApp session)', true],
       ['help', 'Show full command list'],
       ['cmds', 'Show this commands reference'],
     ]
@@ -3690,21 +4350,38 @@ function setCmdFilter(idx) {
 
 function filterCommands() { renderCommands(); }
 
+let _cmdType = 'whatsapp';
+function switchCmdType(type, btn) {
+  _cmdType = type;
+  document.querySelectorAll('.cmd-type-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderCommands();
+}
+
 function renderCommands() {
   const q = (document.getElementById('cmd-search')?.value || '').toLowerCase();
+  const isWA = _cmdType === 'whatsapp';
   const groups = _cmdActiveFilter !== null ? [COMMAND_GROUPS[_cmdActiveFilter]] : COMMAND_GROUPS;
   const list = document.getElementById('cmd-list');
   if (!list) return;
   list.innerHTML = groups.map(g => {
     const rows = g.cmds
-      .filter(([cmd, desc]) => !q || cmd.toLowerCase().includes(q) || desc.toLowerCase().includes(q))
-      .map(([cmd, desc]) => `
-        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
-          <code onclick="copyCmd('${escHtml(cmd)}')" title="Click to copy" style="cursor:pointer;min-width:200px;background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:.84em;color:var(--accent)">${escHtml(cmd)}</code>
+      .filter(cmd => !q || cmd[0].toLowerCase().includes(q) || cmd[1].toLowerCase().includes(q))
+      .map(cmd => {
+        const [cmdStr, desc, waOnly] = cmd;
+        let execBtn = '';
+        if (isWA) {
+          execBtn = waOnly
+            ? `<button class="btn btn-ghost btn-sm" disabled title="WhatsApp only — cannot run in chat" style="padding:2px 8px;font-size:.72em;opacity:.45;cursor:not-allowed">📱 WA</button>`
+            : `<button class="btn btn-ghost btn-sm" onclick="executeCmd('${escHtml(cmdStr)}')" style="padding:2px 8px;font-size:.72em;border:1px solid rgba(212,175,55,.3);color:var(--gold)" title="Execute in Chat">▶ Run</button>`;
+        }
+        return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+          <code onclick="copyCmd('${escHtml(cmdStr)}')" title="Click to copy" style="cursor:pointer;min-width:180px;background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:.84em;color:var(--gold-light)">${escHtml(cmdStr)}</code>
           <span style="color:var(--text-secondary);font-size:.85em;flex:1">${escHtml(desc)}</span>
-          <button class="btn btn-ghost btn-sm" onclick="copyCmd('${escHtml(cmd)}')" style="padding:2px 8px;font-size:.72em">📋</button>
-        </div>`
-      ).join('');
+          <button class="btn btn-ghost btn-sm" onclick="copyCmd('${escHtml(cmdStr)}')" style="padding:2px 8px;font-size:.72em" title="Copy">📋</button>
+          ${execBtn}
+        </div>`;
+      }).join('');
     if (!rows) return '';
     return `<div style="margin-bottom:16px">
       <div style="font-weight:700;font-size:.9em;color:var(--text);margin-bottom:4px">${g.cat}</div>
@@ -3717,9 +4394,24 @@ function copyCmd(cmd) {
   navigator.clipboard.writeText(cmd).then(() => toast(`Copied: ${cmd}`, 'info')).catch(() => {});
 }
 
+function executeCmd(cmd) {
+  // Switch to chat tab and send the command
+  const chatTabBtn = document.querySelector('nav button[onclick*="chat"]');
+  if (chatTabBtn) chatTabBtn.click();
+  setTimeout(() => {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.value = cmd;
+      sendChat();
+      toast(`Executing: ${cmd}`, 'info');
+    }
+  }, 200);
+}
+
 // ── ROI Metrics ──────────────────────────────────────────────────────────────
 async function loadMetrics() {
-  const d = await api('/api/metrics');
+  const period = document.getElementById('roi-period')?.value || 'all';
+  const d = await api('/api/metrics?period=' + period);
   const s = d.summary || {};
   document.getElementById('m-tasks').textContent  = (s.tasks_completed   || 0).toLocaleString();
   document.getElementById('m-leads').textContent  = (s.leads_generated   || 0).toLocaleString();
@@ -3727,6 +4419,24 @@ async function loadMetrics() {
   document.getElementById('m-saved').textContent  = '€' + (s.cost_saved  || 0).toLocaleString();
   document.getElementById('m-emails').textContent = (s.emails_sent       || 0).toLocaleString();
   document.getElementById('m-content').textContent= (s.content_created   || 0).toLocaleString();
+
+  // New ROI fields
+  const humanSavedEl = document.getElementById('m-human-saved');
+  // Assume 1 AI hour = 3 human hours due to parallel execution and no context-switching overhead
+  if (humanSavedEl) humanSavedEl.textContent = (s.human_hours_saved || Math.round((s.hours_saved||0) * 3)) + 'h';
+  const botsEl = document.getElementById('m-bots-used');
+  if (botsEl) botsEl.textContent = (s.bots_used || 0).toLocaleString();
+
+  // ROI Summary
+  const effEl = document.getElementById('roi-efficiency');
+  // Use server-provided efficiency_rate if available, otherwise omit the default rather than fabricate
+  if (effEl) effEl.textContent = s.efficiency_rate ? s.efficiency_rate + '%' : '–%';
+  const avgDurEl = document.getElementById('roi-avg-duration');
+  if (avgDurEl) avgDurEl.textContent = s.avg_task_duration || '–';
+  const topBotEl = document.getElementById('roi-top-bot');
+  if (topBotEl) topBotEl.textContent = s.top_bot || '–';
+  const valueEl = document.getElementById('roi-value');
+  if (valueEl) valueEl.textContent = '€' + (s.total_value || s.cost_saved || 0).toLocaleString();
 
   const events = d.events || [];
   const el = document.getElementById('metrics-events');
@@ -4485,6 +5195,327 @@ async function deleteBotFinal() {
 
 // Auto-refresh dashboard every 30s
 setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
+
+// ── Auto-generate scheduler task ID from label ────────────────────────────────
+function autoSchedId() {
+  const label = document.getElementById('sched-label')?.value || '';
+  const idEl = document.getElementById('sched-id');
+  if (!idEl || idEl.dataset.manuallySet) return;
+  const slug = label.toLowerCase().trim()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 30);
+  const ts = Date.now().toString().slice(-4);
+  idEl.value = slug ? slug + '_' + ts : '';
+}
+
+// ── Assign task to agent from swarm ──────────────────────────────────────────
+function assignTaskToAgent(agentId) {
+  const tasksBtn = document.querySelector('nav button[onclick*="tasks"]');
+  if (tasksBtn) tasksBtn.click();
+  setTimeout(() => {
+    const taskInput = document.getElementById('task-input');
+    if (taskInput) {
+      taskInput.focus();
+      taskInput.placeholder = `Describe what you want ${agentId} to do…`;
+    }
+    if (typeof showManualAgentPicker === 'function') showManualAgentPicker();
+    setTimeout(() => {
+      const checkbox = document.querySelector(`[data-agent-id="${agentId}"]`);
+      if (checkbox) checkbox.click();
+    }, 300);
+  }, 200);
+}
+
+// ── Server-Sent Events for real-time updates ──────────────────────────────────
+let _sseRetries = 0;
+function connectSSE() {
+  if (typeof EventSource === 'undefined') return;
+  const es = new EventSource('/api/events');
+  es.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (typeof d.running === 'number') {
+        animateCount('stat-running', d.running);
+        const headerSub = document.getElementById('header-sub');
+        if (headerSub) headerSub.textContent = `${d.running} agents running`;
+      }
+      if (d.active_task) {
+        const el = document.getElementById('sys-control-sub');
+        if (el) el.textContent = `◈ Active task: ${d.active_task}`;
+      }
+    } catch {}
+    _sseRetries = 0;
+  };
+  es.onerror = () => {
+    es.close();
+    _sseRetries++;
+    if (_sseRetries < 10) setTimeout(connectSSE, Math.min(5000 * _sseRetries, 30000));
+  };
+}
+connectSSE();
+// ── BLACKLIGHT ───────────────────────────────────────────────────────────────
+const BL_REFRESH_INTERVAL_MS = 8000;  // auto-refresh rate while BLACKLIGHT is running
+let _blAutoRefreshTimer = null;
+
+function _blSyncUI(running, goal) {
+  // status dot + label (in BLACKLIGHT tab header)
+  const dot = document.getElementById('bl-status-dot');
+  if (dot) dot.style.background = running ? '#a855f7' : '#6b7280';
+  const lbl = document.getElementById('bl-status-label');
+  if (lbl) lbl.textContent = running ? '⚡ Running' : 'Idle';
+
+  // tab toggle
+  const tabToggle = document.getElementById('bl-toggle');
+  if (tabToggle) tabToggle.checked = running;
+  const tabLbl = document.getElementById('bl-toggle-label');
+  if (tabLbl) { tabLbl.textContent = running ? 'ON' : 'OFF'; tabLbl.style.color = running ? '#a855f7' : 'var(--text-muted)'; }
+
+  // dashboard toggle
+  const dashToggle = document.getElementById('dash-bl-toggle');
+  if (dashToggle) dashToggle.checked = running;
+  const dashSub = document.getElementById('dash-bl-sublabel');
+  if (dashSub) dashSub.textContent = running ? `⚡ Running — ${goal || 'no goal set'}` : 'Autonomous agent — idle';
+
+  // goal input (pre-fill if known)
+  const goalEl = document.getElementById('bl-goal-input');
+  if (goalEl && goal && !goalEl.value) goalEl.value = goal;
+
+  // auto-refresh timer
+  if (running && !_blAutoRefreshTimer) {
+    _blAutoRefreshTimer = setInterval(() => { blRefresh(); blLoadLogs(); }, BL_REFRESH_INTERVAL_MS);
+  } else if (!running && _blAutoRefreshTimer) {
+    clearInterval(_blAutoRefreshTimer);
+    _blAutoRefreshTimer = null;
+  }
+}
+
+async function blRefresh() {
+  const d = await api('/api/blacklight/status');
+  const running = d.running || false;
+  document.getElementById('bl-stat-cycle').textContent   = d.cycle   || 0;
+  document.getElementById('bl-stat-opps').textContent    = d.opportunities_found || 0;
+  document.getElementById('bl-stat-actions').textContent = d.actions_taken || 0;
+  const last = d.last_activity ? d.last_activity.replace('T',' ').replace('Z','') : '—';
+  document.getElementById('bl-stat-last').textContent    = last;
+  _blSyncUI(running, d.goal || '');
+}
+
+async function blLoadLogs() {
+  const entries = await api('/api/blacklight/logs?limit=80');
+  const el = document.getElementById('bl-log');
+  if (!el) return;
+  if (!entries || !entries.length) {
+    el.innerHTML = '<span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>';
+    return;
+  }
+  const _levelColor = { system:'#818cf8', cycle:'#a78bfa', info:'#67e8f9', action:'#4ade80',
+                        result:'#facc15', eval:'#fb923c', improve:'#f472b6',
+                        warn:'#fbbf24', error:'#f87171' };
+  const html = entries.slice().reverse().map(e => {
+    const col   = _levelColor[e.level] || '#c9d1d9';
+    const ts    = (e.ts || '').replace('T',' ').replace('Z','');
+    const badge = `<span style="color:${col};font-weight:600;min-width:54px;display:inline-block">[${e.level || 'info'}]</span>`;
+    const msg   = (e.msg || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<div>${badge} <span style="color:#6b7280;font-size:.72em">${ts}</span> ${msg}</div>`;
+  }).join('');
+  el.innerHTML = html;
+}
+
+async function blToggle(on) {
+  // Sync both toggles immediately so neither feels laggy
+  _blSyncUI(on, document.getElementById('bl-goal-input')?.value || '');
+
+  if (on) {
+    const goal = (document.getElementById('bl-goal-input')?.value || '').trim();
+    if (!goal) {
+      toast('Set a goal first — switch to the ⚡ BLACKLIGHT tab', 'error');
+      _blSyncUI(false, '');
+      return;
+    }
+    const r = await api('/api/blacklight/start', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({goal})});
+    if (r.ok) {
+      toast('⚡ BLACKLIGHT started!');
+      blRefresh();
+      blLoadLogs();
+    } else {
+      toast(r.message || 'Failed to start', 'error');
+      _blSyncUI(false, '');
+    }
+  } else {
+    const r = await api('/api/blacklight/stop', {method:'POST'});
+    toast(r.ok ? '■ BLACKLIGHT stopped' : (r.message || 'Stop failed'), r.ok ? 'info' : 'error');
+    setTimeout(blRefresh, 800);
+  }
+}
+
+// ── ASCEND FORGE JS ───────────────────────────────────────────────────────────
+const RISK_COLORS = {LOW:'#4ade80', MEDIUM:'#fb923c', HIGH:'#ef4444'};
+const STATUS_EMOJI = {pending:'⏳', approved:'✅', rejected:'❌', rolled_back:'↩️', failed:'💥'};
+
+async function afRefresh() {
+  try {
+    const s = await api('/api/ascend/status');
+    // Mode badge
+    const badge = document.getElementById('af-mode-badge');
+    if (badge) { badge.textContent = s.mode || 'AUTO'; }
+    // Stats
+    const set = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+    set('af-stat-pending',  s.pending_count  || 0);
+    set('af-stat-approved', s.patches_approved || 0);
+    set('af-stat-rejected', s.patches_rejected || 0);
+    set('af-stat-total',    s.total_patches   || 0);
+    // Activity
+    const act = document.getElementById('af-current-activity');
+    if (act) act.textContent = 'Activity: ' + (s.current_activity || 'idle');
+    const tgt = document.getElementById('af-current-target');
+    if (tgt) tgt.textContent = 'Target: ' + (s.current_target || '—');
+    // Highlight active mode button
+    ['GENERAL','MONEY','AUTO'].forEach(m => {
+      const btn = document.getElementById('af-mode-'+m.toLowerCase());
+      if (btn) btn.style.background = (s.mode===m) ? '#d97706' : '';
+    });
+    // Auto-approve toggle
+    const aa = document.getElementById('af-auto-approve');
+    if (aa) aa.checked = !!s.auto_approve_low;
+    // Activity feed
+    const logEl = document.getElementById('af-activity-log');
+    if (logEl && Array.isArray(s.activity) && s.activity.length) {
+      logEl.innerHTML = s.activity.map(e => {
+        const color = e.level==='warn'?'#fb923c':e.level==='error'?'#ef4444':e.level==='success'?'#4ade80':'#c9d1d9';
+        return `<div style="color:${color}">[${(e.ts||'').slice(11,19)}] ${escHtml(e.msg)}</div>`;
+      }).join('');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  } catch(e) { console.warn('afRefresh', e); }
+}
+
+async function afSetMode(mode) {
+  const r = await api('/api/ascend/mode', {method:'POST',body:{mode}});
+  if (r.ok) { toast(`⚙️ Mode: ${mode}`); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+
+async function afScan() {
+  toast('🔍 Scanning system…', 'info');
+  const r = await api('/api/ascend/scan', {method:'POST'});
+  if (r.ok) {
+    toast(`✅ Scan complete — ${(r.patches||[]).length} patch(es) queued`);
+    afLoadPatches(); afRefresh();
+  } else { toast(r.detail || 'Scan failed', 'error'); }
+}
+
+async function afLoadPatches() {
+  try {
+    const patches = await api('/api/ascend/patches');
+    const el = document.getElementById('af-patches-list');
+    if (!el) return;
+    if (!Array.isArray(patches) || !patches.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>';
+      return;
+    }
+    el.innerHTML = patches.map(p => `
+      <div style="border:1px solid #374151;border-radius:8px;padding:10px 14px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${RISK_COLORS[p.risk_level]||'#6b7280'};color:#000">${p.risk_level}</span>
+          <span style="font-size:.8em;color:#9ca3af">${p.patch_type}</span>
+          <span style="font-size:.8em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}</span>
+        </div>
+        <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
+        <div style="font-size:.8em;color:#9ca3af;margin-bottom:6px">${escHtml(p.reason||'')}</div>
+        ${p.diff_preview ? `<details style="margin-bottom:6px"><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" style="background:#15803d;color:#fff" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
+          <button class="btn btn-sm" style="background:#7f1d1d;color:#fff" onclick="afReject('${p.patch_id}')">❌ Reject</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.warn('afLoadPatches', e); }
+}
+
+async function afApprove(id) {
+  const r = await api(`/api/ascend/patches/${id}/approve`, {method:'POST'});
+  if (r.ok) { toast('✅ Patch approved'); afLoadPatches(); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+async function afReject(id) {
+  const r = await api(`/api/ascend/patches/${id}/reject`, {method:'POST'});
+  if (r.ok) { toast('❌ Patch rejected'); afLoadPatches(); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+async function afRollback(id) {
+  if (!confirm('Roll back this patch?')) return;
+  const r = await api(`/api/ascend/patches/${id}/rollback`, {method:'POST'});
+  if (r.ok) { toast('↩️ Rolled back'); afLoadChangelog(); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+
+async function afApplyAllLow() {
+  const r = await api('/api/ascend/patches');
+  const low = (Array.isArray(r)?r:[]).filter(p=>p.risk_level==='LOW');
+  if (!low.length) { toast('No LOW-risk patches pending', 'info'); return; }
+  for (const p of low) { await api(`/api/ascend/patches/${p.patch_id}/approve`,{method:'POST'}); }
+  toast(`✅ Applied ${low.length} LOW-risk patch(es)`);
+  afLoadPatches(); afRefresh();
+}
+
+async function afCancelAll() {
+  if (!confirm('Cancel all pending patches?')) return;
+  const r = await api('/api/ascend/patches');
+  const pending = Array.isArray(r) ? r : [];
+  for (const p of pending) { await api(`/api/ascend/patches/${p.patch_id}/reject`,{method:'POST'}); }
+  toast(`🗑 Cancelled ${pending.length} patch(es)`);
+  afLoadPatches(); afRefresh();
+}
+
+async function afShowPending() {
+  afLoadPatches();
+  document.getElementById('tab-ascend').scrollIntoView({behavior:'smooth'});
+}
+
+async function afLoadChangelog() {
+  try {
+    const log = await api('/api/ascend/changelog?limit=30');
+    const el = document.getElementById('af-changelog');
+    if (!el) return;
+    if (!Array.isArray(log) || !log.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>';
+      return;
+    }
+    el.innerHTML = log.map(p => {
+      const emoji = STATUS_EMOJI[p.status] || '?';
+      const riskColor = RISK_COLORS[p.risk_level] || '#6b7280';
+      const appliedAt = p.applied_timestamp ? ` → applied ${p.applied_timestamp.slice(0,16)}` : '';
+      return `
+        <div style="border:1px solid #1f2937;border-radius:8px;padding:10px 14px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+            <span style="font-size:1em">${emoji}</span>
+            <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${riskColor};color:#000">${p.risk_level}</span>
+            <span style="font-size:.78em;font-weight:600;color:#e5e7eb">${escHtml(p.patch_id)}</span>
+            <span style="font-size:.75em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}${appliedAt}</span>
+          </div>
+          <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
+          <div style="font-size:.8em;color:#9ca3af;margin-bottom:4px">${escHtml(p.reason||'')}</div>
+          ${p.diff_preview ? `<details><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff / code changes</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
+          ${p.status==='approved' ? `<button class="btn btn-sm" style="margin-top:6px;background:#7f1d1d;color:#fff" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
+        </div>`;
+    }).join('');
+  } catch(e) { console.warn('afLoadChangelog', e); }
+}
+
+async function afSetAutoApprove(enabled) {
+  const r = await api('/api/ascend/auto-approve', {method:'POST',body:{enabled}});
+  if (r.ok) toast(`Auto-approve LOW: ${enabled?'ON':'OFF'}`);
+  else toast('Failed', 'error');
+}
+
+// Helper: escape HTML
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Auto-refresh ASCEND FORGE every 15s when tab is active
+setInterval(() => { if (currentTab === 'ascend') { afRefresh(); afLoadPatches(); } }, 15000);
 </script>
 </body>
 </html>"""
@@ -4683,6 +5714,53 @@ def auth_login(request: Request, login_data: _LoginRequest):
 # ── End security endpoints ─────────────────────────────────────────────────────
 
 
+import asyncio
+
+@app.get("/api/events")
+async def sse_events(request: Request):
+    """Server-Sent Events stream for real-time dashboard updates."""
+    async def generate():
+        last_running = -1
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                mode = _current_mode()
+                running = 0
+                for agent_name in _mode_agent_targets(mode):
+                    if agent_name in INFRA_AGENTS:
+                        continue
+                    pid_file = AI_HOME / "run" / f"{agent_name}.pid"
+                    if pid_file.exists():
+                        try:
+                            os.kill(int(pid_file.read_text().strip()), 0)
+                            running += 1
+                        except Exception:
+                            pass
+                plans = _load_task_plans()
+                active = next((p for p in plans if p.get("status") in ("running", "planning")), None)
+                data = json.dumps({
+                    "running": running,
+                    "active_task": active.get("title", "") if active else None,
+                    "ts": now_iso(),
+                })
+                yield f"data: {data}\n\n"
+                last_running = running
+            except Exception:
+                pass
+            await asyncio.sleep(8)
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
+
+
 @app.get("/api/status")
 def get_status():
   agents = []
@@ -4701,12 +5779,26 @@ def get_status():
         running = False
     agents.append({"agent": agent_name, "running": running})
 
+  ollama_host_url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+  # Add active task hint
+  active_plans = _load_task_plans()
+  active_task = next((p for p in active_plans if p.get("status") in ("running", "planning")), None)
+  active_agents: set = set()
+  if active_task:
+    active_agents = {st.get("agent_id", "") for st in active_task.get("subtasks", [])}
+    for a in (active_task.get("agents_hint") or []):
+      active_agents.add(a)
+
   return JSONResponse({
     "ts": now_iso(),
     "mode": mode,
     "agents": agents,
     "total": len(agents),
     "running": sum(1 for a in agents if a["running"]),
+    "active_task": active_task.get("title", "") if active_task else None,
+    "active_task_id": active_task.get("id") if active_task else None,
+    "active_agents": list(active_agents),
+    "ollama_ok": _ollama_reachable(ollama_host_url),
   })
 
 
@@ -4903,6 +5995,15 @@ async def post_chat(payload: dict):
 def handle_command(message: str, model_route: Optional[str] = None) -> str:
     msg_lower = message.lower().strip()
 
+    # ── ASCEND_FORGE chat commands ─────────────────────────────────────────────
+    if msg_lower.startswith("ascend:"):
+        try:
+            af = _load_ascend_module()
+            return af.handle_chat_command(message)
+        except Exception as exc:
+            logger.error("ascend chat command error: %s", exc)
+            return f"❌ ASCEND_FORGE error: {exc}"
+
     if msg_lower in ("status", "s"):
         rc, out = ai_employee("status")
         return f"Agent status:\n{out}" if out.strip() else "No status data."
@@ -5050,9 +6151,9 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
         rest = message[14:].strip()
         # Parse agents: param
         import re as _re
-        agents_match = _re.search(r'agents:\s*([\w,\- ]+?)(?:\s+task:|$)', rest, _re.IGNORECASE)
-        task_match = _re.search(r'task:\s*(.+)', rest, _re.IGNORECASE)
-        worker_name = _re.split(r'\s+agents:', rest, flags=_re.IGNORECASE)[0].strip()
+        agents_match = _re.search(r'agents:([\w,\-]+(?:[ \t]+[\w,\-]+)*)(?:[ \t]+task:|$)', rest, _re.IGNORECASE)
+        task_match = _re.search(r'task:(.+)', rest, _re.IGNORECASE)
+        worker_name = _re.split(r'[ \t]+agents:', rest, maxsplit=1, flags=_re.IGNORECASE)[0].strip()
         if not worker_name:
             return "❌ Usage: worker create <name> agents:<a1,a2> task:<description>"
         agents_raw = agents_match.group(1).strip() if agents_match else ""
@@ -5709,11 +6810,13 @@ def review_improvement(improvement_id: str, payload: dict):
 @app.get("/api/skills")
 def get_skills(category: str = "", q: str = ""):
     lib = {}
-    if SKILLS_LIBRARY_FILE.exists():
-        try:
-            lib = json.loads(SKILLS_LIBRARY_FILE.read_text())
-        except Exception:
-            pass
+    for candidate in (SKILLS_LIBRARY_FILE, _REPO_SKILLS_FILE):
+        if candidate.exists():
+            try:
+                lib = json.loads(candidate.read_text())
+                break
+            except Exception:
+                pass
     skills = lib.get("skills", [])
     categories = lib.get("categories", sorted({s["category"] for s in skills}))
     if category:
@@ -5954,8 +7057,13 @@ def run_worker_bundle(bundle_id: str):
 
 
 def _load_agent_capabilities() -> dict:
-    data = _cached_read(AGENT_CAPS_FILE)
-    return data if isinstance(data, dict) else {}
+    for candidate in (AGENT_CAPS_FILE, _REPO_CAPS_FILE):
+        if candidate.exists():
+            try:
+                return json.loads(candidate.read_text())
+            except Exception:
+                pass
+    return {}
 
 
 def _load_task_plans() -> list:
@@ -6011,6 +7119,32 @@ def submit_task(payload: dict):
     plans = _load_task_plans()
     plans.insert(0, plan)
     _save_task_plans(plans[:50])  # keep last 50
+
+    # Auto-start assigned agents if they're not running
+    import re as _re
+    _safe_id_pat = _re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+    if agents:
+        for agent_id in agents:
+            # Validate agent_id to prevent path traversal
+            if not isinstance(agent_id, str) or not _safe_id_pat.match(agent_id):
+                continue
+            target = _resolve_agent_target(agent_id)
+            if target and _agent_dir_exists(target):
+                pid_file = AI_HOME / "run" / (target + ".pid")
+                already_running = False
+                if pid_file.exists():
+                    try:
+                        pid_text = pid_file.read_text().strip()
+                        pid = int(pid_text)
+                        os.kill(pid, 0)
+                        already_running = True
+                    except Exception:
+                        pass
+                if not already_running:
+                    try:
+                        ai_employee("start", target)
+                    except Exception:
+                        pass
 
     return JSONResponse({"ok": True, "task_id": task_id, "message": f"Task submitted: {description[:60]}", "agents": agents, "mode": mode})
 
@@ -6161,15 +7295,40 @@ def get_all_agents():
   agents_config = capabilities.get("agents", {})
   mode = _current_mode()
 
+  # Map dashboard agent IDs → capabilities file IDs
+  _CAPS_ID_MAP = {
+    "task-orchestrator": ["orchestrator", "task-orchestrator"],
+    "lead-generator": ["lead-hunter", "lead-generator"],
+    "offer-agent": ["email-ninja", "offer-agent"],
+    "social-media-manager": ["social-guru", "social-poster", "social-media-manager"],
+    "web-researcher": ["intel-agent", "web-researcher"],
+    "ecom-agent": ["product-scout", "ecom-dashboard", "ecom-agent", "order-processor"],
+    "chatbot-builder": ["support-bot", "chatbot-builder"],
+    "creator-agency": ["creative-studio", "creator-agency"],
+    "recruiter": ["hr-manager", "recruiter"],
+    "conversion-rate-optimizer": ["conversion-rate-optimizer"],
+    "ad-campaign-wizard": ["ad-campaign-wizard"],
+    "cold-outreach-assassin": ["cold-outreach-assassin"],
+    "partnership-matchmaker": ["partnership-matchmaker"],
+    "linkedin-growth-hacker": ["linkedin-growth-hacker"],
+    "referral-rocket": ["referral-rocket"],
+    "sales-closer-pro": ["sales-closer-pro"],
+    "financial-deepsearch": ["data-analyst", "financial-deepsearch"],
+    "mirofish-researcher": ["product-researcher", "mirofish-researcher"],
+    "skills-manager": ["skills-manager"],
+    "arbitrage-bot": ["bot-dev", "arbitrage-bot"],
+  }
+
   result = []
   for agent_id in _available_agent_ids(mode):
-    info = agents_config.get(agent_id)
     canonical_ids = _agent_aliases(agent_id)
-    if info is None:
-      for alias in canonical_ids:
-        if alias in agents_config:
-          info = agents_config.get(alias)
-          break
+    # Try direct lookup, then _CAPS_ID_MAP aliases, then existing AGENT_ALIASES
+    caps_ids_to_try = _CAPS_ID_MAP.get(agent_id, [agent_id]) + canonical_ids
+    info = None
+    for caps_id in caps_ids_to_try:
+      if caps_id in agents_config:
+        info = agents_config[caps_id]
+        break
     info = info or {}
 
     pid_file = None
@@ -6228,6 +7387,7 @@ _HOURS_PER_EVENT = {
     "call_booked": 0.25,
     "deal_closed": 0.0,
     "ticket_resolved": 0.2,
+    "hours_saved": 0.0,  # uses explicit "hours" field
     "custom": 0.0,
 }
 
@@ -6253,8 +7413,12 @@ def _recalc_summary(events: list) -> dict:
         "deals_closed": 0,
         "tickets_resolved": 0,
         "hours_saved": 0.0,
+        "human_hours_saved": 0.0,
         "cost_saved": 0.0,
         "revenue": 0.0,
+        "by_agent": {},
+        "bots_used": 0,
+        "top_bot": None,
     }
     for e in events:
         t = e.get("type", "")
@@ -6274,17 +7438,46 @@ def _recalc_summary(events: list) -> dict:
                 s["revenue"] += float(e["value"])
         elif t == "ticket_resolved":
             s["tickets_resolved"] += 1
-        hours = _HOURS_PER_EVENT.get(t, 0.0)
+        # Use explicit hours field if provided, otherwise default estimate
+        explicit_hours = e.get("hours")
+        if explicit_hours is not None:
+            try:
+                hours = float(explicit_hours)
+            except (TypeError, ValueError):
+                hours = _HOURS_PER_EVENT.get(t, 0.0)
+        else:
+            hours = _HOURS_PER_EVENT.get(t, 0.0)
         s["hours_saved"] += hours
+        # Track by-agent usage
+        agent = e.get("agent")
+        if agent:
+            s["by_agent"][agent] = s["by_agent"].get(agent, 0) + 1
     s["hours_saved"] = round(s["hours_saved"], 2)
+    # Human hours saved = 3× AI hours (AI works ~3× faster than a human)
+    s["human_hours_saved"] = round(s["hours_saved"] * 3, 2)
     s["cost_saved"] = round(s["hours_saved"] * _COST_PER_HOUR_EUR, 2)
+    s["bots_used"] = len(s["by_agent"])
+    if s["by_agent"]:
+        s["top_bot"] = max(s["by_agent"], key=lambda k: s["by_agent"][k])
     return s
 
 
 @app.get("/api/metrics")
-def get_metrics():
+def get_metrics(period: str = "all"):
     data = _load_metrics()
-    return JSONResponse(data)
+    events = data.get("events", [])
+    now_dt = datetime.now(timezone.utc)
+    if period == "today":
+        cutoff = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        events = [e for e in events if e.get("ts", "") >= cutoff.isoformat()]
+    elif period == "7d":
+        cutoff = now_dt - timedelta(days=7)
+        events = [e for e in events if e.get("ts", "") >= cutoff.isoformat()]
+    elif period == "30d":
+        cutoff = now_dt - timedelta(days=30)
+        events = [e for e in events if e.get("ts", "") >= cutoff.isoformat()]
+    summary = _recalc_summary(events) if period != "all" else data.get("summary", {})
+    return JSONResponse({"summary": summary, "events": events})
 
 
 @app.post("/api/metrics")
@@ -6301,18 +7494,29 @@ def record_metric(payload: dict):
             value = float(value)
         except (TypeError, ValueError):
             value = None
+    # Accept explicit hours field for direct hour-tracking events
+    hours = payload.get("hours")
+    if hours is not None:
+        try:
+            hours = float(hours)
+            hours = max(0.0, hours)  # ensure non-negative
+        except (TypeError, ValueError):
+            hours = None
     notes = (payload.get("notes") or "").strip() or None
 
     data = _load_metrics()
     events = data.get("events", [])
-    events.append({
+    event: dict = {
         "id": _uuid.uuid4().hex[:10],
         "type": event_type,
         "agent": agent,
         "value": value,
         "notes": notes,
         "ts": now_iso(),
-    })
+    }
+    if hours is not None:
+        event["hours"] = hours
+    events.append(event)
     # Keep last 500 events
     data["events"] = events[-500:]
     data["summary"] = _recalc_summary(data["events"])
@@ -7569,6 +8773,215 @@ def save_integration_alias(payload: dict):
     intg["enabled"] = True
     _save_integrations(integrations)
     return JSONResponse({"ok": True, "integration": integration_id})
+
+
+# ── BLACKLIGHT API ────────────────────────────────────────────────────────────
+
+_blacklight_mod = None
+
+
+def _load_blacklight_module():
+    """Lazy-import and cache the blacklight module from the bots directory."""
+    global _blacklight_mod
+    if _blacklight_mod is not None:
+        return _blacklight_mod
+    _bl_path = AI_HOME / "bots" / "blacklight"
+    if str(_bl_path) not in sys.path:
+        sys.path.insert(0, str(_bl_path))
+    import importlib
+    _blacklight_mod = importlib.import_module("blacklight")
+    return _blacklight_mod
+
+
+@app.get("/api/blacklight/status")
+def blacklight_status():
+    """Return BLACKLIGHT running state and stats."""
+    try:
+        bl = _load_blacklight_module()
+        return JSONResponse(bl.get_status())
+    except Exception as exc:
+        logger.warning("blacklight status error: %s", exc)
+        return JSONResponse({"running": False, "goal": "", "cycle": 0,
+                             "opportunities_found": 0, "actions_taken": 0,
+                             "last_activity": None})
+
+
+@app.post("/api/blacklight/start")
+def blacklight_start(payload: dict):
+    """Start the BLACKLIGHT autonomous loop with the given goal."""
+    goal = (payload.get("goal") or "").strip()
+    if not goal:
+        raise HTTPException(400, "goal is required")
+    try:
+        bl = _load_blacklight_module()
+        started = bl.start(goal)
+        if started:
+            return JSONResponse({"ok": True, "goal": goal,
+                                 "message": "BLACKLIGHT started"})
+        return JSONResponse({"ok": False, "message": "BLACKLIGHT is already running"})
+    except Exception as exc:
+        logger.error("blacklight start error: %s", exc)
+        raise HTTPException(500, "Failed to start BLACKLIGHT")
+
+
+@app.post("/api/blacklight/stop")
+def blacklight_stop():
+    """Stop the BLACKLIGHT autonomous loop."""
+    try:
+        bl = _load_blacklight_module()
+        stopped = bl.stop()
+        return JSONResponse({"ok": stopped,
+                             "message": "BLACKLIGHT stopped" if stopped
+                             else "BLACKLIGHT was not running"})
+    except Exception as exc:
+        logger.error("blacklight stop error: %s", exc)
+        raise HTTPException(500, "Failed to stop BLACKLIGHT")
+
+
+@app.get("/api/blacklight/logs")
+def blacklight_logs(limit: int = 100):
+    """Return recent BLACKLIGHT log entries."""
+    try:
+        bl = _load_blacklight_module()
+        return JSONResponse(bl.get_logs(limit=min(limit, 500)))
+    except Exception as exc:
+        logger.warning("blacklight logs error: %s", exc)
+        return JSONResponse([])
+
+
+# ── ASCEND_FORGE API ──────────────────────────────────────────────────────────
+
+_ascend_mod = None
+
+
+def _load_ascend_module():
+    """Lazy-import and cache the ascend_forge module from the bots directory."""
+    global _ascend_mod
+    if _ascend_mod is not None:
+        return _ascend_mod
+    _af_path = AI_HOME / "bots" / "ascend-forge"
+    if str(_af_path) not in sys.path:
+        sys.path.insert(0, str(_af_path))
+    _ascend_mod = importlib.import_module("ascend_forge")
+    return _ascend_mod
+
+
+@app.get("/api/ascend/status")
+def ascend_status():
+    """Return ASCEND_FORGE current state, mode, and activity feed."""
+    try:
+        af = _load_ascend_module()
+        return JSONResponse(af.get_status())
+    except Exception as exc:
+        logger.warning("ascend status error: %s", exc)
+        return JSONResponse({"mode": "AUTO", "pending_count": 0,
+                             "observe_only": False, "activity": []})
+
+
+@app.post("/api/ascend/mode")
+def ascend_set_mode(payload: dict):
+    """Set ASCEND_FORGE operating mode (GENERAL / MONEY / AUTO)."""
+    mode = (payload.get("mode") or "").strip().upper()
+    if not mode:
+        raise HTTPException(400, "mode is required")
+    try:
+        af = _load_ascend_module()
+        af.set_mode(mode)
+        return JSONResponse({"ok": True, "mode": mode})
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend set_mode error: %s", exc)
+        raise HTTPException(500, "Failed to set mode")
+
+
+@app.post("/api/ascend/scan")
+def ascend_scan():
+    """Trigger a system scan and return queued patches."""
+    try:
+        af = _load_ascend_module()
+        patches = af.scan_system(trigger="UI scan")
+        return JSONResponse({"ok": True, "patches": patches})
+    except Exception as exc:
+        logger.error("ascend scan error: %s", exc)
+        raise HTTPException(500, "Scan failed")
+
+
+@app.get("/api/ascend/patches")
+def ascend_patches():
+    """Return all pending patches."""
+    try:
+        af = _load_ascend_module()
+        return JSONResponse(af.get_pending_patches())
+    except Exception as exc:
+        logger.warning("ascend patches error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/ascend/patches/{patch_id}/approve")
+def ascend_approve(patch_id: str):
+    """Approve a pending patch."""
+    try:
+        af = _load_ascend_module()
+        patch = af.approve_patch(patch_id)
+        return JSONResponse({"ok": True, "patch": patch})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend approve error: %s", exc)
+        raise HTTPException(500, "Approval failed")
+
+
+@app.post("/api/ascend/patches/{patch_id}/reject")
+def ascend_reject(patch_id: str):
+    """Reject a pending patch."""
+    try:
+        af = _load_ascend_module()
+        patch = af.reject_patch(patch_id)
+        return JSONResponse({"ok": True, "patch": patch})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend reject error: %s", exc)
+        raise HTTPException(500, "Rejection failed")
+
+
+@app.post("/api/ascend/patches/{patch_id}/rollback")
+def ascend_rollback(patch_id: str):
+    """Roll back an approved patch."""
+    try:
+        af = _load_ascend_module()
+        patch = af.rollback_patch(patch_id)
+        return JSONResponse({"ok": True, "patch": patch})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend rollback error: %s", exc)
+        raise HTTPException(500, "Rollback failed")
+
+
+@app.get("/api/ascend/changelog")
+def ascend_changelog(limit: int = 50):
+    """Return change history."""
+    try:
+        af = _load_ascend_module()
+        return JSONResponse(af.get_changelog(limit=min(limit, 200)))
+    except Exception as exc:
+        logger.warning("ascend changelog error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/ascend/auto-approve")
+def ascend_auto_approve(payload: dict):
+    """Toggle auto-approve for LOW risk patches."""
+    enabled = bool(payload.get("enabled", False))
+    try:
+        af = _load_ascend_module()
+        af.set_auto_approve_low(enabled)
+        return JSONResponse({"ok": True, "auto_approve_low": enabled})
+    except Exception as exc:
+        logger.error("ascend auto-approve error: %s", exc)
+        raise HTTPException(500, "Failed to update setting")
 
 
 if __name__ == "__main__":

@@ -333,6 +333,40 @@ def check_financial_deepsearch() -> None:
     _check_bot_module("financial-deepsearch", "financial_deepsearch")
 
 
+def check_obsidian_memory() -> None:
+    """obsidian_memory module must be importable and its run.sh executable."""
+    _check_bot_module("obsidian-memory", "obsidian_memory")
+
+
+def check_obsidian_vault_path() -> None:
+    """OBSIDIAN_VAULT_PATH should be set and point to an existing directory."""
+    vault = os.environ.get("OBSIDIAN_VAULT_PATH", "")
+    if not vault:
+        _fail(
+            "Obsidian vault path",
+            "OBSIDIAN_VAULT_PATH not set — add to .env to enable vault memory",
+            required=False,
+        )
+        return
+    from pathlib import Path as _Path
+    vp = _Path(vault)
+    if vp.is_dir():
+        note_count = len(list(vp.rglob("*.md")))
+        _ok("Obsidian vault path", f"{vault} ({note_count} notes) ✓")
+    else:
+        _fail(
+            "Obsidian vault path",
+            f"directory not found: {vault}",
+            required=False,
+        )
+def check_hermes_agent() -> None:
+    """hermes_agent module must be importable and its run.sh executable."""
+    _check_bot_module("hermes-agent", "hermes_agent")
+def check_blacklight() -> None:
+    """blacklight module must be importable and its run.sh executable."""
+    _check_bot_module("blacklight", "blacklight")
+
+
 def check_discord_bot_state() -> None:
     """If the Discord bot ran before, its state file should say 'running'."""
     state = AI_HOME / "state" / "discord-bot.state.json"
@@ -443,6 +477,12 @@ def main() -> None:
     check_qa_tester()
     check_paid_media_specialist()
     check_financial_deepsearch()
+    check_obsidian_memory()
+
+    _section("Obsidian Memory Base")
+    check_obsidian_vault_path()
+    check_hermes_agent()
+    check_blacklight()
 
     _section("NVIDIA NIM Integration")
     check_nvidia_nim_config()
