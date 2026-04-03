@@ -2387,7 +2387,7 @@ INDEX_HTML = r"""<!doctype html>
       <button class="btn btn-ghost btn-sm" onclick="blRefresh()">↻ Refresh</button>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
-      Set a goal, then hit <strong>Start</strong>. BLACKLIGHT will find opportunities, analyse them with Hermes, generate outreach, and iterate — without waiting for input.
+      Set a goal, then hit <strong>Start</strong>. BLACKLIGHT will find opportunities, analyze them with Hermes, generate outreach, and iterate — without waiting for input.
     </p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
       <div style="flex:1;min-width:220px">
@@ -4558,6 +4558,7 @@ async function deleteBotFinal() {
 setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 
 // ── BLACKLIGHT ───────────────────────────────────────────────────────────────
+const BL_REFRESH_INTERVAL_MS = 8000;  // auto-refresh rate while BLACKLIGHT is running
 let _blAutoRefreshTimer = null;
 
 async function blRefresh() {
@@ -4575,7 +4576,7 @@ async function blRefresh() {
   document.getElementById('bl-start-btn').disabled = running;
   document.getElementById('bl-stop-btn').disabled  = !running;
   if (running && !_blAutoRefreshTimer) {
-    _blAutoRefreshTimer = setInterval(() => { blRefresh(); blLoadLogs(); }, 8000);
+    _blAutoRefreshTimer = setInterval(() => { blRefresh(); blLoadLogs(); }, BL_REFRESH_INTERVAL_MS);
   } else if (!running && _blAutoRefreshTimer) {
     clearInterval(_blAutoRefreshTimer);
     _blAutoRefreshTimer = null;
@@ -7729,7 +7730,7 @@ def blacklight_status():
         logger.warning("blacklight status error: %s", exc)
         return JSONResponse({"running": False, "goal": "", "cycle": 0,
                              "opportunities_found": 0, "actions_taken": 0,
-                             "last_activity": None, "error": str(exc)})
+                             "last_activity": None})
 
 
 @app.post("/api/blacklight/start")
@@ -7747,7 +7748,7 @@ def blacklight_start(payload: dict):
         return JSONResponse({"ok": False, "message": "BLACKLIGHT is already running"})
     except Exception as exc:
         logger.error("blacklight start error: %s", exc)
-        raise HTTPException(500, f"Failed to start BLACKLIGHT: {exc}")
+        raise HTTPException(500, "Failed to start BLACKLIGHT")
 
 
 @app.post("/api/blacklight/stop")
@@ -7761,7 +7762,7 @@ def blacklight_stop():
                              else "BLACKLIGHT was not running"})
     except Exception as exc:
         logger.error("blacklight stop error: %s", exc)
-        raise HTTPException(500, f"Failed to stop BLACKLIGHT: {exc}")
+        raise HTTPException(500, "Failed to stop BLACKLIGHT")
 
 
 @app.get("/api/blacklight/logs")
