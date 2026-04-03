@@ -42,8 +42,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import time
+import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -54,6 +56,11 @@ import requests
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
+
+# ── Module-level constants ────────────────────────────────────────────────────
+TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+DISCORD_MAX_MESSAGE_LENGTH = 2000
+LOG_DESCRIPTION_MAX_LEN = 60
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -222,7 +229,6 @@ def openclaw_process(raw_input: str | dict) -> dict:
             break
 
     # ── Extract rough entities (capitalised words / quoted strings) ──────────
-    import re
     entities = re.findall(r'"([^"]+)"', text)
     entities += [w for w in re.findall(r"\b[A-Z][a-zA-Z]{2,}\b", text) if w not in {
         "The", "This", "That", "When", "What", "How", "Why", "Who",
@@ -636,7 +642,6 @@ def build_plan(normalized_input: dict) -> list[dict]:
     try:
         raw = query_llm(prompt, agent_type="reasoning", json_mode=True)
         # Extract JSON from response (handle markdown code blocks)
-        import re
         json_match = re.search(r"\{.*\}", raw, re.DOTALL)
         if json_match:
             data = json.loads(json_match.group())
@@ -688,7 +693,7 @@ def execute_plan(
         return all(dep in completed for dep in step.get("depends_on", []))
 
     def _run_step(step: dict) -> dict:
-        logger.info("Running step %d: %s [skill=%s]", step["id"], step["description"][:60], step["skill"])
+        logger.info("Running step %d: %s [skill=%s]", step["id"], step["description"][:LOG_DESCRIPTION_MAX_LEN], step["skill"])
         # Build per-step task context, enriched with prior results
         prior_outputs = "\n\n".join(
             f"Step {sid} output:\n{completed[sid]['result'].get('output','')}"
@@ -843,7 +848,6 @@ def validate_result(result: dict, original_task: str) -> dict:
 
     try:
         raw = query_llm(prompt, agent_type="reasoning", json_mode=True)
-        import re
         json_match = re.search(r"\{.*\}", raw, re.DOTALL)
         if json_match:
             data = json.loads(json_match.group())
@@ -901,8 +905,7 @@ def _send_telegram(chat_id: str, message: str) -> bool:
     if not TELEGRAM_BOT_TOKEN or not chat_id:
         return False
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = json.dumps({"chat_id": chat_id, "text": message[:4096]}).encode()
-    import urllib.request
+    payload = json.dumps({"chat_id": chat_id, "text": message[:TELEGRAM_MAX_MESSAGE_LENGTH]}).encode()
     try:
         req = urllib.request.Request(
             url,
@@ -936,12 +939,12 @@ def notify_all(task_id: str, intent: str, result: dict, validation: dict) -> Non
 
     # Discord
     if HERMES_NOTIFY_DISCORD and _DISCORD_AVAILABLE and is_discord_configured():
-        notify_discord(message[:2000], username="Hermes Agent")
+        notify_discord(message[:DISCORD_MAX_MESSAGE_LENGTH], username="Hermes Agent")
         logger.info("Discord notification sent for task %s", task_id)
 
     # WhatsApp
     if HERMES_NOTIFY_WHATSAPP_TO and _WHATSAPP_AVAILABLE:
-        ok, info = send_whatsapp(HERMES_NOTIFY_WHATSAPP_TO, message[:4096])
+        ok, info = send_whatsapp(HERMES_NOTIFY_WHATSAPP_TO, message[:TELEGRAM_MAX_MESSAGE_LENGTH])
         if ok:
             logger.info("WhatsApp notification sent for task %s", task_id)
         else:
@@ -1298,7 +1301,7 @@ def api_run(payload: dict) -> JSONResponse:
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("Pipeline error for payload %s", str(payload)[:100])
-        return JSONResponse({"error": str(exc), "status": "failed"}, status_code=500)
+        return JSONResponse({"error": "An internal error occurred. Check server logs.", "status": "failed"}, status_code=500)
 
 
 @app.get("/api/status")
