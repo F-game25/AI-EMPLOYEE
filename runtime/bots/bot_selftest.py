@@ -359,6 +359,12 @@ def check_obsidian_vault_path() -> None:
             f"directory not found: {vault}",
             required=False,
         )
+def check_hermes_agent() -> None:
+    """hermes_agent module must be importable and its run.sh executable."""
+    _check_bot_module("hermes-agent", "hermes_agent")
+def check_blacklight() -> None:
+    """blacklight module must be importable and its run.sh executable."""
+    _check_bot_module("blacklight", "blacklight")
 
 
 def check_discord_bot_state() -> None:
@@ -475,6 +481,8 @@ def main() -> None:
 
     _section("Obsidian Memory Base")
     check_obsidian_vault_path()
+    check_hermes_agent()
+    check_blacklight()
 
     _section("NVIDIA NIM Integration")
     check_nvidia_nim_config()
