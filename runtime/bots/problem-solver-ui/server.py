@@ -1681,8 +1681,16 @@ INDEX_HTML = r"""<!doctype html>
           </label>
         </div>
       </div>
-      <div class="card-title" style="margin-bottom:10px"><span class="icon">🔧</span> System Info</div>
-      <pre id="system-info" style="font-size:.78em">Click Refresh on the left to load…</pre>
+      <div class="card-title" style="margin-bottom:10px"><span class="icon" style="color:var(--gold)">◈</span> System Health</div>
+      <div id="system-health-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.84em">
+        <div class="health-check-item" id="hc-api"><span class="hc-dot">●</span> API Server <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-ollama"><span class="hc-dot">●</span> Ollama LLM <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-agents"><span class="hc-dot">●</span> Agents <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-db"><span class="hc-dot">●</span> State Store <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
+      </div>
+      <div id="system-info" style="display:none"></div>
     </div>
   </div>
 
@@ -5254,6 +5262,7 @@ function connectSSE() {
   };
 }
 connectSSE();
+
 // ── BLACKLIGHT ───────────────────────────────────────────────────────────────
 const BL_REFRESH_INTERVAL_MS = 8000;  // auto-refresh rate while BLACKLIGHT is running
 let _blAutoRefreshTimer = null;
