@@ -1489,6 +1489,7 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('history',this)">🕐 History</button>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
   <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em">⚡ BLACKLIGHT</button>
+  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="background:linear-gradient(135deg,#0a1628,#0f2240);color:#f59e0b;border:1px solid #d97706;font-weight:700;letter-spacing:.04em">🔥 ASCEND FORGE</button>
 </nav>
 
 <main>
@@ -2454,6 +2455,110 @@ INDEX_HTML = r"""<!doctype html>
 
 </div>
 
+<!-- ── ASCEND FORGE ── -->
+<div id="tab-ascend" class="tab-content">
+
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#0a1628 0%,#0f2240 60%,#1a0a08 100%);border:1px solid #d97706;border-radius:12px;padding:20px 24px;margin-bottom:18px;display:flex;align-items:center;gap:18px">
+    <div style="font-size:2.4rem;line-height:1">🔥</div>
+    <div style="flex:1">
+      <div style="font-size:1.18rem;font-weight:700;color:#fef3c7;letter-spacing:.06em">ASCEND FORGE</div>
+      <div style="font-size:.83em;color:#f59e0b;margin-top:2px">Top-layer self-improver — continuously improves the system safely</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <!-- Subtle pulsing indicator -->
+      <div id="af-pulse" style="width:10px;height:10px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
+      <span id="af-mode-badge" style="font-size:.78em;font-weight:700;padding:3px 10px;border-radius:20px;background:#d97706;color:#1a0800;letter-spacing:.06em">AUTO</span>
+    </div>
+  </div>
+
+  <style>
+  @keyframes afPulse{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.5)}50%{box-shadow:0 0 0 6px rgba(217,119,6,0)}}
+  </style>
+
+  <!-- Mode + controls -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">⚙️</span> Mode &amp; Controls</div>
+      <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <button class="btn btn-sm" id="af-mode-general" onclick="afSetMode('GENERAL')" style="border:1px solid #6b7280">🛠 GENERAL</button>
+      <button class="btn btn-sm" id="af-mode-money"   onclick="afSetMode('MONEY')"   style="border:1px solid #6b7280">💰 MONEY</button>
+      <button class="btn btn-sm" id="af-mode-auto"    onclick="afSetMode('AUTO')"    style="border:1px solid #6b7280">🤖 AUTO</button>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <label style="font-size:.82em;color:var(--text-muted)">Auto-approve LOW risk:</label>
+        <label class="toggle" style="width:44px;height:24px">
+          <input type="checkbox" id="af-auto-approve" onchange="afSetAutoApprove(this.checked)"/>
+          <span class="slider" style="border-radius:24px"></span>
+        </label>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="afScan()">🔍 Scan System</button>
+      <button class="btn btn-ghost btn-sm"   onclick="afShowPending()">📋 Show Pending</button>
+      <button class="btn btn-ghost btn-sm"   onclick="afApplyAllLow()">✅ Apply All LOW</button>
+      <button class="btn btn-ghost btn-sm"   onclick="afCancelAll()" style="color:#ef4444">🗑 Cancel All</button>
+    </div>
+    <div id="af-current-activity" style="margin-top:10px;font-size:.82em;color:var(--text-muted)">Activity: idle</div>
+    <div id="af-current-target"   style="font-size:.82em;color:var(--text-muted)">Target: —</div>
+  </div>
+
+  <!-- Stats -->
+  <div class="grid-stat" style="margin-bottom:18px">
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#f59e0b">📋</div>
+      <div class="stat-body"><div class="val" id="af-stat-pending">0</div><div class="lbl">Pending</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#4ade80">✅</div>
+      <div class="stat-body"><div class="val" id="af-stat-approved">0</div><div class="lbl">Approved</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#ef4444">❌</div>
+      <div class="stat-body"><div class="val" id="af-stat-rejected">0</div><div class="lbl">Rejected</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#6b7280">📚</div>
+      <div class="stat-body"><div class="val" id="af-stat-total">0</div><div class="lbl">Total Patches</div></div>
+    </div>
+  </div>
+
+  <!-- Pending patches -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">⏳</span> Pending Patches</div>
+      <button class="btn btn-ghost btn-sm" onclick="afLoadPatches()">↻ Refresh</button>
+    </div>
+    <div id="af-patches-list" style="font-size:.84em">
+      <div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>
+    </div>
+  </div>
+
+  <!-- Activity feed -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📡</span> Activity Feed</div>
+      <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
+    </div>
+    <div id="af-activity-log" style="font-family:var(--font-mono,monospace);font-size:.77em;background:var(--bg-deep,#0d1117);border-radius:8px;padding:12px;height:200px;overflow-y:auto;color:#c9d1d9;line-height:1.7">
+      <span style="color:#6b7280">Waiting for activity…</span>
+    </div>
+  </div>
+
+  <!-- Change history -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🕐</span> Change History</div>
+      <button class="btn btn-ghost btn-sm" onclick="afLoadChangelog()">↻ Refresh</button>
+    </div>
+    <div id="af-changelog" style="font-size:.84em">
+      <div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>
+    </div>
+  </div>
+
+</div>
+
 </main>
 
 <div id="toast"></div>
@@ -2486,6 +2591,7 @@ function switchTab(tab, btn) {
   if (tab === 'history') loadHistory();
   if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
   if (tab === 'blacklight') { blRefresh(); blLoadLogs(); }
+  if (tab === 'ascend') { afRefresh(); afLoadPatches(); afLoadChangelog(); }
 }
 
 function toast(msg, type='success') {
@@ -4677,6 +4783,173 @@ async function blToggle(on) {
     setTimeout(blRefresh, 800);
   }
 }
+
+// ── ASCEND FORGE JS ───────────────────────────────────────────────────────────
+const RISK_COLORS = {LOW:'#4ade80', MEDIUM:'#fb923c', HIGH:'#ef4444'};
+const STATUS_EMOJI = {pending:'⏳', approved:'✅', rejected:'❌', rolled_back:'↩️', failed:'💥'};
+
+async function afRefresh() {
+  try {
+    const s = await api('/api/ascend/status');
+    // Mode badge
+    const badge = document.getElementById('af-mode-badge');
+    if (badge) { badge.textContent = s.mode || 'AUTO'; }
+    // Stats
+    const set = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+    set('af-stat-pending',  s.pending_count  || 0);
+    set('af-stat-approved', s.patches_approved || 0);
+    set('af-stat-rejected', s.patches_rejected || 0);
+    set('af-stat-total',    s.total_patches   || 0);
+    // Activity
+    const act = document.getElementById('af-current-activity');
+    if (act) act.textContent = 'Activity: ' + (s.current_activity || 'idle');
+    const tgt = document.getElementById('af-current-target');
+    if (tgt) tgt.textContent = 'Target: ' + (s.current_target || '—');
+    // Highlight active mode button
+    ['GENERAL','MONEY','AUTO'].forEach(m => {
+      const btn = document.getElementById('af-mode-'+m.toLowerCase());
+      if (btn) btn.style.background = (s.mode===m) ? '#d97706' : '';
+    });
+    // Auto-approve toggle
+    const aa = document.getElementById('af-auto-approve');
+    if (aa) aa.checked = !!s.auto_approve_low;
+    // Activity feed
+    const logEl = document.getElementById('af-activity-log');
+    if (logEl && Array.isArray(s.activity) && s.activity.length) {
+      logEl.innerHTML = s.activity.map(e => {
+        const color = e.level==='warn'?'#fb923c':e.level==='error'?'#ef4444':e.level==='success'?'#4ade80':'#c9d1d9';
+        return `<div style="color:${color}">[${(e.ts||'').slice(11,19)}] ${escHtml(e.msg)}</div>`;
+      }).join('');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  } catch(e) { console.warn('afRefresh', e); }
+}
+
+async function afSetMode(mode) {
+  const r = await api('/api/ascend/mode', {method:'POST',body:{mode}});
+  if (r.ok) { toast(`⚙️ Mode: ${mode}`); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+
+async function afScan() {
+  toast('🔍 Scanning system…', 'info');
+  const r = await api('/api/ascend/scan', {method:'POST'});
+  if (r.ok) {
+    toast(`✅ Scan complete — ${(r.patches||[]).length} patch(es) queued`);
+    afLoadPatches(); afRefresh();
+  } else { toast(r.detail || 'Scan failed', 'error'); }
+}
+
+async function afLoadPatches() {
+  try {
+    const patches = await api('/api/ascend/patches');
+    const el = document.getElementById('af-patches-list');
+    if (!el) return;
+    if (!Array.isArray(patches) || !patches.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>';
+      return;
+    }
+    el.innerHTML = patches.map(p => `
+      <div style="border:1px solid #374151;border-radius:8px;padding:10px 14px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${RISK_COLORS[p.risk_level]||'#6b7280'};color:#000">${p.risk_level}</span>
+          <span style="font-size:.8em;color:#9ca3af">${p.patch_type}</span>
+          <span style="font-size:.8em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}</span>
+        </div>
+        <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
+        <div style="font-size:.8em;color:#9ca3af;margin-bottom:6px">${escHtml(p.reason||'')}</div>
+        ${p.diff_preview ? `<details style="margin-bottom:6px"><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" style="background:#15803d;color:#fff" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
+          <button class="btn btn-sm" style="background:#7f1d1d;color:#fff" onclick="afReject('${p.patch_id}')">❌ Reject</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.warn('afLoadPatches', e); }
+}
+
+async function afApprove(id) {
+  const r = await api(`/api/ascend/patches/${id}/approve`, {method:'POST'});
+  if (r.ok) { toast('✅ Patch approved'); afLoadPatches(); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+async function afReject(id) {
+  const r = await api(`/api/ascend/patches/${id}/reject`, {method:'POST'});
+  if (r.ok) { toast('❌ Patch rejected'); afLoadPatches(); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+async function afRollback(id) {
+  if (!confirm('Roll back this patch?')) return;
+  const r = await api(`/api/ascend/patches/${id}/rollback`, {method:'POST'});
+  if (r.ok) { toast('↩️ Rolled back'); afLoadChangelog(); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+
+async function afApplyAllLow() {
+  const r = await api('/api/ascend/patches');
+  const low = (Array.isArray(r)?r:[]).filter(p=>p.risk_level==='LOW');
+  if (!low.length) { toast('No LOW-risk patches pending', 'info'); return; }
+  for (const p of low) { await api(`/api/ascend/patches/${p.patch_id}/approve`,{method:'POST'}); }
+  toast(`✅ Applied ${low.length} LOW-risk patch(es)`);
+  afLoadPatches(); afRefresh();
+}
+
+async function afCancelAll() {
+  if (!confirm('Cancel all pending patches?')) return;
+  const r = await api('/api/ascend/patches');
+  const pending = Array.isArray(r) ? r : [];
+  for (const p of pending) { await api(`/api/ascend/patches/${p.patch_id}/reject`,{method:'POST'}); }
+  toast(`🗑 Cancelled ${pending.length} patch(es)`);
+  afLoadPatches(); afRefresh();
+}
+
+async function afShowPending() {
+  afLoadPatches();
+  document.getElementById('tab-ascend').scrollIntoView({behavior:'smooth'});
+}
+
+async function afLoadChangelog() {
+  try {
+    const log = await api('/api/ascend/changelog?limit=30');
+    const el = document.getElementById('af-changelog');
+    if (!el) return;
+    if (!Array.isArray(log) || !log.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>';
+      return;
+    }
+    el.innerHTML = log.map(p => {
+      const emoji = STATUS_EMOJI[p.status] || '?';
+      const riskColor = RISK_COLORS[p.risk_level] || '#6b7280';
+      const appliedAt = p.applied_timestamp ? ` → applied ${p.applied_timestamp.slice(0,16)}` : '';
+      return `
+        <div style="border:1px solid #1f2937;border-radius:8px;padding:10px 14px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+            <span style="font-size:1em">${emoji}</span>
+            <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${riskColor};color:#000">${p.risk_level}</span>
+            <span style="font-size:.78em;font-weight:600;color:#e5e7eb">${escHtml(p.patch_id)}</span>
+            <span style="font-size:.75em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}${appliedAt}</span>
+          </div>
+          <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
+          <div style="font-size:.8em;color:#9ca3af;margin-bottom:4px">${escHtml(p.reason||'')}</div>
+          ${p.diff_preview ? `<details><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff / code changes</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
+          ${p.status==='approved' ? `<button class="btn btn-sm" style="margin-top:6px;background:#7f1d1d;color:#fff" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
+        </div>`;
+    }).join('');
+  } catch(e) { console.warn('afLoadChangelog', e); }
+}
+
+async function afSetAutoApprove(enabled) {
+  const r = await api('/api/ascend/auto-approve', {method:'POST',body:{enabled}});
+  if (r.ok) toast(`Auto-approve LOW: ${enabled?'ON':'OFF'}`);
+  else toast('Failed', 'error');
+}
+
+// Helper: escape HTML
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Auto-refresh ASCEND FORGE every 15s when tab is active
+setInterval(() => { if (currentTab === 'ascend') { afRefresh(); afLoadPatches(); } }, 15000);
 </script>
 </body>
 </html>"""
@@ -5094,6 +5367,15 @@ async def post_chat(payload: dict):
 
 def handle_command(message: str, model_route: Optional[str] = None) -> str:
     msg_lower = message.lower().strip()
+
+    # ── ASCEND_FORGE chat commands ─────────────────────────────────────────────
+    if msg_lower.startswith("ascend:"):
+        try:
+            af = _load_ascend_module()
+            return af.handle_chat_command(message)
+        except Exception as exc:
+            logger.error("ascend chat command error: %s", exc)
+            return f"❌ ASCEND_FORGE error: {exc}"
 
     if msg_lower in ("status", "s"):
         rc, out = ai_employee("status")
@@ -7835,6 +8117,141 @@ def blacklight_logs(limit: int = 100):
     except Exception as exc:
         logger.warning("blacklight logs error: %s", exc)
         return JSONResponse([])
+
+
+# ── ASCEND_FORGE API ──────────────────────────────────────────────────────────
+
+_ascend_mod = None
+
+
+def _load_ascend_module():
+    """Lazy-import and cache the ascend_forge module from the bots directory."""
+    global _ascend_mod
+    if _ascend_mod is not None:
+        return _ascend_mod
+    _af_path = AI_HOME / "bots" / "ascend-forge"
+    if str(_af_path) not in sys.path:
+        sys.path.insert(0, str(_af_path))
+    _ascend_mod = importlib.import_module("ascend_forge")
+    return _ascend_mod
+
+
+@app.get("/api/ascend/status")
+def ascend_status():
+    """Return ASCEND_FORGE current state, mode, and activity feed."""
+    try:
+        af = _load_ascend_module()
+        return JSONResponse(af.get_status())
+    except Exception as exc:
+        logger.warning("ascend status error: %s", exc)
+        return JSONResponse({"mode": "AUTO", "pending_count": 0,
+                             "observe_only": False, "activity": []})
+
+
+@app.post("/api/ascend/mode")
+def ascend_set_mode(payload: dict):
+    """Set ASCEND_FORGE operating mode (GENERAL / MONEY / AUTO)."""
+    mode = (payload.get("mode") or "").strip().upper()
+    if not mode:
+        raise HTTPException(400, "mode is required")
+    try:
+        af = _load_ascend_module()
+        af.set_mode(mode)
+        return JSONResponse({"ok": True, "mode": mode})
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend set_mode error: %s", exc)
+        raise HTTPException(500, "Failed to set mode")
+
+
+@app.post("/api/ascend/scan")
+def ascend_scan():
+    """Trigger a system scan and return queued patches."""
+    try:
+        af = _load_ascend_module()
+        patches = af.scan_system(trigger="UI scan")
+        return JSONResponse({"ok": True, "patches": patches})
+    except Exception as exc:
+        logger.error("ascend scan error: %s", exc)
+        raise HTTPException(500, "Scan failed")
+
+
+@app.get("/api/ascend/patches")
+def ascend_patches():
+    """Return all pending patches."""
+    try:
+        af = _load_ascend_module()
+        return JSONResponse(af.get_pending_patches())
+    except Exception as exc:
+        logger.warning("ascend patches error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/ascend/patches/{patch_id}/approve")
+def ascend_approve(patch_id: str):
+    """Approve a pending patch."""
+    try:
+        af = _load_ascend_module()
+        patch = af.approve_patch(patch_id)
+        return JSONResponse({"ok": True, "patch": patch})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend approve error: %s", exc)
+        raise HTTPException(500, "Approval failed")
+
+
+@app.post("/api/ascend/patches/{patch_id}/reject")
+def ascend_reject(patch_id: str):
+    """Reject a pending patch."""
+    try:
+        af = _load_ascend_module()
+        patch = af.reject_patch(patch_id)
+        return JSONResponse({"ok": True, "patch": patch})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend reject error: %s", exc)
+        raise HTTPException(500, "Rejection failed")
+
+
+@app.post("/api/ascend/patches/{patch_id}/rollback")
+def ascend_rollback(patch_id: str):
+    """Roll back an approved patch."""
+    try:
+        af = _load_ascend_module()
+        patch = af.rollback_patch(patch_id)
+        return JSONResponse({"ok": True, "patch": patch})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend rollback error: %s", exc)
+        raise HTTPException(500, "Rollback failed")
+
+
+@app.get("/api/ascend/changelog")
+def ascend_changelog(limit: int = 50):
+    """Return change history."""
+    try:
+        af = _load_ascend_module()
+        return JSONResponse(af.get_changelog(limit=min(limit, 200)))
+    except Exception as exc:
+        logger.warning("ascend changelog error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/ascend/auto-approve")
+def ascend_auto_approve(payload: dict):
+    """Toggle auto-approve for LOW risk patches."""
+    enabled = bool(payload.get("enabled", False))
+    try:
+        af = _load_ascend_module()
+        af.set_auto_approve_low(enabled)
+        return JSONResponse({"ok": True, "auto_approve_low": enabled})
+    except Exception as exc:
+        logger.error("ascend auto-approve error: %s", exc)
+        raise HTTPException(500, "Failed to update setting")
 
 
 if __name__ == "__main__":
