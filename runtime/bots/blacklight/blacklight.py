@@ -35,6 +35,14 @@ MAX_CYCLES = int(os.environ.get("BLACKLIGHT_MAX_CYCLES", "0"))
 # Maximum log entries to keep on disk
 MAX_LOG_LINES = 500
 
+# Opportunity analysis / evaluation tuning
+MAX_OPPORTUNITIES_TO_ANALYZE = 5   # how many raw leads to score per cycle
+MAX_PLANS_TO_EXECUTE = 3           # how many plans to run per cycle
+POINTS_PER_LEAD = 2                # evaluation score weight: stored lead
+POINTS_PER_MESSAGE = 3             # evaluation score weight: outreach message
+MAX_EVALUATION_SCORE = 10          # evaluation score cap
+SUCCESS_SCORE_THRESHOLD = 4        # minimum score to consider a cycle successful
+
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
     format="%(message)s",
@@ -192,7 +200,7 @@ def skill_generate_outreach(lead: dict, offer: str) -> dict:
 
     # Use Hermes directly
     prompt = (
-        f"Write a short personalised cold outreach email for a business called "
+        f"Write a short personalized cold outreach email for a business called "
         f"'{lead.get('name', 'this company')}' in the "
         f"{lead.get('industry', 'local')} space.\n"
         f"My offer: {offer}.\n"
@@ -284,7 +292,7 @@ def analyze_opportunity(opp: dict, goal: str) -> dict:
 def prioritize_opportunities(opps: list[dict], goal: str) -> list[dict]:
     """Analyze top candidates and return sorted by score."""
     scored = []
-    for opp in opps[:5]:  # keep fast — analyze top 5 only
+    for opp in opps[:MAX_OPPORTUNITIES_TO_ANALYZE]:
         analysis = analyze_opportunity(opp, goal)
         opp["bl_score"]  = analysis["score"]
         opp["bl_action"] = analysis.get("action", "outreach")
@@ -304,7 +312,7 @@ def plan_actions(opps: list[dict], goal: str, strategy: dict) -> list[dict]:
         "a professional AI-powered service that helps your business grow faster",
     )
     plans = []
-    for opp in opps[:3]:  # top 3 only
+    for opp in opps[:MAX_PLANS_TO_EXECUTE]:
         plans.append({
             "id":    f"plan-{uuid.uuid4().hex[:6]}",
             "lead":  opp,
@@ -350,9 +358,10 @@ def evaluate_results(executions: list[dict], cycle: int) -> dict:
     leads_stored        = sum(1 for e in executions if e.get("stored"))
     messages_generated  = sum(1 for e in executions if e.get("outreach_message"))
 
-    # Score: 2pts per lead stored, 3pts per message generated
-    score   = min(10, leads_stored * 2 + messages_generated * 3)
-    success = score >= 4
+    # Score: POINTS_PER_LEAD pts per lead stored, POINTS_PER_MESSAGE pts per message generated
+    score   = min(MAX_EVALUATION_SCORE,
+                  leads_stored * POINTS_PER_LEAD + messages_generated * POINTS_PER_MESSAGE)
+    success = score >= SUCCESS_SCORE_THRESHOLD
     reason  = (
         f"Cycle {cycle}: {leads_stored} lead(s) stored, "
         f"{messages_generated} outreach message(s) generated"
