@@ -228,6 +228,7 @@ _AGENT_ID_ROUTING: dict = {
     "engineering-assistant": "coding",    # engineering / code tasks
     "qa-tester":             "coding",    # QA & test generation
     "chatbot-builder":       "coding",    # chatbot logic & code
+    "obsidian-memory":       "coding",    # Obsidian vault knowledge base
     # ── Hermes autonomous agent ───────────────────────────────────────────
     "hermes-agent":  "reasoning",   # autonomous pipeline orchestrator
     "hermes":        "reasoning",
