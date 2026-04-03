@@ -3397,8 +3397,8 @@ function renderAgenda() {
   const g = document.getElementById('agenda-grid');
   if (!p || !g) return;
   const d = _agendaDate;
-  const today = new Date();
   if (_agendaView === 'month') {
+    const today = new Date();
     p.textContent = d.toLocaleDateString('en-US', {month:'long',year:'numeric'});
     const first = new Date(d.getFullYear(), d.getMonth(), 1);
     const last = new Date(d.getFullYear(), d.getMonth()+1, 0);
@@ -3413,6 +3413,7 @@ function renderAgenda() {
     g.style.gridTemplateColumns = 'repeat(7,1fr)';
     g.innerHTML = html;
   } else if (_agendaView === 'week') {
+    const today = new Date();
     // Show a 7-column week grid with day names + date numbers
     const startOfWeek = new Date(d);
     startOfWeek.setDate(d.getDate() - d.getDay());
@@ -5597,7 +5598,9 @@ async function blToggle(on) {
   if (on) {
     const goal = (document.getElementById('bl-goal-input')?.value || document.getElementById('dash-bl-goal-input')?.value || '').trim();
     if (!goal) {
-      toast('Set a goal first — type one in the goal field below the toggle', 'error');
+      // Determine which context triggered the toggle to give a useful hint
+      const onDash = !!document.getElementById('dash-bl-goal-input');
+      toast(onDash ? 'Set a goal first — type one in the goal field below the BLACKLIGHT toggle' : 'Set a goal first — type one in the goal field above the start button', 'error');
       _blSyncUI(false, '');
       return;
     }
