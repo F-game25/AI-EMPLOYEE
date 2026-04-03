@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import difflib
 import importlib
+import itertools
 import json
 import logging
 import os
@@ -303,9 +304,9 @@ def scan_prompts(target_path: Optional[Path] = None) -> list[dict]:
             continue
         # Find triple-quoted strings longer than 40 chars (likely prompt templates)
         import re
-        pattern = re.compile(r'"""([\s\S]{40,400}?)"""', re.DOTALL)
+        pattern = re.compile(r'(?:"""([\s\S]{40,400}?)"""|\'\'\'([\s\S]{40,400}?)\'\'\')', re.DOTALL)
         for match in pattern.finditer(source):
-            text = match.group(1).strip()
+            text = (match.group(1) or match.group(2)).strip()
             _, suggestions = _optimize_prompt(text)
             if suggestions:
                 candidates.append({
@@ -343,10 +344,10 @@ def create_patch(
     change_size = len(diff_preview.splitlines())
     risk = _risk_level(affected_files, change_size)
 
-    # Protected area + HIGH risk: never auto-apply
+    # Protected area — force HIGH risk for any change to protected modules
     for f in affected_files:
         for protected in PROTECTED_MODULES:
-            if protected in f and risk == "HIGH":
+            if protected in f:
                 risk = "HIGH"
 
     patch_id = "patch-" + uuid.uuid4().hex[:8]
@@ -501,7 +502,7 @@ def scan_system(trigger: str = "auto scan") -> list[dict]:
         todo_files: list[str] = []
         if bots_dir.exists():
             import re
-            for py_file in list(bots_dir.rglob("*.py"))[:30]:
+            for py_file in itertools.islice(bots_dir.rglob("*.py"), 30):
                 try:
                     src = py_file.read_text(errors="replace")
                     hits = re.findall(r"#\s*(TODO|FIXME)[^\n]*", src, re.IGNORECASE)
