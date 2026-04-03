@@ -188,6 +188,8 @@ AGENT_TEMPLATES_FILE = CONFIG_DIR / "agent_templates.json"
 
 # Source agent_templates.json path (bundled in repo config directory)
 _REPO_TEMPLATES_FILE = Path(__file__).parent.parent.parent / "config" / "agent_templates.json"
+# Source skills_library.json path (bundled in repo config directory)
+_REPO_SKILLS_FILE = Path(__file__).parent.parent.parent / "config" / "skills_library.json"
 
 PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
@@ -419,6 +421,39 @@ def _ollama_reachable(ollama_host: str) -> bool:
 def _detect_llm_provider(model_route: Optional[str] = None) -> tuple[Optional[str], str, dict[str, str]]:
   runtime_env = _load_runtime_env_map()
   route = (model_route or "").strip().lower()
+
+  if route == "auto":
+    # Cost-effective order: Ollama (free) → NVIDIA (free) → Groq (fast cheap) → OpenAI → Anthropic
+    ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    if _ollama_reachable(ollama_host):
+      return "ollama", runtime_env.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL", "llama3.2"), runtime_env
+    nvidia_key = runtime_env.get("NVIDIA_API_KEY") or os.environ.get("NVIDIA_API_KEY", "")
+    if nvidia_key:
+      return "nvidia", runtime_env.get("NIM_BULK_MODEL") or os.environ.get("NIM_BULK_MODEL", "meta/llama-3.1-8b-instruct"), runtime_env
+    groq_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+    if groq_key:
+      return "groq", runtime_env.get("GROQ_MODEL") or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"), runtime_env
+    openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
+      return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o-mini"), runtime_env
+    anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+      return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5"), runtime_env
+
+  if route == "nvidia":
+    nvidia_key = runtime_env.get("NVIDIA_API_KEY") or os.environ.get("NVIDIA_API_KEY", "")
+    if nvidia_key:
+      return "nvidia", runtime_env.get("NIM_BULK_MODEL") or os.environ.get("NIM_BULK_MODEL", "meta/llama-3.1-8b-instruct"), runtime_env
+
+  if route == "openai":
+    openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
+      return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o"), runtime_env
+
+  if route == "anthropic":
+    anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+      return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
 
   if route == "groq":
     groq_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
@@ -1710,11 +1745,11 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div class="form-group">
           <label>Task ID (unique)</label>
-          <input id="sched-id" placeholder="e.g. weekly_report_001"/>
+          <input id="sched-id" placeholder="auto-generated from label" oninput="this.dataset.manuallySet='1'"/>
         </div>
         <div class="form-group">
           <label>Label / Title</label>
-          <input id="sched-label" placeholder="e.g. Weekly Performance Report"/>
+          <input id="sched-label" placeholder="e.g. Weekly Performance Report" oninput="autoSchedId()"/>
         </div>
         <div class="form-group">
           <label>Priority</label>
@@ -2728,12 +2763,16 @@ async function loadDashboard() {
   if (!agents.length) {
     el.innerHTML = '<div class="empty"><div class="icon">🤖</div><p>No agent state data yet. Start the agents first.</p></div>';
   } else {
-    el.innerHTML = agents.map(a => {
+    const sorted = [...agents].sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0) || (a.id || '').localeCompare(b.id || ''));
+    el.innerHTML = sorted.map(a => {
       const cls = a.running ? 'on' : 'off';
       const lbl = a.running ? 'running' : 'stopped';
+      const isActive = (d.active_agents || []).includes(a.id);
+      const taskBadge = isActive ? `<span style="font-size:.68em;padding:2px 6px;border-radius:8px;background:rgba(212,175,55,.15);color:var(--gold);border:1px solid rgba(212,175,55,.3);margin-left:4px">◈ on task</span>` : '';
       return `<div class="bot-row">
         <div class="dot ${cls}"></div>
         <span class="bot-name">${escHtml(a.id)}</span>
+        ${taskBadge}
         <span class="badge ${lbl}">${lbl}</span>
       </div>`;
     }).join('');
@@ -2742,7 +2781,7 @@ async function loadDashboard() {
   const sys = await api('/api/doctor');
   // Try to determine real gateway status from the doctor endpoint
   const gatewayOk = sys.gateway_ok !== undefined ? !!sys.gateway_ok : (document.getElementById('stat-gateway')?.textContent === 'Online');
-  updateHealthChecks({running_bots: running, ollama_ok: !!sys.ollama_ok, gateway_ok: gatewayOk});
+  updateHealthChecks({running_bots: running, ollama_ok: d.ollama_ok !== undefined ? !!d.ollama_ok : !!sys.ollama_ok, gateway_ok: gatewayOk});
 }
 
 async function loadLiveOffice() {
@@ -2759,7 +2798,14 @@ async function loadLiveOffice() {
   const countEl = document.getElementById('office-agent-count');
   if (countEl) countEl.textContent = agents.length + ' agent' + (agents.length !== 1 ? 's' : '') + ' active';
   if (!agents.length) {
-    container.innerHTML = '<div class="empty" style="padding-top:80px"><div class="icon">🏢</div><p>No running agents right now.</p></div>';
+    container.innerHTML = `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px">
+    <div style="width:80px;height:80px;border-radius:50%;border:3px solid rgba(212,175,55,.3);display:flex;align-items:center;justify-content:center;font-size:2em;animation:robotWalk 3s ease-in-out infinite">🤖</div>
+    <div style="text-align:center">
+      <div style="font-size:1em;font-weight:700;color:var(--gold);margin-bottom:6px">No Active Agents</div>
+      <div style="font-size:.8em;color:var(--text-muted);max-width:260px;line-height:1.6">Your AI workforce is standing by. Start agents from the Dashboard to see them appear here and work on your tasks.</div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="startAll();setTimeout(loadLiveOffice,3000)" style="background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700">▶ Start All Agents</button>
+  </div>`;
     return;
   }
 
@@ -2922,9 +2968,20 @@ async function loadChatLog() {
 function updateChatModelBadge() {
   const sel = document.getElementById('chat-model');
   const badge = document.getElementById('chat-model-badge');
+  const indicator = document.getElementById('chat-agent-indicator');
   if (!sel || !badge) return;
   const labels = {auto:'Auto',ollama:'Ollama',nvidia:'NVIDIA NIM',openai:'OpenAI',anthropic:'Claude',groq:'Groq',external:'External'};
+  const hints = {
+    auto:'Auto-routing: Ollama → NVIDIA → Groq → OpenAI (cost-effective)',
+    ollama:'Using local Ollama (free, private)',
+    nvidia:'Using NVIDIA NIM (fast, free tier)',
+    openai:'Using OpenAI GPT-4o',
+    anthropic:'Using Anthropic Claude',
+    groq:'Using Groq (ultra-fast inference)',
+    external:'Using external AI provider'
+  };
   badge.textContent = labels[sel.value] || sel.value;
+  if (indicator) indicator.textContent = hints[sel.value] || 'Routing to best agent';
 }
 
 async function sendChat() {
@@ -2933,6 +2990,17 @@ async function sendChat() {
   if (!q) return;
   const route = document.getElementById('chat-model')?.value || 'ollama';
   input.value = '';
+  // Optimistically add user message to chat before API response
+  const log = document.getElementById('chat-log');
+  if (log) {
+    const emptyEl = log.querySelector('.empty');
+    if (emptyEl) emptyEl.remove();
+    log.insertAdjacentHTML('beforeend', `<div class="chat-msg user">
+  <div class="chat-msg-header"><span class="chat-msg-avatar">👤</span><span class="chat-msg-source">You</span></div>
+  <div>${q.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</div>
+</div>`);
+    log.scrollTo({top: log.scrollHeight, behavior: 'smooth'});
+  }
   await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q, model_route: route})});
   loadChatLog();
 }
@@ -3737,14 +3805,17 @@ function renderSwarmGrid(agents) {
     const dotColor = a.running ? '#10b981' : '#ef4444';
     const runningDot = `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};display:inline-block;margin-left:6px"></span>`;
     const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:var(--surface);padding:2px 6px;border-radius:3px;font-size:.73em;color:var(--text-secondary)">${escHtml(s)}</span>`).join('');
-    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color}">
+    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color};display:flex;flex-direction:column">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-weight:600;font-size:.95em">${escHtml(a.id)}</div>
         ${runningDot}
       </div>
-      <div style="font-size:.8em;color:var(--text-secondary);margin-bottom:10px;line-height:1.4">${escHtml(a.description||'')}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px">${skills}${(a.skills||[]).length > 4 ? `<span style="font-size:.73em;color:var(--text-muted)">+${(a.skills||[]).length-4} more</span>` : ''}</div>
-      <div style="margin-top:8px;font-size:.75em;color:var(--text-muted)">Category: ${escHtml(a.category||'')}</div>
+      <div style="font-size:.8em;color:var(--text-secondary);margin-bottom:10px;line-height:1.4;flex:1">${escHtml(a.description||'No description available.')}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${skills}${(a.skills||[]).length > 4 ? `<span style="font-size:.73em;color:var(--text-muted)">+${(a.skills||[]).length-4} more</span>` : ''}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:8px;border-top:1px solid rgba(255,255,255,.05)">
+        <span style="font-size:.72em;color:var(--text-muted)">${escHtml(a.category||'General')}</span>
+        <button class="btn btn-ghost btn-sm" onclick="assignTaskToAgent('${escHtml(a.id)}')" style="font-size:.74em;border:1px solid rgba(212,175,55,.3);color:var(--gold);padding:3px 10px">→ Assign Task</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -4054,7 +4125,8 @@ function executeCmd(cmd) {
 
 // ── ROI Metrics ──────────────────────────────────────────────────────────────
 async function loadMetrics() {
-  const d = await api('/api/metrics');
+  const period = document.getElementById('roi-period')?.value || 'all';
+  const d = await api('/api/metrics?period=' + period);
   const s = d.summary || {};
   document.getElementById('m-tasks').textContent  = (s.tasks_completed   || 0).toLocaleString();
   document.getElementById('m-leads').textContent  = (s.leads_generated   || 0).toLocaleString();
@@ -4838,6 +4910,65 @@ async function deleteBotFinal() {
 
 // Auto-refresh dashboard every 30s
 setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
+
+// ── Auto-generate scheduler task ID from label ────────────────────────────────
+function autoSchedId() {
+  const label = document.getElementById('sched-label')?.value || '';
+  const idEl = document.getElementById('sched-id');
+  if (!idEl || idEl.dataset.manuallySet) return;
+  const slug = label.toLowerCase().trim()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 30);
+  const ts = Date.now().toString().slice(-4);
+  idEl.value = slug ? slug + '_' + ts : '';
+}
+
+// ── Assign task to agent from swarm ──────────────────────────────────────────
+function assignTaskToAgent(agentId) {
+  const tasksBtn = document.querySelector('nav button[onclick*="tasks"]');
+  if (tasksBtn) tasksBtn.click();
+  setTimeout(() => {
+    const taskInput = document.getElementById('task-input');
+    if (taskInput) {
+      taskInput.focus();
+      taskInput.placeholder = `Describe what you want ${agentId} to do…`;
+    }
+    if (typeof showManualAgentPicker === 'function') showManualAgentPicker();
+    setTimeout(() => {
+      const checkbox = document.querySelector(`[data-agent-id="${agentId}"]`);
+      if (checkbox) checkbox.click();
+    }, 300);
+  }, 200);
+}
+
+// ── Server-Sent Events for real-time updates ──────────────────────────────────
+let _sseRetries = 0;
+function connectSSE() {
+  if (typeof EventSource === 'undefined') return;
+  const es = new EventSource('/api/events');
+  es.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (typeof d.running === 'number') {
+        animateCount('stat-running', d.running);
+        const headerSub = document.getElementById('header-sub');
+        if (headerSub) headerSub.textContent = `${d.running} agents running`;
+      }
+      if (d.active_task) {
+        const el = document.getElementById('sys-control-sub');
+        if (el) el.textContent = `◈ Active task: ${d.active_task}`;
+      }
+    } catch {}
+    _sseRetries = 0;
+  };
+  es.onerror = () => {
+    es.close();
+    _sseRetries++;
+    if (_sseRetries < 10) setTimeout(connectSSE, Math.min(5000 * _sseRetries, 30000));
+  };
+}
+connectSSE();
 </script>
 </body>
 </html>"""
@@ -5036,6 +5167,53 @@ def auth_login(request: Request, login_data: _LoginRequest):
 # ── End security endpoints ─────────────────────────────────────────────────────
 
 
+import asyncio
+
+@app.get("/api/events")
+async def sse_events(request: Request):
+    """Server-Sent Events stream for real-time dashboard updates."""
+    async def generate():
+        last_running = -1
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                mode = _current_mode()
+                running = 0
+                for agent_name in _mode_agent_targets(mode):
+                    if agent_name in INFRA_AGENTS:
+                        continue
+                    pid_file = AI_HOME / "run" / f"{agent_name}.pid"
+                    if pid_file.exists():
+                        try:
+                            os.kill(int(pid_file.read_text().strip()), 0)
+                            running += 1
+                        except Exception:
+                            pass
+                plans = _load_task_plans()
+                active = next((p for p in plans if p.get("status") in ("running", "planning")), None)
+                data = json.dumps({
+                    "running": running,
+                    "active_task": active.get("title", "") if active else None,
+                    "ts": now_iso(),
+                })
+                yield f"data: {data}\n\n"
+                last_running = running
+            except Exception:
+                pass
+            await asyncio.sleep(8)
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
+
+
 @app.get("/api/status")
 def get_status():
   agents = []
@@ -5054,12 +5232,26 @@ def get_status():
         running = False
     agents.append({"agent": agent_name, "running": running})
 
+  ollama_host_url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+  # Add active task hint
+  active_plans = _load_task_plans()
+  active_task = next((p for p in active_plans if p.get("status") in ("running", "planning")), None)
+  active_agents: set = set()
+  if active_task:
+    active_agents = {st.get("agent_id", "") for st in active_task.get("subtasks", [])}
+    for a in (active_task.get("agents_hint") or []):
+      active_agents.add(a)
+
   return JSONResponse({
     "ts": now_iso(),
     "mode": mode,
     "agents": agents,
     "total": len(agents),
     "running": sum(1 for a in agents if a["running"]),
+    "active_task": active_task.get("title", "") if active_task else None,
+    "active_task_id": active_task.get("id") if active_task else None,
+    "active_agents": list(active_agents),
+    "ollama_ok": _ollama_reachable(ollama_host_url),
   })
 
 
@@ -6069,11 +6261,13 @@ def review_improvement(improvement_id: str, payload: dict):
 @app.get("/api/skills")
 def get_skills(category: str = "", q: str = ""):
     lib = {}
-    if SKILLS_LIBRARY_FILE.exists():
-        try:
-            lib = json.loads(SKILLS_LIBRARY_FILE.read_text())
-        except Exception:
-            pass
+    for candidate in (SKILLS_LIBRARY_FILE, _REPO_SKILLS_FILE):
+        if candidate.exists():
+            try:
+                lib = json.loads(candidate.read_text())
+                break
+            except Exception:
+                pass
     skills = lib.get("skills", [])
     categories = lib.get("categories", sorted({s["category"] for s in skills}))
     if category:
@@ -6379,6 +6573,25 @@ def submit_task(payload: dict):
     plans.insert(0, plan)
     _save_task_plans(plans[:50])  # keep last 50
 
+    # Auto-start assigned agents if they're not running
+    if agents:
+        for agent_id in agents:
+            target = _resolve_agent_target(agent_id)
+            if target and _agent_dir_exists(target):
+                pid_file = AI_HOME / "run" / f"{target}.pid"
+                already_running = False
+                if pid_file.exists():
+                    try:
+                        os.kill(int(pid_file.read_text().strip()), 0)
+                        already_running = True
+                    except Exception:
+                        pass
+                if not already_running:
+                    try:
+                        ai_employee("start", target)
+                    except Exception:
+                        pass
+
     return JSONResponse({"ok": True, "task_id": task_id, "message": f"Task submitted: {description[:60]}", "agents": agents, "mode": mode})
 
 
@@ -6528,15 +6741,40 @@ def get_all_agents():
   agents_config = capabilities.get("agents", {})
   mode = _current_mode()
 
+  # Map dashboard agent IDs → capabilities file IDs
+  _CAPS_ID_MAP = {
+    "task-orchestrator": ["orchestrator", "task-orchestrator"],
+    "lead-generator": ["lead-hunter", "lead-generator"],
+    "offer-agent": ["email-ninja", "offer-agent"],
+    "social-media-manager": ["social-guru", "social-poster", "social-media-manager"],
+    "web-researcher": ["intel-agent", "web-researcher"],
+    "ecom-agent": ["product-scout", "ecom-dashboard", "ecom-agent", "order-processor"],
+    "chatbot-builder": ["support-bot", "chatbot-builder"],
+    "creator-agency": ["creative-studio", "creator-agency"],
+    "recruiter": ["hr-manager", "recruiter"],
+    "conversion-rate-optimizer": ["conversion-rate-optimizer"],
+    "ad-campaign-wizard": ["ad-campaign-wizard"],
+    "cold-outreach-assassin": ["cold-outreach-assassin"],
+    "partnership-matchmaker": ["partnership-matchmaker"],
+    "linkedin-growth-hacker": ["linkedin-growth-hacker"],
+    "referral-rocket": ["referral-rocket"],
+    "sales-closer-pro": ["sales-closer-pro"],
+    "financial-deepsearch": ["data-analyst", "financial-deepsearch"],
+    "mirofish-researcher": ["product-researcher", "mirofish-researcher"],
+    "skills-manager": ["skills-manager"],
+    "arbitrage-bot": ["bot-dev", "arbitrage-bot"],
+  }
+
   result = []
   for agent_id in _available_agent_ids(mode):
-    info = agents_config.get(agent_id)
     canonical_ids = _agent_aliases(agent_id)
-    if info is None:
-      for alias in canonical_ids:
-        if alias in agents_config:
-          info = agents_config.get(alias)
-          break
+    # Try direct lookup, then _CAPS_ID_MAP aliases, then existing AGENT_ALIASES
+    caps_ids_to_try = _CAPS_ID_MAP.get(agent_id, [agent_id]) + canonical_ids
+    info = None
+    for caps_id in caps_ids_to_try:
+      if caps_id in agents_config:
+        info = agents_config[caps_id]
+        break
     info = info or {}
 
     pid_file = None
@@ -6674,9 +6912,21 @@ def _recalc_summary(events: list) -> dict:
 
 
 @app.get("/api/metrics")
-def get_metrics():
+def get_metrics(period: str = "all"):
     data = _load_metrics()
-    return JSONResponse(data)
+    events = data.get("events", [])
+    now_dt = datetime.now(timezone.utc)
+    if period == "today":
+        cutoff = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        events = [e for e in events if e.get("ts", "") >= cutoff.isoformat()]
+    elif period == "7d":
+        cutoff = now_dt - timedelta(days=7)
+        events = [e for e in events if e.get("ts", "") >= cutoff.isoformat()]
+    elif period == "30d":
+        cutoff = now_dt - timedelta(days=30)
+        events = [e for e in events if e.get("ts", "") >= cutoff.isoformat()]
+    summary = _recalc_summary(events) if period != "all" else data.get("summary", {})
+    return JSONResponse({"summary": summary, "events": events})
 
 
 @app.post("/api/metrics")
@@ -6698,6 +6948,7 @@ def record_metric(payload: dict):
     if hours is not None:
         try:
             hours = float(hours)
+            hours = max(0.0, hours)  # ensure non-negative
         except (TypeError, ValueError):
             hours = None
     notes = (payload.get("notes") or "").strip() or None
