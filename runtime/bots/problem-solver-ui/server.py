@@ -1664,31 +1664,43 @@ INDEX_HTML = r"""<!doctype html>
         <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
         <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
       </div>
-      <div id="system-info" style="display:none"></div>
+      <hr style="margin:12px 0">
       <!-- BLACKLIGHT quick-toggle -->
+      <div style="padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.1rem">⚡</span>
+            <div>
+              <div style="font-size:.86em;font-weight:600;color:var(--text)">BLACKLIGHT Mode</div>
+              <div style="font-size:.75em;color:var(--text-muted)" id="dash-bl-sublabel">Autonomous agent — idle</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <label class="toggle" title="Toggle BLACKLIGHT on/off">
+              <input type="checkbox" id="dash-bl-toggle" onchange="blToggle(this.checked)"/>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <input id="dash-bl-goal-input" placeholder="Set a goal to activate BLACKLIGHT…"
+          style="width:100%;box-sizing:border-box;font-size:.8em" autocomplete="off"
+          oninput="(function(v){var m=document.getElementById('bl-goal-input');if(m&&!m.value)m.value=v;})(this.value)"/>
+      </div>
+      <!-- Hermes Agent quick-toggle -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:1.1rem">⚡</span>
+          <span style="font-size:1.1rem">🧠</span>
           <div>
-            <div style="font-size:.86em;font-weight:600;color:var(--text)">BLACKLIGHT Mode</div>
-            <div style="font-size:.75em;color:var(--text-muted)" id="dash-bl-sublabel">Autonomous agent — idle</div>
+            <div style="font-size:.86em;font-weight:600;color:var(--text)">Hermes Agent</div>
+            <div style="font-size:.75em;color:var(--text-muted)" id="dash-hermes-sublabel">Reasoning agent — stopped</div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <label class="toggle" title="Toggle BLACKLIGHT on/off">
-            <input type="checkbox" id="dash-bl-toggle" onchange="blToggle(this.checked)"/>
+          <label class="toggle" title="Toggle Hermes Agent on/off">
+            <input type="checkbox" id="dash-hermes-toggle" onchange="hermesToggle(this.checked)"/>
             <span class="slider"></span>
           </label>
         </div>
-      </div>
-      <div class="card-title" style="margin-bottom:10px"><span class="icon" style="color:var(--gold)">◈</span> System Health</div>
-      <div id="system-health-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.84em">
-        <div class="health-check-item" id="hc-api"><span class="hc-dot">●</span> API Server <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-ollama"><span class="hc-dot">●</span> Ollama LLM <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-agents"><span class="hc-dot">●</span> Agents <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-db"><span class="hc-dot">●</span> State Store <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
       </div>
       <div id="system-info" style="display:none"></div>
     </div>
@@ -1710,7 +1722,7 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 
 <!-- ── Chat ── -->
-<div id="tab-chat" class="tab-content" style="display:none">
+<div id="tab-chat" class="tab-content">
   <div style="display:flex;flex-direction:column;height:calc(100vh - 115px);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
     <!-- Chat header bar -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
@@ -1733,6 +1745,10 @@ INDEX_HTML = r"""<!doctype html>
             <option value="groq">⚡ Groq • Fast</option>
             <option value="external">🌐 External AI</option>
           </select>
+        </div>
+        <div id="chat-hermes-status" title="Hermes Agent status" style="display:flex;align-items:center;gap:5px;font-size:.73em;padding:3px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.2);color:var(--text-muted)">
+          <span id="chat-hermes-dot" style="width:7px;height:7px;border-radius:50%;background:#6b7280;display:inline-block"></span>
+          <span id="chat-hermes-label">Hermes –</span>
         </div>
         <div id="chat-model-badge" style="font-size:.73em;padding:3px 10px;border-radius:12px;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.25);color:var(--gold)">Auto</div>
         <button class="btn btn-ghost btn-sm" onclick="loadChatLog()" title="Refresh">↻</button>
@@ -1757,7 +1773,7 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 
 <!-- ── Live Office ── -->
-<div id="tab-live-office" class="tab-content" style="display:none">
+<div id="tab-live-office" class="tab-content">
   <div style="height:calc(100vh - 115px);display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
     <!-- Office header -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
@@ -3067,6 +3083,14 @@ async function loadDashboard() {
   // Sync the BLACKLIGHT quick-toggle on the dashboard
   const bl = await api('/api/blacklight/status');
   _blSyncUI(bl.running || false, bl.goal || '');
+
+  // Sync Hermes Agent toggle
+  const hermesRunning = agents.some(a => (a.id || a.name || '').toLowerCase().includes('hermes') && a.running);
+  const hermesToggleEl = document.getElementById('dash-hermes-toggle');
+  if (hermesToggleEl) hermesToggleEl.checked = hermesRunning;
+  const hermesSub = document.getElementById('dash-hermes-sublabel');
+  if (hermesSub) hermesSub.textContent = hermesRunning ? '🧠 Running — ready for tasks' : 'Reasoning agent — stopped';
+  _updateChatHermesStatus(hermesRunning);
 }
 
 async function loadLiveOffice() {
@@ -3202,6 +3226,12 @@ async function runOnboard() {
 
 // ── Chat ────────────────────────────────────────────────────────────────────
 async function loadChatLog() {
+  // Refresh Hermes status indicator in the chat header
+  api('/api/workers').then(d => {
+    const agents = Array.isArray(d.agents) ? d.agents : [];
+    const hermesRunning = agents.some(a => (a.id || a.name || '').toLowerCase().includes('hermes') && a.running);
+    _updateChatHermesStatus(hermesRunning);
+  }).catch(() => {});
   const data = await api('/api/chat');
   const log = document.getElementById('chat-log');
   const msgs = data.messages || [];
@@ -5289,6 +5319,8 @@ function _blSyncUI(running, goal) {
   // goal input (pre-fill if known)
   const goalEl = document.getElementById('bl-goal-input');
   if (goalEl && goal && !goalEl.value) goalEl.value = goal;
+  const dashGoalEl = document.getElementById('dash-bl-goal-input');
+  if (dashGoalEl && goal && !dashGoalEl.value) dashGoalEl.value = goal;
 
   // auto-refresh timer
   if (running && !_blAutoRefreshTimer) {
@@ -5333,12 +5365,12 @@ async function blLoadLogs() {
 
 async function blToggle(on) {
   // Sync both toggles immediately so neither feels laggy
-  _blSyncUI(on, document.getElementById('bl-goal-input')?.value || '');
+  _blSyncUI(on, document.getElementById('bl-goal-input')?.value || document.getElementById('dash-bl-goal-input')?.value || '');
 
   if (on) {
-    const goal = (document.getElementById('bl-goal-input')?.value || '').trim();
+    const goal = (document.getElementById('bl-goal-input')?.value || document.getElementById('dash-bl-goal-input')?.value || '').trim();
     if (!goal) {
-      toast('Set a goal first — switch to the ⚡ BLACKLIGHT tab', 'error');
+      toast('Set a goal first — type one in the goal field below the toggle', 'error');
       _blSyncUI(false, '');
       return;
     }
@@ -5357,6 +5389,33 @@ async function blToggle(on) {
     toast(r.ok ? '■ BLACKLIGHT stopped' : (r.message || 'Stop failed'), r.ok ? 'info' : 'error');
     setTimeout(blRefresh, 800);
   }
+}
+
+async function hermesToggle(on) {
+  const r = await api('/api/bots/' + (on ? 'start' : 'stop'), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({bot: 'hermes-agent'})
+  });
+  if (r.ok) {
+    toast(on ? '🧠 Hermes Agent started' : '■ Hermes Agent stopped', on ? 'success' : 'info');
+    const sub = document.getElementById('dash-hermes-sublabel');
+    if (sub) sub.textContent = on ? '🧠 Running — ready for tasks' : 'Reasoning agent — stopped';
+    _updateChatHermesStatus(on);
+  } else {
+    toast(r.message || (on ? 'Failed to start Hermes' : 'Failed to stop Hermes'), 'error');
+    const el = document.getElementById('dash-hermes-toggle');
+    if (el) el.checked = !on;
+  }
+}
+
+function _updateChatHermesStatus(running) {
+  const dot = document.getElementById('chat-hermes-dot');
+  const lbl = document.getElementById('chat-hermes-label');
+  if (dot) dot.style.background = running ? '#4ade80' : '#6b7280';
+  if (lbl) lbl.textContent = running ? 'Hermes ● online' : 'Hermes ○ offline';
+  const wrap = document.getElementById('chat-hermes-status');
+  if (wrap) wrap.style.borderColor = running ? 'rgba(74,222,128,.4)' : 'rgba(148,163,184,.2)';
 }
 
 // ── ASCEND FORGE JS ───────────────────────────────────────────────────────────
