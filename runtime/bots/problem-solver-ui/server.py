@@ -1488,6 +1488,7 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em">⚡ BLACKLIGHT</button>
 </nav>
 
 <main>
@@ -2363,6 +2364,75 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- ── BLACKLIGHT ── -->
+<div id="tab-blacklight" class="tab-content">
+
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#1a0a2e 0%,#16213e 60%,#0f172a 100%);border:1px solid #7c3aed;border-radius:12px;padding:20px 24px;margin-bottom:18px;display:flex;align-items:center;gap:18px">
+    <div style="font-size:2.4rem;line-height:1">⚡</div>
+    <div style="flex:1">
+      <div style="font-size:1.18rem;font-weight:700;color:#e2d9f3;letter-spacing:.06em">BLACKLIGHT</div>
+      <div style="font-size:.83em;color:#a78bfa;margin-top:2px">Autonomous money-making agent — runs above Hermes without user input</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div id="bl-status-dot" style="width:10px;height:10px;border-radius:50%;background:#6b7280;box-shadow:0 0 0 0 #7c3aed;transition:background .4s"></div>
+      <span id="bl-status-label" style="font-size:.82em;color:#a78bfa;font-weight:600">Idle</span>
+    </div>
+  </div>
+
+  <!-- Control row -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🎯</span> Goal &amp; Control</div>
+      <button class="btn btn-ghost btn-sm" onclick="blRefresh()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      Set a goal, then hit <strong>Start</strong>. BLACKLIGHT will find opportunities, analyse them with Hermes, generate outreach, and iterate — without waiting for input.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:220px">
+        <label style="font-size:.82em;color:var(--text-muted);display:block;margin-bottom:4px">Goal</label>
+        <input id="bl-goal-input" placeholder="e.g. Find local restaurants that need better marketing"
+          style="width:100%;box-sizing:border-box" autocomplete="off"/>
+      </div>
+      <button id="bl-start-btn" class="btn btn-success" onclick="blStart()" style="min-width:100px">▶ Start</button>
+      <button id="bl-stop-btn"  class="btn btn-danger"  onclick="blStop()"  style="min-width:100px" disabled>■ Stop</button>
+    </div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="grid-stat" style="margin-bottom:18px" id="bl-stat-cards">
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#a855f7">🔄</div>
+      <div class="stat-body"><div class="val" id="bl-stat-cycle">0</div><div class="lbl">Cycles Run</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#22d3ee">🎯</div>
+      <div class="stat-body"><div class="val" id="bl-stat-opps">0</div><div class="lbl">Opportunities Found</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#4ade80">⚡</div>
+      <div class="stat-body"><div class="val" id="bl-stat-actions">0</div><div class="lbl">Actions Taken</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color:#fb923c">🕐</div>
+      <div class="stat-body"><div class="val" id="bl-stat-last" style="font-size:.75em">—</div><div class="lbl">Last Activity</div></div>
+    </div>
+  </div>
+
+  <!-- Live activity log -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📡</span> Live Activity Log</div>
+      <button class="btn btn-ghost btn-sm" onclick="blLoadLogs()">↻ Refresh</button>
+    </div>
+    <div id="bl-log" style="font-family:var(--font-mono,monospace);font-size:.77em;background:var(--bg-deep,#0d1117);border-radius:8px;padding:12px;height:340px;overflow-y:auto;color:#c9d1d9;line-height:1.7">
+      <span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>
+    </div>
+  </div>
+
+</div>
+
 </main>
 
 <div id="toast"></div>
@@ -2394,6 +2464,7 @@ function switchTab(tab, btn) {
   if (tab === 'integrations') loadIntegrations();
   if (tab === 'history') loadHistory();
   if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
+  if (tab === 'blacklight') { blRefresh(); blLoadLogs(); }
 }
 
 function toast(msg, type='success') {
@@ -4485,6 +4556,72 @@ async function deleteBotFinal() {
 
 // Auto-refresh dashboard every 30s
 setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
+
+// ── BLACKLIGHT ───────────────────────────────────────────────────────────────
+let _blAutoRefreshTimer = null;
+
+async function blRefresh() {
+  const d = await api('/api/blacklight/status');
+  const running = d.running || false;
+  document.getElementById('bl-status-dot').style.background   = running ? '#a855f7' : '#6b7280';
+  document.getElementById('bl-status-label').textContent       = running ? '⚡ Running' : 'Idle';
+  document.getElementById('bl-stat-cycle').textContent         = d.cycle   || 0;
+  document.getElementById('bl-stat-opps').textContent          = d.opportunities_found || 0;
+  document.getElementById('bl-stat-actions').textContent       = d.actions_taken || 0;
+  const last = d.last_activity ? d.last_activity.replace('T',' ').replace('Z','') : '—';
+  document.getElementById('bl-stat-last').textContent          = last;
+  const goalEl = document.getElementById('bl-goal-input');
+  if (d.goal && !goalEl.value) goalEl.value = d.goal;
+  document.getElementById('bl-start-btn').disabled = running;
+  document.getElementById('bl-stop-btn').disabled  = !running;
+  if (running && !_blAutoRefreshTimer) {
+    _blAutoRefreshTimer = setInterval(() => { blRefresh(); blLoadLogs(); }, 8000);
+  } else if (!running && _blAutoRefreshTimer) {
+    clearInterval(_blAutoRefreshTimer);
+    _blAutoRefreshTimer = null;
+  }
+}
+
+async function blLoadLogs() {
+  const entries = await api('/api/blacklight/logs?limit=80');
+  const el = document.getElementById('bl-log');
+  if (!el) return;
+  if (!entries || !entries.length) {
+    el.innerHTML = '<span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>';
+    return;
+  }
+  const _levelColor = { system:'#818cf8', cycle:'#a78bfa', info:'#67e8f9', action:'#4ade80',
+                        result:'#facc15', eval:'#fb923c', improve:'#f472b6',
+                        warn:'#fbbf24', error:'#f87171' };
+  const html = entries.slice().reverse().map(e => {
+    const col   = _levelColor[e.level] || '#c9d1d9';
+    const ts    = (e.ts || '').replace('T',' ').replace('Z','');
+    const badge = `<span style="color:${col};font-weight:600;min-width:54px;display:inline-block">[${e.level || 'info'}]</span>`;
+    const msg   = (e.msg || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<div>${badge} <span style="color:#6b7280;font-size:.72em">${ts}</span> ${msg}</div>`;
+  }).join('');
+  el.innerHTML = html;
+}
+
+async function blStart() {
+  const goal = (document.getElementById('bl-goal-input').value || '').trim();
+  if (!goal) { toast('Enter a goal first', 'error'); return; }
+  const r = await api('/api/blacklight/start', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({goal})});
+  if (r.ok) {
+    toast('⚡ BLACKLIGHT started!');
+    blRefresh();
+    blLoadLogs();
+  } else {
+    toast(r.message || 'Failed to start', 'error');
+  }
+}
+
+async function blStop() {
+  const r = await api('/api/blacklight/stop', {method:'POST'});
+  toast(r.ok ? '■ BLACKLIGHT stopped' : (r.message || 'Stop failed'), r.ok ? 'info' : 'error');
+  setTimeout(blRefresh, 800);
+}
 </script>
 </body>
 </html>"""
@@ -7569,6 +7706,73 @@ def save_integration_alias(payload: dict):
     intg["enabled"] = True
     _save_integrations(integrations)
     return JSONResponse({"ok": True, "integration": integration_id})
+
+
+# ── BLACKLIGHT API ────────────────────────────────────────────────────────────
+
+def _load_blacklight_module():
+    """Lazy-import blacklight module from the bots directory."""
+    _bl_path = AI_HOME / "bots" / "blacklight"
+    if str(_bl_path) not in sys.path:
+        sys.path.insert(0, str(_bl_path))
+    import importlib
+    return importlib.import_module("blacklight")
+
+
+@app.get("/api/blacklight/status")
+def blacklight_status():
+    """Return BLACKLIGHT running state and stats."""
+    try:
+        bl = _load_blacklight_module()
+        return JSONResponse(bl.get_status())
+    except Exception as exc:
+        logger.warning("blacklight status error: %s", exc)
+        return JSONResponse({"running": False, "goal": "", "cycle": 0,
+                             "opportunities_found": 0, "actions_taken": 0,
+                             "last_activity": None, "error": str(exc)})
+
+
+@app.post("/api/blacklight/start")
+def blacklight_start(payload: dict):
+    """Start the BLACKLIGHT autonomous loop with the given goal."""
+    goal = (payload.get("goal") or "").strip()
+    if not goal:
+        raise HTTPException(400, "goal is required")
+    try:
+        bl = _load_blacklight_module()
+        started = bl.start(goal)
+        if started:
+            return JSONResponse({"ok": True, "goal": goal,
+                                 "message": "BLACKLIGHT started"})
+        return JSONResponse({"ok": False, "message": "BLACKLIGHT is already running"})
+    except Exception as exc:
+        logger.error("blacklight start error: %s", exc)
+        raise HTTPException(500, f"Failed to start BLACKLIGHT: {exc}")
+
+
+@app.post("/api/blacklight/stop")
+def blacklight_stop():
+    """Stop the BLACKLIGHT autonomous loop."""
+    try:
+        bl = _load_blacklight_module()
+        stopped = bl.stop()
+        return JSONResponse({"ok": stopped,
+                             "message": "BLACKLIGHT stopped" if stopped
+                             else "BLACKLIGHT was not running"})
+    except Exception as exc:
+        logger.error("blacklight stop error: %s", exc)
+        raise HTTPException(500, f"Failed to stop BLACKLIGHT: {exc}")
+
+
+@app.get("/api/blacklight/logs")
+def blacklight_logs(limit: int = 100):
+    """Return recent BLACKLIGHT log entries."""
+    try:
+        bl = _load_blacklight_module()
+        return JSONResponse(bl.get_logs(limit=min(limit, 500)))
+    except Exception as exc:
+        logger.warning("blacklight logs error: %s", exc)
+        return JSONResponse([])
 
 
 if __name__ == "__main__":

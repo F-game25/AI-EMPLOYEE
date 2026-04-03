@@ -230,6 +230,8 @@ _AGENT_ID_ROUTING: dict = {
     "chatbot-builder":       "coding",    # chatbot logic & code
     # ── General / local ───────────────────────────────────────────────────
     "recruiter": "general",   # HR recruiting (broad, free)
+    # ── BLACKLIGHT autonomous agent ───────────────────────────────────────
+    "blacklight": "orchestrator",  # autonomous loop — planning + reasoning
 }
 
 
