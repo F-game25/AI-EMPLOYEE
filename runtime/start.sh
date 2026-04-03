@@ -221,7 +221,16 @@ if [[ -n "$OPENCLAW_CMD" ]]; then
     >> "$AI_HOME/logs/gateway.log" 2>&1 &
   GATEWAY_PID=$!
   echo "$GATEWAY_PID" > "$AI_HOME/run/gateway.pid"
-  if "$OPENCLAW_CMD" health >/dev/null 2>&1 || _port_in_use "${OPENCLAW_GATEWAY_PORT:-18789}"; then
+  # Wait up to 10 s for the gateway to become healthy before declaring failure.
+  _gw_ready=0
+  for _ in {1..10}; do
+    sleep 1
+    if "$OPENCLAW_CMD" health >/dev/null 2>&1 || _port_in_use "${OPENCLAW_GATEWAY_PORT:-18789}"; then
+      _gw_ready=1
+      break
+    fi
+  done
+  if [[ "$_gw_ready" -eq 1 ]]; then
     ok "OpenClaw gateway started (pid=$GATEWAY_PID)"
   else
     warn "Gateway process started but health probe failed. Check: $AI_HOME/logs/gateway.log"
