@@ -333,6 +333,11 @@ def check_financial_deepsearch() -> None:
     _check_bot_module("financial-deepsearch", "financial_deepsearch")
 
 
+def check_blacklight() -> None:
+    """blacklight module must be importable and its run.sh executable."""
+    _check_bot_module("blacklight", "blacklight")
+
+
 def check_discord_bot_state() -> None:
     """If the Discord bot ran before, its state file should say 'running'."""
     state = AI_HOME / "state" / "discord-bot.state.json"
@@ -443,6 +448,7 @@ def main() -> None:
     check_qa_tester()
     check_paid_media_specialist()
     check_financial_deepsearch()
+    check_blacklight()
 
     _section("NVIDIA NIM Integration")
     check_nvidia_nim_config()
