@@ -6574,15 +6574,21 @@ def submit_task(payload: dict):
     _save_task_plans(plans[:50])  # keep last 50
 
     # Auto-start assigned agents if they're not running
+    import re as _re
+    _safe_id_pat = _re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
     if agents:
         for agent_id in agents:
+            # Validate agent_id to prevent path traversal
+            if not isinstance(agent_id, str) or not _safe_id_pat.match(agent_id):
+                continue
             target = _resolve_agent_target(agent_id)
             if target and _agent_dir_exists(target):
                 pid_file = AI_HOME / "run" / f"{target}.pid"
                 already_running = False
                 if pid_file.exists():
                     try:
-                        os.kill(int(pid_file.read_text().strip()), 0)
+                        pid = int(pid_file.read_text().strip())
+                        os.kill(pid, 0)
                         already_running = True
                     except Exception:
                         pass
