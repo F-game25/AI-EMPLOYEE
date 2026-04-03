@@ -223,7 +223,7 @@ if [[ -n "$OPENCLAW_CMD" ]]; then
   echo "$GATEWAY_PID" > "$AI_HOME/run/gateway.pid"
   # Wait up to 10 s for the gateway to become healthy before declaring failure.
   _gw_ready=0
-  for _gw_i in 1 2 3 4 5 6 7 8 9 10; do
+  for _ in {1..10}; do
     sleep 1
     if "$OPENCLAW_CMD" health >/dev/null 2>&1 || _port_in_use "${OPENCLAW_GATEWAY_PORT:-18789}"; then
       _gw_ready=1
