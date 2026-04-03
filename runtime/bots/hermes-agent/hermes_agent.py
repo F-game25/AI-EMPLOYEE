@@ -59,6 +59,7 @@ import uvicorn
 
 # ── Module-level constants ────────────────────────────────────────────────────
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+WHATSAPP_MAX_MESSAGE_LENGTH = 4096   # Twilio / Meta WhatsApp cap
 DISCORD_MAX_MESSAGE_LENGTH = 2000
 LOG_DESCRIPTION_MAX_LEN = 60
 
@@ -944,7 +945,7 @@ def notify_all(task_id: str, intent: str, result: dict, validation: dict) -> Non
 
     # WhatsApp
     if HERMES_NOTIFY_WHATSAPP_TO and _WHATSAPP_AVAILABLE:
-        ok, info = send_whatsapp(HERMES_NOTIFY_WHATSAPP_TO, message[:TELEGRAM_MAX_MESSAGE_LENGTH])
+        ok, info = send_whatsapp(HERMES_NOTIFY_WHATSAPP_TO, message[:WHATSAPP_MAX_MESSAGE_LENGTH])
         if ok:
             logger.info("WhatsApp notification sent for task %s", task_id)
         else:
@@ -1301,7 +1302,11 @@ def api_run(payload: dict) -> JSONResponse:
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("Pipeline error for payload %s", str(payload)[:100])
-        return JSONResponse({"error": "An internal error occurred. Check server logs.", "status": "failed"}, status_code=500)
+        error_type = type(exc).__name__
+        return JSONResponse(
+            {"error": "pipeline_error", "error_type": error_type, "status": "failed"},
+            status_code=500,
+        )
 
 
 @app.get("/api/status")
