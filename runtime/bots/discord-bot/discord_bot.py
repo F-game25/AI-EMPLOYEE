@@ -71,6 +71,23 @@ try:
 except ImportError:
     _DEEPSEARCH_AVAILABLE = False
 
+# Add obsidian-memory to path so we can reuse its functions directly
+_obsidian_path = AI_HOME / "bots" / "obsidian-memory"
+if str(_obsidian_path) not in sys.path:
+    sys.path.insert(0, str(_obsidian_path))
+
+try:
+    from obsidian_memory import (  # type: ignore
+        cmd_ask as _ob_ask,
+        cmd_search as _ob_search,
+        cmd_note as _ob_note,
+        cmd_index as _ob_index,
+        cmd_status as _ob_status,
+    )
+    _OBSIDIAN_AVAILABLE = True
+except ImportError:
+    _OBSIDIAN_AVAILABLE = False
+
 import discord
 from discord.ext import commands
 
