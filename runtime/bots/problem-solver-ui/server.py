@@ -1683,6 +1683,7 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
         <input id="dash-bl-goal-input" placeholder="Set a goal to activate BLACKLIGHT…"
+          aria-label="BLACKLIGHT goal"
           style="width:100%;box-sizing:border-box;font-size:.8em" autocomplete="off"
           oninput="(function(v){var m=document.getElementById('bl-goal-input');if(m&&!m.value)m.value=v;})(this.value)"/>
       </div>
@@ -3010,6 +3011,10 @@ function updateHealthChecks(data) {
   setHC('hc-memory', true, 'Ready');
 }
 
+function _isHermesRunning(agents) {
+  return agents.some(a => (a.id || a.name || '') === 'hermes-agent' && a.running);
+}
+
 async function loadDashboard() {
   const d = await api('/api/status');
   const agents = normalizeAgents(d);
@@ -3085,7 +3090,7 @@ async function loadDashboard() {
   _blSyncUI(bl.running || false, bl.goal || '');
 
   // Sync Hermes Agent toggle
-  const hermesRunning = agents.some(a => (a.id || a.name || '').toLowerCase().includes('hermes') && a.running);
+  const hermesRunning = _isHermesRunning(agents);
   const hermesToggleEl = document.getElementById('dash-hermes-toggle');
   if (hermesToggleEl) hermesToggleEl.checked = hermesRunning;
   const hermesSub = document.getElementById('dash-hermes-sublabel');
@@ -3229,8 +3234,7 @@ async function loadChatLog() {
   // Refresh Hermes status indicator in the chat header
   api('/api/workers').then(d => {
     const agents = Array.isArray(d.agents) ? d.agents : [];
-    const hermesRunning = agents.some(a => (a.id || a.name || '').toLowerCase().includes('hermes') && a.running);
-    _updateChatHermesStatus(hermesRunning);
+    _updateChatHermesStatus(_isHermesRunning(agents));
   }).catch(() => {});
   const data = await api('/api/chat');
   const log = document.getElementById('chat-log');
