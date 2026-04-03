@@ -1560,6 +1560,22 @@ INDEX_HTML = r"""<!doctype html>
         <a class="btn btn-ghost btn-sm" href="http://localhost:18789" target="_blank">📡 Gateway</a>
       </div>
       <hr>
+      <!-- BLACKLIGHT quick-toggle -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:1.1rem">⚡</span>
+          <div>
+            <div style="font-size:.86em;font-weight:600;color:var(--text)">BLACKLIGHT Mode</div>
+            <div style="font-size:.75em;color:var(--text-muted)" id="dash-bl-sublabel">Autonomous agent — idle</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="toggle" title="Toggle BLACKLIGHT on/off">
+            <input type="checkbox" id="dash-bl-toggle" onchange="blToggle(this.checked)"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
       <div class="card-title" style="margin-bottom:10px"><span class="icon">🔧</span> System Info</div>
       <pre id="system-info" style="font-size:.78em">Click Refresh on the left to load…</pre>
     </div>
@@ -2389,14 +2405,19 @@ INDEX_HTML = r"""<!doctype html>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
       Set a goal, then hit <strong>Start</strong>. BLACKLIGHT will find opportunities, analyze them with Hermes, generate outreach, and iterate — without waiting for input.
     </p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
       <div style="flex:1;min-width:220px">
         <label style="font-size:.82em;color:var(--text-muted);display:block;margin-bottom:4px">Goal</label>
         <input id="bl-goal-input" placeholder="e.g. Find local restaurants that need better marketing"
           style="width:100%;box-sizing:border-box" autocomplete="off"/>
       </div>
-      <button id="bl-start-btn" class="btn btn-success" onclick="blStart()" style="min-width:100px">▶ Start</button>
-      <button id="bl-stop-btn"  class="btn btn-danger"  onclick="blStop()"  style="min-width:100px" disabled>■ Stop</button>
+      <div style="display:flex;align-items:center;gap:10px;padding-bottom:2px">
+        <label class="toggle" style="width:54px;height:30px" title="Toggle BLACKLIGHT on/off">
+          <input type="checkbox" id="bl-toggle" onchange="blToggle(this.checked)"/>
+          <span class="slider" style="border-radius:30px"></span>
+        </label>
+        <span id="bl-toggle-label" style="font-size:.9em;font-weight:600;color:var(--text-muted);min-width:52px">OFF</span>
+      </div>
     </div>
   </div>
 
@@ -2627,6 +2648,10 @@ async function loadDashboard() {
 
   const sys = await api('/api/doctor');
   document.getElementById('system-info').textContent = sys.output || '(no output)';
+
+  // Sync the BLACKLIGHT quick-toggle on the dashboard
+  const bl = await api('/api/blacklight/status');
+  _blSyncUI(bl.running || false, bl.goal || '');
 }
 
 async function loadLiveOffice() {
@@ -4561,26 +4586,47 @@ setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
 const BL_REFRESH_INTERVAL_MS = 8000;  // auto-refresh rate while BLACKLIGHT is running
 let _blAutoRefreshTimer = null;
 
-async function blRefresh() {
-  const d = await api('/api/blacklight/status');
-  const running = d.running || false;
-  document.getElementById('bl-status-dot').style.background   = running ? '#a855f7' : '#6b7280';
-  document.getElementById('bl-status-label').textContent       = running ? '⚡ Running' : 'Idle';
-  document.getElementById('bl-stat-cycle').textContent         = d.cycle   || 0;
-  document.getElementById('bl-stat-opps').textContent          = d.opportunities_found || 0;
-  document.getElementById('bl-stat-actions').textContent       = d.actions_taken || 0;
-  const last = d.last_activity ? d.last_activity.replace('T',' ').replace('Z','') : '—';
-  document.getElementById('bl-stat-last').textContent          = last;
+function _blSyncUI(running, goal) {
+  // status dot + label (in BLACKLIGHT tab header)
+  const dot = document.getElementById('bl-status-dot');
+  if (dot) dot.style.background = running ? '#a855f7' : '#6b7280';
+  const lbl = document.getElementById('bl-status-label');
+  if (lbl) lbl.textContent = running ? '⚡ Running' : 'Idle';
+
+  // tab toggle
+  const tabToggle = document.getElementById('bl-toggle');
+  if (tabToggle) tabToggle.checked = running;
+  const tabLbl = document.getElementById('bl-toggle-label');
+  if (tabLbl) { tabLbl.textContent = running ? 'ON' : 'OFF'; tabLbl.style.color = running ? '#a855f7' : 'var(--text-muted)'; }
+
+  // dashboard toggle
+  const dashToggle = document.getElementById('dash-bl-toggle');
+  if (dashToggle) dashToggle.checked = running;
+  const dashSub = document.getElementById('dash-bl-sublabel');
+  if (dashSub) dashSub.textContent = running ? `⚡ Running — ${goal || 'no goal set'}` : 'Autonomous agent — idle';
+
+  // goal input (pre-fill if known)
   const goalEl = document.getElementById('bl-goal-input');
-  if (d.goal && !goalEl.value) goalEl.value = d.goal;
-  document.getElementById('bl-start-btn').disabled = running;
-  document.getElementById('bl-stop-btn').disabled  = !running;
+  if (goalEl && goal && !goalEl.value) goalEl.value = goal;
+
+  // auto-refresh timer
   if (running && !_blAutoRefreshTimer) {
     _blAutoRefreshTimer = setInterval(() => { blRefresh(); blLoadLogs(); }, BL_REFRESH_INTERVAL_MS);
   } else if (!running && _blAutoRefreshTimer) {
     clearInterval(_blAutoRefreshTimer);
     _blAutoRefreshTimer = null;
   }
+}
+
+async function blRefresh() {
+  const d = await api('/api/blacklight/status');
+  const running = d.running || false;
+  document.getElementById('bl-stat-cycle').textContent   = d.cycle   || 0;
+  document.getElementById('bl-stat-opps').textContent    = d.opportunities_found || 0;
+  document.getElementById('bl-stat-actions').textContent = d.actions_taken || 0;
+  const last = d.last_activity ? d.last_activity.replace('T',' ').replace('Z','') : '—';
+  document.getElementById('bl-stat-last').textContent    = last;
+  _blSyncUI(running, d.goal || '');
 }
 
 async function blLoadLogs() {
@@ -4604,24 +4650,32 @@ async function blLoadLogs() {
   el.innerHTML = html;
 }
 
-async function blStart() {
-  const goal = (document.getElementById('bl-goal-input').value || '').trim();
-  if (!goal) { toast('Enter a goal first', 'error'); return; }
-  const r = await api('/api/blacklight/start', {method:'POST',
-    headers:{'Content-Type':'application/json'}, body:JSON.stringify({goal})});
-  if (r.ok) {
-    toast('⚡ BLACKLIGHT started!');
-    blRefresh();
-    blLoadLogs();
-  } else {
-    toast(r.message || 'Failed to start', 'error');
-  }
-}
+async function blToggle(on) {
+  // Sync both toggles immediately so neither feels laggy
+  _blSyncUI(on, document.getElementById('bl-goal-input')?.value || '');
 
-async function blStop() {
-  const r = await api('/api/blacklight/stop', {method:'POST'});
-  toast(r.ok ? '■ BLACKLIGHT stopped' : (r.message || 'Stop failed'), r.ok ? 'info' : 'error');
-  setTimeout(blRefresh, 800);
+  if (on) {
+    const goal = (document.getElementById('bl-goal-input')?.value || '').trim();
+    if (!goal) {
+      toast('Set a goal first — switch to the ⚡ BLACKLIGHT tab', 'error');
+      _blSyncUI(false, '');
+      return;
+    }
+    const r = await api('/api/blacklight/start', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({goal})});
+    if (r.ok) {
+      toast('⚡ BLACKLIGHT started!');
+      blRefresh();
+      blLoadLogs();
+    } else {
+      toast(r.message || 'Failed to start', 'error');
+      _blSyncUI(false, '');
+    }
+  } else {
+    const r = await api('/api/blacklight/stop', {method:'POST'});
+    toast(r.ok ? '■ BLACKLIGHT stopped' : (r.message || 'Stop failed'), r.ok ? 'info' : 'error');
+    setTimeout(blRefresh, 800);
+  }
 }
 </script>
 </body>
