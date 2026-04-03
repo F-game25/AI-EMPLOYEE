@@ -289,7 +289,7 @@ def write_vault_note(rel_path: str, content: str) -> tuple[bool, str]:
 
     note_path = (VAULT_PATH / raw).resolve()
     vault_resolved = VAULT_PATH.resolve()
-    if not str(note_path).startswith(str(vault_resolved) + os.sep) and note_path != vault_resolved:
+    if not note_path.is_relative_to(vault_resolved):
         err = (
             "Path traversal detected: target is outside the vault."
             if LANGUAGE == "en" else
@@ -408,7 +408,8 @@ def cmd_ask(question: str) -> str:
 
     # Suggest a session note with a unique filename (timestamp + question slug)
     _slug = re.sub(r"\W+", "-", question.lower().strip())[:40].strip("-")
-    note_path = f"AI/Sessies/{now_iso()[:16].replace(':', '').replace('T', '_')}_{_slug}.md"
+    _ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+    note_path = f"AI/Sessies/{_ts}_{_slug}.md"
     note_content = _build_session_note_content(question, answer, sources)
 
     suggestion = (
@@ -494,7 +495,9 @@ def cmd_index() -> str:
     note_count = len(index)
     index_state_path = STATE_FILE.parent / "obsidian-vault-index.json"
     index_state_path.parent.mkdir(parents=True, exist_ok=True)
-    index_state_path.write_text(json.dumps({"built_at": now_iso(), "notes": index}, indent=2))
+    index_state_path.write_text(
+        json.dumps({"built_at": now_iso(), "notes": index}, indent=2, ensure_ascii=False)
+    )
     logger.info("obsidian-memory: persisted vault index with %d notes to %s", note_count, index_state_path)
 
     # Update master index note in vault
