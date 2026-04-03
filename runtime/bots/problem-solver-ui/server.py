@@ -7711,13 +7711,20 @@ def save_integration_alias(payload: dict):
 
 # ── BLACKLIGHT API ────────────────────────────────────────────────────────────
 
+_blacklight_mod = None
+
+
 def _load_blacklight_module():
-    """Lazy-import blacklight module from the bots directory."""
+    """Lazy-import and cache the blacklight module from the bots directory."""
+    global _blacklight_mod
+    if _blacklight_mod is not None:
+        return _blacklight_mod
     _bl_path = AI_HOME / "bots" / "blacklight"
     if str(_bl_path) not in sys.path:
         sys.path.insert(0, str(_bl_path))
     import importlib
-    return importlib.import_module("blacklight")
+    _blacklight_mod = importlib.import_module("blacklight")
+    return _blacklight_mod
 
 
 @app.get("/api/blacklight/status")
