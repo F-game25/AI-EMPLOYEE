@@ -361,6 +361,11 @@ def check_obsidian_vault_path() -> None:
         )
 
 
+def check_blacklight() -> None:
+    """blacklight module must be importable and its run.sh executable."""
+    _check_bot_module("blacklight", "blacklight")
+
+
 def check_discord_bot_state() -> None:
     """If the Discord bot ran before, its state file should say 'running'."""
     state = AI_HOME / "state" / "discord-bot.state.json"
@@ -475,6 +480,7 @@ def main() -> None:
 
     _section("Obsidian Memory Base")
     check_obsidian_vault_path()
+    check_blacklight()
 
     _section("NVIDIA NIM Integration")
     check_nvidia_nim_config()
