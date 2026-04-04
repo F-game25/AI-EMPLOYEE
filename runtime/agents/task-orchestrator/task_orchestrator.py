@@ -245,6 +245,11 @@ def dispatch_to_agent(agent_id: str, subtask: dict) -> None:
     thread-pool workers dispatch to the same agent concurrently.
     Uses a blocking exclusive lock (LOCK_EX without LOCK_NB) so concurrent
     callers wait rather than fall back to an unprotected write.
+
+    The queue file is explicitly flushed and synced to disk before the lock
+    is released, preventing readers from observing partial writes.
+    Lock files are reused (not deleted) to avoid accumulation; their sole
+    purpose is to serve as a lock target for fcntl, so content is irrelevant.
     """
     AGENT_TASKS_DIR.mkdir(parents=True, exist_ok=True)
     queue_file = AGENT_TASKS_DIR / f"{agent_id}.queue.jsonl"
@@ -252,12 +257,16 @@ def dispatch_to_agent(agent_id: str, subtask: dict) -> None:
 
     if _FCNTL_AVAILABLE:
         try:
-            with open(lock_file, "w") as lf:
+            with open(lock_file, "a") as lf:
                 # Blocking exclusive lock — waits until other writers release.
                 # Released automatically when the context manager exits.
                 _fcntl.flock(lf, _fcntl.LOCK_EX)
                 with open(queue_file, "a") as f:
                     f.write(json.dumps(subtask) + "\n")
+                    # Flush Python buffer and sync OS buffer to disk before
+                    # releasing the lock, so concurrent readers see complete data.
+                    f.flush()
+                    os.fsync(f.fileno())
             return
         except OSError as exc:
             logger.warning(

@@ -43,10 +43,18 @@ COMPANIES_STATE_ROOT = AI_HOME / "state" / "companies"
 _SECRET_PATTERNS = [
     # Key=value pairs where the key name suggests a secret
     re.compile(r'(?i)(api[_-]?key|secret|password|token|bearer|auth)\s*[=:]\s*\S+'),
-    # OpenAI / Anthropic style prefixed keys (sk-..., sk-ant-...) — broaden to 10+ chars
+    # OpenAI / Anthropic style prefixed keys (sk-..., sk-ant-...) — 10+ chars
     re.compile(r'\bsk-[a-zA-Z0-9_-]{10,}\b'),
-    # Standard Bearer token patterns (eyJ... JWT tokens)
-    re.compile(r'\beyJ[a-zA-Z0-9+/]{30,}'),
+    # Standard Bearer / JWT tokens (eyJ... with dot-separated segments, base64url chars)
+    re.compile(r'\beyJ[a-zA-Z0-9+/_=-]{10,}(?:\.[a-zA-Z0-9+/_=-]{10,})+'),
+    # AWS access key IDs (AKIA... or ASIA...)
+    re.compile(r'\b(?:AKIA|ASIA|AROA|AIPA|ANPA|ANVA|APKA)[A-Z0-9]{16}\b'),
+    # Google Cloud API keys (AIza...)
+    re.compile(r'\bAIza[a-zA-Z0-9_-]{35}\b'),
+    # Database URLs containing credentials (postgres://user:pass@... etc.)
+    re.compile(r'(?i)(?:postgres(?:ql)?|mysql|mongodb|redis)://[^@\s]+:[^@\s]+@\S+'),
+    # Azure connection strings (AccountKey=...)
+    re.compile(r'(?i)AccountKey=[a-zA-Z0-9+/]{40,}[=]{0,2}'),
 ]
 _PLACEHOLDER = "***SCRUBBED***"
 
@@ -145,7 +153,10 @@ def delete_company(company_id: str) -> bool:
 
     # Don't allow deleting the last company
     if len(companies) <= 1:
-        raise ValueError("Cannot delete the last company")
+        raise ValueError(
+            "Cannot delete the last company. At least one company must exist in the system. "
+            "Create a new company first, then delete this one."
+        )
 
     # If deleting active company, switch to another
     if registry.get("active_company_id") == company_id:
