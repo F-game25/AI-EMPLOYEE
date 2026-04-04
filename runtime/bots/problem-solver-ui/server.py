@@ -1664,31 +1664,44 @@ INDEX_HTML = r"""<!doctype html>
         <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
         <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
       </div>
-      <div id="system-info" style="display:none"></div>
+      <hr style="margin:12px 0">
       <!-- BLACKLIGHT quick-toggle -->
+      <div style="padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.1rem">⚡</span>
+            <div>
+              <div style="font-size:.86em;font-weight:600;color:var(--text)">BLACKLIGHT Mode</div>
+              <div style="font-size:.75em;color:var(--text-muted)" id="dash-bl-sublabel">Autonomous agent — idle</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <label class="toggle" title="Toggle BLACKLIGHT on/off">
+              <input type="checkbox" id="dash-bl-toggle" onchange="blToggle(this.checked)"/>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <input id="dash-bl-goal-input" placeholder="Set a goal to activate BLACKLIGHT…"
+          aria-label="BLACKLIGHT goal"
+          style="width:100%;box-sizing:border-box;font-size:.8em" autocomplete="off"
+          oninput="(function(v){var m=document.getElementById('bl-goal-input');if(m&&!m.value)m.value=v;})(this.value)"/>
+      </div>
+      <!-- Hermes Agent quick-toggle -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:1.1rem">⚡</span>
+          <span style="font-size:1.1rem">🧠</span>
           <div>
-            <div style="font-size:.86em;font-weight:600;color:var(--text)">BLACKLIGHT Mode</div>
-            <div style="font-size:.75em;color:var(--text-muted)" id="dash-bl-sublabel">Autonomous agent — idle</div>
+            <div style="font-size:.86em;font-weight:600;color:var(--text)">Hermes Agent</div>
+            <div style="font-size:.75em;color:var(--text-muted)" id="dash-hermes-sublabel">Reasoning agent — stopped</div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <label class="toggle" title="Toggle BLACKLIGHT on/off">
-            <input type="checkbox" id="dash-bl-toggle" onchange="blToggle(this.checked)"/>
+          <label class="toggle" title="Toggle Hermes Agent on/off">
+            <input type="checkbox" id="dash-hermes-toggle" onchange="hermesToggle(this.checked)"/>
             <span class="slider"></span>
           </label>
         </div>
-      </div>
-      <div class="card-title" style="margin-bottom:10px"><span class="icon" style="color:var(--gold)">◈</span> System Health</div>
-      <div id="system-health-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.84em">
-        <div class="health-check-item" id="hc-api"><span class="hc-dot">●</span> API Server <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-ollama"><span class="hc-dot">●</span> Ollama LLM <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-agents"><span class="hc-dot">●</span> Agents <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-db"><span class="hc-dot">●</span> State Store <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
-        <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
       </div>
       <div id="system-info" style="display:none"></div>
     </div>
@@ -1710,7 +1723,7 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 
 <!-- ── Chat ── -->
-<div id="tab-chat" class="tab-content" style="display:none">
+<div id="tab-chat" class="tab-content">
   <div style="display:flex;flex-direction:column;height:calc(100vh - 115px);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
     <!-- Chat header bar -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
@@ -1733,6 +1746,10 @@ INDEX_HTML = r"""<!doctype html>
             <option value="groq">⚡ Groq • Fast</option>
             <option value="external">🌐 External AI</option>
           </select>
+        </div>
+        <div id="chat-hermes-status" title="Hermes Agent status" style="display:flex;align-items:center;gap:5px;font-size:.73em;padding:3px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.2);color:var(--text-muted)">
+          <span id="chat-hermes-dot" style="width:7px;height:7px;border-radius:50%;background:#6b7280;display:inline-block"></span>
+          <span id="chat-hermes-label">Hermes –</span>
         </div>
         <div id="chat-model-badge" style="font-size:.73em;padding:3px 10px;border-radius:12px;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.25);color:var(--gold)">Auto</div>
         <button class="btn btn-ghost btn-sm" onclick="loadChatLog()" title="Refresh">↻</button>
@@ -1757,7 +1774,7 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 
 <!-- ── Live Office ── -->
-<div id="tab-live-office" class="tab-content" style="display:none">
+<div id="tab-live-office" class="tab-content">
   <div style="height:calc(100vh - 115px);display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
     <!-- Office header -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
@@ -2251,8 +2268,11 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px" id="roi-summary">
       <div>
-        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Efficiency Rate</div>
+        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Efficiency Rate
+          <span title="Efficiency = (human hours saved ÷ total tasks) × 100. Higher means your AI team completes more work per task with less overhead." style="cursor:help;color:var(--gold);margin-left:4px">ⓘ</span>
+        </div>
         <div style="font-size:1.8em;font-weight:700;color:var(--gold)" id="roi-efficiency">–%</div>
+        <div id="roi-efficiency-desc" style="font-size:.72em;color:var(--text-muted);margin-top:3px"></div>
       </div>
       <div>
         <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Avg Task Duration</div>
@@ -2321,6 +2341,8 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Guardrails ── -->
 <div id="tab-guardrails" class="tab-content">
+  <!-- Pending approvals notification banner -->
+  <div id="guardrails-notification-banner" style="display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(239,68,68,.1));border:1px solid rgba(245,158,11,.5);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.88em;color:var(--warning);font-weight:600;animation:blink 1.5s infinite"></div>
   <div class="grid-stat">
     <div class="stat-card">
       <div class="stat-icon yellow">⏳</div>
@@ -2419,6 +2441,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="form-group"><label>Name</label><input id="mem-name" placeholder="e.g. John Smith"/></div>
         <div class="form-group"><label>Company</label><input id="mem-company" placeholder="e.g. Acme Corp"/></div>
         <div class="form-group"><label>Email</label><input id="mem-email" type="email" placeholder="john@acme.com"/></div>
+        <div class="form-group"><label>Phone</label><input id="mem-phone" type="tel" placeholder="+1 555 123 4567"/></div>
         <div class="form-group">
           <label>Status</label>
           <select id="mem-status">
@@ -2994,6 +3017,10 @@ function updateHealthChecks(data) {
   setHC('hc-memory', true, 'Ready');
 }
 
+function _isHermesRunning(agents) {
+  return agents.some(a => (a.id || a.name || '') === 'hermes-agent' && a.running);
+}
+
 async function loadDashboard() {
   const d = await api('/api/status');
   const agents = normalizeAgents(d);
@@ -3067,6 +3094,14 @@ async function loadDashboard() {
   // Sync the BLACKLIGHT quick-toggle on the dashboard
   const bl = await api('/api/blacklight/status');
   _blSyncUI(bl.running || false, bl.goal || '');
+
+  // Sync Hermes Agent toggle
+  const hermesRunning = _isHermesRunning(agents);
+  const hermesToggleEl = document.getElementById('dash-hermes-toggle');
+  if (hermesToggleEl) hermesToggleEl.checked = hermesRunning;
+  const hermesSub = document.getElementById('dash-hermes-sublabel');
+  if (hermesSub) hermesSub.textContent = hermesRunning ? '🧠 Running — ready for tasks' : 'Reasoning agent — stopped';
+  _updateChatHermesStatus(hermesRunning);
 }
 
 async function loadLiveOffice() {
@@ -3202,6 +3237,11 @@ async function runOnboard() {
 
 // ── Chat ────────────────────────────────────────────────────────────────────
 async function loadChatLog() {
+  // Refresh Hermes status indicator in the chat header
+  api('/api/workers').then(d => {
+    const agents = Array.isArray(d.agents) ? d.agents : [];
+    _updateChatHermesStatus(_isHermesRunning(agents));
+  }).catch(() => {});
   const data = await api('/api/chat');
   const log = document.getElementById('chat-log');
   const msgs = data.messages || [];
@@ -3358,20 +3398,60 @@ function renderAgenda() {
   if (!p || !g) return;
   const d = _agendaDate;
   if (_agendaView === 'month') {
+    const today = new Date();
     p.textContent = d.toLocaleDateString('en-US', {month:'long',year:'numeric'});
     const first = new Date(d.getFullYear(), d.getMonth(), 1);
     const last = new Date(d.getFullYear(), d.getMonth()+1, 0);
     const days = ['Su','Mo','Tu','We','Th','Fr','Sa'];
     let html = days.map(dy => '<div style="text-align:center;color:var(--text-muted);padding:4px;font-size:.7em">' + dy + '</div>').join('');
     for (let i = 0; i < first.getDay(); i++) html += '<div></div>';
-    const today = new Date();
     for (let i = 1; i <= last.getDate(); i++) {
       const isToday = i === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
       html += '<div onclick="selectAgendaDay(' + i + ')" style="text-align:center;padding:5px 2px;border-radius:4px;cursor:pointer;font-size:.78em;' + (isToday ? 'background:rgba(212,175,55,.2);color:var(--gold);font-weight:700;' : '') + '">' + i + '</div>';
     }
     g.style.display = 'grid';
+    g.style.gridTemplateColumns = 'repeat(7,1fr)';
+    g.innerHTML = html;
+  } else if (_agendaView === 'week') {
+    const today = new Date();
+    // Show a 7-column week grid with day names + date numbers
+    const startOfWeek = new Date(d);
+    startOfWeek.setDate(d.getDate() - d.getDay());
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    p.textContent = startOfWeek.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' – ' + endOfWeek.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    let html = '';
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(startOfWeek);
+      day.setDate(startOfWeek.getDate() + i);
+      const isToday = day.toDateString() === today.toDateString();
+      html += `<div onclick="selectAgendaFull(${JSON.stringify(day.toDateString())})" style="text-align:center;padding:8px 2px;border-radius:6px;cursor:pointer;border:1px solid ${isToday?'rgba(212,175,55,.5)':'transparent'};background:${isToday?'rgba(212,175,55,.12)':'transparent'}">
+        <div style="font-size:.68em;color:var(--text-muted);margin-bottom:3px">${days[i]}</div>
+        <div style="font-size:.88em;font-weight:${isToday?700:400};color:${isToday?'var(--gold)':'var(--text)'}">${day.getDate()}</div>
+      </div>`;
+    }
+    g.style.display = 'grid';
+    g.style.gridTemplateColumns = 'repeat(7,1fr)';
+    g.innerHTML = html;
+  } else if (_agendaView === 'day') {
+    p.textContent = d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    const hours = [7,8,9,10,11,12,13,14,15,16,17,18,19,20];
+    let html = hours.map(h => {
+      const label = h < 12 ? h+':00 AM' : h===12 ? '12:00 PM' : (h-12)+':00 PM';
+      return `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid rgba(148,163,184,.06);font-size:.72em">
+        <span style="color:var(--text-muted);min-width:52px">${label}</span>
+        <div style="flex:1;height:20px;border-radius:3px;background:transparent"></div>
+      </div>`;
+    }).join('');
+    g.style.display = 'block';
+    g.style.gridTemplateColumns = '';
     g.innerHTML = html;
   }
+}
+function selectAgendaFull(dateStr) {
+  const el = document.getElementById('agenda-day-label');
+  if (el) { const d = new Date(dateStr); el.textContent = d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }
 }
 function selectAgendaDay(day) {
   const el = document.getElementById('agenda-day-label');
@@ -3644,17 +3724,53 @@ async function loadImprovements() {
   const el = document.getElementById('improvement-list');
   if (!items.length) { el.innerHTML = '<div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery agent will add them over time.</p></div>'; return; }
   el.innerHTML = items.map(imp => `
-    <div class="improv-row">
+    <div class="improv-row" style="cursor:pointer" onclick="toggleImprovDetail('${jsEsc(imp.id)}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-        <h4>${imp.title||imp.id} <span class="badge ${imp.status||'pending'}">${imp.status||'pending'}</span></h4>
-        ${imp.status==='pending' ? `<div style="display:flex;gap:6px;flex-shrink:0">
-          <button class="btn btn-success btn-sm" onclick="reviewImprovement('${imp.id}','approved')">✓ Approve</button>
-          <button class="btn btn-danger btn-sm" onclick="reviewImprovement('${imp.id}','rejected')">✕ Reject</button>
+        <h4 style="display:flex;align-items:center;gap:8px">
+          <span id="improv-arrow-${escHtml(imp.id)}" style="font-size:.8em;color:var(--text-muted)">▶</span>
+          ${escHtml(imp.title||imp.id)} <span class="badge ${imp.status||'pending'}">${imp.status||'pending'}</span>
+        </h4>
+        ${imp.status==='pending' ? `<div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
+          <button class="btn btn-success btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','approved')">✓ Approve</button>
+          <button class="btn btn-danger btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','rejected')">✕ Reject</button>
         </div>` : ''}
       </div>
-      <p>${imp.description||''}</p>
-      ${imp.agent ? `<p style="font-size:.78em;color:var(--primary);margin-top:4px">Agent: ${imp.agent} · Type: ${imp.type||'?'} · Effort: ${imp.effort||'?'}</p>` : ''}
+      <p style="color:var(--text-muted);font-size:.84em;margin:4px 0">${escHtml((imp.description||'').slice(0,120))}${(imp.description||'').length>120?'…':''}</p>
+      <div id="improv-detail-${escHtml(imp.id)}" style="display:none;margin-top:10px;padding:12px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border)">
+        <p style="font-size:.84em;color:var(--text-secondary);line-height:1.6;margin-bottom:10px">${escHtml(imp.description||'No description provided.')}</p>
+        ${imp.agent ? `<p style="font-size:.78em;color:var(--primary);margin-bottom:8px">Agent: <strong>${escHtml(imp.agent)}</strong> · Type: ${escHtml(imp.type||'?')} · Effort: ${escHtml(imp.effort||'?')}</p>` : ''}
+        ${imp.rationale ? `<p style="font-size:.8em;color:var(--text-muted);margin-bottom:10px"><strong>Rationale:</strong> ${escHtml(imp.rationale)}</p>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap" onclick="event.stopPropagation()">
+          <button class="btn btn-primary btn-sm" onclick="sendImprovToAI('${jsEsc(imp.id)}','${jsEsc(imp.title||imp.id)}','${jsEsc(imp.description||'')}')">🚀 Send to Main AI for Execution</button>
+          ${imp.status==='pending' ? `<button class="btn btn-success btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','approved')">✓ Approve</button>
+          <button class="btn btn-danger btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','rejected')">✕ Reject</button>` : ''}
+        </div>
+      </div>
     </div>`).join('');
+}
+
+function toggleImprovDetail(id) {
+  const detail = document.getElementById('improv-detail-' + id);
+  const arrow = document.getElementById('improv-arrow-' + id);
+  if (!detail) return;
+  const open = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'block';
+  if (arrow) arrow.textContent = open ? '▶' : '▼';
+}
+
+async function sendImprovToAI(id, title, description) {
+  const msg = `Execute this improvement proposal:\n\nTitle: ${title}\n\nDescription: ${description}\n\nPlease implement this improvement and report back with the result.`;
+  // Switch to chat tab and send
+  const chatTabBtn = document.querySelector('nav button[onclick*="chat"]');
+  if (chatTabBtn) chatTabBtn.click();
+  setTimeout(() => {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.value = msg;
+      toast(`📤 Sending "${title}" to Main AI…`, 'info');
+      sendChat();
+    }
+  }, 200);
 }
 
 async function reviewImprovement(id, decision) {
@@ -3718,11 +3834,55 @@ function renderSkillGrid(skills) {
     const sel = selectedSkillIds.has(s.id);
     const tags = (s.tags||[]).slice(0,4).map(t=>`<span class="tag">${t}</span>`).join('');
     return `<div class="skill-card${sel?' selected':''}" onclick="toggleSkill(${JSON.stringify(s.id)},this)">
-      <h5>${s.name} <span style="color:${color};font-size:.72em;font-weight:500">${s.category}</span></h5>
-      <p>${s.description.slice(0,110)}${s.description.length>110?'…':''}</p>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">
+        <h5 style="flex:1">${escHtml(s.name)} <span style="color:${color};font-size:.72em;font-weight:500">${escHtml(s.category)}</span></h5>
+        <button onclick="event.stopPropagation();showSkillDetail(${JSON.stringify(s.id)})" title="View details"
+          style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:.68em;padding:1px 5px;cursor:pointer;flex-shrink:0">ℹ</button>
+      </div>
+      <p>${escHtml(s.description.slice(0,110))}${s.description.length>110?'…':''}</p>
       <div class="tags">${tags}</div>
     </div>`;
   }).join('');
+}
+
+function showSkillDetail(id) {
+  const s = allSkills.find(x => x.id === id);
+  if (!s) return;
+  const color = CAT_COLORS[s.category] || '#94a3b8';
+  const tags = (s.tags||[]).map(t=>`<span class="tag">${escHtml(t)}</span>`).join('');
+  const steps = (s.steps||[]).map((step,i)=>`<li style="margin-bottom:6px">${escHtml(step)}</li>`).join('');
+  let html = `<div style="position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:2000;display:flex;align-items:center;justify-content:center" id="skill-detail-overlay" onclick="if(event.target.id==='skill-detail-overlay')closeSkillDetail()">
+    <div style="background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:28px;max-width:560px;width:90%;max-height:80vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+        <div>
+          <div style="font-size:1.1em;font-weight:700;color:var(--text)">${escHtml(s.name)}</div>
+          <span style="font-size:.78em;background:${color}22;color:${color};padding:2px 8px;border-radius:4px;border:1px solid ${color}44">${escHtml(s.category)}</span>
+        </div>
+        <button onclick="closeSkillDetail()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);padding:4px 10px;cursor:pointer">✕</button>
+      </div>
+      <p style="font-size:.88em;color:var(--text-secondary);line-height:1.6;margin-bottom:14px">${escHtml(s.description)}</p>
+      ${tags ? `<div style="margin-bottom:14px"><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Tags</div><div class="tags">${tags}</div></div>` : ''}
+      ${steps ? `<div style="margin-bottom:14px"><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">How it works</div><ol style="font-size:.83em;color:var(--text-secondary);margin:0 0 0 16px;line-height:1.7">${steps}</ol></div>` : ''}
+      ${s.prompt_template ? `<div><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Prompt Template</div><pre style="font-size:.75em;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-word;color:var(--text-secondary)">${escHtml(s.prompt_template.slice(0,400))}${s.prompt_template.length>400?'\n…':''}</pre></div>` : ''}
+      <div style="margin-top:16px;display:flex;gap:8px">
+        <button class="btn btn-success btn-sm" onclick="toggleSkillFromModal(${JSON.stringify(s.id)});closeSkillDetail()" id="skill-detail-add-btn">${selectedSkillIds.has(s.id)?'✓ Deselect':'+ Add to Agent'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeSkillDetail()">Close</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeSkillDetail() {
+  const el = document.getElementById('skill-detail-overlay');
+  if (el) el.remove();
+}
+
+function toggleSkillFromModal(id) {
+  if (selectedSkillIds.has(id)) selectedSkillIds.delete(id);
+  else selectedSkillIds.add(id);
+  updateSelectedPanel();
+  filterSkills();
 }
 
 function toggleSkill(id, card) {
@@ -4040,12 +4200,17 @@ async function loadTasks() {
     const e = {done:'✅',failed:'❌',cancelled:'🛑',timed_out:'⏰'}[p.status]||'?';
     const agents = [...new Set((p.subtasks||[]).map(s=>s.agent_id).filter(Boolean))].join(', ');
     const mode = p.mode ? ` · ${p.mode}` : '';
-    return `<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:background .15s" 
+      onclick="openTaskDetail(${JSON.stringify(p)})"
+      onmouseenter="this.style.background='rgba(212,175,55,.05)'" onmouseleave="this.style.background=''">
       <div>
         <div style="font-weight:500">${e} ${escHtml(p.title||p.id)}</div>
-        <div style="font-size:.78em;color:var(--text-muted)">${(p.subtasks||[]).length} subtasks${mode} | Agents: ${escHtml(agents)||'—'} | ${p.created_at||''}</div>
+        <div style="font-size:.78em;color:var(--text-muted)">${(p.subtasks||[]).length} subtasks${mode} | Agents: ${escHtml(agents)||'—'} | ${(p.created_at||'').split('T')[0]}</div>
       </div>
-      <span style="font-size:.78em;background:var(--surface2);padding:2px 8px;border-radius:4px;color:var(--text-secondary)">${p.status}</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:.78em;background:var(--surface2);padding:2px 8px;border-radius:4px;color:var(--text-secondary)">${p.status}</span>
+        <span style="color:var(--text-muted);font-size:.8em">▶</span>
+      </div>
     </div>`;
   }).join('');
 }
@@ -4068,6 +4233,47 @@ async function reassignSubtask(taskId, subtaskId) {
   const r = await api('/api/task/reassign', {method:'POST', body: JSON.stringify({task_id: taskId, subtask_id: subtaskId, agent_id: agentId.trim()})});
   if (r.ok) { toast('Subtask reassigned ✅', 'success'); loadTasks(); }
   else toast('Reassign failed', 'error');
+}
+
+function openTaskDetail(plan) {
+  const modal = document.getElementById('task-detail-modal');
+  const content = document.getElementById('task-detail-content');
+  if (!modal || !content) return;
+  modal.style.display = 'flex';
+  const e = {done:'✅',failed:'❌',cancelled:'🛑',timed_out:'⏰',running:'⏳',planning:'🧠'}[plan.status]||'?';
+  const subtasks = plan.subtasks || [];
+  const subtaskRows = subtasks.map(st => {
+    const se = {done:'✅',running:'⏳',pending:'⏸️',failed:'❌',skipped:'⏭️'}[st.status]||'?';
+    return `<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:.83em">
+      <span>${se}</span>
+      <div style="flex:1">
+        <div style="font-weight:500;color:var(--text)">${escHtml(st.agent_id||'?')}</div>
+        <div style="color:var(--text-secondary)">${escHtml(st.title||st.subtask_id||'')}</div>
+        ${st.result ? `<div style="color:var(--text-muted);font-size:.88em;margin-top:2px;white-space:pre-wrap;max-height:80px;overflow:hidden">${escHtml(String(st.result).slice(0,300))}</div>` : ''}
+      </div>
+      <span style="font-size:.73em;color:var(--text-muted);white-space:nowrap">${st.status}</span>
+    </div>`;
+  }).join('');
+  content.innerHTML = `
+    <div style="margin-bottom:14px">
+      <div style="font-size:.84em;color:var(--text-muted);margin-bottom:4px">ID: ${escHtml(plan.id||'?')} · Mode: ${escHtml(plan.mode||'auto')} · Created: ${(plan.created_at||'').split('T')[0]}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span>${e}</span>
+        <span style="font-size:.9em;background:var(--surface2);padding:2px 8px;border-radius:4px">${escHtml(plan.status||'?')}</span>
+      </div>
+      ${subtasks.length ? `<div style="font-size:.82em;color:var(--text-muted)">${subtasks.filter(s=>s.status==='done').length}/${subtasks.length} subtasks completed</div>` : ''}
+    </div>
+    <div style="font-size:.84em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Subtasks</div>
+    <div style="max-height:340px;overflow-y:auto">${subtaskRows || '<div class="empty"><p>No subtasks.</p></div>'}</div>
+    ${plan.result ? `<div style="margin-top:14px"><div style="font-size:.84em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Final Output</div><pre style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;white-space:pre-wrap;max-height:200px;overflow-y:auto">${escHtml(String(plan.result).slice(0,1500))}</pre></div>` : ''}
+  `;
+  document.getElementById('task-detail-heading').textContent = (plan.title||plan.id||'Task Detail');
+  document.getElementById('task-detail-dialog')?.focus();
+}
+
+function closeTaskDetail() {
+  const modal = document.getElementById('task-detail-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 // ── Swarm ────────────────────────────────────────────────────────────────────
@@ -4361,8 +4567,16 @@ function filterCommands() { renderCommands(); }
 let _cmdType = 'whatsapp';
 function switchCmdType(type, btn) {
   _cmdType = type;
-  document.querySelectorAll('.cmd-type-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.cmd-type-btn').forEach(b => {
+    b.classList.remove('active');
+    b.style.background = '';
+    b.style.color = '';
+    b.style.border = '';
+  });
   btn.classList.add('active');
+  btn.style.background = 'linear-gradient(135deg,#B8960C,#D4AF37)';
+  btn.style.color = '#000';
+  btn.style.border = 'none';
   renderCommands();
 }
 
@@ -4377,15 +4591,21 @@ function renderCommands() {
       .filter(cmd => !q || cmd[0].toLowerCase().includes(q) || cmd[1].toLowerCase().includes(q))
       .map(cmd => {
         const [cmdStr, desc, waOnly] = cmd;
+        // WA view: no execute button (WA commands are shortcuts, not runnable here)
+        // Bot view: show Run button only for non-WA-only commands
         let execBtn = '';
-        if (isWA) {
-          execBtn = waOnly
-            ? `<button class="btn btn-ghost btn-sm" disabled title="WhatsApp only — cannot run in chat" style="padding:2px 8px;font-size:.72em;opacity:.45;cursor:not-allowed">📱 WA</button>`
-            : `<button class="btn btn-ghost btn-sm" onclick="executeCmd('${escHtml(cmdStr)}')" style="padding:2px 8px;font-size:.72em;border:1px solid rgba(212,175,55,.3);color:var(--gold)" title="Execute in Chat">▶ Run</button>`;
+        if (!isWA && !waOnly) {
+          execBtn = `<button class="btn btn-ghost btn-sm" onclick="executeCmd('${escHtml(cmdStr)}')" style="padding:2px 8px;font-size:.72em;border:1px solid rgba(212,175,55,.3);color:var(--gold)" title="Execute in Chat">▶ Run</button>`;
+        } else if (!isWA && waOnly) {
+          execBtn = `<button class="btn btn-ghost btn-sm" disabled title="WhatsApp only" style="padding:2px 8px;font-size:.72em;opacity:.45;cursor:not-allowed">📱 WA</button>`;
         }
+        const waShort = isWA ? `<span style="font-size:.7em;color:var(--text-muted);margin-left:4px">→ send via WhatsApp</span>` : '';
         return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
           <code onclick="copyCmd('${escHtml(cmdStr)}')" title="Click to copy" style="cursor:pointer;min-width:180px;background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:.84em;color:var(--gold-light)">${escHtml(cmdStr)}</code>
-          <span style="color:var(--text-secondary);font-size:.85em;flex:1">${escHtml(desc)}</span>
+          <div style="flex:1">
+            <span style="color:var(--text-secondary);font-size:.85em">${escHtml(desc)}</span>
+            ${waShort}
+          </div>
           <button class="btn btn-ghost btn-sm" onclick="copyCmd('${escHtml(cmdStr)}')" style="padding:2px 8px;font-size:.72em" title="Copy">📋</button>
           ${execBtn}
         </div>`;
@@ -4439,6 +4659,15 @@ async function loadMetrics() {
   const effEl = document.getElementById('roi-efficiency');
   // Use server-provided efficiency_rate if available, otherwise omit the default rather than fabricate
   if (effEl) effEl.textContent = s.efficiency_rate ? s.efficiency_rate + '%' : '–%';
+  const effDescEl = document.getElementById('roi-efficiency-desc');
+  if (effDescEl) {
+    const eff = s.efficiency_rate ? parseFloat(s.efficiency_rate) : null;
+    if (eff !== null && !isNaN(eff)) {
+      effDescEl.textContent = eff >= 80 ? 'Excellent — agents are highly productive' : eff >= 50 ? 'Good — solid AI utilization' : 'Growing — run more tasks to improve';
+    } else {
+      effDescEl.textContent = 'Complete tasks to calculate efficiency';
+    }
+  }
   const avgDurEl = document.getElementById('roi-avg-duration');
   if (avgDurEl) avgDurEl.textContent = s.avg_task_duration || '–';
   const topBotEl = document.getElementById('roi-top-bot');
@@ -4544,6 +4773,17 @@ async function loadGuardrails() {
   document.getElementById('g-rejected').textContent = summary.rejected || 0;
   document.getElementById('g-total').textContent    = summary.total    || 0;
 
+  // Show/hide notification banner
+  const banner = document.getElementById('guardrails-notification-banner');
+  if (banner) {
+    if (pending.length > 0) {
+      banner.style.display = 'flex';
+      banner.innerHTML = `<span style="font-size:1.2em">⚠️</span> <strong>${pending.length} pending approval${pending.length!==1?'s':''} require your attention.</strong> Review below before agents proceed.`;
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
   const pEl = document.getElementById('guardrails-pending');
   if (!pending.length) {
     pEl.innerHTML = '<div class="empty"><div class="icon">✅</div><p>No pending approvals. All clear!</p></div>';
@@ -4640,12 +4880,13 @@ async function loadMemory() {
           <div>
             <div style="font-weight:600;font-size:.9em">${escHtml(c.name)}</div>
             ${c.company ? `<div style="font-size:.8em;color:var(--text-secondary)">${escHtml(c.company)}</div>` : ''}
-            ${c.email   ? `<div style="font-size:.77em;color:var(--text-muted)">${escHtml(c.email)}</div>`   : ''}
+            ${c.email   ? `<div style="font-size:.77em;color:var(--text-muted)">✉ ${escHtml(c.email)}</div>`   : ''}
+            ${c.phone   ? `<div style="font-size:.77em;color:var(--text-muted)">📞 ${escHtml(c.phone)}</div>`   : ''}
           </div>
           <span style="font-size:.73em;background:${col};padding:2px 8px;border-radius:4px;border:1px solid var(--border)">${escHtml(c.status||'prospect')}</span>
         </div>
         ${c.notes ? `<div style="font-size:.78em;color:var(--text-muted);margin-top:6px;line-height:1.4">${escHtml(c.notes)}</div>` : ''}
-        <div style="font-size:.72em;color:var(--text-muted);margin-top:4px">${(c.interactions||0)} interactions · added ${(c.added_at||'').split('T')[0]}</div>
+        <div style="font-size:.72em;color:var(--text-muted);margin-top:4px">${(c.interactions||0)} interactions · added ${(c.added_at||'').split('T')[0]} · last update ${(c.updated_at||c.added_at||'').split('T')[0]}</div>
         <div style="margin-top:8px;display:flex;gap:5px">
           <button class="btn btn-ghost btn-sm" onclick="updateClientStatus('${jsEsc(c.id)}','customer')" title="Mark as customer">Mark customer</button>
           <button class="btn btn-danger btn-sm" onclick="deleteClient('${jsEsc(c.id)}')">🗑</button>
@@ -4672,17 +4913,20 @@ async function addClient() {
   const name    = document.getElementById('mem-name').value.trim();
   const company = document.getElementById('mem-company').value.trim();
   const email   = document.getElementById('mem-email').value.trim();
+  const phone   = (document.getElementById('mem-phone')?.value || '').trim();
   const status  = document.getElementById('mem-status').value;
   const notes   = document.getElementById('mem-notes').value.trim();
   if (!name) { toast('Name is required', 'error'); return; }
   const r = await api('/api/memory/clients', {method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name, company: company||null, email: email||null, status, notes: notes||null})});
+    body: JSON.stringify({name, company: company||null, email: email||null, phone: phone||null, status, notes: notes||null})});
   if (r.ok) {
     toast('Client added ✅');
     document.getElementById('mem-name').value    = '';
     document.getElementById('mem-company').value = '';
     document.getElementById('mem-email').value   = '';
+    const phoneEl = document.getElementById('mem-phone');
+    if (phoneEl) phoneEl.value = '';
     document.getElementById('mem-notes').value   = '';
     loadMemory();
   } else { toast(r.detail || 'Error', 'error'); }
@@ -4712,14 +4956,20 @@ async function loadIntegrations() {
   el.innerHTML = integrations.map(intg => {
     const enabled = intg.enabled === true;
     const statusCol = enabled ? 'var(--success)' : 'var(--text-muted)';
-    const fields = (intg.fields||[]).map(f => `
+  const fields = (intg.fields||[]).map(f => {
+    const isPass = f.type === 'password';
+    const savedVal = intg.config && intg.config[f.key] ? String(intg.config[f.key]) : '';
+    // Never pre-fill password fields with saved values — show placeholder bullets instead
+    const displayVal = isPass ? '' : escHtml(savedVal);
+    const placeholder = isPass && savedVal ? '●●●●●●●● (set — paste new value to update)' : escHtml(f.placeholder||'');
+    return `
       <div class="form-group" style="margin-bottom:8px">
-        <label style="font-size:.78em">${escHtml(f.label)}</label>
-        <input type="${f.type||'text'}" id="intg-${escHtml(intg.id)}-${escHtml(f.key)}"
-          placeholder="${escHtml(f.placeholder||'')}"
-          value="${escHtml(intg.config && intg.config[f.key] ? String(intg.config[f.key]) : '')}"
-          ${f.type==='password'?'autocomplete="off"':''}/>
-      </div>`).join('');
+        <label style="font-size:.78em">${escHtml(f.label)}${isPass && savedVal ? ' <span style="color:var(--success);font-size:.85em">● saved</span>' : ''}</label>
+        <input type="${isPass?'password':f.type||'text'}" id="intg-${escHtml(intg.id)}-${escHtml(f.key)}"
+          placeholder="${placeholder}"
+          value="${displayVal}"
+          ${isPass?'autocomplete="new-password"':''}/>
+      </div>`}).join('');
     return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:18px;background:var(--surface2)">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
         <span style="font-size:1.6em">${escHtml(intg.icon||'🔌')}</span>
@@ -4746,9 +4996,17 @@ async function saveIntegration(id) {
   const config = {};
   (intg.fields||[]).forEach(f => {
     const el = document.getElementById(`intg-${id}-${f.key}`);
-    if (el) config[f.key] = el.value;
+    if (!el) return;
+    const isPass = f.type === 'password';
+    const val = el.value;
+    if (isPass && !val.trim()) {
+      // Keep existing value — user did not provide a new one
+      if (intg.config && intg.config[f.key]) config[f.key] = intg.config[f.key];
+    } else {
+      config[f.key] = val;
+    }
   });
-  const enabled = Object.values(config).some(v => v.trim && v.trim());
+  const enabled = Object.values(config).some(v => v && v.toString().trim());
   const r = await api(`/api/integrations/${id}`, {method:'PATCH',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({config, enabled})});
   if (r.ok) { toast(`${intg.name} saved ✅`); loadIntegrations(); }
@@ -5289,6 +5547,8 @@ function _blSyncUI(running, goal) {
   // goal input (pre-fill if known)
   const goalEl = document.getElementById('bl-goal-input');
   if (goalEl && goal && !goalEl.value) goalEl.value = goal;
+  const dashGoalEl = document.getElementById('dash-bl-goal-input');
+  if (dashGoalEl && goal && !dashGoalEl.value) dashGoalEl.value = goal;
 
   // auto-refresh timer
   if (running && !_blAutoRefreshTimer) {
@@ -5333,12 +5593,14 @@ async function blLoadLogs() {
 
 async function blToggle(on) {
   // Sync both toggles immediately so neither feels laggy
-  _blSyncUI(on, document.getElementById('bl-goal-input')?.value || '');
+  _blSyncUI(on, document.getElementById('bl-goal-input')?.value || document.getElementById('dash-bl-goal-input')?.value || '');
 
   if (on) {
-    const goal = (document.getElementById('bl-goal-input')?.value || '').trim();
+    const goal = (document.getElementById('bl-goal-input')?.value || document.getElementById('dash-bl-goal-input')?.value || '').trim();
     if (!goal) {
-      toast('Set a goal first — switch to the ⚡ BLACKLIGHT tab', 'error');
+      // Determine which context triggered the toggle to give a useful hint
+      const onDash = !!document.getElementById('dash-bl-goal-input');
+      toast(onDash ? 'Set a goal first — type one in the goal field below the BLACKLIGHT toggle' : 'Set a goal first — type one in the goal field above the start button', 'error');
       _blSyncUI(false, '');
       return;
     }
@@ -5357,6 +5619,33 @@ async function blToggle(on) {
     toast(r.ok ? '■ BLACKLIGHT stopped' : (r.message || 'Stop failed'), r.ok ? 'info' : 'error');
     setTimeout(blRefresh, 800);
   }
+}
+
+async function hermesToggle(on) {
+  const r = await api('/api/bots/' + (on ? 'start' : 'stop'), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({bot: 'hermes-agent'})
+  });
+  if (r.ok) {
+    toast(on ? '🧠 Hermes Agent started' : '■ Hermes Agent stopped', on ? 'success' : 'info');
+    const sub = document.getElementById('dash-hermes-sublabel');
+    if (sub) sub.textContent = on ? '🧠 Running — ready for tasks' : 'Reasoning agent — stopped';
+    _updateChatHermesStatus(on);
+  } else {
+    toast(r.message || (on ? 'Failed to start Hermes' : 'Failed to stop Hermes'), 'error');
+    const el = document.getElementById('dash-hermes-toggle');
+    if (el) el.checked = !on;
+  }
+}
+
+function _updateChatHermesStatus(running) {
+  const dot = document.getElementById('chat-hermes-dot');
+  const lbl = document.getElementById('chat-hermes-label');
+  if (dot) dot.style.background = running ? '#4ade80' : '#6b7280';
+  if (lbl) lbl.textContent = running ? 'Hermes ● online' : 'Hermes ○ offline';
+  const wrap = document.getElementById('chat-hermes-status');
+  if (wrap) wrap.style.borderColor = running ? 'rgba(74,222,128,.4)' : 'rgba(148,163,184,.2)';
 }
 
 // ── ASCEND FORGE JS ───────────────────────────────────────────────────────────
@@ -7781,6 +8070,7 @@ def add_memory_client(payload: dict):
         "name": name,
         "company": (payload.get("company") or "").strip() or None,
         "email": (payload.get("email") or "").strip() or None,
+        "phone": (payload.get("phone") or "").strip() or None,
         "status": (payload.get("status") or "prospect").strip(),
         "notes": (payload.get("notes") or "").strip() or None,
         "interactions": 0,
@@ -7800,7 +8090,7 @@ def update_memory_client(client_id: str, payload: dict):
     if client_id not in clients:
         raise HTTPException(404, f"Client '{client_id}' not found")
     client = clients[client_id]
-    for field in ("name", "company", "email", "status", "notes"):
+    for field in ("name", "company", "email", "phone", "status", "notes"):
         if field in payload:
             client[field] = payload[field]
     client["updated_at"] = now_iso()
@@ -7929,6 +8219,66 @@ _DEFAULT_INTEGRATIONS = [
         "fields": [
             {"key": "url", "label": "Webhook URL", "type": "url", "placeholder": "https://hooks.zapier.com/…"},
             {"key": "secret", "label": "Shared Secret (optional)", "type": "password", "placeholder": "mysecret"},
+        ],
+    },
+    {
+        "id": "linkedin",
+        "name": "LinkedIn",
+        "icon": "💼",
+        "description": "Post content, manage connections, and run LinkedIn lead generation",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "access_token", "label": "LinkedIn Access Token", "type": "password", "placeholder": "AQV…"},
+            {"key": "person_urn", "label": "Person URN (optional)", "type": "text", "placeholder": "urn:li:person:XXXXXXX"},
+        ],
+    },
+    {
+        "id": "youtube",
+        "name": "YouTube",
+        "icon": "▶️",
+        "description": "Upload videos, manage channel, and analyze performance via YouTube Data API",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "YouTube API Key", "type": "password", "placeholder": "AIza…"},
+            {"key": "channel_id", "label": "Channel ID", "type": "text", "placeholder": "UCxxxxxxxxxxxxxxxx"},
+        ],
+    },
+    {
+        "id": "instagram",
+        "name": "Instagram / Meta",
+        "icon": "📸",
+        "description": "Post to Instagram, manage content calendar, and track engagement via Meta Graph API",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "access_token", "label": "Meta Access Token", "type": "password", "placeholder": "EAAxxxxxx…"},
+            {"key": "instagram_account_id", "label": "Instagram Account ID", "type": "text", "placeholder": "17841400000000000"},
+        ],
+    },
+    {
+        "id": "hubspot",
+        "name": "HubSpot CRM",
+        "icon": "🟠",
+        "description": "Sync leads, deals, contacts, and activities with HubSpot CRM",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "HubSpot Private App Token", "type": "password", "placeholder": "pat-na1-…"},
+            {"key": "portal_id", "label": "Portal ID (optional)", "type": "text", "placeholder": "12345678"},
+        ],
+    },
+    {
+        "id": "notion",
+        "name": "Notion",
+        "icon": "📓",
+        "description": "Create and update pages in Notion databases — CRM, tasks, reports",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "Notion API Key", "type": "password", "placeholder": "secret_…"},
+            {"key": "database_id", "label": "Default Database ID", "type": "text", "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
         ],
     },
 ]
