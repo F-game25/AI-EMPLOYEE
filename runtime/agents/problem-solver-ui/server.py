@@ -914,7 +914,7 @@ INDEX_HTML = r"""<!doctype html>
     ::-webkit-scrollbar{width:5px;height:5px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:rgba(148,163,184,.15);border-radius:10px}
-    ::-webkit-scrollbar-thumb:hover{background:rgba(129,140,248,.35)}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(212,175,55,.35)}
 
     /* ── Layout ── */
     .app{display:flex;flex-direction:column;min-height:100vh;position:relative;z-index:1}
@@ -954,7 +954,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .header-title h1{
       font-size:1.18em;font-weight:700;letter-spacing:-.03em;
-      background:linear-gradient(135deg,#fff 30%,rgba(165,180,252,.9) 100%);
+      background:linear-gradient(135deg,#fff 30%,var(--gold-light) 100%);
       -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
     }
     .header-title .sub{color:rgba(148,163,184,.75);font-size:.78em;margin-top:1px;letter-spacing:.01em}
@@ -996,11 +996,11 @@ INDEX_HTML = r"""<!doctype html>
       font-family:inherit;position:relative;letter-spacing:.01em;
     }
     nav button:hover{color:var(--text);background:rgba(255,255,255,.04)}
-    nav button.active{color:var(--gold-light);border-bottom-color:var(--gold);
-      background:rgba(212,175,55,.07)}
-    nav button.active::after{content:'';position:absolute;bottom:0;left:20%;right:20%;height:2px;
+    nav button.active{color:var(--gold);border-bottom-color:var(--gold);
+      background:rgba(212,175,55,.08);font-weight:600;text-shadow:0 0 12px rgba(212,175,55,.4)}
+    nav button.active::after{content:'';position:absolute;bottom:0;left:15%;right:15%;height:2px;
       background:linear-gradient(90deg,transparent,var(--gold),transparent);
-      border-radius:2px 2px 0 0;filter:blur(1px)}
+      border-radius:2px 2px 0 0;filter:blur(2px);box-shadow:0 0 8px var(--gold)}
 
     /* ── Main content ── */
     main{flex:1;padding:24px 28px;max-width:1320px;margin:0 auto;width:100%;position:relative;z-index:1}
@@ -1061,14 +1061,14 @@ INDEX_HTML = r"""<!doctype html>
     }
     .stat-icon::before{content:'';position:absolute;inset:0;border-radius:inherit;
       background:linear-gradient(135deg,rgba(255,255,255,.12) 0%,transparent 50%)}
-    .stat-card:hover .stat-icon{transform:scale(1.1) rotate(-5deg);box-shadow:0 0 16px var(--stat-glow,rgba(99,102,241,.4))}
+    .stat-card:hover .stat-icon{transform:scale(1.1) rotate(-5deg);box-shadow:0 0 16px var(--stat-glow,rgba(212,175,55,.4))}
     .stat-icon.green{background:linear-gradient(135deg,rgba(16,185,129,.2),rgba(52,211,153,.08));color:#34d399;--stat-glow:rgba(16,185,129,.45)}
     .stat-icon.blue{background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.08));color:var(--gold-light);--stat-glow:rgba(212,175,55,.45)}
     .stat-icon.cyan{background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.05));color:var(--accent2);--stat-glow:rgba(212,175,55,.35)}
     .stat-icon.yellow{background:linear-gradient(135deg,rgba(245,158,11,.2),rgba(251,191,36,.08));color:#fbbf24;--stat-glow:rgba(245,158,11,.45)}
-    .stat-body .val{font-size:1.65em;font-weight:700;color:var(--text);
-      animation:countUp .5s ease;letter-spacing:-.03em;line-height:1}
-    .stat-body .lbl{font-size:.76em;color:var(--text-muted);margin-top:5px;letter-spacing:.02em}
+    .stat-body .val{font-size:1.8em;font-weight:800;color:var(--text);
+      animation:countUp .5s ease;letter-spacing:-.04em;line-height:1}
+    .stat-body .lbl{font-size:.75em;color:var(--text-muted);margin-top:6px;letter-spacing:.03em;text-transform:uppercase;font-weight:500}
 
     /* ── System control hero ── */
     .sys-control{
@@ -1167,7 +1167,7 @@ INDEX_HTML = r"""<!doctype html>
       transition:background .2s;animation:slideInLeft .3s ease both;
     }
     .bot-row:last-child{border-bottom:none}
-    .bot-row:hover{background:rgba(129,140,248,.05)}
+    .bot-row:hover{background:rgba(212,175,55,.04)}
     .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:all .4s;position:relative}
     .dot.on{background:var(--success);box-shadow:0 0 8px rgba(16,185,129,.6)}
     .dot.on::after{
@@ -1204,9 +1204,9 @@ INDEX_HTML = r"""<!doctype html>
     .btn:active::after{width:250px;height:250px;opacity:0}
     .btn-primary{
       background:linear-gradient(135deg,var(--primary-dark),var(--primary));
-      color:#fff;box-shadow:0 2px 12px rgba(99,102,241,.35);
+      color:#000;font-weight:600;box-shadow:0 2px 12px rgba(212,175,55,.35);
     }
-    .btn-primary:hover{transform:translateY(-1px);box-shadow:0 5px 18px rgba(99,102,241,.5);filter:brightness(1.08)}
+    .btn-primary:hover{transform:translateY(-1px);box-shadow:0 5px 20px rgba(212,175,55,.55),0 0 0 1px rgba(212,175,55,.2);filter:brightness(1.08)}
     .btn-danger{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.22)}
     .btn-danger:hover{background:rgba(244,63,94,.22);box-shadow:0 3px 12px rgba(244,63,94,.28);border-color:rgba(244,63,94,.4)}
     .btn-success{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(16,185,129,.22)}
@@ -1228,11 +1228,11 @@ INDEX_HTML = r"""<!doctype html>
       backdrop-filter:blur(4px);
     }
     input:focus,textarea:focus,select:focus{
-      border-color:rgba(129,140,248,.6);
-      box-shadow:0 0 0 3px rgba(99,102,241,.12),0 0 16px rgba(99,102,241,.1);
+      border-color:rgba(212,175,55,.6);
+      box-shadow:0 0 0 3px rgba(212,175,55,.12),0 0 16px rgba(212,175,55,.1);
       background:rgba(15,25,55,.9);
     }
-    input:hover:not(:focus),select:hover:not(:focus){border-color:rgba(129,140,248,.3)}
+    input:hover:not(:focus),select:hover:not(:focus){border-color:rgba(212,175,55,.3)}
     textarea{resize:vertical;min-height:80px}
     select option{background:#0d1b33;color:var(--text)}
 
@@ -1251,7 +1251,7 @@ INDEX_HTML = r"""<!doctype html>
       transition:.35s cubic-bezier(.4,0,.2,1);
       box-shadow:0 1px 4px rgba(0,0,0,.5);
     }
-    input:checked+.slider{background:linear-gradient(135deg,var(--primary-dark),var(--primary));box-shadow:0 0 14px rgba(99,102,241,.45)}
+    input:checked+.slider{background:linear-gradient(135deg,var(--primary-dark),var(--primary));box-shadow:0 0 14px rgba(212,175,55,.5)}
     input:checked+.slider:before{transform:translateX(19px);background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.4)}
 
     /* ── Code / pre ── */
@@ -1356,7 +1356,7 @@ INDEX_HTML = r"""<!doctype html>
       transition:border-color .25s,transform .2s,box-shadow .25s;
       backdrop-filter:blur(8px);
     }
-    .improv-row:hover{border-color:rgba(129,140,248,.3);transform:translateX(4px);box-shadow:0 0 20px rgba(99,102,241,.15),-4px 0 0 rgba(129,140,248,.3)}
+    .improv-row:hover{border-color:rgba(212,175,55,.35);transform:translateX(4px);box-shadow:0 0 20px rgba(212,175,55,.1),-4px 0 0 rgba(212,175,55,.4)}
     .improv-row h4{color:var(--text);font-size:.9em;margin-bottom:5px;font-weight:600}
     .improv-row p{font-size:.83em;color:var(--text-secondary);margin-bottom:8px;line-height:1.55}
 
@@ -1369,7 +1369,7 @@ INDEX_HTML = r"""<!doctype html>
       transition:border-color .25s,box-shadow .25s;
       backdrop-filter:blur(6px);
     }
-    .sched-row:hover{border-color:rgba(129,140,248,.25);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+    .sched-row:hover{border-color:rgba(212,175,55,.3);box-shadow:0 4px 16px rgba(0,0,0,.3),0 0 0 1px rgba(212,175,55,.08)}
     .sched-info{flex:1}
     .sched-info h4{color:var(--text);font-size:.875em;margin-bottom:3px;display:flex;align-items:center;gap:8px;font-weight:600}
     .sched-info p{font-size:.8em;color:var(--text-muted)}
@@ -1382,15 +1382,15 @@ INDEX_HTML = r"""<!doctype html>
       background:rgba(15,25,48,.7);
       backdrop-filter:blur(6px);
     }
-    .skill-card:hover{border-color:rgba(129,140,248,.35);background:rgba(99,102,241,.08);
-      transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.3)}
+    .skill-card:hover{border-color:rgba(212,175,55,.4);background:rgba(212,175,55,.06);
+      transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4),0 0 0 1px rgba(212,175,55,.1)}
     .skill-card.selected{border-color:rgba(52,211,153,.5);background:rgba(16,185,129,.08);
       box-shadow:0 0 16px rgba(16,185,129,.18)}
     .skill-card h5{color:var(--text);font-size:.875em;margin-bottom:4px;font-weight:600}
     .skill-card p{font-size:.8em;color:var(--text-muted);margin:0;line-height:1.45}
     .skill-card .tags{margin-top:7px;display:flex;flex-wrap:wrap;gap:4px}
-    .tag{background:rgba(99,102,241,.14);color:var(--primary-light);border-radius:5px;
-      padding:2px 8px;font-size:.72em;font-weight:500;letter-spacing:.01em}
+    .tag{background:rgba(212,175,55,.12);color:var(--gold-light);border-radius:5px;
+      padding:2px 8px;font-size:.72em;font-weight:500;letter-spacing:.01em;border:1px solid rgba(212,175,55,.2)}
     .cat-pill{display:inline-block;padding:4px 12px;border-radius:20px;font-size:.8em;
       cursor:pointer;border:1px solid var(--border);color:var(--text-secondary);
       margin:2px;transition:all .2s;font-weight:500}
@@ -1404,7 +1404,7 @@ INDEX_HTML = r"""<!doctype html>
       background:rgba(15,25,48,.7);transition:all .22s;
       backdrop-filter:blur(6px);
     }
-    .agent-card:hover{border-color:rgba(129,140,248,.3);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.3)}
+    .agent-card:hover{border-color:rgba(212,175,55,.35);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.3),0 0 0 1px rgba(212,175,55,.1)}
     .agent-card h4{color:var(--text);margin-bottom:5px;font-size:.9em;font-weight:600}
     .agent-card p{font-size:.82em;color:var(--text-muted);line-height:1.45}
     #skill-search{margin-bottom:12px}
@@ -1520,18 +1520,30 @@ INDEX_HTML = r"""<!doctype html>
     .health-check-item.ok .hc-val{color:var(--success)}
     .health-check-item.warn .hc-val{color:var(--warning)}
     .health-check-item.err .hc-val{color:var(--danger)}
-    .office-desk-item{position:absolute;width:70px;height:40px;background:linear-gradient(180deg,rgba(212,175,55,.15),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.2);border-radius:4px}
+    .office-desk-item{position:absolute;width:80px;height:44px;background:linear-gradient(180deg,rgba(212,175,55,.18),rgba(212,175,55,.06));border:1px solid rgba(212,175,55,.25);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.3)}
     .robot-agent{position:absolute;cursor:pointer;transition:transform .3s;animation:robotWalk 3s ease-in-out infinite}
-    .robot-agent:hover{transform:scale(1.15)!important;z-index:100}
-    .robot-body{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2em;border:2px solid var(--gold);box-shadow:0 0 12px rgba(212,175,55,.4);background:var(--surface2)}
-    .robot-body.busy{border-color:var(--success);box-shadow:0 0 12px rgba(34,197,94,.4);animation:robotBusy .8s ease-in-out infinite}
-    .robot-name{font-size:.6em;color:var(--gold-light);text-align:center;margin-top:3px;white-space:nowrap;max-width:60px;overflow:hidden;text-overflow:ellipsis}
+    .robot-agent:hover{transform:scale(1.2)!important;z-index:100}
+    .robot-body{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.3em;border:2px solid var(--gold);box-shadow:0 0 16px rgba(212,175,55,.5),0 0 32px rgba(212,175,55,.15);background:var(--surface2)}
+    .robot-body.busy{border-color:var(--success);box-shadow:0 0 16px rgba(34,197,94,.6),0 0 32px rgba(34,197,94,.2);animation:robotBusy .8s ease-in-out infinite}
+    .robot-name{font-size:.6em;color:var(--gold-light);text-align:center;margin-top:3px;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis;font-weight:600}
     .robot-status-dot{width:8px;height:8px;border-radius:50%;margin:2px auto;background:var(--text-muted)}
-    .robot-status-dot.running{background:var(--success);box-shadow:0 0 6px var(--success);animation:blink 1.5s infinite}
-    .robot-status-dot.busy{background:var(--gold);box-shadow:0 0 6px var(--gold);animation:blink .8s infinite}
-    @keyframes robotWalk{0%,100%{transform:translateY(0) rotate(-1deg)}25%{transform:translateY(-4px) rotate(1deg)}50%{transform:translateY(-2px) rotate(0deg)}75%{transform:translateY(-5px) rotate(-1deg)}}
-    @keyframes robotBusy{0%,100%{box-shadow:0 0 8px rgba(34,197,94,.4)}50%{box-shadow:0 0 20px rgba(34,197,94,.8)}}
+    .robot-status-dot.running{background:var(--success);box-shadow:0 0 8px var(--success);animation:blink 1.5s infinite}
+    .robot-status-dot.busy{background:var(--gold);box-shadow:0 0 8px var(--gold);animation:blink .8s infinite}
+    @keyframes robotWalk{0%,100%{transform:translateY(0) rotate(-1deg)}25%{transform:translateY(-5px) rotate(1.5deg)}50%{transform:translateY(-2px) rotate(0deg)}75%{transform:translateY(-6px) rotate(-1.5deg)}}
+    @keyframes robotBusy{0%,100%{box-shadow:0 0 8px rgba(34,197,94,.4),0 4px 12px rgba(0,0,0,.3)}50%{box-shadow:0 0 24px rgba(34,197,94,.9),0 4px 20px rgba(34,197,94,.3)}}
     @keyframes robotWalk2{0%,100%{transform:translateY(0) rotate(1deg)}25%{transform:translateY(-3px) rotate(-1deg)}50%{transform:translateY(-5px) rotate(0deg)}75%{transform:translateY(-2px) rotate(1deg)}}
+
+    /* ── Agent picker grid (Task tab) ── */
+    .agent-pick-item{
+      display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
+      border:1px solid rgba(148,163,184,.1);cursor:pointer;
+      background:rgba(15,25,48,.6);transition:all .2s;font-size:.82em;
+    }
+    .agent-pick-item:hover{border-color:rgba(212,175,55,.3);background:rgba(212,175,55,.06)}
+    .agent-pick-item.selected{border-color:rgba(212,175,55,.5);background:rgba(212,175,55,.1);box-shadow:0 0 12px rgba(212,175,55,.12)}
+    .agent-pick-item .pick-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+    .agent-pick-item .pick-dot.on{background:var(--success);box-shadow:0 0 6px var(--success)}
+    .agent-pick-item .pick-dot.off{background:rgba(100,116,139,.4)}
   </style>
 </head>
 <body>
@@ -1709,15 +1721,14 @@ INDEX_HTML = r"""<!doctype html>
 
   <div class="card">
     <div class="card-header">
-      <div class="card-title"><span class="icon">💬</span> WhatsApp Commands</div>
+      <div class="card-title"><span class="icon">💬</span> Quick WhatsApp Commands</div>
+      <a href="#" onclick="event.preventDefault();document.querySelector('nav button[onclick*=commands]').click()" style="font-size:.78em;color:var(--gold);text-decoration:none">View all →</a>
     </div>
-    <div class="cmd-grid">
-      <div class="cmd-item"><code>status</code><span>Get current status report</span></div>
-      <div class="cmd-item"><code>workers</code><span>List active agents</span></div>
-      <div class="cmd-item"><code>schedule</code><span>List scheduled tasks</span></div>
-      <div class="cmd-item"><code>improvements</code><span>List pending proposals</span></div>
-      <div class="cmd-item"><code>switch to &lt;agent&gt;</code><span>Switch active agent</span></div>
-      <div class="cmd-item"><code>help</code><span>Show all commands</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
+      <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">status</code><span style="font-size:.78em;color:var(--text-muted)">Get current status report</span></div>
+      <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">workers</code><span style="font-size:.78em;color:var(--text-muted)">List active agents</span></div>
+      <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">schedule</code><span style="font-size:.78em;color:var(--text-muted)">List scheduled tasks</span></div>
+      <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">help</code><span style="font-size:.78em;color:var(--text-muted)">Show all commands</span></div>
     </div>
   </div>
 </div>
@@ -1790,10 +1801,13 @@ INDEX_HTML = r"""<!doctype html>
     <!-- Office floor -->
     <div style="flex:1;position:relative;overflow:hidden;background:linear-gradient(180deg,#111 0%,#0d0d0d 60%,#0a0a0a 100%)">
       <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(212,175,55,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(212,175,55,.03) 1px,transparent 1px);background-size:60px 60px;pointer-events:none"></div>
-      <div style="position:absolute;bottom:0;left:0;right:0;height:8px;background:linear-gradient(90deg,rgba(212,175,55,.1),rgba(212,175,55,.05),rgba(212,175,55,.1))"></div>
-      <div style="position:absolute;top:20px;left:20px;font-size:.7em;color:rgba(212,175,55,.4);letter-spacing:.1em;text-transform:uppercase">◈ Command Zone</div>
-      <div style="position:absolute;top:20px;left:50%;transform:translateX(-50%);font-size:.7em;color:rgba(212,175,55,.4);letter-spacing:.1em;text-transform:uppercase">◈ Research Zone</div>
-      <div style="position:absolute;top:20px;right:20px;font-size:.7em;color:rgba(212,175,55,.4);letter-spacing:.1em;text-transform:uppercase">◈ Sales Zone</div>
+      <!-- Zone dividers -->
+      <div style="position:absolute;top:0;left:33.3%;bottom:0;width:1px;background:linear-gradient(180deg,transparent,rgba(212,175,55,.08),transparent);pointer-events:none"></div>
+      <div style="position:absolute;top:0;left:66.6%;bottom:0;width:1px;background:linear-gradient(180deg,transparent,rgba(212,175,55,.08),transparent);pointer-events:none"></div>
+      <div style="position:absolute;bottom:0;left:0;right:0;height:10px;background:linear-gradient(90deg,rgba(212,175,55,.15),rgba(212,175,55,.05),rgba(212,175,55,.15))"></div>
+      <div style="position:absolute;top:16px;left:20px;font-size:.68em;color:rgba(212,175,55,.5);letter-spacing:.12em;text-transform:uppercase;font-weight:600;background:rgba(0,0,0,.4);padding:3px 10px;border-radius:20px;border:1px solid rgba(212,175,55,.15)">◈ Command Zone</div>
+      <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);font-size:.68em;color:rgba(212,175,55,.5);letter-spacing:.12em;text-transform:uppercase;font-weight:600;background:rgba(0,0,0,.4);padding:3px 10px;border-radius:20px;border:1px solid rgba(212,175,55,.15);white-space:nowrap">◈ Research Zone</div>
+      <div style="position:absolute;top:16px;right:20px;font-size:.68em;color:rgba(212,175,55,.5);letter-spacing:.12em;text-transform:uppercase;font-weight:600;background:rgba(0,0,0,.4);padding:3px 10px;border-radius:20px;border:1px solid rgba(212,175,55,.15)">◈ Sales Zone</div>
       <div class="office-desk-item" style="left:5%;bottom:100px"></div>
       <div class="office-desk-item" style="left:20%;bottom:100px"></div>
       <div class="office-desk-item" style="left:38%;bottom:100px"></div>
@@ -1803,17 +1817,17 @@ INDEX_HTML = r"""<!doctype html>
       <div id="office-agents" style="position:absolute;inset:0"></div>
     </div>
     <!-- Agent info bar -->
-    <div style="height:60px;border-top:1px solid rgba(212,175,55,.1);background:var(--surface2);display:flex;align-items:center;padding:0 20px;gap:10px;overflow-x:auto;flex-shrink:0" id="office-agent-bar">
-      <span style="font-size:.78em;color:var(--text-muted);white-space:nowrap">Click a robot to inspect →</span>
+    <div style="height:60px;border-top:1px solid rgba(212,175,55,.12);background:var(--surface2);display:flex;align-items:center;padding:0 20px;gap:10px;overflow-x:auto;flex-shrink:0" id="office-agent-bar">
+      <span style="font-size:.78em;color:var(--text-muted);white-space:nowrap">🤖 Click a robot to inspect →</span>
     </div>
   </div>
 </div>
 
 <div class="office-modal" id="office-modal">
-  <div class="office-modal-card">
+  <div class="office-modal-card" style="border:1px solid rgba(212,175,55,.25);box-shadow:0 24px 64px rgba(0,0,0,.7),0 0 0 1px rgba(212,175,55,.08),0 0 60px rgba(212,175,55,.08)">
     <div class="card-header" style="margin-bottom:10px">
-      <div class="card-title"><span class="icon">🧠</span> <span id="office-modal-title">Agent</span></div>
-      <button class="btn btn-ghost btn-sm" onclick="closeOfficeModal()">Close</button>
+      <div class="card-title"><span style="color:var(--gold)">🧠</span> <span id="office-modal-title">Agent</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="closeOfficeModal()">✕ Close</button>
     </div>
     <div style="font-size:.86em;color:var(--text-secondary);margin-bottom:8px" id="office-modal-status">Status</div>
     <div class="office-progress"><div id="office-modal-progress"></div></div>
@@ -2181,7 +2195,7 @@ INDEX_HTML = r"""<!doctype html>
       <button class="btn btn-ghost btn-sm" onclick="loadSwarm()" title="Refresh swarm">↻ Refresh</button>
     </div>
     <div id="swarm-filter-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
-      <button class="btn btn-ghost btn-sm swarm-pill active" onclick="filterSwarm('all',this)">All</button>
+      <button class="btn btn-primary btn-sm swarm-pill active" onclick="filterSwarm('all',this)" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none">All</button>
       <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('sales',this)">💼 Sales</button>
       <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('marketing',this)">📢 Marketing</button>
       <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('social',this)">📱 Social</button>
@@ -2214,11 +2228,11 @@ INDEX_HTML = r"""<!doctype html>
 <div id="tab-metrics" class="tab-content">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
     <div>
-      <h2 style="font-size:1.1em;font-weight:700;color:var(--text)">ROI &amp; Usage Tracking</h2>
+      <h2 style="font-size:1.15em;font-weight:800;color:var(--text);letter-spacing:-.02em">ROI &amp; Usage Tracking</h2>
       <p style="font-size:.8em;color:var(--text-muted)">Real usage data — tracked automatically from all agent activity</p>
     </div>
     <div style="display:flex;gap:8px">
-      <select id="roi-period" onchange="loadMetrics()" style="font-size:.82em;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:5px 10px">
+      <select id="roi-period" onchange="loadMetrics()" style="font-size:.82em;background:var(--surface2);border:1px solid rgba(212,175,55,.25);border-radius:8px;color:var(--text);padding:6px 12px">
         <option value="all">All Time</option>
         <option value="30d">Last 30 Days</option>
         <option value="7d">Last 7 Days</option>
@@ -2262,29 +2276,29 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
   <!-- ROI Summary bar -->
-  <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.05),transparent)">
+  <div class="card" style="border:1px solid rgba(212,175,55,.3);background:linear-gradient(135deg,rgba(212,175,55,.06),rgba(212,175,55,.02))">
     <div class="card-header">
       <div class="card-title"><span style="color:var(--gold)">◈</span> ROI Summary</div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px" id="roi-summary">
-      <div>
-        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Efficiency Rate
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:20px" id="roi-summary">
+      <div style="text-align:center;padding:16px 10px;background:rgba(212,175,55,.05);border-radius:10px;border:1px solid rgba(212,175,55,.12)">
+        <div style="font-size:.7em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Efficiency Rate
           <span title="Efficiency = (human hours saved ÷ total tasks) × 100. Higher means your AI team completes more work per task with less overhead." style="cursor:help;color:var(--gold);margin-left:4px">ⓘ</span>
         </div>
-        <div style="font-size:1.8em;font-weight:700;color:var(--gold)" id="roi-efficiency">–%</div>
-        <div id="roi-efficiency-desc" style="font-size:.72em;color:var(--text-muted);margin-top:3px"></div>
+        <div style="font-size:2.4em;font-weight:800;color:var(--gold);letter-spacing:-.03em;line-height:1" id="roi-efficiency">–%</div>
+        <div id="roi-efficiency-desc" style="font-size:.72em;color:var(--text-muted);margin-top:6px;line-height:1.4"></div>
       </div>
-      <div>
-        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Avg Task Duration</div>
-        <div style="font-size:1.8em;font-weight:700;color:var(--gold)" id="roi-avg-duration">–</div>
+      <div style="text-align:center;padding:16px 10px;background:rgba(212,175,55,.05);border-radius:10px;border:1px solid rgba(212,175,55,.12)">
+        <div style="font-size:.7em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Avg Task Duration</div>
+        <div style="font-size:2.4em;font-weight:800;color:var(--gold);letter-spacing:-.03em;line-height:1" id="roi-avg-duration">–</div>
       </div>
-      <div>
-        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Most Active Bot</div>
-        <div style="font-size:1.1em;font-weight:700;color:var(--text)" id="roi-top-bot">–</div>
+      <div style="text-align:center;padding:16px 10px;background:rgba(212,175,55,.05);border-radius:10px;border:1px solid rgba(212,175,55,.12)">
+        <div style="font-size:.7em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Most Active Agent</div>
+        <div style="font-size:1.2em;font-weight:700;color:var(--text);line-height:1.3;margin-top:6px" id="roi-top-bot">–</div>
       </div>
-      <div>
-        <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Value Generated</div>
-        <div style="font-size:1.8em;font-weight:700;color:var(--success)" id="roi-value">€–</div>
+      <div style="text-align:center;padding:16px 10px;background:rgba(34,197,94,.05);border-radius:10px;border:1px solid rgba(34,197,94,.15)">
+        <div style="font-size:.7em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Value Generated</div>
+        <div style="font-size:2.4em;font-weight:800;color:var(--success);letter-spacing:-.03em;line-height:1" id="roi-value">€–</div>
       </div>
     </div>
   </div>
@@ -2675,70 +2689,77 @@ INDEX_HTML = r"""<!doctype html>
 <div id="tab-blacklight" class="tab-content">
 
   <!-- Header banner -->
-  <div style="background:linear-gradient(135deg,#1a0a2e 0%,#16213e 60%,#0f172a 100%);border:1px solid #7c3aed;border-radius:12px;padding:20px 24px;margin-bottom:18px;display:flex;align-items:center;gap:18px">
-    <div style="font-size:2.4rem;line-height:1">⚡</div>
-    <div style="flex:1">
-      <div style="font-size:1.18rem;font-weight:700;color:#e2d9f3;letter-spacing:.06em">BLACKLIGHT</div>
-      <div style="font-size:.83em;color:#a78bfa;margin-top:2px">Autonomous money-making agent — runs above Hermes without user input</div>
+  <div style="background:linear-gradient(135deg,#1a0a2e 0%,#16213e 60%,#0f172a 100%);border:1px solid #7c3aed;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(124,58,237,.15),0 8px 32px rgba(0,0,0,.6)">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(124,58,237,.2) 0%,transparent 60%);pointer-events:none"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(167,139,250,.6),transparent)"></div>
+    <div style="font-size:2.6rem;line-height:1;animation:blLightning 3s ease-in-out infinite;position:relative;z-index:1">⚡</div>
+    <div style="flex:1;position:relative;z-index:1">
+      <div style="font-size:1.3rem;font-weight:800;color:#e2d9f3;letter-spacing:.1em;text-shadow:0 0 20px rgba(167,139,250,.5)">BLACKLIGHT</div>
+      <div style="font-size:.83em;color:#a78bfa;margin-top:3px;font-weight:500">Autonomous money-making agent — runs above Hermes without user input</div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px">
-      <div id="bl-status-dot" style="width:10px;height:10px;border-radius:50%;background:#6b7280;box-shadow:0 0 0 0 #7c3aed;transition:background .4s"></div>
-      <span id="bl-status-label" style="font-size:.82em;color:#a78bfa;font-weight:600">Idle</span>
+    <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
+      <div id="bl-status-dot" style="width:12px;height:12px;border-radius:50%;background:#6b7280;transition:background .4s,box-shadow .4s"></div>
+      <span id="bl-status-label" style="font-size:.84em;color:#a78bfa;font-weight:700;letter-spacing:.04em">IDLE</span>
     </div>
   </div>
+  <style>
+  @keyframes blLightning{0%,90%,100%{opacity:1;filter:drop-shadow(0 0 8px #a855f7)}5%{opacity:.3;filter:none}10%{opacity:1;filter:drop-shadow(0 0 20px #c084fc)}15%{opacity:.7}20%{opacity:1;filter:drop-shadow(0 0 12px #a855f7)}}
+  .bl-stat-card{background:linear-gradient(135deg,rgba(88,28,135,.2),rgba(124,58,237,.1));border:1px solid rgba(124,58,237,.3);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
+  .bl-stat-card:hover{border-color:rgba(167,139,250,.5);box-shadow:0 0 20px rgba(124,58,237,.2)}
+  </style>
 
   <!-- Control row -->
-  <div class="card" style="margin-bottom:18px">
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(124,58,237,.2);background:linear-gradient(135deg,rgba(88,28,135,.1),var(--surface2))">
     <div class="card-header">
-      <div class="card-title"><span class="icon">🎯</span> Goal &amp; Control</div>
+      <div class="card-title"><span style="color:#a78bfa">🎯</span> Goal &amp; Control</div>
       <button class="btn btn-ghost btn-sm" onclick="blRefresh()">↻ Refresh</button>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
-      Set a goal, then hit <strong>Start</strong>. BLACKLIGHT will find opportunities, analyze them with Hermes, generate outreach, and iterate — without waiting for input.
+      Set a goal, then hit <strong style="color:#a78bfa">Start</strong>. BLACKLIGHT will find opportunities, analyze them with Hermes, generate outreach, and iterate — without waiting for input.
     </p>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
       <div style="flex:1;min-width:220px">
-        <label style="font-size:.82em;color:var(--text-muted);display:block;margin-bottom:4px">Goal</label>
+        <label style="font-size:.82em;color:#a78bfa;display:block;margin-bottom:4px;font-weight:600">Goal</label>
         <input id="bl-goal-input" placeholder="e.g. Find local restaurants that need better marketing"
-          style="width:100%;box-sizing:border-box" autocomplete="off"/>
+          style="width:100%;box-sizing:border-box;border-color:rgba(124,58,237,.3)" autocomplete="off"/>
       </div>
       <div style="display:flex;align-items:center;gap:10px;padding-bottom:2px">
         <label class="toggle" style="width:54px;height:30px" title="Toggle BLACKLIGHT on/off">
           <input type="checkbox" id="bl-toggle" onchange="blToggle(this.checked)"/>
           <span class="slider" style="border-radius:30px"></span>
         </label>
-        <span id="bl-toggle-label" style="font-size:.9em;font-weight:600;color:var(--text-muted);min-width:52px">OFF</span>
+        <span id="bl-toggle-label" style="font-size:.9em;font-weight:700;color:#a78bfa;min-width:52px">OFF</span>
       </div>
     </div>
   </div>
 
   <!-- Stats row -->
   <div class="grid-stat" style="margin-bottom:18px" id="bl-stat-cards">
-    <div class="stat-card">
-      <div class="stat-icon" style="color:#a855f7">🔄</div>
-      <div class="stat-body"><div class="val" id="bl-stat-cycle">0</div><div class="lbl">Cycles Run</div></div>
+    <div class="bl-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(124,58,237,.2);display:flex;align-items:center;justify-content:center;font-size:1.1em">🔄</div>
+      <div class="stat-body"><div class="val" id="bl-stat-cycle" style="color:#a78bfa">0</div><div class="lbl">Cycles Run</div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-icon" style="color:#22d3ee">🎯</div>
-      <div class="stat-body"><div class="val" id="bl-stat-opps">0</div><div class="lbl">Opportunities Found</div></div>
+    <div class="bl-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(6,182,212,.15);display:flex;align-items:center;justify-content:center;font-size:1.1em">🎯</div>
+      <div class="stat-body"><div class="val" id="bl-stat-opps" style="color:#22d3ee">0</div><div class="lbl">Opportunities Found</div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-icon" style="color:#4ade80">⚡</div>
-      <div class="stat-body"><div class="val" id="bl-stat-actions">0</div><div class="lbl">Actions Taken</div></div>
+    <div class="bl-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(74,222,128,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">⚡</div>
+      <div class="stat-body"><div class="val" id="bl-stat-actions" style="color:#4ade80">0</div><div class="lbl">Actions Taken</div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-icon" style="color:#fb923c">🕐</div>
-      <div class="stat-body"><div class="val" id="bl-stat-last" style="font-size:.75em">—</div><div class="lbl">Last Activity</div></div>
+    <div class="bl-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(251,146,60,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">🕐</div>
+      <div class="stat-body"><div class="val" id="bl-stat-last" style="font-size:.75em;color:#fb923c">—</div><div class="lbl">Last Activity</div></div>
     </div>
   </div>
 
   <!-- Live activity log -->
-  <div class="card">
+  <div class="card" style="border:1px solid rgba(124,58,237,.3);background:linear-gradient(135deg,rgba(88,28,135,.1),var(--surface2))">
     <div class="card-header">
-      <div class="card-title"><span class="icon">📡</span> Live Activity Log</div>
+      <div class="card-title"><span style="color:#a78bfa">📡</span> Live Activity Log</div>
       <button class="btn btn-ghost btn-sm" onclick="blLoadLogs()">↻ Refresh</button>
     </div>
-    <div id="bl-log" style="font-family:var(--font-mono,monospace);font-size:.77em;background:var(--bg-deep,#0d1117);border-radius:8px;padding:12px;height:340px;overflow-y:auto;color:#c9d1d9;line-height:1.7">
+    <div id="bl-log" style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace;font-size:.77em;background:rgba(2,0,10,.9);border:1px solid rgba(124,58,237,.2);border-radius:8px;padding:14px;height:340px;overflow-y:auto;color:#c9d1d9;line-height:1.7;box-shadow:inset 0 0 40px rgba(88,28,135,.2)">
       <span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>
     </div>
   </div>
@@ -2749,33 +2770,41 @@ INDEX_HTML = r"""<!doctype html>
 <div id="tab-ascend" class="tab-content">
 
   <!-- Header banner -->
-  <div style="background:linear-gradient(135deg,#0a1628 0%,#0f2240 60%,#1a0a08 100%);border:1px solid #d97706;border-radius:12px;padding:20px 24px;margin-bottom:18px;display:flex;align-items:center;gap:18px">
-    <div style="font-size:2.4rem;line-height:1">🔥</div>
-    <div style="flex:1">
-      <div style="font-size:1.18rem;font-weight:700;color:#fef3c7;letter-spacing:.06em">ASCEND FORGE</div>
-      <div style="font-size:.83em;color:#f59e0b;margin-top:2px">Top-layer self-improver — continuously improves the system safely</div>
+  <div style="background:linear-gradient(135deg,#0a1628 0%,#1a0e05 50%,#0f2240 100%);border:1px solid #d97706;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(217,119,6,.12),0 8px 32px rgba(0,0,0,.6)">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(217,119,6,.2) 0%,transparent 60%);pointer-events:none"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(251,191,36,.5),transparent)"></div>
+    <div style="font-size:2.6rem;line-height:1;animation:forgeFire 2s ease-in-out infinite;position:relative;z-index:1">🔥</div>
+    <div style="flex:1;position:relative;z-index:1">
+      <div style="font-size:1.3rem;font-weight:800;color:#fef3c7;letter-spacing:.1em;text-shadow:0 0 20px rgba(251,191,36,.4)">ASCEND FORGE</div>
+      <div style="font-size:.83em;color:#f59e0b;margin-top:3px;font-weight:500">Top-layer self-improver — continuously improves the system safely</div>
     </div>
-    <div style="display:flex;align-items:center;gap:10px">
-      <!-- Subtle pulsing indicator -->
-      <div id="af-pulse" style="width:10px;height:10px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
-      <span id="af-mode-badge" style="font-size:.78em;font-weight:700;padding:3px 10px;border-radius:20px;background:#d97706;color:#1a0800;letter-spacing:.06em">AUTO</span>
+    <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
+      <div id="af-pulse" style="width:12px;height:12px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
+      <span id="af-mode-badge" style="font-size:.78em;font-weight:800;padding:4px 12px;border-radius:20px;background:linear-gradient(135deg,#b45309,#d97706);color:#fff1c6;letter-spacing:.08em;box-shadow:0 0 12px rgba(217,119,6,.4)">AUTO</span>
     </div>
   </div>
 
   <style>
-  @keyframes afPulse{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.5)}50%{box-shadow:0 0 0 6px rgba(217,119,6,0)}}
+  @keyframes afPulse{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.5)}50%{box-shadow:0 0 0 8px rgba(217,119,6,0)}}
+  @keyframes forgeFire{0%,100%{filter:drop-shadow(0 0 6px #f59e0b);transform:scale(1)}25%{filter:drop-shadow(0 0 16px #fbbf24);transform:scale(1.05)}50%{filter:drop-shadow(0 0 8px #f97316);transform:scale(.97)}75%{filter:drop-shadow(0 0 20px #f59e0b);transform:scale(1.03)}}
+  .af-mode-btn{padding:8px 18px;border-radius:8px;font-size:.82em;font-weight:700;cursor:pointer;transition:all .2s;font-family:inherit;letter-spacing:.03em}
+  .af-mode-btn.active{background:linear-gradient(135deg,#92400e,#b45309,#d97706);color:#fff;border:1px solid #f59e0b;box-shadow:0 0 16px rgba(217,119,6,.4)}
+  .af-mode-btn:not(.active){background:rgba(217,119,6,.08);color:#f59e0b;border:1px solid rgba(217,119,6,.3)}
+  .af-mode-btn:not(.active):hover{background:rgba(217,119,6,.15);border-color:rgba(217,119,6,.5)}
+  .af-stat-card{background:linear-gradient(135deg,rgba(120,53,15,.2),rgba(217,119,6,.08));border:1px solid rgba(217,119,6,.25);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
+  .af-stat-card:hover{border-color:rgba(251,191,36,.4);box-shadow:0 0 20px rgba(217,119,6,.15)}
   </style>
 
   <!-- Mode + controls -->
-  <div class="card" style="margin-bottom:18px">
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.1),var(--surface2))">
     <div class="card-header">
-      <div class="card-title"><span class="icon">⚙️</span> Mode &amp; Controls</div>
+      <div class="card-title"><span style="color:#f59e0b">⚙️</span> Mode &amp; Controls</div>
       <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-      <button class="btn btn-sm" id="af-mode-general" onclick="afSetMode('GENERAL')" style="border:1px solid #6b7280">🛠 GENERAL</button>
-      <button class="btn btn-sm" id="af-mode-money"   onclick="afSetMode('MONEY')"   style="border:1px solid #6b7280">💰 MONEY</button>
-      <button class="btn btn-sm" id="af-mode-auto"    onclick="afSetMode('AUTO')"    style="border:1px solid #6b7280">🤖 AUTO</button>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <button class="af-mode-btn" id="af-mode-general" onclick="afSetMode('GENERAL')">🛠 GENERAL</button>
+      <button class="af-mode-btn" id="af-mode-money"   onclick="afSetMode('MONEY')">💰 MONEY</button>
+      <button class="af-mode-btn active" id="af-mode-auto" onclick="afSetMode('AUTO')">🤖 AUTO</button>
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
         <label style="font-size:.82em;color:var(--text-muted)">Auto-approve LOW risk:</label>
         <label class="toggle" style="width:44px;height:24px">
@@ -2784,32 +2813,32 @@ INDEX_HTML = r"""<!doctype html>
         </label>
       </div>
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-primary btn-sm" onclick="afScan()">🔍 Scan System</button>
-      <button class="btn btn-ghost btn-sm"   onclick="afShowPending()">📋 Show Pending</button>
-      <button class="btn btn-ghost btn-sm"   onclick="afApplyAllLow()">✅ Apply All LOW</button>
-      <button class="btn btn-ghost btn-sm"   onclick="afCancelAll()" style="color:#ef4444">🗑 Cancel All</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="afScan()" style="padding:8px 16px;background:linear-gradient(135deg,#92400e,#d97706);border:none;border-radius:8px;color:#fff;font-weight:700;font-size:.82em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.filter='brightness(1.1)';this.style.boxShadow='0 4px 16px rgba(217,119,6,.4)'" onmouseleave="this.style.filter='';this.style.boxShadow=''">🔍 Scan System</button>
+      <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afShowPending()">📋 Show Pending</button>
+      <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afApplyAllLow()">✅ Apply All LOW</button>
+      <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="afCancelAll()">🗑 Cancel All</button>
     </div>
-    <div id="af-current-activity" style="margin-top:10px;font-size:.82em;color:var(--text-muted)">Activity: idle</div>
+    <div id="af-current-activity" style="margin-top:12px;font-size:.82em;color:var(--text-muted)">Activity: idle</div>
     <div id="af-current-target"   style="font-size:.82em;color:var(--text-muted)">Target: —</div>
   </div>
 
   <!-- Stats -->
   <div class="grid-stat" style="margin-bottom:18px">
-    <div class="stat-card">
-      <div class="stat-icon" style="color:#f59e0b">📋</div>
-      <div class="stat-body"><div class="val" id="af-stat-pending">0</div><div class="lbl">Pending</div></div>
+    <div class="af-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(217,119,6,.2);display:flex;align-items:center;justify-content:center;font-size:1.1em">📋</div>
+      <div class="stat-body"><div class="val" id="af-stat-pending" style="color:#f59e0b">0</div><div class="lbl">Pending</div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-icon" style="color:#4ade80">✅</div>
-      <div class="stat-body"><div class="val" id="af-stat-approved">0</div><div class="lbl">Approved</div></div>
+    <div class="af-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(74,222,128,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">✅</div>
+      <div class="stat-body"><div class="val" id="af-stat-approved" style="color:#4ade80">0</div><div class="lbl">Approved</div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-icon" style="color:#ef4444">❌</div>
-      <div class="stat-body"><div class="val" id="af-stat-rejected">0</div><div class="lbl">Rejected</div></div>
+    <div class="af-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(239,68,68,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">❌</div>
+      <div class="stat-body"><div class="val" id="af-stat-rejected" style="color:#ef4444">0</div><div class="lbl">Rejected</div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-icon" style="color:#6b7280">📚</div>
+    <div class="af-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(148,163,184,.08);display:flex;align-items:center;justify-content:center;font-size:1.1em">📚</div>
       <div class="stat-body"><div class="val" id="af-stat-total">0</div><div class="lbl">Total Patches</div></div>
     </div>
   </div>
@@ -2826,12 +2855,12 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <!-- Activity feed -->
-  <div class="card" style="margin-bottom:18px">
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.08),var(--surface2))">
     <div class="card-header">
-      <div class="card-title"><span class="icon">📡</span> Activity Feed</div>
+      <div class="card-title"><span style="color:#f59e0b">📡</span> Activity Feed</div>
       <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
     </div>
-    <div id="af-activity-log" style="font-family:var(--font-mono,monospace);font-size:.77em;background:var(--bg-deep,#0d1117);border-radius:8px;padding:12px;height:200px;overflow-y:auto;color:#c9d1d9;line-height:1.7">
+    <div id="af-activity-log" style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace;font-size:.77em;background:rgba(10,5,0,.9);border:1px solid rgba(217,119,6,.2);border-radius:8px;padding:14px;height:200px;overflow-y:auto;color:#fef3c7;line-height:1.7;box-shadow:inset 0 0 40px rgba(120,53,15,.3)">
       <span style="color:#6b7280">Waiting for activity…</span>
     </div>
   </div>
@@ -3520,28 +3549,27 @@ async function loadWorkers() {
     bundleEl.innerHTML = bundles.map(b => {
       const enabled = b.enabled !== false;
       const statusColor = enabled ? '#10b981' : '#64748b';
-      const agents = (b.agents || []).map(a => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:.73em">${escHtml(a)}</span>`).join(' ');
+      const agents = (b.agents || []).map(a => `<span style="background:rgba(212,175,55,.08);padding:2px 7px;border-radius:4px;font-size:.7em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18)">${escHtml(a)}</span>`).join(' ');
       const schedMap = {continuous:'🔄 Continuous', hourly:'⏰ Hourly', every6h:'⏰ Every 6h', daily:'🌙 Daily 2AM', '3x_daily':'☀️ 3× Daily', weekly:'📅 Weekly', manual:'🖱 Manual'};
       const schedLabel = schedMap[b.schedule] || b.schedule || 'manual';
       const lastRun = b.last_run ? `Last: ${b.last_run.split('T')[0]}` : 'Never run';
-      return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px;border-left:4px solid ${statusColor}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      return `<div style="border:1px solid ${enabled ? 'rgba(16,185,129,.2)' : 'var(--border)'};border-radius:var(--radius);padding:16px;margin-bottom:10px;border-left:4px solid ${statusColor};background:var(--surface2);transition:all .2s" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)'" onmouseleave="this.style.borderColor='${enabled ? 'rgba(16,185,129,.2)' : 'var(--border)'}'">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
           <div style="flex:1">
-            <div style="font-weight:700;font-size:.95em;display:flex;align-items:center;gap:6px">
+            <div style="font-weight:700;font-size:.95em;display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
               🏭 ${escHtml(b.name)}
-              <span style="font-size:.72em;background:${statusColor};color:#fff;border-radius:3px;padding:1px 6px">${enabled ? 'enabled' : 'disabled'}</span>
-              <span style="font-size:.72em;color:var(--text-muted)">${schedLabel}</span>
+              <span style="font-size:.7em;background:${enabled ? 'rgba(16,185,129,.15)' : 'rgba(100,116,139,.15)'};color:${statusColor};border-radius:4px;padding:2px 7px;border:1px solid ${enabled ? 'rgba(16,185,129,.25)' : 'rgba(100,116,139,.25)'}">${enabled ? 'enabled' : 'disabled'}</span>
+              <span style="font-size:.7em;color:var(--text-muted);background:var(--surface);padding:2px 7px;border-radius:4px;border:1px solid var(--border)">${schedLabel}</span>
             </div>
-            <div style="font-size:.82em;color:var(--text-secondary);margin:4px 0">${escHtml(b.description || b.task_description || '')}</div>
-            <div style="font-size:.8em;color:var(--text-muted);margin-bottom:6px;line-height:1.5">${escHtml((b.task_description||'').slice(0,120))}${(b.task_description||'').length>120?'…':''}</div>
-            <div style="display:flex;flex-wrap:wrap;gap:3px">${agents}</div>
-            <div style="font-size:.72em;color:var(--text-muted);margin-top:5px">${lastRun}</div>
+            <div style="font-size:.82em;color:var(--text-secondary);margin-bottom:6px;line-height:1.5">${escHtml((b.task_description||'').slice(0,120))}${(b.task_description||'').length>120?'…':''}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">${agents}</div>
+            <div style="font-size:.72em;color:var(--text-muted)">${lastRun}</div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:5px;min-width:90px">
+          <div style="display:flex;flex-direction:column;gap:5px;min-width:88px">
             <button class="btn btn-primary btn-sm" onclick="runBundle('${escHtml(b.id)}')">▶ Run</button>
             <button class="btn btn-ghost btn-sm" onclick="editBundleById('${escHtml(b.id)}')">✏️ Edit</button>
-            <button class="btn btn-ghost btn-sm" onclick="toggleBundle('${escHtml(b.id)}', ${!enabled})">${enabled ? '⏸ Disable' : '▶ Enable'}</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteBundle('${escHtml(b.id)}')">🗑</button>
+            <button class="btn btn-ghost btn-sm" onclick="toggleBundle('${escHtml(b.id)}', ${!enabled})">${enabled ? '⏸ Pause' : '▶ Enable'}</button>
+            <button class="btn btn-ghost btn-sm" onclick="deleteBundle('${escHtml(b.id)}')" style="color:var(--danger);border-color:rgba(239,68,68,.3)">🗑 Delete</button>
           </div>
         </div>
       </div>`;
@@ -4033,18 +4061,19 @@ function renderAgentPicker() {
     const wasAuto = _autoSelectedIds.has(a.id);
     const color = _catColors[a.category] || '#64748b';
     const emoji = _catEmoji[a.category] || '🤖';
-    const dotColor = a.running ? '#10b981' : '#64748b';
+    const isRunning = a.running;
     return `<div id="agentcard-${a.id}"
       onclick="toggleAgent('${escHtml(a.id)}')"
       title="${escHtml(a.description||'')}"
-      style="cursor:pointer;border:2px solid ${selected ? color : 'var(--border)'};border-radius:var(--radius-sm);padding:8px 6px;background:${selected ? 'var(--surface2)' : 'var(--surface)'};transition:all .15s;position:relative;user-select:none">
-      ${wasAuto ? `<span style="position:absolute;top:3px;right:3px;font-size:.6em;background:${color};color:#fff;border-radius:3px;padding:1px 4px">AUTO</span>` : ''}
-      <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+      class="agent-pick-item${selected ? ' selected' : ''}"
+      style="position:relative;user-select:none;flex-direction:column;align-items:flex-start;gap:4px">
+      ${wasAuto ? `<span style="position:absolute;top:4px;right:4px;font-size:.58em;background:rgba(212,175,55,.2);color:var(--gold);border-radius:3px;padding:1px 5px;border:1px solid rgba(212,175,55,.3)">AUTO</span>` : ''}
+      <div style="display:flex;align-items:center;gap:6px;width:100%">
         <span style="font-size:1em">${emoji}</span>
-        <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0"></span>
+        <span class="pick-dot ${isRunning ? 'on' : 'off'}"></span>
+        <span style="font-size:.76em;font-weight:600;color:${selected ? 'var(--gold-light)' : 'var(--text)'};line-height:1.2;flex:1">${escHtml(a.id)}</span>
       </div>
-      <div style="font-size:.78em;font-weight:600;color:${selected ? color : 'var(--text)'};line-height:1.2">${escHtml(a.id)}</div>
-      <div style="font-size:.68em;color:var(--text-muted);margin-top:1px">${escHtml(a.category||'')}</div>
+      <div style="font-size:.65em;color:${color};margin-left:22px;font-weight:500">${escHtml(a.category||'')}</div>
     </div>`;
   }).join('');
   updateAgentSelCount();
@@ -4293,28 +4322,46 @@ function renderSwarmGrid(agents) {
   }
   grid.innerHTML = agents.map(a => {
     const color = _catColors[a.category] || '#64748b';
-    const dotColor = a.running ? '#10b981' : '#ef4444';
-    const runningDot = `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};display:inline-block;margin-left:6px"></span>`;
-    const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:var(--surface);padding:2px 6px;border-radius:3px;font-size:.73em;color:var(--text-secondary)">${escHtml(s)}</span>`).join('');
-    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;border-top:3px solid ${color};display:flex;flex-direction:column">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:600;font-size:.95em">${escHtml(a.id)}</div>
-        ${runningDot}
+    const isRunning = a.running;
+    const dotColor = isRunning ? '#10b981' : '#4b5563';
+    const dotGlow = isRunning ? 'box-shadow:0 0 8px rgba(16,185,129,.7)' : '';
+    const cardGlow = isRunning ? 'box-shadow:0 4px 24px rgba(0,0,0,.5),0 0 0 1px rgba(16,185,129,.1)' : '';
+    const statusLabel = isRunning ? '<span style="font-size:.7em;color:#34d399;font-weight:600;letter-spacing:.02em">ONLINE</span>' : '<span style="font-size:.7em;color:#4b5563;font-weight:600;letter-spacing:.02em">OFFLINE</span>';
+    const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:rgba(212,175,55,.08);padding:2px 7px;border-radius:4px;font-size:.7em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18)">${escHtml(s)}</span>`).join('');
+    const moreSkills = (a.skills||[]).length > 4 ? `<span style="font-size:.7em;color:var(--text-muted);padding:2px 6px">+${(a.skills||[]).length-4} more</span>` : '';
+    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid ${isRunning ? 'rgba(16,185,129,.2)' : 'var(--border)'};border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;transition:all .25s;${cardGlow}" onmouseenter="this.style.transform='translateY(-3px)';this.style.borderColor='rgba(212,175,55,.3)';this.style.boxShadow='0 8px 32px rgba(0,0,0,.5),0 0 0 1px rgba(212,175,55,.08)'" onmouseleave="this.style.transform='';this.style.borderColor='${isRunning ? 'rgba(16,185,129,.2)' : 'var(--border)'}';this.style.boxShadow='${cardGlow}'">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+          <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,${color}22,${color}11);border:1px solid ${color}44;display:flex;align-items:center;justify-content:center;font-size:1.1em;flex-shrink:0">🤖</div>
+          <div style="min-width:0">
+            <div style="font-weight:700;font-size:.88em;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(a.id)}</div>
+            <div style="font-size:.7em;color:${color};font-weight:500;margin-top:1px">${escHtml(a.category||'General')}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+          ${statusLabel}
+          <span style="width:8px;height:8px;border-radius:50%;background:${dotColor};display:inline-block;${dotGlow}"></span>
+        </div>
       </div>
-      <div style="font-size:.8em;color:var(--text-secondary);margin-bottom:10px;line-height:1.4;flex:1">${escHtml(a.description||'No description available.')}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${skills}${(a.skills||[]).length > 4 ? `<span style="font-size:.73em;color:var(--text-muted)">+${(a.skills||[]).length-4} more</span>` : ''}</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:8px;border-top:1px solid rgba(255,255,255,.05)">
-        <span style="font-size:.72em;color:var(--text-muted)">${escHtml(a.category||'General')}</span>
-        <button class="btn btn-ghost btn-sm" onclick="assignTaskToAgent('${escHtml(a.id)}')" style="font-size:.74em;border:1px solid rgba(212,175,55,.3);color:var(--gold);padding:3px 10px">→ Assign Task</button>
-      </div>
+      <div style="font-size:.8em;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;flex:1">${escHtml((a.description||'No description available.').slice(0,100))}${(a.description||'').length>100?'…':''}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">${skills}${moreSkills}</div>
+      <button class="btn btn-ghost btn-sm" onclick="assignTaskToAgent('${escHtml(a.id)}')" style="width:100%;font-size:.78em;border:1px solid rgba(212,175,55,.3);color:var(--gold);padding:6px;border-radius:6px;transition:all .2s" onmouseenter="this.style.background='rgba(212,175,55,.1)';this.style.borderColor='rgba(212,175,55,.6)'" onmouseleave="this.style.background='';this.style.borderColor='rgba(212,175,55,.3)'">⚡ Assign Task</button>
     </div>`;
   }).join('');
 }
 
 function filterSwarm(category, btn) {
   if (btn) {
-    document.querySelectorAll('.swarm-pill').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.swarm-pill').forEach(p => {
+      p.classList.remove('active');
+      p.style.background = '';
+      p.style.color = '';
+      p.style.border = '';
+    });
     btn.classList.add('active');
+    btn.style.background = 'linear-gradient(135deg,var(--primary-dark),var(--primary))';
+    btn.style.color = '#000';
+    btn.style.border = 'none';
   }
   const searchVal = (document.getElementById('swarm-search')?.value || '').toLowerCase();
   let filtered = category === 'all' || !category ? _allAgents : _allAgents.filter(a => a.category === category);
@@ -4591,33 +4638,27 @@ function renderCommands() {
       .filter(cmd => !q || cmd[0].toLowerCase().includes(q) || cmd[1].toLowerCase().includes(q))
       .map(cmd => {
         const [cmdStr, desc, waOnly] = cmd;
-        // WA view: no execute button (WA commands are shortcuts, not runnable here)
-        // Bot view: show Run button only for non-WA-only commands
         let execBtn = '';
         if (!isWA && !waOnly) {
-          execBtn = `<button class="btn btn-ghost btn-sm" onclick="executeCmd('${escHtml(cmdStr)}')" style="padding:2px 8px;font-size:.72em;border:1px solid rgba(212,175,55,.3);color:var(--gold)" title="Execute in Chat">▶ Run</button>`;
+          execBtn = `<button onclick="executeCmd('${escHtml(cmdStr)}')" style="flex-shrink:0;padding:3px 10px;font-size:.72em;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.3);color:var(--gold);border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s" onmouseenter="this.style.background='rgba(212,175,55,.2)'" onmouseleave="this.style.background='rgba(212,175,55,.1)'" title="Execute in Chat">▶ Run</button>`;
         } else if (!isWA && waOnly) {
-          execBtn = `<button class="btn btn-ghost btn-sm" disabled title="WhatsApp only" style="padding:2px 8px;font-size:.72em;opacity:.45;cursor:not-allowed">📱 WA</button>`;
+          execBtn = `<span style="flex-shrink:0;padding:3px 8px;font-size:.7em;opacity:.4;color:var(--text-muted)">📱 WA only</span>`;
         }
-        const waShort = isWA ? `<span style="font-size:.7em;color:var(--text-muted);margin-left:4px">→ send via WhatsApp</span>` : '';
-        return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
-          <code onclick="copyCmd('${escHtml(cmdStr)}')" title="Click to copy" style="cursor:pointer;min-width:180px;background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:.84em;color:var(--gold-light)">${escHtml(cmdStr)}</code>
-          <div style="flex:1">
-            <span style="color:var(--text-secondary);font-size:.85em">${escHtml(desc)}</span>
-            ${waShort}
-          </div>
-          <button class="btn btn-ghost btn-sm" onclick="copyCmd('${escHtml(cmdStr)}')" style="padding:2px 8px;font-size:.72em" title="Copy">📋</button>
+        const waShort = isWA ? `<span style="font-size:.68em;color:var(--text-muted);margin-left:4px">→ send via WhatsApp</span>` : '';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;transition:background .15s;cursor:default" onmouseenter="this.style.background='rgba(212,175,55,.04)'" onmouseleave="this.style.background=''">
+          <code onclick="copyCmd('${escHtml(cmdStr)}')" title="Click to copy" style="cursor:pointer;min-width:160px;max-width:220px;background:rgba(10,15,30,.9);padding:4px 9px;border-radius:5px;font-size:.8em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color .15s" onmouseenter="this.style.borderColor='rgba(212,175,55,.5)'" onmouseleave="this.style.borderColor='rgba(212,175,55,.18)'">${escHtml(cmdStr)}</code>
+          <div style="flex:1;font-size:.83em;color:var(--text-secondary);line-height:1.4">${escHtml(desc)}${waShort}</div>
+          <button onclick="copyCmd('${escHtml(cmdStr)}')" style="flex-shrink:0;padding:3px 8px;font-size:.7em;background:transparent;border:1px solid rgba(148,163,184,.12);color:var(--text-muted);border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)';this.style.color='var(--gold)'" onmouseleave="this.style.borderColor='rgba(148,163,184,.12)';this.style.color='var(--text-muted)'" title="Copy">Copy</button>
           ${execBtn}
         </div>`;
       }).join('');
     if (!rows) return '';
-    return `<div style="margin-bottom:16px">
-      <div style="font-weight:700;font-size:.9em;color:var(--text);margin-bottom:4px">${g.cat}</div>
-      ${rows}
+    return `<div style="margin-bottom:20px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <div style="font-weight:700;font-size:.83em;color:var(--gold-light);padding:10px 14px;background:rgba(212,175,55,.06);border-bottom:1px solid rgba(212,175,55,.12);letter-spacing:.02em">${g.cat}</div>
+      <div style="padding:6px 6px">${rows}</div>
     </div>`;
   }).join('');
 }
-
 function copyCmd(cmd) {
   navigator.clipboard.writeText(cmd).then(() => toast(`Copied: ${cmd}`, 'info')).catch(() => {});
 }
@@ -4724,31 +4765,31 @@ async function loadTemplates() {
     return;
   }
   const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)'};
+  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(99,102,241,.3)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)'};
   el.innerHTML = templates.map(t => {
-    const col = catColors[t.category] || 'rgba(99,102,241,.12)';
-    const agents = (t.agents||[]).map(a => `<span style="background:var(--surface);padding:1px 6px;border-radius:3px;font-size:.72em;border:1px solid var(--border)">${escHtml(a)}</span>`).join(' ');
+    const col = catColors[t.category] || 'rgba(212,175,55,.1)';
+    const bdr = catBorderColors[t.category] || 'rgba(212,175,55,.2)';
+    const agents = (t.agents||[]).map(a => `<span style="background:rgba(212,175,55,.08);padding:2px 8px;border-radius:4px;font-size:.72em;border:1px solid rgba(212,175,55,.2);color:var(--gold-light)">${escHtml(a)}</span>`).join(' ');
     const expected = t.expected_results || {};
     const roi = expected.estimated_monthly_revenue || expected.estimated_monthly_savings || expected.estimated_monthly_value || '';
     const steps = (t.setup_steps||[]).map(s => `<li style="margin-bottom:4px">${escHtml(s)}</li>`).join('');
-    return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:18px;background:var(--surface2)">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-        <span style="font-size:1.8em">${escHtml(t.icon||'📋')}</span>
-        <div>
-          <div style="font-weight:700;font-size:.95em">${escHtml(t.name)}</div>
-          <span style="font-size:.73em;background:${col};padding:2px 8px;border-radius:4px;color:var(--text-secondary)">${escHtml(t.category)}</span>
+    return `<div style="border:1px solid ${bdr};border-radius:var(--radius);padding:20px;background:linear-gradient(135deg,var(--surface2) 0%,rgba(12,18,36,.98) 100%);display:flex;flex-direction:column;gap:14px;transition:all .25s;position:relative;overflow:hidden" onmouseenter="this.style.transform='translateY(-3px)';this.style.borderColor='rgba(212,175,55,.5)';this.style.boxShadow='0 12px 40px rgba(0,0,0,.6),0 0 0 1px rgba(212,175,55,.1)'" onmouseleave="this.style.transform='';this.style.borderColor='${bdr}';this.style.boxShadow=''">
+      <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,${bdr},transparent);pointer-events:none"></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:52px;height:52px;border-radius:14px;background:${col};border:1px solid ${bdr};display:flex;align-items:center;justify-content:center;font-size:1.8em;flex-shrink:0">${escHtml(t.icon||'📋')}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:1em;color:var(--text);margin-bottom:3px">${escHtml(t.name)}</div>
+          <span style="font-size:.73em;background:${col};padding:2px 9px;border-radius:20px;color:var(--text-secondary);border:1px solid ${bdr}">${escHtml(t.category)}</span>
         </div>
-        ${roi ? `<span style="margin-left:auto;font-size:.78em;color:var(--success);font-weight:600;background:rgba(16,185,129,.1);padding:3px 8px;border-radius:6px">${escHtml(roi)}</span>` : ''}
+        ${roi ? `<div style="text-align:right;flex-shrink:0"><div style="font-size:.68em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Expected</div><div style="font-size:.88em;color:var(--success);font-weight:700;background:rgba(16,185,129,.1);padding:4px 10px;border-radius:8px;border:1px solid rgba(16,185,129,.2)">${escHtml(roi)}</div></div>` : ''}
       </div>
-      <p style="font-size:.83em;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${escHtml(t.description)}</p>
-      <div style="margin-bottom:10px">
-        <div style="font-size:.73em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Agents</div>
-        <div style="display:flex;flex-wrap:wrap;gap:3px">${agents}</div>
+      <p style="font-size:.83em;color:var(--text-secondary);line-height:1.6;margin:0">${escHtml(t.description)}</p>
+      <div>
+        <div style="font-size:.7em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Agents Deployed</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">${agents}</div>
       </div>
-      <details style="margin-bottom:10px">
-        <summary style="cursor:pointer;font-size:.8em;color:var(--accent);font-weight:600">📋 Setup Steps</summary>
-        <ol style="font-size:.8em;color:var(--text-muted);margin:8px 0 0 16px;line-height:1.6">${steps}</ol>
-      </details>
-      <button class="btn btn-success" style="width:100%" onclick="deployTemplate('${jsEsc(t.id)}','${jsEsc(t.name)}')">🚀 Deploy Template</button>
+      ${steps ? `<details style="font-size:.8em"><summary style="cursor:pointer;color:var(--gold);font-weight:600;list-style:none;display:flex;align-items:center;gap:5px"><span>▶</span> Setup Steps</summary><ol style="color:var(--text-muted);margin:8px 0 0 16px;line-height:1.7;padding:0">${steps}</ol></details>` : ''}
+      <button onclick="deployTemplate('${jsEsc(t.id)}','${jsEsc(t.name)}')" style="width:100%;padding:12px;background:linear-gradient(135deg,var(--primary-dark),var(--primary));border:none;border-radius:9px;color:#000;font-weight:700;font-size:.88em;cursor:pointer;transition:all .2s;letter-spacing:.02em;font-family:inherit" onmouseenter="this.style.filter='brightness(1.1)';this.style.boxShadow='0 6px 24px rgba(212,175,55,.5)'" onmouseleave="this.style.filter='';this.style.boxShadow=''">🚀 Deploy Template</button>
     </div>`;
   }).join('');
 }
@@ -5528,9 +5569,12 @@ let _blAutoRefreshTimer = null;
 function _blSyncUI(running, goal) {
   // status dot + label (in BLACKLIGHT tab header)
   const dot = document.getElementById('bl-status-dot');
-  if (dot) dot.style.background = running ? '#a855f7' : '#6b7280';
+  if (dot) {
+    dot.style.background = running ? '#a855f7' : '#6b7280';
+    dot.style.boxShadow = running ? '0 0 12px rgba(168,85,247,.8),0 0 24px rgba(168,85,247,.4)' : 'none';
+  }
   const lbl = document.getElementById('bl-status-label');
-  if (lbl) lbl.textContent = running ? '⚡ Running' : 'Idle';
+  if (lbl) { lbl.textContent = running ? '⚡ RUNNING' : 'IDLE'; lbl.style.color = running ? '#c084fc' : '#a78bfa'; }
 
   // tab toggle
   const tabToggle = document.getElementById('bl-toggle');
@@ -5672,7 +5716,13 @@ async function afRefresh() {
     // Highlight active mode button
     ['GENERAL','MONEY','AUTO'].forEach(m => {
       const btn = document.getElementById('af-mode-'+m.toLowerCase());
-      if (btn) btn.style.background = (s.mode===m) ? '#d97706' : '';
+      if (btn) {
+        if (s.mode === m) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      }
     });
     // Auto-approve toggle
     const aa = document.getElementById('af-auto-approve');
