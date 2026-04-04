@@ -35,6 +35,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    import fcntl as _fcntl
+    _FCNTL_AVAILABLE = True
+except ImportError:
+    _FCNTL_AVAILABLE = False  # Windows / environments without fcntl
+
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_FILE = AI_HOME / "state" / "task-orchestrator.state.json"
 TASK_PLANS_FILE = AI_HOME / "config" / "task_plans.json"
@@ -49,6 +55,8 @@ PLAN_TIMEOUT_SECS = int(os.environ.get("TASK_ORCHESTRATOR_TIMEOUT", "600"))
 MAX_PLANS_HISTORY = int(os.environ.get("TASK_ORCHESTRATOR_MAX_HISTORY", "20"))
 # Enable peer-review validation between agents (default: on)
 PEER_REVIEW_ENABLED = os.environ.get("TASK_ORCHESTRATOR_PEER_REVIEW", "true").lower() == "true"
+# Maximum characters of a subtask result shown in a ticket comment
+TICKET_COMMENT_MAX_LENGTH = 500
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -83,6 +91,75 @@ except ImportError:
     _FEEDBACK_AVAILABLE = False
     def _record_outcome(*args, **kwargs):  # type: ignore
         pass
+
+# ── Budget tracker (optional) ─────────────────────────────────────────────────
+
+_budget_path = AI_HOME / "agents" / "budget-tracker"
+if str(_budget_path) not in sys.path:
+    sys.path.insert(0, str(_budget_path))
+
+try:
+    from budget_tracker import (  # type: ignore
+        record_usage as _bt_record_usage,
+        is_budget_exceeded as _bt_is_exceeded,
+    )
+    _BUDGET_AVAILABLE = True
+except ImportError:
+    _BUDGET_AVAILABLE = False
+    def _bt_record_usage(*args, **kwargs):  # type: ignore
+        return {"status": "ok"}
+    def _bt_is_exceeded(*args, **kwargs) -> bool:  # type: ignore
+        return False
+
+# ── Goal alignment (optional) ────────────────────────────────────────────────
+
+_goal_path = AI_HOME / "agents" / "goal-alignment"
+if str(_goal_path) not in sys.path:
+    sys.path.insert(0, str(_goal_path))
+
+try:
+    from goal_alignment import build_goal_preamble as _goal_preamble  # type: ignore
+    _GOAL_AVAILABLE = True
+except ImportError:
+    _GOAL_AVAILABLE = False
+    def _goal_preamble(*args, **kwargs) -> str:  # type: ignore
+        return ""
+
+# ── Ticket system (optional) ─────────────────────────────────────────────────
+
+_ticket_path = AI_HOME / "agents" / "ticket-system"
+if str(_ticket_path) not in sys.path:
+    sys.path.insert(0, str(_ticket_path))
+
+try:
+    from ticket_system import (  # type: ignore
+        create_ticket as _ts_create,
+        update_ticket as _ts_update,
+        add_comment as _ts_comment,
+    )
+    _TICKET_AVAILABLE = True
+except ImportError:
+    _TICKET_AVAILABLE = False
+    def _ts_create(*args, **kwargs) -> dict:  # type: ignore
+        return {}
+    def _ts_update(*args, **kwargs) -> dict:  # type: ignore
+        return {}
+    def _ts_comment(*args, **kwargs) -> dict:  # type: ignore
+        return {}
+
+# ── Governance (optional) ────────────────────────────────────────────────────
+
+_gov_path = AI_HOME / "agents" / "governance"
+if str(_gov_path) not in sys.path:
+    sys.path.insert(0, str(_gov_path))
+
+try:
+    from governance import is_agent_allowed as _gov_is_allowed  # type: ignore
+    _GOV_AVAILABLE = True
+except ImportError:
+    _GOV_AVAILABLE = False
+    def _gov_is_allowed(*args, **kwargs) -> bool:  # type: ignore
+        return True
 
 
 def now_iso() -> str:
@@ -162,9 +239,42 @@ def update_plan(plans: list, plan_id: str, updates: dict) -> None:
 # ── Per-Agent Task Queues ─────────────────────────────────────────────────────
 
 def dispatch_to_agent(agent_id: str, subtask: dict) -> None:
-    """Write a subtask to the agent's queue file."""
+    """Write a subtask to the agent's queue file using atomic locking.
+
+    File-based locking prevents duplicate task checkout when multiple
+    thread-pool workers dispatch to the same agent concurrently.
+    Uses a blocking exclusive lock (LOCK_EX without LOCK_NB) so concurrent
+    callers wait rather than fall back to an unprotected write.
+
+    The queue file is explicitly flushed and synced to disk before the lock
+    is released, preventing readers from observing partial writes.
+    Lock files are reused (not deleted) to avoid accumulation; their sole
+    purpose is to serve as a lock target for fcntl, so content is irrelevant.
+    """
     AGENT_TASKS_DIR.mkdir(parents=True, exist_ok=True)
     queue_file = AGENT_TASKS_DIR / f"{agent_id}.queue.jsonl"
+    lock_file = AGENT_TASKS_DIR / f"{agent_id}.queue.lock"
+
+    if _FCNTL_AVAILABLE:
+        try:
+            with open(lock_file, "a") as lf:
+                # Blocking exclusive lock — waits until other writers release.
+                # Released automatically when the context manager exits.
+                _fcntl.flock(lf, _fcntl.LOCK_EX)
+                with open(queue_file, "a") as f:
+                    f.write(json.dumps(subtask) + "\n")
+                    # Flush Python buffer and sync OS buffer to disk before
+                    # releasing the lock, so concurrent readers see complete data.
+                    f.flush()
+                    os.fsync(f.fileno())
+            return
+        except OSError as exc:
+            logger.warning(
+                "task-orchestrator: file lock failed for agent '%s' queue, falling back to unprotected write: %s",
+                agent_id, exc,
+            )
+
+    # Fallback: non-atomic write (fcntl unavailable or lock error)
     with open(queue_file, "a") as f:
         f.write(json.dumps(subtask) + "\n")
 
@@ -361,18 +471,78 @@ def _execute_subtask_inline(st: dict, plan: dict, capabilities: dict) -> dict:
 
     This is called from a thread-pool worker. Returns the subtask dict
     updated with result, status, and completed_at.
+
+    Integrations:
+      - Governance: checks if agent is allowed before executing
+      - Budget: checks and records token usage per agent
+      - Goal alignment: injects company/project goal ancestry into prompt
+      - Ticket system: updates ticket status and appends tool-call trace
     """
     agent_id = st.get("agent_id", "general")
     instructions = st.get("instructions", "")
     title = st.get("title", st["subtask_id"])
     skills = st.get("skills", [])
+    ticket_id: str | None = st.get("ticket_id") or plan.get("ticket_id")
+
+    # ── Governance check ──────────────────────────────────────────────────────
+    if _GOV_AVAILABLE and not _gov_is_allowed(agent_id):
+        logger.warning(
+            "task-orchestrator: agent '%s' is paused/terminated by governance — skipping subtask '%s'",
+            agent_id, title,
+        )
+        st["status"] = "skipped"
+        st["result"] = f"[Skipped: agent '{agent_id}' is paused or terminated by governance board]"
+        st["completed_at"] = now_iso()
+        return st
+
+    # ── Budget check ──────────────────────────────────────────────────────────
+    if _BUDGET_AVAILABLE and _bt_is_exceeded(agent_id):
+        logger.warning(
+            "task-orchestrator: agent '%s' has exceeded its monthly budget — skipping subtask '%s'",
+            agent_id, title,
+        )
+        st["status"] = "skipped"
+        st["result"] = f"[Skipped: agent '{agent_id}' monthly budget exceeded]"
+        st["completed_at"] = now_iso()
+        if ticket_id:
+            try:
+                _ts_comment(
+                    ticket_id,
+                    f"⚠️ Subtask '{title}' skipped: agent '{agent_id}' has exceeded its monthly budget.",
+                    author="budget-tracker",
+                )
+            except Exception:
+                pass
+        return st
+
+    # ── Ticket: mark in-progress ──────────────────────────────────────────────
+    if ticket_id:
+        try:
+            _ts_update(ticket_id, status="in_progress", agent_id=agent_id)
+            _ts_comment(
+                ticket_id,
+                f"▶️ Starting subtask '{title}' assigned to {agent_id}.",
+                author="task-orchestrator",
+                tool_call={"action": "execute_subtask", "agent_id": agent_id, "subtask_id": st["subtask_id"]},
+            )
+        except Exception:
+            pass
 
     # Build a rich system prompt from agent capabilities
     caps = capabilities.get("agents", {}).get(agent_id, {})
     agent_desc = caps.get("description", f"You are a specialist {agent_id} agent.")
     skills_text = ", ".join(skills[:5]) if skills else "general"
 
+    # ── Goal alignment: inject goal ancestry ──────────────────────────────────
+    goal_preamble = ""
+    if _GOAL_AVAILABLE:
+        try:
+            goal_preamble = _goal_preamble(agent_id=agent_id)
+        except Exception:
+            pass
+
     system_prompt = (
+        f"{goal_preamble}"
         f"You are {agent_id}: {agent_desc}\n"
         f"Your active skills for this subtask: {skills_text}\n"
         "Deliver a complete, actionable result. Be specific and thorough."
@@ -393,8 +563,25 @@ def _execute_subtask_inline(st: dict, plan: dict, capabilities: dict) -> dict:
         st["status"] = "error"
         st["result"] = f"[AI call failed: {exc}]"
         st["completed_at"] = now_iso()
+        if ticket_id:
+            try:
+                _ts_comment(ticket_id, f"❌ AI call failed: {exc}", author="task-orchestrator")
+            except Exception:
+                pass
         return st
     answer = res.get("answer", "")
+
+    # ── Budget: record usage ──────────────────────────────────────────────────
+    if _BUDGET_AVAILABLE:
+        try:
+            _bt_record_usage(
+                agent_id=agent_id,
+                model=res.get("model", "unknown"),
+                input_tokens=res.get("input_tokens", 0),
+                output_tokens=res.get("output_tokens", 0),
+            )
+        except Exception:
+            pass
 
     # Optionally run peer review on the result
     review = {"approved": True, "improved": answer, "feedback": ""}
@@ -433,6 +620,26 @@ def _execute_subtask_inline(st: dict, plan: dict, capabilities: dict) -> dict:
         "peer_review": st["peer_review"],
         "completed_at": now_iso(),
     }, indent=2))
+
+    # ── Ticket: append result comment ─────────────────────────────────────────
+    if ticket_id:
+        try:
+            truncated = final_result[:TICKET_COMMENT_MAX_LENGTH]
+            if len(final_result) > TICKET_COMMENT_MAX_LENGTH:
+                truncated += "…"
+            _ts_comment(
+                ticket_id,
+                f"✅ Subtask '{title}' completed by {agent_id}.\n\n{truncated}",
+                author=agent_id,
+                tool_call={
+                    "action": "subtask_result",
+                    "agent_id": agent_id,
+                    "provider": res.get("provider", "?"),
+                    "model": res.get("model", "?"),
+                },
+            )
+        except Exception:
+            pass
 
     logger.info(
         "task-orchestrator: subtask '%s' [%s] completed (provider=%s)",
@@ -754,6 +961,21 @@ def aggregate_results(plan: dict) -> None:
         f"_Subtasks: {len(subtasks)} | Time: {plan.get('created_at', '?')} → {now_iso()}_"
     )
     append_chatlog({"ts": now_iso(), "type": "bot", "bot": "task-orchestrator", "message": message})
+
+    # ── Close ticket ──────────────────────────────────────────────────────────
+    ticket_id = plan.get("ticket_id")
+    if ticket_id and _TICKET_AVAILABLE:
+        try:
+            final_status = "done" if plan.get("status") == "done" else "cancelled"
+            _ts_update(ticket_id, status=final_status, updated_by="task-orchestrator")
+            _ts_comment(
+                ticket_id,
+                f"{status_emoji} Task plan '{plan.get('title', plan['id'])}' finished.\n\n{summary[:1000]}",
+                author="task-orchestrator",
+            )
+        except Exception:
+            pass
+
     logger.info("task-orchestrator: plan '%s' aggregated and posted", plan["id"])
 
 
@@ -781,6 +1003,20 @@ def handle_command(message: str, capabilities: dict, plans: list) -> str | None:
         for st in subtasks:
             st["skills"] = select_skills_for_agent(st["agent_id"], st["instructions"], capabilities)
 
+        # ── Create a ticket for this task ─────────────────────────────────────
+        ticket_id = None
+        if _TICKET_AVAILABLE:
+            try:
+                ticket = _ts_create(
+                    title=original_desc[:100],
+                    description=f"Task submitted to orchestrator. {len(subtasks)} subtasks.",
+                    created_by="user",
+                    task_plan_id=task_id,
+                )
+                ticket_id = ticket.get("ticket_id")
+            except Exception as exc:
+                logger.debug("task-orchestrator: could not create ticket — %s", exc)
+
         plan = {
             "id": task_id,
             "title": original_desc[:100],
@@ -788,7 +1024,13 @@ def handle_command(message: str, capabilities: dict, plans: list) -> str | None:
             "created_at": now_iso(),
             "completed_at": None,
             "subtasks": subtasks,
+            "ticket_id": ticket_id,
         }
+        # Propagate ticket_id to subtasks so they can update it
+        if ticket_id:
+            for st in subtasks:
+                st["ticket_id"] = ticket_id
+
         plans.insert(0, plan)
         # Keep history bounded
         while len(plans) > MAX_PLANS_HISTORY:
@@ -796,8 +1038,9 @@ def handle_command(message: str, capabilities: dict, plans: list) -> str | None:
         save_task_plans(plans)
 
         agent_list = ", ".join(set(st["agent_id"] for st in subtasks))
+        ticket_note = f"\n🎫 Ticket: `{ticket_id}`" if ticket_id else ""
         return (
-            f"🚀 *Task started!* ID: `{task_id}`\n"
+            f"🚀 *Task started!* ID: `{task_id}`{ticket_note}\n"
             f"📋 Decomposed into {len(subtasks)} subtasks\n"
             f"🤖 Agents assigned: {agent_list}\n\n"
             + "\n".join(f"  {i+1}. [{st['agent_id']}] {st.get('title','')}" for i, st in enumerate(subtasks))
