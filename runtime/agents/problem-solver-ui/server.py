@@ -933,6 +933,7 @@ INDEX_HTML = r"""<!doctype html>
     @keyframes countUp{from{opacity:0;transform:scale(.8) translateY(6px)}to{opacity:1;transform:none}}
     @keyframes glowPulse{0%,100%{box-shadow:0 0 20px rgba(212,175,55,.15),0 0 0 rgba(212,175,55,.05)}50%{box-shadow:0 0 40px rgba(212,175,55,.25),0 0 80px rgba(212,175,55,.08)}}
     @keyframes borderGlow{0%,100%{border-color:rgba(212,175,55,.2)}50%{border-color:rgba(212,175,55,.5)}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
     /* ── Header ── */
     header{
@@ -2706,6 +2707,7 @@ INDEX_HTML = r"""<!doctype html>
   @keyframes blLightning{0%,90%,100%{opacity:1;filter:drop-shadow(0 0 8px #a855f7)}5%{opacity:.3;filter:none}10%{opacity:1;filter:drop-shadow(0 0 20px #c084fc)}15%{opacity:.7}20%{opacity:1;filter:drop-shadow(0 0 12px #a855f7)}}
   .bl-stat-card{background:linear-gradient(135deg,rgba(88,28,135,.2),rgba(124,58,237,.1));border:1px solid rgba(124,58,237,.3);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
   .bl-stat-card:hover{border-color:rgba(167,139,250,.5);box-shadow:0 0 20px rgba(124,58,237,.2)}
+  @media(prefers-reduced-motion:reduce){[style*="blLightning"],[style*="animation"]{animation:none!important}}
   </style>
 
   <!-- Control row -->
@@ -2793,6 +2795,7 @@ INDEX_HTML = r"""<!doctype html>
   .af-mode-btn:not(.active):hover{background:rgba(217,119,6,.15);border-color:rgba(217,119,6,.5)}
   .af-stat-card{background:linear-gradient(135deg,rgba(120,53,15,.2),rgba(217,119,6,.08));border:1px solid rgba(217,119,6,.25);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
   .af-stat-card:hover{border-color:rgba(251,191,36,.4);box-shadow:0 0 20px rgba(217,119,6,.15)}
+  @media(prefers-reduced-motion:reduce){.af-mode-btn{transition:none}.af-stat-card{transition:none}}
   </style>
 
   <!-- Mode + controls -->
@@ -4646,7 +4649,7 @@ function renderCommands() {
         }
         const waShort = isWA ? `<span style="font-size:.68em;color:var(--text-muted);margin-left:4px">→ send via WhatsApp</span>` : '';
         return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;transition:background .15s;cursor:default" onmouseenter="this.style.background='rgba(212,175,55,.04)'" onmouseleave="this.style.background=''">
-          <code onclick="copyCmd('${escHtml(cmdStr)}')" title="Click to copy" style="cursor:pointer;min-width:160px;max-width:220px;background:rgba(10,15,30,.9);padding:4px 9px;border-radius:5px;font-size:.8em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color .15s" onmouseenter="this.style.borderColor='rgba(212,175,55,.5)'" onmouseleave="this.style.borderColor='rgba(212,175,55,.18)'">${escHtml(cmdStr)}</code>
+          <code onclick="copyCmd('${escHtml(cmdStr)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();copyCmd('${escHtml(cmdStr)}')}" tabindex="0" role="button" aria-label="Copy command: ${escHtml(cmdStr)}" title="Click to copy" style="cursor:pointer;min-width:160px;max-width:220px;background:rgba(10,15,30,.9);padding:4px 9px;border-radius:5px;font-size:.8em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color .15s" onmouseenter="this.style.borderColor='rgba(212,175,55,.5)'" onmouseleave="this.style.borderColor='rgba(212,175,55,.18)'">${escHtml(cmdStr)}</code>
           <div style="flex:1;font-size:.83em;color:var(--text-secondary);line-height:1.4">${escHtml(desc)}${waShort}</div>
           <button onclick="copyCmd('${escHtml(cmdStr)}')" style="flex-shrink:0;padding:3px 8px;font-size:.7em;background:transparent;border:1px solid rgba(148,163,184,.12);color:var(--text-muted);border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)';this.style.color='var(--gold)'" onmouseleave="this.style.borderColor='rgba(148,163,184,.12)';this.style.color='var(--text-muted)'" title="Copy">Copy</button>
           ${execBtn}
