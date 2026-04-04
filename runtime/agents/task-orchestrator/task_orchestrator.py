@@ -624,9 +624,12 @@ def _execute_subtask_inline(st: dict, plan: dict, capabilities: dict) -> dict:
     # ── Ticket: append result comment ─────────────────────────────────────────
     if ticket_id:
         try:
+            truncated = final_result[:TICKET_COMMENT_MAX_LENGTH]
+            if len(final_result) > TICKET_COMMENT_MAX_LENGTH:
+                truncated += "…"
             _ts_comment(
                 ticket_id,
-                f"✅ Subtask '{title}' completed by {agent_id}.\n\n{final_result[:TICKET_COMMENT_MAX_LENGTH]}{'…' if len(final_result) > TICKET_COMMENT_MAX_LENGTH else ''}",
+                f"✅ Subtask '{title}' completed by {agent_id}.\n\n{truncated}",
                 author=agent_id,
                 tool_call={
                     "action": "subtask_result",
