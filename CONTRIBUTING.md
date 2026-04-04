@@ -18,14 +18,14 @@ Thank you for your interest in contributing! This document explains how to work 
 ```
 runtime/
   bin/ai-employee        # CLI entry point
-  bots/                  # All bot modules
+  agents/                # All agent modules
     <bot-name>/
       <bot_name>.py      # Bot logic
       run.sh             # Start script (must be chmod +x)
       requirements.txt   # Python dependencies
   config/                # Per-bot .env config files
-  start.sh               # Start all bots
-  stop.sh                # Stop all bots
+  start.sh               # Start all agents
+  stop.sh                # Stop all agents
 .env.example             # Template for environment variables
 install.sh               # Full installer (Linux/macOS)
 ```
@@ -49,7 +49,7 @@ install.sh               # Full installer (Linux/macOS)
    ```bash
    npm test
    # or directly:
-   python3 runtime/bots/bot_selftest.py
+   python3 runtime/agents/agent_selftest.py
    ```
 
 3. **Start the system:**
@@ -69,7 +69,7 @@ Follow these steps exactly so the bot integrates cleanly with the rest of the sy
 1. **Create the bot directory:**
 
    ```
-   runtime/bots/<bot-name>/
+   runtime/agents/<bot-name>/
      <bot_name>.py        # Main bot module
      run.sh               # Runner script
      requirements.txt     # Python deps (at minimum: requests>=2.31.0)
@@ -81,7 +81,7 @@ Follow these steps exactly so the bot integrates cleanly with the rest of the sy
    #!/usr/bin/env bash
    set -euo pipefail
    AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-   BOT_HOME="$AI_HOME/bots/<bot-name>"
+   AGENT_HOME="$AI_HOME/agents/<agent-name>"
    if [[ -f "$AI_HOME/.env" ]]; then set -a; source "$AI_HOME/.env"; set +a; fi
    if [[ -f "$AI_HOME/config/<bot-name>.env" ]]; then set -a; source "$AI_HOME/config/<bot-name>.env"; set +a; fi
    python3 "$BOT_HOME/<bot_name>.py"
@@ -90,12 +90,12 @@ Follow these steps exactly so the bot integrates cleanly with the rest of the sy
 3. **Make `run.sh` executable** — this is required:
 
    ```bash
-   chmod +x runtime/bots/<bot-name>/run.sh
+   chmod +x runtime/agents/<bot-name>/run.sh
    ```
 
 4. **Add a config template** at `runtime/config/<bot-name>.env` (even if empty).
 
-5. **Add a selftest check** in `runtime/bots/bot_selftest.py` following the pattern of `check_engineering_assistant()`.
+5. **Add a selftest check** in `runtime/agents/agent_selftest.py` following the pattern of `check_engineering_assistant()`.
 
 6. **Test your bot:**
 
@@ -125,7 +125,7 @@ npm run lint
 npm test
 
 # Full selftest including a live Discord message
-python3 runtime/bots/bot_selftest.py --live
+python3 runtime/agents/agent_selftest.py --live
 ```
 
 The selftest exits with code `0` when all **required** checks pass and `1` when any required check fails — suitable for CI/CD pipelines.

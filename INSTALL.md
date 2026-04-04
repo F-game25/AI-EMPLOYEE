@@ -19,7 +19,7 @@ This installs everything with safe defaults: **local Ollama AI (free & private),
 | Tool | Why | Install command |
 |---|---|---|
 | **curl** | downloads the installer | `sudo apt install curl` |
-| **Python 3.10+** | runs all bots | `sudo apt install python3` |
+| **Python 3.10+** | runs all agents | `sudo apt install python3` |
 | **OpenSSL** | generates security tokens | `sudo apt install openssl` |
 | **Node.js 20+** | recommended for gateway | see https://nodejs.org |
 | **Ollama** | free local AI (no API key) | see https://ollama.com/download |
@@ -92,7 +92,7 @@ Invoke-WebRequest https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/in
 2. Installs **Ollama** (free local AI — no API key needed)
 3. Creates `~/.ai-employee/` with all bot files and configs
 4. Generates a secure `JWT_SECRET_KEY` automatically
-5. Installs Python dependencies for all bots
+5. Installs Python dependencies for all agents
 6. Creates a `ai-employee` command available everywhere
 7. Adds a desktop launcher (Linux/macOS)
 
