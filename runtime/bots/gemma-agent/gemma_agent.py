@@ -38,7 +38,7 @@ import uvicorn
 
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-GEMMA_MODEL = os.environ.get("GEMMA_MODEL", "gemma3")
+GEMMA_MODEL = os.environ.get("GEMMA_MODEL", "gemma4")
 GEMMA_VIA_OLLAMA: bool = os.environ.get("GEMMA_VIA_OLLAMA", "1").strip().lower() not in (
     "0", "false", "no"
 )
