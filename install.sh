@@ -15,6 +15,8 @@ CLAUDE_MODEL="claude-opus-4-6"
 OLLAMA_HOST="http://localhost:11434"
 OLLAMA_MODEL="llama3.2"
 ZERO_CONFIG="${ZERO_CONFIG:-0}"
+AUTO_INSTALL_OPENCLAW="${AUTO_INSTALL_OPENCLAW:-1}"
+AUTO_INSTALL_DOCKER="${AUTO_INSTALL_DOCKER:-0}"
 
 log()   { echo -e "${C}▸${NC} $1"; }
 ok()    { echo -e "${G}✓${NC} $1"; }
@@ -28,7 +30,7 @@ banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
 ║      AI EMPLOYEE - v4.0 INSTALLER  (Linux)           ║
-║  33 Agents • Claude AI • Ollama Local • WhatsApp     ║
+║  35 Agents • Claude AI • Ollama Local • WhatsApp     ║
 ╚══════════════════════════════════════════════════════╝
 EOF
 }
@@ -119,6 +121,66 @@ install_openclaw() {
     fi
 }
 
+# ─── Ollama model catalogue ───────────────────────────────────────────────────
+
+# Associative arrays require bash ≥ 4; we use parallel arrays for portability.
+_OLLAMA_MODEL_NAMES=(
+    "llama3.2"
+    "gemma3"
+    "llama3.1"
+    "mistral"
+    "gemma2"
+    "phi3"
+    "qwen2.5"
+    "deepseek-r1"
+    "codellama"
+)
+_OLLAMA_MODEL_DESCS=(
+    "Meta Llama 3.2 3B  — best all-round, fast          (2 GB RAM)"
+    "Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM) ★ best free model"
+    "Meta Llama 3.1 8B  — smarter, slower               (5 GB RAM)"
+    "Mistral 7B         — great instruction following   (4 GB RAM)"
+    "Google Gemma 2 9B  — strong reasoning              (5 GB RAM)"
+    "Microsoft Phi-3    — tiny but capable, very fast   (2 GB RAM)"
+    "Alibaba Qwen 2.5   — multilingual, 7B              (4 GB RAM)"
+    "DeepSeek R1 7B     — chain-of-thought reasoning    (4 GB RAM)"
+    "CodeLlama 7B       — coding-focused                (4 GB RAM)"
+)
+
+select_ollama_model() {
+    # Print the model menu and return the chosen model name in OLLAMA_MODEL.
+    local tty_in="${1:-/dev/tty}"
+    [[ ! -r "$tty_in" ]] && tty_in="/dev/stdin"
+
+    echo ""
+    echo -e "  ${C}Available local AI models:${NC}"
+    echo ""
+    local i=1
+    for desc in "${_OLLAMA_MODEL_DESCS[@]}"; do
+        if [[ $i -eq 1 ]]; then
+            printf "    ${G}%2d)${NC} %s  ${G}← recommended${NC}\n" "$i" "$desc"
+        else
+            printf "    ${B}%2d)${NC} %s\n" "$i" "$desc"
+        fi
+        (( i++ ))
+    done
+    echo ""
+    ask "Choose a model [1-${#_OLLAMA_MODEL_NAMES[@]}, default: 1]:"
+    local choice
+    read -r choice < "$tty_in"
+    choice="${choice:-1}"
+
+    # Validate range; fall back to 1 if out of range
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] \
+       || (( choice < 1 )) \
+       || (( choice > ${#_OLLAMA_MODEL_NAMES[@]} )); then
+        warn "Invalid choice '$choice'. Using default: ${_OLLAMA_MODEL_NAMES[0]}"
+        choice=1
+    fi
+
+    OLLAMA_MODEL="${_OLLAMA_MODEL_NAMES[$((choice-1))]}"
+}
+
 # ─── Ollama ───────────────────────────────────────────────────────────────────
 
 install_ollama() {
@@ -129,14 +191,25 @@ install_ollama() {
 
     if command -v ollama >/dev/null 2>&1; then
         ok "Ollama already installed"
-        return
+    else
+        log "Installing Ollama..."
+        if curl -fsSL https://ollama.ai/install.sh | sh; then
+            ok "Ollama installed"
+        else
+            warn "Ollama auto-install failed. Install manually: https://ollama.ai/download"
+            return
+        fi
     fi
 
-    log "Installing Ollama..."
-    if curl -fsSL https://ollama.ai/install.sh | sh; then
-        ok "Ollama installed"
-    else
-        warn "Ollama auto-install failed. Install manually: https://ollama.ai/download"
+    # ── Auto-pull the chosen model ─────────────────────────────────────────────
+    if [[ -n "${OLLAMA_MODEL:-}" ]]; then
+        log "Downloading model '${OLLAMA_MODEL}' — this may take a few minutes…"
+        if ollama pull "$OLLAMA_MODEL"; then
+            ok "Model '${OLLAMA_MODEL}' downloaded and ready"
+        else
+            warn "Could not pull '${OLLAMA_MODEL}' automatically."
+            warn "Start Ollama first (ollama serve) then run: ollama pull ${OLLAMA_MODEL}"
+        fi
     fi
 }
 
@@ -168,6 +241,8 @@ wizard() {
         UI_PORT=8787
         WORKERS=5
         AI_EMPLOYEE_MODE="starter"
+        AUTO_INSTALL_OPENCLAW="1"
+        AUTO_INSTALL_DOCKER="0"
         TOKEN=$(openssl rand -hex 32)
         ok "Zero-config defaults set (5 agents, Starter mode, local Ollama)"
         ok "WhatsApp: set placeholder phone — update ~/.ai-employee/config.json to connect"
@@ -202,9 +277,7 @@ wizard() {
     WANT_OLLAMA=$(echo "$WANT_OLLAMA" | tr '[:upper:]' '[:lower:]')
     OLLAMA_MODEL="llama3.2"
     if [[ "$WANT_OLLAMA" == "y" ]]; then
-        ask "Ollama model name [default: llama3.2]:"
-        read -r OLLAMA_MODEL_INPUT < "$tty_in"
-        OLLAMA_MODEL="${OLLAMA_MODEL_INPUT:-llama3.2}"
+        select_ollama_model "$tty_in"
         MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
         ok "Ollama model: $OLLAMA_MODEL (primary AI -- free & private)"
     else
@@ -311,11 +384,11 @@ wizard() {
 
     # 8) Number of workers
     echo ""
-    ask "How many AI agents to enable? (1-20, default 20 = all):"
+    ask "How many AI agents to enable? (1-35, default 35 = all):"
     read -r WORKERS_INPUT < "$tty_in"
-    WORKERS="${WORKERS_INPUT:-20}"
-    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 20"; WORKERS=20; }
-    if (( WORKERS > 20 )); then warn "Maximum is 20; clamping to 20"; WORKERS=20; fi
+    WORKERS="${WORKERS_INPUT:-35}"
+    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 35"; WORKERS=35; }
+    if (( WORKERS > 35 )); then warn "Maximum is 35; clamping to 35"; WORKERS=35; fi
     if (( WORKERS < 1  )); then warn "Minimum is 1; clamping to 1";  WORKERS=1;  fi
     ok "Workers: $WORKERS enabled"
 
@@ -324,7 +397,7 @@ wizard() {
     echo -e "  ${C}Mode options:${NC}"
     echo "    starter  — 3 agents, 5 commands, zero overwhelm (best to start)"
     echo "    business — templates, ROI tracking, scheduling (recommended)"
-    echo "    power    — all 20 agents, 126 skills, full dashboard (advanced)"
+    echo "    power    — all 35 agents, 147 skills, full dashboard (advanced)"
     ask "Which mode? [default: business]:"
     read -r MODE_INPUT < "$tty_in"
     AI_EMPLOYEE_MODE="${MODE_INPUT:-business}"
@@ -332,6 +405,30 @@ wizard() {
       starter|business|power) ok "Mode: $AI_EMPLOYEE_MODE" ;;
       *) warn "Unknown mode '$AI_EMPLOYEE_MODE'; defaulting to business"; AI_EMPLOYEE_MODE="business" ;;
     esac
+
+    # 10) Runtime self-healing preferences
+    echo ""
+    ask "Auto-install OpenClaw at runtime if missing? [Y/n]:"
+    read -r AUTO_OPENCLAW_INPUT < "$tty_in"
+    AUTO_OPENCLAW_INPUT="${AUTO_OPENCLAW_INPUT:-y}"
+    if [[ "$(echo "$AUTO_OPENCLAW_INPUT" | tr '[:upper:]' '[:lower:]')" =~ ^(y|yes)$ ]]; then
+        AUTO_INSTALL_OPENCLAW="1"
+        ok "OpenClaw runtime auto-install: enabled"
+    else
+        AUTO_INSTALL_OPENCLAW="0"
+        info "OpenClaw runtime auto-install: disabled"
+    fi
+
+    ask "Auto-install Docker + sandbox safety setup if missing? [y/N]:"
+    read -r AUTO_DOCKER_INPUT < "$tty_in"
+    AUTO_DOCKER_INPUT="${AUTO_DOCKER_INPUT:-n}"
+    if [[ "$(echo "$AUTO_DOCKER_INPUT" | tr '[:upper:]' '[:lower:]')" =~ ^(y|yes)$ ]]; then
+        AUTO_INSTALL_DOCKER="1"
+        ok "Docker runtime auto-install: enabled"
+    else
+        AUTO_INSTALL_DOCKER="0"
+        info "Docker runtime auto-install: disabled"
+    fi
 
     TOKEN=$(openssl rand -hex 32)
     ok "Wizard complete"
@@ -384,7 +481,7 @@ setup_jwt_secret() {
 setup_directories() {
     step "5/8 — Creating directory structure"
 
-    mkdir -p "$AI_HOME"/{workspace,credentials,downloads,logs,ui,backups,bin,run,bots,config,state,improvements}
+    mkdir -p "$AI_HOME"/{workspace,credentials,downloads,logs,ui,backups,bin,run,agents,config,state,improvements}
 
     for a in orchestrator lead-hunter content-master social-guru intel-agent product-scout \
               email-ninja support-bot data-analyst creative-studio crypto-trader bot-dev web-sales \
@@ -417,96 +514,96 @@ install_runtime() {
         }
 
         dl "bin/ai-employee"
-        dl "bots/problem-solver/run.sh"
-        dl "bots/problem-solver/problem_solver.py"
-        dl "bots/problem-solver-ui/run.sh"
-        dl "bots/problem-solver-ui/server.py"
-        dl "bots/problem-solver-ui/requirements.txt"
-        dl "bots/polymarket-trader/run.sh"
-        dl "bots/polymarket-trader/trader.py"
-        dl "bots/status-reporter/run.sh"
-        dl "bots/status-reporter/status_reporter.py"
-        dl "bots/scheduler-runner/run.sh"
-        dl "bots/scheduler-runner/scheduler.py"
-        dl "bots/discovery/run.sh"
-        dl "bots/discovery/discovery.py"
-        dl "bots/skills-manager/run.sh"
-        dl "bots/skills-manager/skills_manager.py"
-        dl "bots/mirofish-researcher/run.sh"
-        dl "bots/mirofish-researcher/researcher.py"
-        dl "bots/ai-router/ai_router.py"
-        dl "bots/ollama-agent/run.sh"
-        dl "bots/ollama-agent/ollama_agent.py"
-        dl "bots/ollama-agent/requirements.txt"
-        dl "bots/claude-agent/run.sh"
-        dl "bots/claude-agent/claude_agent.py"
-        dl "bots/claude-agent/requirements.txt"
-        dl "bots/web-researcher/run.sh"
-        dl "bots/web-researcher/web_researcher.py"
-        dl "bots/web-researcher/requirements.txt"
-        dl "bots/social-media-manager/run.sh"
-        dl "bots/social-media-manager/social_media_manager.py"
-        dl "bots/social-media-manager/requirements.txt"
-        dl "bots/lead-generator/run.sh"
-        dl "bots/lead-generator/lead_generator.py"
-        dl "bots/lead-generator/requirements.txt"
-        dl "bots/recruiter/run.sh"
-        dl "bots/recruiter/recruiter.py"
-        dl "bots/recruiter/requirements.txt"
-        dl "bots/ecom-agent/run.sh"
-        dl "bots/ecom-agent/ecom_agent.py"
-        dl "bots/ecom-agent/requirements.txt"
-        dl "bots/creator-agency/run.sh"
-        dl "bots/creator-agency/creator_agency.py"
-        dl "bots/creator-agency/requirements.txt"
-        dl "bots/signal-community/run.sh"
-        dl "bots/signal-community/signal_community.py"
-        dl "bots/signal-community/requirements.txt"
-        dl "bots/appointment-setter/run.sh"
-        dl "bots/appointment-setter/appointment_setter.py"
-        dl "bots/appointment-setter/requirements.txt"
-        dl "bots/newsletter-bot/run.sh"
-        dl "bots/newsletter-bot/newsletter_bot.py"
-        dl "bots/newsletter-bot/requirements.txt"
-        dl "bots/chatbot-builder/run.sh"
-        dl "bots/chatbot-builder/chatbot_builder.py"
-        dl "bots/chatbot-builder/requirements.txt"
-        dl "bots/faceless-video/run.sh"
-        dl "bots/faceless-video/faceless_video.py"
-        dl "bots/faceless-video/requirements.txt"
-        dl "bots/print-on-demand/run.sh"
-        dl "bots/print-on-demand/print_on_demand.py"
-        dl "bots/print-on-demand/requirements.txt"
-        dl "bots/course-creator/run.sh"
-        dl "bots/course-creator/course_creator.py"
-        dl "bots/course-creator/requirements.txt"
-        dl "bots/arbitrage-bot/run.sh"
-        dl "bots/arbitrage-bot/arbitrage_bot.py"
-        dl "bots/arbitrage-bot/requirements.txt"
-        dl "bots/task-orchestrator/run.sh"
-        dl "bots/task-orchestrator/task_orchestrator.py"
-        dl "bots/task-orchestrator/requirements.txt"
-        dl "bots/company-builder/run.sh"
-        dl "bots/company-builder/company_builder.py"
-        dl "bots/company-builder/requirements.txt"
-        dl "bots/memecoin-creator/run.sh"
-        dl "bots/memecoin-creator/memecoin_creator.py"
-        dl "bots/memecoin-creator/requirements.txt"
-        dl "bots/hr-manager/run.sh"
-        dl "bots/hr-manager/hr_manager.py"
-        dl "bots/hr-manager/requirements.txt"
-        dl "bots/finance-wizard/run.sh"
-        dl "bots/finance-wizard/finance_wizard.py"
-        dl "bots/finance-wizard/requirements.txt"
-        dl "bots/brand-strategist/run.sh"
-        dl "bots/brand-strategist/brand_strategist.py"
-        dl "bots/brand-strategist/requirements.txt"
-        dl "bots/growth-hacker/run.sh"
-        dl "bots/growth-hacker/growth_hacker.py"
-        dl "bots/growth-hacker/requirements.txt"
-        dl "bots/project-manager/run.sh"
-        dl "bots/project-manager/project_manager.py"
-        dl "bots/project-manager/requirements.txt"
+        dl "agents/problem-solver/run.sh"
+        dl "agents/problem-solver/problem_solver.py"
+        dl "agents/problem-solver-ui/run.sh"
+        dl "agents/problem-solver-ui/server.py"
+        dl "agents/problem-solver-ui/requirements.txt"
+        dl "agents/polymarket-trader/run.sh"
+        dl "agents/polymarket-trader/trader.py"
+        dl "agents/status-reporter/run.sh"
+        dl "agents/status-reporter/status_reporter.py"
+        dl "agents/scheduler-runner/run.sh"
+        dl "agents/scheduler-runner/scheduler.py"
+        dl "agents/discovery/run.sh"
+        dl "agents/discovery/discovery.py"
+        dl "agents/skills-manager/run.sh"
+        dl "agents/skills-manager/skills_manager.py"
+        dl "agents/mirofish-researcher/run.sh"
+        dl "agents/mirofish-researcher/researcher.py"
+        dl "agents/ai-router/ai_router.py"
+        dl "agents/ollama-agent/run.sh"
+        dl "agents/ollama-agent/ollama_agent.py"
+        dl "agents/ollama-agent/requirements.txt"
+        dl "agents/claude-agent/run.sh"
+        dl "agents/claude-agent/claude_agent.py"
+        dl "agents/claude-agent/requirements.txt"
+        dl "agents/web-researcher/run.sh"
+        dl "agents/web-researcher/web_researcher.py"
+        dl "agents/web-researcher/requirements.txt"
+        dl "agents/social-media-manager/run.sh"
+        dl "agents/social-media-manager/social_media_manager.py"
+        dl "agents/social-media-manager/requirements.txt"
+        dl "agents/lead-generator/run.sh"
+        dl "agents/lead-generator/lead_generator.py"
+        dl "agents/lead-generator/requirements.txt"
+        dl "agents/recruiter/run.sh"
+        dl "agents/recruiter/recruiter.py"
+        dl "agents/recruiter/requirements.txt"
+        dl "agents/ecom-agent/run.sh"
+        dl "agents/ecom-agent/ecom_agent.py"
+        dl "agents/ecom-agent/requirements.txt"
+        dl "agents/creator-agency/run.sh"
+        dl "agents/creator-agency/creator_agency.py"
+        dl "agents/creator-agency/requirements.txt"
+        dl "agents/signal-community/run.sh"
+        dl "agents/signal-community/signal_community.py"
+        dl "agents/signal-community/requirements.txt"
+        dl "agents/appointment-setter/run.sh"
+        dl "agents/appointment-setter/appointment_setter.py"
+        dl "agents/appointment-setter/requirements.txt"
+        dl "agents/newsletter-bot/run.sh"
+        dl "agents/newsletter-bot/newsletter_bot.py"
+        dl "agents/newsletter-bot/requirements.txt"
+        dl "agents/chatbot-builder/run.sh"
+        dl "agents/chatbot-builder/chatbot_builder.py"
+        dl "agents/chatbot-builder/requirements.txt"
+        dl "agents/faceless-video/run.sh"
+        dl "agents/faceless-video/faceless_video.py"
+        dl "agents/faceless-video/requirements.txt"
+        dl "agents/print-on-demand/run.sh"
+        dl "agents/print-on-demand/print_on_demand.py"
+        dl "agents/print-on-demand/requirements.txt"
+        dl "agents/course-creator/run.sh"
+        dl "agents/course-creator/course_creator.py"
+        dl "agents/course-creator/requirements.txt"
+        dl "agents/arbitrage-bot/run.sh"
+        dl "agents/arbitrage-bot/arbitrage_bot.py"
+        dl "agents/arbitrage-bot/requirements.txt"
+        dl "agents/task-orchestrator/run.sh"
+        dl "agents/task-orchestrator/task_orchestrator.py"
+        dl "agents/task-orchestrator/requirements.txt"
+        dl "agents/company-builder/run.sh"
+        dl "agents/company-builder/company_builder.py"
+        dl "agents/company-builder/requirements.txt"
+        dl "agents/memecoin-creator/run.sh"
+        dl "agents/memecoin-creator/memecoin_creator.py"
+        dl "agents/memecoin-creator/requirements.txt"
+        dl "agents/hr-manager/run.sh"
+        dl "agents/hr-manager/hr_manager.py"
+        dl "agents/hr-manager/requirements.txt"
+        dl "agents/finance-wizard/run.sh"
+        dl "agents/finance-wizard/finance_wizard.py"
+        dl "agents/finance-wizard/requirements.txt"
+        dl "agents/brand-strategist/run.sh"
+        dl "agents/brand-strategist/brand_strategist.py"
+        dl "agents/brand-strategist/requirements.txt"
+        dl "agents/growth-hacker/run.sh"
+        dl "agents/growth-hacker/growth_hacker.py"
+        dl "agents/growth-hacker/requirements.txt"
+        dl "agents/project-manager/run.sh"
+        dl "agents/project-manager/project_manager.py"
+        dl "agents/project-manager/requirements.txt"
         dl "config/openclaw.template.json"
         dl "config/problem-solver.env"
         dl "config/problem-solver-ui.env"
@@ -544,6 +641,8 @@ install_runtime() {
         dl "config/task_plans.json"
         dl "start.sh"
         dl "stop.sh"
+        dl "agents/auto-updater/run.sh"
+        dl "agents/auto-updater/auto_updater.py"
 
         src="$TMP_RUNTIME"
     fi
@@ -553,15 +652,15 @@ install_runtime() {
     cp -f "$src/bin/ai-employee" "$AI_HOME/bin/ai-employee"
     chmod +x "$AI_HOME/bin/ai-employee"
 
-    # bots/ (overwrite code; never overwrite .env)
-    for bot_dir in "$src/bots"/*/; do
+    # agents/ (overwrite code; never overwrite .env)
+    for bot_dir in "$src/agents"/*/; do
         bot_name="$(basename "$bot_dir")"
-        mkdir -p "$AI_HOME/bots/$bot_name"
+        mkdir -p "$AI_HOME/agents/$bot_name"
         for f in "$bot_dir"*; do
             [[ -f "$f" ]] || continue
             fname="$(basename "$f")"
-            cp -f "$f" "$AI_HOME/bots/$bot_name/$fname"
-            [[ "$fname" == *.sh ]] && chmod +x "$AI_HOME/bots/$bot_name/$fname"
+            cp -f "$f" "$AI_HOME/agents/$bot_name/$fname"
+            [[ "$fname" == *.sh ]] && chmod +x "$AI_HOME/agents/$bot_name/$fname"
         done
     done
 
@@ -581,7 +680,7 @@ install_runtime() {
     done
 
     # Python deps for UI bot
-    local req="$AI_HOME/bots/problem-solver-ui/requirements.txt"
+    local req="$AI_HOME/agents/problem-solver-ui/requirements.txt"
     if [[ -f "$req" ]]; then
         if command -v pip3 >/dev/null 2>&1; then
             pip3 install --user -q -r "$req" 2>/dev/null \
@@ -608,6 +707,24 @@ install_runtime() {
     fi
 
     ok "Runtime files installed"
+
+    # ── Record the current GitHub commit SHA so the auto-updater has a baseline ─
+    mkdir -p "$AI_HOME/state"
+    local _commit_sha=""
+    if command -v curl >/dev/null 2>&1; then
+        _commit_sha=$(curl -sf --max-time 10 \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "User-Agent: ai-employee-installer/4.0" \
+            "https://api.github.com/repos/F-game25/AI-EMPLOYEE/commits/main" \
+            2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('sha',''))" \
+            2>/dev/null || true)
+    fi
+    if [[ -n "${_commit_sha:-}" ]]; then
+        echo "$_commit_sha" > "$AI_HOME/state/installed_commit.txt"
+        ok "Recorded install baseline: ${_commit_sha:0:8}"
+    else
+        warn "Could not record install commit SHA (offline install?) — auto-updater will bootstrap on first run"
+    fi
 }
 
 # ─── Claude AI bot ───────────────────────────────────────────────────────────
@@ -616,10 +733,10 @@ install_claude_bot() {
     log "Configuring Claude AI agent..."
 
     # Bot files (claude_agent.py, run.sh, requirements.txt) are deployed by
-    # install_runtime() from runtime/bots/claude-agent/. This function only
+    # install_runtime() from runtime/agents/claude-agent/. This function only
     # handles config file creation and Python dep installation.
 
-    mkdir -p "$AI_HOME/bots/claude-agent"
+    mkdir -p "$AI_HOME/agents/claude-agent"
 
     if [[ ! -f "$AI_HOME/config/claude-agent.env" ]]; then
       cat > "$AI_HOME/config/claude-agent.env" << 'EOF'
@@ -633,7 +750,7 @@ EOF
     fi
 
     log "Installing Python deps for Claude Agent (best-effort)..."
-    local req="$AI_HOME/bots/claude-agent/requirements.txt"
+    local req="$AI_HOME/agents/claude-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
       pip3 install --user -q -r "$req" 2>/dev/null \
         || warn "pip install failed; run manually: pip3 install --user anthropic fastapi uvicorn"
@@ -651,10 +768,10 @@ install_ollama_bot() {
     log "Configuring Ollama local AI agent..."
 
     # Bot files (ollama_agent.py, run.sh, requirements.txt) are deployed by
-    # install_runtime() from runtime/bots/ollama-agent/. This function only
+    # install_runtime() from runtime/agents/ollama-agent/. This function only
     # handles config file creation and Python dep installation.
 
-    mkdir -p "$AI_HOME/bots/ollama-agent"
+    mkdir -p "$AI_HOME/agents/ollama-agent"
 
     if [[ ! -f "$AI_HOME/config/ollama-agent.env" ]]; then
       cat > "$AI_HOME/config/ollama-agent.env" << 'EOF'
@@ -669,7 +786,7 @@ EOF
     fi
 
     log "Installing Python deps for Ollama Agent (best-effort)..."
-    local req="$AI_HOME/bots/ollama-agent/requirements.txt"
+    local req="$AI_HOME/agents/ollama-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
       pip3 install --user -q -r "$req" 2>/dev/null \
         || warn "pip install failed; run manually: pip3 install --user fastapi uvicorn requests"
@@ -764,6 +881,8 @@ OLLAMA_HOST=$OLLAMA_HOST
 OLLAMA_MODEL=$OLLAMA_MODEL
 CLAUDE_MODEL=$CLAUDE_MODEL
 AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}
+AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}
+AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}
 OPENCLAW_DISABLE_BONJOUR=1
 TZ=Europe/Amsterdam
 ENV
@@ -784,20 +903,48 @@ generate_configs() {
             cp "$template" "$AI_HOME/config.json"
         else
             # Minimal fallback
-            cat > "$AI_HOME/config.json" << 'CFG_END'
+                        cat > "$AI_HOME/config.json" << 'CFG_END'
 {
-  "gateway": {
-    "mode": "local",
-    "bind": "loopback",
-    "port": 18789,
-    "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
-    "controlUi": { "enabled": true, "port": 18789 }
-  },
-  "channels": {
-    "whatsapp": { "dmPolicy": "allowlist", "allowFrom": ["PHONE_PLACEHOLDER"] }
-  },
-  "cron": { "enabled": true },
-  "discovery": { "mdns": { "mode": "off" } }
+    "wizard": {
+        "lastRunCommand": "install",
+        "lastRunMode": "local"
+    },
+    "agents": {
+        "defaults": {
+            "workspace": "AI_HOME_PLACEHOLDER/workspace"
+        }
+    },
+    "tools": {
+        "profile": "coding"
+    },
+    "commands": {
+        "native": "auto",
+        "nativeSkills": "auto",
+        "restart": true,
+        "ownerDisplay": "raw"
+    },
+    "session": {
+        "dmScope": "per-channel-peer"
+    },
+    "gateway": {
+        "port": 18789,
+        "mode": "local",
+        "bind": "loopback",
+        "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
+        "tailscale": { "mode": "off", "resetOnExit": false }
+    },
+    "channels": {
+        "whatsapp": {
+            "dmPolicy": "allowlist",
+            "allowFrom": ["PHONE_PLACEHOLDER"],
+            "groups": { "*": { "requireMention": true } },
+            "mediaMaxMb": 50,
+            "sendReadReceipts": true
+        }
+    },
+    "skills": {
+        "install": { "nodeManager": "npm" }
+    }
 }
 CFG_END
         fi
@@ -818,20 +965,48 @@ CFG_END
             if [[ -f "$template" ]]; then
                 cp "$template" "$AI_HOME/config.json"
             else
-                cat > "$AI_HOME/config.json" << 'CFG_END'
+                                cat > "$AI_HOME/config.json" << 'CFG_END'
 {
-  "gateway": {
-    "mode": "local",
-    "bind": "loopback",
-    "port": 18789,
-    "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
-    "controlUi": { "enabled": true, "port": 18789 }
-  },
-  "channels": {
-    "whatsapp": { "dmPolicy": "allowlist", "allowFrom": ["PHONE_PLACEHOLDER"] }
-  },
-  "cron": { "enabled": true },
-  "discovery": { "mdns": { "mode": "off" } }
+    "wizard": {
+        "lastRunCommand": "install",
+        "lastRunMode": "local"
+    },
+    "agents": {
+        "defaults": {
+            "workspace": "AI_HOME_PLACEHOLDER/workspace"
+        }
+    },
+    "tools": {
+        "profile": "coding"
+    },
+    "commands": {
+        "native": "auto",
+        "nativeSkills": "auto",
+        "restart": true,
+        "ownerDisplay": "raw"
+    },
+    "session": {
+        "dmScope": "per-channel-peer"
+    },
+    "gateway": {
+        "port": 18789,
+        "mode": "local",
+        "bind": "loopback",
+        "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
+        "tailscale": { "mode": "off", "resetOnExit": false }
+    },
+    "channels": {
+        "whatsapp": {
+            "dmPolicy": "allowlist",
+            "allowFrom": ["PHONE_PLACEHOLDER"],
+            "groups": { "*": { "requireMention": true } },
+            "mediaMaxMb": 50,
+            "sendReadReceipts": true
+        }
+    },
+    "skills": {
+        "install": { "nodeManager": "npm" }
+    }
 }
 CFG_END
             fi
@@ -869,6 +1044,8 @@ CFG_END
             [[ -n "${SMTP_PASS:-}" ]]              && echo "SMTP_PASS=$SMTP_PASS"
             [[ -n "${ELEVEN_LABS_KEY:-}" ]]       && echo "ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY"
             echo "AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}"
+            echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}"
+            echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}"
             echo "OPENCLAW_DISABLE_BONJOUR=1"
             echo "DASHBOARD_PORT=${DASHBOARD_PORT:-3000}"
             echo "TZ=Europe/Amsterdam"
@@ -878,6 +1055,28 @@ CFG_END
     else
         ok ".env already exists — not overwritten"
     fi
+
+        # Ensure runtime self-healing flags exist for older installs.
+        grep -q "^AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=" "$AI_HOME/.env" \
+            || echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}" >> "$AI_HOME/.env"
+        grep -q "^AI_EMPLOYEE_AUTO_INSTALL_DOCKER=" "$AI_HOME/.env" \
+            || echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}" >> "$AI_HOME/.env"
+
+    # Keep gateway token in .env aligned with config.json to avoid auth mismatch.
+    local cfg_token
+    cfg_token="$(python3 -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1]);
+try:
+ d=json.loads(p.read_text()); print(d.get("gateway",{}).get("auth",{}).get("token",""))
+except Exception:
+ print("")' "$AI_HOME/config.json" 2>/dev/null)"
+        if [[ -n "${cfg_token:-}" ]]; then
+            if grep -q "^OPENCLAW_GATEWAY_TOKEN=" "$AI_HOME/.env"; then
+                sed -i.bak "s|^OPENCLAW_GATEWAY_TOKEN=.*|OPENCLAW_GATEWAY_TOKEN=$cfg_token|" "$AI_HOME/.env"
+                rm -f "$AI_HOME/.env.bak"
+            else
+                echo "OPENCLAW_GATEWAY_TOKEN=$cfg_token" >> "$AI_HOME/.env"
+            fi
+        fi
 
     # Patch status-reporter.env
     local sr_env="$AI_HOME/config/status-reporter.env"
@@ -1037,29 +1236,111 @@ add_to_path() {
 # ─── Desktop launcher & autostart ────────────────────────────────────────────
 
 create_desktop_launcher() {
+    # ── Write a smart launcher script that starts the bot OR opens the UI ───────
+    # If the bot is already running (UI responds), just open the browser.
+    # If it isn't running, launch start.sh in a new terminal window.
+    local launcher_script="$AI_HOME/bin/ai-employee-launcher"
+    cat > "$launcher_script" << 'LAUNCHER'
+#!/usr/bin/env bash
+# AI Employee Smart Launcher
+# • If the bot is already running  → open the dashboard in the browser
+# • If the bot is NOT running      → start the bot (which opens the browser)
+
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+
+# Load .env so ports are respected
+if [[ -f "$AI_HOME/.env" ]]; then
+    set -a; source "$AI_HOME/.env"; set +a
+fi
+
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+DASHBOARD_URL="http://127.0.0.1:${UI_PORT}"
+
+_open_url() {
+    local url="$1"
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        powershell.exe start "$url" 2>/dev/null || cmd.exe /c start "$url" 2>/dev/null || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" &
+    elif command -v sensible-browser >/dev/null 2>&1; then
+        sensible-browser "$url" &
+    else
+        echo "Open: $url"
+    fi
+}
+
+_bot_running() {
+    curl -sf --max-time 2 "$DASHBOARD_URL" >/dev/null 2>&1
+}
+
+if _bot_running; then
+    echo "AI Employee is running — opening dashboard…"
+    _open_url "$DASHBOARD_URL"
+else
+    echo "Starting AI Employee…"
+    # Try to open a terminal emulator with start.sh
+    if command -v gnome-terminal >/dev/null 2>&1; then
+        gnome-terminal -- bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash"
+    elif command -v xterm >/dev/null 2>&1; then
+        xterm -e bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash" &
+    elif command -v konsole >/dev/null 2>&1; then
+        konsole -e bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash" &
+    elif command -v xfce4-terminal >/dev/null 2>&1; then
+        xfce4-terminal -e "bash -c \"cd \\\"$AI_HOME\\\" && ./start.sh; exec bash\"" &
+    elif command -v tilix >/dev/null 2>&1; then
+        tilix -e "bash -c \"cd \\\"$AI_HOME\\\" && ./start.sh; exec bash\"" &
+    else
+        # Fallback: run in background, open browser after a delay
+        cd "$AI_HOME" && nohup ./start.sh >/dev/null 2>&1 &
+        echo "Bot started in background — opening browser in 8s…"
+        sleep 8 && _open_url "$DASHBOARD_URL"
+    fi
+fi
+LAUNCHER
+    chmod +x "$launcher_script"
+    ok "Smart launcher written: $launcher_script"
+
     # ── Linux: .desktop entry (app menu + Desktop shortcut) ───────────────────
     local app_dir="$HOME/.local/share/applications"
     mkdir -p "$app_dir"
     cat > "$app_dir/ai-employee.desktop" << DESK
 [Desktop Entry]
 Name=AI Employee
-Comment=Start the AI Employee multi-agent system
-Exec=bash -c 'cd $AI_HOME && ./start.sh; exec bash'
+Comment=Start AI Employee or open the dashboard if already running
+Exec=$launcher_script
 Icon=utilities-terminal
-Terminal=true
+Terminal=false
 Type=Application
 Categories=Utility;Network;
 StartupNotify=false
 DESK
     chmod +x "$app_dir/ai-employee.desktop"
     ok "App launcher added — search 'AI Employee' in your app menu"
+    # Refresh the XDG app-menu index so the entry is searchable immediately
+    command -v update-desktop-database >/dev/null 2>&1 && \
+        update-desktop-database "$app_dir" 2>/dev/null || true
 
-    # Copy to Desktop if it exists
-    if [[ -d "$HOME/Desktop" ]]; then
-        cp "$app_dir/ai-employee.desktop" "$HOME/Desktop/ai-employee.desktop"
-        chmod +x "$HOME/Desktop/ai-employee.desktop"
-        ok "Desktop shortcut created: ~/Desktop/ai-employee.desktop (double-click to start)"
+    # ── Place shortcut on the Desktop ────────────────────────────────────────
+    # Prefer the XDG-standard path (handles non-English locales such as
+    # ~/Schreibtisch, ~/Bureau, ~/桌面 …); fall back to ~/Desktop.
+    local xdg_desktop
+    xdg_desktop="$(xdg-user-dir DESKTOP 2>/dev/null)" || xdg_desktop=""
+    [[ -z "$xdg_desktop" || "$xdg_desktop" == "$HOME" ]] && xdg_desktop="$HOME/Desktop"
+
+    # Create the directory if it doesn't exist yet (headless or first-boot)
+    mkdir -p "$xdg_desktop"
+
+    local desk_file="$xdg_desktop/ai-employee.desktop"
+    cp "$app_dir/ai-employee.desktop" "$desk_file"
+    chmod +x "$desk_file"
+
+    # Mark the file as trusted so GNOME doesn't show the "Untrusted launcher"
+    # dialog when the user double-clicks it.
+    if command -v gio >/dev/null 2>&1; then
+        gio set "$desk_file" metadata::trusted true 2>/dev/null || true
     fi
+
+    ok "Desktop shortcut placed: $desk_file  (double-click to start or open UI)"
 
     # ── Systemd user service (optional autostart on login) ─────────────
     if command -v systemctl >/dev/null 2>&1; then
@@ -1105,8 +1386,7 @@ done_message() {
     echo "  Ollama model: $OLLAMA_MODEL  (host: $OLLAMA_HOST)"
     echo "  Token:        ${TOKEN:0:16}...${TOKEN: -8}"
     echo "  Config:       ~/.ai-employee/config.json"
-    echo "  Dashboard:    http://localhost:${DASHBOARD_PORT:-3000}  ← primary control"
-    echo "  Problem UI:   http://127.0.0.1:${UI_PORT:-8787}"
+    echo "  Dashboard:    http://127.0.0.1:${UI_PORT:-8787}  ← primary control"
     echo ""
     echo -e "${Y}Next steps:${NC}"
     echo ""
@@ -1125,14 +1405,33 @@ done_message() {
     echo "     openclaw channels login  (scan QR code)"
     echo "     Use WhatsApp for status checks. Use the dashboard for full control."
     echo ""
-    echo -e "  ${G}▸ No-terminal start (after first-time setup):${NC}"
+    echo -e "  ${G}▸ Desktop launcher (smart — starts bot or opens UI if already running):${NC}"
     if [[ -d "$HOME/Desktop" ]]; then
         echo "    • Double-click  ~/Desktop/ai-employee.desktop  (Linux)"
     fi
     echo "    • Or search 'AI Employee' in your application menu"
+    echo "    • Or run directly: ~/.ai-employee/bin/ai-employee-launcher"
     echo "    • Or enable autostart: systemctl --user enable --now ai-employee"
     echo ""
-    [[ -n "${OLLAMA_MODEL:-}" ]] && echo "  Ollama: run  ollama pull $OLLAMA_MODEL  before starting."
+    [[ "${WANT_OLLAMA:-}" == "y" ]] \
+        && echo -e "  ${G}▸ Local AI '${OLLAMA_MODEL}' downloaded and ready to use.${NC}"
+    echo ""
+
+    # ── Auto-open the dashboard in the default browser ────────────────────────
+    local dashboard_url="http://127.0.0.1:${UI_PORT:-8787}"
+    echo -e "  ${C}▸ Opening dashboard in your browser…${NC}  $dashboard_url"
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        # WSL
+        powershell.exe start "$dashboard_url" 2>/dev/null \
+            || cmd.exe /c start "$dashboard_url" 2>/dev/null \
+            || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$dashboard_url" 2>/dev/null &
+    elif command -v sensible-browser >/dev/null 2>&1; then
+        sensible-browser "$dashboard_url" 2>/dev/null &
+    else
+        echo "    Open manually: $dashboard_url"
+    fi
     echo ""
 }
 

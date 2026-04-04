@@ -3,6 +3,60 @@
 > **Your AI leverage machine for solo founders & small agencies** — one install, one command, and your AI employee starts generating leads, writing sales emails, and automating your ops.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Platform: Linux](https://img.shields.io/badge/Platform-Linux-informational.svg)](#-install--choose-your-platform)
+[![Platform: macOS](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)](#-install--choose-your-platform)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078d4.svg)](#-install--choose-your-platform)
+[![Agents: 35](https://img.shields.io/badge/Agents-35-success.svg)](#-new-niche-specialists--ai-growth-agency)
+[![Skills: 147](https://img.shields.io/badge/Skills-147-orange.svg)](#skills-library-147-skills)
+
+---
+
+## 📑 Table of Contents
+
+- [Who is this for?](#who-is-this-for)
+- [✨ Key Features](#-key-features)
+- [⚡ Quickstart](#-quickstart--your-first-business-result-in-15-minutes)
+- [🎯 Use Cases](#-use-cases)
+- [🗂️ Three Modes](#️-three-modes--start-simple-scale-when-ready)
+- [📋 Goal-Based Templates](#-goal-based-templates)
+- [🏗️ Architecture Overview](#️-architecture-overview)
+- [🖥️ Dashboard](#️-dashboard-primary-control)
+- [📱 WhatsApp Commands](#-whatsapp--quick-commands--notifications)
+- [🔧 CLI Reference](#-cli-reference)
+- [📈 ROI Metrics](#-roi-metrics)
+- [🔒 Guardrails](#-guardrails)
+- [Requirements](#requirements)
+- [🖥️ Install](#️-install--choose-your-platform)
+- [🎮 Discord Bot](#-discord-bot--control-panel--live-notifications)
+- [🔌 Integrations](#-integrations)
+- [🚀 New Niche Specialists](#-new-niche-specialists--ai-growth-agency)
+- [Skills Library](#skills-library-147-skills)
+- [🧪 Safety Self-Test](#-safety-self-test--verify-everything-works)
+- [💻 Complete Terminal Reference](#-complete-terminal-command-reference)
+- [Security](#security)
+- [Troubleshooting](#troubleshooting)
+- [🤝 Contributing](#-contributing)
+- [License](#license)
+
+---
+
+## ✨ Key Features
+
+| Feature | Description |
+|---|---|
+| 🤖 **35 Specialist Agents** | A full team of AI agents — each expert in a specific business domain |
+| 🛠️ **147 Reusable Skills** | Modular skill library you can compose into custom agents |
+| 🖥️ **Web Dashboard** | Full control panel at `http://127.0.0.1:8787` — no terminal needed |
+| 🗂️ **Three Modes** | Start with 3 agents (Starter), grow to 8 (Business), or unleash all 35 (Power) |
+| 📋 **Goal Templates** | One-click business templates: 10 leads in 24h, close €1k deal, automate support |
+| 🧠 **AI Router** | Automatically routes tasks to the best model (GPT-4o, Claude, or local Ollama) |
+| 📊 **ROI Tracking** | Tracks leads generated, deals closed, hours saved, and € value created |
+| 🔒 **Guardrails** | Human-in-the-loop approval queue for high-risk actions (bulk email, purchases) |
+| 📱 **WhatsApp + Discord** | Get notified and send commands from your phone or Discord server |
+| 🆓 **Works Locally** | Fully operational without any paid API — uses Ollama for free local AI |
+| 🔄 **Memory & CRM** | Built-in lead CRM with follow-up tracking and per-lead memory |
+| ⏱️ **Scheduler** | Schedule recurring tasks (daily lead generation, weekly reports, etc.) |
 
 ---
 
@@ -10,7 +64,7 @@
 
 **AI Employee is built for solo founders and small agencies** who want leverage — not complexity.
 
-You run a business. You don't have time to manage 20 agents and 126 skills. You just want results:
+You run a business. You don't have time to manage 35 agents and 147 skills. You just want results:
 - 10 qualified leads today
 - A sales email in your inbox
 - Your customer support running on autopilot
@@ -68,21 +122,201 @@ Your AI employee handles it — routing to the right specialist agents internall
 
 ---
 
+## 🎯 Use Cases
+
+AI Employee is designed for real-world business automation. Here are common scenarios:
+
+### 🏢 Solo Founder / Freelancer
+> *"I need leads but can't afford a sales team."*
+
+```bash
+ai-employee do "find 10 qualified leads for my web design agency in London"
+ai-employee do "write personalised cold emails for each lead"
+ai-employee do "schedule follow-up messages for leads that don't reply in 3 days"
+```
+
+**Result:** Automated lead generation + outreach pipeline running 24/7 — no SDR needed.
+
+---
+
+### 🛍️ E-commerce Store Owner
+> *"I spend hours on content and customer support every day."*
+
+```bash
+ai-employee do "deploy template run-ecommerce-on-autopilot"
+ai-employee do "create 30-day Instagram content calendar for my supplement brand"
+ai-employee do "draft answers for the top 20 FAQs from my customers"
+```
+
+**Result:** Content created in minutes, support FAQs handled automatically, store running on autopilot.
+
+---
+
+### 📊 Digital Marketing Agency
+> *"I need to deliver reports and campaigns faster for more clients."*
+
+```bash
+ai-employee do "analyse competitor SEO for my client in the fitness niche"
+ai-employee do "create Meta ad copy with 3 variants for A/B testing"
+ai-employee do "generate monthly performance report with KPIs"
+```
+
+**Result:** Deliverables produced at 10× speed — handle more clients without more headcount.
+
+---
+
+### 💼 B2B Sales Professional
+> *"I need to hit my quota but prospecting takes all my time."*
+
+```bash
+ai-employee do "hunt 20 qualified SaaS leads in Germany"
+ai-employee do "build a 5-step cold outreach sequence for fintech decision makers"
+ai-employee do "help me handle the objection: it's too expensive"
+```
+
+**Result:** Fully automated prospecting + personalised outreach + objection-handling scripts on demand.
+
+---
+
+### 📱 Content Creator / Coach
+> *"I can't keep up with posting consistently across platforms."*
+
+```bash
+ai-employee do "repurpose this blog post into 5 LinkedIn posts and 3 tweet threads"
+ai-employee do "write a YouTube video script about my coaching framework for online entrepreneurs"
+ai-employee do "create a 30-day LinkedIn growth plan to reach 10k followers"
+```
+
+**Result:** One piece of content becomes a full multi-platform campaign in seconds.
+
+---
+
+## 🏗️ Architecture Overview
+
+AI Employee is a multi-layer system where a single user command fans out across specialised agents:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        User Interfaces                          │
+│   Dashboard (port 8787)  │  CLI (ai-employee do)  │  WhatsApp  │
+│                          │                        │  Discord   │
+└──────────────────────────┬─────────────────────────────────────┘
+                           │
+                    ┌──────▼───────┐
+                    │  Problem     │
+                    │  Solver      │  ← Watchdog + task router
+                    │  (Orchestr.) │
+                    └──────┬───────┘
+                           │
+             ┌─────────────┼─────────────────┐
+             │             │                 │
+      ┌──────▼──────┐ ┌────▼─────┐  ┌───────▼──────┐
+      │  AI Router  │ │ Scheduler│  │  Guardrails  │
+      │ (GPT-4o /   │ │ (cron-   │  │  (approval   │
+      │  Claude /   │ │  based)  │  │   queue)     │
+      │  Ollama)    │ └──────────┘  └──────────────┘
+      └──────┬──────┘
+             │
+   ┌─────────┼─────────────────────────────────┐
+   │         │                                 │
+┌──▼──┐  ┌───▼───┐  ┌───────┐  ┌──────────┐  ┌▼──────────────┐
+│Lead │  │Content│  │Sales  │  │Analytics │  │ 27+ more      │
+│Hunt.│  │Master │  │Closer │  │& Reports │  │ specialist    │
+│Elite│  │       │  │Pro    │  │          │  │ agents...     │
+└──┬──┘  └───┬───┘  └───┬───┘  └────┬─────┘  └───────┬───────┘
+   │         │           │           │                │
+   └─────────┴───────────┴───────────┴────────────────┘
+                         │
+               ┌─────────▼──────────┐
+               │  Shared Services   │
+               │  Memory / CRM      │
+               │  ROI Tracker       │
+               │  Feedback Loop     │
+               └────────────────────┘
+```
+
+**Key components:**
+
+| Component | Role |
+|---|---|
+| **Problem Solver** | Orchestrator — watches all agents, routes tasks, restarts crashed agents |
+| **AI Router** | Picks the best LLM per task type (sales→GPT-4o, analysis→Claude, local→Ollama) |
+| **35 Specialist Agents** | Each expert in one domain; task execution mode: Auto (orchestrator decides), Parallel (all at once), or Single (one agent) |
+| **Skills Library** | 147 reusable building blocks composed into agents |
+| **Memory / CRM** | Per-lead memory and interaction history persisted in JSON |
+| **Guardrails** | Human approval queue for high-risk actions before execution |
+| **Scheduler** | Cron-based task runner for recurring automation |
+
+---
+
 ## 🗂️ Three Modes — Start Simple, Scale When Ready
 
 ```bash
 ai-employee mode starter    # 3 agents, 5 commands — zero overwhelm
 ai-employee mode business   # templates, ROI tracking, scheduling (recommended)
-ai-employee mode power      # all 20 agents, 126 skills, full dashboard
+ai-employee mode power      # all 39 agents, 147+ skills, full dashboard
 ```
 
 | Mode | Agents | What you see | Best for |
 |---|---|---|---|
 | **Starter** | 3 | 5 commands, no dashboard overload | Getting your first results |
 | **Business** | 8 | Templates, ROI, scheduling | Daily business automation |
-| **Power** | 20 | Everything — full dashboard, all skills | Advanced users |
+| **Power** | 39 | Everything — full dashboard, all skills | Advanced users |
 
 Change mode any time: `ai-employee mode business`
+
+---
+
+## 🆕 New Agent Divisions (inspired by [agency-agents](https://github.com/msitarzewski/agency-agents))
+
+Four new specialist divisions have been added, bringing the total to **39 agents**:
+
+### 💻 Engineering Division
+| Agent | Commands | What it does |
+|---|---|---|
+| **Engineering Assistant** | `eng frontend`, `eng backend`, `eng aiml`, `eng review`, `eng devops`, `eng database`, `eng security`, `eng architecture`, `eng refactor`, `eng debug` | Full-stack dev help: React/Vue, FastAPI/Node, AI/ML engineering, code review, Docker/K8s, PostgreSQL, OWASP security, system architecture |
+
+### 🎨 Design Division
+| Agent | Commands | What it does |
+|---|---|---|
+| **UI Designer** | `design system`, `design component`, `design audit`, `design colors`, `design typography`, `design layout`, `design accessibility`, `design darkmode`, `design flows`, `design handoff` | Design systems, WCAG accessibility, component specs, color palettes, dark mode strategy, developer handoff |
+
+### 🧪 Testing Division
+| Agent | Commands | What it does |
+|---|---|---|
+| **QA Tester** | `qa plan`, `qa testcases`, `qa api`, `qa bug`, `qa performance`, `qa security`, `qa accessibility`, `qa coverage`, `qa readiness`, `qa automate` | Test plans, BDD test cases, API testing, load testing, OWASP security tests, production readiness certification |
+
+### 💰 Paid Media Division
+| Agent | Commands | What it does |
+|---|---|---|
+| **Paid Media Specialist** | `ppc build`, `ppc audit`, `ppc budget`, `ppc keywords`, `ppc adcopy`, `ppc audiences`, `ppc tracking`, `ppc report`, `ppc forecast`, `ppc diagnose` | Google Ads/Meta Ads strategy, account architecture, PPC audits, ad copy (RSA), audience targeting, conversion tracking |
+
+### 🤖 Claude Code Integration (`.claude/agents/`)
+
+AI Employee now includes agent prompt files compatible with **[Claude Code](https://docs.anthropic.com/en/docs/claude-code/)**. Copy them to activate in your Claude Code sessions:
+
+```bash
+# Copy agents to your Claude Code directory
+cp -r .claude/agents/* ~/.claude/agents/
+
+# Then activate in Claude Code:
+# "Activate Engineering Assistant and review this code for security issues"
+# "Activate UI Designer and create a design system for my SaaS product"
+# "Activate QA Tester and write test cases for the checkout flow"
+# "Activate PPC Strategist and build a Google Ads campaign structure"
+```
+
+**Available Claude Code agents:**
+- `engineering-frontend-developer.md` — React/Vue/TypeScript, performance, accessibility
+- `engineering-backend-architect.md` — APIs, databases, microservices, cloud
+- `engineering-ai-engineer.md` — ML models, LLM integration, MLOps
+- `engineering-security-engineer.md` — threat modeling, OWASP, secure code review
+- `design-ui-designer.md` — design systems, WCAG, component specs
+- `testing-reality-checker.md` — evidence-based QA certification
+- `product-manager.md` — PRDs, roadmaps, sprint planning, outcome measurement
+- `sales-outbound-strategist.md` — signal-based prospecting, ICP, sequences
+- `paid-media-ppc-strategist.md` — Google Ads, Meta Ads, campaign architecture
+- `marketing-growth-hacker.md` — viral loops, funnel optimization, experiments
 
 ---
 
@@ -98,8 +332,18 @@ Deploy a pre-configured AI team in one click from the **📋 Templates** tab:
 | **Hire Your Best Candidate Faster** | 2 weeks | €4,000–€10,000/hire saved |
 | **10x Your Content Output This Week** | 1 week | €2,000–€6,000/month |
 | **Run Your E-commerce Store on Autopilot** | 3 days | €5,000–€15,000/month saved |
+| **Hunt 20 Qualified Leads in 24h** | 24 hours | €500–€5,000/week pipeline |
+| **Launch Cold Outreach Campaign** | 2 hours | €2,000–€15,000/month |
+| **LinkedIn Growth Blitz (30 Days)** | 30 days | €3,000–€20,000 pipeline |
+| **Close 5 Deals This Week** | 1 week | €5,000–€50,000 |
+| **Launch Paid Ads with 3x ROAS** | 1 day | €5,000–€50,000/month |
+| **Launch a Referral Program** | 3 days | 20% new revenue from referrals |
+| **Build JV Partnership Pipeline** | 1 week | €2,000–€20,000/partner/mo |
+| **Boost Conversion Rate by 50%** | 1 week | €1,000–€30,000/month |
 
 ```bash
+ai-employee do "deploy template hunt-20-leads-24h"
+ai-employee do "deploy template cold-outreach-campaign"
 ai-employee do "deploy template get-10-leads-24h"
 ```
 
@@ -107,7 +351,7 @@ ai-employee do "deploy template get-10-leads-24h"
 
 ## 🖥️ Dashboard (Primary Control)
 
-Open the dashboard at **http://localhost:8787** after starting.
+Open the dashboard at **http://127.0.0.1:8787** after starting.
 
 The dashboard is your primary control center. Use it for full control over tasks, scheduling, ROI tracking, and agent management.
 
@@ -116,9 +360,9 @@ The dashboard is your primary control center. Use it for full control over tasks
 | 📊 Dashboard | Bot status overview, quick actions |
 | 💬 Chat | Send tasks, view chat history |
 | 🚀 Tasks | Build & launch multi-agent tasks |
-| 🐝 Swarm | All agents — status, workload |
+| 🐝 Swarm | All agents — status, workload (filterable by category) |
 | 📅 Scheduler | Create & manage scheduled tasks |
-| 👷 Workers | Start/stop individual bots |
+| 👷 Workers | Start/stop individual agents |
 | 📈 ROI | Tasks done, leads, hours saved, €€ saved |
 | 📋 Templates | Deploy goal-based templates in one click |
 | 🔒 Guardrails | Approval queue, safety logs |
@@ -143,7 +387,7 @@ WhatsApp lets you:
 | Command | What it does |
 |---|---|
 | `status` | Quick status check |
-| `workers` | List running bots |
+| `workers` | List running agents |
 | `help` | Show available commands |
 
 Get notified when tasks complete, leads are generated, or deals close — without leaving your phone.
@@ -158,7 +402,7 @@ For everything else: **use the dashboard**.
 ai-employee do <task>               # Send any task to your AI employee
 ai-employee start                   # Start all services
 ai-employee stop                    # Stop all services
-ai-employee status                  # Show running bots
+ai-employee status                  # Show running agents
 ai-employee logs <bot>              # Tail logs for a specific bot
 ai-employee doctor                  # Health check (✅/❌ per service)
 ai-employee selftest                # Safety self-test (see below)
@@ -244,7 +488,7 @@ ai-employee do "reject <action_id>"
 | **Linux** | Ubuntu 20.04+ / Debian / Mint / Fedora | `main` branch |
 | **macOS** | 12+ (Monterey or newer) | `main` branch |
 | **Windows** | Windows 10/11 (PowerShell 5.1+) | `main` branch |
-| **Python 3** | 3.10+ | for bots and dashboard |
+| **Python 3** | 3.10+ | for agents and dashboard |
 | **curl** | any | for downloading |
 | **OpenSSL** | any | for token generation |
 | **Node.js** | 20+ | recommended (for OpenClaw gateway) |
@@ -336,7 +580,7 @@ Invoke-WebRequest https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/in
 .\install-windows.ps1
 ```
 Or use the one-click batch file: download and run `quick-install-windows.bat`.
-No WSL or Git Bash required — installs Python, Git, Ollama, and all 33 bots natively.
+No WSL or Git Bash required — installs Python, Git, Ollama, and all 35 agents natively.
 
 Everything is installed into **`~/.ai-employee/`** (Linux/macOS) or **`%USERPROFILE%\.ai-employee\`** (Windows).
 
@@ -356,8 +600,8 @@ The step-by-step wizard asks:
 4. Alpha Insider, Tavily, NewsAPI keys (optional)
 5. Telegram / Discord / SMTP (optional)
 6. Enable hourly WhatsApp status updates?
-7. Dashboard port (default: 3000) and UI port (default: 8787)
-8. Number of workers (1–20, default: 20)
+7. Dashboard port (default: 8787)
+8. Number of workers (1–35, default: 35)
 
 ---
 
@@ -381,13 +625,19 @@ ai-employee status
 
 Stop: `./stop.sh` or Ctrl+C in the terminal.
 
-**Desktop launchers** (created by installer):
-| Platform | How to start |
-|---|---|
-| **Linux** | Double-click `~/Desktop/ai-employee.desktop` or search "AI Employee" in app menu |
-| **macOS** | Double-click `~/Desktop/AI-Employee.command` |
-| **Linux autostart** | `systemctl --user enable --now ai-employee` |
-| **macOS autostart** | `launchctl load -w ~/Library/LaunchAgents/com.ai-employee.plist` |
+**Desktop launchers** (created by installer — smart, no terminal needed):
+
+The desktop button is *smart*: it checks whether the bot is already running.
+- **Bot running** → opens the dashboard in your browser instantly
+- **Bot not running** → starts the bot (which opens the browser automatically)
+
+| Platform | Button | How it works |
+|---|---|---|
+| **Linux** | `~/Desktop/ai-employee.desktop` or "AI Employee" in app menu | Smart launcher: open UI or start bot |
+| **macOS** | `~/Desktop/AI-Employee.command` | Smart launcher: open UI or start bot in Terminal |
+| **Windows** | `AI Employee.bat` on Desktop | Smart launcher: open UI or start bot in PowerShell |
+| **Linux autostart** | `systemctl --user enable --now ai-employee` | Auto-starts on login |
+| **macOS autostart** | `launchctl load -w ~/Library/LaunchAgents/com.ai-employee.plist` | Auto-starts on login |
 
 ### 🪟 Windows
 
@@ -540,14 +790,14 @@ DISCORD_COMMAND_PREFIX=!
 #### Step 4 — Start the Discord bot
 
 ```bash
-cd ~/.ai-employee/bots/discord-bot
+cd ~/.ai-employee/agents/discord-bot
 python3 discord_bot.py
 ```
 
 Or start it in the background (it will keep running):
 
 ```bash
-nohup python3 ~/.ai-employee/bots/discord-bot/discord_bot.py \
+nohup python3 ~/.ai-employee/agents/discord-bot/discord_bot.py \
   >> ~/.ai-employee/logs/discord-bot.log 2>&1 &
 echo "Discord bot started (PID $!)"
 ```
@@ -611,7 +861,7 @@ The full dashboard runs at **http://127.0.0.1:8787** and has 9 tabs:
 | 🐝 **Swarm** | All 20 agents: capabilities, status, workload |
 | 📜 **Commands** | Full WhatsApp commands reference — searchable, click to copy |
 | 📅 **Scheduler** | Create/edit/delete scheduled tasks |
-| 👷 **Workers** | Start/stop/toggle individual bots |
+| 👷 **Workers** | Start/stop/toggle individual agents |
 | 💡 **Improvements** | Review and approve/reject skill proposals |
 | 🛠️ **Skills** | Browse and search 126+ business skills |
 
@@ -662,9 +912,71 @@ The **problem-solver watchdog** auto-restarts any enabled bot that crashes.
 
 ---
 
-## Skills Library (100+ Skills)
+## 🚀 New Niche Specialists — AI Growth Agency
 
-AI Employee includes a library of **111 reusable skills** across 11 categories. Skills are the building blocks for creating custom specialised agents.
+8 specialist agents focused on B2B growth, lead generation, and revenue — added on top of the existing 27 general agents.
+
+### Agent overview
+
+| Agent | Command prefix | What it does |
+|---|---|---|
+| **LeadHunterElite** | `leadelite` | Scrapes, qualifies (ICP scoring) and enriches B2B leads; generates outreach scripts |
+| **ColdOutreachAssassin** | `outreach` | Multi-channel sequences (email/LinkedIn/WhatsApp), A/B testing, reply tracking |
+| **SalesCloserPro** | `closer` | Objection handling, negotiation tactics, deal-closing scripts (SPIN / MEDDIC) |
+| **LinkedInGrowthHacker** | `linkedin` | Profile optimisation, viral post creation, connection campaigns |
+| **AdCampaignWizard** | `ads` | Ad copy (Meta/Google/LinkedIn), budget allocation, ROAS prediction, performance analysis |
+| **ReferralRocket** | `referral` | Referral program design, incentive modelling, launch plan |
+| **PartnershipMatchmaker** | `partner` | JV/partner scoring, pitch deck outlines, deal structure templates |
+| **ConversionRateOptimizer** | `cro` | Funnel analysis, A/B test design, quick-win CRO recommendations |
+
+### Usage examples
+
+```bash
+# Via CLI
+ai-employee do "Hunt 15 leads for my SaaS product"
+ai-employee do "Build cold outreach sequence for B2B agencies"
+ai-employee do "Close deal with objection: it's too expensive"
+ai-employee do "Optimize my LinkedIn profile for lead generation"
+ai-employee do "Launch Meta ads for my course with 3x ROAS target"
+ai-employee do "Design referral program for SaaS with €500 LTV"
+ai-employee do "Find JV partners in the marketing niche"
+ai-employee do "Analyze conversion funnel and suggest A/B tests"
+
+# Via direct commands in Chat / WhatsApp
+leadelite hunt Get 20 qualified SaaS leads in Germany
+outreach sequence saas-founders email
+closer objection it's too expensive
+linkedin content thought leadership post about AI tools
+ads roas my online course 30
+referral design my subscription product
+partner find digital marketing agency space
+cro audit landing page 12% conversion rate
+```
+
+### Auto-routing
+
+The problem-solver automatically routes tasks to the right specialist agent:
+
+| Keywords in your task | Routed to |
+|---|---|
+| "leads hunt", "b2b leads", "find leads", "hunt leads" | LeadHunterElite |
+| "cold outreach", "cold sequence", "outreach sequence" | ColdOutreachAssassin |
+| "close deal", "objection", "negotiate", "closing" | SalesCloserPro |
+| "linkedin growth", "linkedin content", "linkedin profile" | LinkedInGrowthHacker |
+| "paid ads", "meta ads", "google ads", "roas", "ppc" | AdCampaignWizard |
+| "referral program", "refer a friend", "k-factor" | ReferralRocket |
+| "partnership", "joint venture", "jv partner" | PartnershipMatchmaker |
+| "conversion rate", "cro", "funnel optimization", "ab test" | ConversionRateOptimizer |
+
+### New skills added (147 total)
+
+21 new reusable skills: `lead_scraping`, `qualification_scoring`, `crm_enrichment`, `outreach_script_generator`, `sequence_builder`, `ab_testing`, `reply_tracker`, `objection_handler`, `negotiation_tactics`, `close_deal`, `linkedin_optimizer`, `viral_content_generator`, `ad_copy_generator`, `budget_allocator`, `performance_analyzer`, `referral_program_design`, `incentive_calculator`, `partner_scoring`, `pitch_deck_generator`, `funnel_analyzer`, `ab_test_design`.
+
+---
+
+## Skills Library (147 Skills)
+
+AI Employee includes a library of **147 reusable skills** across 13 categories. Skills are the building blocks for creating custom specialised agents.
 
 ### Categories & skill counts
 
@@ -674,18 +986,20 @@ AI Employee includes a library of **111 reusable skills** across 11 categories. 
 | Research & Analysis | 12 |
 | Trading & Finance | 12 |
 | Social Media | 10 |
-| Lead Generation & Sales | 10 |
+| Lead Generation & Sales | 19 |
 | Development & Technical | 10 |
 | E-commerce & Product | 10 |
 | Data Analysis | 8 |
 | Customer Support | 8 |
-| Marketing & SEO | 8 |
+| Marketing & SEO | 14 |
 | Automation & Productivity | 8 |
+| Growth & Marketing | 11 |
+| **Total** | **147** |
 
 ### Managing skills via the Dashboard
 
 Open the **🛠️ Skills** tab (http://127.0.0.1:8787):
-- **Browse** all 111 skills with search and category filters
+- **Browse** all 147 skills with search and category filters
 - **Click** skill cards to select them
 - **Create** a new custom agent from the selected skills
 - **View** and delete your custom agents
@@ -801,8 +1115,8 @@ The hourly WhatsApp status report now includes a MiroFish research summary line.
 ├── stop.sh              Stop all services
 ├── bin/
 │   └── ai-employee      Multi-bot CLI runner
-├── bots/                Bot code (overwritten on update)
-│   ├── problem-solver/     Watchdog — keeps other bots alive
+├── agents/              Agent code (overwritten on update)
+│   ├── problem-solver/     Watchdog — keeps other agents alive
 │   ├── problem-solver-ui/  Full dashboard (FastAPI)
 │   ├── polymarket-trader/  Trading bot with inline MiroFish predictor
 │   ├── mirofish-researcher/ MiroFish deep market research agent
@@ -897,7 +1211,7 @@ Should show: `"mode": "local"`
 ### UI not opening
 Start it manually:
 ```bash
-cd ~/.ai-employee/bots/problem-solver-ui
+cd ~/.ai-employee/agents/problem-solver-ui
 python3 server.py
 ```
 Then open: http://127.0.0.1:8787
@@ -916,7 +1230,7 @@ Then open: http://127.0.0.1:8787
 Before going live, run the safety self-test. It checks every component and shows a clear ✅ or ❌ for each:
 
 ```bash
-python3 ~/.ai-employee/bots/bot_selftest.py
+python3 ~/.ai-employee/agents/agent_selftest.py
 ```
 
 Or (after install):
@@ -978,7 +1292,7 @@ ai-employee selftest
 **Send a real Discord test ping** (proves the webhook actually works):
 
 ```bash
-python3 ~/.ai-employee/bots/bot_selftest.py --live
+python3 ~/.ai-employee/agents/agent_selftest.py --live
 ```
 
 ---
@@ -1015,7 +1329,7 @@ cd ~/.ai-employee && ./stop.sh
 # Or use the CLI from any directory
 ai-employee start
 ai-employee stop
-ai-employee status          # Shows which bots are running
+ai-employee status          # Shows which agents are running
 ```
 
 ### Send Tasks
@@ -1048,8 +1362,8 @@ ai-employee logs status-reporter           # Status reporter logs
 ai-employee logs problem-solver-ui         # Dashboard logs
 ai-employee doctor                         # Health check
 ai-employee selftest                       # Safety self-test (✅/❌)
-python3 ~/.ai-employee/bots/bot_selftest.py         # Same — direct
-python3 ~/.ai-employee/bots/bot_selftest.py --live  # + real Discord ping
+python3 ~/.ai-employee/agents/agent_selftest.py         # Same — direct
+python3 ~/.ai-employee/agents/agent_selftest.py --live  # + real Discord ping
 ```
 
 ### ROI & Metrics
@@ -1099,10 +1413,10 @@ followup reset <lead_id>           # Reset follow-up counter for a lead
 
 ```bash
 # Start the Discord bot
-python3 ~/.ai-employee/bots/discord-bot/discord_bot.py
+python3 ~/.ai-employee/agents/discord-bot/discord_bot.py
 
 # Start in background (stays running after you close terminal)
-nohup python3 ~/.ai-employee/bots/discord-bot/discord_bot.py \
+nohup python3 ~/.ai-employee/agents/discord-bot/discord_bot.py \
   >> ~/.ai-employee/logs/discord-bot.log 2>&1 &
 echo "Discord bot PID: $!"
 
@@ -1125,14 +1439,14 @@ openclaw channels login            # Link WhatsApp (scan QR code once)
 ai-employee start <bot>            # Start one bot
 ai-employee stop <bot>             # Stop one bot
 ai-employee logs <bot>             # Tail logs for one bot
-ai-employee start --all            # Start all enabled bots
-ai-employee stop --all             # Stop all bots
+ai-employee start --all            # Start all enabled agents
+ai-employee stop --all             # Stop all agents
 
 # Direct bot start (fallback if CLI unavailable)
-python3 ~/.ai-employee/bots/status-reporter/status_reporter.py
-python3 ~/.ai-employee/bots/follow-up-agent/follow_up_agent.py
-python3 ~/.ai-employee/bots/lead-generator/lead_generator.py
-python3 ~/.ai-employee/bots/discord-bot/discord_bot.py
+python3 ~/.ai-employee/agents/status-reporter/status_reporter.py
+python3 ~/.ai-employee/agents/follow-up-agent/follow_up_agent.py
+python3 ~/.ai-employee/agents/lead-generator/lead_generator.py
+python3 ~/.ai-employee/agents/discord-bot/discord_bot.py
 ```
 
 ### Config & Environment
@@ -1144,7 +1458,7 @@ nano ~/.ai-employee/.env
 # Generate a new JWT secret (security)
 python3 -c "import secrets; print(secrets.token_hex(32))"
 
-# Check what bots are configured
+# Check what agents are configured
 cat ~/.ai-employee/config.json | python3 -m json.tool
 ```
 
@@ -1237,6 +1551,34 @@ cat ~/.ai-employee/logs/sync.log
 ```bash
 crontab -e   # delete the sync line
 ```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Whether you're fixing a bug, adding a new agent skill, or improving documentation — every contribution helps.
+
+### How to contribute
+
+1. **Fork** the repository and create your branch from `main`
+2. **Make your changes** — follow the existing code style and patterns
+3. **Test your changes** locally with `ai-employee selftest`
+4. **Open a Pull Request** with a clear description of what you changed and why
+
+### Ideas for contributions
+
+- 🤖 **New agent skills** — add skills to the 147-skill library (see `runtime/agents/skills/`)
+- 🐛 **Bug fixes** — check the [open issues](https://github.com/F-game25/AI-EMPLOYEE/issues)
+- 📖 **Documentation** — improve guides, add examples, fix typos
+- 🌍 **Translations** — translate the README or UI to other languages
+- 🔌 **Integrations** — add new platform integrations (Slack, Notion, HubSpot, etc.)
+
+### Reporting bugs
+
+Open an [issue](https://github.com/F-game25/AI-EMPLOYEE/issues) and include:
+- Your operating system and Python version (`python3 --version`)
+- The exact command or action that triggered the bug
+- The error output from `ai-employee logs <bot>` or `ai-employee doctor`
 
 ---
 

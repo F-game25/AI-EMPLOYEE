@@ -26,7 +26,7 @@ banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
 ║      AI EMPLOYEE - v4.0 INSTALLER  (macOS)           ║
-║  33 Agents • Claude AI • Ollama Local • WhatsApp     ║
+║  35 Agents • Claude AI • Ollama Local • WhatsApp     ║
 ╚══════════════════════════════════════════════════════╝
 EOF
 }
@@ -133,6 +133,63 @@ install_openclaw() {
     fi
 }
 
+# ─── Ollama model catalogue ───────────────────────────────────────────────────
+
+_OLLAMA_MODEL_NAMES=(
+    "llama3.2"
+    "gemma3"
+    "llama3.1"
+    "mistral"
+    "gemma2"
+    "phi3"
+    "qwen2.5"
+    "deepseek-r1"
+    "codellama"
+)
+_OLLAMA_MODEL_DESCS=(
+    "Meta Llama 3.2 3B  — best all-round, fast          (2 GB RAM)"
+    "Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM) ★ best free model"
+    "Meta Llama 3.1 8B  — smarter, slower               (5 GB RAM)"
+    "Mistral 7B         — great instruction following   (4 GB RAM)"
+    "Google Gemma 2 9B  — strong reasoning              (5 GB RAM)"
+    "Microsoft Phi-3    — tiny but capable, very fast   (2 GB RAM)"
+    "Alibaba Qwen 2.5   — multilingual, 7B              (4 GB RAM)"
+    "DeepSeek R1 7B     — chain-of-thought reasoning    (4 GB RAM)"
+    "CodeLlama 7B       — coding-focused                (4 GB RAM)"
+)
+
+select_ollama_model() {
+    local tty_in="${1:-/dev/tty}"
+    [[ ! -r "$tty_in" ]] && tty_in="/dev/stdin"
+
+    echo ""
+    echo -e "  ${C}Available local AI models:${NC}"
+    echo ""
+    local i=1
+    for desc in "${_OLLAMA_MODEL_DESCS[@]}"; do
+        if [[ $i -eq 1 ]]; then
+            printf "    ${G}%2d)${NC} %s  ${G}← recommended${NC}\n" "$i" "$desc"
+        else
+            printf "    ${B}%2d)${NC} %s\n" "$i" "$desc"
+        fi
+        (( i++ ))
+    done
+    echo ""
+    ask "Choose a model [1-${#_OLLAMA_MODEL_NAMES[@]}, default: 1]:"
+    local choice
+    read -r choice < "$tty_in"
+    choice="${choice:-1}"
+
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] \
+       || (( choice < 1 )) \
+       || (( choice > ${#_OLLAMA_MODEL_NAMES[@]} )); then
+        warn "Invalid choice '$choice'. Using default: ${_OLLAMA_MODEL_NAMES[0]}"
+        choice=1
+    fi
+
+    OLLAMA_MODEL="${_OLLAMA_MODEL_NAMES[$((choice-1))]}"
+}
+
 # ─── Ollama ───────────────────────────────────────────────────────────────────
 
 install_ollama() {
@@ -143,14 +200,25 @@ install_ollama() {
 
     if command -v ollama >/dev/null 2>&1; then
         ok "Ollama already installed"
-        return
+    else
+        log "Installing Ollama..."
+        if curl -fsSL https://ollama.ai/install.sh | sh; then
+            ok "Ollama installed"
+        else
+            warn "Ollama auto-install failed. Install manually: https://ollama.ai/download"
+            return
+        fi
     fi
 
-    log "Installing Ollama..."
-    if curl -fsSL https://ollama.ai/install.sh | sh; then
-        ok "Ollama installed"
-    else
-        warn "Ollama auto-install failed. Install manually: https://ollama.ai/download"
+    # ── Auto-pull the chosen model ─────────────────────────────────────────────
+    if [[ -n "${OLLAMA_MODEL:-}" ]]; then
+        log "Downloading model '${OLLAMA_MODEL}' — this may take a few minutes…"
+        if ollama pull "$OLLAMA_MODEL"; then
+            ok "Model '${OLLAMA_MODEL}' downloaded and ready"
+        else
+            warn "Could not pull '${OLLAMA_MODEL}' automatically."
+            warn "Start Ollama first (ollama serve) then run: ollama pull ${OLLAMA_MODEL}"
+        fi
     fi
 }
 
@@ -186,9 +254,7 @@ wizard() {
     WANT_OLLAMA=$(echo "$WANT_OLLAMA" | tr '[:upper:]' '[:lower:]')
     OLLAMA_MODEL="llama3.2"
     if [[ "$WANT_OLLAMA" == "y" ]]; then
-        ask "Ollama model name [default: llama3.2]:"
-        read -r OLLAMA_MODEL_INPUT < "$tty_in"
-        OLLAMA_MODEL="${OLLAMA_MODEL_INPUT:-llama3.2}"
+        select_ollama_model "$tty_in"
         MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
         ok "Ollama model: $OLLAMA_MODEL (primary AI -- free & private)"
     else
@@ -293,11 +359,11 @@ wizard() {
 
     # 8) Number of workers
     echo ""
-    ask "How many AI agents to enable? (1-20, default 20 = all):"
+    ask "How many AI agents to enable? (1-35, default 35 = all):"
     read -r WORKERS_INPUT < "$tty_in"
-    WORKERS="${WORKERS_INPUT:-20}"
-    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 20"; WORKERS=20; }
-    if (( WORKERS > 20 )); then warn "Maximum is 20; clamping to 20"; WORKERS=20; fi
+    WORKERS="${WORKERS_INPUT:-35}"
+    [[ "$WORKERS" =~ ^[0-9]+$ ]] || { warn "Invalid number; using 35"; WORKERS=35; }
+    if (( WORKERS > 35 )); then warn "Maximum is 35; clamping to 35"; WORKERS=35; fi
     if (( WORKERS < 1  )); then warn "Minimum is 1; clamping to 1";  WORKERS=1;  fi
     ok "Workers: $WORKERS enabled"
 
@@ -310,7 +376,7 @@ wizard() {
 setup_directories() {
     step "5/8 — Creating directory structure"
 
-    mkdir -p "$AI_HOME"/{workspace,credentials,downloads,logs,ui,backups,bin,run,bots,config,state,improvements}
+    mkdir -p "$AI_HOME"/{workspace,credentials,downloads,logs,ui,backups,bin,run,agents,config,state,improvements}
 
     for a in orchestrator lead-hunter content-master social-guru intel-agent product-scout \
               email-ninja support-bot data-analyst creative-studio crypto-trader bot-dev web-sales \
@@ -342,96 +408,96 @@ install_runtime() {
         }
 
         dl "bin/ai-employee"
-        dl "bots/problem-solver/run.sh"
-        dl "bots/problem-solver/problem_solver.py"
-        dl "bots/problem-solver-ui/run.sh"
-        dl "bots/problem-solver-ui/server.py"
-        dl "bots/problem-solver-ui/requirements.txt"
-        dl "bots/polymarket-trader/run.sh"
-        dl "bots/polymarket-trader/trader.py"
-        dl "bots/status-reporter/run.sh"
-        dl "bots/status-reporter/status_reporter.py"
-        dl "bots/scheduler-runner/run.sh"
-        dl "bots/scheduler-runner/scheduler.py"
-        dl "bots/discovery/run.sh"
-        dl "bots/discovery/discovery.py"
-        dl "bots/skills-manager/run.sh"
-        dl "bots/skills-manager/skills_manager.py"
-        dl "bots/mirofish-researcher/run.sh"
-        dl "bots/mirofish-researcher/researcher.py"
-        dl "bots/ai-router/ai_router.py"
-        dl "bots/ollama-agent/run.sh"
-        dl "bots/ollama-agent/ollama_agent.py"
-        dl "bots/ollama-agent/requirements.txt"
-        dl "bots/claude-agent/run.sh"
-        dl "bots/claude-agent/claude_agent.py"
-        dl "bots/claude-agent/requirements.txt"
-        dl "bots/web-researcher/run.sh"
-        dl "bots/web-researcher/web_researcher.py"
-        dl "bots/web-researcher/requirements.txt"
-        dl "bots/social-media-manager/run.sh"
-        dl "bots/social-media-manager/social_media_manager.py"
-        dl "bots/social-media-manager/requirements.txt"
-        dl "bots/lead-generator/run.sh"
-        dl "bots/lead-generator/lead_generator.py"
-        dl "bots/lead-generator/requirements.txt"
-        dl "bots/recruiter/run.sh"
-        dl "bots/recruiter/recruiter.py"
-        dl "bots/recruiter/requirements.txt"
-        dl "bots/ecom-agent/run.sh"
-        dl "bots/ecom-agent/ecom_agent.py"
-        dl "bots/ecom-agent/requirements.txt"
-        dl "bots/creator-agency/run.sh"
-        dl "bots/creator-agency/creator_agency.py"
-        dl "bots/creator-agency/requirements.txt"
-        dl "bots/signal-community/run.sh"
-        dl "bots/signal-community/signal_community.py"
-        dl "bots/signal-community/requirements.txt"
-        dl "bots/appointment-setter/run.sh"
-        dl "bots/appointment-setter/appointment_setter.py"
-        dl "bots/appointment-setter/requirements.txt"
-        dl "bots/newsletter-bot/run.sh"
-        dl "bots/newsletter-bot/newsletter_bot.py"
-        dl "bots/newsletter-bot/requirements.txt"
-        dl "bots/chatbot-builder/run.sh"
-        dl "bots/chatbot-builder/chatbot_builder.py"
-        dl "bots/chatbot-builder/requirements.txt"
-        dl "bots/faceless-video/run.sh"
-        dl "bots/faceless-video/faceless_video.py"
-        dl "bots/faceless-video/requirements.txt"
-        dl "bots/print-on-demand/run.sh"
-        dl "bots/print-on-demand/print_on_demand.py"
-        dl "bots/print-on-demand/requirements.txt"
-        dl "bots/course-creator/run.sh"
-        dl "bots/course-creator/course_creator.py"
-        dl "bots/course-creator/requirements.txt"
-        dl "bots/arbitrage-bot/run.sh"
-        dl "bots/arbitrage-bot/arbitrage_bot.py"
-        dl "bots/arbitrage-bot/requirements.txt"
-        dl "bots/task-orchestrator/run.sh"
-        dl "bots/task-orchestrator/task_orchestrator.py"
-        dl "bots/task-orchestrator/requirements.txt"
-        dl "bots/company-builder/run.sh"
-        dl "bots/company-builder/company_builder.py"
-        dl "bots/company-builder/requirements.txt"
-        dl "bots/memecoin-creator/run.sh"
-        dl "bots/memecoin-creator/memecoin_creator.py"
-        dl "bots/memecoin-creator/requirements.txt"
-        dl "bots/hr-manager/run.sh"
-        dl "bots/hr-manager/hr_manager.py"
-        dl "bots/hr-manager/requirements.txt"
-        dl "bots/finance-wizard/run.sh"
-        dl "bots/finance-wizard/finance_wizard.py"
-        dl "bots/finance-wizard/requirements.txt"
-        dl "bots/brand-strategist/run.sh"
-        dl "bots/brand-strategist/brand_strategist.py"
-        dl "bots/brand-strategist/requirements.txt"
-        dl "bots/growth-hacker/run.sh"
-        dl "bots/growth-hacker/growth_hacker.py"
-        dl "bots/growth-hacker/requirements.txt"
-        dl "bots/project-manager/run.sh"
-        dl "bots/project-manager/project_manager.py"
-        dl "bots/project-manager/requirements.txt"
+        dl "bagents/problem-solver/run.sh"
+        dl "bagents/problem-solver/problem_solver.py"
+        dl "bagents/problem-solver-ui/run.sh"
+        dl "bagents/problem-solver-ui/server.py"
+        dl "bagents/problem-solver-ui/requirements.txt"
+        dl "bagents/polymarket-trader/run.sh"
+        dl "bagents/polymarket-trader/trader.py"
+        dl "bagents/status-reporter/run.sh"
+        dl "bagents/status-reporter/status_reporter.py"
+        dl "bagents/scheduler-runner/run.sh"
+        dl "bagents/scheduler-runner/scheduler.py"
+        dl "bagents/discovery/run.sh"
+        dl "bagents/discovery/discovery.py"
+        dl "bagents/skills-manager/run.sh"
+        dl "bagents/skills-manager/skills_manager.py"
+        dl "bagents/mirofish-researcher/run.sh"
+        dl "bagents/mirofish-researcher/researcher.py"
+        dl "bagents/ai-router/ai_router.py"
+        dl "bagents/ollama-agent/run.sh"
+        dl "bagents/ollama-agent/ollama_agent.py"
+        dl "bagents/ollama-agent/requirements.txt"
+        dl "bagents/claude-agent/run.sh"
+        dl "bagents/claude-agent/claude_agent.py"
+        dl "bagents/claude-agent/requirements.txt"
+        dl "bagents/web-researcher/run.sh"
+        dl "bagents/web-researcher/web_researcher.py"
+        dl "bagents/web-researcher/requirements.txt"
+        dl "bagents/social-media-manager/run.sh"
+        dl "bagents/social-media-manager/social_media_manager.py"
+        dl "bagents/social-media-manager/requirements.txt"
+        dl "bagents/lead-generator/run.sh"
+        dl "bagents/lead-generator/lead_generator.py"
+        dl "bagents/lead-generator/requirements.txt"
+        dl "bagents/recruiter/run.sh"
+        dl "bagents/recruiter/recruiter.py"
+        dl "bagents/recruiter/requirements.txt"
+        dl "bagents/ecom-agent/run.sh"
+        dl "bagents/ecom-agent/ecom_agent.py"
+        dl "bagents/ecom-agent/requirements.txt"
+        dl "bagents/creator-agency/run.sh"
+        dl "bagents/creator-agency/creator_agency.py"
+        dl "bagents/creator-agency/requirements.txt"
+        dl "bagents/signal-community/run.sh"
+        dl "bagents/signal-community/signal_community.py"
+        dl "bagents/signal-community/requirements.txt"
+        dl "bagents/appointment-setter/run.sh"
+        dl "bagents/appointment-setter/appointment_setter.py"
+        dl "bagents/appointment-setter/requirements.txt"
+        dl "bagents/newsletter-bot/run.sh"
+        dl "bagents/newsletter-bot/newsletter_bot.py"
+        dl "bagents/newsletter-bot/requirements.txt"
+        dl "bagents/chatbot-builder/run.sh"
+        dl "bagents/chatbot-builder/chatbot_builder.py"
+        dl "bagents/chatbot-builder/requirements.txt"
+        dl "bagents/faceless-video/run.sh"
+        dl "bagents/faceless-video/faceless_video.py"
+        dl "bagents/faceless-video/requirements.txt"
+        dl "bagents/print-on-demand/run.sh"
+        dl "bagents/print-on-demand/print_on_demand.py"
+        dl "bagents/print-on-demand/requirements.txt"
+        dl "bagents/course-creator/run.sh"
+        dl "bagents/course-creator/course_creator.py"
+        dl "bagents/course-creator/requirements.txt"
+        dl "bagents/arbitrage-bot/run.sh"
+        dl "bagents/arbitrage-bot/arbitrage_bot.py"
+        dl "bagents/arbitrage-bot/requirements.txt"
+        dl "bagents/task-orchestrator/run.sh"
+        dl "bagents/task-orchestrator/task_orchestrator.py"
+        dl "bagents/task-orchestrator/requirements.txt"
+        dl "bagents/company-builder/run.sh"
+        dl "bagents/company-builder/company_builder.py"
+        dl "bagents/company-builder/requirements.txt"
+        dl "bagents/memecoin-creator/run.sh"
+        dl "bagents/memecoin-creator/memecoin_creator.py"
+        dl "bagents/memecoin-creator/requirements.txt"
+        dl "bagents/hr-manager/run.sh"
+        dl "bagents/hr-manager/hr_manager.py"
+        dl "bagents/hr-manager/requirements.txt"
+        dl "bagents/finance-wizard/run.sh"
+        dl "bagents/finance-wizard/finance_wizard.py"
+        dl "bagents/finance-wizard/requirements.txt"
+        dl "bagents/brand-strategist/run.sh"
+        dl "bagents/brand-strategist/brand_strategist.py"
+        dl "bagents/brand-strategist/requirements.txt"
+        dl "bagents/growth-hacker/run.sh"
+        dl "bagents/growth-hacker/growth_hacker.py"
+        dl "bagents/growth-hacker/requirements.txt"
+        dl "bagents/project-manager/run.sh"
+        dl "bagents/project-manager/project_manager.py"
+        dl "bagents/project-manager/requirements.txt"
         dl "config/openclaw.template.json"
         dl "config/problem-solver.env"
         dl "config/problem-solver-ui.env"
@@ -478,15 +544,15 @@ install_runtime() {
     cp -f "$src/bin/ai-employee" "$AI_HOME/bin/ai-employee"
     chmod +x "$AI_HOME/bin/ai-employee"
 
-    # bots/ (overwrite code; never overwrite .env)
-    for bot_dir in "$src/bots"/*/; do
+    # bagents/ (overwrite code; never overwrite .env)
+    for bot_dir in "$src/agents"/*/; do
         bot_name="$(basename "$bot_dir")"
-        mkdir -p "$AI_HOME/bots/$bot_name"
+        mkdir -p "$AI_HOME/bagents/$bot_name"
         for f in "$bot_dir"*; do
             [[ -f "$f" ]] || continue
             fname="$(basename "$f")"
-            cp -f "$f" "$AI_HOME/bots/$bot_name/$fname"
-            [[ "$fname" == *.sh ]] && chmod +x "$AI_HOME/bots/$bot_name/$fname"
+            cp -f "$f" "$AI_HOME/bagents/$bot_name/$fname"
+            [[ "$fname" == *.sh ]] && chmod +x "$AI_HOME/bagents/$bot_name/$fname"
         done
     done
 
@@ -506,7 +572,7 @@ install_runtime() {
     done
 
     # Python deps for UI bot
-    local req="$AI_HOME/bots/problem-solver-ui/requirements.txt"
+    local req="$AI_HOME/bagents/problem-solver-ui/requirements.txt"
     if [[ -f "$req" ]]; then
         if command -v pip3 >/dev/null 2>&1; then
             pip3 install --user -q -r "$req" 2>/dev/null \
@@ -541,10 +607,10 @@ install_claude_bot() {
     log "Configuring Claude AI agent..."
 
     # Bot files (claude_agent.py, run.sh, requirements.txt) are deployed by
-    # install_runtime() from runtime/bots/claude-agent/. This function only
+    # install_runtime() from runtime/bagents/claude-agent/. This function only
     # handles config file creation and Python dep installation.
 
-    mkdir -p "$AI_HOME/bots/claude-agent"
+    mkdir -p "$AI_HOME/bagents/claude-agent"
 
     if [[ ! -f "$AI_HOME/config/claude-agent.env" ]]; then
       cat > "$AI_HOME/config/claude-agent.env" << 'EOF'
@@ -558,7 +624,7 @@ EOF
     fi
 
     log "Installing Python deps for Claude Agent (best-effort)..."
-    local req="$AI_HOME/bots/claude-agent/requirements.txt"
+    local req="$AI_HOME/bagents/claude-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
       pip3 install --user -q -r "$req" 2>/dev/null \
         || warn "pip install failed; run manually: pip3 install --user anthropic fastapi uvicorn"
@@ -576,10 +642,10 @@ install_ollama_bot() {
     log "Configuring Ollama local AI agent..."
 
     # Bot files (ollama_agent.py, run.sh, requirements.txt) are deployed by
-    # install_runtime() from runtime/bots/ollama-agent/. This function only
+    # install_runtime() from runtime/bagents/ollama-agent/. This function only
     # handles config file creation and Python dep installation.
 
-    mkdir -p "$AI_HOME/bots/ollama-agent"
+    mkdir -p "$AI_HOME/bagents/ollama-agent"
 
     if [[ ! -f "$AI_HOME/config/ollama-agent.env" ]]; then
       cat > "$AI_HOME/config/ollama-agent.env" << 'EOF'
@@ -594,7 +660,7 @@ EOF
     fi
 
     log "Installing Python deps for Ollama Agent (best-effort)..."
-    local req="$AI_HOME/bots/ollama-agent/requirements.txt"
+    local req="$AI_HOME/bagents/ollama-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
       pip3 install --user -q -r "$req" 2>/dev/null \
         || warn "pip install failed; run manually: pip3 install --user fastapi uvicorn requests"
@@ -942,16 +1008,55 @@ add_to_path() {
 # ─── Desktop launcher & autostart ────────────────────────────────────────────
 
 create_desktop_launcher() {
-    # ── macOS: .command file on Desktop ───────────────────────────────────────
-    if [[ -d "$HOME/Desktop" ]]; then
-        local cmd_file="$HOME/Desktop/AI-Employee.command"
-        cat > "$cmd_file" << CMD
+    # ── Write a smart launcher script that starts the bot OR opens the UI ───────
+    # If the bot is already running (UI responds), just open the browser.
+    # If it isn't running, open a new Terminal window and run start.sh.
+    local launcher_script="$AI_HOME/bin/ai-employee-launcher"
+    cat > "$launcher_script" << 'LAUNCHER'
 #!/usr/bin/env bash
-cd "$AI_HOME" && ./start.sh
+# AI Employee Smart Launcher (macOS)
+# • If the bot is already running  → open the dashboard in the browser
+# • If the bot is NOT running      → open Terminal and start the bot
+
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+
+# Load .env so ports are respected
+if [[ -f "$AI_HOME/.env" ]]; then
+    set -a; source "$AI_HOME/.env"; set +a
+fi
+
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+DASHBOARD_URL="http://127.0.0.1:${UI_PORT}"
+
+_bot_running() {
+    curl -sf --max-time 2 "$DASHBOARD_URL" >/dev/null 2>&1
+}
+
+if _bot_running; then
+    echo "AI Employee is running — opening dashboard…"
+    open "$DASHBOARD_URL"
+else
+    echo "Starting AI Employee…"
+    # Open a new Terminal window running start.sh
+    osascript -e "tell application \"Terminal\"
+        activate
+        do script \"cd \\\"$AI_HOME\\\" && ./start.sh\"
+    end tell"
+fi
+LAUNCHER
+    chmod +x "$launcher_script"
+    ok "Smart launcher written: $launcher_script"
+
+    # ── macOS: .command file on Desktop (double-click to launch) ──────────────
+    # ~/Desktop always exists on macOS, but create it defensively just in case.
+    mkdir -p "$HOME/Desktop"
+    local cmd_file="$HOME/Desktop/AI-Employee.command"
+    cat > "$cmd_file" << CMD
+#!/usr/bin/env bash
+exec "$AI_HOME/bin/ai-employee-launcher"
 CMD
-        chmod +x "$cmd_file"
-        ok "Desktop launcher created: ~/Desktop/AI-Employee.command (double-click to start)"
-    fi
+    chmod +x "$cmd_file"
+    ok "Desktop launcher placed: ~/Desktop/AI-Employee.command (double-click to start or open UI)"
 
     # ── macOS LaunchAgent (auto-start on login) ────────────────────────────────
     local launch_agents_dir="$HOME/Library/LaunchAgents"
@@ -1009,17 +1114,17 @@ done_message() {
     echo "  Ollama model: $OLLAMA_MODEL  (host: $OLLAMA_HOST)"
     echo "  Token:        ${TOKEN:0:16}...${TOKEN: -8}"
     echo "  Config:       ~/.ai-employee/config.json"
-    echo "  Dashboard:    http://localhost:${DASHBOARD_PORT:-3000}"
-    echo "  Problem UI:   http://127.0.0.1:${UI_PORT:-8787}"
+    echo "  Dashboard:    http://127.0.0.1:${UI_PORT:-8787}  ← primary control"
     echo "  Claude Agent: http://127.0.0.1:8788"
     echo "  Ollama Agent: http://127.0.0.1:8789"
     echo ""
     echo -e "${Y}Next steps:${NC}"
     echo ""
-    echo -e "  ${G}▸ No-terminal start (after first-time setup):${NC}"
+    echo -e "  ${G}▸ Desktop launcher (smart — starts bot or opens UI if already running):${NC}"
     if [[ -d "$HOME/Desktop" ]]; then
         echo "    • Double-click  ~/Desktop/AI-Employee.command  (macOS)"
     fi
+    echo "    • Or run directly: ~/.ai-employee/bin/ai-employee-launcher"
     echo "    • Or enable autostart: launchctl load -w ~/Library/LaunchAgents/com.ai-employee.plist"
     echo ""
     echo "  1. First start (terminal needed once to link WhatsApp):"
@@ -1033,10 +1138,17 @@ done_message() {
     echo "  3. Send 'Hello!' to yourself on WhatsApp"
     echo "     You will receive a welcome message confirming it works"
     echo ""
-    echo "  4. Switch agents via WhatsApp:"
-    echo "     switch to claude-agent   → visit http://127.0.0.1:8788"
-    echo "     switch to ollama-agent   → visit http://127.0.0.1:8789"
-    [[ -n "${OLLAMA_MODEL:-}" ]] && echo "     (run first: ollama pull $OLLAMA_MODEL)"
+    echo "  4. Send any task:"
+    echo "     ai-employee do \"find 10 leads for my business\""
+    echo "     ai-employee do \"write a sales email for my agency\""
+    [[ "${WANT_OLLAMA:-}" == "y" ]] \
+        && echo -e "  ${G}▸ Local AI '${OLLAMA_MODEL}' downloaded and ready to use.${NC}"
+    echo ""
+
+    # ── Auto-open the dashboard in the default browser ────────────────────────
+    local dashboard_url="http://127.0.0.1:${UI_PORT:-8787}"
+    echo -e "  ${C}▸ Opening dashboard in your browser…${NC}  $dashboard_url"
+    open "$dashboard_url" 2>/dev/null || true
     echo ""
 }
 

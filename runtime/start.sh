@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AI Employee — Start script
-# Starts OpenClaw gateway + UI bot first, then all remaining bots, then opens the browser.
+# Starts OpenClaw gateway + UI agent first, then all remaining agents, then opens the browser.
 set -euo pipefail
 
 # ── Re-entrancy guard (Bug 1) ─────────────────────────────────────────────────
@@ -23,6 +23,76 @@ log()  { echo -e "${C}▸${NC} $1"; }
 ok()   { echo -e "${G}✓${NC} $1"; }
 warn() { echo -e "${Y}⚠${NC} $1"; }
 
+_add_to_path_if_dir() {
+  local d="$1"
+  [[ -d "$d" ]] || return 0
+  [[ ":$PATH:" == *":$d:"* ]] || PATH="$d:$PATH"
+}
+
+_bootstrap_runtime_path() {
+  _add_to_path_if_dir "$HOME/.local/bin"
+  _add_to_path_if_dir "$HOME/.openclaw/bin"
+  _add_to_path_if_dir "$HOME/.npm-global/bin"
+  if command -v npm >/dev/null 2>&1; then
+    local npm_prefix npm_bin
+    npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+    npm_bin="${npm_prefix:+$npm_prefix/bin}"
+    [[ -n "$npm_bin" ]] && _add_to_path_if_dir "$npm_bin"
+  fi
+  export PATH
+}
+
+_env_true() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|y|Y|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+find_openclaw_cmd() {
+  if [[ -x "$AI_HOME/bin/openclaw" ]]; then
+    echo "$AI_HOME/bin/openclaw"
+    return 0
+  fi
+  if command -v openclaw >/dev/null 2>&1; then
+    command -v openclaw
+    return 0
+  fi
+  return 1
+}
+
+install_openclaw_if_enabled() {
+  find_openclaw_cmd >/dev/null 2>&1 && return 0
+  if _env_true "${AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW:-0}"; then
+    log "OpenClaw missing, auto-install enabled. Installing..."
+    if curl -fsSL https://openclaw.ai/install.sh | bash; then
+      _bootstrap_runtime_path
+      ok "OpenClaw installed"
+      return 0
+    fi
+    warn "OpenClaw auto-install failed"
+  fi
+  return 1
+}
+
+install_docker_if_enabled() {
+  command -v docker >/dev/null 2>&1 && return 0
+  _env_true "${AI_EMPLOYEE_AUTO_INSTALL_DOCKER:-0}" || return 0
+  log "Docker missing, auto-install enabled. Installing for sandbox safety..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y docker.io || warn "Docker install failed via apt"
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y docker || warn "Docker install failed via dnf"
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm docker || warn "Docker install failed via pacman"
+  else
+    warn "No supported package manager found for Docker auto-install"
+  fi
+  if command -v systemctl >/dev/null 2>&1 && command -v docker >/dev/null 2>&1; then
+    sudo systemctl enable --now docker 2>/dev/null || true
+  fi
+}
+
 # Load env
 if [[ -f "$AI_HOME/.env" ]]; then
   set -a
@@ -33,6 +103,34 @@ fi
 # Re-read ports (they may be in .env)
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-$UI_PORT}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
+_bootstrap_runtime_path
+
+# Keep gateway token consistent between config.json and .env.
+if [[ -f "$AI_HOME/config.json" ]] && command -v python3 >/dev/null 2>&1; then
+  CFG_GATEWAY_TOKEN="$(python3 - <<'PY' 2>/dev/null
+import json
+from pathlib import Path
+cfg = Path.home()/'.ai-employee'/'config.json'
+try:
+    data = json.loads(cfg.read_text())
+    print(data.get('gateway', {}).get('auth', {}).get('token', ''))
+except Exception:
+    print('')
+PY
+)"
+  if [[ -n "${CFG_GATEWAY_TOKEN:-}" ]] && [[ "${OPENCLAW_GATEWAY_TOKEN:-}" != "$CFG_GATEWAY_TOKEN" ]]; then
+    export OPENCLAW_GATEWAY_TOKEN="$CFG_GATEWAY_TOKEN"
+    if [[ -f "$AI_HOME/.env" ]]; then
+      if grep -q '^OPENCLAW_GATEWAY_TOKEN=' "$AI_HOME/.env"; then
+        sed -i.bak "s|^OPENCLAW_GATEWAY_TOKEN=.*|OPENCLAW_GATEWAY_TOKEN=$CFG_GATEWAY_TOKEN|" "$AI_HOME/.env"
+        rm -f "$AI_HOME/.env.bak"
+      else
+        echo "OPENCLAW_GATEWAY_TOKEN=$CFG_GATEWAY_TOKEN" >> "$AI_HOME/.env"
+      fi
+    fi
+    ok "Gateway token synchronized from config.json"
+  fi
+fi
 
 mkdir -p "$AI_HOME/logs" "$AI_HOME/run"
 chmod 700 "$AI_HOME/logs" "$AI_HOME/run" 2>/dev/null || true
@@ -75,17 +173,31 @@ else
   ok "JWT_SECRET_KEY is set"
 fi
 
+# ── Startup update check ──────────────────────────────────────────────────────
+log "Checking for updates..."
+_UPDATER_PY="$AI_HOME/agents/auto-updater/auto_updater.py"
+if command -v python3 >/dev/null 2>&1 && [[ -f "$_UPDATER_PY" ]]; then
+  python3 "$_UPDATER_PY" --once || warn "Update check failed (no internet?) — continuing with installed version."
+else
+  warn "Auto-updater not found — skipping update check."
+fi
+
 # ── OpenClaw gateway ───────────────────────────────────────────────────────────
+install_docker_if_enabled
+
 log "Starting OpenClaw gateway..."
 # Support openclaw 2.0 (safe version): set OPENCLAW_BIN=openclaw2 in .env
 # to use ~/.ai-employee/bin/openclaw2 instead of the standard openclaw binary.
 OPENCLAW_BIN="${OPENCLAW_BIN:-openclaw}"
-if [[ -x "$AI_HOME/bin/$OPENCLAW_BIN" ]]; then
+if [[ "$OPENCLAW_BIN" != "openclaw" ]] && [[ -x "$AI_HOME/bin/$OPENCLAW_BIN" ]]; then
   OPENCLAW_CMD="$AI_HOME/bin/$OPENCLAW_BIN"
-elif command -v "$OPENCLAW_BIN" >/dev/null 2>&1; then
-  OPENCLAW_CMD="$OPENCLAW_BIN"
 else
-  OPENCLAW_CMD=""
+  OPENCLAW_CMD="$(find_openclaw_cmd 2>/dev/null || true)"
+fi
+
+if [[ -z "$OPENCLAW_CMD" ]]; then
+  install_openclaw_if_enabled || true
+  OPENCLAW_CMD="$(find_openclaw_cmd 2>/dev/null || true)"
 fi
 
 if [[ -n "$OPENCLAW_CMD" ]]; then
@@ -106,12 +218,23 @@ if [[ -n "$OPENCLAW_CMD" ]]; then
   fi
 
   nohup "$OPENCLAW_CMD" gateway \
-    --config "$OPENCLAW_CONFIG" \
     >> "$AI_HOME/logs/gateway.log" 2>&1 &
   GATEWAY_PID=$!
   echo "$GATEWAY_PID" > "$AI_HOME/run/gateway.pid"
-  sleep 1
-  ok "OpenClaw gateway started (pid=$GATEWAY_PID)"
+  # Wait up to 10 s for the gateway to become healthy before declaring failure.
+  _gw_ready=0
+  for _ in {1..10}; do
+    sleep 1
+    if "$OPENCLAW_CMD" health >/dev/null 2>&1 || _port_in_use "${OPENCLAW_GATEWAY_PORT:-18789}"; then
+      _gw_ready=1
+      break
+    fi
+  done
+  if [[ "$_gw_ready" -eq 1 ]]; then
+    ok "OpenClaw gateway started (pid=$GATEWAY_PID)"
+  else
+    warn "Gateway process started but health probe failed. Check: $AI_HOME/logs/gateway.log"
+  fi
 else
   warn "openclaw not found — gateway not started."
   warn "  Install: curl -fsSL https://openclaw.ai/install.sh | bash"
@@ -141,10 +264,10 @@ else
   warn "  Re-run the installer: cd ~/.ai-employee && bash install.sh"
 fi
 
-# ── Start remaining bots in background ────────────────────────────────────────
-log "Starting remaining bots..."
+# ── Start remaining agents in background ────────────────────────────────────────
+log "Starting remaining agents..."
 if [[ -x "$AI_HOME/bin/ai-employee" ]]; then
-  "$AI_HOME/bin/ai-employee" start --all >> "$AI_HOME/logs/startup.log" 2>&1 || warn "Some bots failed to start (see $AI_HOME/logs/startup.log)"
+  "$AI_HOME/bin/ai-employee" start --all >> "$AI_HOME/logs/startup.log" 2>&1 || warn "Some agents failed to start (see $AI_HOME/logs/startup.log)"
 fi
 
 echo ""

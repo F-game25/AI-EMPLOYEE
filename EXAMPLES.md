@@ -24,7 +24,7 @@ bash install.sh
 ## Starting AI Employee
 
 ```bash
-# Standard start (starts OpenClaw gateway + all bots + dashboard)
+# Standard start (starts OpenClaw gateway + all agents + dashboard)
 cd ~/.ai-employee && bash start.sh
 
 # The dashboard opens automatically at:
@@ -120,21 +120,21 @@ Expected response:
 curl http://127.0.0.1:8787/api/status
 ```
 
-### Start / stop bots
+### Start / stop agents
 
 ```bash
-# Start all bots
-curl -X POST http://127.0.0.1:8787/api/bots/start-all
+# Start all agents
+curl -X POST http://127.0.0.1:8787/api/agents/start-all
 
 # Start a specific bot
-curl -X POST http://127.0.0.1:8787/api/bots/start \
+curl -X POST http://127.0.0.1:8787/api/agents/start \
   -H "Content-Type: application/json" \
-  -d '{"bot": "lead-generator"}'
+  -d '{"agent": "lead-generator"}'
 
 # Stop a specific bot
-curl -X POST http://127.0.0.1:8787/api/bots/stop \
+curl -X POST http://127.0.0.1:8787/api/agents/stop \
   -H "Content-Type: application/json" \
-  -d '{"bot": "lead-generator"}'
+  -d '{"agent": "lead-generator"}'
 ```
 
 ---
@@ -221,7 +221,7 @@ git -C ~/AI-EMPLOYEE pull origin main
 cd ~/AI-EMPLOYEE && bash install.sh
 
 # Update Python dependencies
-pip3 install --user -r ~/.ai-employee/bots/problem-solver-ui/requirements.txt --upgrade
+pip3 install --user -r ~/.ai-employee/agents/problem-solver-ui/requirements.txt --upgrade
 ```
 
 ---
@@ -252,7 +252,7 @@ export JWT_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32)
 tail -50 ~/.ai-employee/logs/gateway.log
 
 # Verify dependencies
-pip3 install --user -r ~/.ai-employee/bots/problem-solver-ui/requirements.txt
+pip3 install --user -r ~/.ai-employee/agents/problem-solver-ui/requirements.txt
 
 # Check Python version (3.8+ required)
 python3 --version
