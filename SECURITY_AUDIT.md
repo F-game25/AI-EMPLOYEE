@@ -45,25 +45,25 @@
 ## Critical Issues Fixed
 
 ### 1. Server started despite missing/weak JWT_SECRET_KEY
-- **File:** `runtime/bots/problem-solver-ui/server.py` lines 13–105
+- **File:** `runtime/agents/problem-solver-ui/server.py` lines 13–105
 - **Was:** `except (ValueError, Exception): _security_config = None` — app started in degraded mode
 - **Fix:** Added `_validate_jwt_secret_on_startup()` called at module import time. Server now calls `sys.exit(1)` if JWT_SECRET_KEY is empty, < 32 chars, or a known default value.
 - **Test:** `JWT_SECRET_KEY="" python3 server.py` → `❌ STARTUP BLOCKED` + exit 1
 
 ### 2. Bot name injection (path traversal via subprocess)
 - **Files:**
-  - `runtime/bots/problem-solver-ui/server.py` — `/api/bots/start`, `/api/bots/stop`, `handle_command()`
+  - `runtime/agents/problem-solver-ui/server.py` — `/api/agents/start`, `/api/bots/stop`, `handle_command()`
   - `runtime/bin/ai-employee` — `start_bot()`, `stop_bot()`
 - **Was:** User-supplied bot name passed directly to `ai_employee("start", bot)` / `nohup "$entry"` without validation
 - **Fix:** Added `_BOT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")` and validation in all four code paths. Shell script uses `[[ ! "$bot" =~ ^[a-zA-Z0-9]... ]]` guard.
-- **Test:** `POST /api/bots/start {"bot": "../../evil"}` → HTTP 400
+- **Test:** `POST /api/agents/start {"agent": "../../evil"}` → HTTP 400
 
 ---
 
 ## High-Severity Issues Fixed
 
 ### 3. No rate limiting on `/auth/register` (brute-force vector)
-- **File:** `runtime/bots/problem-solver-ui/server.py`
+- **File:** `runtime/agents/problem-solver-ui/server.py`
 - **Was:** No `@limiter.limit()` on `/auth/register`
 - **Fix:** Added explicit 5/minute per-IP check via `limiter._check_request_limit()` in both `/auth/register` and the new `/auth/login`
 
@@ -72,12 +72,12 @@
 - **Fix:** Added `/auth/login` endpoint with bcrypt password verification, 5/minute rate limiting, and no user enumeration (same 401 for wrong user and wrong password)
 
 ### 5. Chat message length not enforced
-- **File:** `runtime/bots/problem-solver-ui/server.py`, `/api/chat`
+- **File:** `runtime/agents/problem-solver-ui/server.py`, `/api/chat`
 - **Was:** Unlimited message length accepted
 - **Fix:** `InputSanitizer.sanitize_input(raw_message, max_length=10000)` applied before processing; null-byte stripping also applied
 
 ### 6. Vulnerable dependencies: `cryptography` and `python-jose`
-- **File:** `runtime/bots/problem-solver-ui/requirements.txt`
+- **File:** `runtime/agents/problem-solver-ui/requirements.txt`
 - **Was:** `cryptography>=42.0.0` (vulnerable ≤ 46.0.4), `python-jose>=3.3.0` (algorithm confusion CVE < 3.4.0)
 - **Fix:** Pinned to `cryptography==46.0.5` and `python-jose[cryptography]==3.4.0` (both CVE-free per GitHub Advisory Database)
 
@@ -86,11 +86,11 @@
 ## Medium-Severity Issues Fixed
 
 ### 7. API keys could leak into chatlog
-- **File:** `runtime/bots/problem-solver-ui/server.py`
+- **File:** `runtime/agents/problem-solver-ui/server.py`
 - **Fix:** Added `_API_KEY_PATTERN` regex and `_sanitize_for_log()` function; applied to both user message and bot response before every chatlog write
 
 ### 8. `webhook_server.py` defaulted to `0.0.0.0`
-- **File:** `runtime/bots/whatsapp-webhook/webhook_server.py`
+- **File:** `runtime/agents/whatsapp-webhook/webhook_server.py`
 - **Was:** `WEBHOOK_HOST = os.environ.get("WHATSAPP_WEBHOOK_HOST", "0.0.0.0")`
 - **Fix:** Changed default to `127.0.0.1`; `0.0.0.0` documented as opt-in only when Twilio needs direct access, with warning that `TWILIO_AUTH_TOKEN` MUST be set in that case
 
@@ -99,7 +99,7 @@
 - **Fix:** Added `chmod 700 "$AI_HOME/state"` to both files
 
 ### 10. Dependencies used `>=` version specifiers
-- **File:** `runtime/bots/problem-solver-ui/requirements.txt`
+- **File:** `runtime/agents/problem-solver-ui/requirements.txt`
 - **Fix:** All packages now pinned with `==` to prevent silent upgrades to vulnerable versions
 
 ### 11. `.gitignore` missing certificate and key extensions
@@ -107,7 +107,7 @@
 - **Fix:** Added `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx`, and `state/users.json`
 
 ### 12. Python version not checked at startup
-- **File:** `runtime/bots/problem-solver-ui/server.py`
+- **File:** `runtime/agents/problem-solver-ui/server.py`
 - **Fix:** Added `sys.version_info < (3, 10)` check that calls `sys.exit(1)` with a clear error
 
 ---
@@ -143,13 +143,13 @@ Expected: No output.
 
 ### 2. Verify server refuses weak JWT_SECRET_KEY
 ```bash
-JWT_SECRET_KEY="" python3 ~/.ai-employee/bots/problem-solver-ui/server.py
+JWT_SECRET_KEY="" python3 ~/.ai-employee/agents/problem-solver-ui/server.py
 # Expected: ❌ STARTUP BLOCKED: JWT_SECRET_KEY is not set ... (exit 1)
 
-JWT_SECRET_KEY="short" python3 ~/.ai-employee/bots/problem-solver-ui/server.py
+JWT_SECRET_KEY="short" python3 ~/.ai-employee/agents/problem-solver-ui/server.py
 # Expected: ❌ STARTUP BLOCKED: JWT_SECRET_KEY must be at least 32 characters (exit 1)
 
-JWT_SECRET_KEY="secret" python3 ~/.ai-employee/bots/problem-solver-ui/server.py
+JWT_SECRET_KEY="secret" python3 ~/.ai-employee/agents/problem-solver-ui/server.py
 # Expected: ❌ STARTUP BLOCKED (known default) (exit 1)
 ```
 
@@ -178,9 +178,9 @@ done
 
 ### 5. Verify bot name injection is blocked
 ```bash
-curl -s -X POST http://127.0.0.1:8787/api/bots/start \
+curl -s -X POST http://127.0.0.1:8787/api/agents/start \
   -H "Content-Type: application/json" \
-  -d '{"bot": "../../evil"}'
+  -d '{"agent": "../../evil"}'
 # Expected: {"detail":"Invalid bot name. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}."}
 ```
 
@@ -196,7 +196,7 @@ curl -sI http://127.0.0.1:8787/health
 
 ### 7. Verify server only binds localhost
 ```bash
-grep "0\.0\.0\.0" ~/.ai-employee/bots/problem-solver-ui/server.py
+grep "0\.0\.0\.0" ~/.ai-employee/agents/problem-solver-ui/server.py
 # Expected: No output
 ```
 
@@ -220,17 +220,17 @@ ls -la ~/.ai-employee/state/
 
 ### 10. Run the built-in safety self-test
 ```bash
-python3 ~/.ai-employee/bots/bot_selftest.py
+python3 ~/.ai-employee/agents/agent_selftest.py
 # Expected: All required checks ✅ — overall result green
 
 # Send a live Discord ping to verify webhook:
-python3 ~/.ai-employee/bots/bot_selftest.py --live
+python3 ~/.ai-employee/agents/agent_selftest.py --live
 ```
 
 ### 11. Verify no vulnerable dependencies
 ```bash
 pip install pip-audit
-pip-audit -r ~/.ai-employee/bots/problem-solver-ui/requirements.txt
+pip-audit -r ~/.ai-employee/agents/problem-solver-ui/requirements.txt
 # Expected: No vulnerabilities found
 ```
 

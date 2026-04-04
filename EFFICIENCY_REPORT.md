@@ -73,7 +73,7 @@ Evidence:
 | Timeout | ✅ | ✅ | ✅ |
 
 ## Issues Fixed This Audit
-- `runtime/bots/problem-solver-ui/server.py`
+- `runtime/agents/problem-solver-ui/server.py`
   - Added deterministic LLM provider detection and 30s timeout handling.
   - Added mode-aware routing and mode-based agent availability checks.
   - Added strict routing map and routed-agent prompt injection.
@@ -83,17 +83,17 @@ Evidence:
 - `runtime/bin/ai-employee`
   - Added startup `.env` autoload.
   - Fixed `mode` command persistence even when `.env` does not yet exist.
-- `runtime/bots/scheduler-runner/scheduler.py`
+- `runtime/agents/scheduler-runner/scheduler.py`
   - Fixed schedule file loading regression (`NoneType` loop crash).
   - Added flexible interval parser (`1min`, `hourly`, `daily`, `weekly`).
   - Added scheduled chat task execution via `/api/chat`.
   - Added safer chatlog writes and explicit fire logging.
-- `runtime/bots/scheduler-runner/run.sh`
+- `runtime/agents/scheduler-runner/run.sh`
   - Added global `.env` loading before bot-specific config.
-- `runtime/bots/problem-solver/problem_solver.py`
+- `runtime/agents/problem-solver/problem_solver.py`
   - Added safe state-write error handling.
   - Added explicit restart log line (`restarting <agent>`).
-- `runtime/bots/problem-solver/run.sh`
+- `runtime/agents/problem-solver/run.sh`
   - Added global `.env` loading before bot-specific config.
-- `runtime/bots/problem-solver-ui/run.sh`
+- `runtime/agents/problem-solver-ui/run.sh`
   - Updated env precedence so runtime/global `.env` overrides bot defaults.
