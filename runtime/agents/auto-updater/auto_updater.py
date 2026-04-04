@@ -76,12 +76,24 @@ def _gh_get(url: str):
 
 
 def _download_raw(repo_path: str, dest: Path) -> bool:
+    """Download repo_path from the raw CDN and write it to dest atomically.
+
+    Atomicity matters for shell entry-points like start.sh: bash holds an open
+    file-descriptor to the inode it started reading.  A plain write_bytes()
+    truncates that inode in-place, so bash sees corrupted content for lines it
+    hasn't read yet.  Writing to a sibling temp-file and then os.replace()-ing
+    it creates a new inode, leaving bash's open fd pointing at the old content
+    for the lifetime of the current run.
+    """
     url = f"{RAW_BASE}/{repo_path}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "ai-employee-updater/2.0"})
         with urllib.request.urlopen(req, timeout=30) as r:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(r.read())
+            data = r.read()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.parent / f".{dest.name}.tmp"
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)
         return True
     except Exception as e:
         logger.warning("Download failed %s: %s", url, e)
