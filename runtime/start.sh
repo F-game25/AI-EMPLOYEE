@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AI Employee — Start script
-# Starts OpenClaw gateway + UI bot first, then all remaining bots, then opens the browser.
+# Starts OpenClaw gateway + UI agent first, then all remaining agents, then opens the browser.
 set -euo pipefail
 
 # ── Re-entrancy guard (Bug 1) ─────────────────────────────────────────────────
@@ -175,7 +175,7 @@ fi
 
 # ── Startup update check ──────────────────────────────────────────────────────
 log "Checking for updates..."
-_UPDATER_PY="$AI_HOME/bots/auto-updater/auto_updater.py"
+_UPDATER_PY="$AI_HOME/agents/auto-updater/auto_updater.py"
 if command -v python3 >/dev/null 2>&1 && [[ -f "$_UPDATER_PY" ]]; then
   python3 "$_UPDATER_PY" --once || warn "Update check failed (no internet?) — continuing with installed version."
 else
@@ -264,10 +264,10 @@ else
   warn "  Re-run the installer: cd ~/.ai-employee && bash install.sh"
 fi
 
-# ── Start remaining bots in background ────────────────────────────────────────
-log "Starting remaining bots..."
+# ── Start remaining agents in background ────────────────────────────────────────
+log "Starting remaining agents..."
 if [[ -x "$AI_HOME/bin/ai-employee" ]]; then
-  "$AI_HOME/bin/ai-employee" start --all >> "$AI_HOME/logs/startup.log" 2>&1 || warn "Some bots failed to start (see $AI_HOME/logs/startup.log)"
+  "$AI_HOME/bin/ai-employee" start --all >> "$AI_HOME/logs/startup.log" 2>&1 || warn "Some agents failed to start (see $AI_HOME/logs/startup.log)"
 fi
 
 echo ""
