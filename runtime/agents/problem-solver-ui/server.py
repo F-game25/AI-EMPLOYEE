@@ -9343,6 +9343,662 @@ def ascend_auto_approve(payload: dict):
         raise HTTPException(500, "Failed to update setting")
 
 
+# ── New Paperclip-parity features ─────────────────────────────────────────────
+# Org Chart, Budget Tracker, Goal Alignment, Ticket System, Governance,
+# Company Manager — all lazy-loaded from their respective agent directories.
+
+_org_chart_mod = None
+_budget_mod = None
+_goal_mod = None
+_ticket_mod = None
+_gov_mod = None
+_company_mod = None
+
+
+def _load_module(name: str, agent_dir: str, global_var_name: str):
+    """Generic lazy-loader for the new feature modules."""
+    # check global cache
+    frame = globals()
+    cached = frame.get(global_var_name)
+    if cached is not None:
+        return cached
+    path = AI_HOME / "agents" / agent_dir
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+    mod = importlib.import_module(name)
+    frame[global_var_name] = mod
+    return mod
+
+
+def _org():
+    return _load_module("org_chart", "org-chart", "_org_chart_mod")
+
+
+def _budget():
+    return _load_module("budget_tracker", "budget-tracker", "_budget_mod")
+
+
+def _goals():
+    return _load_module("goal_alignment", "goal-alignment", "_goal_mod")
+
+
+def _tickets():
+    return _load_module("ticket_system", "ticket-system", "_ticket_mod")
+
+
+def _gov():
+    return _load_module("governance", "governance", "_gov_mod")
+
+
+def _company():
+    return _load_module("company_manager", "company-manager", "_company_mod")
+
+
+# ── Org Chart API ──────────────────────────────────────────────────────────────
+
+@app.get("/api/org/chart")
+def org_get_chart():
+    """Return the full org chart with roles, reporting lines, and direct reports."""
+    try:
+        return JSONResponse(_org().get_chart())
+    except Exception as exc:
+        logger.warning("org chart error: %s", exc)
+        return JSONResponse({"roles": []})
+
+
+@app.post("/api/org/roles")
+def org_upsert_role(payload: dict):
+    """Create or update an org-chart role."""
+    role_id = (payload.get("role_id") or "").strip()
+    title = (payload.get("title") or "").strip()
+    if not role_id or not title:
+        raise HTTPException(400, "role_id and title are required")
+    try:
+        role = _org().upsert_role(
+            role_id=role_id,
+            title=title,
+            description=payload.get("description", ""),
+            reports_to=payload.get("reports_to"),
+            heartbeat_interval_minutes=int(payload.get("heartbeat_interval_minutes", 60)),
+            agent_id=payload.get("agent_id"),
+        )
+        return JSONResponse(role)
+    except Exception as exc:
+        logger.error("org upsert_role error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/org/roles/{role_id}")
+def org_delete_role(role_id: str):
+    try:
+        deleted = _org().delete_role(role_id)
+        return JSONResponse({"ok": deleted})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/org/assign")
+def org_assign_agent(payload: dict):
+    """Assign an AI-EMPLOYEE agent to an org-chart role."""
+    role_id = (payload.get("role_id") or "").strip()
+    agent_id = (payload.get("agent_id") or "").strip()
+    if not role_id or not agent_id:
+        raise HTTPException(400, "role_id and agent_id are required")
+    try:
+        return JSONResponse(_org().assign_agent_to_role(role_id, agent_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/org/delegate")
+def org_delegate_task(payload: dict):
+    """Delegate a task from one role to another."""
+    from_role = (payload.get("from_role") or "").strip()
+    to_role = (payload.get("to_role") or "").strip()
+    task = (payload.get("task") or "").strip()
+    if not from_role or not to_role or not task:
+        raise HTTPException(400, "from_role, to_role, and task are required")
+    try:
+        return JSONResponse(_org().delegate_task(from_role, to_role, task, payload.get("context")))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/org/adapters")
+def org_list_adapters():
+    try:
+        return JSONResponse(_org().list_adapters())
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.post("/api/org/adapters")
+def org_register_adapter(payload: dict):
+    """Register a BYOA (Bring Your Own Agent) adapter."""
+    adapter_id = (payload.get("adapter_id") or "").strip()
+    name = (payload.get("name") or "").strip()
+    adapter_type = (payload.get("type") or "http_webhook").strip()
+    if not adapter_id or not name:
+        raise HTTPException(400, "adapter_id and name are required")
+    try:
+        return JSONResponse(
+            _org().register_adapter(
+                adapter_id=adapter_id,
+                name=name,
+                adapter_type=adapter_type,
+                config=payload.get("config", {}),
+                description=payload.get("description", ""),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/org/adapters/{adapter_id}")
+def org_deregister_adapter(adapter_id: str):
+    try:
+        ok = _org().deregister_adapter(adapter_id)
+        return JSONResponse({"ok": ok})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Budget Tracker API ─────────────────────────────────────────────────────────
+
+@app.get("/api/budget/status")
+def budget_all_status():
+    """Return budget status for all tracked agents."""
+    try:
+        _budget().auto_reset_all_if_new_month()
+        return JSONResponse(_budget().get_all_status())
+    except Exception as exc:
+        logger.warning("budget status error: %s", exc)
+        return JSONResponse([])
+
+
+@app.get("/api/budget/status/{agent_id}")
+def budget_agent_status(agent_id: str):
+    """Return budget status for a single agent."""
+    try:
+        _budget().auto_reset_all_if_new_month()
+        return JSONResponse(_budget().get_agent_status(agent_id))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/budget/set")
+def budget_set(payload: dict):
+    """Set the monthly budget cap for an agent."""
+    agent_id = (payload.get("agent_id") or "").strip()
+    budget = payload.get("monthly_budget_usd")
+    if not agent_id or budget is None:
+        raise HTTPException(400, "agent_id and monthly_budget_usd are required")
+    try:
+        return JSONResponse(_budget().set_budget(agent_id, float(budget)))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/budget/reset/{agent_id}")
+def budget_reset(agent_id: str):
+    """Reset monthly usage for an agent."""
+    try:
+        return JSONResponse(_budget().reset_usage(agent_id))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/budget/record")
+def budget_record_usage(payload: dict):
+    """Record token usage for an agent (called by ai_router or manually)."""
+    agent_id = (payload.get("agent_id") or "").strip()
+    model = (payload.get("model") or "unknown").strip()
+    if not agent_id:
+        raise HTTPException(400, "agent_id is required")
+    try:
+        return JSONResponse(
+            _budget().record_usage(
+                agent_id=agent_id,
+                model=model,
+                input_tokens=int(payload.get("input_tokens", 0)),
+                output_tokens=int(payload.get("output_tokens", 0)),
+                cost_usd=payload.get("cost_usd"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Goal Alignment API ─────────────────────────────────────────────────────────
+
+@app.get("/api/goals/company")
+def goals_get_company():
+    """Return the company mission and vision."""
+    try:
+        return JSONResponse(_goals().get_company_mission())
+    except Exception as exc:
+        return JSONResponse({"mission": "", "vision": ""})
+
+
+@app.post("/api/goals/company")
+def goals_set_company(payload: dict):
+    """Set the company mission."""
+    mission = (payload.get("mission") or "").strip()
+    if not mission:
+        raise HTTPException(400, "mission is required")
+    try:
+        return JSONResponse(
+            _goals().set_company_mission(
+                mission=mission,
+                vision=payload.get("vision", ""),
+                values=payload.get("values"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/goals/projects")
+def goals_list_projects():
+    try:
+        return JSONResponse(_goals().list_projects())
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.post("/api/goals/projects")
+def goals_upsert_project(payload: dict):
+    """Create or update a project under the company mission."""
+    name = (payload.get("name") or "").strip()
+    goal = (payload.get("goal") or "").strip()
+    if not name or not goal:
+        raise HTTPException(400, "name and goal are required")
+    try:
+        return JSONResponse(
+            _goals().upsert_project(
+                project_id=payload.get("project_id"),
+                name=name,
+                goal=goal,
+                description=payload.get("description", ""),
+                assigned_roles=payload.get("assigned_roles"),
+                assigned_agents=payload.get("assigned_agents"),
+                priority=payload.get("priority", "medium"),
+                status=payload.get("status", "active"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/goals/projects/{project_id}")
+def goals_delete_project(project_id: str):
+    try:
+        return JSONResponse({"ok": _goals().delete_project(project_id)})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/goals/context/{project_id}")
+def goals_get_context(project_id: str):
+    """Return the full goal ancestry for a project (for prompt injection)."""
+    try:
+        ctx = _goals().get_goal_context(project_id=project_id)
+        preamble = _goals().build_goal_preamble(project_id=project_id)
+        return JSONResponse({**ctx, "preamble": preamble})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Ticket System API ──────────────────────────────────────────────────────────
+
+@app.get("/api/tickets")
+def tickets_list(
+    status: str | None = None,
+    agent_id: str | None = None,
+    project_id: str | None = None,
+    limit: int = 50,
+):
+    """List tickets with optional filters."""
+    try:
+        return JSONResponse(
+            _tickets().list_tickets(
+                status=status, agent_id=agent_id, project_id=project_id, limit=min(limit, 200)
+            )
+        )
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.post("/api/tickets")
+def tickets_create(payload: dict):
+    """Create a new ticket."""
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title is required")
+    try:
+        return JSONResponse(
+            _tickets().create_ticket(
+                title=title,
+                description=payload.get("description", ""),
+                created_by=payload.get("created_by", "user"),
+                agent_id=payload.get("agent_id"),
+                project_id=payload.get("project_id"),
+                priority=payload.get("priority", "medium"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/tickets/{ticket_id}")
+def tickets_get(ticket_id: str):
+    try:
+        ticket = _tickets().get_ticket(ticket_id)
+        if ticket is None:
+            raise HTTPException(404, f"Ticket '{ticket_id}' not found")
+        return JSONResponse(ticket)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.patch("/api/tickets/{ticket_id}")
+def tickets_update(ticket_id: str, payload: dict):
+    """Update ticket status, title, priority, or agent assignment."""
+    try:
+        return JSONResponse(
+            _tickets().update_ticket(
+                ticket_id=ticket_id,
+                status=payload.get("status"),
+                title=payload.get("title"),
+                description=payload.get("description"),
+                priority=payload.get("priority"),
+                agent_id=payload.get("agent_id"),
+                updated_by=payload.get("updated_by", "user"),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/tickets/{ticket_id}/comment")
+def tickets_add_comment(ticket_id: str, payload: dict):
+    """Add a comment to a ticket thread."""
+    body = (payload.get("body") or "").strip()
+    if not body:
+        raise HTTPException(400, "body is required")
+    try:
+        return JSONResponse(
+            _tickets().add_comment(
+                ticket_id=ticket_id,
+                body=body,
+                author=payload.get("author", "user"),
+                tool_call=payload.get("tool_call"),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/tickets/{ticket_id}/audit")
+def tickets_audit(ticket_id: str):
+    """Return the immutable audit trail for a ticket."""
+    try:
+        return JSONResponse(_tickets().get_audit_trail(ticket_id))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/tickets/audit/log")
+def tickets_full_audit(limit: int = 200):
+    """Return the most recent audit events across all tickets."""
+    try:
+        return JSONResponse(_tickets().get_full_audit_log(limit=min(limit, 500)))
+    except Exception as exc:
+        return JSONResponse([])
+
+
+# ── Governance API ─────────────────────────────────────────────────────────────
+
+@app.get("/api/governance/pending")
+def governance_pending():
+    """List all pending approval requests."""
+    try:
+        return JSONResponse(_gov().list_pending())
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.get("/api/governance/audit")
+def governance_audit(limit: int = 200):
+    """Return the governance audit trail."""
+    try:
+        return JSONResponse(_gov().get_audit_trail(limit=min(limit, 500)))
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.get("/api/governance/history")
+def governance_history(limit: int = 100):
+    """Return recent governance decisions."""
+    try:
+        return JSONResponse(_gov().get_history(limit=min(limit, 200)))
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.post("/api/governance/request")
+def governance_request(payload: dict):
+    """Agent submits an action for board approval."""
+    agent_id = (payload.get("agent_id") or "").strip()
+    action = (payload.get("action") or "").strip()
+    description = (payload.get("description") or "").strip()
+    if not agent_id or not action:
+        raise HTTPException(400, "agent_id and action are required")
+    try:
+        return JSONResponse(
+            _gov().request_approval(
+                agent_id=agent_id,
+                action=action,
+                description=description,
+                risk_level=payload.get("risk_level", "medium"),
+                payload=payload.get("payload"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/{action_id}/approve")
+def governance_approve(action_id: str, payload: dict = {}):
+    """Board approves a pending action."""
+    try:
+        return JSONResponse(
+            _gov().approve_action(
+                action_id=action_id,
+                decided_by=payload.get("decided_by", "board"),
+                note=payload.get("note", ""),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/{action_id}/reject")
+def governance_reject(action_id: str, payload: dict = {}):
+    """Board rejects a pending action."""
+    try:
+        return JSONResponse(
+            _gov().reject_action(
+                action_id=action_id,
+                decided_by=payload.get("decided_by", "board"),
+                note=payload.get("note", ""),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/pause/{agent_id}")
+def governance_pause(agent_id: str, payload: dict = {}):
+    """Board pauses an agent."""
+    try:
+        return JSONResponse(_gov().pause_agent(agent_id, reason=payload.get("reason", "")))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/resume/{agent_id}")
+def governance_resume(agent_id: str, payload: dict = {}):
+    """Board resumes a paused agent."""
+    try:
+        return JSONResponse(_gov().resume_agent(agent_id, reason=payload.get("reason", "")))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/terminate/{agent_id}")
+def governance_terminate(agent_id: str, payload: dict = {}):
+    """Board terminates an agent."""
+    try:
+        return JSONResponse(_gov().terminate_agent(agent_id, reason=payload.get("reason", "")))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/governance/agent/{agent_id}")
+def governance_agent_status(agent_id: str):
+    """Return governance status for a specific agent."""
+    try:
+        return JSONResponse(_gov().get_agent_gov_status(agent_id))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/governance/settings")
+def governance_get_settings():
+    try:
+        return JSONResponse(_gov().get_settings())
+    except Exception as exc:
+        return JSONResponse({})
+
+
+@app.post("/api/governance/settings")
+def governance_update_settings(payload: dict):
+    """Update governance settings (auto-approve thresholds, timeouts, etc.)."""
+    try:
+        return JSONResponse(_gov().update_settings(payload))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Company Manager API ────────────────────────────────────────────────────────
+
+@app.get("/api/companies")
+def companies_list():
+    """List all companies in this deployment."""
+    try:
+        return JSONResponse(_company().list_companies())
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.get("/api/companies/active")
+def companies_active():
+    """Return the currently active company."""
+    try:
+        c = _company().get_active_company()
+        return JSONResponse(c or {})
+    except Exception as exc:
+        return JSONResponse({})
+
+
+@app.post("/api/companies")
+def companies_create(payload: dict):
+    """Create a new company."""
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    try:
+        return JSONResponse(
+            _company().create_company(
+                name=name,
+                description=payload.get("description", ""),
+                mission=payload.get("mission", ""),
+                company_id=payload.get("company_id"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/companies/switch")
+def companies_switch(payload: dict):
+    """Switch the active company context."""
+    company_id = (payload.get("company_id") or "").strip()
+    if not company_id:
+        raise HTTPException(400, "company_id is required")
+    try:
+        return JSONResponse(_company().switch_company(company_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/companies/{company_id}")
+def companies_delete(company_id: str):
+    try:
+        ok = _company().delete_company(company_id)
+        return JSONResponse({"ok": ok})
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/companies/{company_id}/export")
+def companies_export(company_id: str):
+    """Export a company configuration with secrets scrubbed."""
+    try:
+        return JSONResponse(_company().export_company(company_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/companies/import")
+def companies_import(payload: dict):
+    """Import a company template."""
+    if not payload:
+        raise HTTPException(400, "template payload is required")
+    try:
+        return JSONResponse(
+            _company().import_company(
+                template=payload,
+                name_override=payload.get("name_override"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
 if __name__ == "__main__":
     _trim_jsonl(CHATLOG, 1000)
     _trim_jsonl(ACTIVITY_LOG, 2000)
