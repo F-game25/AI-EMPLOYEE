@@ -261,8 +261,10 @@ def get_full_audit_log(limit: int = 200) -> list[dict]:
         return []
     events: list[dict] = []
     try:
-        # Use a deque to efficiently keep only the last N*2 lines without
-        # loading the entire file into memory multiple times.
+        # Read the file line by line, keeping only the last `limit * 2` lines
+        # in memory at once (via a bounded deque).  The 2× multiplier provides
+        # a buffer so that after filtering out blank/malformed lines we still
+        # have at least `limit` valid JSON events to return.
         tail: deque[str] = deque(maxlen=limit * 2)
         with TICKETS_LOG.open("r", encoding="utf-8") as fh:
             for line in fh:

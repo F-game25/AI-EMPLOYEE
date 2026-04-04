@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -320,21 +321,27 @@ def update_settings(updates: dict) -> dict:
 
 
 def get_audit_trail(limit: int = 200) -> list[dict]:
-    """Return the most recent governance audit events."""
+    """Return the most recent governance audit events.
+
+    Uses a bounded deque (2× limit) to avoid loading the entire log file
+    into memory, then returns the last `limit` valid events in chronological order.
+    """
     if not AUDIT_LOG.exists():
         return []
-    events = []
+    events: list[dict] = []
     try:
-        lines = AUDIT_LOG.read_text().splitlines()
-        for line in reversed(lines):
+        tail: deque[str] = deque(maxlen=limit * 2)
+        with AUDIT_LOG.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                tail.append(line)
+        for line in tail:
             if not line.strip():
                 continue
             try:
                 events.append(json.loads(line))
             except Exception:
                 continue
-            if len(events) >= limit:
-                break
+        return events[-limit:]
     except Exception as exc:
         logger.warning("governance audit read error: %s", exc)
-    return list(reversed(events))
+        return []
