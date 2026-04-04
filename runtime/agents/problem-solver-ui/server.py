@@ -4653,7 +4653,7 @@ async function loadMetrics() {
   // Assume 1 AI hour = 3 human hours due to parallel execution and no context-switching overhead
   if (humanSavedEl) humanSavedEl.textContent = (s.human_hours_saved || Math.round((s.hours_saved||0) * 3)) + 'h';
   const agentsEl = document.getElementById('m-agents-used');
-  if (agentsEl) agentsEl.textContent = (s.bots_used || 0).toLocaleString();
+  if (agentsEl) agentsEl.textContent = (s.agents_used || 0).toLocaleString();
 
   // ROI Summary
   const effEl = document.getElementById('roi-efficiency');
