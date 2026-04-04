@@ -313,6 +313,33 @@ def check_engineering_assistant() -> None:
     _check_bot_module("engineering-assistant", "engineering_assistant")
 
 
+def check_turbo_quant() -> None:
+    """turbo_quant module must be importable, self-test must pass, and run.sh executable."""
+    _check_bot_module("turbo-quant", "turbo_quant")
+    tq_path = AI_HOME / "agents" / "turbo-quant"
+    if str(tq_path) not in sys.path:
+        sys.path.insert(0, str(tq_path))
+    try:
+        import turbo_quant as tq  # type: ignore[import]
+        # Verify core functions are present
+        for fn in ("get_mode", "set_mode", "select_model", "log_inference",
+                   "memory_status", "suggest_acceleration", "run_auto_improvement"):
+            if not callable(getattr(tq, fn, None)):
+                _fail("turbo_quant API", f"missing function: {fn}")
+                return
+        # Verify MONEY/POWER/AUTO modes
+        tq.set_mode("MONEY")
+        assert tq.get_mode() == "MONEY"
+        tq.set_mode("AUTO")
+        cfg = tq.select_model(category="general", mode="MONEY")
+        assert cfg.provider == "ollama", f"MONEY mode should use ollama, got {cfg.provider}"
+        cfg_p = tq.select_model(category="reasoning", mode="POWER")
+        assert cfg_p.provider == "nvidia_nim", f"POWER reasoning should use nvidia_nim, got {cfg_p.provider}"
+        _ok("turbo_quant API", "MONEY/POWER/AUTO modes ✓")
+    except Exception as exc:
+        _fail("turbo_quant API", f"self-check failed: {exc}")
+
+
 def check_ui_designer() -> None:
     """ui_designer module must be importable and its run.sh executable."""
     _check_bot_module("ui-designer", "ui_designer")
@@ -483,6 +510,7 @@ def main() -> None:
     check_ai_router()
     check_follow_up_agent()
     check_engineering_assistant()
+    check_turbo_quant()
     check_ui_designer()
     check_qa_tester()
     check_paid_media_specialist()
