@@ -1,8 +1,21 @@
 """Turbo Quantization — high-efficiency inference optimization layer.
 
 Sits between the AI router and the underlying model backends (Ollama, NVIDIA NIM,
-cloud APIs) to maximise throughput and minimise VRAM/CPU cost on mid-tier hardware
-such as an RTX 2070 Super (8 GB VRAM) / Ryzen 5 3600 / 16 GB RAM.
+cloud APIs) to maximise throughput and minimise VRAM/CPU cost.  Hardware specs are
+auto-detected at startup so the module works on any machine — from a low-end laptop
+with no GPU to a high-end workstation with a 24 GB card.
+
+Hardware Detection
+──────────────────
+  detect_hardware() runs once at import time and returns a HardwareProfile:
+    • GPU VRAM  — tries nvidia-smi (NVIDIA), rocm-smi (AMD), system_profiler (macOS),
+                  /proc/driver/nvidia (Linux), wmic (Windows). Falls back to 0 (CPU only).
+    • RAM       — reads /proc/meminfo (Linux/macOS) or wmic (Windows).
+    • CPU cores — os.cpu_count().
+    • Platform  — platform.system() + platform.machine().
+
+  The detected VRAM is used automatically as VRAM_BUDGET_GB unless
+  TURBO_VRAM_BUDGET_GB is set explicitly in the environment / .env.
 
 Architecture overview
 ─────────────────────
@@ -27,7 +40,7 @@ Architecture overview
   └───────────────────────────────────────────────────────────────────────────┘
 
   ┌─ Memory Optimizer ────────────────────────────────────────────────────────┐
-  │  • VRAM budget tracking (hard limit: VRAM_BUDGET_GB, default 6.5 GB)      │
+  │  • VRAM budget auto-detected from hardware (override: TURBO_VRAM_BUDGET_GB)│
   │  • CPU offload suggestion when VRAM headroom is too small                 │
   │  • Lazy-load: only one large model loaded at a time (evict on swap)       │
   │  • Layer-swap hints for AirLLM-style streaming                            │
@@ -54,10 +67,11 @@ Architecture overview
   │  • Sandbox-mode dry-run with alternative configs                          │
   └───────────────────────────────────────────────────────────────────────────┘
 
-Environment variables (all optional — sane defaults for RTX 2070 Super)
-────────────────────────────────────────────────────────────────────────
+Environment variables (all optional — auto-detected from hardware by default)
+──────────────────────────────────────────────────────────────────────────────
   TURBO_MODE               — MONEY | POWER | AUTO  (default: AUTO)
-  TURBO_VRAM_BUDGET_GB     — VRAM budget in GB     (default: 6.5)
+  TURBO_VRAM_BUDGET_GB     — override detected VRAM budget in GB
+                             (default: auto-detected, or 0.0 for CPU-only)
   TURBO_LOG_MAX_LINES      — max log lines kept     (default: 2000)
   TURBO_LOW_COMPLEXITY     — complexity threshold for lightweight routing
                              (default: 0.3, range 0–1)
@@ -75,13 +89,17 @@ Usage
     sys.path.insert(0, str(AI_HOME / "agents" / "turbo-quant"))
     from turbo_quant import (
         get_mode, set_mode,
+        detect_hardware, hardware_profile,
         select_model, QuantConfig,
         log_inference, run_auto_improvement,
         memory_status, suggest_acceleration,
     )
 
+    hw = hardware_profile()
+    print(hw.gpu_name, hw.vram_gb, hw.ram_gb, hw.cpu_cores)
+
     cfg = select_model(agent_id="sales-closer-pro", task="Write a cold email", complexity=0.4)
-    print(cfg.model, cfg.quant, cfg.provider)   # e.g. "llama3.2:8b-q4_K_M", "Q4_K_M", "ollama"
+    print(cfg.model, cfg.quant, cfg.provider)   # auto-tuned for your GPU
 """
 from __future__ import annotations
 
@@ -89,7 +107,9 @@ import json
 import logging
 import math
 import os
+import platform
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -126,9 +146,6 @@ QUANT_FP16  = "FP16"     # half-precision — tiny models or CPU dynamic quant
 QUANT_GPTQ  = "GPTQ"     # GPTQ 4-bit — cloud / NIM-hosted large models
 QUANT_AWQ   = "AWQ"      # AWQ 4-bit  — activation-aware, slightly better than GPTQ
 
-# ── Hardware profile (RTX 2070 Super target) ───────────────────────────────────
-VRAM_BUDGET_GB: float = float(os.environ.get("TURBO_VRAM_BUDGET_GB", "6.5"))
-
 # Approximate VRAM usage per quantization level (GB per billion parameters)
 _VRAM_PER_BPARAM: dict[str, float] = {
     QUANT_4BIT: 0.58,
@@ -138,6 +155,316 @@ _VRAM_PER_BPARAM: dict[str, float] = {
     QUANT_GPTQ: 0.58,
     QUANT_AWQ:  0.55,
 }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Hardware detection — universal, zero external dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Conservative VRAM budget estimates used when a GPU is detected via lspci but
+# memory size cannot be queried precisely (no rocm-smi / nvidia-smi available).
+_DEFAULT_INTEL_VRAM_GB: float = 2.0   # Intel integrated GPU (shares system RAM)
+_DEFAULT_AMD_VRAM_GB:   float = 4.0   # AMD discrete GPU without rocm-smi
+
+@dataclass
+class HardwareProfile:
+    """Detected hardware specifications for this machine."""
+    gpu_name:    str   = "unknown"   # GPU model name (or "CPU only")
+    gpu_vendor:  str   = "unknown"   # "nvidia" | "amd" | "apple" | "intel" | "none"
+    vram_gb:     float = 0.0         # detected VRAM in GB (0 = no dedicated GPU)
+    ram_gb:      float = 0.0         # total system RAM in GB
+    cpu_cores:   int   = 1           # logical CPU core count
+    cpu_name:    str   = "unknown"   # CPU model string
+    os_name:     str   = "unknown"   # OS name + version
+    detection:   str   = "auto"      # "auto" | "env_override" | "fallback"
+
+
+def _run(cmd: list[str], timeout: int = 5) -> str:
+    """Run *cmd* and return stdout, empty string on any failure."""
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _detect_vram_nvidia() -> tuple[float, str]:
+    """Return (vram_gb, gpu_name) via nvidia-smi, or (0, '') on failure."""
+    # Memory in MiB
+    mem = _run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+    name = _run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])
+    if mem:
+        try:
+            # nvidia-smi may return multiple lines for multi-GPU; take the largest
+            vals = [float(v.strip()) for v in mem.splitlines() if v.strip()]
+            return round(max(vals) / 1024, 2), (name.splitlines()[0].strip() if name else "NVIDIA GPU")
+        except ValueError:
+            pass
+    return 0.0, ""
+
+
+def _detect_vram_amd() -> tuple[float, str]:
+    """Return (vram_gb, gpu_name) via rocm-smi, or (0, '') on failure."""
+    out = _run(["rocm-smi", "--showmeminfo", "vram", "--csv"])
+    if out:
+        try:
+            for line in out.splitlines():
+                parts = line.split(",")
+                if len(parts) >= 2 and parts[-1].strip().isdigit():
+                    return round(int(parts[-1].strip()) / (1024 ** 3), 2), "AMD GPU"
+        except Exception:
+            pass
+    return 0.0, ""
+
+
+def _detect_vram_apple() -> tuple[float, str]:
+    """Return (vram_gb, gpu_name) on macOS using system_profiler."""
+    if platform.system() != "Darwin":
+        return 0.0, ""
+    out = _run(["system_profiler", "SPDisplaysDataType"])
+    if out:
+        gpu_name = "Apple GPU"
+        for line in out.splitlines():
+            low = line.lower()
+            if "chipset model" in low or "gpu" in low:
+                gpu_name = line.split(":")[-1].strip()
+            if "vram" in low and "mb" in low:
+                try:
+                    mb = float("".join(c for c in line if c.isdigit() or c == "."))
+                    return round(mb / 1024, 2), gpu_name
+                except ValueError:
+                    pass
+            if "total number of cores" in low:
+                # Apple Silicon — estimate ~70% of RAM as unified GPU memory
+                pass
+    # Apple Silicon unified memory: treat available system RAM × 0.7 as VRAM
+    ram = _detect_ram_gb()
+    if ram > 0 and (platform.machine() == "arm64" or "Apple" in platform.processor()):
+        return round(ram * 0.7, 2), "Apple Silicon"
+    return 0.0, ""
+
+
+def _detect_vram_windows_wmic() -> tuple[float, str]:
+    """Return (vram_gb, gpu_name) on Windows via wmic."""
+    if platform.system() != "Windows":
+        return 0.0, ""
+    out = _run(["wmic", "path", "win32_VideoController", "get", "AdapterRAM,Name", "/format:csv"])
+    if out:
+        for line in out.splitlines():
+            parts = line.split(",")
+            if len(parts) >= 3:
+                try:
+                    ram_bytes = int(parts[1].strip())
+                    name = parts[2].strip()
+                    if ram_bytes > 0:
+                        return round(ram_bytes / (1024 ** 3), 2), name
+                except (ValueError, IndexError):
+                    pass
+    return 0.0, ""
+
+
+def _detect_vram_linux_proc() -> tuple[float, str]:
+    """Read VRAM from /proc/driver/nvidia/gpus/*/information (Linux NVIDIA without smi)."""
+    gpu_path = Path("/proc/driver/nvidia/gpus")
+    if not gpu_path.exists():
+        return 0.0, ""
+    try:
+        best_mb = 0.0
+        best_name = ""
+        for info_file in gpu_path.glob("*/information"):
+            text = info_file.read_text()
+            for line in text.splitlines():
+                if line.lower().startswith("model:"):
+                    best_name = line.split(":", 1)[-1].strip()
+                if "video memory" in line.lower():
+                    mb = float("".join(c for c in line if c.isdigit() or c == "."))
+                    if mb > best_mb:
+                        best_mb = mb
+        if best_mb > 0:
+            return round(best_mb / 1024, 2), best_name or "NVIDIA GPU"
+    except Exception:
+        pass
+    return 0.0, ""
+
+
+def _detect_ram_gb() -> float:
+    """Return total system RAM in GB across Linux, macOS, and Windows."""
+    sys_name = platform.system()
+
+    if sys_name in ("Linux", "Darwin"):
+        # /proc/meminfo (Linux)
+        try:
+            with open("/proc/meminfo", "r") as fh:
+                for line in fh:
+                    if line.startswith("MemTotal:"):
+                        kb = int(line.split()[1])
+                        return round(kb / (1024 ** 2), 2)
+        except OSError:
+            pass
+        # sysctl (macOS)
+        out = _run(["sysctl", "-n", "hw.memsize"])
+        if out:
+            try:
+                return round(int(out) / (1024 ** 3), 2)
+            except ValueError:
+                pass
+
+    elif sys_name == "Windows":
+        out = _run(["wmic", "computersystem", "get", "TotalPhysicalMemory", "/value"])
+        for line in out.splitlines():
+            if "TotalPhysicalMemory=" in line:
+                try:
+                    return round(int(line.split("=")[1]) / (1024 ** 3), 2)
+                except (ValueError, IndexError):
+                    pass
+
+    return 0.0
+
+
+def _detect_cpu_name() -> str:
+    """Return CPU model string."""
+    sys_name = platform.system()
+
+    if sys_name == "Linux":
+        try:
+            with open("/proc/cpuinfo", "r") as fh:
+                for line in fh:
+                    if "model name" in line.lower():
+                        return line.split(":", 1)[-1].strip()
+        except OSError:
+            pass
+
+    elif sys_name == "Darwin":
+        out = _run(["sysctl", "-n", "machdep.cpu.brand_string"])
+        if out:
+            return out
+
+    elif sys_name == "Windows":
+        out = _run(["wmic", "cpu", "get", "Name", "/value"])
+        for line in out.splitlines():
+            if "Name=" in line:
+                return line.split("=", 1)[-1].strip()
+
+    return platform.processor() or "unknown"
+
+
+def detect_hardware() -> HardwareProfile:
+    """Auto-detect GPU, RAM, and CPU specs for this machine.
+
+    Tries multiple detection strategies in order, falling back gracefully so
+    the module always returns a usable profile even when no GPU is present or
+    hardware-query tools are unavailable.
+
+    Detection order for VRAM:
+      1. nvidia-smi        (NVIDIA on Linux / Windows / WSL)
+      2. /proc/driver/…    (NVIDIA Linux without smi path)
+      3. rocm-smi          (AMD on Linux)
+      4. system_profiler   (macOS — discrete or Apple Silicon)
+      5. wmic              (Windows — any vendor)
+      6. 0 GB              (CPU-only fallback)
+    """
+    # GPU / VRAM
+    vram_gb, gpu_name, gpu_vendor = 0.0, "CPU only", "none"
+
+    v, n = _detect_vram_nvidia()
+    if v > 0:
+        vram_gb, gpu_name, gpu_vendor = v, n, "nvidia"
+    else:
+        v, n = _detect_vram_linux_proc()
+        if v > 0:
+            vram_gb, gpu_name, gpu_vendor = v, n, "nvidia"
+
+    if vram_gb == 0.0:
+        v, n = _detect_vram_amd()
+        if v > 0:
+            vram_gb, gpu_name, gpu_vendor = v, n, "amd"
+
+    if vram_gb == 0.0:
+        v, n = _detect_vram_apple()
+        if v > 0:
+            vram_gb, gpu_name, gpu_vendor = v, n, "apple"
+
+    if vram_gb == 0.0 and platform.system() == "Windows":
+        v, n = _detect_vram_windows_wmic()
+        if v > 0:
+            vram_gb, gpu_name, gpu_vendor = v, n, "unknown"
+
+    # Also check Intel Arc / integrated via lspci on Linux as a best-effort hint
+    if vram_gb == 0.0 and platform.system() == "Linux":
+        lspci = _run(["lspci"])
+        for line in lspci.splitlines():
+            low = line.lower()
+            if "vga" in low or "display" in low or "3d" in low:
+                if "intel" in low:
+                    gpu_name = line.split(":")[-1].strip()
+                    gpu_vendor = "intel"
+                    # Intel integrated shares system RAM — use conservative budget
+                    vram_gb = _DEFAULT_INTEL_VRAM_GB
+                    break
+                if "amd" in low or "ati" in low:
+                    gpu_name = line.split(":")[-1].strip()
+                    gpu_vendor = "amd"
+                    vram_gb = _DEFAULT_AMD_VRAM_GB   # conservative estimate without rocm-smi
+                    break
+
+    # RAM + CPU
+    ram_gb   = _detect_ram_gb()
+    cpu_name = _detect_cpu_name()
+    cpu_cores = os.cpu_count() or 1
+    os_name   = f"{platform.system()} {platform.release()} {platform.machine()}".strip()
+
+    return HardwareProfile(
+        gpu_name   = gpu_name,
+        gpu_vendor = gpu_vendor,
+        vram_gb    = vram_gb,
+        ram_gb     = ram_gb,
+        cpu_cores  = cpu_cores,
+        cpu_name   = cpu_name,
+        os_name    = os_name,
+        detection  = "auto",
+    )
+
+
+# ── Module-level hardware profile (detected once at import) ───────────────────
+# Use hardware_profile() to access; direct callers can also read _HW.
+_HW: HardwareProfile = detect_hardware()
+
+# Track whether the caller explicitly set TURBO_VRAM_BUDGET_GB
+_VRAM_ENV_OVERRIDE: bool = bool(os.environ.get("TURBO_VRAM_BUDGET_GB", "").strip())
+
+
+def hardware_profile() -> HardwareProfile:
+    """Return the detected hardware profile for this machine.
+
+    The profile is detected once at import time.  Call detect_hardware() to
+    refresh it (e.g. after hot-plugging a GPU — rare but possible).
+    """
+    return _HW
+
+
+# ── Hardware-adaptive VRAM budget ─────────────────────────────────────────────
+def _compute_vram_budget() -> float:
+    """Return the effective VRAM budget in GB.
+
+    Priority:
+      1. TURBO_VRAM_BUDGET_GB env var (explicit override)
+      2. Detected GPU VRAM × 0.85 safety headroom
+      3. 0.0 (CPU-only — model router will always use cloud/NIM)
+    """
+    env_val = os.environ.get("TURBO_VRAM_BUDGET_GB", "").strip()
+    if env_val:
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+    if _HW.vram_gb > 0:
+        return round(_HW.vram_gb * 0.85, 2)
+    return 0.0
+
+
+VRAM_BUDGET_GB: float = _compute_vram_budget()
 
 # ── Complexity thresholds ──────────────────────────────────────────────────────
 LOW_COMPLEXITY_THRESHOLD: float = float(os.environ.get("TURBO_LOW_COMPLEXITY", "0.30"))
@@ -385,15 +712,19 @@ def memory_status() -> dict:
 
     Note: this tracks *estimated* usage based on what turbo_quant has registered
     via register_loaded_model() / unregister_model().  It does not query the GPU
-    directly (no hardware dependency required at import time).
+    directly (no hardware dependency required at call time).
     """
     with _loaded_lock:
         used = sum(_loaded_models.values())
     return {
-        "budget_gb":    VRAM_BUDGET_GB,
-        "used_est_gb":  round(used, 2),
-        "free_est_gb":  round(max(0.0, VRAM_BUDGET_GB - used), 2),
+        "budget_gb":     VRAM_BUDGET_GB,
+        "used_est_gb":   round(used, 2),
+        "free_est_gb":   round(max(0.0, VRAM_BUDGET_GB - used), 2),
         "loaded_models": dict(_loaded_models),
+        "gpu_name":      _HW.gpu_name,
+        "gpu_vendor":    _HW.gpu_vendor,
+        "detected_vram_gb": _HW.vram_gb,
+        "ram_gb":        _HW.ram_gb,
     }
 
 
@@ -443,21 +774,32 @@ def should_offload_to_cpu(params_b: float, quant: str) -> bool:
 def suggest_acceleration(params_b: float, provider: str, quant: str) -> dict:
     """Return a dict of inference acceleration recommendations.
 
-    This is advisory only — no hardware calls are made.
+    Uses the detected hardware profile to tailor advice to the current machine.
+    No hardware calls are made at call time — uses the profile detected at import.
     """
     tips = []
     use_flash_attn = False
     use_onnx       = False
+    hw = _HW
 
     if provider == "ollama":
-        tips.append("Ollama uses llama.cpp with cuBLAS — GPU layers auto-detected.")
+        if hw.gpu_vendor == "nvidia":
+            tips.append(f"Ollama uses llama.cpp with cuBLAS on your {hw.gpu_name} ({hw.vram_gb:.1f} GB VRAM).")
+        elif hw.gpu_vendor == "amd":
+            tips.append(f"Ollama uses llama.cpp with ROCm on your {hw.gpu_name} ({hw.vram_gb:.1f} GB VRAM).")
+        elif hw.gpu_vendor == "apple":
+            tips.append(f"Ollama uses Metal on your {hw.gpu_name} — Metal Performance Shaders auto-enabled.")
+        elif hw.vram_gb == 0:
+            tips.append("No GPU detected — Ollama will run on CPU. Expect slower inference.")
+        else:
+            tips.append(f"Ollama uses llama.cpp with GPU layers on your {hw.gpu_name}.")
         if params_b >= 7:
             use_flash_attn = True
             tips.append("Enable Flash Attention: set OLLAMA_FLASH_ATTN=1 in .env.")
         if quant in (QUANT_4BIT, QUANT_5BIT):
             tips.append(
-                "Q4_K_M / Q5_K_M GGUF recommended for RTX 2070 Super — "
-                "matches GPU memory without quality loss."
+                f"Q4_K_M / Q5_K_M GGUF recommended for your {hw.vram_gb:.1f} GB GPU — "
+                "best size/quality tradeoff."
             )
 
     elif provider == "nvidia_nim":
@@ -718,6 +1060,7 @@ def recommend_quant_format(params_b: float, task_type: str = "general") -> dict:
     """Return a recommendation dict for the best quantization format.
 
     This is advisory — helps operators choose models in Ollama or for download.
+    Automatically adapts to the detected GPU VRAM of this machine.
 
     Args:
         params_b:  Model parameter count in billions.
@@ -731,20 +1074,21 @@ def recommend_quant_format(params_b: float, task_type: str = "general") -> dict:
 
     vram_4bit = vram_estimate_gb(params_b, QUANT_4BIT)
     vram_8bit = vram_estimate_gb(params_b, QUANT_8BIT)
+    gpu_label = _HW.gpu_name if _HW.gpu_name != "CPU only" else "this system"
 
-    if params_b >= 30:
+    if params_b >= 30 or (VRAM_BUDGET_GB > 0 and vram_4bit > VRAM_BUDGET_GB):
         fmt   = QUANT_GPTQ
         tag   = ""
         rationale = (
-            f"{params_b:.0f}B parameter model exceeds local VRAM budget — "
+            f"{params_b:.0f}B parameter model exceeds local VRAM budget ({VRAM_BUDGET_GB:.1f} GB) — "
             "recommend GPTQ/AWQ via NVIDIA NIM or cloud endpoint."
         )
-        pull_cmd = f"# Model too large for local 8 GB VRAM — use NVIDIA NIM or cloud API"
+        pull_cmd = f"# Model too large for local VRAM — use NVIDIA NIM or cloud API"
     elif vram_4bit <= VRAM_BUDGET_GB * 0.85:
         fmt   = QUANT_4BIT
         tag   = "q4_K_M"
         rationale = (
-            f"Q4_K_M uses ~{vram_4bit:.1f} GB VRAM — fits comfortably on RTX 2070 Super. "
+            f"Q4_K_M uses ~{vram_4bit:.1f} GB VRAM — fits comfortably on {gpu_label}. "
             "Best size/quality tradeoff for mid-size models."
         )
         base_name = "llama3.2" if params_b <= 4 else "llama3.1"
@@ -764,7 +1108,7 @@ def recommend_quant_format(params_b: float, task_type: str = "general") -> dict:
         fmt   = QUANT_FP16
         tag   = "fp16"
         rationale = (
-            f"Even Q8_0 ({vram_8bit:.1f} GB) exceeds VRAM budget. "
+            f"Even Q8_0 ({vram_8bit:.1f} GB) exceeds VRAM budget ({VRAM_BUDGET_GB:.1f} GB). "
             "Use CPU offload or AirLLM layer streaming."
         )
         pull_cmd = f"# Enable CPU offload: OLLAMA_GPU_LAYERS=<N> in .env"
@@ -978,6 +1322,21 @@ def turbo_query(
 def _selftest() -> None:
     print("── Turbo Quant self-test ──────────────────────────────")
 
+    # Hardware detection
+    hw = hardware_profile()
+    assert isinstance(hw, HardwareProfile), "hardware_profile() failed"
+    assert hw.cpu_cores >= 1,  "cpu_cores must be ≥ 1"
+    assert hw.ram_gb >= 0,     "ram_gb must be ≥ 0"
+    assert hw.vram_gb >= 0,    "vram_gb must be ≥ 0"
+    assert hw.gpu_vendor in ("nvidia", "amd", "apple", "intel", "unknown", "none"), \
+        f"unexpected gpu_vendor: {hw.gpu_vendor}"
+    print(f"  hardware: gpu={hw.gpu_name} vram={hw.vram_gb:.1f}GB "
+          f"ram={hw.ram_gb:.1f}GB cpu={hw.cpu_cores}×{hw.cpu_name[:30]}  ✓")
+
+    # VRAM budget is derived from hardware
+    assert VRAM_BUDGET_GB >= 0, f"VRAM_BUDGET_GB should be ≥ 0, got {VRAM_BUDGET_GB}"
+    print(f"  VRAM_BUDGET_GB={VRAM_BUDGET_GB:.2f} GB (auto-detected)  ✓")
+
     # Mode management
     set_mode(MODE_MONEY)
     assert get_mode() == MODE_MONEY, "set_mode failed"
@@ -995,8 +1354,8 @@ def _selftest() -> None:
     # Model selection
     cfg_money = select_model(category="general", mode=MODE_MONEY)
     cfg_power = select_model(category="reasoning", mode=MODE_POWER)
-    assert cfg_money.provider == "ollama",       f"money tier should be ollama, got {cfg_money.provider}"
-    assert cfg_power.provider == "nvidia_nim",   f"power tier reasoning should be nvidia_nim, got {cfg_power.provider}"
+    assert cfg_money.provider == "ollama",     f"money tier should be ollama, got {cfg_money.provider}"
+    assert cfg_power.provider == "nvidia_nim", f"power tier reasoning should be nvidia_nim, got {cfg_power.provider}"
     assert cfg_money.params_b <= cfg_power.params_b or cfg_power.params_b == 0, "power should be larger"
     print(f"  money  model={cfg_money.model}  quant={cfg_money.quant}  ✓")
     print(f"  power  model={cfg_power.model}  quant={cfg_power.quant}  ✓")
@@ -1006,10 +1365,12 @@ def _selftest() -> None:
     assert 0 < est < 10, f"VRAM estimate out of range: {est}"
     print(f"  VRAM estimate 7B Q4_K_M = {est:.2f} GB  ✓")
 
-    # Memory status
+    # Memory status — must include hardware fields
     register_loaded_model("test-model", 3.0)
     status = memory_status()
     assert status["used_est_gb"] == 3.0, f"memory tracking failed: {status}"
+    assert "gpu_name" in status,         "memory_status missing gpu_name"
+    assert "ram_gb"   in status,         "memory_status missing ram_gb"
     unregister_model("test-model")
     assert memory_status()["used_est_gb"] == 0.0, "unregister failed"
     print("  memory tracking  ✓")
@@ -1020,10 +1381,11 @@ def _selftest() -> None:
     assert accel["batch_supported"] is True
     print("  acceleration hints  ✓")
 
-    # Quantization recommendation
+    # Quantization recommendation — result depends on detected VRAM
     rec = recommend_quant_format(7.0)
-    assert rec["format"] in (QUANT_4BIT, QUANT_5BIT, QUANT_8BIT)
-    print(f"  recommend_quant 7B = {rec['format']} ({rec['ollama_pull_cmd']})  ✓")
+    assert rec["format"] in (QUANT_4BIT, QUANT_5BIT, QUANT_8BIT, QUANT_GPTQ, QUANT_FP16), \
+        f"unexpected quant format: {rec['format']}"
+    print(f"  recommend_quant 7B = {rec['format']}  vram_budget={VRAM_BUDGET_GB:.1f}GB  ✓")
 
     # AirLLM config
     air = airllm_config(70.0, QUANT_4BIT)
