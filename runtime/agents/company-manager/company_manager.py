@@ -43,8 +43,8 @@ COMPANIES_STATE_ROOT = AI_HOME / "state" / "companies"
 _SECRET_PATTERNS = [
     # Key=value pairs where the key name suggests a secret
     re.compile(r'(?i)(api[_-]?key|secret|password|token|bearer|auth)\s*[=:]\s*\S+'),
-    # OpenAI / Anthropic style prefixed keys (sk-..., sk-ant-...)
-    re.compile(r'\bsk-[a-zA-Z0-9]{20,}\b'),
+    # OpenAI / Anthropic style prefixed keys (sk-..., sk-ant-...) — broaden to 10+ chars
+    re.compile(r'\bsk-[a-zA-Z0-9_-]{10,}\b'),
     # Standard Bearer token patterns (eyJ... JWT tokens)
     re.compile(r'\beyJ[a-zA-Z0-9+/]{30,}'),
 ]
@@ -291,7 +291,9 @@ def import_company(template: dict, name_override: str | None = None) -> dict:
     if schedules:
         sched_file = AI_HOME / "config" / "schedules.json"
         try:
-            # Merge with existing schedules (no duplicates by task_id)
+            # Merge with existing schedules (no duplicates by task_id).
+            # Initialize to empty list first to handle the case where
+            # sched_file does not yet exist.
             existing: list = []
             if sched_file.exists():
                 existing = json.loads(sched_file.read_text())
@@ -299,6 +301,7 @@ def import_company(template: dict, name_override: str | None = None) -> dict:
             for s in schedules:
                 if s.get("task_id") not in existing_ids:
                     existing.append(s)
+            sched_file.parent.mkdir(parents=True, exist_ok=True)
             sched_file.write_text(json.dumps(existing, indent=2))
         except Exception as exc:
             logger.warning("import: could not restore schedules: %s", exc)
