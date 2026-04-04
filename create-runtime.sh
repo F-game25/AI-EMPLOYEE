@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-mkdir -p runtime/{bin,bots,config}
-mkdir -p runtime/bots/{problem-solver,problem-solver-ui,polymarket-trader}
+mkdir -p runtime/{bin,agents,config}
+mkdir -p runtime/bagents/{problem-solver,problem-solver-ui,polymarket-trader}
 
 # -----------------------------------------------------------------------------
 # runtime/bin/ai-employee
@@ -17,7 +17,7 @@ cat > runtime/bin/ai-employee << 'EOF'
 set -euo pipefail
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-BOTS_DIR="$AI_HOME/bots"
+AGENTS_DIR="$AI_HOME/agents"
 LOGS_DIR="$AI_HOME/logs"
 RUN_DIR="$AI_HOME/run"
 STATE_DIR="$AI_HOME/state"
@@ -28,10 +28,10 @@ usage() {
   cat <<'USAGE'
 ai-employee commands:
   do <task>              Send any task to your AI employee (e.g. ai-employee do "find 10 leads")
-  start --all | <bot>    Start one or all bots
-  stop  --all | <bot>    Stop one or all bots
-  restart --all | <bot>  Restart one or all bots
-  status                 Show running status of all bots
+  start --all | <agent>   Start one or all agents
+  stop  --all | <agent>   Stop one or all agents
+  restart --all | <agent> Restart one or all agents
+  status                 Show running status of all agents
   logs <bot>             Tail logs for a bot
   doctor                 Health-check all services (✅/❌ per component)
   onboard                Run the First 15 Minutes Value Flow (3 starter tasks)
@@ -55,7 +55,7 @@ is_running() {
 
 start_bot() {
   local bot="$1"
-  local bot_dir="$BOTS_DIR/$bot"
+  local bot_dir="$AGENTS_DIR/$bot"
   local entry="$bot_dir/run.sh"
   local log="$LOGS_DIR/$bot.log"
   local pid_file
@@ -116,11 +116,11 @@ stop_bot() {
 }
 
 list_bots() {
-  if [[ ! -d "$BOTS_DIR" ]]; then
+  if [[ ! -d "$AGENTS_DIR" ]]; then
     return 0
   fi
   # Portable: works on Linux and macOS
-  find "$BOTS_DIR" -maxdepth 1 -mindepth 1 -type d | sort | while read -r d; do
+  find "$AGENTS_DIR" -maxdepth 1 -mindepth 1 -type d | sort | while read -r d; do
     basename "$d"
   done
 }
@@ -248,7 +248,7 @@ case "$cmd" in
     echo "── Configuration ─────────────────────────────"
     echo "  $OK Mode           : $_mode  (change: ai-employee mode starter|business|power)"
     echo "  $OK AI_HOME        : $AI_HOME"
-    echo "  $OK Bots dir       : $BOTS_DIR"
+    echo "  $OK Bots dir       : $AGENTS_DIR"
     echo "  $OK Logs dir       : $LOGS_DIR"
     echo ""
     echo "  Tip: Run  ai-employee start --all  to start all services."
@@ -466,14 +466,14 @@ esac
 EOF
 
 # -----------------------------------------------------------------------------
-# runtime/bots/problem-solver/*
+# runtime/bagents/problem-solver/*
 # -----------------------------------------------------------------------------
-cat > runtime/bots/problem-solver/run.sh << 'EOF'
+cat > runtime/bagents/problem-solver/run.sh << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-BOT_HOME="$AI_HOME/bots/problem-solver"
+BOT_HOME="$AI_HOME/bagents/problem-solver"
 
 if [[ -f "$AI_HOME/config/problem-solver.env" ]]; then
   set -a
@@ -485,7 +485,7 @@ fi
 python3 "$BOT_HOME/problem_solver.py"
 EOF
 
-cat > runtime/bots/problem-solver/problem_solver.py << 'EOF'
+cat > runtime/bagents/problem-solver/problem_solver.py << 'EOF'
 import json
 import os
 import subprocess
@@ -498,7 +498,7 @@ STATE_FILE = AI_HOME / "run" / "problem-solver.state.json"
 
 CHECK_INTERVAL = int(os.environ.get("PROBLEM_SOLVER_CHECK_INTERVAL", "5"))
 AUTO_RESTART = os.environ.get("PROBLEM_SOLVER_AUTO_RESTART", "true").lower() == "true"
-BOTS = os.environ.get("PROBLEM_SOLVER_WATCH_BOTS", "problem-solver-ui,polymarket-trader").split(",")
+AGENTS = os.environ.get("PROBLEM_SOLVER_WATCH_AGENTS", "problem-solver-ui,polymarket-trader").split(",")
 
 def now():
     return datetime.utcnow().isoformat() + "Z"
@@ -529,10 +529,10 @@ def write_state(state: dict):
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 def main():
-    print(f"[{now()}] problem-solver started; watching bots: {BOTS}; auto_restart={AUTO_RESTART}")
+    print(f"[{now()}] problem-solver started; watching agents: {AGENTS}; auto_restart={AUTO_RESTART}")
     while True:
-        state = {"ts": now(), "bots": []}
-        for bot in [b.strip() for b in BOTS if b.strip()]:
+        state = {"ts": now(), "agents": []}
+        for bot in [b.strip() for b in AGENTS if b.strip()]:
             ok = bot_running(bot)
             entry = {"bot": bot, "running": ok}
             if not ok and AUTO_RESTART:
@@ -540,7 +540,7 @@ def main():
                 entry["action"] = "start"
                 entry["action_rc"] = rc
                 entry["action_out_tail"] = out[-800:]
-            state["bots"].append(entry)
+            state["agents"].append(entry)
 
         write_state(state)
         time.sleep(CHECK_INTERVAL)
@@ -550,14 +550,14 @@ if __name__ == "__main__":
 EOF
 
 # -----------------------------------------------------------------------------
-# runtime/bots/problem-solver-ui/*
+# runtime/bagents/problem-solver-ui/*
 # -----------------------------------------------------------------------------
-cat > runtime/bots/problem-solver-ui/run.sh << 'EOF'
+cat > runtime/bagents/problem-solver-ui/run.sh << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-BOT_HOME="$AI_HOME/bots/problem-solver-ui"
+BOT_HOME="$AI_HOME/bagents/problem-solver-ui"
 
 if [[ -f "$AI_HOME/config/problem-solver-ui.env" ]]; then
   set -a
@@ -569,7 +569,7 @@ fi
 python3 "$BOT_HOME/server.py"
 EOF
 
-cat > runtime/bots/problem-solver-ui/server.py << 'EOF'
+cat > runtime/bagents/problem-solver-ui/server.py << 'EOF'
 """AI Employee — Problem Solver UI (server.py)
 
 Full FastAPI implementation with authentication, LLM-backed chat,
@@ -876,7 +876,7 @@ def api_status() -> Any:
     state_file = AI_HOME / "run" / "problem-solver.state.json"
     if state_file.exists():
         return JSONResponse(_read_json(state_file))
-    return {"ts": None, "bots": [], "note": "No state file yet. Start problem-solver."}
+    return {"ts": None, "agents": [], "note": "No state file yet. Start problem-solver."}
 
 @app.post("/api/chat")
 def api_chat(req: _ChatReq) -> Dict[str, str]:
@@ -958,7 +958,7 @@ if __name__ == "__main__":
     uvicorn.run(app, host=HOST, port=PORT)
 EOF
 
-cat > runtime/bots/problem-solver-ui/requirements.txt << 'EOF'
+cat > runtime/bagents/problem-solver-ui/requirements.txt << 'EOF'
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-jose[cryptography]==3.3.0
@@ -970,14 +970,14 @@ anthropic>=0.25.0
 EOF
 
 # -----------------------------------------------------------------------------
-# runtime/bots/polymarket-trader/*
+# runtime/bagents/polymarket-trader/*
 # -----------------------------------------------------------------------------
-cat > runtime/bots/polymarket-trader/run.sh << 'EOF'
+cat > runtime/bagents/polymarket-trader/run.sh << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-BOT_HOME="$AI_HOME/bots/polymarket-trader"
+BOT_HOME="$AI_HOME/bagents/polymarket-trader"
 
 if [[ -f "$AI_HOME/config/polymarket-trader.env" ]]; then
   set -a
@@ -989,7 +989,7 @@ fi
 python3 "$BOT_HOME/trader.py"
 EOF
 
-cat > runtime/bots/polymarket-trader/trader.py << 'EOF'
+cat > runtime/bagents/polymarket-trader/trader.py << 'EOF'
 import os
 import time
 import json
@@ -1089,7 +1089,7 @@ EOF
 # runtime/config/*
 # -----------------------------------------------------------------------------
 cat > runtime/config/problem-solver.env << 'EOF'
-PROBLEM_SOLVER_WATCH_BOTS=problem-solver-ui,polymarket-trader
+PROBLEM_SOLVER_WATCH_AGENTS=problem-solver-ui,polymarket-trader
 PROBLEM_SOLVER_CHECK_INTERVAL=5
 PROBLEM_SOLVER_AUTO_RESTART=true
 EOF
@@ -1116,9 +1116,9 @@ EOF
 # Permissions
 # -----------------------------------------------------------------------------
 chmod +x runtime/bin/ai-employee
-chmod +x runtime/bots/problem-solver/run.sh
-chmod +x runtime/bots/problem-solver-ui/run.sh
-chmod +x runtime/bots/polymarket-trader/run.sh
+chmod +x runtime/bagents/problem-solver/run.sh
+chmod +x runtime/bagents/problem-solver-ui/run.sh
+chmod +x runtime/bagents/polymarket-trader/run.sh
 
 echo "OK: runtime/ generated under: $ROOT_DIR/runtime"
 echo "Next: git add runtime && git commit -m 'Add runtime files' && git push"
