@@ -3,13 +3,13 @@
 .SYNOPSIS
     AI Employee — Windows Startup Script
 .DESCRIPTION
-    Starts all 33 AI Employee bots natively on Windows using Python directly.
+    Starts all 33 AI Employee agents natively on Windows using Python directly.
     No WSL or Git Bash required.
 .NOTES
     UI Port:        8787 (override with $env:PROBLEM_SOLVER_UI_PORT)
     Dashboard Port: 3000
     Gateway Port:   18789
-    Bot manifest:   31 background bots + problem-solver-ui = 32 Python services started
+    Agent manifest: 31 background agents + problem-solver-ui = 32 Python services started
                     (ai-router is a shared module, not a standalone service; total bot count is 33)
 
     ⚠  WINDOWS SUPPORT STATUS: This script has not yet been fully tested on
@@ -64,7 +64,7 @@ function Start-Bot {
         [string]$envFile
     )
 
-    $botDir = Join-Path $AI_HOME "bots\$botName"
+    $botDir = Join-Path $AI_HOME "agents\$botName"
     $pyPath = Join-Path $botDir $pyFile
 
     if (-not (Test-Path $pyPath)) {
@@ -268,7 +268,7 @@ if (Test-Path $uiDir) {
 Write-Step "Starting Problem Solver UI (port $UI_PORT)…"
 
 $psuName   = 'problem-solver-ui'
-$psuDir    = Join-Path $AI_HOME "bots\$psuName"
+$psuDir    = Join-Path $AI_HOME "agents\$psuName"
 $psuScript = Join-Path $psuDir 'server.py'
 $psuEnv    = Join-Path $AI_HOME "config\$psuName.env"
 $psuLog    = Join-Path $AI_HOME "logs\$psuName.log"
@@ -321,9 +321,9 @@ if (Test-Path $psuScript) {
     Write-Skip "$psuName not installed"
 }
 
-# ─── 7. Pause before other bots ────────────────────────────────────────────────
+# ─── 7. Pause before other agents ────────────────────────────────────────────────
 Write-Host ""
-Write-Step "Waiting 2 s before starting remaining bots…"
+Write-Step "Waiting 2 s before starting remaining agents…"
 Start-Sleep -Seconds 2
 
 # ─── 8. Bot manifest (name → python file) ─────────────────────────────────────
@@ -339,46 +339,46 @@ if ($statusReporterIntervalRaw) {
     }
 }
 
-$bots = [ordered]@{}
-$bots['problem-solver']        = 'problem_solver.py'
-$bots['polymarket-trader']     = 'trader.py'
+$agents = [ordered]@{}
+$agents['problem-solver']        = 'problem_solver.py'
+$agents['polymarket-trader']     = 'trader.py'
 if ($statusReporterEnabled) {
-    $bots['status-reporter']    = 'status_reporter.py'
+    $agents['status-reporter']    = 'status_reporter.py'
 }
-$bots['scheduler-runner']      = 'scheduler.py'
-$bots['discovery']             = 'discovery.py'
-$bots['skills-manager']        = 'skills_manager.py'
-$bots['mirofish-researcher']   = 'researcher.py'
-$bots['ollama-agent']          = 'ollama_agent.py'
-$bots['claude-agent']          = 'claude_agent.py'
-$bots['web-researcher']        = 'web_researcher.py'
-$bots['social-media-manager']  = 'social_media_manager.py'
-$bots['lead-generator']        = 'lead_generator.py'
-$bots['recruiter']             = 'recruiter.py'
-$bots['ecom-agent']            = 'ecom_agent.py'
-$bots['creator-agency']        = 'creator_agency.py'
-$bots['signal-community']      = 'signal_community.py'
-$bots['appointment-setter']    = 'appointment_setter.py'
-$bots['newsletter-bot']        = 'newsletter_bot.py'
-$bots['chatbot-builder']       = 'chatbot_builder.py'
-$bots['faceless-video']        = 'faceless_video.py'
-$bots['print-on-demand']       = 'print_on_demand.py'
-$bots['course-creator']        = 'course_creator.py'
-$bots['arbitrage-bot']         = 'arbitrage_bot.py'
-$bots['task-orchestrator']     = 'task_orchestrator.py'
-$bots['company-builder']       = 'company_builder.py'
-$bots['memecoin-creator']      = 'memecoin_creator.py'
-$bots['hr-manager']            = 'hr_manager.py'
-$bots['finance-wizard']        = 'finance_wizard.py'
-$bots['brand-strategist']      = 'brand_strategist.py'
-$bots['growth-hacker']         = 'growth_hacker.py'
-$bots['project-manager']       = 'project_manager.py'
-Write-Step "Starting $($bots.Count) background bots…"
+$agents['scheduler-runner']      = 'scheduler.py'
+$agents['discovery']             = 'discovery.py'
+$agents['skills-manager']        = 'skills_manager.py'
+$agents['mirofish-researcher']   = 'researcher.py'
+$agents['ollama-agent']          = 'ollama_agent.py'
+$agents['claude-agent']          = 'claude_agent.py'
+$agents['web-researcher']        = 'web_researcher.py'
+$agents['social-media-manager']  = 'social_media_manager.py'
+$agents['lead-generator']        = 'lead_generator.py'
+$agents['recruiter']             = 'recruiter.py'
+$agents['ecom-agent']            = 'ecom_agent.py'
+$agents['creator-agency']        = 'creator_agency.py'
+$agents['signal-community']      = 'signal_community.py'
+$agents['appointment-setter']    = 'appointment_setter.py'
+$agents['newsletter-bot']        = 'newsletter_bot.py'
+$agents['chatbot-builder']       = 'chatbot_builder.py'
+$agents['faceless-video']        = 'faceless_video.py'
+$agents['print-on-demand']       = 'print_on_demand.py'
+$agents['course-creator']        = 'course_creator.py'
+$agents['arbitrage-bot']         = 'arbitrage_bot.py'
+$agents['task-orchestrator']     = 'task_orchestrator.py'
+$agents['company-builder']       = 'company_builder.py'
+$agents['memecoin-creator']      = 'memecoin_creator.py'
+$agents['hr-manager']            = 'hr_manager.py'
+$agents['finance-wizard']        = 'finance_wizard.py'
+$agents['brand-strategist']      = 'brand_strategist.py'
+$agents['growth-hacker']         = 'growth_hacker.py'
+$agents['project-manager']       = 'project_manager.py'
+Write-Step "Starting $($agents.Count) background agents…"
 Write-Host ""
 
 $startedCount = 0
 
-foreach ($entry in $bots.GetEnumerator()) {
+foreach ($entry in $agents.GetEnumerator()) {
     $name    = $entry.Key
     $pyFile  = $entry.Value
     $envFile = Join-Path $AI_HOME "config\$name.env"
@@ -446,7 +446,7 @@ try {
     while ($true) {
         Start-Sleep -Seconds 5
 
-        # Reload any new PIDs dropped into run/ by bots themselves
+        # Reload any new PIDs dropped into run/ by agents themselves
         $pidFiles = Get-ChildItem -Path (Join-Path $AI_HOME 'run') -Filter '*.pid' -ErrorAction SilentlyContinue
         foreach ($pf in $pidFiles) {
             $pidVal = (Get-Content $pf.FullName -ErrorAction SilentlyContinue) -as [int]

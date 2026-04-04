@@ -4,7 +4,7 @@
     AI EMPLOYEE v4.0 - Windows Native Installer
 .DESCRIPTION
     One-click installer for AI Employee on Windows (no WSL or Git Bash required).
-    Installs Python, Git, OpenClaw, Ollama (optional), all 35 bots, and configures
+    Installs Python, Git, OpenClaw, Ollama (optional), all 35 agents, and configures
     everything for immediate use.
 .NOTES
     Run as a normal user (not Administrator).
@@ -358,7 +358,7 @@ $uiPortStr = Read-Host "  Problem Solver UI port [default: 8787]"
 $UI_PORT = if ($uiPortStr -match '^\d+$') { [int]$uiPortStr } else { 8787 }
 
 # Workers
-$workersStr = Read-Host "  Number of worker bots [1-20, default: 20]"
+$workersStr = Read-Host "  Number of worker agents [1-20, default: 20]"
 $NUM_WORKERS = if ($workersStr -match '^\d+$' -and [int]$workersStr -ge 1 -and [int]$workersStr -le 20) {
     [int]$workersStr
 } else { 20 }
@@ -413,7 +413,7 @@ Write-Step "Creating directory structure in $AI_HOME ..."
 
 $AI_DIRS = @(
     'workspace', 'credentials', 'downloads', 'logs', 'ui',
-    'backups', 'bin', 'run', 'bots', 'config', 'state', 'improvements'
+    'backups', 'bin', 'run', 'agents', 'config', 'state', 'improvements'
 )
 foreach ($d in $AI_DIRS) {
     $path = Join-Path $AI_HOME $d
@@ -482,7 +482,7 @@ $BOT_FILES = [ordered]@{
 }
 $BOTS = $BOT_FILES.Keys
 
-# Download start-windows.ps1 launcher (the script that actually starts all bots)
+# Download start-windows.ps1 launcher (the script that actually starts all agents)
 $startScriptUrl  = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/start-windows.ps1"
 $startScriptDest = Join-Path $AI_HOME 'start-windows.ps1'
 $ok = Invoke-Download $startScriptUrl $startScriptDest
@@ -500,7 +500,7 @@ Get-Content "`$AI_HOME\.env" | ForEach-Object {
 Write-Host 'Starting AI Employee...' -ForegroundColor Cyan
 Push-Location `$AI_HOME
 `$python = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'py' }
-`$uiScript = Join-Path `$AI_HOME 'bots\problem-solver-ui\server.py'
+`$uiScript = Join-Path `$AI_HOME 'agents\problem-solver-ui\server.py'
 Start-Process `$python -ArgumentList `"`$uiScript`" -WindowStyle Hidden
 Start-Sleep 5
 Start-Process 'http://127.0.0.1:8787'
@@ -515,18 +515,18 @@ $downloadCount = 0
 $failCount = 0
 foreach ($bot in $BOTS) {
     $pyFile = $BOT_FILES[$bot]
-    $botDir = Join-Path $AI_HOME "bots\$bot"
+    $botDir = Join-Path $AI_HOME "agents\$bot"
     if (-not (Test-Path $botDir)) {
         New-Item -ItemType Directory -Path $botDir -Force | Out-Null
     }
 
     # Main bot Python script (with correct filename)
-    $botUrl  = "$BASE_URL/bots/$bot/$pyFile"
+    $botUrl  = "$BASE_URL/bagents/$bot/$pyFile"
     $botDest = Join-Path $botDir $pyFile
     if (Invoke-Download $botUrl $botDest) { $downloadCount++ } else { $failCount++ }
 
     # requirements.txt (optional)
-    $reqUrl  = "$BASE_URL/bots/$bot/requirements.txt"
+    $reqUrl  = "$BASE_URL/bagents/$bot/requirements.txt"
     $reqDest = Join-Path $botDir 'requirements.txt'
     Invoke-Download $reqUrl $reqDest | Out-Null
 
@@ -553,7 +553,7 @@ Write-OK "Bot files: $downloadCount downloaded, $failCount not found (placeholde
 # Ensure every bot directory has at least a placeholder Python script
 foreach ($bot in $BOTS) {
     $pyFile  = $BOT_FILES[$bot]
-    $pyDest  = Join-Path $AI_HOME "bots\$bot\$pyFile"
+    $pyDest  = Join-Path $AI_HOME "agents\$bot\$pyFile"
     if (-not (Test-Path $pyDest)) {
         $placeholder = @"
 # $bot ($pyFile) - placeholder
@@ -586,7 +586,7 @@ try {
 }
 
 foreach ($bot in $BOTS) {
-    $reqFile = Join-Path $AI_HOME "bots\$bot\requirements.txt"
+    $reqFile = Join-Path $AI_HOME "agents\$bot\requirements.txt"
     if (Test-Path $reqFile) {
         try {
             & $PYTHON -m pip install --user -r $reqFile --quiet -ErrorAction SilentlyContinue | Out-Null
