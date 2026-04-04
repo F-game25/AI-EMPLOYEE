@@ -13,6 +13,7 @@ Config is read/written in ~/.ai-employee/config/
 import json
 import hashlib
 import hmac
+import importlib
 import logging
 import os
 import re
@@ -1576,6 +1577,14 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
   <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em">⚡ BLACKLIGHT</button>
   <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="background:linear-gradient(135deg,#0a1628,#0f2240);color:#f59e0b;border:1px solid #d97706;font-weight:700;letter-spacing:.04em">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('budget',this)" style="background:linear-gradient(135deg,#022c22,#064e3b);color:#34d399;border:1px solid #059669;font-weight:700">💰 Budget</button>
+  <button onclick="switchTab('org',this)" style="background:linear-gradient(135deg,#1e1b4b,#312e81);color:#818cf8;border:1px solid #4f46e5;font-weight:700">🏢 Org Chart</button>
+  <button onclick="switchTab('goals',this)" style="background:linear-gradient(135deg,#1c1917,#292524);color:#fb923c;border:1px solid #ea580c;font-weight:700">🎯 Goals</button>
+  <button onclick="switchTab('tickets',this)" style="background:linear-gradient(135deg,#0c1a2e,#0f2947);color:#38bdf8;border:1px solid #0284c7;font-weight:700">🎫 Tickets</button>
+  <button onclick="switchTab('boardroom',this)" style="background:linear-gradient(135deg,#1a0a0a,#2d1515);color:#f87171;border:1px solid #dc2626;font-weight:700">🛡️ Boardroom</button>
+  <button onclick="switchTab('companies',this)" style="background:linear-gradient(135deg,#0a1a0a,#152815);color:#86efac;border:1px solid #16a34a;font-weight:700">🏗️ Companies</button>
+  <button onclick="switchTab('artifacts',this)" style="background:linear-gradient(135deg,#1a1a0a,#2a2a10);color:#fde68a;border:1px solid #ca8a04;font-weight:700">📦 Artifacts</button>
+  <button onclick="switchTab('sessions',this)" style="background:linear-gradient(135deg,#0a1a1a,#102828);color:#67e8f9;border:1px solid #0891b2;font-weight:700">💾 Sessions</button>
 </nav>
 
 <main>
@@ -2026,6 +2035,406 @@ INDEX_HTML = r"""<!doctype html>
       <strong style="color:var(--warning)">No changes are applied automatically.</strong>
     </p>
     <div id="improvement-list"><div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery agent will add proposals over time.</p></div></div>
+  </div>
+</div>
+
+<!-- ── Budget ── -->
+<div id="tab-budget" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="bud-total-spent">–</div><div class="lbl">Total Spent (month)</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">⚠️</div><div class="stat-body"><div class="val" id="bud-agents-warn">–</div><div class="lbl">Agents at Warning</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">🛑</div><div class="stat-body"><div class="val" id="bud-agents-exceeded">–</div><div class="lbl">Agents Exceeded</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📊</div><div class="stat-body"><div class="val" id="bud-agents-tracked">–</div><div class="lbl">Agents Tracked</div></div></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">💰</span> Agent Budgets</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadBudget()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Monthly USD budget per agent. 80% = warning, 100% = hard stop.</p>
+      <div id="budget-agents-list"><div class="empty"><div class="icon">💰</div><p>Loading budget data…</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">⚙️</span> Set Agent Budget</div></div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Configure the monthly budget cap for any agent.</p>
+      <div class="form-group"><label>Agent ID</label><input id="bud-agent-id" placeholder="e.g. ceo, cto, marketing-agent"/></div>
+      <div class="form-group"><label>Monthly Budget (USD)</label><input id="bud-amount" type="number" min="0.01" step="0.01" placeholder="e.g. 10.00"/></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="setBudget()">💾 Set Budget</button>
+        <button class="btn btn-ghost btn-sm" onclick="resetBudget()">↺ Reset Usage</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header"><div class="card-title"><span class="icon">📈</span> Record Usage Manually</div></div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Manually record token usage (useful for testing or manual reconciliation).</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="flex:1;min-width:120px"><label>Agent ID</label><input id="bud-rec-agent" placeholder="agent-id"/></div>
+      <div class="form-group" style="flex:1;min-width:120px"><label>Model</label><input id="bud-rec-model" placeholder="gpt-4o" value="gpt-4o"/></div>
+      <div class="form-group" style="flex:0 0 90px"><label>Input Tokens</label><input id="bud-rec-in" type="number" min="0" value="0"/></div>
+      <div class="form-group" style="flex:0 0 90px"><label>Output Tokens</label><input id="bud-rec-out" type="number" min="0" value="0"/></div>
+      <button class="btn btn-primary" style="margin-bottom:18px" onclick="recordBudgetUsage()">📥 Record</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Org Chart ── -->
+<div id="tab-org" class="tab-content">
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🏢</span> Org Chart</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadOrg()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Visual hierarchy of roles and reporting lines. Assign agents to roles for delegation.</p>
+      <div id="org-chart-tree"><div class="empty"><div class="icon">🏢</div><p>Loading org chart…</p></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add / Edit Role</div></div>
+        <div class="form-group"><label>Role ID</label><input id="org-role-id" placeholder="e.g. cto"/></div>
+        <div class="form-group"><label>Title</label><input id="org-role-title" placeholder="e.g. Chief Technology Officer"/></div>
+        <div class="form-group"><label>Description</label><input id="org-role-desc" placeholder="Role responsibilities"/></div>
+        <div class="form-group"><label>Reports To (Role ID)</label><input id="org-role-reports" placeholder="e.g. ceo (leave empty for top)"/></div>
+        <div class="form-group"><label>Assign Agent ID</label><input id="org-role-agent" placeholder="e.g. engineering-assistant"/></div>
+        <button class="btn btn-primary" onclick="upsertOrgRole()">💾 Save Role</button>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-header"><div class="card-title"><span class="icon">🤝</span> Delegate Task</div></div>
+        <p style="color:var(--text-muted);font-size:.83em;margin-bottom:12px">Route a task from one role to another through the org chart.</p>
+        <div class="form-group"><label>From Role</label><input id="org-del-from" placeholder="ceo"/></div>
+        <div class="form-group"><label>To Role</label><input id="org-del-to" placeholder="cto"/></div>
+        <div class="form-group"><label>Task</label><input id="org-del-task" placeholder="Build the MVP architecture"/></div>
+        <button class="btn btn-primary" onclick="delegateOrgTask()">🚀 Delegate</button>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🔌</span> BYOA Adapters</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadOrgAdapters()">↻ Refresh</button>
+        </div>
+        <div id="org-adapters-list" style="font-size:.84em"><div class="empty"><div class="icon">🔌</div><p>No adapters registered.</p></div></div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="flex:1;min-width:110px"><label>Adapter ID</label><input id="org-adp-id" placeholder="my-bot"/></div>
+          <div class="form-group" style="flex:2;min-width:160px"><label>Name</label><input id="org-adp-name" placeholder="My Custom Bot"/></div>
+          <button class="btn btn-primary" style="margin-bottom:18px" onclick="registerOrgAdapter()">➕ Register</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Goals ── -->
+<div id="tab-goals" class="tab-content">
+  <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,rgba(234,88,12,.08),rgba(251,146,60,.04));border-color:rgba(251,146,60,.3)">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">💬</span> CEO Chat</div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      Send a direct directive to the top-level CEO agent. Context flows from company mission down through the org chart.
+    </p>
+    <div id="ceo-chat-log" style="background:var(--bg-deep,#0d1117);border-radius:6px;padding:12px;min-height:80px;max-height:200px;overflow-y:auto;font-size:.83em;margin-bottom:12px;color:#c9d1d9;line-height:1.7">
+      <span style="color:#6b7280">CEO is ready. Send a directive below.</span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <input id="ceo-chat-input" placeholder='e.g. "Prioritize the MVP launch this week"' style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px 12px;font-family:inherit"
+        onkeydown="if(event.key==='Enter')sendCEOMessage()"/>
+      <button class="btn btn-primary" onclick="sendCEOMessage()" id="ceo-send-btn">📨 Send</button>
+    </div>
+    <div id="ceo-chat-status" style="font-size:.78em;color:var(--text-muted);margin-top:6px"></div>
+  </div>
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🎯</span> Company Mission</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadGoals()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      The company mission is injected into every agent prompt so agents always know <em>what</em> to do and <em>why</em>.
+    </p>
+    <div id="goals-mission-display" style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;font-size:.9em;color:var(--text-secondary);min-height:40px">
+      <em style="color:var(--text-muted)">No mission set yet. Set one below.</em>
+    </div>
+    <div class="form-group"><label>Mission Statement</label><textarea id="goals-mission-input" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical" placeholder="e.g. Build the #1 AI note-taking app to $1M MRR"></textarea></div>
+    <div class="form-group"><label>Vision (optional)</label><input id="goals-vision-input" placeholder="Long-term company vision"/></div>
+    <button class="btn btn-primary" onclick="saveCompanyMission()">💾 Save Mission</button>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📁</span> Projects</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadGoals()">↻ Refresh</button>
+      </div>
+      <div id="goals-projects-list"><div class="empty"><div class="icon">📁</div><p>No projects yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Project</div></div>
+      <div class="form-group"><label>Project Name</label><input id="goals-proj-name" placeholder="e.g. MVP Launch"/></div>
+      <div class="form-group"><label>Goal</label><input id="goals-proj-goal" placeholder="e.g. Ship v1.0 by Q2"/></div>
+      <div class="form-group"><label>Description</label><input id="goals-proj-desc" placeholder="Brief description"/></div>
+      <div class="form-group"><label>Priority</label>
+        <select id="goals-proj-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="high">🔴 High</option>
+          <option value="medium" selected>🟡 Medium</option>
+          <option value="low">🟢 Low</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="addGoalProject()">➕ Add Project</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tickets ── -->
+<div id="tab-tickets" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon blue">🎫</div><div class="stat-body"><div class="val" id="tkt-total">–</div><div class="lbl">Total Tickets</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="tkt-open">–</div><div class="lbl">Open</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">▶️</div><div class="stat-body"><div class="val" id="tkt-inprog">–</div><div class="lbl">In Progress</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="tkt-done">–</div><div class="lbl">Done</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🎫</span> Tickets</div>
+        <div style="display:flex;gap:6px">
+          <select id="tkt-filter-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadTickets()">
+            <option value="">All</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="blocked">Blocked</option>
+            <option value="done">Done</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadTickets()">↻</button>
+        </div>
+      </div>
+      <div id="tickets-list"><div class="empty"><div class="icon">🎫</div><p>No tickets yet.</p></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Ticket</div></div>
+        <div class="form-group"><label>Title</label><input id="tkt-new-title" placeholder="Describe the task"/></div>
+        <div class="form-group"><label>Description (optional)</label><textarea id="tkt-new-desc" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Details…"></textarea></div>
+        <div class="form-group"><label>Priority</label>
+          <select id="tkt-new-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="high">🔴 High</option>
+            <option value="medium" selected>🟡 Medium</option>
+            <option value="low">🟢 Low</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Assign Agent (optional)</label><input id="tkt-new-agent" placeholder="e.g. engineering-assistant"/></div>
+        <button class="btn btn-primary" onclick="createTicket()">➕ Create Ticket</button>
+      </div>
+      <div class="card" style="margin-top:14px" id="tkt-detail-card" style="display:none">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📋</span> Ticket Detail</div>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('tkt-detail-card').style.display='none'">✕</button>
+        </div>
+        <div id="tkt-detail-body"></div>
+        <div class="form-group" style="margin-top:12px"><label>Add Comment</label>
+          <div style="display:flex;gap:8px">
+            <input id="tkt-comment-input" placeholder="Write a comment…" style="flex:1"/>
+            <button class="btn btn-primary" onclick="addTicketComment()">💬 Post</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📋</span> Audit Trail</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadTicketAudit()">↻ Refresh</button>
+    </div>
+    <div id="tickets-audit"><div class="empty"><div class="icon">📋</div><p>No audit events yet.</p></div></div>
+  </div>
+</div>
+
+<!-- ── Boardroom (Governance) ── -->
+<div id="tab-boardroom" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="gov-pending">–</div><div class="lbl">Pending Approvals</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="gov-approved">–</div><div class="lbl">Approved</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">🚫</div><div class="stat-body"><div class="val" id="gov-rejected">–</div><div class="lbl">Rejected</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📋</div><div class="stat-body"><div class="val" id="gov-total">–</div><div class="lbl">Total Actions</div></div></div>
+  </div>
+
+  <div id="gov-pending-banner" style="display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(239,68,68,.15),rgba(245,158,11,.1));border:1px solid rgba(239,68,68,.5);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.88em;color:#f87171;font-weight:600;animation:blink 1.5s infinite"></div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">⏳</span> Pending Board Approvals</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadBoardroom()">↻ Refresh</button>
+      </div>
+      <div id="gov-pending-list"><div class="empty"><div class="icon">✅</div><p>No pending approvals.</p></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🤖</span> Agent Controls</div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">As the board, you can pause, resume, or terminate any agent at any time.</p>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="flex:1;min-width:140px"><label>Agent ID</label><input id="gov-agent-ctrl-id" placeholder="e.g. marketing-agent"/></div>
+          <button class="btn btn-warning btn-sm" style="margin-bottom:18px" onclick="govPauseAgent()">⏸ Pause</button>
+          <button class="btn btn-success btn-sm" style="margin-bottom:18px" onclick="govResumeAgent()">▶️ Resume</button>
+          <button class="btn btn-danger btn-sm" style="margin-bottom:18px" onclick="govTerminateAgent()">⛔ Terminate</button>
+        </div>
+        <div id="gov-agent-status-display" style="font-size:.83em;color:var(--text-muted)"></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-header"><div class="card-title"><span class="icon">🧪</span> Submit Test Action</div></div>
+        <p style="color:var(--text-muted);font-size:.83em;margin-bottom:10px">Test the approval gate — submit an action on behalf of an agent.</p>
+        <div class="form-group"><label>Agent ID</label><input id="gov-test-agent" placeholder="my-agent"/></div>
+        <div class="form-group"><label>Action</label><input id="gov-test-action" placeholder="e.g. send_email_blast"/></div>
+        <div class="form-group"><label>Description</label><input id="gov-test-desc" placeholder="Send 1000 emails to customer list"/></div>
+        <div class="form-group"><label>Risk Level</label>
+          <select id="gov-test-risk" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="low">🟢 Low (auto-approved)</option>
+            <option value="medium" selected>🟡 Medium</option>
+            <option value="high">🔴 High</option>
+            <option value="critical">🔥 Critical</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="govTestAction()">🧪 Submit Action</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📋</span> Governance Audit Trail</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadBoardroom()">↻ Refresh</button>
+    </div>
+    <div id="gov-audit-list"><div class="empty"><div class="icon">📋</div><p>No audit events yet.</p></div></div>
+  </div>
+</div>
+
+<!-- ── Companies ── -->
+<div id="tab-companies" class="tab-content">
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🏗️</span> Multi-Company Manager</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadCompanies()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      One deployment, many companies. Complete data isolation and one control plane for your portfolio.
+    </p>
+    <div id="companies-active-banner" style="background:linear-gradient(135deg,rgba(16,185,129,.1),rgba(52,211,153,.05));border:1px solid rgba(52,211,153,.3);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:12px;font-size:.88em;color:var(--success);display:none"></div>
+    <div id="companies-list"><div class="empty"><div class="icon">🏗️</div><p>No companies yet. Create one below.</p></div></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Company</div></div>
+      <div class="form-group"><label>Company Name</label><input id="co-new-name" placeholder="e.g. Acme AI Inc."/></div>
+      <div class="form-group"><label>Mission (optional)</label><input id="co-new-mission" placeholder="Build the #1 AI assistant"/></div>
+      <div class="form-group"><label>Description (optional)</label><input id="co-new-desc" placeholder="Brief description"/></div>
+      <button class="btn btn-primary" onclick="createCompany()">🏗️ Create Company</button>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📦</span> Export / Import</div></div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Export a company config (secrets scrubbed) or import a template.</p>
+      <div class="form-group"><label>Company ID to Export</label>
+        <div style="display:flex;gap:8px">
+          <input id="co-export-id" placeholder="company-id" style="flex:1"/>
+          <button class="btn btn-ghost" onclick="exportCompany()">📤 Export</button>
+        </div>
+      </div>
+      <div class="form-group"><label>Import Template (JSON)</label>
+        <textarea id="co-import-json" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='{"company": {"name": "My Company"}, ...}'></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="importCompany()">📥 Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Artifacts ── -->
+<div id="tab-artifacts" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon yellow">📦</div><div class="stat-body"><div class="val" id="art-total">–</div><div class="lbl">Total Artifacts</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📝</div><div class="stat-body"><div class="val" id="art-drafts">–</div><div class="lbl">Drafts</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">🚀</div><div class="stat-body"><div class="val" id="art-deployed">–</div><div class="lbl">Deployed</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="art-approved">–</div><div class="lbl">Approved</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📦</span> Artifacts</div>
+        <div style="display:flex;gap:6px">
+          <select id="art-filter-type" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadArtifacts()">
+            <option value="">All Types</option>
+            <option value="code">Code</option>
+            <option value="report">Report</option>
+            <option value="campaign">Campaign</option>
+            <option value="business_plan">Business Plan</option>
+            <option value="config">Config</option>
+            <option value="other">Other</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadArtifacts()">↻</button>
+        </div>
+      </div>
+      <div id="artifacts-list"><div class="empty"><div class="icon">📦</div><p>No artifacts yet. Create a task to generate artifacts.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Artifact</div></div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Manually create an artifact from content.</p>
+      <div class="form-group"><label>Title</label><input id="art-new-title" placeholder="e.g. Marketing Plan Q2"/></div>
+      <div class="form-group"><label>Type</label>
+        <select id="art-new-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="report">Report</option>
+          <option value="code">Code</option>
+          <option value="campaign">Campaign</option>
+          <option value="business_plan">Business Plan</option>
+          <option value="config">Config</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Content</label>
+        <textarea id="art-new-content" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder="Artifact content…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="createArtifact()">📦 Create Artifact</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px" id="art-detail-card" style="display:none">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🔍</span> Artifact Detail</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('art-detail-card').style.display='none'">✕ Close</button>
+    </div>
+    <div id="art-detail-body"></div>
+  </div>
+</div>
+
+<!-- ── Sessions ── -->
+<div id="tab-sessions" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon cyan">💾</div><div class="stat-body"><div class="val" id="ses-total">–</div><div class="lbl">Total Sessions</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">▶️</div><div class="stat-body"><div class="val" id="ses-active">–</div><div class="lbl">Active</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">⏸</div><div class="stat-body"><div class="val" id="ses-paused">–</div><div class="lbl">Paused</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="ses-completed">–</div><div class="lbl">Completed</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">💾</span> Persistent Sessions</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadSessions()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+        Sessions persist across reboots. Agents resume their exact task context rather than starting from scratch.
+      </p>
+      <div id="sessions-list"><div class="empty"><div class="icon">💾</div><p>No sessions yet.</p></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Session</div></div>
+        <div class="form-group"><label>Agent ID</label><input id="ses-new-agent" placeholder="e.g. engineering-assistant"/></div>
+        <div class="form-group"><label>Title</label><input id="ses-new-title" placeholder="e.g. MVP feature development"/></div>
+        <div class="form-group"><label>Initial Context (JSON)</label>
+          <textarea id="ses-new-ctx" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder='{"goal": "Build login feature", "stack": "React + FastAPI"}'></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="createSession()">💾 Create Session</button>
+      </div>
+      <div class="card" style="margin-top:14px" id="ses-detail-card">
+        <div class="card-header"><div class="card-title"><span class="icon">📋</span> Session Detail</div></div>
+        <div id="ses-detail-body"><div class="empty"><p>Click a session to view details and checkpoints.</p></div></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2882,6 +3291,15 @@ function switchTab(tab, btn) {
   if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
   if (tab === 'blacklight') { blRefresh(); blLoadLogs(); }
   if (tab === 'ascend') { afRefresh(); afLoadPatches(); afLoadChangelog(); }
+  // New Paperclip-parity tabs
+  if (tab === 'budget') loadBudget();
+  if (tab === 'org') { loadOrg(); loadOrgAdapters(); }
+  if (tab === 'goals') loadGoals();
+  if (tab === 'tickets') { loadTickets(); loadTicketAudit(); }
+  if (tab === 'boardroom') loadBoardroom();
+  if (tab === 'companies') loadCompanies();
+  if (tab === 'artifacts') loadArtifacts();
+  if (tab === 'sessions') loadSessions();
 }
 
 function toast(msg, type='success') {
@@ -5814,6 +6232,828 @@ function escHtml(s) {
 
 // Auto-refresh ASCEND FORGE every 15s when tab is active
 setInterval(() => { if (currentTab === 'ascend') { afRefresh(); afLoadPatches(); } }, 15000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── BUDGET TAB ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadBudget() {
+  try {
+    const data = await api('/api/budget/status');
+    const agents = Array.isArray(data) ? data : (data.agents || []);
+    const totalSpent = agents.reduce((sum, a) => sum + (a.spent_usd || 0), 0);
+    const warned = agents.filter(a => a.status === 'warning').length;
+    const exceeded = agents.filter(a => a.status === 'exceeded').length;
+    document.getElementById('bud-total-spent').textContent = '$' + totalSpent.toFixed(4);
+    document.getElementById('bud-agents-warn').textContent = warned;
+    document.getElementById('bud-agents-exceeded').textContent = exceeded;
+    document.getElementById('bud-agents-tracked').textContent = agents.length;
+    const el = document.getElementById('budget-agents-list');
+    if (!agents.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">💰</div><p>No agents tracked yet. Run a task to see spending.</p></div>';
+      return;
+    }
+    const statusColor = {ok:'#34d399', warning:'#f59e0b', exceeded:'#ef4444'};
+    el.innerHTML = agents.map(a => {
+      const col = statusColor[a.status] || '#34d399';
+      const pct = Math.min(100, Math.round((a.spent_usd / (a.budget_usd || 10)) * 100));
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-weight:600;font-size:.9em"><code>${escHtml(a.agent_id)}</code></div>
+          <div style="font-size:.82em;color:${col};font-weight:600">${escHtml(a.status)}</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:4px;height:6px;margin-bottom:6px">
+          <div style="background:${col};width:${pct}%;height:100%;border-radius:4px;transition:width .3s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:.78em;color:var(--text-muted)">
+          <span>$${(a.spent_usd||0).toFixed(4)} spent</span>
+          <span>Budget: $${(a.budget_usd||10).toFixed(2)}</span>
+          <span>${pct}%</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadBudget', e); }
+}
+
+async function setBudget() {
+  const agent_id = document.getElementById('bud-agent-id').value.trim();
+  const monthly_budget_usd = parseFloat(document.getElementById('bud-amount').value);
+  if (!agent_id || isNaN(monthly_budget_usd)) { toast('Fill in agent ID and budget amount', 'error'); return; }
+  const r = await api('/api/budget/set', {method:'POST', body:{agent_id, monthly_budget_usd}});
+  if (r.ok) { toast(`✅ Budget set: ${agent_id} = $${monthly_budget_usd}/month`); loadBudget(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function resetBudget() {
+  const agent_id = document.getElementById('bud-agent-id').value.trim();
+  if (!agent_id) { toast('Enter agent ID to reset', 'error'); return; }
+  if (!confirm(`Reset usage for ${agent_id}?`)) return;
+  const r = await api(`/api/budget/reset/${encodeURIComponent(agent_id)}`, {method:'POST'});
+  if (r.ok) { toast(`↺ Usage reset for ${agent_id}`); loadBudget(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function recordBudgetUsage() {
+  const agent_id = document.getElementById('bud-rec-agent').value.trim();
+  const model = document.getElementById('bud-rec-model').value.trim() || 'gpt-4o';
+  const input_tokens = parseInt(document.getElementById('bud-rec-in').value) || 0;
+  const output_tokens = parseInt(document.getElementById('bud-rec-out').value) || 0;
+  if (!agent_id) { toast('Enter agent ID', 'error'); return; }
+  const r = await api('/api/budget/record', {method:'POST', body:{agent_id, model, input_tokens, output_tokens}});
+  if (r.ok) { toast(`📥 Usage recorded for ${agent_id}`); loadBudget(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── ORG CHART TAB ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadOrg() {
+  try {
+    const d = await api('/api/org/chart');
+    const roles = d.roles || [];
+    const el = document.getElementById('org-chart-tree');
+    if (!roles.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">🏢</div><p>No roles defined yet.</p></div>';
+      return;
+    }
+    // Build tree map
+    const byId = {};
+    roles.forEach(r => { byId[r.role_id] = r; });
+    const roots = roles.filter(r => !r.reports_to);
+    function renderRole(role, depth=0) {
+      const indent = depth * 20;
+      const children = roles.filter(r => r.reports_to === role.role_id);
+      return `<div style="margin-left:${indent}px;border-left:${depth>0?'2px solid var(--border)':'none'};padding-left:${depth>0?'10px':'0'};margin-bottom:8px">
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:600;font-size:.9em">${escHtml(role.title)}</div>
+            <div style="font-size:.78em;color:var(--text-muted)"><code>${escHtml(role.role_id)}</code>${role.agent_id ? ` → <span style="color:var(--primary)">${escHtml(role.agent_id)}</span>` : ' <em>unassigned</em>'}</div>
+            ${role.description ? `<div style="font-size:.77em;color:var(--text-secondary);margin-top:3px">${escHtml(role.description)}</div>` : ''}
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="deleteOrgRole('${jsEsc(role.role_id)}')">🗑</button>
+        </div>
+        ${children.map(c => renderRole(c, depth+1)).join('')}
+      </div>`;
+    }
+    el.innerHTML = roots.map(r => renderRole(r)).join('') ||
+      '<div class="empty"><p>Add roles using the form →</p></div>';
+  } catch(e) { console.warn('loadOrg', e); }
+}
+
+async function upsertOrgRole() {
+  const role_id = document.getElementById('org-role-id').value.trim();
+  const title   = document.getElementById('org-role-title').value.trim();
+  const description = document.getElementById('org-role-desc').value.trim();
+  const reports_to = document.getElementById('org-role-reports').value.trim() || null;
+  const agent_id = document.getElementById('org-role-agent').value.trim() || null;
+  if (!role_id || !title) { toast('Role ID and Title are required', 'error'); return; }
+  const r = await api('/api/org/roles', {method:'POST', body:{role_id, title, description, reports_to, agent_id}});
+  if (r.ok) { toast(`✅ Role '${title}' saved`); loadOrg(); }
+  else toast(r.detail || 'Error saving role', 'error');
+}
+
+async function deleteOrgRole(role_id) {
+  if (!confirm(`Delete role '${role_id}'?`)) return;
+  const r = await api(`/api/org/roles/${encodeURIComponent(role_id)}`, {method:'DELETE'});
+  if (r.ok) { toast('🗑 Role deleted'); loadOrg(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function delegateOrgTask() {
+  const from_role = document.getElementById('org-del-from').value.trim();
+  const to_role   = document.getElementById('org-del-to').value.trim();
+  const task      = document.getElementById('org-del-task').value.trim();
+  if (!from_role || !to_role || !task) { toast('Fill in all delegation fields', 'error'); return; }
+  const r = await api('/api/org/delegate', {method:'POST', body:{from_role, to_role, task}});
+  if (r.ok) { toast(`✅ Delegated from ${from_role} → ${to_role}`); loadOrg(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function loadOrgAdapters() {
+  try {
+    const adapters = await api('/api/org/adapters') || [];
+    const el = document.getElementById('org-adapters-list');
+    if (!Array.isArray(adapters) || !adapters.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">🔌</div><p>No adapters. Register a BYOA agent below.</p></div>';
+      return;
+    }
+    el.innerHTML = adapters.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <span style="font-weight:600">${escHtml(a.name)}</span>
+        <code style="font-size:.75em;margin-left:6px;color:var(--text-muted)">${escHtml(a.adapter_id)}</code>
+        <span style="font-size:.73em;margin-left:6px;color:var(--text-muted)">${escHtml(a.type)}</span>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="deregisterOrgAdapter('${jsEsc(a.adapter_id)}')">🗑</button>
+    </div>`).join('');
+  } catch(e) { console.warn('loadOrgAdapters', e); }
+}
+
+async function registerOrgAdapter() {
+  const adapter_id = document.getElementById('org-adp-id').value.trim();
+  const name = document.getElementById('org-adp-name').value.trim();
+  if (!adapter_id || !name) { toast('Adapter ID and Name required', 'error'); return; }
+  const r = await api('/api/org/adapters', {method:'POST', body:{adapter_id, name}});
+  if (r.ok) { toast('🔌 Adapter registered'); loadOrgAdapters(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deregisterOrgAdapter(adapter_id) {
+  if (!confirm(`Remove adapter '${adapter_id}'?`)) return;
+  const r = await api(`/api/org/adapters/${encodeURIComponent(adapter_id)}`, {method:'DELETE'});
+  if (r.ok) { toast('Adapter removed'); loadOrgAdapters(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── GOALS TAB ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadGoals() {
+  try {
+    const [company, projects] = await Promise.all([
+      api('/api/goals/company'),
+      api('/api/goals/projects'),
+    ]);
+    const mission = company.mission || '';
+    const vision  = company.vision  || '';
+    document.getElementById('goals-mission-display').innerHTML = mission
+      ? `<div style="font-weight:600;color:var(--text)">${escHtml(mission)}</div>${vision ? `<div style="font-size:.82em;color:var(--text-muted);margin-top:4px">${escHtml(vision)}</div>` : ''}`
+      : '<em style="color:var(--text-muted)">No mission set.</em>';
+    document.getElementById('goals-mission-input').value = mission;
+    document.getElementById('goals-vision-input').value = vision;
+    const el = document.getElementById('goals-projects-list');
+    const plist = Array.isArray(projects) ? projects : (projects.projects || []);
+    if (!plist.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📁</div><p>No projects yet.</p></div>';
+      return;
+    }
+    const pri = {high:'🔴', medium:'🟡', low:'🟢'};
+    el.innerHTML = plist.map(p => `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.9em">${pri[p.priority]||'🟡'} ${escHtml(p.name)}</div>
+          <div style="font-size:.82em;color:var(--text-secondary);margin:3px 0">${escHtml(p.goal)}</div>
+          ${p.description ? `<div style="font-size:.77em;color:var(--text-muted)">${escHtml(p.description)}</div>` : ''}
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="deleteGoalProject('${jsEsc(p.project_id)}')">🗑</button>
+      </div>
+    </div>`).join('');
+  } catch(e) { console.warn('loadGoals', e); }
+}
+
+async function saveCompanyMission() {
+  const mission = document.getElementById('goals-mission-input').value.trim();
+  const vision = document.getElementById('goals-vision-input').value.trim();
+  if (!mission) { toast('Mission is required', 'error'); return; }
+  const r = await api('/api/goals/company', {method:'POST', body:{mission, vision}});
+  if (r.ok) { toast('🎯 Mission saved!'); loadGoals(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function addGoalProject() {
+  const name = document.getElementById('goals-proj-name').value.trim();
+  const goal = document.getElementById('goals-proj-goal').value.trim();
+  const description = document.getElementById('goals-proj-desc').value.trim();
+  const priority = document.getElementById('goals-proj-priority').value;
+  if (!name || !goal) { toast('Name and Goal are required', 'error'); return; }
+  const r = await api('/api/goals/projects', {method:'POST', body:{name, goal, description, priority}});
+  if (r.ok) { toast('📁 Project added'); loadGoals(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deleteGoalProject(project_id) {
+  if (!confirm('Delete this project?')) return;
+  const r = await api(`/api/goals/projects/${encodeURIComponent(project_id)}`, {method:'DELETE'});
+  if (r.ok) { toast('🗑 Project deleted'); loadGoals(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function sendCEOMessage() {
+  const input = document.getElementById('ceo-chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+  const btn = document.getElementById('ceo-send-btn');
+  const log = document.getElementById('ceo-chat-log');
+  const status = document.getElementById('ceo-chat-status');
+  btn.disabled = true; btn.textContent = '⏳ Sending…';
+  status.textContent = 'Routing to CEO agent…';
+  input.value = '';
+  // Append user message
+  log.innerHTML += `<div style="margin-bottom:8px"><span style="color:#f59e0b;font-weight:600">Board → CEO:</span> ${escHtml(message)}</div>`;
+  log.scrollTop = log.scrollHeight;
+  try {
+    const r = await api('/api/ceo/chat', {method:'POST', body:{message}});
+    const response = r.response || r.detail || 'No response';
+    log.innerHTML += `<div style="margin-bottom:12px;padding-left:12px;border-left:2px solid #f59e0b"><span style="color:#34d399;font-weight:600">CEO → Board:</span><div style="margin-top:3px;white-space:pre-wrap">${escHtml(response)}</div>${r.ticket_id ? `<div style="font-size:.75em;color:var(--text-muted);margin-top:3px">Ticket created: <code>${escHtml(r.ticket_id)}</code></div>` : ''}</div>`;
+    log.scrollTop = log.scrollHeight;
+    status.textContent = r.goal_context_injected ? '✓ Goal context injected' : '';
+  } catch(e) {
+    log.innerHTML += `<div style="color:#ef4444">Error: ${escHtml(String(e))}</div>`;
+  }
+  btn.disabled = false; btn.textContent = '📨 Send';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── TICKETS TAB ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _activeTicketId = null;
+
+async function loadTickets() {
+  try {
+    const status = document.getElementById('tkt-filter-status').value;
+    const params = status ? `?status=${status}` : '';
+    const data = await api('/api/tickets' + params);
+    const tickets = Array.isArray(data) ? data : [];
+    const total = tickets.length;
+    const open = tickets.filter(t => t.status === 'open').length;
+    const inprog = tickets.filter(t => t.status === 'in_progress').length;
+    const done = tickets.filter(t => t.status === 'done').length;
+    document.getElementById('tkt-total').textContent = total;
+    document.getElementById('tkt-open').textContent = open;
+    document.getElementById('tkt-inprog').textContent = inprog;
+    document.getElementById('tkt-done').textContent = done;
+    const el = document.getElementById('tickets-list');
+    if (!tickets.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">🎫</div><p>No tickets. Create one →</p></div>';
+      return;
+    }
+    const statusIcon = {open:'🟡', in_progress:'🔵', blocked:'🔴', done:'✅', cancelled:'⛔'};
+    const priColor = {high:'#ef4444', medium:'#f59e0b', low:'#10b981'};
+    el.innerHTML = tickets.map(t => {
+      const icon = statusIcon[t.status] || '🎫';
+      const pc = priColor[t.priority] || '#f59e0b';
+      const ts = (t.created_at||'').slice(0,16).replace('T',' ');
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;cursor:pointer;background:${_activeTicketId===t.ticket_id?'var(--surface2)':'transparent'}" onclick="openTicket('${jsEsc(t.ticket_id)}')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:.88em;font-weight:600">${icon} ${escHtml(t.title)}</div>
+            <div style="font-size:.77em;color:var(--text-muted);margin-top:3px">
+              <code>${escHtml(t.ticket_id)}</code>
+              ${t.agent_id ? ` · ${escHtml(t.agent_id)}` : ''}
+              · <span style="color:${pc}">${escHtml(t.priority||'medium')}</span>
+              · ${ts}
+            </div>
+          </div>
+          <span style="font-size:.78em;color:var(--text-muted)">${escHtml(t.status)}</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadTickets', e); }
+}
+
+async function openTicket(ticket_id) {
+  _activeTicketId = ticket_id;
+  const card = document.getElementById('tkt-detail-card');
+  card.style.display = 'block';
+  card.scrollIntoView({behavior:'smooth', block:'start'});
+  try {
+    const t = await api(`/api/tickets/${ticket_id}`);
+    const statusOpts = ['open','in_progress','blocked','done','cancelled']
+      .map(s => `<option value="${s}"${t.status===s?' selected':''}>${s}</option>`).join('');
+    const thread = (t.thread||[]);
+    document.getElementById('tkt-detail-body').innerHTML = `
+      <div style="margin-bottom:10px">
+        <div style="font-weight:700;font-size:.95em;margin-bottom:6px">${escHtml(t.title)}</div>
+        <div style="font-size:.82em;color:var(--text-muted);margin-bottom:8px">ID: <code>${escHtml(t.ticket_id)}</code> · Created: ${(t.created_at||'').slice(0,16)}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="tkt-status-sel" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:5px 8px;font-size:.82em">${statusOpts}</select>
+          <button class="btn btn-primary btn-sm" onclick="updateTicketStatus('${jsEsc(ticket_id)}')">💾 Save Status</button>
+        </div>
+      </div>
+      ${t.description ? `<div style="font-size:.84em;color:var(--text-secondary);margin-bottom:10px">${escHtml(t.description)}</div>` : ''}
+      <div style="font-size:.82em;font-weight:600;margin-bottom:6px;color:var(--text-muted)">Thread (${thread.length})</div>
+      <div style="max-height:220px;overflow-y:auto;background:var(--bg-deep,#0d1117);border-radius:6px;padding:10px;font-size:.8em;line-height:1.6">
+        ${thread.length ? thread.map(c => `<div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <span style="font-weight:600;color:var(--primary)">${escHtml(c.author||'user')}</span>
+          <span style="color:var(--text-muted);font-size:.78em;margin-left:6px">${(c.created_at||'').slice(0,16)}</span>
+          <div style="margin-top:3px;white-space:pre-wrap">${escHtml(c.body||'')}</div>
+        </div>`).join('') : '<span style="color:var(--text-muted)">No comments yet.</span>'}
+      </div>`;
+    document.getElementById('tkt-comment-input').dataset.ticketId = ticket_id;
+    loadTickets();
+  } catch(e) { console.warn('openTicket', e); }
+}
+
+async function createTicket() {
+  const title = document.getElementById('tkt-new-title').value.trim();
+  const description = document.getElementById('tkt-new-desc').value.trim();
+  const priority = document.getElementById('tkt-new-priority').value;
+  const agent_id = document.getElementById('tkt-new-agent').value.trim() || null;
+  if (!title) { toast('Ticket title is required', 'error'); return; }
+  const r = await api('/api/tickets', {method:'POST', body:{title, description, priority, agent_id, created_by:'user'}});
+  if (r.ok || r.ticket_id) {
+    toast('🎫 Ticket created!');
+    document.getElementById('tkt-new-title').value = '';
+    document.getElementById('tkt-new-desc').value = '';
+    loadTickets();
+  } else toast(r.detail || 'Error', 'error');
+}
+
+async function updateTicketStatus(ticket_id) {
+  const status = document.getElementById('tkt-status-sel').value;
+  const r = await api(`/api/tickets/${ticket_id}`, {method:'PATCH', body:{status, updated_by:'user'}});
+  if (r.ok || r.ticket_id) { toast(`✅ Status → ${status}`); loadTickets(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function addTicketComment() {
+  const input = document.getElementById('tkt-comment-input');
+  const ticket_id = _activeTicketId || input.dataset.ticketId;
+  const body = input.value.trim();
+  if (!ticket_id) { toast('Select a ticket first', 'error'); return; }
+  if (!body) { toast('Write a comment', 'error'); return; }
+  const r = await api(`/api/tickets/${ticket_id}/comment`, {method:'POST', body:{body, author:'user'}});
+  if (r.ok || r.comment_id) { toast('💬 Comment posted'); input.value=''; openTicket(ticket_id); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function loadTicketAudit() {
+  try {
+    const events = await api('/api/tickets/audit/log?limit=30') || [];
+    const el = document.getElementById('tickets-audit');
+    if (!Array.isArray(events) || !events.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No audit events yet.</p></div>';
+      return;
+    }
+    const actionIcon = {created:'🆕', status_changed:'🔄', comment_added:'💬'};
+    el.innerHTML = events.slice().reverse().slice(0,30).map(e => {
+      const icon = actionIcon[e.action] || '📋';
+      const ts = (e.ts||'').slice(0,16).replace('T',' ');
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:.82em">
+        <span>${icon}</span>
+        <div style="flex:1"><code>${escHtml(e.ticket_id||'?')}</code> ${escHtml(e.action||'')} ${e.field ? `· ${escHtml(e.field)}: ${escHtml(String(e.old_value||''))}→${escHtml(String(e.new_value||''))}` : ''}</div>
+        <span style="font-size:.74em;color:var(--text-muted)">${ts}</span>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadTicketAudit', e); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── BOARDROOM TAB (GOVERNANCE) ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadBoardroom() {
+  try {
+    const [pending, audit] = await Promise.all([
+      api('/api/governance/pending'),
+      api('/api/governance/audit?limit=30'),
+    ]);
+    const pList = Array.isArray(pending) ? pending : [];
+    const aList = Array.isArray(audit) ? audit : [];
+    const approved = aList.filter(e => e.state==='approved').length;
+    const rejected = aList.filter(e => e.state==='rejected').length;
+    document.getElementById('gov-pending').textContent = pList.length;
+    document.getElementById('gov-approved').textContent = approved;
+    document.getElementById('gov-rejected').textContent = rejected;
+    document.getElementById('gov-total').textContent = aList.length;
+    // Banner
+    const banner = document.getElementById('gov-pending-banner');
+    if (pList.length > 0) {
+      banner.style.display = 'flex';
+      banner.innerHTML = `<span style="font-size:1.2em">⚠️</span> <strong>${pList.length} action${pList.length!==1?'s':''} pending board approval.</strong> Review below.`;
+    } else {
+      banner.style.display = 'none';
+    }
+    // Pending list
+    const pEl = document.getElementById('gov-pending-list');
+    if (!pList.length) {
+      pEl.innerHTML = '<div class="empty"><div class="icon">✅</div><p>No pending approvals.</p></div>';
+    } else {
+      const riskCol = {critical:'#ef4444', high:'#ef4444', medium:'#f59e0b', low:'#10b981'};
+      pEl.innerHTML = pList.map(a => {
+        const col = riskCol[a.risk_level] || '#f59e0b';
+        return `<div style="border:1px solid ${col};border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;background:var(--surface2)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1">
+              <div style="font-size:.88em;font-weight:600">${escHtml(a.action)}</div>
+              <div style="font-size:.8em;color:var(--text-secondary);margin:3px 0">${escHtml(a.description||'')}</div>
+              <div style="font-size:.77em;color:var(--text-muted)">Agent: <code>${escHtml(a.agent_id||'?')}</code> · Risk: <span style="color:${col};font-weight:600">${escHtml(a.risk_level||'medium')}</span></div>
+            </div>
+            <div style="display:flex;gap:5px;flex-shrink:0">
+              <button class="btn btn-success btn-sm" onclick="govApprove('${jsEsc(a.action_id)}')">✅ Approve</button>
+              <button class="btn btn-danger btn-sm" onclick="govReject('${jsEsc(a.action_id)}')">🚫 Reject</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+    // Audit list
+    const aEl = document.getElementById('gov-audit-list');
+    const stateIcon = {approved:'✅', rejected:'🚫', auto_approved:'✔️', pending:'⏳'};
+    aEl.innerHTML = aList.slice().reverse().slice(0,20).map(e => {
+      const icon = stateIcon[e.state] || '📋';
+      const ts = (e.decided_at||e.requested_at||'').slice(0,16).replace('T',' ');
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:.82em">
+        <span>${icon}</span>
+        <div style="flex:1"><code>${escHtml(e.agent_id||'?')}</code> · ${escHtml(e.action||'')} <span style="color:var(--text-muted)">· ${escHtml(e.state||'')}</span></div>
+        <span style="font-size:.74em;color:var(--text-muted)">${ts}</span>
+      </div>`;
+    }).join('') || '<div class="empty"><div class="icon">📋</div><p>No audit events.</p></div>';
+  } catch(e) { console.warn('loadBoardroom', e); }
+}
+
+async function govApprove(action_id) {
+  const r = await api(`/api/governance/${encodeURIComponent(action_id)}/approve`, {method:'POST', body:{decided_by:'board'}});
+  if (r.ok || r.action_id) { toast('✅ Action approved'); loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govReject(action_id) {
+  const note = prompt('Reason for rejection (optional):') || '';
+  const r = await api(`/api/governance/${encodeURIComponent(action_id)}/reject`, {method:'POST', body:{decided_by:'board', note}});
+  if (r.ok || r.action_id) { toast('🚫 Action rejected', 'error'); loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govPauseAgent() {
+  const agent_id = document.getElementById('gov-agent-ctrl-id').value.trim();
+  if (!agent_id) { toast('Enter agent ID', 'error'); return; }
+  const reason = prompt(`Reason for pausing ${agent_id}?`) || '';
+  const r = await api(`/api/governance/pause/${encodeURIComponent(agent_id)}`, {method:'POST', body:{reason}});
+  if (r.ok || r.agent_id) { toast(`⏸ ${agent_id} paused`); document.getElementById('gov-agent-status-display').textContent = `${agent_id} is now paused.`; loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govResumeAgent() {
+  const agent_id = document.getElementById('gov-agent-ctrl-id').value.trim();
+  if (!agent_id) { toast('Enter agent ID', 'error'); return; }
+  const r = await api(`/api/governance/resume/${encodeURIComponent(agent_id)}`, {method:'POST', body:{reason:'Board decision'}});
+  if (r.ok || r.agent_id) { toast(`▶️ ${agent_id} resumed`); document.getElementById('gov-agent-status-display').textContent = `${agent_id} is now active.`; loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govTerminateAgent() {
+  const agent_id = document.getElementById('gov-agent-ctrl-id').value.trim();
+  if (!agent_id) { toast('Enter agent ID', 'error'); return; }
+  if (!confirm(`Permanently terminate ${agent_id}? This cannot be undone.`)) return;
+  const reason = prompt('Reason for termination:') || 'Board decision';
+  const r = await api(`/api/governance/terminate/${encodeURIComponent(agent_id)}`, {method:'POST', body:{reason}});
+  if (r.ok || r.agent_id) { toast(`⛔ ${agent_id} terminated`, 'error'); document.getElementById('gov-agent-status-display').textContent = `${agent_id} has been terminated.`; loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govTestAction() {
+  const agent_id = document.getElementById('gov-test-agent').value.trim();
+  const action = document.getElementById('gov-test-action').value.trim();
+  const description = document.getElementById('gov-test-desc').value.trim();
+  const risk_level = document.getElementById('gov-test-risk').value;
+  if (!agent_id || !action) { toast('Agent ID and Action are required', 'error'); return; }
+  const r = await api('/api/governance/request', {method:'POST', body:{agent_id, action, description, risk_level}});
+  if (r.ok || r.action_id) {
+    const state = r.state || '?';
+    toast(`🧪 Action submitted — state: ${state}`, state==='auto_approved'?'success':'warning');
+    loadBoardroom();
+  } else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── COMPANIES TAB ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadCompanies() {
+  try {
+    const [companies, active] = await Promise.all([
+      api('/api/companies'),
+      api('/api/companies/active'),
+    ]);
+    const list = Array.isArray(companies) ? companies : [];
+    const banner = document.getElementById('companies-active-banner');
+    if (active && active.name) {
+      banner.style.display = 'block';
+      banner.innerHTML = `🏗️ Active company: <strong>${escHtml(active.name)}</strong> <code style="font-size:.8em">${escHtml(active.company_id)}</code>`;
+    } else {
+      banner.style.display = 'none';
+    }
+    const el = document.getElementById('companies-list');
+    if (!list.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">🏗️</div><p>No companies yet.</p></div>';
+      return;
+    }
+    el.innerHTML = list.map(c => {
+      const isActive = active && c.company_id === active.company_id;
+      return `<div style="border:1px solid ${isActive?'var(--success)':'var(--border)'};border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;background:${isActive?'rgba(52,211,153,.05)':'transparent'}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:600">${escHtml(c.name)} ${isActive?'<span style="font-size:.73em;color:var(--success);margin-left:6px">● ACTIVE</span>':''}</div>
+            <div style="font-size:.78em;color:var(--text-muted)"><code>${escHtml(c.company_id)}</code>${c.mission ? ` · ${escHtml(c.mission.slice(0,60))}${c.mission.length>60?'…':''}` : ''}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            ${!isActive ? `<button class="btn btn-primary btn-sm" onclick="switchCompany('${jsEsc(c.company_id)}')">⚡ Switch</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="exportCompanyById('${jsEsc(c.company_id)}')">📤</button>
+            ${!isActive ? `<button class="btn btn-danger btn-sm" onclick="deleteCompany('${jsEsc(c.company_id)}')">🗑</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadCompanies', e); }
+}
+
+async function createCompany() {
+  const name = document.getElementById('co-new-name').value.trim();
+  const mission = document.getElementById('co-new-mission').value.trim();
+  const description = document.getElementById('co-new-desc').value.trim();
+  if (!name) { toast('Company name is required', 'error'); return; }
+  const r = await api('/api/companies', {method:'POST', body:{name, mission, description}});
+  if (r.ok || r.company_id) { toast(`🏗️ Company '${name}' created!`); loadCompanies(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function switchCompany(company_id) {
+  const r = await api('/api/companies/switch', {method:'POST', body:{company_id}});
+  if (r.ok || r.company_id) { toast(`⚡ Switched to ${company_id}`); loadCompanies(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deleteCompany(company_id) {
+  if (!confirm(`Delete company '${company_id}'? This is irreversible.`)) return;
+  const r = await api(`/api/companies/${encodeURIComponent(company_id)}`, {method:'DELETE'});
+  if (r.ok) { toast('🗑 Company deleted'); loadCompanies(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function exportCompany() {
+  const company_id = document.getElementById('co-export-id').value.trim();
+  if (!company_id) { toast('Enter company ID to export', 'error'); return; }
+  exportCompanyById(company_id);
+}
+
+async function exportCompanyById(company_id) {
+  const r = await api(`/api/companies/${encodeURIComponent(company_id)}/export`);
+  if (r.export_version || r.company) {
+    const blob = new Blob([JSON.stringify(r, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `company-${company_id}.json`;
+    a.click();
+    toast('📤 Exported!');
+  } else toast(r.detail || 'Error exporting', 'error');
+}
+
+async function importCompany() {
+  const raw = document.getElementById('co-import-json').value.trim();
+  if (!raw) { toast('Paste JSON template to import', 'error'); return; }
+  let template;
+  try { template = JSON.parse(raw); } catch { toast('Invalid JSON', 'error'); return; }
+  const r = await api('/api/companies/import', {method:'POST', body:template});
+  if (r.ok || r.company_id) { toast(`📥 Imported: ${r.name||r.company_id}`); loadCompanies(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── ARTIFACTS TAB ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadArtifacts() {
+  try {
+    const type = document.getElementById('art-filter-type').value;
+    const params = type ? `?artifact_type=${type}` : '';
+    const data = await api('/api/artifacts' + params);
+    const arts = Array.isArray(data) ? data : [];
+    document.getElementById('art-total').textContent = arts.length;
+    document.getElementById('art-drafts').textContent = arts.filter(a=>a.status==='draft').length;
+    document.getElementById('art-deployed').textContent = arts.filter(a=>a.status==='deployed').length;
+    document.getElementById('art-approved').textContent = arts.filter(a=>a.status==='approved').length;
+    const el = document.getElementById('artifacts-list');
+    if (!arts.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📦</div><p>No artifacts yet.</p></div>';
+      return;
+    }
+    const typeIcon = {code:'💻', report:'📊', campaign:'📣', business_plan:'📋', config:'⚙️', other:'📦'};
+    const statCol = {draft:'var(--text-muted)', review:'#f59e0b', approved:'#34d399', deployed:'#38bdf8', archived:'#6b7280'};
+    el.innerHTML = arts.map(a => {
+      const icon = typeIcon[a.type] || '📦';
+      const sc = statCol[a.status] || 'var(--text-muted)';
+      const ts = (a.updated_at||'').slice(0,16).replace('T',' ');
+      const kb = a.content_length ? `${(a.content_length/1024).toFixed(1)}KB` : '';
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;cursor:pointer" onclick="openArtifact('${jsEsc(a.artifact_id)}')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:.88em;font-weight:600">${icon} ${escHtml(a.title)}</div>
+            <div style="font-size:.77em;color:var(--text-muted);margin-top:2px"><code>${escHtml(a.artifact_id)}</code> · ${escHtml(a.type)} · v${a.version||1} · ${kb}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:.78em;color:${sc};font-weight:600">${escHtml(a.status)}</div>
+            <div style="font-size:.72em;color:var(--text-muted)">${ts}</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadArtifacts', e); }
+}
+
+async function openArtifact(artifact_id) {
+  const card = document.getElementById('art-detail-card');
+  card.style.display = 'block';
+  card.scrollIntoView({behavior:'smooth'});
+  try {
+    const a = await api(`/api/artifacts/${artifact_id}`);
+    const statusOpts = ['draft','review','approved','archived']
+      .map(s => `<option value="${s}"${a.status===s?' selected':''}>${s}</option>`).join('');
+    document.getElementById('art-detail-body').innerHTML = `
+      <div style="margin-bottom:10px">
+        <div style="font-weight:700">${escHtml(a.title)}</div>
+        <div style="font-size:.8em;color:var(--text-muted);margin-bottom:8px"><code>${escHtml(a.artifact_id)}</code> · v${a.version||1} · ${escHtml(a.type)} · ${escHtml(a.status)}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="art-status-sel" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:5px 8px;font-size:.82em">${statusOpts}</select>
+          <button class="btn btn-primary btn-sm" onclick="updateArtifactStatus('${jsEsc(artifact_id)}')">💾 Status</button>
+          <button class="btn btn-success btn-sm" onclick="deployArtifact('${jsEsc(artifact_id)}')">🚀 Deploy</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteArtifact('${jsEsc(artifact_id)}')">🗑 Delete</button>
+        </div>
+      </div>
+      <div style="background:var(--bg-deep,#0d1117);border-radius:6px;padding:12px;max-height:300px;overflow-y:auto">
+        <pre style="font-size:.78em;color:#c9d1d9;margin:0;white-space:pre-wrap;word-break:break-word">${escHtml(a.content||'')}</pre>
+      </div>`;
+  } catch(e) { console.warn('openArtifact', e); }
+}
+
+async function createArtifact() {
+  const title = document.getElementById('art-new-title').value.trim();
+  const type = document.getElementById('art-new-type').value;
+  const content = document.getElementById('art-new-content').value.trim();
+  if (!title || !content) { toast('Title and content are required', 'error'); return; }
+  const r = await api('/api/artifacts', {method:'POST', body:{title, artifact_type:type, content, agent_id:'user'}});
+  if (r.ok || r.artifact_id) {
+    toast('📦 Artifact created!');
+    document.getElementById('art-new-title').value = '';
+    document.getElementById('art-new-content').value = '';
+    loadArtifacts();
+  } else toast(r.detail || 'Error', 'error');
+}
+
+async function updateArtifactStatus(artifact_id) {
+  const status = document.getElementById('art-status-sel').value;
+  const r = await api(`/api/artifacts/${artifact_id}`, {method:'PATCH', body:{status}});
+  if (r.ok || r.artifact_id) { toast(`✅ Status → ${status}`); loadArtifacts(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deployArtifact(artifact_id) {
+  const notes = prompt('Deployment notes (optional):') || '';
+  const r = await api(`/api/artifacts/${artifact_id}/deploy`, {method:'POST', body:{deploy_notes:notes}});
+  if (r.ok || r.artifact_id) { toast('🚀 Artifact deployed!'); openArtifact(artifact_id); loadArtifacts(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deleteArtifact(artifact_id) {
+  if (!confirm('Delete this artifact?')) return;
+  const r = await api(`/api/artifacts/${artifact_id}`, {method:'DELETE'});
+  if (r.ok) { document.getElementById('art-detail-card').style.display='none'; toast('🗑 Artifact deleted'); loadArtifacts(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── SESSIONS TAB ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadSessions() {
+  try {
+    const data = await api('/api/sessions');
+    const sessions = Array.isArray(data) ? data : (data.sessions || []);
+    document.getElementById('ses-total').textContent = sessions.length;
+    document.getElementById('ses-active').textContent = sessions.filter(s=>s.status==='active').length;
+    document.getElementById('ses-paused').textContent = sessions.filter(s=>s.status==='paused').length;
+    document.getElementById('ses-completed').textContent = sessions.filter(s=>s.status==='completed').length;
+    const el = document.getElementById('sessions-list');
+    if (!sessions.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">💾</div><p>No sessions. Agents create sessions automatically when tasks start.</p></div>';
+      return;
+    }
+    const statusIcon = {active:'▶️', paused:'⏸', completed:'✅', abandoned:'🗑'};
+    el.innerHTML = sessions.map(s => {
+      const icon = statusIcon[s.status] || '💾';
+      const ts = (s.updated_at||'').slice(0,16).replace('T',' ');
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;cursor:pointer" onclick="openSession('${jsEsc(s.session_id)}')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:.88em;font-weight:600">${icon} ${escHtml(s.title||s.session_id)}</div>
+            <div style="font-size:.77em;color:var(--text-muted);margin-top:2px"><code>${escHtml(s.session_id)}</code> · ${escHtml(s.agent_id||'?')}</div>
+          </div>
+          <div style="font-size:.77em;color:var(--text-muted)">${ts}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadSessions', e); }
+}
+
+async function createSession() {
+  const agent_id = document.getElementById('ses-new-agent').value.trim();
+  const title = document.getElementById('ses-new-title').value.trim();
+  const ctxRaw = document.getElementById('ses-new-ctx').value.trim();
+  if (!agent_id) { toast('Agent ID is required', 'error'); return; }
+  let context = {};
+  if (ctxRaw) { try { context = JSON.parse(ctxRaw); } catch { toast('Invalid JSON context', 'error'); return; } }
+  const r = await api('/api/sessions', {method:'POST', body:{agent_id, title, context}});
+  if (r.ok || r.session_id) { toast('💾 Session created!'); loadSessions(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function openSession(session_id) {
+  const card = document.getElementById('ses-detail-card');
+  try {
+    const s = await api(`/api/sessions/${session_id}`);
+    const checkpoints = s.checkpoints || [];
+    const ctx = JSON.stringify(s.context||{}, null, 2);
+    document.getElementById('ses-detail-body').innerHTML = `
+      <div style="margin-bottom:10px">
+        <div style="font-weight:700">${escHtml(s.title||s.session_id)}</div>
+        <div style="font-size:.8em;color:var(--text-muted);margin-bottom:8px"><code>${escHtml(s.session_id)}</code> · Agent: <code>${escHtml(s.agent_id)}</code> · Status: ${escHtml(s.status)}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-success btn-sm" onclick="resumeSession('${jsEsc(session_id)}')">▶️ Resume</button>
+          <button class="btn btn-warning btn-sm" onclick="closeSession('${jsEsc(session_id)}')">✅ Close</button>
+          <button class="btn btn-ghost btn-sm" onclick="saveCheckpoint('${jsEsc(session_id)}')">📌 Checkpoint</button>
+        </div>
+      </div>
+      <div style="font-size:.82em;font-weight:600;margin-bottom:6px">Context</div>
+      <pre style="background:var(--bg-deep,#0d1117);border-radius:6px;padding:10px;font-size:.77em;color:#c9d1d9;max-height:180px;overflow:auto;white-space:pre-wrap">${escHtml(ctx)}</pre>
+      ${checkpoints.length ? `<div style="font-size:.82em;font-weight:600;margin:10px 0 6px">Checkpoints (${checkpoints.length})</div>
+      ${checkpoints.map(cp => `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:.8em">
+        <span>📌 ${escHtml(cp.label)}</span>
+        <div style="display:flex;gap:5px">
+          <span style="color:var(--text-muted)">${(cp.created_at||'').slice(0,16)}</span>
+          <button class="btn btn-warning btn-sm" onclick="restoreCheckpoint('${jsEsc(session_id)}','${jsEsc(cp.checkpoint_id)}')">↩ Restore</button>
+        </div>
+      </div>`).join('')}` : ''}`;
+    card.scrollIntoView({behavior:'smooth'});
+  } catch(e) { console.warn('openSession', e); }
+}
+
+async function resumeSession(session_id) {
+  const r = await api(`/api/sessions/${session_id}/resume`, {method:'POST'});
+  if (r.ok || r.session_id) { toast('▶️ Session resumed'); loadSessions(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function closeSession(session_id) {
+  if (!confirm('Mark this session as completed?')) return;
+  const r = await api(`/api/sessions/${session_id}`, {method:'DELETE'});
+  if (r.ok) { toast('✅ Session closed'); loadSessions(); document.getElementById('ses-detail-body').innerHTML='<div class="empty"><p>Session closed.</p></div>'; }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function saveCheckpoint(session_id) {
+  const label = prompt('Checkpoint label (e.g. "After auth module"):');
+  if (!label) return;
+  const r = await api(`/api/sessions/${session_id}/checkpoint`, {method:'POST', body:{label}});
+  if (r.ok || r.checkpoint_id) { toast('📌 Checkpoint saved'); openSession(session_id); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function restoreCheckpoint(session_id, checkpoint_id) {
+  if (!confirm('Restore session context to this checkpoint? Current context will be overwritten.')) return;
+  const r = await api(`/api/sessions/${session_id}/restore/${checkpoint_id}`, {method:'POST'});
+  if (r.ok || r.session_id) { toast('↩ Checkpoint restored'); openSession(session_id); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// Auto-refresh new tabs every 30s when active
+setInterval(() => {
+  if (currentTab === 'budget') loadBudget();
+  if (currentTab === 'boardroom') loadBoardroom();
+  if (currentTab === 'tickets') loadTickets();
+  if (currentTab === 'sessions') loadSessions();
+}, 30000);
 </script>
 </body>
 </html>"""
@@ -9368,6 +10608,10 @@ def _load_module(name: str, agent_dir: str, global_var_name: str):
        to prevent two threads both observing a None cache and loading twice.
     The double-check inside the lock handles the race where two threads both
     pass the fast path check before either acquires the lock.
+
+    Module search order:
+    1. Sibling directory next to server.py (runtime/agents/<agent_dir>/)
+    2. AI_HOME/agents/<agent_dir>/  (for installed/deployed setups)
     """
     frame = globals()
     # Fast path: return if already loaded.
@@ -9380,10 +10624,15 @@ def _load_module(name: str, agent_dir: str, global_var_name: str):
         cached = frame.get(global_var_name)
         if cached is not None:
             return cached
-        path = AI_HOME / "agents" / agent_dir
-        path_str = str(path)
-        if path_str not in sys.path:
-            sys.path.insert(0, path_str)
+        # Prefer sibling directory (dev/deployed-from-source setups)
+        server_dir = Path(__file__).resolve().parent.parent  # runtime/agents/
+        candidate_paths = [
+            str(server_dir / agent_dir),         # runtime/agents/<dir>/
+            str(AI_HOME / "agents" / agent_dir), # ~/.ai-employee/agents/<dir>/
+        ]
+        for path_str in candidate_paths:
+            if Path(path_str).is_dir() and path_str not in sys.path:
+                sys.path.insert(0, path_str)
         mod = importlib.import_module(name)
         frame[global_var_name] = mod
         return mod
@@ -9500,7 +10749,7 @@ def org_register_adapter(payload: dict):
     """Register a BYOA (Bring Your Own Agent) adapter."""
     adapter_id = (payload.get("adapter_id") or "").strip()
     name = (payload.get("name") or "").strip()
-    adapter_type = (payload.get("type") or "http_webhook").strip()
+    adapter_type = (payload.get("type") or "http_webhook").strip().lower()
     if not adapter_id or not name:
         raise HTTPException(400, "adapter_id and name are required")
     try:
@@ -10016,6 +11265,292 @@ def companies_import(payload: dict):
         )
     except Exception as exc:
         raise HTTPException(500, str(exc))
+
+
+# ── Session Manager & Artifacts lazy-loaders ──────────────────────────────────
+
+_session_mod = None
+_artifacts_mod = None
+
+
+def _sessions():
+    return _load_module("session_manager", "session-manager", "_session_mod")
+
+
+def _arts():
+    return _load_module("artifacts", "artifacts", "_artifacts_mod")
+
+
+# ── Session Manager API ────────────────────────────────────────────────────────
+
+
+@app.get("/api/sessions")
+def sessions_list(agent_id: str = None, status: str = None, limit: int = 50):
+    """List all sessions, optionally filtered by agent or status."""
+    try:
+        return JSONResponse(_sessions().list_sessions(agent_id=agent_id, status=status, limit=limit))
+    except Exception as exc:
+        logger.warning("sessions list error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/sessions")
+def sessions_create(payload: dict):
+    """Create a new persistent session."""
+    agent_id = (payload.get("agent_id") or "").strip()
+    if not agent_id:
+        raise HTTPException(400, "agent_id is required")
+    try:
+        s = _sessions().create_session(
+            agent_id=agent_id,
+            title=payload.get("title", ""),
+            context=payload.get("context") or {},
+            ticket_id=payload.get("ticket_id"),
+            task_plan_id=payload.get("task_plan_id"),
+        )
+        return JSONResponse(s)
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/sessions/{session_id}")
+def sessions_get(session_id: str):
+    """Get session details including context and checkpoints."""
+    s = _sessions().get_session(session_id)
+    if s is None:
+        raise HTTPException(404, f"Session '{session_id}' not found")
+    return JSONResponse(s)
+
+
+@app.patch("/api/sessions/{session_id}")
+def sessions_update(session_id: str, payload: dict):
+    """Update session context or status."""
+    try:
+        return JSONResponse(_sessions().update_session(
+            session_id,
+            context=payload.get("context"),
+            status=payload.get("status"),
+            title=payload.get("title"),
+            merge_context=payload.get("merge_context", True),
+        ))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/sessions/{session_id}")
+def sessions_close(session_id: str):
+    """Close (complete) a session."""
+    ok = _sessions().close_session(session_id)
+    return JSONResponse({"ok": ok})
+
+
+@app.post("/api/sessions/{session_id}/resume")
+def sessions_resume(session_id: str):
+    """Resume a paused session."""
+    try:
+        return JSONResponse(_sessions().resume_session(session_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.post("/api/sessions/{session_id}/checkpoint")
+def sessions_save_checkpoint(session_id: str, payload: dict = None):
+    """Save a named checkpoint for rollback."""
+    if payload is None:
+        payload = {}
+    label = (payload.get("label") or "checkpoint").strip()
+    try:
+        cp = _sessions().save_checkpoint(session_id, label=label, snapshot=payload.get("snapshot"))
+        return JSONResponse(cp)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.get("/api/sessions/{session_id}/checkpoints")
+def sessions_list_checkpoints(session_id: str):
+    return JSONResponse(_sessions().list_checkpoints(session_id))
+
+
+@app.post("/api/sessions/{session_id}/restore/{checkpoint_id}")
+def sessions_restore_checkpoint(session_id: str, checkpoint_id: str):
+    """Restore session context to a checkpoint (rollback)."""
+    try:
+        return JSONResponse(_sessions().restore_checkpoint(session_id, checkpoint_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+# ── Artifacts API ──────────────────────────────────────────────────────────────
+
+
+@app.get("/api/artifacts")
+def artifacts_list(artifact_type: str = None, agent_id: str = None, status: str = None, limit: int = 50):
+    """List artifacts, optionally filtered."""
+    try:
+        return JSONResponse(_arts().list_artifacts(
+            artifact_type=artifact_type, agent_id=agent_id, status=status, limit=limit
+        ))
+    except Exception as exc:
+        logger.warning("artifacts list error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/artifacts")
+def artifacts_create(payload: dict):
+    """Create a new artifact."""
+    title = (payload.get("title") or "").strip()
+    content = (payload.get("content") or "").strip()
+    if not title or not content:
+        raise HTTPException(400, "title and content are required")
+    try:
+        return JSONResponse(_arts().create_artifact(
+            title=title,
+            content=content,
+            artifact_type=payload.get("artifact_type", "other"),
+            agent_id=payload.get("agent_id"),
+            ticket_id=payload.get("ticket_id"),
+            task_plan_id=payload.get("task_plan_id"),
+            metadata=payload.get("metadata") or {},
+        ))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/artifacts/{artifact_id}")
+def artifacts_get(artifact_id: str):
+    """Get artifact with full content."""
+    a = _arts().get_artifact(artifact_id)
+    if a is None:
+        raise HTTPException(404, f"Artifact '{artifact_id}' not found")
+    return JSONResponse(a)
+
+
+@app.patch("/api/artifacts/{artifact_id}")
+def artifacts_update(artifact_id: str, payload: dict):
+    """Update artifact content, title, or status."""
+    try:
+        return JSONResponse(_arts().update_artifact(
+            artifact_id,
+            title=payload.get("title"),
+            content=payload.get("content"),
+            status=payload.get("status"),
+            metadata=payload.get("metadata"),
+        ))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/artifacts/{artifact_id}")
+def artifacts_delete(artifact_id: str):
+    ok = _arts().delete_artifact(artifact_id)
+    return JSONResponse({"ok": ok})
+
+
+@app.post("/api/artifacts/{artifact_id}/deploy")
+def artifacts_deploy(artifact_id: str, payload: dict = None):
+    """Mark artifact as deployed."""
+    notes = (payload or {}).get("deploy_notes", "")
+    try:
+        return JSONResponse(_arts().deploy_artifact(artifact_id, deploy_notes=notes))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.get("/api/artifacts/{artifact_id}/versions")
+def artifacts_versions(artifact_id: str):
+    return JSONResponse(_arts().get_versions(artifact_id))
+
+
+# ── CEO Chat (direct message to top-level agent) ──────────────────────────────
+
+
+@app.post("/api/ceo/chat")
+async def ceo_chat(payload: dict):
+    """Send a message directly to the CEO agent and get a response.
+
+    This implements Paperclip's "CEO Chat" concept — a direct channel to the
+    top-level agent that propagates context down the org chart.
+    """
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(400, "message is required")
+
+    # Find CEO role from org chart to get the assigned agent
+    ceo_agent_id = "ceo"
+    try:
+        chart = _org().get_chart()
+        ceo_role = next(
+            (r for r in chart.get("roles", [])
+             if r.get("role_id") == "ceo" and r.get("agent_id")),
+            None,
+        )
+        if ceo_role and ceo_role.get("agent_id"):
+            ceo_agent_id = ceo_role["agent_id"]
+    except Exception:
+        pass
+
+    # Get goal context to inject company mission
+    goal_preamble = ""
+    try:
+        goal_preamble = _goals().build_goal_preamble()
+    except Exception:
+        pass
+
+    # Route to AI router
+    try:
+        from ai_router import query_ai_for_agent  # type: ignore
+        ai_available = True
+    except ImportError:
+        ai_available = False
+
+    if ai_available:
+        system = (
+            f"{goal_preamble}\n\n"
+            f"You are the CEO of this company. You receive direct messages from the board "
+            f"and coordinate the entire agent team to execute on the company's mission. "
+            f"Respond strategically and concisely."
+        ).strip()
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: query_ai_for_agent(ceo_agent_id, message, system=system),
+            )
+            response_text = result.get("content", result.get("text", str(result)))
+        except Exception:
+            logger.warning("CEO agent call failed", exc_info=True)
+            response_text = "[CEO Agent unavailable — Ollama or AI provider not running]"
+    else:
+        response_text = (
+            f"[CEO simulated response] Mission acknowledged. "
+            f"I have received your message: '{message[:80]}'. "
+            f"Coordinating team to execute on this directive."
+        )
+
+    # Store as a ticket for traceability
+    ticket_id = None
+    try:
+        ticket = _tickets().create_ticket(
+            title=f"CEO Directive: {message[:60]}",
+            description=message,
+            priority="high",
+            agent_id=ceo_agent_id,
+            created_by="board",
+        )
+        ticket_id = ticket.get("ticket_id")
+    except Exception:
+        pass
+
+    return JSONResponse({
+        "message": message,
+        "response": response_text,
+        "agent_id": ceo_agent_id,
+        "ticket_id": ticket_id,
+        "goal_context_injected": bool(goal_preamble),
+    })
 
 
 if __name__ == "__main__":

@@ -307,8 +307,16 @@ def register_adapter(
       "cli"          — agent is invoked via config["command"] shell command
       "queue"        — agent reads from a JSONL queue file at config["queue_path"]
     """
-    if adapter_type not in ("http_webhook", "cli", "queue"):
-        raise ValueError(f"Unknown adapter_type: {adapter_type!r}")
+    # Accepted canonical types and their aliases
+    _CANONICAL = {"http_webhook", "cli", "queue"}
+    _ALIASES = {"http": "http_webhook", "webhook": "http_webhook", "api": "http_webhook"}
+    if adapter_type in _ALIASES:
+        adapter_type = _ALIASES[adapter_type]
+    if adapter_type not in _CANONICAL:
+        raise ValueError(
+            f"Unknown adapter_type: {adapter_type!r}. "
+            f"Accepted values: http_webhook (aliases: http, webhook, api), cli, queue"
+        )
 
     adapters = _load_adapters()
     # Remove existing entry with same ID
