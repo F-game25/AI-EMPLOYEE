@@ -17,7 +17,7 @@ if [[ -f "$AI_HOME/.env" ]]; then
 fi
 DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
 
-log "Stopping bots..."
+log "Stopping agents..."
 "$AI_HOME/bin/ai-employee" stop --all >/dev/null 2>&1 || true
 
 log "Stopping gateway..."

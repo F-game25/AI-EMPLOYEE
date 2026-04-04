@@ -97,7 +97,7 @@ if (-not $bash) {
     # Fallback: run Python server directly without the full bash environment
     Write-Host ""
     Write-Host "  No Bash found. Starting UI server directly with Python..." -ForegroundColor Yellow
-    $serverPath = "$AI_HOME\bots\problem-solver-ui\server.py"
+    $serverPath = "$AI_HOME\agents\problem-solver-ui\server.py"
     if (Test-Path $serverPath) {
         $env:AI_HOME = $AI_HOME
         Start-Process -FilePath $python -ArgumentList $serverPath -WindowStyle Normal
