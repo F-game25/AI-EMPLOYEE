@@ -38,6 +38,7 @@ COMPANIES_FILE = AI_HOME / "config" / "companies.json"
 COMPANIES_STATE_ROOT = AI_HOME / "state" / "companies"
 
 # Regex patterns that look like secrets (scrubbed on export).
+# Compiled at module level for reuse across many export calls.
 # The patterns are intentionally conservative to avoid over-scrubbing
 # legitimate identifiers (e.g., SHA hashes, UUIDs).
 _SECRET_PATTERNS = [

@@ -9360,9 +9360,17 @@ _module_load_lock = _threading.Lock()
 
 
 def _load_module(name: str, agent_dir: str, global_var_name: str):
-    """Thread-safe generic lazy-loader for the new feature modules."""
+    """Thread-safe generic lazy-loader for the new feature modules.
+
+    Uses a double-checked locking pattern:
+    1. Fast path (no lock) — return immediately if already loaded.
+    2. Slow path (under lock) — load the module, guarded by _module_load_lock
+       to prevent two threads both observing a None cache and loading twice.
+    The double-check inside the lock handles the race where two threads both
+    pass the fast path check before either acquires the lock.
+    """
     frame = globals()
-    # Fast path: already loaded (no lock needed for reads on CPython due to GIL)
+    # Fast path: return if already loaded.
     cached = frame.get(global_var_name)
     if cached is not None:
         return cached
