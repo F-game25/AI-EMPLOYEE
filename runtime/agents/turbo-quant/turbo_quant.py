@@ -163,8 +163,34 @@ _VRAM_PER_BPARAM: dict[str, float] = {
 
 # Conservative VRAM budget estimates used when a GPU is detected via lspci but
 # memory size cannot be queried precisely (no rocm-smi / nvidia-smi available).
-_DEFAULT_INTEL_VRAM_GB: float = 2.0   # Intel integrated GPU (shares system RAM)
-_DEFAULT_AMD_VRAM_GB:   float = 4.0   # AMD discrete GPU without rocm-smi
+_DEFAULT_INTEL_VRAM_GB:    float = 2.0    # Intel integrated GPU (shares system RAM)
+_DEFAULT_DISCRETE_GPU_VRAM_GB: float = 4.0  # NVIDIA / AMD discrete GPU without driver tools
+
+# Apple Silicon unified memory fraction used as effective GPU budget.
+_APPLE_SILICON_UNIFIED_MEMORY_FRACTION: float = 0.7
+
+# PCI BAR size thresholds — BARs outside this range are not VRAM.
+_MIN_VRAM_BAR_GB: float = 0.5    # skip BARs smaller than 512 MB
+_MAX_VRAM_BAR_GB: float = 80.0   # skip BARs larger than 80 GB (implausible for consumer GPU)
+
+# CPU inference budget fractions (used when no GPU is detected).
+_CPU_INFERENCE_RAM_FRACTION: float = 0.5   # use 50% of RAM as effective Ollama CPU budget
+_CPU_INFERENCE_MAX_GB:       float = 16.0  # cap at 16 GB regardless of RAM size
+
+# Common paths where nvidia-smi may live across Linux distros, WSL, and Windows.
+_NVIDIA_SMI_CANDIDATES: list[str] = [
+    "nvidia-smi",
+    "/usr/bin/nvidia-smi",
+    "/usr/local/bin/nvidia-smi",
+    "/usr/lib/nvidia/nvidia-smi",
+    "/opt/cuda/bin/nvidia-smi",
+    "/usr/lib/wsl/lib/nvidia-smi",            # WSL2
+    r"C:\Windows\System32\nvidia-smi.exe",    # Windows
+    r"C:\Windows\SysWOW64\nvidia-smi.exe",
+]
+
+# NVIDIA PCI vendor ID (hex)
+_NVIDIA_VENDOR_ID: str = "0x10de"
 
 @dataclass
 class HardwareProfile:
@@ -191,22 +217,214 @@ def _run(cmd: list[str], timeout: int = 5) -> str:
 
 
 def _detect_vram_nvidia() -> tuple[float, str]:
-    """Return (vram_gb, gpu_name) via nvidia-smi, or (0, '') on failure."""
-    # Memory in MiB
-    mem = _run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"])
-    name = _run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])
-    if mem:
-        try:
-            # nvidia-smi may return multiple lines for multi-GPU; take the largest
-            vals = [float(v.strip()) for v in mem.splitlines() if v.strip()]
-            return round(max(vals) / 1024, 2), (name.splitlines()[0].strip() if name else "NVIDIA GPU")
-        except ValueError:
-            pass
+    """Return (vram_gb, gpu_name) for NVIDIA GPUs.
+
+    Tries (in order):
+      1. pynvml Python library (most reliable, works in containers)
+      2. nvidia-smi at several common filesystem paths
+      3. /proc/driver/nvidia/gpus/*/information (loaded-driver read)
+      4. PCI sysfs resource files for NVIDIA vendor (0x10de)
+      5. lspci -v — parses BAR size from PCI device description
+    """
+    # ── 1. pynvml (optional) ───────────────────────────────────────────────────
+    try:
+        import pynvml  # type: ignore[import]
+        pynvml.nvmlInit()
+        count = pynvml.nvmlDeviceGetCount()
+        if count > 0:
+            best_mem  = 0
+            best_name = ""
+            for i in range(count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                name = pynvml.nvmlDeviceGetName(handle)
+                if isinstance(name, bytes):
+                    name = name.decode()
+                if info.total > best_mem:
+                    best_mem  = info.total
+                    best_name = name
+            pynvml.nvmlShutdown()
+            if best_mem > 0:
+                return round(best_mem / (1024 ** 3), 2), best_name
+    except Exception:
+        pass
+
+    # ── 2. nvidia-smi at multiple paths ───────────────────────────────────────
+    for smi in _NVIDIA_SMI_CANDIDATES:
+        mem  = _run([smi, "--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+        name = _run([smi, "--query-gpu=name",         "--format=csv,noheader"])
+        if mem:
+            try:
+                vals = [float(v.strip()) for v in mem.splitlines() if v.strip()]
+                if vals:
+                    gpu_name = name.splitlines()[0].strip() if name else "NVIDIA GPU"
+                    return round(max(vals) / 1024, 2), gpu_name
+            except ValueError:
+                pass
+
+    # ── 3. /proc/driver/nvidia/gpus/*/information ─────────────────────────────
+    v, n = _detect_vram_nvidia_proc()
+    if v > 0:
+        return v, n
+
+    # ── 4. PCI sysfs resource file (NVIDIA vendor 0x10de) ─────────────────────
+    v, n = _detect_vram_nvidia_pci_sysfs()
+    if v > 0:
+        return v, n
+
+    # ── 5. lspci -v BAR parsing ────────────────────────────────────────────────
+    v, n = _detect_vram_lspci_bar("nvidia", "NVIDIA GPU")
+    if v > 0:
+        return v, n
+
     return 0.0, ""
 
 
+def _detect_vram_nvidia_proc() -> tuple[float, str]:
+    """Read VRAM from /proc/driver/nvidia/gpus/*/information (Linux NVIDIA driver)."""
+    gpu_path = Path("/proc/driver/nvidia/gpus")
+    if not gpu_path.exists():
+        return 0.0, ""
+    try:
+        best_mb   = 0.0
+        best_name = ""
+        for info_file in gpu_path.glob("*/information"):
+            text = info_file.read_text()
+            for line in text.splitlines():
+                low = line.lower()
+                if low.startswith("model:"):
+                    best_name = line.split(":", 1)[-1].strip()
+                if "video memory" in low:
+                    # "Video Memory: 8192 MB"
+                    digits = "".join(c for c in line if c.isdigit())
+                    if digits:
+                        mb = float(digits)
+                        if mb > best_mb:
+                            best_mb = mb
+        if best_mb > 0:
+            return round(best_mb / 1024, 2), best_name or "NVIDIA GPU"
+    except Exception:
+        pass
+    return 0.0, ""
+
+
+def _detect_vram_nvidia_pci_sysfs() -> tuple[float, str]:
+    """Read NVIDIA VRAM from PCI sysfs resource file (Linux, no driver tools needed).
+
+    The NVIDIA GPU exposes its VRAM as BAR1 (256-MB-aligned) or BAR6 in the
+    /sys/bus/pci/devices/<id>/resource file.  We read the largest BAR for any
+    device with NVIDIA vendor ID (0x10de).
+    """
+    if platform.system() != "Linux":
+        return 0.0, ""
+    try:
+        pci_root = Path("/sys/bus/pci/devices")
+        if not pci_root.exists():
+            return 0.0, ""
+        best_gb   = 0.0
+        best_name = ""
+        for dev in pci_root.iterdir():
+            vendor_file = dev / "vendor"
+            if not vendor_file.exists():
+                continue
+            if vendor_file.read_text().strip().lower() != _NVIDIA_VENDOR_ID:
+                continue
+            # Check device class — 0x03xx is display
+            class_file = dev / "class"
+            if class_file.exists():
+                cls = class_file.read_text().strip()
+                if not cls.startswith("0x03"):   # 0x0300 VGA, 0x0302 3D, 0x0380 other display
+                    continue
+            resource_file = dev / "resource"
+            if not resource_file.exists():
+                continue
+            lines = resource_file.read_text().splitlines()
+            for line in lines:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                try:
+                    start = int(parts[0], 16)
+                    end   = int(parts[1], 16)
+                    if start == 0 or end == 0:
+                        continue
+                    size_gb = (end - start + 1) / (1024 ** 3)
+                    # Skip implausible BAR sizes (not VRAM)
+                    if _MIN_VRAM_BAR_GB <= size_gb <= _MAX_VRAM_BAR_GB and size_gb > best_gb:
+                        best_gb = size_gb
+                except ValueError:
+                    continue
+        if best_gb > 0:
+            return round(best_gb, 2), "NVIDIA GPU"
+    except Exception:
+        pass
+    return 0.0, ""
+
+
+def _detect_vram_lspci_bar(vendor_keyword: str, default_name: str) -> tuple[float, str]:
+    """Parse `lspci -v` output to find the largest memory BAR for a vendor."""
+    if platform.system() != "Linux":
+        return 0.0, ""
+    out = _run(["lspci", "-v"])
+    if not out:
+        return 0.0, ""
+    best_gb   = 0.0
+    best_name = default_name
+    in_device = False
+    for line in out.splitlines():
+        low = line.lower()
+        if not line.startswith("\t") and not line.startswith(" "):
+            # New device line
+            in_device = vendor_keyword.lower() in low
+            if in_device:
+                # Extract name after last ':'
+                parts = line.split(":")
+                if len(parts) >= 3:
+                    best_name = ":".join(parts[2:]).strip()
+        elif in_device and ("memory at" in low or "prefetchable" in low):
+            # "Memory at ... [size=8G]"
+            import re
+            m = re.search(r"\[size=(\d+)([KMGT])\]", line, re.IGNORECASE)
+            if m:
+                num  = float(m.group(1))
+                unit = m.group(2).upper()
+                mult = {"K": 1/1024**2, "M": 1/1024, "G": 1.0, "T": 1024.0}.get(unit, 0)
+                size_gb = num * mult
+                if _MIN_VRAM_BAR_GB <= size_gb <= _MAX_VRAM_BAR_GB and size_gb > best_gb:
+                    best_gb = size_gb
+    return (round(best_gb, 2), best_name) if best_gb > 0 else (0.0, "")
+
+
 def _detect_vram_amd() -> tuple[float, str]:
-    """Return (vram_gb, gpu_name) via rocm-smi, or (0, '') on failure."""
+    """Return (vram_gb, gpu_name) for AMD GPUs.
+
+    Tries (in order):
+      1. /sys/class/drm/card*/device/mem_info_vram_total (most reliable, no tools needed)
+      2. rocm-smi
+      3. lspci -v BAR parsing
+    """
+    # ── 1. DRM sysfs (works without ROCm drivers) ─────────────────────────────
+    try:
+        import glob as _glob
+        best_bytes = 0
+        best_name  = ""
+        for vram_file in _glob.glob("/sys/class/drm/card*/device/mem_info_vram_total"):
+            try:
+                val = int(Path(vram_file).read_text().strip())
+                if val > best_bytes:
+                    best_bytes = val
+                    # Try to read GPU name from same device dir
+                    vendor_file = Path(vram_file).parent / "mem_info_vram_vendor"
+                    if vendor_file.exists():
+                        best_name = vendor_file.read_text().strip()
+            except (ValueError, OSError):
+                continue
+        if best_bytes > 0:
+            return round(best_bytes / (1024 ** 3), 2), best_name or "AMD GPU"
+    except Exception:
+        pass
+
+    # ── 2. rocm-smi ────────────────────────────────────────────────────────────
     out = _run(["rocm-smi", "--showmeminfo", "vram", "--csv"])
     if out:
         try:
@@ -216,6 +434,12 @@ def _detect_vram_amd() -> tuple[float, str]:
                     return round(int(parts[-1].strip()) / (1024 ** 3), 2), "AMD GPU"
         except Exception:
             pass
+
+    # ── 3. lspci BAR ──────────────────────────────────────────────────────────
+    v, n = _detect_vram_lspci_bar("amd", "AMD GPU")
+    if v > 0:
+        return v, n
+
     return 0.0, ""
 
 
@@ -239,10 +463,10 @@ def _detect_vram_apple() -> tuple[float, str]:
             if "total number of cores" in low:
                 # Apple Silicon — estimate ~70% of RAM as unified GPU memory
                 pass
-    # Apple Silicon unified memory: treat available system RAM × 0.7 as VRAM
+    # Apple Silicon unified memory: treat available system RAM × fraction as VRAM
     ram = _detect_ram_gb()
-    if ram > 0 and (platform.machine() == "arm64" or "Apple" in platform.processor()):
-        return round(ram * 0.7, 2), "Apple Silicon"
+    if ram > 0 and (platform.machine() == "arm64" or "Apple" in (platform.processor() or "")):
+        return round(ram * _APPLE_SILICON_UNIFIED_MEMORY_FRACTION, 2), "Apple Silicon"
     return 0.0, ""
 
 
@@ -262,30 +486,6 @@ def _detect_vram_windows_wmic() -> tuple[float, str]:
                         return round(ram_bytes / (1024 ** 3), 2), name
                 except (ValueError, IndexError):
                     pass
-    return 0.0, ""
-
-
-def _detect_vram_linux_proc() -> tuple[float, str]:
-    """Read VRAM from /proc/driver/nvidia/gpus/*/information (Linux NVIDIA without smi)."""
-    gpu_path = Path("/proc/driver/nvidia/gpus")
-    if not gpu_path.exists():
-        return 0.0, ""
-    try:
-        best_mb = 0.0
-        best_name = ""
-        for info_file in gpu_path.glob("*/information"):
-            text = info_file.read_text()
-            for line in text.splitlines():
-                if line.lower().startswith("model:"):
-                    best_name = line.split(":", 1)[-1].strip()
-                if "video memory" in line.lower():
-                    mb = float("".join(c for c in line if c.isdigit() or c == "."))
-                    if mb > best_mb:
-                        best_mb = mb
-        if best_mb > 0:
-            return round(best_mb / 1024, 2), best_name or "NVIDIA GPU"
-    except Exception:
-        pass
     return 0.0, ""
 
 
@@ -353,67 +553,102 @@ def _detect_cpu_name() -> str:
 def detect_hardware() -> HardwareProfile:
     """Auto-detect GPU, RAM, and CPU specs for this machine.
 
-    Tries multiple detection strategies in order, falling back gracefully so
-    the module always returns a usable profile even when no GPU is present or
-    hardware-query tools are unavailable.
+    Tries multiple detection strategies in order so the module works on any
+    system — from a laptop with no GPU to a workstation with a 24 GB card.
 
     Detection order for VRAM:
-      1. nvidia-smi        (NVIDIA on Linux / Windows / WSL)
-      2. /proc/driver/…    (NVIDIA Linux without smi path)
-      3. rocm-smi          (AMD on Linux)
-      4. system_profiler   (macOS — discrete or Apple Silicon)
-      5. wmic              (Windows — any vendor)
-      6. 0 GB              (CPU-only fallback)
+      NVIDIA:
+        1a. pynvml Python library (most reliable, works inside containers)
+        1b. nvidia-smi at 8+ common filesystem paths (Linux/Windows/WSL)
+        1c. /proc/driver/nvidia/gpus/*/information (loaded-driver read)
+        1d. PCI sysfs BAR sizes for vendor 0x10de (no driver tools needed)
+        1e. lspci -v BAR size parsing
+      AMD:
+        2a. /sys/class/drm/card*/device/mem_info_vram_total (no ROCm needed)
+        2b. rocm-smi
+        2c. lspci -v BAR size parsing
+      macOS:
+        3a. system_profiler SPDisplaysDataType (discrete GPU VRAM)
+        3b. Apple Silicon unified memory estimate (RAM × 0.70)
+      Windows:
+        4a. wmic win32_VideoController
+      Fallback:
+        5.  lspci NVIDIA/AMD detection with conservative estimate
+        6.  0 GB (genuine CPU-only or virtual machine)
+
+    Virtual GPUs (Microsoft Hyper-V vendor 0x1414, VMware, etc.) are
+    intentionally skipped — they do not provide real VRAM.
+
+    When no GPU is found the CPU inference budget is derived from RAM:
+      cpu_inference_gb = min(ram_gb * 0.5, 16)
+    This lets Ollama CPU-mode routing use quantized models up to that size.
     """
     # GPU / VRAM
     vram_gb, gpu_name, gpu_vendor = 0.0, "CPU only", "none"
 
+    # ── NVIDIA ─────────────────────────────────────────────────────────────────
     v, n = _detect_vram_nvidia()
     if v > 0:
         vram_gb, gpu_name, gpu_vendor = v, n, "nvidia"
-    else:
-        v, n = _detect_vram_linux_proc()
-        if v > 0:
-            vram_gb, gpu_name, gpu_vendor = v, n, "nvidia"
 
+    # ── AMD ────────────────────────────────────────────────────────────────────
     if vram_gb == 0.0:
         v, n = _detect_vram_amd()
         if v > 0:
             vram_gb, gpu_name, gpu_vendor = v, n, "amd"
 
+    # ── macOS (discrete + Apple Silicon) ──────────────────────────────────────
     if vram_gb == 0.0:
         v, n = _detect_vram_apple()
         if v > 0:
             vram_gb, gpu_name, gpu_vendor = v, n, "apple"
 
+    # ── Windows wmic ──────────────────────────────────────────────────────────
     if vram_gb == 0.0 and platform.system() == "Windows":
         v, n = _detect_vram_windows_wmic()
         if v > 0:
             vram_gb, gpu_name, gpu_vendor = v, n, "unknown"
 
-    # Also check Intel Arc / integrated via lspci on Linux as a best-effort hint
+    # ── Linux lspci fallback (any vendor not yet detected) ────────────────────
     if vram_gb == 0.0 and platform.system() == "Linux":
-        lspci = _run(["lspci"])
-        for line in lspci.splitlines():
+        lspci_out = _run(["lspci"])
+        for line in lspci_out.splitlines():
             low = line.lower()
-            if "vga" in low or "display" in low or "3d" in low:
-                if "intel" in low:
-                    gpu_name = line.split(":")[-1].strip()
-                    gpu_vendor = "intel"
-                    # Intel integrated shares system RAM — use conservative budget
-                    vram_gb = _DEFAULT_INTEL_VRAM_GB
-                    break
-                if "amd" in low or "ati" in low:
-                    gpu_name = line.split(":")[-1].strip()
-                    gpu_vendor = "amd"
-                    vram_gb = _DEFAULT_AMD_VRAM_GB   # conservative estimate without rocm-smi
-                    break
+            if not any(k in low for k in ("vga", "display", "3d controller")):
+                continue
+            # Skip known virtual / software renderers
+            if "microsoft" in low or "vmware" in low or "virtualbox" in low or "hyper-v" in low:
+                continue
+            if "nvidia" in low:
+                gpu_name   = line.split(":", 2)[-1].strip()
+                gpu_vendor = "nvidia"
+                vram_gb    = _DEFAULT_DISCRETE_GPU_VRAM_GB
+                break
+            if "amd" in low or "ati" in low:
+                gpu_name   = line.split(":", 2)[-1].strip()
+                gpu_vendor = "amd"
+                vram_gb    = _DEFAULT_DISCRETE_GPU_VRAM_GB
+                break
+            if "intel" in low:
+                gpu_name   = line.split(":", 2)[-1].strip()
+                gpu_vendor = "intel"
+                vram_gb    = _DEFAULT_INTEL_VRAM_GB
+                break
 
     # RAM + CPU
-    ram_gb   = _detect_ram_gb()
-    cpu_name = _detect_cpu_name()
+    ram_gb    = _detect_ram_gb()
+    cpu_name  = _detect_cpu_name()
     cpu_cores = os.cpu_count() or 1
     os_name   = f"{platform.system()} {platform.release()} {platform.machine()}".strip()
+
+    # When no GPU is detected, compute a CPU inference budget from RAM so that
+    # Ollama CPU-mode routing still works (Ollama maps quantized models to RAM).
+    # Use _CPU_INFERENCE_RAM_FRACTION of RAM, capped at _CPU_INFERENCE_MAX_GB.
+    if vram_gb == 0.0 and ram_gb > 0:
+        cpu_inference_gb = round(min(ram_gb * _CPU_INFERENCE_RAM_FRACTION, _CPU_INFERENCE_MAX_GB), 2)
+        gpu_name   = f"CPU only ({ram_gb:.0f} GB RAM)"
+        gpu_vendor = "none"
+        vram_gb    = cpu_inference_gb
 
     return HardwareProfile(
         gpu_name   = gpu_name,
@@ -789,16 +1024,20 @@ def suggest_acceleration(params_b: float, provider: str, quant: str) -> dict:
             tips.append(f"Ollama uses llama.cpp with ROCm on your {hw.gpu_name} ({hw.vram_gb:.1f} GB VRAM).")
         elif hw.gpu_vendor == "apple":
             tips.append(f"Ollama uses Metal on your {hw.gpu_name} — Metal Performance Shaders auto-enabled.")
-        elif hw.vram_gb == 0:
-            tips.append("No GPU detected — Ollama will run on CPU. Expect slower inference.")
+        elif hw.gpu_vendor in ("none", "unknown") and hw.ram_gb > 0:
+            tips.append(
+                f"No dedicated GPU detected — Ollama running in CPU mode "
+                f"({hw.cpu_cores} cores, {hw.ram_gb:.0f} GB RAM). "
+                "Expect slower inference; use small Q4_K_M models for best speed."
+            )
         else:
             tips.append(f"Ollama uses llama.cpp with GPU layers on your {hw.gpu_name}.")
         if params_b >= 7:
             use_flash_attn = True
             tips.append("Enable Flash Attention: set OLLAMA_FLASH_ATTN=1 in .env.")
-        if quant in (QUANT_4BIT, QUANT_5BIT):
+        if quant in (QUANT_4BIT, QUANT_5BIT) and hw.vram_gb > 0:
             tips.append(
-                f"Q4_K_M / Q5_K_M GGUF recommended for your {hw.vram_gb:.1f} GB GPU — "
+                f"Q4_K_M / Q5_K_M GGUF recommended for your {hw.vram_gb:.1f} GB budget — "
                 "best size/quality tradeoff."
             )
 
