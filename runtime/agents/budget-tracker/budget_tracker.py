@@ -110,7 +110,8 @@ def _save_state(state: dict) -> None:
 
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Return estimated USD cost for a model call."""
-    pricing = MODEL_COST_PER_1M.get(model.lower(), DEFAULT_MODEL_COST)
+    model_key = str(model).lower() if model else "unknown"
+    pricing = MODEL_COST_PER_1M.get(model_key, DEFAULT_MODEL_COST)
     return (input_tokens / 1_000_000) * pricing["input"] + (
         output_tokens / 1_000_000
     ) * pricing["output"]
@@ -142,7 +143,7 @@ def record_usage(
     month_usage["tokens"] += input_tokens + output_tokens
 
     # Track per-model breakdown
-    model_key = f"model_{model.lower()}"
+    model_key = f"model_{str(model).lower() if model else 'unknown'}"
     month_usage[model_key] = round(month_usage.get(model_key, 0.0) + cost_usd, 6)
 
     _save_state(state)

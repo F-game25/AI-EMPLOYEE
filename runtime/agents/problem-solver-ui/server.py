@@ -9354,20 +9354,31 @@ _ticket_mod = None
 _gov_mod = None
 _company_mod = None
 
+# Lock to ensure thread-safe lazy loading of feature modules
+import threading as _threading
+_module_load_lock = _threading.Lock()
+
 
 def _load_module(name: str, agent_dir: str, global_var_name: str):
-    """Generic lazy-loader for the new feature modules."""
-    # check global cache
+    """Thread-safe generic lazy-loader for the new feature modules."""
     frame = globals()
+    # Fast path: already loaded (no lock needed for reads on CPython due to GIL)
     cached = frame.get(global_var_name)
     if cached is not None:
         return cached
-    path = AI_HOME / "agents" / agent_dir
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-    mod = importlib.import_module(name)
-    frame[global_var_name] = mod
-    return mod
+    # Slow path: load under lock to prevent concurrent double-loading
+    with _module_load_lock:
+        # Re-check after acquiring lock in case another thread loaded it first
+        cached = frame.get(global_var_name)
+        if cached is not None:
+            return cached
+        path = AI_HOME / "agents" / agent_dir
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
+        mod = importlib.import_module(name)
+        frame[global_var_name] = mod
+        return mod
 
 
 def _org():

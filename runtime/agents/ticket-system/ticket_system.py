@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -262,7 +263,6 @@ def get_full_audit_log(limit: int = 200) -> list[dict]:
     try:
         # Use a deque to efficiently keep only the last N*2 lines without
         # loading the entire file into memory multiple times.
-        from collections import deque
         tail: deque[str] = deque(maxlen=limit * 2)
         with TICKETS_LOG.open("r", encoding="utf-8") as fh:
             for line in fh:

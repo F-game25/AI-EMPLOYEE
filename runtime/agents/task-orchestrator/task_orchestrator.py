@@ -55,6 +55,8 @@ PLAN_TIMEOUT_SECS = int(os.environ.get("TASK_ORCHESTRATOR_TIMEOUT", "600"))
 MAX_PLANS_HISTORY = int(os.environ.get("TASK_ORCHESTRATOR_MAX_HISTORY", "20"))
 # Enable peer-review validation between agents (default: on)
 PEER_REVIEW_ENABLED = os.environ.get("TASK_ORCHESTRATOR_PEER_REVIEW", "true").lower() == "true"
+# Maximum characters of a subtask result shown in a ticket comment
+TICKET_COMMENT_MAX_LENGTH = 500
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -251,13 +253,11 @@ def dispatch_to_agent(agent_id: str, subtask: dict) -> None:
     if _FCNTL_AVAILABLE:
         try:
             with open(lock_file, "w") as lf:
-                # Blocking exclusive lock — waits until other writers release
+                # Blocking exclusive lock — waits until other writers release.
+                # Released automatically when the context manager exits.
                 _fcntl.flock(lf, _fcntl.LOCK_EX)
-                try:
-                    with open(queue_file, "a") as f:
-                        f.write(json.dumps(subtask) + "\n")
-                finally:
-                    _fcntl.flock(lf, _fcntl.LOCK_UN)
+                with open(queue_file, "a") as f:
+                    f.write(json.dumps(subtask) + "\n")
             return
         except OSError as exc:
             logger.warning(
@@ -617,7 +617,7 @@ def _execute_subtask_inline(st: dict, plan: dict, capabilities: dict) -> dict:
         try:
             _ts_comment(
                 ticket_id,
-                f"✅ Subtask '{title}' completed by {agent_id}.\n\n{final_result[:500]}{'…' if len(final_result) > 500 else ''}",
+                f"✅ Subtask '{title}' completed by {agent_id}.\n\n{final_result[:TICKET_COMMENT_MAX_LENGTH]}{'…' if len(final_result) > TICKET_COMMENT_MAX_LENGTH else ''}",
                 author=agent_id,
                 tool_call={
                     "action": "subtask_result",

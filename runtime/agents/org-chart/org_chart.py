@@ -145,6 +145,21 @@ def _load_adapters() -> list:
     return []
 
 
+def _load_state() -> dict:
+    if STATE_FILE.exists():
+        try:
+            return json.loads(STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_state(state: dict) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    state["updated_at"] = _now_iso()
+    STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
 def _save_adapters(adapters: list) -> None:
     ADAPTERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     ADAPTERS_FILE.write_text(json.dumps(adapters, indent=2))
@@ -260,19 +275,12 @@ def delegate_task(
         "created_at": _now_iso(),
     }
 
-    # Persist delegation log
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    state: dict = {}
-    if STATE_FILE.exists():
-        try:
-            state = json.loads(STATE_FILE.read_text())
-        except Exception:
-            pass
+    # Persist delegation log using the shared state helpers
+    state = _load_state()
     delegations: list = state.get("delegations", [])
     delegations.append(delegation)
     state["delegations"] = delegations[-200:]  # keep last 200
-    state["updated_at"] = _now_iso()
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    _save_state(state)
 
     return delegation
 
@@ -332,17 +340,10 @@ def get_due_heartbeats(state: dict | None = None) -> list[dict]:
     """Return roles whose heartbeat is due right now.
 
     state: dict mapping role_id → last_heartbeat_ts (float).
-           Defaults to loading from STATE_FILE.
+           Defaults to loading from STATE_FILE via _load_state().
     """
     if state is None:
-        if STATE_FILE.exists():
-            try:
-                saved = json.loads(STATE_FILE.read_text())
-                state = saved.get("last_heartbeats", {})
-            except Exception:
-                state = {}
-        else:
-            state = {}
+        state = _load_state().get("last_heartbeats", {})
 
     chart = _load_chart()
     now = time.time()
@@ -359,15 +360,8 @@ def get_due_heartbeats(state: dict | None = None) -> list[dict]:
 
 def record_heartbeat(role_id: str) -> None:
     """Update the last heartbeat timestamp for a role."""
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    state: dict = {}
-    if STATE_FILE.exists():
-        try:
-            state = json.loads(STATE_FILE.read_text())
-        except Exception:
-            pass
+    state = _load_state()
     heartbeats = state.get("last_heartbeats", {})
     heartbeats[role_id] = time.time()
     state["last_heartbeats"] = heartbeats
-    state["updated_at"] = _now_iso()
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    _save_state(state)
