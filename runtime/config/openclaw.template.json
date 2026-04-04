@@ -1,185 +1,56 @@
 {
+  "wizard": {
+    "lastRunCommand": "install",
+    "lastRunMode": "local"
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "AI_HOME_PLACEHOLDER/workspace"
+    }
+  },
+  "tools": {
+    "profile": "coding"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
   "gateway": {
+    "port": 18789,
     "mode": "local",
     "bind": "loopback",
-    "port": 18789,
     "auth": {
       "mode": "token",
       "token": "TOKEN_PLACEHOLDER"
     },
-    "controlUi": {
-      "enabled": true,
-      "port": 18789
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
     }
-  },
-  "agent": {
-    "workspace": "AI_HOME_PLACEHOLDER/workspace",
-    "model": {
-      "primary": "MODEL_PLACEHOLDER"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "sandbox": {
-        "mode": "off"
-      }
-    },
-    "list": [
-      {
-        "id": "orchestrator",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-orchestrator",
-        "systemPrompt": "Master Orchestrator. Route tasks to the right specialist agent. When asked about WhatsApp commands, list available commands. Agents: lead-hunter (leads), content-master (content), social-guru (social), intel-agent (research), product-scout (ecommerce), email-ninja (email), support-bot (support), data-analyst (analysis), creative-studio (creative), crypto-trader (crypto), bot-dev (code), web-sales (web).",
-        "sandbox": { "mode": "off" },
-        "tools": { "allow": ["read", "write", "web_search", "sessions_spawn", "sessions_send", "sessions_list"] }
-      },
-      {
-        "id": "lead-hunter",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-lead-hunter",
-        "systemPrompt": "B2B Lead Generation Specialist. Find decision makers, emails, qualify leads. Always verify before returning.",
-        "tools": { "allow": ["web_search", "web_fetch", "browser", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "content-master",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-content-master",
-        "systemPrompt": "SEO Content Specialist. Write 2000+ word optimized articles with proper structure, keywords, and links.",
-        "tools": { "allow": ["web_search", "web_fetch", "read", "write", "edit"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "social-guru",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-social-guru",
-        "systemPrompt": "Social Media Manager. Find viral content, write engaging captions, generate hashtags.",
-        "tools": { "allow": ["web_search", "web_fetch", "browser", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "intel-agent",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-intel-agent",
-        "systemPrompt": "Competitive Intelligence Analyst. Monitor competitors: pricing, features, reviews, traffic.",
-        "tools": { "allow": ["web_search", "web_fetch", "browser", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "product-scout",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-product-scout",
-        "systemPrompt": "E-commerce Product Researcher. Find arbitrage opportunities, trending products, validate suppliers.",
-        "tools": { "allow": ["web_search", "web_fetch", "browser", "read", "write", "exec"], "deny": ["elevated"] }
-      },
-      {
-        "id": "email-ninja",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-email-ninja",
-        "systemPrompt": "Cold Email Specialist. Build sequences, personalize at scale, optimize deliverability. Never spam.",
-        "tools": { "allow": ["web_fetch", "read", "write", "edit"], "deny": ["exec", "elevated", "browser"] }
-      },
-      {
-        "id": "support-bot",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-support-bot",
-        "systemPrompt": "Customer Support Agent. Answer FAQs, classify tickets, analyze sentiment, escalate when needed.",
-        "tools": { "allow": ["read", "write", "web_fetch"], "deny": ["exec", "elevated", "browser"] }
-      },
-      {
-        "id": "data-analyst",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-data-analyst",
-        "systemPrompt": "Market Research Analyst. Analyze trends, generate SWOT, create reports with data and insights.",
-        "tools": { "allow": ["web_search", "web_fetch", "browser", "read", "write", "exec"], "deny": ["elevated"] }
-      },
-      {
-        "id": "creative-studio",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-creative-studio",
-        "systemPrompt": "Creative Director. Design briefs, image prompts, brand voice, ad copy.",
-        "tools": { "allow": ["web_search", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "crypto-trader",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-crypto-trader",
-        "systemPrompt": "Crypto Trading Analyst. Technical analysis, patterns, risk assessment. Include confidence scores and stop-losses.",
-        "tools": { "allow": ["web_fetch", "browser", "read", "write", "exec"], "deny": ["elevated"] }
-      },
-      {
-        "id": "bot-dev",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-bot-dev",
-        "systemPrompt": "Trading Bot Developer. Code review, feature implementation, optimization. Security-first approach.",
-        "tools": { "allow": ["read", "write", "edit", "apply_patch", "exec"], "deny": ["elevated"] }
-      },
-      {
-        "id": "web-sales",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-web-sales",
-        "systemPrompt": "Web Analysis & Sales Specialist. UX/SEO audits, find contacts, write personalized pitches. Max 10 emails per session.",
-        "tools": { "allow": ["browser", "web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "company-builder",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-company-builder",
-        "systemPrompt": "Company Builder Agent. Build companies from scratch: business plans, financial projections, org structure, market entry strategy, go-to-market plans, investor pitches, and company simulations. Handle all aspects of company creation and strategic planning.",
-        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "memecoin-creator",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-memecoin-creator",
-        "systemPrompt": "Memecoin & Crypto Token Creator. Generate token concepts, design tokenomics, draft whitepapers, create viral community strategies, plan token launches, and develop crypto marketing campaigns. Expert in Web3 and meme culture.",
-        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "hr-manager",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-hr-manager",
-        "systemPrompt": "HR Manager Agent. Handle full HR lifecycle: job description writing, CV screening, interview frameworks, 90-day onboarding plans, performance review templates, org chart design, compensation benchmarking, and company culture documents.",
-        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "finance-wizard",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-finance-wizard",
-        "systemPrompt": "Finance Wizard Agent. Create financial models, P&L projections, burn rate analyses, runway calculations, fundraising round prep, unit economics, pricing strategies, cap table modeling, and investor-grade financial narratives.",
-        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "brand-strategist",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-brand-strategist",
-        "systemPrompt": "Brand Strategist Agent. Create brand names, full identity systems, positioning strategies, brand voice guides, messaging frameworks, competitive brand analyses, and brand launch plans. Expert in building iconic, memorable brands.",
-        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "growth-hacker",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-growth-hacker",
-        "systemPrompt": "Growth Hacker Agent. Design viral growth loops, optimize conversion funnels, create A/B test frameworks, build retention strategies, design referral programs, develop product-led growth strategies, and generate ICE-scored experiment backlogs.",
-        "tools": { "allow": ["web_search", "web_fetch", "read", "write"], "deny": ["exec", "elevated"] }
-      },
-      {
-        "id": "project-manager",
-        "workspace": "AI_HOME_PLACEHOLDER/workspace-project-manager",
-        "systemPrompt": "Project Manager Agent. Create work breakdown structures, sprint plans, project roadmaps, risk registers, RACI matrices, Gantt charts, status reports, and retrospective facilitation. Expert in both Agile and traditional project management.",
-        "tools": { "allow": ["read", "write", "web_fetch"], "deny": ["exec", "elevated", "browser"] }
-      }
-    ]
-  },
-  "session": {
-    "dmScope": "per-channel-peer",
-    "reset": { "mode": "manual" },
-    "maintenance": { "mode": "rotate", "pruneAfter": "7d", "rotateBytes": "50mb" }
   },
   "channels": {
     "whatsapp": {
       "dmPolicy": "allowlist",
-      "allowFrom": ["PHONE_PLACEHOLDER"],
-      "groups": { "*": { "requireMention": true } },
+      "allowFrom": [
+        "PHONE_PLACEHOLDER"
+      ],
+      "groups": {
+        "*": {
+          "requireMention": true
+        }
+      },
       "mediaMaxMb": 50,
       "sendReadReceipts": true
     }
   },
-  "tools": {
-    "browser": {
-      "enabled": true,
-      "headless": true,
-      "downloadsDir": "AI_HOME_PLACEHOLDER/downloads",
-      "viewport": { "width": 1920, "height": 1080 }
-    },
-    "web": { "search": { "enabled": true, "provider": "brave", "maxResults": 10 } },
-    "exec": { "enabled": true, "host": "local", "shell": "/bin/bash", "timeout": 300000 },
-    "elevated": { "enabled": false }
-  },
-  "logging": {
-    "level": "info",
-    "consoleLevel": "info",
-    "file": "AI_HOME_PLACEHOLDER/logs/gateway.log",
-    "redactSensitive": "tools",
-    "redactPatterns": ["api[_-]?key", "secret", "token", "password"]
-  },
-  "cron": { "enabled": true },
-  "discovery": { "mdns": { "mode": "off" } }
+  "skills": {
+    "install": {
+      "nodeManager": "npm"
+    }
+  }
 }

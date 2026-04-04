@@ -6,6 +6,8 @@
   "private": true,
   "scripts": {
     "install:deps": "bash install.sh",
-    "start": "bash -c 'cd ~/.ai-employee && ./start.sh'"
+    "start": "bash -c 'cd ~/.ai-employee && ./start.sh'",
+    "test": "python3 runtime/agents/agent_selftest.py",
+    "lint": "find runtime/agents -name '*.py' -exec python3 -m py_compile {} +"
   }
 }
