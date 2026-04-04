@@ -122,9 +122,9 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "60"))
 
 # ── Google Gemma (free local open-source AI) ──────────────────────────────────
-# Primary: run Gemma through local Ollama (ollama pull gemma3).
+# Primary: run Gemma through local Ollama (ollama pull gemma4).
 # Fallback: Google AI Studio free-tier API (GOOGLE_API_KEY required).
-GEMMA_MODEL = os.environ.get("GEMMA_MODEL", "gemma3")
+GEMMA_MODEL = os.environ.get("GEMMA_MODEL", "gemma4")
 GEMMA_VIA_OLLAMA: bool = os.environ.get("GEMMA_VIA_OLLAMA", "1").strip().lower() not in ("0", "false", "no")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 GEMMA_CLOUD_MODEL = os.environ.get("GEMMA_CLOUD_MODEL", "gemma-3-27b-it")
