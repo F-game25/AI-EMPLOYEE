@@ -97,6 +97,17 @@ from typing import Optional
 
 logger = logging.getLogger("ai_router")
 
+# ── Turbo Quantization integration (optional — graceful fallback if not present) ─
+_turbo_quant = None
+try:
+    _tq_path = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee"))) / "agents" / "turbo-quant"
+    if _tq_path.exists() and str(_tq_path) not in sys.path:
+        sys.path.insert(0, str(_tq_path))
+    import turbo_quant as _turbo_quant  # type: ignore[import]
+    logger.debug("ai_router: turbo_quant loaded — Turbo Mode active")
+except Exception:
+    _turbo_quant = None
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "60"))
@@ -126,6 +137,21 @@ LOCAL_AI_FIRST: bool = os.environ.get("LOCAL_AI_FIRST", "1").strip().lower() not
 
 # Maximum concurrent Ollama workers used by query_ai_batch().
 OLLAMA_BATCH_MAX_WORKERS: int = int(os.environ.get("OLLAMA_BATCH_MAX_WORKERS", "4"))
+
+# ── Turbo Mode (MONEY | POWER | AUTO) ────────────────────────────────────────
+# When turbo_quant is available the active mode is read from it.
+# Otherwise TURBO_MODE env var is used directly.
+# MONEY  → smallest quantized local models (fastest, lowest cost)
+# POWER  → largest / best-quality models (higher latency, higher cost)
+# AUTO   → picks automatically based on task complexity (default)
+def _turbo_mode() -> str:
+    """Return the current Turbo Mode string."""
+    if _turbo_quant is not None:
+        try:
+            return _turbo_quant.get_mode()
+        except Exception:
+            pass
+    return os.environ.get("TURBO_MODE", "AUTO").upper()
 
 # ── Per-agent model routing ───────────────────────────────────────────────────
 # Maps agent categories and IDs to their preferred AI provider + model.
@@ -610,6 +636,11 @@ def query_ai_for_agent(
       analytics / data   → Anthropic Claude  (superior long-context analysis)
       general / other    → Anthropic → OpenAI
 
+    Turbo Mode integration (when turbo_quant is available):
+      MONEY  → forces Ollama local-only routing for cost efficiency
+      POWER  → skips Ollama and goes straight to the agent's preferred provider
+      AUTO   → standard two-layer routing (default)
+
     Legacy Mode (LOCAL_AI_FIRST=0):
       Tries the preferred provider first, then falls back via query_ai().
 
@@ -631,9 +662,43 @@ def query_ai_for_agent(
     preferred_provider = routing["provider"]
     preferred_model = os.environ.get(routing["model_env"], routing["default_model"])
 
+    # ── Turbo Mode override ───────────────────────────────────────────────────
+    turbo_mode = _turbo_mode()
+    if turbo_mode == "MONEY":
+        # MONEY mode: local Ollama only — fastest and cheapest
+        logger.debug("ai_router: TURBO MONEY mode — forcing Ollama-only for agent=%s", agent_type)
+        result = _try_ollama(prompt, system_prompt, history)
+        return result or _error_response()
+
+    if turbo_mode == "POWER":
+        # POWER mode: skip Layer 1, go straight to the best provider for this agent
+        logger.debug(
+            "ai_router: TURBO POWER mode — skipping Layer 1 for agent=%s, using %s/%s",
+            agent_type, preferred_provider, preferred_model,
+        )
+        if preferred_provider == "nvidia_nim":
+            result = _try_nvidia_nim(prompt, system_prompt, history, model=preferred_model)
+            if result:
+                return result
+        elif preferred_provider == "openai":
+            result = _try_openai(prompt, system_prompt, history, model=preferred_model)
+            if result:
+                return result
+            result = _try_anthropic(prompt, system_prompt, history)
+            return result or _error_response()
+        elif preferred_provider == "anthropic":
+            result = _try_anthropic(prompt, system_prompt, history, model=preferred_model)
+            if result:
+                return result
+            result = _try_openai(prompt, system_prompt, history)
+            return result or _error_response()
+        # nvidia_nim fallback → cloud
+        result = _try_anthropic(prompt, system_prompt, history) or _try_openai(prompt, system_prompt, history)
+        return result or _error_response()
+
     logger.debug(
-        "ai_router: agent_type=%s → preferred_provider=%s model=%s LOCAL_AI_FIRST=%s",
-        agent_type, preferred_provider, preferred_model, LOCAL_AI_FIRST,
+        "ai_router: agent_type=%s → preferred_provider=%s model=%s LOCAL_AI_FIRST=%s turbo=%s",
+        agent_type, preferred_provider, preferred_model, LOCAL_AI_FIRST, turbo_mode,
     )
 
     if LOCAL_AI_FIRST:
