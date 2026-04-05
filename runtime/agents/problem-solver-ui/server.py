@@ -1,0 +1,11871 @@
+"""AI Employee Dashboard — Problem Solver UI
+
+Extended dashboard with 5 tabs:
+  1. Dashboard  — bot status overview
+  2. Chat       — send tasks / view chat log (mirrors WhatsApp tasks)
+  3. Scheduler  — create/edit/list scheduled tasks
+  4. Workers    — view/adjust enabled agents
+  5. Improvements — approve/reject skill/market proposals
+
+State files are read from ~/.ai-employee/state/
+Config is read/written in ~/.ai-employee/config/
+"""
+import json
+import hashlib
+import hmac
+import importlib
+import logging
+import os
+import re
+import secrets
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Optional
+
+# ── Python version guard ──────────────────────────────────────────────────────
+if sys.version_info < (3, 10):
+    print("ERROR: Python 3.10+ is required. Current version: "
+          f"{sys.version_info.major}.{sys.version_info.minor}")
+    sys.exit(1)
+
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
+import uvicorn
+
+# ── Security imports (openclaw-2) ─────────────────────────────────────────────
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    _SLOWAPI_AVAILABLE = True
+except ImportError:
+    _SLOWAPI_AVAILABLE = False
+
+# Locate security module relative to this file
+_SEC_DIR = Path(__file__).parent
+if str(_SEC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SEC_DIR))
+
+# ── JWT secret startup validation ─────────────────────────────────────────────
+_KNOWN_WEAK_SECRETS = frozenset({
+    "", "secret", "changeme", "change-me", "your-secret-here", "default",
+    "password", "1234", "12345678", "test", "dev",
+    "CHANGE_THIS_IN_SECURITY_LOCAL_YML_OR_SET_JWT_SECRET_KEY_ENV_VAR",
+})
+
+def _validate_jwt_secret_on_startup(secret: str) -> None:
+    """Refuse to start if JWT_SECRET_KEY is missing, too short, or a known default."""
+    # Normalise to lowercase for case-insensitive weak-value detection
+    if secret.lower() in _KNOWN_WEAK_SECRETS:
+        print(
+            "\n❌  STARTUP BLOCKED: JWT_SECRET_KEY is not set or uses a known default.\n"
+            "    Generate a strong secret and export it:\n\n"
+            "        export JWT_SECRET_KEY=$(python3 -c "
+            "\"import secrets; print(secrets.token_hex(32))\")\n\n"
+            "    Or add JWT_SECRET_KEY=<value> to ~/.ai-employee/.env\n"
+        )
+        sys.exit(1)
+    if len(secret) < 32:
+        print(
+            "\n❌  STARTUP BLOCKED: JWT_SECRET_KEY must be at least 32 characters.\n"
+            "    Generate a strong secret:\n\n"
+            "        python3 -c \"import secrets; print(secrets.token_hex(32))\"\n"
+        )
+        sys.exit(1)
+
+_jwt_secret_env = os.environ.get("JWT_SECRET_KEY", "")
+_validate_jwt_secret_on_startup(_jwt_secret_env)
+
+# ── Bot name validation ────────────────────────────────────────────────────────
+_BOT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+
+def _validate_bot_name(name: str) -> str:
+    """Raise HTTP 400 if *name* is not a valid bot name. Returns the name unchanged."""
+    if not name or not _BOT_NAME_RE.match(name):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid bot name. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}.",
+        )
+    return name
+
+try:
+    from security import AuthManager, InputSanitizer, PasswordValidator
+    from config_manager import load_config, validate_security_config, Config as _Cfg
+    _security_config: Optional[_Cfg] = None
+    try:
+        _security_config = load_config()
+    except ValueError as _jwt_err:
+        # load_config() raises ValueError when JWT_SECRET_KEY is missing/default.
+        # _validate_jwt_secret_on_startup() above already handles the empty-env case;
+        # this catches the case where security.yml still has the placeholder value.
+        print(f"\n❌  STARTUP BLOCKED: {_jwt_err}\n")
+        sys.exit(1)
+    except Exception:
+        # Other config errors (YAML parse, etc.) — still start but without
+        # the richer config object; JWT is already validated above.
+        _security_config = None
+    _SECURITY_AVAILABLE = True
+except ImportError:
+    _SECURITY_AVAILABLE = False
+    _security_config = None
+
+    # Fallback security primitives so auth endpoints remain functional even
+    # when optional security dependencies are not installed.
+    class InputSanitizer:  # type: ignore[no-redef]
+        @staticmethod
+        def sanitize_input(value: str, max_length: int = 50) -> str:
+            v = (value or "").strip()
+            v = re.sub(r"[^a-zA-Z0-9._@-]", "", v)
+            return v[:max_length]
+
+    class PasswordValidator:  # type: ignore[no-redef]
+        @staticmethod
+        def validate(
+            password: str,
+            min_length: int = 12,
+            require_special: bool = True,
+            require_numbers: bool = True,
+            require_uppercase: bool = True,
+        ) -> tuple[bool, str]:
+            if len(password or "") < min_length:
+                return False, f"Password must be at least {min_length} characters."
+            if require_numbers and not re.search(r"\d", password):
+                return False, "Password must include at least one number."
+            if require_uppercase and not re.search(r"[A-Z]", password):
+                return False, "Password must include at least one uppercase letter."
+            if require_special and not re.search(r"[^a-zA-Z0-9]", password):
+                return False, "Password must include at least one special character."
+            return True, "ok"
+
+    class AuthManager:  # type: ignore[no-redef]
+        def __init__(self, secret_key: str, algorithm: str = "HS256", expire_minutes: int = 30):
+            self.secret_key = secret_key
+            self.algorithm = algorithm
+            self.expire_minutes = expire_minutes
+
+        def hash_password(self, password: str) -> str:
+            salt = secrets.token_bytes(16)
+            digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 120000)
+            return f"pbkdf2_sha256${salt.hex()}${digest.hex()}"
+
+        def verify_password(self, password: str, hashed: str) -> bool:
+            try:
+                _prefix, salt_hex, digest_hex = hashed.split("$", 2)
+                calc = hashlib.pbkdf2_hmac(
+                    "sha256", password.encode(), bytes.fromhex(salt_hex), 120000
+                ).hex()
+                return hmac.compare_digest(calc, digest_hex)
+            except Exception:
+                return False
+
+        def create_access_token(self, payload: dict) -> str:
+            """Create a verifiable HMAC-SHA256 signed token (stdlib-only fallback)."""
+            import base64
+            import json as _json
+            user = str(payload.get("sub", "user"))
+            exp = int(time.time()) + self.expire_minutes * 60
+            body = base64.urlsafe_b64encode(
+                _json.dumps({"sub": user, "exp": exp}).encode()
+            ).rstrip(b"=").decode()
+            sig = hmac.new(
+                self.secret_key.encode(),
+                body.encode(),
+                "sha256",
+            ).hexdigest()
+            return f"fb1.{body}.{sig}"
+
+        def verify_token(self, token: str) -> Optional[dict]:
+            """Verify a stdlib fallback token. Returns payload or None."""
+            import base64
+            import json as _json
+            try:
+                parts = token.split(".", 2)
+                if len(parts) != 3 or parts[0] != "fb1":
+                    return None
+                _prefix, body, sig = parts
+                expected = hmac.new(
+                    self.secret_key.encode(),
+                    body.encode(),
+                    "sha256",
+                ).hexdigest()
+                if not hmac.compare_digest(expected, sig):
+                    return None
+                padding = "=" * (4 - len(body) % 4)
+                data = _json.loads(base64.urlsafe_b64decode(body + padding))
+                if data.get("exp", 0) < int(time.time()):
+                    return None
+                return data
+            except Exception:
+                return None
+
+AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
+STATE_DIR = AI_HOME / "state"
+CONFIG_DIR = AI_HOME / "config"
+BOTS_DIR = AI_HOME / "agents"
+CHATLOG = STATE_DIR / "chatlog.jsonl"
+ACTIVITY_LOG = STATE_DIR / "activity_log.jsonl"
+SCHEDULES_FILE = CONFIG_DIR / "schedules.json"
+IMPROVEMENTS_FILE = STATE_DIR / "improvements.json"
+SKILLS_LIBRARY_FILE = CONFIG_DIR / "skills_library.json"
+CUSTOM_AGENTS_FILE = CONFIG_DIR / "custom_agents.json"
+METRICS_FILE = STATE_DIR / "metrics.json"
+GUARDRAILS_FILE = STATE_DIR / "guardrails.json"
+MEMORY_FILE = STATE_DIR / "memory.json"
+INTEGRATIONS_FILE = CONFIG_DIR / "integrations.json"
+AGENT_TEMPLATES_FILE = CONFIG_DIR / "agent_templates.json"
+
+# Source agent_templates.json path (bundled in repo config directory)
+_REPO_TEMPLATES_FILE = Path(__file__).parent.parent.parent / "config" / "agent_templates.json"
+# Source skills_library.json path (bundled in repo config directory)
+_REPO_SKILLS_FILE = Path(__file__).parent.parent.parent / "config" / "skills_library.json"
+# Source agent_capabilities.json path (bundled in repo config directory)
+_REPO_CAPS_FILE = Path(__file__).parent.parent.parent / "config" / "agent_capabilities.json"
+
+PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
+HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
+MAX_CHAT_MESSAGE_LENGTH = 10000
+CHATLOG_MAX_ENTRIES = 1000
+LLM_TIMEOUT_SECONDS = 30
+
+ROUTING_MAP = {
+  "business plan": "company-builder",
+  "customer": "support-bot",
+  "support": "support-bot",
+  "prospect": "lead-generator",
+  "lead": "lead-generator",
+  "outreach": "email-ninja",
+  "email": "email-ninja",
+  "blog": "content-master",
+  "article": "content-master",
+  "seo": "content-master",
+  "linkedin": "social-guru",
+  "instagram": "social-guru",
+  "twitter": "social-guru",
+  "post": "social-guru",
+  "competitor": "intel-agent",
+  "research": "intel-agent",
+  "market": "data-analyst",
+  "analyse": "data-analyst",
+  "analyze": "data-analyst",
+  "ad": "creative-studio",
+  "copy": "creative-studio",
+  "website": "web-sales",
+  "hire": "hr-manager",
+  "recruit": "hr-manager",
+  "finance": "finance-wizard",
+  "revenue": "finance-wizard",
+  "grow": "growth-hacker",
+  "project": "project-manager",
+}
+
+AGENTS_BY_MODE = {
+  "starter": [
+    "task-orchestrator",
+    "lead-generator",
+    "offer-agent",
+  ],
+  "business": [
+    "task-orchestrator",
+    "lead-generator",
+    "offer-agent",
+    "company-builder",
+    "brand-strategist",
+    "finance-wizard",
+    "growth-hacker",
+    "project-manager",
+  ],
+  "power": [
+    "task-orchestrator",
+    "lead-generator",
+    "offer-agent",
+    "company-builder",
+    "brand-strategist",
+    "finance-wizard",
+    "growth-hacker",
+    "project-manager",
+    "social-media-manager",
+    "paid-media-specialist",
+    "qualification-agent",
+    "follow-up-agent",
+    "appointment-setter",
+    "ui-designer",
+    "web-researcher",
+    "engineering-assistant",
+    "ecom-agent",
+    "chatbot-builder",
+    "creator-agency",
+    "recruiter",
+    # Additional agents with run.sh
+    "arbitrage-bot",
+    "course-creator",
+    "faceless-video",
+    "financial-deepsearch",
+    "hr-manager",
+    "memecoin-creator",
+    "mirofish-researcher",
+    "newsletter-bot",
+    "polymarket-trader",
+    "print-on-demand",
+    "qa-tester",
+    "signal-community",
+    "skills-manager",
+    "status-reporter",
+    # Agents without run.sh but with Python implementation
+    "ad-campaign-wizard",
+    "cold-outreach-assassin",
+    "conversion-rate-optimizer",
+    "lead-hunter-elite",
+    "linkedin-growth-hacker",
+    "partnership-matchmaker",
+    "referral-rocket",
+    "sales-closer-pro",
+  ],
+}
+
+AGENT_ALIASES = {
+  "task-orchestrator": ["task-orchestrator", "orchestrator"],
+  "lead-generator": ["lead-generator", "lead-hunter", "lead-hunter-elite"],
+  "lead-hunter": ["lead-hunter", "lead-generator", "lead-hunter-elite"],
+}
+
+INFRA_AGENTS = {
+  "problem-solver-ui",
+  "problem-solver",
+  "scheduler-runner",
+  "status-reporter",
+  "auto-updater",
+  "discovery",
+}
+
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(message)s",
+)
+logger = logging.getLogger("problem-solver-ui")
+
+_ACTIVITY_LOCK = threading.Lock()
+
+# ── TTL-cached .env reader (avoids disk I/O on every chat/status request) ──────
+_ENV_MAP_CACHE: tuple[float, dict[str, str]] = (0.0, {})
+_ENV_MAP_CACHE_TTL: float = 10.0  # seconds
+
+
+def _load_runtime_env_map() -> dict[str, str]:
+  global _ENV_MAP_CACHE
+  now = time.time()
+  if now - _ENV_MAP_CACHE[0] < _ENV_MAP_CACHE_TTL:
+    return _ENV_MAP_CACHE[1]
+  env_map: dict[str, str] = {}
+  env_file = AI_HOME / ".env"
+  if env_file.exists():
+    try:
+      for raw_line in env_file.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+          continue
+        key, value = line.split("=", 1)
+        env_map[key.strip()] = value.strip().strip('"').strip("'")
+    except Exception as exc:
+      logger.warning("Failed to read %s: %s", env_file, exc)
+  _ENV_MAP_CACHE = (now, env_map)
+  return env_map
+
+
+def _runtime_env_value(key: str, default: str = "") -> str:
+  value = _load_runtime_env_map().get(key)
+  if value not in (None, ""):
+    return value
+  return os.environ.get(key, default)
+
+
+def _current_mode() -> str:
+  mode = _runtime_env_value("AI_EMPLOYEE_MODE", "power").strip().lower()
+  return mode if mode in AGENTS_BY_MODE else "power"
+
+
+def _available_agent_ids(mode: Optional[str] = None) -> list[str]:
+  return list(AGENTS_BY_MODE.get(mode or _current_mode(), AGENTS_BY_MODE["power"]))
+
+
+def _agent_aliases(agent_id: str) -> list[str]:
+  aliases = AGENT_ALIASES.get(agent_id, [agent_id])
+  return aliases if agent_id in aliases else [agent_id, *aliases]
+
+
+def _agent_allowed_in_mode(agent_id: str, mode: Optional[str] = None) -> bool:
+  allowed = set(_available_agent_ids(mode))
+  if agent_id in allowed:
+    return True
+  for allowed_id in allowed:
+    if agent_id in _agent_aliases(allowed_id):
+      return True
+  return False
+
+
+def _agent_dir_exists(agent_id: str) -> bool:
+  return (BOTS_DIR / agent_id / "run.sh").exists()
+
+
+def _resolve_agent_target(agent_id: str) -> Optional[str]:
+  """Resolve an agent ID to a runnable folder name (supports aliases)."""
+  for candidate in _agent_aliases(agent_id):
+    if _agent_dir_exists(candidate):
+      return candidate
+  return None
+
+
+def _mode_agent_targets(mode: Optional[str] = None) -> list[str]:
+  """Return unique runnable agent folders for the current mode."""
+  targets: list[str] = []
+  for agent_id in _available_agent_ids(mode):
+    resolved = _resolve_agent_target(agent_id)
+    if resolved and resolved not in targets:
+      targets.append(resolved)
+  return targets
+
+
+def route_to_agent(message: str) -> str:
+  message_lower = message.lower()
+  for keyword in sorted(ROUTING_MAP, key=len, reverse=True):
+    if keyword in message_lower:
+      return ROUTING_MAP[keyword]
+  if "all 20 agents" in message_lower or "all agents" in message_lower:
+    return "task-orchestrator"
+  return "task-orchestrator"
+
+
+def append_chatlog(entry: dict) -> None:
+  try:
+    CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+    lines = CHATLOG.read_text().splitlines() if CHATLOG.exists() else []
+    lines.append(json.dumps(entry))
+    CHATLOG.write_text("\n".join(lines[-CHATLOG_MAX_ENTRIES:]) + "\n")
+  except Exception as exc:
+    logger.warning("Failed to write chatlog: %s", exc)
+
+
+def _ollama_reachable(ollama_host: str) -> bool:
+  try:
+    req = urllib.request.Request(
+      f"{ollama_host.rstrip('/')}/api/tags",
+      headers={"User-Agent": "AI-Employee/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=0.25) as resp:
+      return resp.status == 200
+  except Exception:
+    return False
+
+
+def _detect_llm_provider(model_route: Optional[str] = None) -> tuple[Optional[str], str, dict[str, str]]:
+  runtime_env = _load_runtime_env_map()
+  route = (model_route or "").strip().lower()
+
+  if route == "auto":
+    # Cost-effective order: Ollama (free) → NVIDIA (free) → Groq (fast cheap) → OpenAI → Anthropic
+    ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    if _ollama_reachable(ollama_host):
+      return "ollama", runtime_env.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL", "llama3.2"), runtime_env
+    nvidia_key = runtime_env.get("NVIDIA_API_KEY") or os.environ.get("NVIDIA_API_KEY", "")
+    if nvidia_key:
+      return "nvidia", runtime_env.get("NIM_BULK_MODEL") or os.environ.get("NIM_BULK_MODEL", "meta/llama-3.1-8b-instruct"), runtime_env
+    groq_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+    if groq_key:
+      return "groq", runtime_env.get("GROQ_MODEL") or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"), runtime_env
+    openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
+      return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o-mini"), runtime_env
+    anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+      return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5"), runtime_env
+
+  if route == "nvidia":
+    nvidia_key = runtime_env.get("NVIDIA_API_KEY") or os.environ.get("NVIDIA_API_KEY", "")
+    if nvidia_key:
+      return "nvidia", runtime_env.get("NIM_BULK_MODEL") or os.environ.get("NIM_BULK_MODEL", "meta/llama-3.1-8b-instruct"), runtime_env
+
+  if route == "openai":
+    openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
+      return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o"), runtime_env
+
+  if route == "anthropic":
+    anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+      return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
+
+  if route == "groq":
+    groq_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+    if groq_key:
+      return "groq", runtime_env.get("GROQ_MODEL") or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"), runtime_env
+
+  if route == "external":
+    anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+      return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
+    openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
+      return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o"), runtime_env
+
+  if route == "ollama":
+    ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    if _ollama_reachable(ollama_host):
+      return "ollama", runtime_env.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL", "llama3.2"), runtime_env
+
+  if route == "gemma":
+    ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    if _ollama_reachable(ollama_host):
+      gemma_model = runtime_env.get("GEMMA_MODEL") or os.environ.get("GEMMA_MODEL", "gemma4")
+      return "gemma", gemma_model, runtime_env
+
+  anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+  if anthropic_key:
+    return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
+  openai_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+  if openai_key:
+    return "openai", runtime_env.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o"), runtime_env
+  ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+  if _ollama_reachable(ollama_host):
+    return "ollama", runtime_env.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL", "llama3.2"), runtime_env
+  return None, "", runtime_env
+
+
+def _llm_auth_failed(exc: Exception) -> bool:
+  text = str(exc).lower()
+  return "401" in text or "403" in text or "unauthorized" in text or "invalid api key" in text or "authentication" in text
+
+
+def _build_llm_system_prompt(message: str, routed_agent: str, mode: str) -> str:
+  available_agents = ", ".join(_available_agent_ids(mode))
+  return (
+    "You are AI Employee, a high-agency execution assistant with a natural human tone. "
+    f"Current mode: {mode}. "
+    f"Available agents in this mode: {available_agents}. "
+    f"Routed specialist agent: {routed_agent}. "
+    f"User task: {message}. "
+    "Produce real output immediately. Do not ask follow-up questions. "
+    "Write conversationally, with clear structure, and avoid robotic phrasing. "
+    "If live data or browsing is unavailable, say that clearly and provide the exact plan, structure, or draft you would deliver instead. "
+    "Be concrete, concise, and useful."
+  )
+
+
+def _call_groq_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
+  payload = {
+    "model": model,
+    "messages": [
+      {"role": "system", "content": system_prompt},
+      {"role": "user", "content": prompt},
+    ],
+    "temperature": 0.7,
+  }
+  req = urllib.request.Request(
+    "https://api.groq.com/openai/v1/chat/completions",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+      "Content-Type": "application/json",
+      "Authorization": f"Bearer {api_key}",
+    },
+    method="POST",
+  )
+  with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+    body = json.loads(resp.read().decode("utf-8", errors="replace"))
+  return (((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+
+
+def _call_openai_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
+  payload = {
+    "model": model,
+    "messages": [
+      {"role": "system", "content": system_prompt},
+      {"role": "user", "content": prompt},
+    ],
+    "temperature": 0.7,
+  }
+  req = urllib.request.Request(
+    "https://api.openai.com/v1/chat/completions",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+      "Content-Type": "application/json",
+      "Authorization": f"Bearer {api_key}",
+    },
+    method="POST",
+  )
+  with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+    body = json.loads(resp.read().decode("utf-8", errors="replace"))
+  return (((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+
+
+def _call_anthropic_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
+  payload = {
+    "model": model,
+    "max_tokens": 1200,
+    "system": system_prompt,
+    "messages": [{"role": "user", "content": prompt}],
+  }
+  req = urllib.request.Request(
+    "https://api.anthropic.com/v1/messages",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+      "Content-Type": "application/json",
+      "x-api-key": api_key,
+      "anthropic-version": "2023-06-01",
+    },
+    method="POST",
+  )
+  with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+    body = json.loads(resp.read().decode("utf-8", errors="replace"))
+  parts = body.get("content") or []
+  return "\n".join(part.get("text", "") for part in parts if part.get("type") == "text").strip()
+
+
+def _call_ollama_chat(prompt: str, system_prompt: str, model: str, ollama_host: str) -> str:
+  payload = {
+    "model": model,
+    "stream": False,
+    "messages": [
+      {"role": "system", "content": system_prompt},
+      {"role": "user", "content": prompt},
+    ],
+  }
+  req = urllib.request.Request(
+    f"{ollama_host.rstrip('/')}/api/chat",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+  )
+  with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+    body = json.loads(resp.read().decode("utf-8", errors="replace"))
+  return ((body.get("message") or {}).get("content") or "").strip()
+
+
+def _call_gemma_chat(prompt: str, system_prompt: str, ollama_host: str) -> str:
+  """Call Gemma model via local Ollama using the configured GEMMA_MODEL."""
+  gemma_model = os.environ.get("GEMMA_MODEL", "gemma4")
+  return _call_ollama_chat(prompt, system_prompt, gemma_model, ollama_host)
+
+
+def _generate_llm_response(message: str, routed_agent: str, mode: str, model_route: Optional[str] = None) -> str:
+  provider, model, runtime_env = _detect_llm_provider(model_route)
+  if not provider:
+    return (
+      "No model is available for the selected route. Add GROQ_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to ~/.ai-employee/.env, "
+      "or run Ollama locally: https://ollama.ai"
+    )
+
+  system_prompt = _build_llm_system_prompt(message, routed_agent, mode)
+  try:
+    if provider == "anthropic":
+      api_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+      answer = _call_anthropic_chat(message, system_prompt, model, api_key)
+    elif provider == "openai":
+      api_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+      answer = _call_openai_chat(message, system_prompt, model, api_key)
+    elif provider == "groq":
+      api_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+      answer = _call_groq_chat(message, system_prompt, model, api_key)
+    elif provider == "gemma":
+      ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+      answer = _call_gemma_chat(message, system_prompt, ollama_host)
+    else:
+      ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+      answer = _call_ollama_chat(message, system_prompt, model, ollama_host)
+  except urllib.error.HTTPError as exc:
+    if _llm_auth_failed(exc):
+      return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
+    return "Task is taking longer than expected. Check dashboard for results."
+  except (socket.timeout, TimeoutError, urllib.error.URLError) as exc:
+    if _llm_auth_failed(exc):
+      return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
+    return "Request timed out. Try a simpler task or check your connection."
+  except Exception as exc:
+    logger.warning("LLM request failed for agent %s: %s", routed_agent, exc)
+    if _llm_auth_failed(exc):
+      return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
+    return "Task is taking longer than expected. Check dashboard for results."
+
+  if not answer:
+    return (
+      "No model response was returned. Check your selected route credentials or model availability."
+    )
+
+  return f"Agent: {routed_agent}\n\n{answer}"
+
+def _log_activity(
+    event_type: str,
+    description: str,
+    details: "dict | None" = None,
+    source: str = "system",
+) -> None:
+    """Append one entry to the persistent activity log (activity_log.jsonl)."""
+    entry: dict = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "event_type": event_type,
+        "description": description,
+        "source": source,
+    }
+    if details:
+        entry["details"] = details
+    try:
+        ACTIVITY_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _ACTIVITY_LOCK:
+            with open(ACTIVITY_LOG, "a") as _fh:
+                _fh.write(json.dumps(entry) + "\n")
+    except Exception as _exc:
+        logger.warning("Failed to write activity log: %s", _exc)
+
+
+_ai_router_path = AI_HOME / "agents" / "ai-router"
+if str(_ai_router_path) not in sys.path:
+    sys.path.insert(0, str(_ai_router_path))
+
+try:
+    from ai_router import query_ai_for_agent as _query_ai_for_agent  # type: ignore
+    _AI_ROUTER_AVAILABLE = True
+except ImportError:
+    _AI_ROUTER_AVAILABLE = False
+
+app = FastAPI(title="AI Employee Dashboard")
+
+# ── Optional endpoint authentication (REQUIRE_AUTH=1 enables enforcement) ──────
+# When REQUIRE_AUTH is not set (default), requests from localhost are allowed
+# without a token so the dashboard works out-of-the-box.  Set REQUIRE_AUTH=1
+# in ~/.ai-employee/.env to enforce JWT on all state-modifying endpoints.
+_REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "0").strip() in ("1", "true", "yes")
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _verify_any_token(token_str: str) -> bool:
+    """Return True if the token is valid using the configured AuthManager."""
+    cfg = _security_config
+    try:
+        if _SECURITY_AVAILABLE:
+            from security import AuthManager as _AM  # type: ignore
+            _am = _AM(
+                secret_key=(cfg.security.jwt_secret_key if cfg else _jwt_secret_env),
+                algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
+                expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+            )
+            payload = _am.verify_token(token_str)
+            return payload is not None and "sub" in payload
+    except Exception:
+        pass
+    # Fallback: try stdlib HMAC token
+    try:
+        auth_fb = AuthManager(
+            secret_key=_jwt_secret_env,
+            algorithm="HS256",
+            expire_minutes=30,
+        )
+        payload = auth_fb.verify_token(token_str)
+        return payload is not None and "sub" in payload
+    except Exception:
+        return False
+
+
+def _is_localhost(request: Request) -> bool:
+    """Return True if the request originates from the loopback interface."""
+    host = (request.client.host if request.client else "") or ""
+    return host in ("127.0.0.1", "::1", "localhost")
+
+
+async def require_auth(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+) -> None:
+    """FastAPI dependency that enforces auth when REQUIRE_AUTH=1.
+
+    - When REQUIRE_AUTH is off (default): allows all requests.
+    - When REQUIRE_AUTH=1: allows localhost without a token (dev mode),
+      but requires a valid JWT for all other origins.
+    """
+    if not _REQUIRE_AUTH:
+        return  # auth not enforced globally
+    if _is_localhost(request):
+        return  # always allow local access
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Provide a Bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not _verify_any_token(credentials.credentials):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+# ── Rate limiter (openclaw-2) ─────────────────────────────────────────────────
+if _SLOWAPI_AVAILABLE:
+    _rate_limit = (
+        f"{_security_config.security.rate_limit_per_minute}/minute"
+        if _security_config else "60/minute"
+    )
+    limiter = Limiter(key_func=get_remote_address, default_limits=[_rate_limit])
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+else:
+    limiter = None
+
+
+def _auth_rate_limit(f):
+    """Apply 5/minute per-IP rate limit to auth endpoints.
+
+    Uses the slowapi limiter if available; otherwise returns the function unchanged
+    (rate limiting is then handled only by the global default limit).
+    Endpoints must accept ``request: Request`` as a parameter for the decorator to work.
+    """
+    if _SLOWAPI_AVAILABLE and limiter is not None:
+        return limiter.limit("5/minute")(f)
+    return f
+
+# ── CORS (openclaw-2) ─────────────────────────────────────────────────────────
+_cors_origins = (
+    _security_config.security.cors_origins
+    if _security_config
+    else ["http://localhost:8787", "http://127.0.0.1:8787"]
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
+    allow_headers=["*"],
+)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# ── Security headers middleware (openclaw-2) ──────────────────────────────────
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Attach HTTP security headers to every response.
+
+    The index route (/) generates its own tighter CSP with a per-request nonce
+    for the inline script block.  This middleware only sets the CSP fallback for
+    all other routes (JSON API endpoints) that don't set one themselves.
+    """
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    # HSTS is only meaningful over TLS; omit it on plain HTTP to avoid browser
+    # caching a broken policy that prevents future access on port changes.
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Only set the fallback CSP when the index route has not already applied
+    # its own policy for the dashboard HTML.
+    if "Content-Security-Policy" not in response.headers:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; "
+            "img-src 'self' data: blob:"
+        )
+    return response
+
+# ── Audit logging middleware (openclaw-2) ─────────────────────────────────────
+_audit_logger = logging.getLogger("ai_employee.audit")
+if not _audit_logger.handlers:
+    _audit_handler = logging.StreamHandler()
+    _audit_handler.setFormatter(logging.Formatter("%(asctime)s AUDIT %(message)s"))
+    _audit_logger.addHandler(_audit_handler)
+    _audit_logger.setLevel(logging.INFO)
+
+@app.middleware("http")
+async def audit_logging_middleware(request: Request, call_next):
+    """Log every inbound request and outbound status for the audit trail."""
+    # Skip high-frequency health/status probes to reduce I/O noise
+    if request.url.path in ("/health", "/api/status", "/api/gateway/status"):
+        return await call_next(request)
+
+    _audit_enabled = (
+        _security_config.logging.audit_enabled if _security_config else True
+    )
+    if not _audit_enabled:
+        return await call_next(request)
+
+    start = datetime.now(timezone.utc)
+    _audit_logger.info(json.dumps({
+        "event": "request",
+        "timestamp": start.isoformat(),
+        "method": request.method,
+        "path": request.url.path,
+        "client": request.client.host if request.client else "unknown",
+    }))
+    response = await call_next(request)
+    duration = (datetime.now(timezone.utc) - start).total_seconds()
+    _audit_logger.info(json.dumps({
+        "event": "response",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "duration_seconds": round(duration, 4),
+    }))
+    return response
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ── In-memory file read cache (reduces disk I/O for high-frequency reads) ─────
+_cache: dict = {}
+
+def _cached_read(path: Path, ttl: int = 5) -> "dict | list":
+    """Read a JSON file with a short TTL cache to avoid repeated disk hits."""
+    key = str(path)
+    now = time.time()
+    if key in _cache and now - _cache[key]["ts"] < ttl:
+        return _cache[key]["data"]
+    try:
+        data: "dict | list" = json.loads(path.read_text()) if path.exists() else {}
+    except Exception:
+        data = {}
+    _cache[key] = {"ts": now, "data": data}
+    return data
+
+
+def _invalidate_cache(path: Path) -> None:
+    """Evict a path from the read cache after a write."""
+    _cache.pop(str(path), None)
+
+
+# ── Efficient last-N-lines reader for growing JSONL logs ──────────────────────
+def _read_last_n_lines(path: Path, n: int = 100) -> list:
+    """Return the last *n* non-empty JSONL lines without reading the whole file."""
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        buf = b""
+        lines: list[bytes] = []
+        pos = size
+        while pos > 0 and len(lines) < n + 1:
+            chunk = min(4096, pos)
+            pos -= chunk
+            f.seek(pos)
+            buf = f.read(chunk) + buf
+            lines = buf.split(b"\n")
+        result = [l for l in lines[-n:] if l.strip()]
+    parsed = []
+    for l in result:
+        try:
+            parsed.append(json.loads(l))
+        except Exception:
+            pass
+    return parsed
+
+
+# ── JSONL trim helper (keeps state files from growing unbounded) ──────────────
+def _trim_jsonl(path: Path, max_lines: int = 1000) -> None:
+    if not path.exists():
+        return
+    try:
+        lines = path.read_bytes().split(b"\n")
+        lines = [l for l in lines if l.strip()]
+        if len(lines) > max_lines:
+            path.write_bytes(b"\n".join(lines[-max_lines:]) + b"\n")
+    except Exception:
+        pass
+
+
+def ai_employee(*args: str) -> tuple:
+    try:
+        p = subprocess.run(
+            [str(AI_HOME / "bin" / "ai-employee"), *args],
+            capture_output=True, text=True, timeout=10
+        )
+        return p.returncode, p.stdout + p.stderr
+    except Exception as e:
+        return 1, str(e)
+
+
+# ─── HTML Dashboard ────────────────────────────────────────────────────────────
+
+INDEX_HTML = r"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>AI Employee Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#080808;
+      --surface:rgba(14,14,14,0.98);
+      --surface2:rgba(20,20,20,0.96);
+      --glass:rgba(255,255,255,0.02);
+      --border:rgba(201,168,76,0.18);
+      --primary:#D4AF37;
+      --primary-dark:#B8960C;
+      --primary-light:#F0D060;
+      --accent:#C9A227;
+      --accent2:#E8C84A;
+      --gold:#D4AF37;
+      --gold-light:#F0D060;
+      --gold-dark:#B8960C;
+      --success:#22c55e;
+      --danger:#ef4444;
+      --warning:#f59e0b;
+      --text:#f5f5f0;
+      --text-secondary:#9a8a6a;
+      --text-muted:#5a4a30;
+      --radius:12px;
+      --radius-sm:8px;
+      --shadow:0 8px 40px rgba(0,0,0,.95);
+      --glow-primary:0 0 32px rgba(212,175,55,.4);
+      --glow-success:0 0 28px rgba(34,197,94,.35);
+      --glow-danger:0 0 28px rgba(239,68,68,.35);
+      --sidebar-w:220px;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{
+      font-family:'Inter','Space Grotesk',system-ui,sans-serif;
+      background:var(--bg);
+      color:var(--text);min-height:100vh;line-height:1.6;
+      overflow-x:hidden;
+    }
+    /* Animated background blobs */
+    body::before,body::after{
+      content:'';position:fixed;border-radius:50%;pointer-events:none;z-index:0;filter:blur(80px);
+    }
+    body::before{
+      width:900px;height:700px;top:-200px;left:-200px;
+      background:radial-gradient(circle,rgba(212,175,55,.08) 0%,transparent 65%);
+      animation:blobDrift 18s ease-in-out infinite alternate;
+    }
+    body::after{
+      width:700px;height:600px;bottom:-100px;right:-100px;
+      background:radial-gradient(circle,rgba(212,175,55,.05) 0%,transparent 65%);
+      animation:blobDrift2 22s ease-in-out infinite alternate;
+    }
+    @keyframes blobDrift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(80px,50px) scale(1.1)}100%{transform:translate(-40px,80px) scale(0.95)}}
+    @keyframes blobDrift2{0%{transform:translate(0,0) scale(1)}50%{transform:translate(-60px,-40px) scale(1.08)}100%{transform:translate(50px,-80px) scale(0.92)}}
+
+    /* ── Scrollbars ── */
+    ::-webkit-scrollbar{width:5px;height:5px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:rgba(148,163,184,.15);border-radius:10px}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(212,175,55,.35)}
+
+    /* ── Layout ── */
+    .app{display:flex;flex-direction:column;min-height:100vh;position:relative;z-index:1}
+
+    /* ── Keyframe animations ── */
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+    @keyframes slideInLeft{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:none}}
+    @keyframes slideInRight{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+    @keyframes slideInUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+    @keyframes pulseRing{0%{transform:scale(1);opacity:.8}70%{transform:scale(2);opacity:0}100%{transform:scale(2);opacity:0}}
+    @keyframes gradientShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+    @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+    @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+    @keyframes countUp{from{opacity:0;transform:scale(.8) translateY(6px)}to{opacity:1;transform:none}}
+    @keyframes glowPulse{0%,100%{box-shadow:0 0 20px rgba(212,175,55,.15),0 0 0 rgba(212,175,55,.05)}50%{box-shadow:0 0 40px rgba(212,175,55,.25),0 0 80px rgba(212,175,55,.08)}}
+    @keyframes borderGlow{0%,100%{border-color:rgba(212,175,55,.2)}50%{border-color:rgba(212,175,55,.5)}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+    /* ── Header ── */
+    header{
+      background:linear-gradient(100deg,rgba(6,12,28,0.98) 0%,rgba(10,18,42,0.98) 60%,rgba(8,15,35,0.98) 100%);
+      backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+      padding:14px 32px;display:flex;align-items:center;justify-content:space-between;
+      border-bottom:1px solid rgba(212,175,55,.2);
+      position:sticky;top:0;z-index:200;
+      animation:glowPulse 8s ease infinite;
+    }
+    .header-left{display:flex;align-items:center;gap:14px}
+    .logo{
+      width:42px;height:42px;
+      background:linear-gradient(135deg,#B8960C,#D4AF37);
+      border-radius:12px;display:flex;align-items:center;justify-content:center;
+      font-size:1.3em;border:1px solid rgba(212,175,55,.3);
+      animation:float 5s ease-in-out infinite;
+      box-shadow:0 0 20px rgba(212,175,55,.5),inset 0 1px 0 rgba(255,255,255,.15);
+    }
+    .header-title h1{
+      font-size:1.18em;font-weight:700;letter-spacing:-.03em;
+      background:linear-gradient(135deg,#fff 30%,var(--gold-light) 100%);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    }
+    .header-title .sub{color:rgba(148,163,184,.75);font-size:.78em;margin-top:1px;letter-spacing:.01em}
+    .header-right{display:flex;align-items:center;gap:10px}
+    .status-pill{display:flex;align-items:center;gap:7px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.1);border-radius:20px;
+      padding:5px 13px;font-size:.78em;color:rgba(240,244,255,.8);
+      backdrop-filter:blur(8px);transition:all .3s}
+    .status-pill:hover{background:rgba(255,255,255,.09);border-color:rgba(129,140,248,.3)}
+    .status-dot{width:7px;height:7px;border-radius:50%;background:var(--success);
+      box-shadow:0 0 9px var(--success);animation:blink 2.5s infinite;flex-shrink:0}
+    .hdr-ctrl{display:flex;align-items:center;gap:8px}
+    .hdr-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 15px;border:none;
+      border-radius:20px;cursor:pointer;font-size:.775em;font-weight:600;
+      transition:all .2s;font-family:inherit;white-space:nowrap;position:relative;overflow:hidden;
+      letter-spacing:.01em}
+    .hdr-btn-start{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3)}
+    .hdr-btn-start:hover{background:rgba(16,185,129,.3);box-shadow:0 0 18px rgba(16,185,129,.4);transform:translateY(-1px)}
+    .hdr-btn-stop{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.28)}
+    .hdr-btn-stop:hover{background:rgba(244,63,94,.25);box-shadow:0 0 18px rgba(244,63,94,.35);transform:translateY(-1px)}
+    .hdr-btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+
+    /* ── Navigation (horizontal scrollable tab bar) ── */
+    nav{
+      background:rgba(6,10,22,0.92);
+      border-bottom:1px solid rgba(148,163,184,.08);
+      padding:0 28px;display:flex;gap:0;overflow-x:auto;
+      box-shadow:0 4px 20px rgba(0,0,0,.4);
+      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      scrollbar-width:none;
+    }
+    nav::-webkit-scrollbar{display:none}
+    nav button{
+      background:none;border:none;color:rgba(148,163,184,.7);
+      padding:13px 15px;cursor:pointer;font-size:.82em;font-weight:500;
+      border-bottom:2px solid transparent;transition:all .22s;
+      white-space:nowrap;display:flex;align-items:center;gap:5px;
+      font-family:inherit;position:relative;letter-spacing:.01em;
+    }
+    nav button:hover{color:var(--text);background:rgba(255,255,255,.04)}
+    nav button.active{color:var(--gold);border-bottom-color:var(--gold);
+      background:rgba(212,175,55,.08);font-weight:600;text-shadow:0 0 12px rgba(212,175,55,.4);
+      box-shadow:inset 0 -2px 8px rgba(212,175,55,.15);letter-spacing:.02em}
+    nav button.active::after{content:'';position:absolute;bottom:0;left:15%;right:15%;height:2px;
+      background:linear-gradient(90deg,transparent,var(--gold),transparent);
+      border-radius:2px 2px 0 0;filter:blur(2px);box-shadow:0 0 8px var(--gold)}
+
+    /* ── Main content ── */
+    main{flex:1;padding:24px 28px;max-width:1320px;margin:0 auto;width:100%;position:relative;z-index:1}
+    @media(max-width:768px){main{padding:12px 14px}}
+
+    /* ── Tab panels ── */
+    .tab-content{display:none}
+    .tab-content.active{display:block;animation:fadeIn .3s ease}
+
+    /* ── Cards ── */
+    .card{
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius);padding:22px;margin-bottom:16px;
+      transition:border-color .3s,box-shadow .35s,transform .3s;
+      backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+      position:relative;overflow:hidden;
+    }
+    .card::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);
+    }
+    .card:hover{border-color:rgba(212,175,55,.25);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(212,175,55,.08);transform:translateY(-1px)}
+    .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    .card-title{font-size:.92em;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;letter-spacing:.005em}
+    .card-title .icon{color:var(--primary-light)}
+    .section-title{font-size:.76em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
+
+    /* ── Grid layouts ── */
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    .grid-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin-bottom:16px}
+    @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
+
+    /* ── Stat cards ── */
+    .stat-card{
+      background:var(--surface2);
+      border:1px solid var(--border);border-radius:var(--radius);
+      padding:20px 18px;display:flex;align-items:center;gap:14px;
+      transition:all .3s ease;cursor:default;position:relative;overflow:hidden;
+      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    }
+    .stat-card::before{
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(255,255,255,.03) 0%,transparent 60%);
+      pointer-events:none;
+    }
+    .stat-card::after{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,var(--stat-top,rgba(255,255,255,.1)),transparent);
+    }
+    .stat-card:hover{transform:translateY(-3px);box-shadow:0 10px 32px rgba(0,0,0,.4),0 0 0 1px rgba(212,175,55,.12);border-color:rgba(212,175,55,.25)}
+    .stat-card:hover::before{opacity:1}
+    .stat-icon{
+      width:48px;height:48px;border-radius:14px;display:flex;align-items:center;
+      justify-content:center;font-size:1.3em;flex-shrink:0;transition:transform .3s,box-shadow .3s;
+      position:relative;overflow:hidden;
+    }
+    .stat-icon::before{content:'';position:absolute;inset:0;border-radius:inherit;
+      background:linear-gradient(135deg,rgba(255,255,255,.12) 0%,transparent 50%)}
+    .stat-card:hover .stat-icon{transform:scale(1.1) rotate(-5deg);box-shadow:0 0 16px var(--stat-glow,rgba(212,175,55,.4))}
+    .stat-icon.green{background:linear-gradient(135deg,rgba(16,185,129,.2),rgba(52,211,153,.08));color:#34d399;--stat-glow:rgba(16,185,129,.45)}
+    .stat-icon.blue{background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.08));color:var(--gold-light);--stat-glow:rgba(212,175,55,.45)}
+    .stat-icon.cyan{background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.05));color:var(--accent2);--stat-glow:rgba(212,175,55,.35)}
+    .stat-icon.yellow{background:linear-gradient(135deg,rgba(245,158,11,.2),rgba(251,191,36,.08));color:#fbbf24;--stat-glow:rgba(245,158,11,.45)}
+    .stat-body .val{font-size:1.8em;font-weight:800;color:var(--text);
+      animation:countUp .5s ease;letter-spacing:-.04em;line-height:1}
+    .stat-body .lbl{font-size:.75em;color:var(--text-muted);margin-top:6px;letter-spacing:.03em;text-transform:uppercase;font-weight:500}
+
+    /* ── System control hero ── */
+    .sys-control{
+      background:linear-gradient(135deg,rgba(212,175,55,.08) 0%,rgba(212,175,55,.04) 50%,rgba(212,175,55,.02) 100%);
+      border:1px solid rgba(212,175,55,.25);border-radius:var(--radius);
+      padding:26px 30px;margin-bottom:16px;
+      display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;
+      position:relative;overflow:hidden;
+      backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+      animation:borderGlow 8s ease infinite;
+    }
+    .sys-control::before{
+      content:'';position:absolute;top:-80%;right:-5%;width:400px;height:400px;
+      background:radial-gradient(circle,rgba(99,102,241,.1) 0%,transparent 65%);
+      pointer-events:none;animation:float 10s ease-in-out infinite;
+    }
+    .sys-control::after{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+    }
+    .sys-control-left{display:flex;align-items:center;gap:20px}
+    .sys-status-ring{position:relative;width:60px;height:60px;flex-shrink:0}
+    .sys-status-ring .ring-bg{
+      width:60px;height:60px;border-radius:50%;
+      border:2px solid rgba(212,175,55,.3);
+      display:flex;align-items:center;justify-content:center;
+      font-size:1.65em;
+      background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.05));
+      box-shadow:0 0 20px rgba(212,175,55,.3);
+    }
+    .sys-status-ring .ring-pulse{
+      position:absolute;inset:-4px;border-radius:50%;
+      border:2px solid var(--success);
+      animation:pulseRing 2.8s ease-out infinite;
+    }
+    .sys-status-ring.offline .ring-pulse{border-color:var(--danger)}
+    .sys-control-info h2{font-size:1.1em;font-weight:700;color:var(--text);margin-bottom:4px;letter-spacing:-.02em}
+    .sys-control-info p{font-size:.83em;color:var(--text-secondary);line-height:1.5}
+    .sys-control-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .btn-hero{
+      display:inline-flex;align-items:center;gap:9px;padding:12px 26px;border:none;
+      border-radius:11px;cursor:pointer;font-size:.9em;font-weight:600;
+      transition:all .22s cubic-bezier(.4,0,.2,1);font-family:inherit;white-space:nowrap;
+      position:relative;overflow:hidden;letter-spacing:.01em;
+    }
+    .btn-hero::before{
+      content:'';position:absolute;inset:0;border-radius:inherit;
+      background:linear-gradient(135deg,rgba(255,255,255,.12) 0%,transparent 50%);
+      opacity:0;transition:opacity .22s;
+    }
+    .btn-hero:hover::before{opacity:1}
+    .btn-hero::after{
+      content:'';position:absolute;top:50%;left:50%;width:0;height:0;
+      background:rgba(255,255,255,.18);border-radius:50%;
+      transform:translate(-50%,-50%);transition:width .45s ease,height .45s ease,opacity .45s ease;
+      opacity:0;
+    }
+    .btn-hero:active::after{width:350px;height:350px;opacity:0}
+    .btn-hero-start{
+      background:linear-gradient(135deg,#047857,#059669,#10b981);
+      color:#fff;box-shadow:0 4px 18px rgba(16,185,129,.35),inset 0 1px 0 rgba(255,255,255,.15);
+    }
+    .btn-hero-start:hover{
+      box-shadow:0 8px 28px rgba(16,185,129,.55),inset 0 1px 0 rgba(255,255,255,.2);
+      transform:translateY(-2px);
+    }
+    .btn-hero-stop{
+      background:linear-gradient(135deg,#9f1239,#be123c,#f43f5e);
+      color:#fff;box-shadow:0 4px 18px rgba(244,63,94,.3),inset 0 1px 0 rgba(255,255,255,.12);
+    }
+    .btn-hero-stop:hover{
+      box-shadow:0 8px 28px rgba(244,63,94,.5),inset 0 1px 0 rgba(255,255,255,.18);
+      transform:translateY(-2px);
+    }
+    .btn-hero:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+    .btn-hero .btn-icon{font-size:1em}
+
+    /* ── Bot health progress bar ── */
+    .health-bar-wrap{margin:10px 0 4px;position:relative}
+    .health-bar-track{height:5px;background:rgba(255,255,255,.06);border-radius:10px;overflow:hidden}
+    .health-bar-fill{
+      height:100%;border-radius:10px;
+      background:linear-gradient(90deg,#059669,#34d399);
+      transition:width .9s cubic-bezier(.4,0,.2,1);
+      box-shadow:0 0 10px rgba(16,185,129,.5);
+      width:0%;
+    }
+    .health-bar-fill.warn{background:linear-gradient(90deg,#d97706,#fbbf24)}
+    .health-bar-fill.danger{background:linear-gradient(90deg,#be123c,#fb7185)}
+    .health-label{display:flex;justify-content:space-between;font-size:.73em;color:var(--text-muted);margin-top:4px}
+
+    /* ── Bot rows ── */
+    .bot-row{
+      display:flex;align-items:center;gap:10px;padding:10px 10px;
+      border-bottom:1px solid rgba(148,163,184,.06);border-radius:8px;
+      transition:background .2s;animation:slideInLeft .3s ease both;
+    }
+    .bot-row:last-child{border-bottom:none}
+    .bot-row:hover{background:rgba(212,175,55,.04)}
+    .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:all .4s;position:relative}
+    .dot.on{background:var(--success);box-shadow:0 0 8px rgba(16,185,129,.6)}
+    .dot.on::after{
+      content:'';position:absolute;inset:-3px;border-radius:50%;
+      border:1.5px solid rgba(16,185,129,.4);
+      animation:pulseRing 2.5s ease-out infinite;
+    }
+    .dot.off{background:#374151}
+    .dot.unknown{background:var(--warning)}
+    .bot-name{flex:1;font-size:.875em;color:var(--text)}
+
+    /* ── Badges ── */
+    .badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;
+      font-size:.75em;font-weight:600;letter-spacing:.01em}
+    .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:var(--success);border:1px solid rgba(16,185,129,.25)}
+    .badge.stopped,.badge.rejected{background:rgba(239,68,68,.12);color:var(--danger);border:1px solid rgba(239,68,68,.25)}
+    .badge.pending{background:rgba(245,158,11,.12);color:var(--warning);border:1px solid rgba(245,158,11,.25)}
+    .badge.enabled{background:rgba(99,102,241,.12);color:var(--primary);border:1px solid rgba(99,102,241,.25)}
+    .badge.disabled{background:rgba(100,116,139,.12);color:var(--text-muted);border:1px solid rgba(100,116,139,.25)}
+
+    /* ── Buttons ── */
+    .btn{
+      display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border:none;
+      border-radius:var(--radius-sm);cursor:pointer;font-size:.855em;font-weight:500;
+      transition:all .2s cubic-bezier(.4,0,.2,1);font-family:inherit;text-decoration:none;
+      white-space:nowrap;position:relative;overflow:hidden;letter-spacing:.01em;
+    }
+    .btn::after{
+      content:'';position:absolute;top:50%;left:50%;width:0;height:0;
+      background:rgba(255,255,255,.14);border-radius:50%;
+      transform:translate(-50%,-50%);transition:width .4s ease,height .4s ease,opacity .4s ease;
+      opacity:0;
+    }
+    .btn:active::after{width:250px;height:250px;opacity:0}
+    .btn-primary{
+      background:linear-gradient(135deg,var(--primary-dark),var(--primary));
+      color:#000;font-weight:600;box-shadow:0 2px 12px rgba(212,175,55,.35);
+    }
+    .btn-primary:hover{transform:translateY(-1px);box-shadow:0 5px 20px rgba(212,175,55,.55),0 0 0 1px rgba(212,175,55,.2);filter:brightness(1.08)}
+    .btn-danger{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.22)}
+    .btn-danger:hover{background:rgba(244,63,94,.22);box-shadow:0 3px 12px rgba(244,63,94,.28);border-color:rgba(244,63,94,.4)}
+    .btn-success{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(16,185,129,.22)}
+    .btn-success:hover{background:rgba(16,185,129,.24);box-shadow:0 3px 12px rgba(16,185,129,.3);border-color:rgba(16,185,129,.4)}
+    .btn-ghost{background:rgba(255,255,255,.04);color:var(--text-secondary);border:1px solid rgba(148,163,184,.12)}
+    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(129,140,248,.3)}
+    .btn-sm{padding:5px 12px;font-size:.78em}
+    .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+
+    /* ── Form controls ── */
+    .form-group{margin-bottom:14px}
+    label{display:block;font-size:.8em;font-weight:500;color:var(--text-secondary);margin-bottom:5px;letter-spacing:.02em}
+    input,textarea,select{
+      width:100%;
+      background:rgba(15,25,48,.7);
+      border:1px solid rgba(148,163,184,.12);
+      color:var(--text);border-radius:var(--radius-sm);padding:9px 13px;
+      font-size:.875em;font-family:inherit;transition:border-color .2s,box-shadow .2s,background .2s;outline:none;
+      backdrop-filter:blur(4px);
+    }
+    input:focus,textarea:focus,select:focus{
+      border-color:rgba(212,175,55,.6);
+      box-shadow:0 0 0 3px rgba(212,175,55,.12),0 0 16px rgba(212,175,55,.1);
+      background:rgba(15,25,55,.9);
+    }
+    input:hover:not(:focus),select:hover:not(:focus){border-color:rgba(212,175,55,.3)}
+    textarea{resize:vertical;min-height:80px}
+    select option{background:#0d1b33;color:var(--text)}
+
+    /* ── Toggle (enhanced) ── */
+    .toggle{position:relative;display:inline-block;width:44px;height:25px;flex-shrink:0}
+    .toggle input{opacity:0;width:0;height:0}
+    .slider{
+      position:absolute;cursor:pointer;inset:0;
+      background:rgba(148,163,184,.15);border-radius:25px;
+      transition:.35s cubic-bezier(.4,0,.2,1);
+      border:1px solid rgba(148,163,184,.1);
+    }
+    .slider:before{
+      content:"";position:absolute;width:19px;height:19px;left:3px;top:2px;
+      background:#475569;border-radius:50%;
+      transition:.35s cubic-bezier(.4,0,.2,1);
+      box-shadow:0 1px 4px rgba(0,0,0,.5);
+    }
+    input:checked+.slider{background:linear-gradient(135deg,var(--primary-dark),var(--primary));box-shadow:0 0 14px rgba(212,175,55,.5)}
+    input:checked+.slider:before{transform:translateX(19px);background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.4)}
+
+    /* ── Code / pre ── */
+    pre{
+      background:rgba(4,8,18,.7);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius-sm);
+      padding:16px;overflow:auto;font-size:.8em;max-height:280px;
+      white-space:pre-wrap;word-break:break-word;color:var(--text-secondary);
+      font-family:'JetBrains Mono','Fira Code','Consolas',monospace;
+      backdrop-filter:blur(4px);
+    }
+    code{background:rgba(99,102,241,.14);color:var(--primary-light);
+      padding:1px 7px;border-radius:5px;font-size:.875em;font-family:monospace}
+
+    /* ── Chat ── */
+    #chat-log{
+      max-height:calc(100vh - 280px);overflow-y:auto;padding:16px;
+      border:1px solid rgba(148,163,184,.09);
+      border-radius:16px;
+      background:linear-gradient(180deg,rgba(4,8,20,.95),rgba(7,12,28,.98));
+      margin-bottom:14px;
+      backdrop-filter:blur(8px);
+    }
+    .chat-msg{padding:12px 16px;border-radius:14px;margin-bottom:10px;max-width:86%;
+      word-break:break-word;animation:slideInUp .22s ease}
+    .chat-msg.user{
+      background:linear-gradient(135deg,#B8960C,#D4AF37,#F0D060);
+      margin-left:auto;color:#fff;
+      box-shadow:0 3px 14px rgba(99,102,241,.35),inset 0 1px 0 rgba(255,255,255,.12);
+      border-radius:18px 18px 4px 18px;
+      font-size:.92em;line-height:1.65;
+    }
+    .chat-msg.bot,.chat-msg.agent{
+      background:rgba(18,18,18,0.95);
+      border:1px solid rgba(148,163,184,.1);color:var(--text);
+      border-radius:14px 14px 14px 4px;
+      backdrop-filter:blur(6px);
+      font-size:.92em;line-height:1.65;
+    }
+    .chat-msg-header{display:flex;align-items:center;gap:8px;font-size:.72em;margin-bottom:6px;opacity:.85}
+    .chat-msg-avatar{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08)}
+    .chat-msg-source{font-weight:600;letter-spacing:.01em}
+    .chat-model-row{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+    .chat-model-row select{max-width:240px}
+    .chat-msg .ts{font-size:.72em;opacity:.55;margin-top:4px}
+    .chat-input-row{display:flex;gap:8px;align-items:flex-end}
+
+    /* ── Live Office ── */
+    .office-wrap{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;min-height:420px;
+      background:
+        linear-gradient(180deg,rgba(35,199,255,.08),rgba(9,17,31,.9) 38%),
+        repeating-linear-gradient(90deg,rgba(255,255,255,.02) 0 2px,transparent 2px 120px),
+        linear-gradient(0deg,#0a1220,#0a1424)}
+    .office-floor{position:absolute;left:0;right:0;bottom:0;height:48%;background:linear-gradient(180deg,#121b2b,#0a0f17);
+      border-top:1px solid rgba(255,255,255,.08)}
+    .office-window{position:absolute;top:24px;width:160px;height:90px;border-radius:10px;border:1px solid rgba(159,232,255,.35);
+      background:linear-gradient(180deg,rgba(35,199,255,.28),rgba(35,199,255,.06));box-shadow:0 0 22px rgba(35,199,255,.18)}
+    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(159,232,255,.35)}
+    .office-plant{position:absolute;bottom:104px;width:22px;height:36px;background:#143027;border-radius:6px 6px 3px 3px;border:1px solid rgba(65,217,147,.3)}
+    .office-plant::before{content:'';position:absolute;left:-5px;top:-22px;width:32px;height:24px;border-radius:50%;background:radial-gradient(circle,#3fdc94,#1f7f56)}
+    .office-desk{position:absolute;bottom:120px;width:175px;height:15px;
+      background:linear-gradient(135deg,#1e3a52,#243d5e);border-radius:9px;
+      box-shadow:0 4px 12px rgba(0,0,0,.4)}
+    .office-desk::after{content:'';position:absolute;left:12px;top:-18px;width:36px;height:18px;
+      border-radius:5px 5px 3px 3px;background:linear-gradient(135deg,#2a5080,#193559)}
+    .office-agent{position:absolute;bottom:88px;width:42px;height:42px;border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      background:radial-gradient(circle at 30% 30%,#c4eeff,#818cf8);
+      border:2px solid rgba(255,255,255,.3);cursor:pointer;
+      animation:officeWalk linear infinite;
+      will-change:transform;
+      box-shadow:0 0 20px rgba(129,140,248,.5),0 4px 12px rgba(0,0,0,.4)}
+    .office-agent.warning{box-shadow:0 0 24px rgba(244,63,94,.7);border-color:rgba(244,63,94,.9)}
+    .office-agent:hover{transform:scale(1.15)!important;z-index:10}
+    .office-agent .agent-emoji{font-size:18px}
+    .office-agent .agent-tag{
+      position:absolute;top:-24px;left:50%;transform:translateX(-50%);
+      font-size:.62em;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;
+      background:rgba(4,8,20,.92);
+      padding:2px 8px;border-radius:999px;
+      border:1px solid rgba(129,140,248,.3);
+      box-shadow:0 0 8px rgba(99,102,241,.2);
+    }
+    @keyframes officeWalk{
+      0%{translate:0}25%{translate:32px 0}75%{translate:-16px 0}100%{translate:0}
+    }
+    .office-modal{position:fixed;inset:0;background:rgba(2,4,12,.8);display:none;align-items:center;justify-content:center;z-index:4000;backdrop-filter:blur(6px)}
+    .office-modal.open{display:flex;animation:fadeIn .2s ease}
+    .office-modal-card{
+      width:min(540px,92vw);
+      background:rgba(12,20,40,.96);
+      border:1px solid rgba(129,140,248,.2);border-radius:18px;padding:22px;
+      box-shadow:0 24px 64px rgba(0,0,0,.6),0 0 0 1px rgba(129,140,248,.08);
+      backdrop-filter:blur(20px);
+    }
+    #office-modal-action{overflow-wrap:anywhere;word-break:break-word}
+    .office-progress{height:8px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;border:1px solid rgba(148,163,184,.08)}
+    .office-progress > div{height:100%;background:linear-gradient(90deg,var(--accent),var(--primary-light));width:0;transition:width .5s cubic-bezier(.4,0,.2,1)}
+
+    /* ── Improvements ── */
+    .improv-row{
+      border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:16px;margin-bottom:10px;
+      background:rgba(15,25,48,.7);
+      transition:border-color .25s,transform .2s,box-shadow .25s;
+      backdrop-filter:blur(8px);
+    }
+    .improv-row:hover{border-color:rgba(212,175,55,.35);transform:translateX(4px);box-shadow:0 0 20px rgba(212,175,55,.1),-4px 0 0 rgba(212,175,55,.4)}
+    .improv-row h4{color:var(--text);font-size:.9em;margin-bottom:5px;font-weight:600}
+    .improv-row p{font-size:.83em;color:var(--text-secondary);margin-bottom:8px;line-height:1.55}
+
+    /* ── Scheduler ── */
+    .sched-row{
+      border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:13px 16px;margin-bottom:10px;
+      background:rgba(15,25,48,.7);
+      display:flex;align-items:flex-start;gap:12px;
+      transition:border-color .25s,box-shadow .25s;
+      backdrop-filter:blur(6px);
+    }
+    .sched-row:hover{border-color:rgba(212,175,55,.3);box-shadow:0 4px 16px rgba(0,0,0,.3),0 0 0 1px rgba(212,175,55,.08)}
+    .sched-info{flex:1}
+    .sched-info h4{color:var(--text);font-size:.875em;margin-bottom:3px;display:flex;align-items:center;gap:8px;font-weight:600}
+    .sched-info p{font-size:.8em;color:var(--text-muted)}
+
+    /* ── Skills ── */
+    .skill-card{
+      border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:13px;margin-bottom:8px;cursor:pointer;
+      transition:all .22s;
+      background:rgba(15,25,48,.7);
+      backdrop-filter:blur(6px);
+    }
+    .skill-card:hover{border-color:rgba(212,175,55,.4);background:rgba(212,175,55,.06);
+      transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4),0 0 0 1px rgba(212,175,55,.1)}
+    .skill-card.selected{border-color:rgba(52,211,153,.5);background:rgba(16,185,129,.08);
+      box-shadow:0 0 16px rgba(16,185,129,.18)}
+    .skill-card h5{color:var(--text);font-size:.875em;margin-bottom:4px;font-weight:600}
+    .skill-card p{font-size:.8em;color:var(--text-muted);margin:0;line-height:1.45}
+    .skill-card .tags{margin-top:7px;display:flex;flex-wrap:wrap;gap:4px}
+    .tag{background:rgba(212,175,55,.12);color:var(--gold-light);border-radius:5px;
+      padding:2px 8px;font-size:.72em;font-weight:500;letter-spacing:.01em;border:1px solid rgba(212,175,55,.2)}
+    .cat-pill{display:inline-block;padding:4px 12px;border-radius:20px;font-size:.8em;
+      cursor:pointer;border:1px solid var(--border);color:var(--text-secondary);
+      margin:2px;transition:all .2s;font-weight:500}
+    .cat-pill:hover{border-color:var(--primary);color:var(--primary)}
+    .cat-pill.active{background:var(--primary);color:#fff;border-color:var(--primary);
+      box-shadow:0 2px 10px rgba(99,102,241,.35);}
+    .skill-grid{max-height:500px;overflow-y:auto;padding-right:4px}
+    .agent-card{
+      border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:15px;margin-bottom:8px;
+      background:rgba(15,25,48,.7);transition:all .22s;
+      backdrop-filter:blur(6px);
+    }
+    .agent-card:hover{border-color:rgba(212,175,55,.35);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.3),0 0 0 1px rgba(212,175,55,.1)}
+    .agent-card h4{color:var(--text);margin-bottom:5px;font-size:.9em;font-weight:600}
+    .agent-card p{font-size:.82em;color:var(--text-muted);line-height:1.45}
+    #skill-search{margin-bottom:12px}
+
+    /* ── Toast ── */
+    #toast{
+      position:fixed;bottom:24px;right:24px;min-width:260px;padding:14px 20px;
+      border-radius:13px;color:#fff;opacity:0;
+      transition:opacity .3s cubic-bezier(.4,0,.2,1),transform .3s cubic-bezier(.4,0,.2,1);
+      pointer-events:none;z-index:9999;
+      font-size:.855em;font-weight:500;
+      box-shadow:0 16px 48px rgba(0,0,0,.6),0 4px 16px rgba(0,0,0,.4);
+      transform:translateY(16px) scale(.96);
+      display:flex;align-items:center;gap:10px;
+      backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    }
+    #toast.show{opacity:1;transform:translateY(0) scale(1)}
+    #toast.success{background:rgba(16,67,30,.9);border:1px solid rgba(52,211,153,.25);border-left:3px solid #34d399}
+    #toast.error{background:rgba(67,10,20,.9);border:1px solid rgba(244,63,94,.25);border-left:3px solid #f43f5e}
+    #toast.info{background:rgba(20,25,60,.95);border:1px solid rgba(129,140,248,.25);border-left:3px solid #818cf8}
+
+    /* ── Empty states ── */
+    .empty{text-align:center;padding:40px 16px;color:var(--text-muted)}
+    .empty .icon{font-size:2.8em;margin-bottom:12px;opacity:.3;display:block}
+    .empty p{font-size:.875em;line-height:1.5}
+
+    /* ── Spinner ── */
+    .spinner{display:inline-block;animation:spin .7s linear infinite}
+
+    /* ── Divider ── */
+    hr{border:none;border-top:1px solid rgba(148,163,184,.08);margin:18px 0}
+
+    /* ── Quick actions bar ── */
+    .actions-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+
+    /* ── Cmd reference ── */
+    .cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:8px}
+    .cmd-item{
+      background:rgba(15,25,48,.7);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      padding:11px 14px;transition:all .2s;cursor:pointer;backdrop-filter:blur(6px);
+    }
+    .cmd-item:hover{border-color:rgba(129,140,248,.3);background:rgba(99,102,241,.08);transform:translateY(-1px)}
+    .cmd-item code{display:block;margin-bottom:4px;font-size:.8em;color:var(--primary-light)}
+    .cmd-item span{font-size:.77em;color:var(--text-muted)}
+
+    /* ── Badges ── */
+    .badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;
+      font-size:.74em;font-weight:600;letter-spacing:.02em}
+    .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(52,211,153,.2)}
+    .badge.stopped,.badge.rejected{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.2)}
+    .badge.pending{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.2)}
+    .badge.enabled{background:rgba(129,140,248,.12);color:var(--primary-light);border:1px solid rgba(129,140,248,.2)}
+    .badge.disabled{background:rgba(100,116,139,.08);color:var(--text-muted);border:1px solid rgba(100,116,139,.15)}
+
+    /* ── Dots ── */
+    .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:all .4s;position:relative}
+    .dot.on{background:#34d399;box-shadow:0 0 9px rgba(52,211,153,.7)}
+    .dot.on::after{
+      content:'';position:absolute;inset:-3px;border-radius:50%;
+      border:1.5px solid rgba(52,211,153,.4);
+      animation:pulseRing 2.8s ease-out infinite;
+    }
+    .dot.off{background:rgba(100,116,139,.4)}
+    .dot.unknown{background:var(--warning)}
+    .bot-name{flex:1;font-size:.855em;color:var(--text);font-weight:500}
+
+    /* ── Staggered animation delays for bot rows ── */
+    .bot-row:nth-child(1){animation-delay:.02s}.bot-row:nth-child(2){animation-delay:.04s}
+    .bot-row:nth-child(3){animation-delay:.06s}.bot-row:nth-child(4){animation-delay:.08s}
+    .bot-row:nth-child(5){animation-delay:.1s}.bot-row:nth-child(6){animation-delay:.12s}
+    .bot-row:nth-child(7){animation-delay:.14s}.bot-row:nth-child(8){animation-delay:.16s}
+    .bot-row:nth-child(9){animation-delay:.18s}.bot-row:nth-child(n+10){animation-delay:.2s}
+
+    /* ── Live Office enhanced ── */
+    .office-wrap{
+      position:relative;overflow:hidden;
+      border:1px solid rgba(148,163,184,.1);border-radius:18px;min-height:440px;
+      background:
+        linear-gradient(180deg,rgba(79,70,229,.12) 0%,rgba(9,15,30,.95) 35%),
+        repeating-linear-gradient(90deg,rgba(255,255,255,.018) 0 1px,transparent 1px 100px),
+        repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 1px,transparent 1px 80px),
+        linear-gradient(180deg,#080f1e,#070c18);
+      backdrop-filter:blur(4px);
+    }
+    .office-floor{
+      position:absolute;left:0;right:0;bottom:0;height:46%;
+      background:linear-gradient(180deg,#0e1928,#08111c);
+      border-top:1px solid rgba(129,140,248,.15);
+    }
+    .office-floor::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+    }
+    .office-window{
+      position:absolute;top:20px;width:150px;height:88px;border-radius:10px;
+      border:1px solid rgba(129,140,248,.3);
+      background:linear-gradient(180deg,rgba(99,102,241,.25),rgba(79,70,229,.06));
+      box-shadow:0 0 28px rgba(99,102,241,.2),inset 0 1px 0 rgba(255,255,255,.12);
+    }
+    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(129,140,248,.3)}
+    .office-window::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(129,140,248,.2)}
+    .office-plant{position:absolute;bottom:106px;width:18px;height:32px;background:linear-gradient(180deg,#0f2e1c,#0b2016);border-radius:5px 5px 2px 2px;border:1px solid rgba(52,211,153,.2)}
+    .office-plant::before{content:'';position:absolute;left:-8px;top:-28px;width:34px;height:30px;border-radius:50% 50% 0 50%;background:radial-gradient(circle at 40% 40%,#34d399,#059669);box-shadow:0 0 14px rgba(52,211,153,.3)}
+    .health-check-item{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)}
+    .health-check-item .hc-dot{font-size:.65em;color:var(--text-muted)}
+    .health-check-item.ok .hc-dot{color:var(--success)}
+    .health-check-item.ok .hc-dot::after{content:' ✓'}
+    .health-check-item.warn .hc-dot{color:var(--warning)}
+    .health-check-item.warn .hc-dot::after{content:' ⚠'}
+    .health-check-item.err .hc-dot{color:var(--danger)}
+    .health-check-item.err .hc-dot::after{content:' ✕'}
+    .health-check-item .hc-val{margin-left:auto;font-weight:600;font-size:.88em}
+    .health-check-item.ok .hc-val{color:var(--success)}
+    .health-check-item.warn .hc-val{color:var(--warning)}
+    .health-check-item.err .hc-val{color:var(--danger)}
+    .office-desk-item{position:absolute;width:80px;height:44px;background:linear-gradient(180deg,rgba(212,175,55,.18),rgba(212,175,55,.06));border:1px solid rgba(212,175,55,.25);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+    .robot-agent{position:absolute;cursor:pointer;transition:transform .3s;animation:robotWalk 3s ease-in-out infinite}
+    .robot-agent:hover{transform:scale(1.2)!important;z-index:100}
+    .robot-body{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.3em;border:2px solid var(--gold);box-shadow:0 0 16px rgba(212,175,55,.5),0 0 32px rgba(212,175,55,.15);background:var(--surface2)}
+    .robot-body.busy{border-color:var(--success);box-shadow:0 0 16px rgba(34,197,94,.6),0 0 32px rgba(34,197,94,.2);animation:robotBusy .8s ease-in-out infinite}
+    .robot-name{font-size:.6em;color:var(--gold-light);text-align:center;margin-top:3px;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+    .robot-status-dot{width:8px;height:8px;border-radius:50%;margin:2px auto;background:var(--text-muted)}
+    .robot-status-dot.running{background:var(--success);box-shadow:0 0 8px var(--success);animation:blink 1.5s infinite}
+    .robot-status-dot.busy{background:var(--gold);box-shadow:0 0 8px var(--gold);animation:blink .8s infinite}
+    @keyframes robotWalk{0%,100%{transform:translateY(0) rotate(-1deg)}25%{transform:translateY(-5px) rotate(1.5deg)}50%{transform:translateY(-2px) rotate(0deg)}75%{transform:translateY(-6px) rotate(-1.5deg)}}
+    @keyframes robotBusy{0%,100%{box-shadow:0 0 8px rgba(34,197,94,.4),0 4px 12px rgba(0,0,0,.3)}50%{box-shadow:0 0 24px rgba(34,197,94,.9),0 4px 20px rgba(34,197,94,.3)}}
+    @keyframes robotWalk2{0%,100%{transform:translateY(0) rotate(1deg)}25%{transform:translateY(-3px) rotate(-1deg)}50%{transform:translateY(-5px) rotate(0deg)}75%{transform:translateY(-2px) rotate(1deg)}}
+
+    /* ── Agent picker grid (Task tab) ── */
+    .agent-pick-item{
+      display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
+      border:1px solid rgba(148,163,184,.1);cursor:pointer;
+      background:rgba(15,25,48,.6);transition:all .2s;font-size:.82em;
+    }
+    .agent-pick-item:hover{border-color:rgba(212,175,55,.3);background:rgba(212,175,55,.06)}
+    .agent-pick-item.selected{border-color:rgba(212,175,55,.5);background:rgba(212,175,55,.1);box-shadow:0 0 12px rgba(212,175,55,.12)}
+    .agent-pick-item .pick-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+    .agent-pick-item .pick-dot.on{background:var(--success);box-shadow:0 0 6px var(--success)}
+    .agent-pick-item .pick-dot.off{background:rgba(100,116,139,.4)}
+  </style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── Header ── -->
+<header>
+  <div class="header-left">
+    <div class="logo">🤖</div>
+    <div class="header-title">
+      <h1>AI Employee</h1>
+      <div class="sub" id="header-sub">Loading…</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="hdr-ctrl">
+      <button class="hdr-btn hdr-btn-start" id="hdr-start-btn" onclick="startAll()" title="Start all agents">▶ Start</button>
+      <button class="hdr-btn hdr-btn-stop" id="hdr-stop-btn" onclick="stopAll()" title="Stop all agents">■ Stop</button>
+    </div>
+    <div class="status-pill"><div class="status-dot"></div><span id="header-status">Running</span></div>
+  </div>
+</header>
+
+<!-- ── Navigation ── -->
+<nav>
+  <button class="active" onclick="switchTab('dashboard',this)">📊 Dashboard</button>
+  <button onclick="switchTab('chat',this)">💬 Chat</button>
+  <button onclick="switchTab('tasks',this)">🚀 Tasks</button>
+  <button onclick="switchTab('swarm',this)">🐝 Swarm</button>
+  <button onclick="switchTab('live-office',this)">🏢 Live Office</button>
+  <button onclick="switchTab('commands',this)">📜 Commands</button>
+  <button onclick="switchTab('scheduler',this)">📅 Scheduler</button>
+  <button onclick="switchTab('workers',this)">👷 Agents</button>
+  <button onclick="switchTab('improvements',this)">💡 Improvements</button>
+  <button onclick="switchTab('skills',this)">🛠️ Skills</button>
+  <button onclick="switchTab('metrics',this)">📈 ROI</button>
+  <button onclick="switchTab('templates',this)">📋 Templates</button>
+  <button onclick="switchTab('guardrails',this)">🔒 Guardrails</button>
+  <button onclick="switchTab('memory',this)">🧠 Memory</button>
+  <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
+  <button onclick="switchTab('history',this)">🕐 History</button>
+  <button onclick="switchTab('options',this)">⚙️ Options</button>
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em">⚡ BLACKLIGHT</button>
+  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="background:linear-gradient(135deg,#0a1628,#0f2240);color:#f59e0b;border:1px solid #d97706;font-weight:700;letter-spacing:.04em">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('budget',this)" style="background:linear-gradient(135deg,#022c22,#064e3b);color:#34d399;border:1px solid #059669;font-weight:700">💰 Budget</button>
+  <button onclick="switchTab('org',this)" style="background:linear-gradient(135deg,#1e1b4b,#312e81);color:#818cf8;border:1px solid #4f46e5;font-weight:700">🏢 Org Chart</button>
+  <button onclick="switchTab('goals',this)" style="background:linear-gradient(135deg,#1c1917,#292524);color:#fb923c;border:1px solid #ea580c;font-weight:700">🎯 Goals</button>
+  <button onclick="switchTab('tickets',this)" style="background:linear-gradient(135deg,#0c1a2e,#0f2947);color:#38bdf8;border:1px solid #0284c7;font-weight:700">🎫 Tickets</button>
+  <button onclick="switchTab('boardroom',this)" style="background:linear-gradient(135deg,#1a0a0a,#2d1515);color:#f87171;border:1px solid #dc2626;font-weight:700">🛡️ Boardroom</button>
+  <button onclick="switchTab('companies',this)" style="background:linear-gradient(135deg,#0a1a0a,#152815);color:#86efac;border:1px solid #16a34a;font-weight:700">🏗️ Companies</button>
+  <button onclick="switchTab('artifacts',this)" style="background:linear-gradient(135deg,#1a1a0a,#2a2a10);color:#fde68a;border:1px solid #ca8a04;font-weight:700">📦 Artifacts</button>
+  <button onclick="switchTab('sessions',this)" style="background:linear-gradient(135deg,#0a1a1a,#102828);color:#67e8f9;border:1px solid #0891b2;font-weight:700">💾 Sessions</button>
+</nav>
+
+<main>
+
+<!-- ── Dashboard ── -->
+<div id="tab-dashboard" class="tab-content active">
+
+  <!-- System Control Hero -->
+  <div class="sys-control">
+    <div class="sys-control-left">
+      <div class="sys-status-ring" id="sys-ring">
+        <div class="ring-bg">🤖</div>
+        <div class="ring-pulse"></div>
+      </div>
+      <div class="sys-control-info">
+        <h2>AI Employee System</h2>
+        <p id="sys-control-sub">Loading system status…</p>
+        <div class="health-bar-wrap" style="min-width:200px">
+          <div class="health-bar-track"><div class="health-bar-fill" id="health-bar"></div></div>
+          <div class="health-label"><span id="health-label-left">Agent Health</span><span id="health-label-right">–</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="sys-control-right">
+      <button class="btn-hero btn-hero-start" id="hero-start-btn" onclick="startAll()">
+        <span class="btn-icon">▶</span> Start All Agents
+      </button>
+      <button class="btn-hero btn-hero-stop" id="hero-stop-btn" onclick="stopAll()">
+        <span class="btn-icon">■</span> Stop All Agents
+      </button>
+    </div>
+  </div>
+
+  <div class="grid-stat" id="stat-cards">
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('running')" style="cursor:pointer" aria-label="Agents Running – click for details">
+      <div class="stat-icon green">●</div>
+      <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Agents Running</div><div class="stat-trend" id="stat-running-sub" style="font-size:.7em;color:var(--gold);margin-top:3px"></div></div>
+    </div>
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('total')" style="cursor:pointer" aria-label="Total Agents – click for details">
+      <div class="stat-icon blue">◆</div>
+      <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Agents</div><div class="stat-trend" id="stat-total-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
+    </div>
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('gateway')" style="cursor:pointer" aria-label="Gateway – click for details">
+      <div class="stat-icon cyan">◉</div>
+      <div class="stat-body"><div class="val" id="stat-gateway">–</div><div class="lbl">Gateway</div><div class="stat-trend" id="stat-gateway-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
+    </div>
+    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('uptime')" style="cursor:pointer" aria-label="Uptime – click for details">
+      <div class="stat-icon yellow">◎</div>
+      <div class="stat-body"><div class="val" id="stat-uptime">–</div><div class="lbl">Uptime</div><div class="stat-trend" id="stat-uptime-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
+    </div>
+  </div>
+  <!-- Stat detail panel -->
+  <div id="stat-detail-panel" style="display:none;background:var(--surface2);border:1px solid var(--gold);border-radius:var(--radius);padding:16px;margin-bottom:16px;animation:fadeIn .2s ease">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" id="stat-detail-title">Details</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stat-detail-panel').style.display='none'">✕</button>
+    </div>
+    <div id="stat-detail-content" style="font-size:.88em;color:var(--text-secondary)"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🤖</span> Agent Status</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadDashboard()">↻ Refresh</button>
+      </div>
+      <div id="bot-status-list"><div class="empty"><div class="icon">🔍</div><p>Loading agents…</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">⚡</span> Quick Actions</div>
+      </div>
+      <div class="actions-bar">
+        <button class="btn btn-success" onclick="startAll()">▶ Start All Agents</button>
+        <button class="btn btn-danger" onclick="stopAll()">■ Stop All Agents</button>
+        <button class="btn btn-primary" onclick="runOnboard()">⚡ Run Onboard</button>
+        <a class="btn btn-ghost btn-sm" href="http://localhost:18789" target="_blank">📡 Gateway</a>
+      </div>
+      <hr>
+      <div class="card-title" style="margin-bottom:10px"><span class="icon" style="color:var(--gold)">◈</span> System Health</div>
+      <div id="system-health-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.84em">
+        <div class="health-check-item" id="hc-api"><span class="hc-dot">●</span> API Server <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-ollama"><span class="hc-dot">●</span> Ollama LLM <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-agents"><span class="hc-dot">●</span> Agents <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-db"><span class="hc-dot">●</span> State Store <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
+      </div>
+      <hr style="margin:12px 0">
+      <!-- BLACKLIGHT quick-toggle -->
+      <div style="padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.1rem">⚡</span>
+            <div>
+              <div style="font-size:.86em;font-weight:600;color:var(--text)">BLACKLIGHT Mode</div>
+              <div style="font-size:.75em;color:var(--text-muted)" id="dash-bl-sublabel">Autonomous agent — idle</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <label class="toggle" title="Toggle BLACKLIGHT on/off">
+              <input type="checkbox" id="dash-bl-toggle" onchange="blToggle(this.checked)"/>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <input id="dash-bl-goal-input" placeholder="Set a goal to activate BLACKLIGHT…"
+          aria-label="BLACKLIGHT goal"
+          style="width:100%;box-sizing:border-box;font-size:.8em" autocomplete="off"
+          oninput="(function(v){var m=document.getElementById('bl-goal-input');if(m&&!m.value)m.value=v;})(this.value)"/>
+      </div>
+      <!-- Hermes Agent quick-toggle -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:1.1rem">🧠</span>
+          <div>
+            <div style="font-size:.86em;font-weight:600;color:var(--text)">Hermes Agent</div>
+            <div style="font-size:.75em;color:var(--text-muted)" id="dash-hermes-sublabel">Reasoning agent — stopped</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="toggle" title="Toggle Hermes Agent on/off">
+            <input type="checkbox" id="dash-hermes-toggle" onchange="hermesToggle(this.checked)"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+      <div id="system-info" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">💬</span> Quick WhatsApp Commands</div>
+      <a href="#" onclick="event.preventDefault();document.querySelector('nav button[onclick*=commands]').click()" style="font-size:.78em;color:var(--gold);text-decoration:none">View all →</a>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
+      <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">status</code><span style="font-size:.78em;color:var(--text-muted)">Get current status report</span></div>
+      <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">workers</code><span style="font-size:.78em;color:var(--text-muted)">List active agents</span></div>
+      <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">schedule</code><span style="font-size:.78em;color:var(--text-muted)">List scheduled tasks</span></div>
+      <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">help</code><span style="font-size:.78em;color:var(--text-muted)">Show all commands</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Chat ── -->
+<div id="tab-chat" class="tab-content">
+  <div style="display:flex;flex-direction:column;height:calc(100vh - 115px);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+    <!-- Chat header bar -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:36px;height:36px;background:linear-gradient(135deg,#B8960C,#D4AF37);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1em">◈</div>
+        <div>
+          <div style="font-weight:700;font-size:.95em;color:var(--text)">AI Command Center</div>
+          <div style="font-size:.74em;color:var(--text-muted)">Direct interface to your AI workforce</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.04);border:1px solid rgba(212,175,55,.2);border-radius:8px;padding:6px 12px">
+          <span style="font-size:.78em;color:var(--text-muted);white-space:nowrap">Model:</span>
+          <select id="chat-model" onchange="updateChatModelBadge()" style="background:transparent;border:none;color:var(--gold-light);font-size:.82em;font-weight:600;cursor:pointer;outline:none;font-family:inherit">
+            <option value="auto">⚡ Auto (Cost-Effective)</option>
+            <option value="ollama">🦙 Ollama • Local AI</option>
+            <option value="gemma">💎 Gemma • Free &amp; Open Source</option>
+            <option value="nvidia">🔷 NVIDIA NIM</option>
+            <option value="openai">🌐 OpenAI</option>
+            <option value="anthropic">🤖 Anthropic Claude</option>
+            <option value="groq">⚡ Groq • Fast</option>
+            <option value="external">🌐 External AI</option>
+          </select>
+        </div>
+        <div id="chat-hermes-status" title="Hermes Agent status" style="display:flex;align-items:center;gap:5px;font-size:.73em;padding:3px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.2);color:var(--text-muted)">
+          <span id="chat-hermes-dot" style="width:7px;height:7px;border-radius:50%;background:#6b7280;display:inline-block"></span>
+          <span id="chat-hermes-label">Hermes –</span>
+        </div>
+        <div id="chat-model-badge" style="font-size:.73em;padding:3px 10px;border-radius:12px;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.25);color:var(--gold)">Auto</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadChatLog()" title="Refresh">↻</button>
+      </div>
+    </div>
+    <!-- Chat log -->
+    <div id="chat-log" style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px">
+      <div class="empty"><div class="icon">◈</div><p>No messages yet. Send your first command below.</p></div>
+    </div>
+    <!-- Input bar -->
+    <div style="padding:14px 20px;border-top:1px solid rgba(212,175,55,.12);background:var(--surface2);flex-shrink:0">
+      <div style="display:flex;gap:10px;align-items:flex-end">
+        <textarea id="chat-input" placeholder="Command your AI workforce…" rows="2"
+          style="flex:1;background:rgba(255,255,255,.04);border:1px solid rgba(212,175,55,.2);border-radius:10px;color:var(--text);padding:10px 14px;font-family:inherit;resize:none;font-size:.9em;line-height:1.5;outline:none;transition:border-color .2s"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
+          onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'"></textarea>
+        <button class="btn btn-primary" onclick="sendChat()" style="height:44px;padding:0 20px;background:linear-gradient(135deg,#B8960C,#D4AF37);border:none;color:#000;font-weight:700;border-radius:10px">Send ↗</button>
+      </div>
+      <div style="font-size:.72em;color:var(--text-muted);margin-top:6px">Enter to send · Shift+Enter for new line · <span id="chat-agent-indicator" style="color:var(--gold)">Auto-routing to best agent</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Live Office ── -->
+<div id="tab-live-office" class="tab-content">
+  <div style="height:calc(100vh - 115px);display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+    <!-- Office header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:32px;height:32px;background:linear-gradient(135deg,#B8960C,#D4AF37);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1em">🏢</div>
+        <div>
+          <div style="font-weight:700;font-size:.92em">Live Office</div>
+          <div id="office-agent-count" style="font-size:.72em;color:var(--text-muted)">Loading agents…</div>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="loadLiveOffice()">↻ Refresh</button>
+    </div>
+    <!-- Office floor -->
+    <div style="flex:1;position:relative;overflow:hidden;background:linear-gradient(180deg,#111 0%,#0d0d0d 60%,#0a0a0a 100%)">
+      <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(212,175,55,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(212,175,55,.03) 1px,transparent 1px);background-size:60px 60px;pointer-events:none"></div>
+      <!-- Zone dividers -->
+      <div style="position:absolute;top:0;left:33.3%;bottom:0;width:1px;background:linear-gradient(180deg,transparent,rgba(212,175,55,.08),transparent);pointer-events:none"></div>
+      <div style="position:absolute;top:0;left:66.6%;bottom:0;width:1px;background:linear-gradient(180deg,transparent,rgba(212,175,55,.08),transparent);pointer-events:none"></div>
+      <div style="position:absolute;bottom:0;left:0;right:0;height:10px;background:linear-gradient(90deg,rgba(212,175,55,.15),rgba(212,175,55,.05),rgba(212,175,55,.15))"></div>
+      <div style="position:absolute;top:16px;left:20px;font-size:.68em;color:rgba(212,175,55,.5);letter-spacing:.12em;text-transform:uppercase;font-weight:600;background:rgba(0,0,0,.4);padding:3px 10px;border-radius:20px;border:1px solid rgba(212,175,55,.15)">◈ Command Zone</div>
+      <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);font-size:.68em;color:rgba(212,175,55,.5);letter-spacing:.12em;text-transform:uppercase;font-weight:600;background:rgba(0,0,0,.4);padding:3px 10px;border-radius:20px;border:1px solid rgba(212,175,55,.15);white-space:nowrap">◈ Research Zone</div>
+      <div style="position:absolute;top:16px;right:20px;font-size:.68em;color:rgba(212,175,55,.5);letter-spacing:.12em;text-transform:uppercase;font-weight:600;background:rgba(0,0,0,.4);padding:3px 10px;border-radius:20px;border:1px solid rgba(212,175,55,.15)">◈ Sales Zone</div>
+      <div class="office-desk-item" style="left:5%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:20%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:38%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:55%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:72%;bottom:100px"></div>
+      <div class="office-desk-item" style="left:87%;bottom:100px"></div>
+      <div id="office-agents" style="position:absolute;inset:0"></div>
+    </div>
+    <!-- Agent info bar -->
+    <div style="height:60px;border-top:1px solid rgba(212,175,55,.12);background:var(--surface2);display:flex;align-items:center;padding:0 20px;gap:10px;overflow-x:auto;flex-shrink:0" id="office-agent-bar">
+      <span style="font-size:.78em;color:var(--text-muted);white-space:nowrap">🤖 Click a robot to inspect →</span>
+    </div>
+  </div>
+</div>
+
+<div class="office-modal" id="office-modal">
+  <div class="office-modal-card" style="border:1px solid rgba(212,175,55,.25);box-shadow:0 24px 64px rgba(0,0,0,.7),0 0 0 1px rgba(212,175,55,.08),0 0 60px rgba(212,175,55,.08)">
+    <div class="card-header" style="margin-bottom:10px">
+      <div class="card-title"><span style="color:var(--gold)">🧠</span> <span id="office-modal-title">Agent</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="closeOfficeModal()">✕ Close</button>
+    </div>
+    <div style="font-size:.86em;color:var(--text-secondary);margin-bottom:8px" id="office-modal-status">Status</div>
+    <div class="office-progress"><div id="office-modal-progress"></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;font-size:.82em;color:var(--text-secondary)">
+      <div><strong style="color:var(--text)">Time Busy:</strong> <span id="office-modal-time">-</span></div>
+      <div><strong style="color:var(--text)">Last Action:</strong> <span id="office-modal-action">-</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Scheduler ── -->
+<div id="tab-scheduler" class="tab-content">
+  <div style="display:flex;gap:16px;height:calc(100vh - 130px)">
+    <!-- Left: Agenda calendar -->
+    <div style="width:320px;display:flex;flex-direction:column;gap:12px;flex-shrink:0">
+      <div class="card" style="flex-shrink:0">
+        <div class="card-header">
+          <div class="card-title"><span style="color:var(--gold)">◈</span> Agenda</div>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-ghost btn-sm agenda-view-btn active" onclick="setAgendaView('month',this)">Month</button>
+            <button class="btn btn-ghost btn-sm agenda-view-btn" onclick="setAgendaView('week',this)">Week</button>
+            <button class="btn btn-ghost btn-sm agenda-view-btn" onclick="setAgendaView('day',this)">Day</button>
+          </div>
+        </div>
+        <div id="agenda-nav" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <button class="btn btn-ghost btn-sm" onclick="agendaNav(-1)">&#8249;</button>
+          <span id="agenda-period" style="font-weight:600;font-size:.9em;color:var(--gold)">–</span>
+          <button class="btn btn-ghost btn-sm" onclick="agendaNav(1)">&#8250;</button>
+        </div>
+        <div id="agenda-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:.75em"></div>
+      </div>
+      <div class="card" style="flex:1;overflow-y:auto">
+        <div class="card-title" style="margin-bottom:10px"><span style="color:var(--gold)">◈</span> <span id="agenda-day-label">All Tasks</span></div>
+        <div id="schedule-list"><div class="empty"><div class="icon">📅</div><p>No tasks yet.</p></div></div>
+      </div>
+    </div>
+    <!-- Right: New task form -->
+    <div class="card" style="flex:1;overflow-y:auto">
+      <div class="card-header">
+        <div class="card-title"><span style="color:var(--gold)">◈</span> Schedule New Task</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Task Goal / Objective</label>
+          <textarea id="sched-goal" rows="3" placeholder="What should this task achieve? e.g. Generate and send weekly performance report to all stakeholders…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Task ID (unique)</label>
+          <input id="sched-id" placeholder="auto-generated from label" oninput="this.dataset.manuallySet='1'"/>
+        </div>
+        <div class="form-group">
+          <label>Label / Title</label>
+          <input id="sched-label" placeholder="e.g. Weekly Performance Report" oninput="autoSchedId()"/>
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <select id="sched-priority">
+            <option value="high">🔴 High</option>
+            <option value="medium" selected>🟡 Medium</option>
+            <option value="low">🟢 Low</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Action</label>
+          <select id="sched-action" onchange="toggleSchedBot()">
+            <option value="log">Log message</option>
+            <option value="start_bot">Start agent</option>
+            <option value="stop_bot">Stop agent</option>
+            <option value="status_report">Send status report</option>
+            <option value="run_task">Run AI task</option>
+          </select>
+        </div>
+        <div class="form-group" id="sched-bot-row" style="display:none">
+          <label>Agent name</label>
+          <input id="sched-bot" placeholder="e.g. lead-hunter"/>
+        </div>
+        <div class="form-group">
+          <label>Schedule type</label>
+          <select id="sched-type" onchange="toggleSchedType()">
+            <option value="interval">Every N minutes</option>
+            <option value="daily">Daily at time (UTC)</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="once">Once (specific date/time)</option>
+          </select>
+        </div>
+        <div class="form-group" id="sched-interval-row">
+          <label>Interval (minutes)</label>
+          <input id="sched-interval" type="number" value="60" min="1"/>
+        </div>
+        <div class="form-group" id="sched-daily-row" style="display:none">
+          <label>Run at (HH:MM UTC)</label>
+          <input id="sched-daily-time" placeholder="08:00"/>
+        </div>
+        <div class="form-group" id="sched-once-row" style="display:none">
+          <label>Date &amp; Time (UTC)</label>
+          <input id="sched-once-dt" type="datetime-local"/>
+        </div>
+        <div class="form-group" id="sched-weekly-row" style="display:none">
+          <label>Day of Week</label>
+          <select id="sched-weekly-day">
+            <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+            <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+          </select>
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Notes / Instructions</label>
+          <input id="sched-msg" placeholder="Additional instructions or context for this task"/>
+        </div>
+      </div>
+      <button class="btn btn-success" onclick="addSchedule()" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700">◈ Schedule Task</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Workers ── -->
+<div id="tab-workers" class="tab-content">
+
+  <!-- Agent Team Bundles section -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🏭</span> Agent Teams</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="loadWorkers()">↻ Refresh</button>
+        <button class="btn btn-primary btn-sm" onclick="openCreateWorker()">＋ New Agent Team</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+      Bundle agents together with a recurring task. Agent teams run on a schedule and always perform their assigned role.
+      <strong style="color:var(--accent)">Ecom Agent Team auto-preset</strong> is included below.
+    </p>
+    <div id="bundle-list"><div class="empty"><div class="icon">🏭</div><p>No agent teams yet. Click <strong>+ New Agent Team</strong> to create one.</p></div></div>
+  </div>
+
+  <!-- Create / Edit Agent Team form (inline, hidden by default) -->
+  <div id="worker-form-card" class="card" style="display:none;border:2px solid var(--primary)">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">✏️</span> <span id="worker-form-title">Create Agent Team</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="closeWorkerForm()">✕ Cancel</button>
+    </div>
+    <div class="grid2" style="gap:12px">
+      <div>
+        <div class="form-group">
+          <label>Agent Team Name</label>
+          <input id="wf-name" placeholder="e.g. Ecom Order Processor" />
+        </div>
+        <div class="form-group">
+          <label>Recurring Task / Role Description</label>
+          <textarea id="wf-task" rows="3" placeholder="e.g. Monitor new Shopify orders, validate payments, place Printful orders, send customer tracking emails"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Schedule</label>
+          <select id="wf-schedule" style="width:100%">
+            <option value="continuous">Continuous (always on)</option>
+            <option value="hourly">Every hour</option>
+            <option value="every6h">Every 6 hours</option>
+            <option value="daily">Daily (2 AM)</option>
+            <option value="3x_daily">3× daily (9 AM / 3 PM / 8 PM)</option>
+            <option value="weekly">Weekly</option>
+            <option value="manual">Manual trigger only</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Description (optional)</label>
+          <input id="wf-desc" placeholder="Short description of what this agent team does" />
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label style="font-weight:600">Assign Agents <span id="wf-agent-count" style="color:var(--primary)"></span></label>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="wfSelectAll()">All</button>
+            <button class="btn btn-ghost btn-sm" onclick="wfClearAll()">None</button>
+          </div>
+        </div>
+        <div id="wf-agent-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:5px;max-height:300px;overflow-y:auto"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-success" onclick="saveWorkerBundle()" style="flex:1" id="wf-save-btn">💾 Save Agent Team</button>
+      <button class="btn btn-ghost" onclick="presetEcomWorker()" title="Fill in the full ecom automation preset">🛒 Ecom Preset</button>
+    </div>
+    <div id="wf-save-result" style="margin-top:8px;font-size:.84em"></div>
+    <input type="hidden" id="wf-editing-id" value="" />
+  </div>
+
+  <!-- Individual Agents section (raw start/stop controls) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">👷</span> Individual Agents</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadWorkers()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+      Start or stop individual agents. The problem-solver watchdog auto-restarts enabled agents if they crash.
+    </p>
+    <div id="worker-list"><div class="empty"><div class="icon">👷</div><p>Loading agents…</p></div></div>
+  </div>
+</div>
+
+<!-- ── Improvements ── -->
+<div id="tab-improvements" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">💡</span> Improvement Proposals</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadImprovements()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">
+      The discovery agent proposes new skills and markets. Review and approve or reject below.
+      <strong style="color:var(--warning)">No changes are applied automatically.</strong>
+    </p>
+    <div id="improvement-list"><div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery agent will add proposals over time.</p></div></div>
+  </div>
+</div>
+
+<!-- ── Budget ── -->
+<div id="tab-budget" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="bud-total-spent">–</div><div class="lbl">Total Spent (month)</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">⚠️</div><div class="stat-body"><div class="val" id="bud-agents-warn">–</div><div class="lbl">Agents at Warning</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">🛑</div><div class="stat-body"><div class="val" id="bud-agents-exceeded">–</div><div class="lbl">Agents Exceeded</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📊</div><div class="stat-body"><div class="val" id="bud-agents-tracked">–</div><div class="lbl">Agents Tracked</div></div></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">💰</span> Agent Budgets</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadBudget()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Monthly USD budget per agent. 80% = warning, 100% = hard stop.</p>
+      <div id="budget-agents-list"><div class="empty"><div class="icon">💰</div><p>Loading budget data…</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">⚙️</span> Set Agent Budget</div></div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Configure the monthly budget cap for any agent.</p>
+      <div class="form-group"><label>Agent ID</label><input id="bud-agent-id" placeholder="e.g. ceo, cto, marketing-agent"/></div>
+      <div class="form-group"><label>Monthly Budget (USD)</label><input id="bud-amount" type="number" min="0.01" step="0.01" placeholder="e.g. 10.00"/></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="setBudget()">💾 Set Budget</button>
+        <button class="btn btn-ghost btn-sm" onclick="resetBudget()">↺ Reset Usage</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header"><div class="card-title"><span class="icon">📈</span> Record Usage Manually</div></div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Manually record token usage (useful for testing or manual reconciliation).</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="flex:1;min-width:120px"><label>Agent ID</label><input id="bud-rec-agent" placeholder="agent-id"/></div>
+      <div class="form-group" style="flex:1;min-width:120px"><label>Model</label><input id="bud-rec-model" placeholder="gpt-4o" value="gpt-4o"/></div>
+      <div class="form-group" style="flex:0 0 90px"><label>Input Tokens</label><input id="bud-rec-in" type="number" min="0" value="0"/></div>
+      <div class="form-group" style="flex:0 0 90px"><label>Output Tokens</label><input id="bud-rec-out" type="number" min="0" value="0"/></div>
+      <button class="btn btn-primary" style="margin-bottom:18px" onclick="recordBudgetUsage()">📥 Record</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Org Chart ── -->
+<div id="tab-org" class="tab-content">
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🏢</span> Org Chart</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadOrg()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Visual hierarchy of roles and reporting lines. Assign agents to roles for delegation.</p>
+      <div id="org-chart-tree"><div class="empty"><div class="icon">🏢</div><p>Loading org chart…</p></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add / Edit Role</div></div>
+        <div class="form-group"><label>Role ID</label><input id="org-role-id" placeholder="e.g. cto"/></div>
+        <div class="form-group"><label>Title</label><input id="org-role-title" placeholder="e.g. Chief Technology Officer"/></div>
+        <div class="form-group"><label>Description</label><input id="org-role-desc" placeholder="Role responsibilities"/></div>
+        <div class="form-group"><label>Reports To (Role ID)</label><input id="org-role-reports" placeholder="e.g. ceo (leave empty for top)"/></div>
+        <div class="form-group"><label>Assign Agent ID</label><input id="org-role-agent" placeholder="e.g. engineering-assistant"/></div>
+        <button class="btn btn-primary" onclick="upsertOrgRole()">💾 Save Role</button>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-header"><div class="card-title"><span class="icon">🤝</span> Delegate Task</div></div>
+        <p style="color:var(--text-muted);font-size:.83em;margin-bottom:12px">Route a task from one role to another through the org chart.</p>
+        <div class="form-group"><label>From Role</label><input id="org-del-from" placeholder="ceo"/></div>
+        <div class="form-group"><label>To Role</label><input id="org-del-to" placeholder="cto"/></div>
+        <div class="form-group"><label>Task</label><input id="org-del-task" placeholder="Build the MVP architecture"/></div>
+        <button class="btn btn-primary" onclick="delegateOrgTask()">🚀 Delegate</button>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🔌</span> BYOA Adapters</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadOrgAdapters()">↻ Refresh</button>
+        </div>
+        <div id="org-adapters-list" style="font-size:.84em"><div class="empty"><div class="icon">🔌</div><p>No adapters registered.</p></div></div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="flex:1;min-width:110px"><label>Adapter ID</label><input id="org-adp-id" placeholder="my-bot"/></div>
+          <div class="form-group" style="flex:2;min-width:160px"><label>Name</label><input id="org-adp-name" placeholder="My Custom Bot"/></div>
+          <button class="btn btn-primary" style="margin-bottom:18px" onclick="registerOrgAdapter()">➕ Register</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Goals ── -->
+<div id="tab-goals" class="tab-content">
+  <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,rgba(234,88,12,.08),rgba(251,146,60,.04));border-color:rgba(251,146,60,.3)">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">💬</span> CEO Chat</div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      Send a direct directive to the top-level CEO agent. Context flows from company mission down through the org chart.
+    </p>
+    <div id="ceo-chat-log" style="background:var(--bg-deep,#0d1117);border-radius:6px;padding:12px;min-height:80px;max-height:200px;overflow-y:auto;font-size:.83em;margin-bottom:12px;color:#c9d1d9;line-height:1.7">
+      <span style="color:#6b7280">CEO is ready. Send a directive below.</span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <input id="ceo-chat-input" placeholder='e.g. "Prioritize the MVP launch this week"' style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px 12px;font-family:inherit"
+        onkeydown="if(event.key==='Enter')sendCEOMessage()"/>
+      <button class="btn btn-primary" onclick="sendCEOMessage()" id="ceo-send-btn">📨 Send</button>
+    </div>
+    <div id="ceo-chat-status" style="font-size:.78em;color:var(--text-muted);margin-top:6px"></div>
+  </div>
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🎯</span> Company Mission</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadGoals()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      The company mission is injected into every agent prompt so agents always know <em>what</em> to do and <em>why</em>.
+    </p>
+    <div id="goals-mission-display" style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;font-size:.9em;color:var(--text-secondary);min-height:40px">
+      <em style="color:var(--text-muted)">No mission set yet. Set one below.</em>
+    </div>
+    <div class="form-group"><label>Mission Statement</label><textarea id="goals-mission-input" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical" placeholder="e.g. Build the #1 AI note-taking app to $1M MRR"></textarea></div>
+    <div class="form-group"><label>Vision (optional)</label><input id="goals-vision-input" placeholder="Long-term company vision"/></div>
+    <button class="btn btn-primary" onclick="saveCompanyMission()">💾 Save Mission</button>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📁</span> Projects</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadGoals()">↻ Refresh</button>
+      </div>
+      <div id="goals-projects-list"><div class="empty"><div class="icon">📁</div><p>No projects yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Project</div></div>
+      <div class="form-group"><label>Project Name</label><input id="goals-proj-name" placeholder="e.g. MVP Launch"/></div>
+      <div class="form-group"><label>Goal</label><input id="goals-proj-goal" placeholder="e.g. Ship v1.0 by Q2"/></div>
+      <div class="form-group"><label>Description</label><input id="goals-proj-desc" placeholder="Brief description"/></div>
+      <div class="form-group"><label>Priority</label>
+        <select id="goals-proj-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="high">🔴 High</option>
+          <option value="medium" selected>🟡 Medium</option>
+          <option value="low">🟢 Low</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="addGoalProject()">➕ Add Project</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tickets ── -->
+<div id="tab-tickets" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon blue">🎫</div><div class="stat-body"><div class="val" id="tkt-total">–</div><div class="lbl">Total Tickets</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="tkt-open">–</div><div class="lbl">Open</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">▶️</div><div class="stat-body"><div class="val" id="tkt-inprog">–</div><div class="lbl">In Progress</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="tkt-done">–</div><div class="lbl">Done</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🎫</span> Tickets</div>
+        <div style="display:flex;gap:6px">
+          <select id="tkt-filter-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadTickets()">
+            <option value="">All</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="blocked">Blocked</option>
+            <option value="done">Done</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadTickets()">↻</button>
+        </div>
+      </div>
+      <div id="tickets-list"><div class="empty"><div class="icon">🎫</div><p>No tickets yet.</p></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Ticket</div></div>
+        <div class="form-group"><label>Title</label><input id="tkt-new-title" placeholder="Describe the task"/></div>
+        <div class="form-group"><label>Description (optional)</label><textarea id="tkt-new-desc" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Details…"></textarea></div>
+        <div class="form-group"><label>Priority</label>
+          <select id="tkt-new-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="high">🔴 High</option>
+            <option value="medium" selected>🟡 Medium</option>
+            <option value="low">🟢 Low</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Assign Agent (optional)</label><input id="tkt-new-agent" placeholder="e.g. engineering-assistant"/></div>
+        <button class="btn btn-primary" onclick="createTicket()">➕ Create Ticket</button>
+      </div>
+      <div class="card" style="margin-top:14px" id="tkt-detail-card" style="display:none">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📋</span> Ticket Detail</div>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('tkt-detail-card').style.display='none'">✕</button>
+        </div>
+        <div id="tkt-detail-body"></div>
+        <div class="form-group" style="margin-top:12px"><label>Add Comment</label>
+          <div style="display:flex;gap:8px">
+            <input id="tkt-comment-input" placeholder="Write a comment…" style="flex:1"/>
+            <button class="btn btn-primary" onclick="addTicketComment()">💬 Post</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📋</span> Audit Trail</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadTicketAudit()">↻ Refresh</button>
+    </div>
+    <div id="tickets-audit"><div class="empty"><div class="icon">📋</div><p>No audit events yet.</p></div></div>
+  </div>
+</div>
+
+<!-- ── Boardroom (Governance) ── -->
+<div id="tab-boardroom" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="gov-pending">–</div><div class="lbl">Pending Approvals</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="gov-approved">–</div><div class="lbl">Approved</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">🚫</div><div class="stat-body"><div class="val" id="gov-rejected">–</div><div class="lbl">Rejected</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📋</div><div class="stat-body"><div class="val" id="gov-total">–</div><div class="lbl">Total Actions</div></div></div>
+  </div>
+
+  <div id="gov-pending-banner" style="display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(239,68,68,.15),rgba(245,158,11,.1));border:1px solid rgba(239,68,68,.5);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.88em;color:#f87171;font-weight:600;animation:blink 1.5s infinite"></div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">⏳</span> Pending Board Approvals</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadBoardroom()">↻ Refresh</button>
+      </div>
+      <div id="gov-pending-list"><div class="empty"><div class="icon">✅</div><p>No pending approvals.</p></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🤖</span> Agent Controls</div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">As the board, you can pause, resume, or terminate any agent at any time.</p>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="flex:1;min-width:140px"><label>Agent ID</label><input id="gov-agent-ctrl-id" placeholder="e.g. marketing-agent"/></div>
+          <button class="btn btn-warning btn-sm" style="margin-bottom:18px" onclick="govPauseAgent()">⏸ Pause</button>
+          <button class="btn btn-success btn-sm" style="margin-bottom:18px" onclick="govResumeAgent()">▶️ Resume</button>
+          <button class="btn btn-danger btn-sm" style="margin-bottom:18px" onclick="govTerminateAgent()">⛔ Terminate</button>
+        </div>
+        <div id="gov-agent-status-display" style="font-size:.83em;color:var(--text-muted)"></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-header"><div class="card-title"><span class="icon">🧪</span> Submit Test Action</div></div>
+        <p style="color:var(--text-muted);font-size:.83em;margin-bottom:10px">Test the approval gate — submit an action on behalf of an agent.</p>
+        <div class="form-group"><label>Agent ID</label><input id="gov-test-agent" placeholder="my-agent"/></div>
+        <div class="form-group"><label>Action</label><input id="gov-test-action" placeholder="e.g. send_email_blast"/></div>
+        <div class="form-group"><label>Description</label><input id="gov-test-desc" placeholder="Send 1000 emails to customer list"/></div>
+        <div class="form-group"><label>Risk Level</label>
+          <select id="gov-test-risk" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="low">🟢 Low (auto-approved)</option>
+            <option value="medium" selected>🟡 Medium</option>
+            <option value="high">🔴 High</option>
+            <option value="critical">🔥 Critical</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="govTestAction()">🧪 Submit Action</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📋</span> Governance Audit Trail</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadBoardroom()">↻ Refresh</button>
+    </div>
+    <div id="gov-audit-list"><div class="empty"><div class="icon">📋</div><p>No audit events yet.</p></div></div>
+  </div>
+</div>
+
+<!-- ── Companies ── -->
+<div id="tab-companies" class="tab-content">
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🏗️</span> Multi-Company Manager</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadCompanies()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      One deployment, many companies. Complete data isolation and one control plane for your portfolio.
+    </p>
+    <div id="companies-active-banner" style="background:linear-gradient(135deg,rgba(16,185,129,.1),rgba(52,211,153,.05));border:1px solid rgba(52,211,153,.3);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:12px;font-size:.88em;color:var(--success);display:none"></div>
+    <div id="companies-list"><div class="empty"><div class="icon">🏗️</div><p>No companies yet. Create one below.</p></div></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Company</div></div>
+      <div class="form-group"><label>Company Name</label><input id="co-new-name" placeholder="e.g. Acme AI Inc."/></div>
+      <div class="form-group"><label>Mission (optional)</label><input id="co-new-mission" placeholder="Build the #1 AI assistant"/></div>
+      <div class="form-group"><label>Description (optional)</label><input id="co-new-desc" placeholder="Brief description"/></div>
+      <button class="btn btn-primary" onclick="createCompany()">🏗️ Create Company</button>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📦</span> Export / Import</div></div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Export a company config (secrets scrubbed) or import a template.</p>
+      <div class="form-group"><label>Company ID to Export</label>
+        <div style="display:flex;gap:8px">
+          <input id="co-export-id" placeholder="company-id" style="flex:1"/>
+          <button class="btn btn-ghost" onclick="exportCompany()">📤 Export</button>
+        </div>
+      </div>
+      <div class="form-group"><label>Import Template (JSON)</label>
+        <textarea id="co-import-json" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='{"company": {"name": "My Company"}, ...}'></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="importCompany()">📥 Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Artifacts ── -->
+<div id="tab-artifacts" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon yellow">📦</div><div class="stat-body"><div class="val" id="art-total">–</div><div class="lbl">Total Artifacts</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📝</div><div class="stat-body"><div class="val" id="art-drafts">–</div><div class="lbl">Drafts</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">🚀</div><div class="stat-body"><div class="val" id="art-deployed">–</div><div class="lbl">Deployed</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="art-approved">–</div><div class="lbl">Approved</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📦</span> Artifacts</div>
+        <div style="display:flex;gap:6px">
+          <select id="art-filter-type" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadArtifacts()">
+            <option value="">All Types</option>
+            <option value="code">Code</option>
+            <option value="report">Report</option>
+            <option value="campaign">Campaign</option>
+            <option value="business_plan">Business Plan</option>
+            <option value="config">Config</option>
+            <option value="other">Other</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadArtifacts()">↻</button>
+        </div>
+      </div>
+      <div id="artifacts-list"><div class="empty"><div class="icon">📦</div><p>No artifacts yet. Create a task to generate artifacts.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Artifact</div></div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Manually create an artifact from content.</p>
+      <div class="form-group"><label>Title</label><input id="art-new-title" placeholder="e.g. Marketing Plan Q2"/></div>
+      <div class="form-group"><label>Type</label>
+        <select id="art-new-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="report">Report</option>
+          <option value="code">Code</option>
+          <option value="campaign">Campaign</option>
+          <option value="business_plan">Business Plan</option>
+          <option value="config">Config</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Content</label>
+        <textarea id="art-new-content" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder="Artifact content…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="createArtifact()">📦 Create Artifact</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px" id="art-detail-card" style="display:none">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🔍</span> Artifact Detail</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('art-detail-card').style.display='none'">✕ Close</button>
+    </div>
+    <div id="art-detail-body"></div>
+  </div>
+</div>
+
+<!-- ── Sessions ── -->
+<div id="tab-sessions" class="tab-content">
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon cyan">💾</div><div class="stat-body"><div class="val" id="ses-total">–</div><div class="lbl">Total Sessions</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">▶️</div><div class="stat-body"><div class="val" id="ses-active">–</div><div class="lbl">Active</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">⏸</div><div class="stat-body"><div class="val" id="ses-paused">–</div><div class="lbl">Paused</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="ses-completed">–</div><div class="lbl">Completed</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">💾</span> Persistent Sessions</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadSessions()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+        Sessions persist across reboots. Agents resume their exact task context rather than starting from scratch.
+      </p>
+      <div id="sessions-list"><div class="empty"><div class="icon">💾</div><p>No sessions yet.</p></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Session</div></div>
+        <div class="form-group"><label>Agent ID</label><input id="ses-new-agent" placeholder="e.g. engineering-assistant"/></div>
+        <div class="form-group"><label>Title</label><input id="ses-new-title" placeholder="e.g. MVP feature development"/></div>
+        <div class="form-group"><label>Initial Context (JSON)</label>
+          <textarea id="ses-new-ctx" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder='{"goal": "Build login feature", "stack": "React + FastAPI"}'></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="createSession()">💾 Create Session</button>
+      </div>
+      <div class="card" style="margin-top:14px" id="ses-detail-card">
+        <div class="card-header"><div class="card-title"><span class="icon">📋</span> Session Detail</div></div>
+        <div id="ses-detail-body"><div class="empty"><p>Click a session to view details and checkpoints.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Skills ── -->
+<div id="tab-skills" class="tab-content">
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🛠️</span> Skills Library <span id="skill-total-badge" style="font-size:.8em;color:var(--text-muted)"></span></div>
+      </div>
+      <input id="skill-search" placeholder="Search skills…" oninput="filterSkills()" />
+      <div id="category-pills" style="margin:10px 0"></div>
+      <div id="skill-grid" class="skill-grid"><div class="empty"><div class="icon">🛠️</div><p>Loading skills…</p></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🤖</span> Create Custom Agent</div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">Select skills from the library, name your agent, then click Create.</p>
+        <div class="form-group"><label>Agent Name</label><input id="agent-name-input" placeholder="e.g. My Content Writer"/></div>
+        <div class="form-group"><label>Description (optional)</label><input id="agent-desc-input" placeholder="What this agent does"/></div>
+        <div class="form-group">
+          <label>Selected Skills <span id="selected-count" style="color:var(--primary)">(0)</span></label>
+          <div id="selected-skills-list" style="font-size:.82em;color:var(--text-muted);min-height:24px">No skills selected. Click cards on the left.</div>
+        </div>
+        <button class="btn btn-success" onclick="createAgent()">➕ Create Agent</button>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">👥</span> Custom Agents</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadAgents()">↻ Refresh</button>
+        </div>
+        <div id="agents-list"><div class="empty"><div class="icon">👥</div><p>No agents yet.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tasks ── -->
+<div id="tab-tasks" class="tab-content">
+
+  <!-- Task Builder -->
+  <div class="grid2" style="align-items:start">
+    <!-- Left: build a task -->
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🚀</span> Build a Task</div>
+          <span id="task-step-badge" style="font-size:.78em;background:var(--primary);color:#fff;padding:2px 8px;border-radius:10px">Step 1</span>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Describe any goal — agents will be auto-selected. You can adjust everything before launching.</p>
+
+        <!-- Step 1: description -->
+        <div id="task-step1">
+          <div class="form-group">
+            <label>Task Description</label>
+            <textarea id="task-input" rows="4"
+              placeholder="e.g. Build a SaaS company for remote team management — create business plan, brand identity, hiring plan, financial model, and go-to-market strategy"
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"
+              oninput="onTaskInputChange()"></textarea>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="runAutoSelect()" style="flex:1" id="btn-autoselect" disabled>🤖 Auto-Select Agents</button>
+            <button class="btn btn-ghost btn-sm" onclick="showManualAgentPicker()" title="Manually pick agents">⚙️ Manual</button>
+          </div>
+          <div id="autoselect-status" style="margin-top:8px;font-size:.82em;color:var(--text-muted)"></div>
+        </div>
+
+        <!-- Step 2: agent picker (hidden until auto-select or manual click) -->
+        <div id="task-step2" style="display:none;margin-top:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <label style="font-weight:600">🤖 Agent Selection <span id="agent-sel-count" style="color:var(--primary);font-weight:700"></span></label>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="selectAllAgents()">All</button>
+              <button class="btn btn-ghost btn-sm" onclick="clearAllAgents()">None</button>
+              <button class="btn btn-ghost btn-sm" onclick="resetToAutoSelected()">Auto</button>
+            </div>
+          </div>
+          <div id="agent-picker-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:6px;max-height:340px;overflow-y:auto;padding:2px"></div>
+        </div>
+
+        <!-- Step 3: mode + submit (hidden until agents selected) -->
+        <div id="task-step3" style="display:none;margin-top:16px">
+          <div class="form-group">
+            <label>Execution Mode</label>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px" id="mode-selector">
+              <label id="mode-auto" onclick="setMode('auto')" style="cursor:pointer;border:2px solid var(--primary);border-radius:var(--radius-sm);padding:8px 4px;text-align:center;background:var(--surface2)">
+                <div style="font-size:1.2em">🧠</div>
+                <div style="font-size:.75em;font-weight:600;margin-top:2px">Auto</div>
+                <div style="font-size:.68em;color:var(--text-muted)">Orchestrator decides</div>
+              </label>
+              <label id="mode-parallel" onclick="setMode('parallel')" style="cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 4px;text-align:center;background:var(--surface2)">
+                <div style="font-size:1.2em">⚡</div>
+                <div style="font-size:.75em;font-weight:600;margin-top:2px">Parallel</div>
+                <div style="font-size:.68em;color:var(--text-muted)">All agents at once</div>
+              </label>
+              <label id="mode-single" onclick="setMode('single')" style="cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 4px;text-align:center;background:var(--surface2)">
+                <div style="font-size:1.2em">1️⃣</div>
+                <div style="font-size:.75em;font-weight:600;margin-top:2px">Single</div>
+                <div style="font-size:.68em;color:var(--text-muted)">First selected agent</div>
+              </label>
+            </div>
+          </div>
+          <button class="btn btn-success" onclick="submitTask()" style="width:100%;margin-top:4px" id="btn-launch">🚀 Launch Task</button>
+          <div id="task-submit-result" style="margin-top:10px;font-size:.88em"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: active task -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📊</span> Active Task</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadTasks()">↻ Refresh</button>
+      </div>
+      <div id="active-task-panel"><div class="empty"><div class="icon">🚀</div><p>No active task.</p></div></div>
+    </div>
+  </div>
+
+  <!-- Task History -->
+  <div class="card" style="margin-top:16px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon" style="color:var(--gold)">◈</span> Task History</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadTasks()">↻ Refresh</button>
+    </div>
+    <div id="task-history-list"><div class="empty"><p>No completed tasks yet.</p></div></div>
+  </div>
+  <!-- Task detail modal -->
+  <div id="task-detail-modal" role="dialog" aria-modal="true" aria-labelledby="task-detail-heading" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:24px;max-width:640px;width:90%;max-height:80vh;overflow-y:auto" tabindex="-1" id="task-detail-dialog">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div class="card-title" id="task-detail-heading">Task Detail</div>
+        <button class="btn btn-ghost btn-sm" id="task-detail-close-btn" onclick="closeTaskDetail()" aria-label="Close task detail">✕ Close</button>
+      </div>
+      <div id="task-detail-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Swarm ── -->
+<div id="tab-swarm" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🐝</span> Agent Swarm Overview</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadSwarm()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:12px">All AI agents — their capabilities, current status, and workload.</p>
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
+      <input id="swarm-search" placeholder="🔍 Search agents by name, skill, or capability…"
+        style="flex:1;background:var(--surface2);border:1px solid rgba(212,175,55,.2);border-radius:8px;color:var(--text);padding:10px 14px;font-family:inherit;font-size:.88em;outline:none"
+        oninput="filterSwarm(null,null)" onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'" />
+      <button class="btn btn-ghost btn-sm" onclick="loadSwarm()" title="Refresh swarm">↻ Refresh</button>
+    </div>
+    <div id="swarm-filter-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+      <button class="btn btn-primary btn-sm swarm-pill active" onclick="filterSwarm('all',this)" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none">All</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('sales',this)">💼 Sales</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('marketing',this)">📢 Marketing</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('social',this)">📱 Social</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('analytics',this)">📊 Analytics</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('content',this)">✍️ Content</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('ecommerce',this)">🛒 E-commerce</button>
+      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('coordination',this)">🎯 Core</button>
+    </div>
+    <div id="swarm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"><div class="empty"><div class="icon">🐝</div><p>Loading agents…</p></div></div>
+  </div>
+</div>
+
+<!-- ── Commands ── -->
+<div id="tab-commands" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon" style="color:var(--gold)">◈</span> Command Reference</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button class="btn btn-primary btn-sm cmd-type-btn active" onclick="switchCmdType('whatsapp',this)" id="cmd-tab-wa" style="background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none">📱 WhatsApp Commands</button>
+      <button class="btn btn-ghost btn-sm cmd-type-btn" onclick="switchCmdType('bot',this)" id="cmd-tab-bot">🤖 Bot Commands</button>
+    </div>
+    <input id="cmd-search" placeholder="🔍 Search commands…" oninput="filterCommands()" style="width:100%;margin-bottom:14px" />
+    <div id="cmd-category-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px"></div>
+    <div id="cmd-list"></div>
+  </div>
+</div>
+
+<!-- ── ROI Metrics ── -->
+<div id="tab-metrics" class="tab-content">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div>
+      <h2 style="font-size:1.15em;font-weight:800;color:var(--text);letter-spacing:-.02em">ROI &amp; Usage Tracking</h2>
+      <p style="font-size:.8em;color:var(--text-muted)">Real usage data — tracked automatically from all agent activity</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <select id="roi-period" onchange="loadMetrics()" style="font-size:.82em;background:var(--surface2);border:1px solid rgba(212,175,55,.25);border-radius:8px;color:var(--text);padding:6px 12px">
+        <option value="all">All Time</option>
+        <option value="30d">Last 30 Days</option>
+        <option value="7d">Last 7 Days</option>
+        <option value="today">Today</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="loadMetrics()">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="grid-stat" id="roi-stat-cards">
+    <div class="stat-card" style="--stat-top:rgba(212,175,55,.3)">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">✓</div>
+      <div class="stat-body"><div class="val" id="m-tasks">–</div><div class="lbl">Tasks Completed</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-tasks-trend"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(34,197,94,.2),rgba(34,197,94,.05));color:var(--success)">⏱</div>
+      <div class="stat-body"><div class="val" id="m-hours">–</div><div class="lbl">AI Hours Worked</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-hours-trend"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold-light)">👤</div>
+      <div class="stat-body"><div class="val" id="m-human-saved">–</div><div class="lbl">Human Hours Saved</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-human-saved-trend"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(34,197,94,.2),rgba(34,197,94,.05));color:var(--success)">€</div>
+      <div class="stat-body"><div class="val" id="m-saved">–</div><div class="lbl">Cost Saved (€)</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-saved-trend"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">◆</div>
+      <div class="stat-body"><div class="val" id="m-agents-used">–</div><div class="lbl">Agents Utilized</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-agents-trend"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">◎</div>
+      <div class="stat-body"><div class="val" id="m-leads">–</div><div class="lbl">Leads Generated</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(34,197,94,.2),rgba(34,197,94,.05));color:var(--success)">✉</div>
+      <div class="stat-body"><div class="val" id="m-emails">–</div><div class="lbl">Emails Sent</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">◈</div>
+      <div class="stat-body"><div class="val" id="m-content">–</div><div class="lbl">Content Created</div></div>
+    </div>
+  </div>
+  <!-- ROI Summary bar -->
+  <div class="card" style="border:1px solid rgba(212,175,55,.3);background:linear-gradient(135deg,rgba(212,175,55,.06),rgba(212,175,55,.02))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:var(--gold)">◈</span> ROI Summary</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:20px" id="roi-summary">
+      <div style="text-align:center;padding:16px 10px;background:rgba(212,175,55,.05);border-radius:10px;border:1px solid rgba(212,175,55,.12)">
+        <div style="font-size:.7em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Efficiency Rate
+          <span title="Efficiency = (human hours saved ÷ total tasks) × 100. Higher means your AI team completes more work per task with less overhead." style="cursor:help;color:var(--gold);margin-left:4px">ⓘ</span>
+        </div>
+        <div style="font-size:2.4em;font-weight:800;color:var(--gold);letter-spacing:-.03em;line-height:1" id="roi-efficiency">–%</div>
+        <div id="roi-efficiency-desc" style="font-size:.72em;color:var(--text-muted);margin-top:6px;line-height:1.4"></div>
+      </div>
+      <div style="text-align:center;padding:16px 10px;background:rgba(212,175,55,.05);border-radius:10px;border:1px solid rgba(212,175,55,.12)">
+        <div style="font-size:.7em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Avg Task Duration</div>
+        <div style="font-size:2.4em;font-weight:800;color:var(--gold);letter-spacing:-.03em;line-height:1" id="roi-avg-duration">–</div>
+      </div>
+      <div style="text-align:center;padding:16px 10px;background:rgba(212,175,55,.05);border-radius:10px;border:1px solid rgba(212,175,55,.12)">
+        <div style="font-size:.7em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Most Active Agent</div>
+        <div style="font-size:1.2em;font-weight:700;color:var(--text);line-height:1.3;margin-top:6px" id="roi-top-bot">–</div>
+      </div>
+      <div style="text-align:center;padding:16px 10px;background:rgba(34,197,94,.05);border-radius:10px;border:1px solid rgba(34,197,94,.15)">
+        <div style="font-size:.7em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Value Generated</div>
+        <div style="font-size:2.4em;font-weight:800;color:var(--success);letter-spacing:-.03em;line-height:1" id="roi-value">€–</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">◈</span> Activity Log</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadMetrics()">↻ Refresh</button>
+      </div>
+      <div id="metrics-events"><div class="empty"><div class="icon">📊</div><p>No events recorded yet. Agent activity is tracked automatically.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">◈</span> Manual Entry</div>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Log business outcomes to track ROI for client reporting.</p>
+      <div class="form-group">
+        <label>Event Type</label>
+        <select id="metric-type">
+          <option value="task_completed">Task Completed</option>
+          <option value="lead_generated">Lead Generated</option>
+          <option value="email_sent">Email Sent</option>
+          <option value="content_created">Content Created</option>
+          <option value="call_booked">Call Booked</option>
+          <option value="deal_closed">Deal Closed</option>
+          <option value="ticket_resolved">Ticket Resolved</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Agent / Source</label><input id="metric-agent" placeholder="e.g. lead-hunter"/></div>
+      <div class="form-group"><label>Value (€, optional)</label><input id="metric-value" type="number" placeholder="e.g. 500" min="0"/></div>
+      <div class="form-group"><label>Notes (optional)</label><input id="metric-notes" placeholder="e.g. Closed deal with Acme Corp"/></div>
+      <button class="btn btn-success" onclick="recordMetric()">📊 Record Event</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Templates ── -->
+<div id="tab-templates" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📋</span> Agent Templates</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadTemplates()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px">
+      Pre-built plug-and-play templates for common business use-cases. One click to deploy a full AI team.
+    </p>
+    <div id="templates-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px">
+      <div class="empty"><div class="icon">📋</div><p>Loading templates…</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Guardrails ── -->
+<div id="tab-guardrails" class="tab-content">
+  <!-- Pending approvals notification banner -->
+  <div id="guardrails-notification-banner" style="display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(239,68,68,.1));border:1px solid rgba(245,158,11,.5);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.88em;color:var(--warning);font-weight:600;animation:blink 1.5s infinite"></div>
+  <div class="grid-stat">
+    <div class="stat-card">
+      <div class="stat-icon yellow">⏳</div>
+      <div class="stat-body"><div class="val" id="g-pending">–</div><div class="lbl">Pending Approvals</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">✅</div>
+      <div class="stat-body"><div class="val" id="g-approved">–</div><div class="lbl">Approved (total)</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon blue">🚫</div>
+      <div class="stat-body"><div class="val" id="g-rejected">–</div><div class="lbl">Rejected (total)</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon cyan">📋</div>
+      <div class="stat-body"><div class="val" id="g-total">–</div><div class="lbl">All Actions Logged</div></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">⏳</span> Pending Approvals</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadGuardrails()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+        High-risk actions require manual confirmation before execution.
+        <strong style="color:var(--warning)">Review carefully before approving.</strong>
+      </p>
+      <div id="guardrails-pending"><div class="empty"><div class="icon">✅</div><p>No pending approvals. All clear!</p></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📋</span> Action Log</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadGuardrails()">↻ Refresh</button>
+      </div>
+      <div id="guardrails-log"><div class="empty"><div class="icon">📋</div><p>No actions logged yet.</p></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">⚙️</span> Guardrail Settings</div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Configure which actions require approval and rate limits per agent.</p>
+    <div class="grid2">
+      <div>
+        <div class="section-title">Actions Requiring Approval</div>
+        <div id="guardrail-settings-list" style="font-size:.88em">
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" id="gr-send-email" checked /> Send bulk emails
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" id="gr-social-post" checked /> Post to social media
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" id="gr-make-purchase" checked /> Make purchases / place orders
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" id="gr-delete-data" checked /> Delete or modify data
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 0">
+            <input type="checkbox" id="gr-api-calls" /> External API calls with side-effects
+          </label>
+        </div>
+      </div>
+      <div>
+        <div class="section-title">Rate Limits</div>
+        <div class="form-group"><label>Max emails / day</label><input id="rl-emails" type="number" value="200" min="1"/></div>
+        <div class="form-group"><label>Max social posts / day</label><input id="rl-posts" type="number" value="10" min="1"/></div>
+        <div class="form-group"><label>Max API calls / hour</label><input id="rl-api" type="number" value="100" min="1"/></div>
+        <button class="btn btn-primary" onclick="saveGuardrailSettings()">💾 Save Settings</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Memory ── -->
+<div id="tab-memory" class="tab-content">
+  <div class="grid2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">👥</span> Client Memory</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadMemory()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">The AI remembers your clients across all conversations and tasks.</p>
+      <div id="memory-clients"><div class="empty"><div class="icon">👥</div><p>No clients remembered yet.</p></div></div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">➕</span> Add Client</div>
+        </div>
+        <div class="form-group"><label>Name</label><input id="mem-name" placeholder="e.g. John Smith"/></div>
+        <div class="form-group"><label>Company</label><input id="mem-company" placeholder="e.g. Acme Corp"/></div>
+        <div class="form-group"><label>Email</label><input id="mem-email" type="email" placeholder="john@acme.com"/></div>
+        <div class="form-group"><label>Phone</label><input id="mem-phone" type="tel" placeholder="+1 555 123 4567"/></div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="mem-status">
+            <option value="prospect">Prospect</option>
+            <option value="lead">Lead</option>
+            <option value="customer">Customer</option>
+            <option value="churned">Churned</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Notes</label><textarea id="mem-notes" rows="3" placeholder="Any important context…"></textarea></div>
+        <button class="btn btn-success" onclick="addClient()">➕ Add Client</button>
+      </div>
+
+      <div class="card" style="margin-top:0">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📝</span> Recent Interactions</div>
+        </div>
+        <div id="memory-recent"><div class="empty"><div class="icon">📝</div><p>No recent interactions.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Integrations ── -->
+<div id="tab-integrations" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🔌</span> Integrations</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadIntegrations()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px">
+      Connect your tools and services. The AI uses these integrations to take real actions across your business.
+    </p>
+    <div id="integrations-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
+      <div class="empty"><div class="icon">🔌</div><p>Loading integrations…</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── History ── -->
+<div id="tab-history" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🕐</span> Activity History</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-ghost btn-sm" onclick="loadHistory()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger)"
+                onclick="clearHistory()">🗑️ Clear</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+      A persistent log of all agent activities, security checks, settings changes and more — from all time.
+    </p>
+
+    <!-- Filter bar -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+      <input id="history-search" placeholder="🔍 Search…"
+             style="flex:1;min-width:160px;max-width:280px;font-size:.84em"
+             oninput="filterHistory()"/>
+      <select id="history-type-filter" style="font-size:.84em;min-width:160px"
+              onchange="filterHistory()">
+        <option value="">All event types</option>
+        <option value="security_check">🛡️ Security Check</option>
+        <option value="security_action_done">✅ Security Action</option>
+        <option value="settings_saved">⚙️ Settings Saved</option>
+        <option value="guardrail_approved">✅ Guardrail Approved</option>
+        <option value="guardrail_rejected">🚫 Guardrail Rejected</option>
+        <option value="agent_command">💬 Agent Command</option>
+        <option value="task_run">🚀 Task Run</option>
+        <option value="worker_triggered">👷 Worker</option>
+        <option value="system">ℹ️ System</option>
+      </select>
+      <select id="history-source-filter" style="font-size:.84em;min-width:140px"
+              onchange="filterHistory()">
+        <option value="">All sources</option>
+        <option value="chat">Chat</option>
+        <option value="dashboard">Dashboard</option>
+        <option value="guardrails">Guardrails</option>
+        <option value="security-checklist">Security</option>
+        <option value="system">System</option>
+      </select>
+      <span id="history-count" style="font-size:.78em;color:var(--text-muted);white-space:nowrap"></span>
+    </div>
+
+    <div id="history-timeline">
+      <div class="empty"><div class="icon">🕐</div><p>Loading history…</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Options ── -->
+<div id="tab-options" class="tab-content">
+  <div class="grid2">
+
+    <!-- Left column: API Keys -->
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🔑</span> API Keys</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadOptions()">↻ Refresh</button>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+          Secret values are masked. Paste a new value to update; leave unchanged to keep existing.
+        </p>
+        <div id="opt-api-keys"></div>
+        <button class="btn btn-primary" style="margin-top:10px;width:100%" onclick="saveSettings('api_keys')">💾 Save API Keys</button>
+      </div>
+    </div>
+
+    <!-- Right column -->
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">⚙️</span> Preferences</div>
+        </div>
+        <div id="opt-preferences"></div>
+        <button class="btn btn-primary" style="margin-top:10px;width:100%" onclick="saveSettings('preferences')">💾 Save Preferences</button>
+      </div>
+
+      <!-- Auto-Update -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🔄</span> Auto Update</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="checkForUpdates()">🔍 Check Now</button>
+            <button class="btn btn-success btn-sm" onclick="triggerUpdate()">⬇ Update Now</button>
+          </div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+          Auto-update runs from GitHub while the system is running. Only changed agents are restarted — the rest stay live.
+        </p>
+        <div id="opt-updater-status" style="font-size:.84em"></div>
+      </div>
+
+      <!-- Security Check -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🛡️</span> Security Checklist</div>
+          <button class="btn btn-ghost btn-sm" onclick="runSecurityCheck()">↻ Re-run</button>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:4px">
+          <strong style="color:var(--text)">Before running in production</strong> — verify all 11 points below.
+        </p>
+        <ol style="color:var(--text-muted);font-size:.78em;margin:0 0 12px 16px;padding:0;line-height:1.8">
+          <li>JWT_SECRET_KEY changed from the default placeholder</li>
+          <li>Strong passwords configured</li>
+          <li>Application bound to localhost only (or properly secured if networked)</li>
+          <li>Rate limiting enabled <code style="font-size:.9em">security.rate_limit_enabled: true</code></li>
+          <li>Encryption at rest enabled <code style="font-size:.9em">privacy.encrypt_data_at_rest: true</code></li>
+          <li>Telemetry disabled <code style="font-size:.9em">privacy.telemetry_enabled: false</code></li>
+          <li>Audit logging enabled <code style="font-size:.9em">logging.audit_enabled: true</code></li>
+          <li>Security headers verified <code style="font-size:.9em">curl -I http://127.0.0.1:8787</code></li>
+          <li>Dependencies updated <code style="font-size:.9em">pip install -r requirements.txt --upgrade</code></li>
+          <li>File permissions secured <code style="font-size:.9em">chmod 600 .env security.local.yml</code></li>
+          <li>No secrets committed to version control</li>
+        </ol>
+        <div id="opt-security-results"><p style="color:var(--text-muted);font-size:.85em">Loading…</p></div>
+      </div>
+
+      <!-- Danger Zone -->
+      <div class="card" style="border-color:rgba(239,68,68,.35)">
+        <div class="card-header">
+          <div class="card-title" style="color:var(--danger)"><span class="icon">💣</span> Danger Zone</div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+          Permanently delete all runtime data — chat logs, metrics, memory, guardrails, improvements.
+          Your <code>.env</code> and config files are <strong style="color:var(--text)">not</strong> deleted.
+        </p>
+        <div class="form-group">
+          <label>Type <strong style="color:var(--danger)">DELETE ALL DATA</strong> to confirm</label>
+          <input id="nuke-confirm" placeholder="DELETE ALL DATA" style="border-color:rgba(239,68,68,.3)" autocomplete="off"/>
+        </div>
+        <button class="btn btn-danger" style="width:100%" onclick="nukeData()">🗑️ Delete All Runtime Data</button>
+        <div id="nuke-result" style="margin-top:8px;font-size:.82em"></div>
+      </div>
+
+      <!-- Delete Complete Installation -->
+      <div class="card" style="border-color:rgba(239,68,68,.6);margin-top:0">
+        <div class="card-header">
+          <div class="card-title" style="color:var(--danger)"><span class="icon">☠️</span> Delete Complete Installation</div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+          Stops all running agents and <strong style="color:var(--danger)">permanently removes</strong>
+          the entire <code>~/.ai-employee</code> installation — all data, config, and code.
+          <strong style="color:var(--text)">This cannot be undone.</strong>
+        </p>
+
+        <!-- Step 1 -->
+        <div id="uninstall-step1">
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+            <input type="checkbox" id="uninstall-check1" style="width:auto;margin:0;cursor:pointer;accent-color:var(--danger)"/>
+            <label for="uninstall-check1" style="margin:0;font-size:.86em;cursor:pointer">
+              I understand this will <strong style="color:var(--danger)">permanently delete</strong> everything
+            </label>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+            <input type="checkbox" id="uninstall-check2" style="width:auto;margin:0;cursor:pointer;accent-color:var(--danger)"/>
+            <label for="uninstall-check2" style="margin:0;font-size:.86em;cursor:pointer">
+              I have backed up anything I want to keep
+            </label>
+          </div>
+          <button class="btn btn-danger" style="width:100%" onclick="deleteBotStep2()">
+            ☠️ Continue to Final Confirmation…
+          </button>
+        </div>
+
+        <!-- Step 2 (hidden until step 1 passes) -->
+        <div id="uninstall-step2" style="display:none;border-top:1px solid rgba(239,68,68,.3);padding-top:14px;margin-top:14px">
+          <div class="form-group">
+            <label>Type <strong style="color:var(--danger)">UNINSTALL AI EMPLOYEE</strong> to confirm</label>
+            <input id="uninstall-confirm" placeholder="UNINSTALL AI EMPLOYEE"
+              style="border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.05)"
+              autocomplete="off"/>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" style="flex:1" onclick="deleteBotCancel()">↩ Cancel</button>
+            <button class="btn btn-danger" style="flex:2" onclick="deleteBotFinal()">
+              ☠️ PERMANENTLY DELETE EVERYTHING
+            </button>
+          </div>
+        </div>
+
+        <div id="uninstall-result" style="margin-top:10px;font-size:.82em"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── BLACKLIGHT ── -->
+<div id="tab-blacklight" class="tab-content">
+
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#1a0a2e 0%,#16213e 60%,#0f172a 100%);border:1px solid #7c3aed;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(124,58,237,.15),0 8px 32px rgba(0,0,0,.6)">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(124,58,237,.2) 0%,transparent 60%);pointer-events:none"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(167,139,250,.6),transparent)"></div>
+    <div style="font-size:2.6rem;line-height:1;animation:blLightning 3s ease-in-out infinite;position:relative;z-index:1">⚡</div>
+    <div style="flex:1;position:relative;z-index:1">
+      <div style="font-size:1.3rem;font-weight:800;color:#e2d9f3;letter-spacing:.1em;text-shadow:0 0 20px rgba(167,139,250,.5)">BLACKLIGHT</div>
+      <div style="font-size:.83em;color:#a78bfa;margin-top:3px;font-weight:500">Autonomous money-making agent — runs above Hermes without user input</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
+      <div id="bl-status-dot" style="width:12px;height:12px;border-radius:50%;background:#6b7280;transition:background .4s,box-shadow .4s"></div>
+      <span id="bl-status-label" style="font-size:.84em;color:#a78bfa;font-weight:700;letter-spacing:.04em">IDLE</span>
+    </div>
+  </div>
+  <style>
+  @keyframes blLightning{0%,90%,100%{opacity:1;filter:drop-shadow(0 0 8px #a855f7)}5%{opacity:.3;filter:none}10%{opacity:1;filter:drop-shadow(0 0 20px #c084fc)}15%{opacity:.7}20%{opacity:1;filter:drop-shadow(0 0 12px #a855f7)}}
+  .bl-stat-card{background:linear-gradient(135deg,rgba(88,28,135,.2),rgba(124,58,237,.1));border:1px solid rgba(124,58,237,.3);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
+  .bl-stat-card:hover{border-color:rgba(167,139,250,.5);box-shadow:0 0 20px rgba(124,58,237,.2)}
+  @media(prefers-reduced-motion:reduce){[style*="blLightning"],[style*="animation"]{animation:none!important}}
+  </style>
+
+  <!-- Control row -->
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(124,58,237,.2);background:linear-gradient(135deg,rgba(88,28,135,.1),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#a78bfa">🎯</span> Goal &amp; Control</div>
+      <button class="btn btn-ghost btn-sm" onclick="blRefresh()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+      Set a goal, then hit <strong style="color:#a78bfa">Start</strong>. BLACKLIGHT will find opportunities, analyze them with Hermes, generate outreach, and iterate — without waiting for input.
+    </p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:220px">
+        <label style="font-size:.82em;color:#a78bfa;display:block;margin-bottom:4px;font-weight:600">Goal</label>
+        <input id="bl-goal-input" placeholder="e.g. Find local restaurants that need better marketing"
+          style="width:100%;box-sizing:border-box;border-color:rgba(124,58,237,.3)" autocomplete="off"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding-bottom:2px">
+        <label class="toggle" style="width:54px;height:30px" title="Toggle BLACKLIGHT on/off">
+          <input type="checkbox" id="bl-toggle" onchange="blToggle(this.checked)"/>
+          <span class="slider" style="border-radius:30px"></span>
+        </label>
+        <span id="bl-toggle-label" style="font-size:.9em;font-weight:700;color:#a78bfa;min-width:52px">OFF</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="grid-stat" style="margin-bottom:18px" id="bl-stat-cards">
+    <div class="bl-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(124,58,237,.2);display:flex;align-items:center;justify-content:center;font-size:1.1em">🔄</div>
+      <div class="stat-body"><div class="val" id="bl-stat-cycle" style="color:#a78bfa">0</div><div class="lbl">Cycles Run</div></div>
+    </div>
+    <div class="bl-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(6,182,212,.15);display:flex;align-items:center;justify-content:center;font-size:1.1em">🎯</div>
+      <div class="stat-body"><div class="val" id="bl-stat-opps" style="color:#22d3ee">0</div><div class="lbl">Opportunities Found</div></div>
+    </div>
+    <div class="bl-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(74,222,128,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">⚡</div>
+      <div class="stat-body"><div class="val" id="bl-stat-actions" style="color:#4ade80">0</div><div class="lbl">Actions Taken</div></div>
+    </div>
+    <div class="bl-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(251,146,60,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">🕐</div>
+      <div class="stat-body"><div class="val" id="bl-stat-last" style="font-size:.75em;color:#fb923c">—</div><div class="lbl">Last Activity</div></div>
+    </div>
+  </div>
+
+  <!-- Live activity log -->
+  <div class="card" style="border:1px solid rgba(124,58,237,.3);background:linear-gradient(135deg,rgba(88,28,135,.1),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#a78bfa">📡</span> Live Activity Log</div>
+      <button class="btn btn-ghost btn-sm" onclick="blLoadLogs()">↻ Refresh</button>
+    </div>
+    <div id="bl-log" style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace;font-size:.77em;background:rgba(2,0,10,.9);border:1px solid rgba(124,58,237,.2);border-radius:8px;padding:14px;height:340px;overflow-y:auto;color:#c9d1d9;line-height:1.7;box-shadow:inset 0 0 40px rgba(88,28,135,.2)">
+      <span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── ASCEND FORGE ── -->
+<div id="tab-ascend" class="tab-content">
+
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#0a1628 0%,#1a0e05 50%,#0f2240 100%);border:1px solid #d97706;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(217,119,6,.12),0 8px 32px rgba(0,0,0,.6)">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(217,119,6,.2) 0%,transparent 60%);pointer-events:none"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(251,191,36,.5),transparent)"></div>
+    <div style="font-size:2.6rem;line-height:1;animation:forgeFire 2s ease-in-out infinite;position:relative;z-index:1">🔥</div>
+    <div style="flex:1;position:relative;z-index:1">
+      <div style="font-size:1.3rem;font-weight:800;color:#fef3c7;letter-spacing:.1em;text-shadow:0 0 20px rgba(251,191,36,.4)">ASCEND FORGE</div>
+      <div style="font-size:.83em;color:#f59e0b;margin-top:3px;font-weight:500">Top-layer self-improver — continuously improves the system safely</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
+      <div id="af-pulse" style="width:12px;height:12px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
+      <span id="af-mode-badge" style="font-size:.78em;font-weight:800;padding:4px 12px;border-radius:20px;background:linear-gradient(135deg,#b45309,#d97706);color:#fff1c6;letter-spacing:.08em;box-shadow:0 0 12px rgba(217,119,6,.4)">AUTO</span>
+    </div>
+  </div>
+
+  <style>
+  @keyframes afPulse{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.5)}50%{box-shadow:0 0 0 8px rgba(217,119,6,0)}}
+  @keyframes forgeFire{0%,100%{filter:drop-shadow(0 0 6px #f59e0b);transform:scale(1)}25%{filter:drop-shadow(0 0 16px #fbbf24);transform:scale(1.05)}50%{filter:drop-shadow(0 0 8px #f97316);transform:scale(.97)}75%{filter:drop-shadow(0 0 20px #f59e0b);transform:scale(1.03)}}
+  .af-mode-btn{padding:8px 18px;border-radius:8px;font-size:.82em;font-weight:700;cursor:pointer;transition:all .2s;font-family:inherit;letter-spacing:.03em}
+  .af-mode-btn.active{background:linear-gradient(135deg,#92400e,#b45309,#d97706);color:#fff;border:1px solid #f59e0b;box-shadow:0 0 16px rgba(217,119,6,.4)}
+  .af-mode-btn:not(.active){background:rgba(217,119,6,.08);color:#f59e0b;border:1px solid rgba(217,119,6,.3)}
+  .af-mode-btn:not(.active):hover{background:rgba(217,119,6,.15);border-color:rgba(217,119,6,.5)}
+  .af-stat-card{background:linear-gradient(135deg,rgba(120,53,15,.2),rgba(217,119,6,.08));border:1px solid rgba(217,119,6,.25);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
+  .af-stat-card:hover{border-color:rgba(251,191,36,.4);box-shadow:0 0 20px rgba(217,119,6,.15)}
+  @media(prefers-reduced-motion:reduce){.af-mode-btn{transition:none}.af-stat-card{transition:none}}
+  </style>
+
+  <!-- Mode + controls -->
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.1),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#f59e0b">⚙️</span> Mode &amp; Controls</div>
+      <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <button class="af-mode-btn" id="af-mode-general" onclick="afSetMode('GENERAL')">🛠 GENERAL</button>
+      <button class="af-mode-btn" id="af-mode-money"   onclick="afSetMode('MONEY')">💰 MONEY</button>
+      <button class="af-mode-btn active" id="af-mode-auto" onclick="afSetMode('AUTO')">🤖 AUTO</button>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <label style="font-size:.82em;color:var(--text-muted)">Auto-approve LOW risk:</label>
+        <label class="toggle" style="width:44px;height:24px">
+          <input type="checkbox" id="af-auto-approve" onchange="afSetAutoApprove(this.checked)"/>
+          <span class="slider" style="border-radius:24px"></span>
+        </label>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="afScan()" style="padding:8px 16px;background:linear-gradient(135deg,#92400e,#d97706);border:none;border-radius:8px;color:#fff;font-weight:700;font-size:.82em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.filter='brightness(1.1)';this.style.boxShadow='0 4px 16px rgba(217,119,6,.4)'" onmouseleave="this.style.filter='';this.style.boxShadow=''">🔍 Scan System</button>
+      <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afShowPending()">📋 Show Pending</button>
+      <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afApplyAllLow()">✅ Apply All LOW</button>
+      <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="afCancelAll()">🗑 Cancel All</button>
+    </div>
+    <div id="af-current-activity" style="margin-top:12px;font-size:.82em;color:var(--text-muted)">Activity: idle</div>
+    <div id="af-current-target"   style="font-size:.82em;color:var(--text-muted)">Target: —</div>
+  </div>
+
+  <!-- Stats -->
+  <div class="grid-stat" style="margin-bottom:18px">
+    <div class="af-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(217,119,6,.2);display:flex;align-items:center;justify-content:center;font-size:1.1em">📋</div>
+      <div class="stat-body"><div class="val" id="af-stat-pending" style="color:#f59e0b">0</div><div class="lbl">Pending</div></div>
+    </div>
+    <div class="af-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(74,222,128,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">✅</div>
+      <div class="stat-body"><div class="val" id="af-stat-approved" style="color:#4ade80">0</div><div class="lbl">Approved</div></div>
+    </div>
+    <div class="af-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(239,68,68,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">❌</div>
+      <div class="stat-body"><div class="val" id="af-stat-rejected" style="color:#ef4444">0</div><div class="lbl">Rejected</div></div>
+    </div>
+    <div class="af-stat-card">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(148,163,184,.08);display:flex;align-items:center;justify-content:center;font-size:1.1em">📚</div>
+      <div class="stat-body"><div class="val" id="af-stat-total">0</div><div class="lbl">Total Patches</div></div>
+    </div>
+  </div>
+
+  <!-- Pending patches -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">⏳</span> Pending Patches</div>
+      <button class="btn btn-ghost btn-sm" onclick="afLoadPatches()">↻ Refresh</button>
+    </div>
+    <div id="af-patches-list" style="font-size:.84em">
+      <div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>
+    </div>
+  </div>
+
+  <!-- Activity feed -->
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.08),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#f59e0b">📡</span> Activity Feed</div>
+      <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
+    </div>
+    <div id="af-activity-log" style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace;font-size:.77em;background:rgba(10,5,0,.9);border:1px solid rgba(217,119,6,.2);border-radius:8px;padding:14px;height:200px;overflow-y:auto;color:#fef3c7;line-height:1.7;box-shadow:inset 0 0 40px rgba(120,53,15,.3)">
+      <span style="color:#6b7280">Waiting for activity…</span>
+    </div>
+  </div>
+
+  <!-- Change history -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🕐</span> Change History</div>
+      <button class="btn btn-ghost btn-sm" onclick="afLoadChangelog()">↻ Refresh</button>
+    </div>
+    <div id="af-changelog" style="font-size:.84em">
+      <div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>
+    </div>
+  </div>
+
+</div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+let currentTab = 'dashboard';
+const _startTime = Date.now();
+
+function switchTab(tab, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  btn.classList.add('active');
+  currentTab = tab;
+  if (tab === 'dashboard') loadDashboard();
+  if (tab === 'chat') loadChatLog();
+  if (tab === 'scheduler') loadSchedules();
+  if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm(); }
+  if (tab === 'improvements') loadImprovements();
+  if (tab === 'skills') loadSkills();
+  if (tab === 'tasks') loadTasks();
+  if (tab === 'swarm') loadSwarm();
+  if (tab === 'live-office') loadLiveOffice();
+  if (tab === 'commands') loadCommandsTab();
+  if (tab === 'metrics') loadMetrics();
+  if (tab === 'templates') loadTemplates();
+  if (tab === 'guardrails') loadGuardrails();
+  if (tab === 'memory') loadMemory();
+  if (tab === 'integrations') loadIntegrations();
+  if (tab === 'history') loadHistory();
+  if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
+  if (tab === 'blacklight') { blRefresh(); blLoadLogs(); }
+  if (tab === 'ascend') { afRefresh(); afLoadPatches(); afLoadChangelog(); }
+  // New Paperclip-parity tabs
+  if (tab === 'budget') loadBudget();
+  if (tab === 'org') { loadOrg(); loadOrgAdapters(); }
+  if (tab === 'goals') loadGoals();
+  if (tab === 'tickets') { loadTickets(); loadTicketAudit(); }
+  if (tab === 'boardroom') loadBoardroom();
+  if (tab === 'companies') loadCompanies();
+  if (tab === 'artifacts') loadArtifacts();
+  if (tab === 'sessions') loadSessions();
+}
+
+function toast(msg, type='success') {
+  const icons = {success:'✅', error:'❌', info:'ℹ️'};
+  const el = document.getElementById('toast');
+  el.innerHTML = `<span style="font-size:1.1em">${icons[type]||'✅'}</span><span>${msg}</span>`;
+  el.className = '';
+  el.classList.add(type, 'show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+async function api(path, opts={}) {
+  const fetchOpts = {...opts};
+  const headers = new Headers(fetchOpts.headers || {});
+  const hasBody = fetchOpts.body !== undefined && fetchOpts.body !== null;
+
+  if (hasBody && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (hasBody && typeof fetchOpts.body === 'object' && !(fetchOpts.body instanceof FormData)) {
+    fetchOpts.body = JSON.stringify(fetchOpts.body);
+  }
+
+  // Attach stored JWT token when available
+  const storedToken = localStorage.getItem('ai_employee_token');
+  if (storedToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${storedToken}`);
+  }
+  fetchOpts.headers = headers;
+
+  try {
+    const r = await fetch(path, fetchOpts);
+    let data = {};
+
+    try {
+      data = await r.json();
+    } catch {
+      const text = await r.text();
+      data = text ? {message: text} : {};
+    }
+
+    if (!data || typeof data !== 'object') {
+      data = {value: data};
+    }
+    if (data.ok === undefined) {
+      data.ok = r.ok;
+    }
+    if (!r.ok && !data.error && !data.detail) {
+      data.detail = `Request failed: ${r.status}`;
+    }
+    // Show login modal when server requires auth and we lack a valid token
+    if (r.status === 401 && !path.startsWith('/auth/')) {
+      _showAuthModal();
+    }
+    data.status_code = r.status;
+    return data;
+  } catch(e) {
+    return {ok: false, error: String(e)};
+  }
+}
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+function _showAuthModal() {
+  let m = document.getElementById('auth-modal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'auth-modal';
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+    m.setAttribute('aria-label', 'Login required');
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center';
+    m.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:32px;max-width:380px;width:90%;box-shadow:var(--shadow)">
+      <h2 style="margin-bottom:16px;font-size:1.1em;font-weight:700">🔐 Login Required</h2>
+      <p style="font-size:.85em;color:var(--text-secondary);margin-bottom:16px">REQUIRE_AUTH is enabled. Enter your credentials.</p>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <input id="auth-user" type="text" placeholder="Username" autocomplete="username"
+          style="padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit">
+        <input id="auth-pass" type="password" placeholder="Password" autocomplete="current-password"
+          style="padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit">
+        <div id="auth-err" style="color:var(--danger);font-size:.82em;min-height:1.2em"></div>
+        <button onclick="_doLogin()" style="padding:10px 20px;border-radius:var(--radius-sm);background:var(--primary);color:#000;font-weight:700;border:none;cursor:pointer;font-family:inherit">Login</button>
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+  }
+  m.style.display = 'flex';
+  setTimeout(() => document.getElementById('auth-user')?.focus(), 50);
+}
+
+async function _doLogin() {
+  const user = document.getElementById('auth-user')?.value.trim();
+  const pass = document.getElementById('auth-pass')?.value;
+  const errEl = document.getElementById('auth-err');
+  if (!user || !pass) { if(errEl) errEl.textContent = 'Enter username and password.'; return; }
+  const r = await fetch('/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: user, password: pass}),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (r.ok && data.access_token) {
+    localStorage.setItem('ai_employee_token', data.access_token);
+    const m = document.getElementById('auth-modal');
+    if (m) m.style.display = 'none';
+    toast('Logged in ✓', 'success');
+  } else {
+    if (errEl) errEl.textContent = data.detail || 'Login failed.';
+  }
+}
+
+function escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Escape a value for safe embedding inside a JS string literal (single-quoted onclick="…")
+function jsEsc(str) {
+  return String(str ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"');
+}
+
+// ── Animated count-up helper ─────────────────────────────────────────────────
+function animateCount(id, target) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const prev = parseInt(el.textContent) || 0;
+  if (prev === target) return;
+  const duration = 500;
+  const startTime = performance.now();
+  const diff = target - prev;
+  const round = diff >= 0 ? Math.ceil : Math.floor;
+  function step(now) {
+    const elapsed = Math.min(now - startTime, duration);
+    const eased = 1 - Math.pow(1 - elapsed / duration, 3);
+    el.textContent = round(prev + diff * eased);
+    if (elapsed < duration) requestAnimationFrame(step);
+    else el.textContent = target;
+  }
+  requestAnimationFrame(step);
+}
+
+// ── Disable / re-enable all start-stop controls during action ────────────────
+function normalizeAgents(statusPayload) {
+  const raw = statusPayload?.agents || statusPayload?.workers || [];
+  return raw.map((entry, idx) => {
+    const id = entry?.agent || entry?.name || entry?.bot || entry?.id || `agent-${idx + 1}`;
+    const running = entry?.running === true || entry?.status === 'running';
+    return { id, running };
+  });
+}
+
+// ── Disable / re-enable all start-stop controls during action ────────────────
+function _setStartStopDisabled(disabled) {
+  ['hero-start-btn','hero-stop-btn','hdr-start-btn','hdr-stop-btn'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = disabled;
+  });
+}
+
+function showStatDetail(type) {
+  const panel = document.getElementById('stat-detail-panel');
+  const title = document.getElementById('stat-detail-title');
+  const content = document.getElementById('stat-detail-content');
+  if (!panel) return;
+  panel.style.display = 'block';
+  const details = {
+    running: {t:'Running Agents', c:'Agents currently active and processing tasks. Click an agent in the Live Office tab to inspect its workload.'},
+    total: {t:'Total System Agents', c:'All registered AI agents in the system. Agents are activated on-demand when tasks matching their specialty arrive.'},
+    gateway: {t:'API Gateway', c:'The gateway routes incoming requests to the correct agent. Status shows whether the routing layer is reachable.'},
+    uptime: {t:'System Uptime', c:'Time since the dashboard server started. Agents have individual uptime tracked in the Agents tab.'}
+  };
+  const d = details[type] || {t:'Details', c:'No details available.'};
+  title.textContent = d.t;
+  content.innerHTML = '<p style="line-height:1.7">' + d.c + '</p>';
+  // Move focus to close button for screen reader / keyboard users
+  const closeBtn = panel.querySelector('button');
+  if (closeBtn) closeBtn.focus();
+}
+
+function updateHealthChecks(data) {
+  const setHC = (id, ok, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.className = 'health-check-item ' + (ok ? 'ok' : 'err');
+    el.querySelector('.hc-val').textContent = val;
+  };
+  setHC('hc-api', true, 'Online');
+  setHC('hc-agents', (data.running_agents||0) > 0, (data.running_agents||0) + ' active');
+  setHC('hc-ollama', data.ollama_ok, data.ollama_ok ? 'Reachable' : 'Offline');
+  setHC('hc-db', true, 'Ready');
+  setHC('hc-gateway', data.gateway_ok !== false, data.gateway_ok !== false ? 'Online' : 'Offline');
+  setHC('hc-memory', true, 'Ready');
+
+  // Animate running count in header
+  const runEl = document.getElementById('stat-running');
+  if (runEl && data.running_agents !== undefined) {
+    animateCount('stat-running', data.running_agents);
+  }
+}
+
+function _isHermesRunning(agents) {
+  return agents.some(a => (a.id || a.name || '') === 'hermes-agent' && a.running);
+}
+
+async function loadDashboard() {
+  const d = await api('/api/status');
+  const agents = normalizeAgents(d);
+  const running = agents.filter(a => a.running).length;
+  const total = agents.length;
+
+  // Animate stat numbers
+  animateCount('stat-running', running);
+  animateCount('stat-total', total);
+  const modeLabel = d.mode ? ` · ${d.mode}` : '';
+  const modeColors = {starter:'#34d399',business:'#D4AF37',power:'#c084fc'};
+  const mc = modeColors[d.mode] || 'var(--gold)';
+  document.getElementById('header-sub').innerHTML =
+    `${running}/${total} agents running` +
+    (d.mode ? ` <span style="background:${mc}22;color:${mc};border:1px solid ${mc}44;border-radius:8px;padding:1px 8px;font-size:.8em;font-weight:700;margin-left:4px">${d.mode.toUpperCase()}</span>` : '');
+
+  // Update system control hero
+  const pct = total > 0 ? Math.round((running / total) * 100) : 0;
+  const healthBar = document.getElementById('health-bar');
+  const sysRing = document.getElementById('sys-ring');
+  const sysControlSub = document.getElementById('sys-control-sub');
+  healthBar.style.width = pct + '%';
+  healthBar.className = 'health-bar-fill' + (pct < 40 ? ' danger' : pct < 70 ? ' warn' : '');
+  document.getElementById('health-label-right').textContent = pct + '%';
+  document.getElementById('health-label-left').textContent = running + ' / ' + total + ' running';
+  if (pct === 0 && total > 0) {
+    sysRing.classList.add('offline');
+    sysControlSub.textContent = 'All agents stopped — click Start All to launch';
+  } else if (pct === 100) {
+    sysRing.classList.remove('offline');
+    sysControlSub.textContent = 'All systems operational ✓';
+  } else if (total === 0) {
+    sysRing.classList.add('offline');
+    sysControlSub.textContent = 'No agent state data yet — start agents first';
+  } else {
+    sysRing.classList.remove('offline');
+    sysControlSub.textContent = `${running} of ${total} agents active`;
+  }
+
+  // Uptime
+  const secs = Math.floor((Date.now() - _startTime) / 1000);
+  document.getElementById('stat-uptime').textContent =
+    secs < 60 ? secs + 's' : secs < 3600 ? Math.floor(secs/60) + 'm' : Math.floor(secs/3600) + 'h';
+
+  // Gateway status (try to ping)
+  fetch('http://localhost:18789', {mode:'no-cors',signal:AbortSignal.timeout(1500)})
+    .then(() => document.getElementById('stat-gateway').textContent = 'Online')
+    .catch(() => document.getElementById('stat-gateway').textContent = 'Offline');
+
+  const el = document.getElementById('bot-status-list');
+  if (!agents.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">🤖</div><p>No agent state data yet. Start the agents first.</p></div>';
+  } else {
+    const sorted = [...agents].sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0) || (a.id || '').localeCompare(b.id || ''));
+    el.innerHTML = sorted.map(a => {
+      const cls = a.running ? 'on' : 'off';
+      const lbl = a.running ? 'running' : 'stopped';
+      const isActive = (d.active_agents || []).includes(a.id);
+      const taskBadge = isActive ? `<span style="font-size:.68em;padding:2px 6px;border-radius:8px;background:rgba(212,175,55,.15);color:var(--gold);border:1px solid rgba(212,175,55,.3);margin-left:4px">◈ on task</span>` : '';
+      return `<div class="bot-row">
+        <div class="dot ${cls}"></div>
+        <span class="bot-name">${escHtml(a.id)}</span>
+        ${taskBadge}
+        <span class="badge ${lbl}">${lbl}</span>
+      </div>`;
+    }).join('');
+  }
+
+  const sys = await api('/api/doctor');
+  // Try to determine real gateway status from the doctor endpoint
+  const gatewayOk = sys.gateway_ok !== undefined ? !!sys.gateway_ok : (document.getElementById('stat-gateway')?.textContent === 'Online');
+  updateHealthChecks({running_agents: running, ollama_ok: d.ollama_ok !== undefined ? !!d.ollama_ok : !!sys.ollama_ok, gateway_ok: gatewayOk});
+  document.getElementById('system-info').textContent = sys.output || '(no output)';
+
+  // Sync the BLACKLIGHT quick-toggle on the dashboard
+  const bl = await api('/api/blacklight/status');
+  _blSyncUI(bl.running || false, bl.goal || '');
+
+  // Sync Hermes Agent toggle
+  const hermesRunning = _isHermesRunning(agents);
+  const hermesToggleEl = document.getElementById('dash-hermes-toggle');
+  if (hermesToggleEl) hermesToggleEl.checked = hermesRunning;
+  const hermesSub = document.getElementById('dash-hermes-sublabel');
+  if (hermesSub) hermesSub.textContent = hermesRunning ? '🧠 Running — ready for tasks' : 'Reasoning agent — stopped';
+  _updateChatHermesStatus(hermesRunning);
+}
+
+async function loadLiveOffice() {
+  const container = document.getElementById('office-agents');
+  if (!container) return;
+  const data = await api('/api/workers');
+  if (!data || data.ok === false) {
+    container.innerHTML = '<div class="empty" style="padding-top:80px"><div class="icon">⚠️</div><p>Live office unavailable right now.</p></div>';
+    return;
+  }
+
+  const list = Array.isArray(data.agents) ? data.agents : [];
+  const agents = list.filter(a => a && a.running).slice(0, 20);
+  const countEl = document.getElementById('office-agent-count');
+  if (countEl) countEl.textContent = agents.length + ' agent' + (agents.length !== 1 ? 's' : '') + ' active';
+  if (!agents.length) {
+    container.innerHTML = `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px">
+    <div style="width:80px;height:80px;border-radius:50%;border:3px solid rgba(212,175,55,.3);display:flex;align-items:center;justify-content:center;font-size:2em;animation:robotWalk 3s ease-in-out infinite">🤖</div>
+    <div style="text-align:center">
+      <div style="font-size:1em;font-weight:700;color:var(--gold);margin-bottom:6px">No Active Agents</div>
+      <div style="font-size:.8em;color:var(--text-muted);max-width:260px;line-height:1.6">Your AI workforce is standing by. Start agents from the Dashboard to see them appear here and work on your tasks.</div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="startAll();setTimeout(loadLiveOffice,3000)" style="background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700">▶ Start All Agents</button>
+  </div>`;
+    return;
+  }
+
+  const agentIcons = {
+    'task-orchestrator':'🎯','lead-generator':'🎯','lead-hunter':'🎯',
+    'brand-strategist':'🎨','finance-wizard':'💰','growth-hacker':'📈',
+    'social-media-manager':'📱','content-master':'✍️','email-ninja':'📧',
+    'intel-agent':'🔍','company-builder':'🏢','hr-manager':'👔',
+    'project-manager':'📋','crypto-trader':'📈','ecom-agent':'🛒',
+    'support-bot':'🎧','creative-studio':'🎨','data-analyst':'📊',
+    'web-researcher':'🌐','chatbot-builder':'🤖','recruiter':'👔',
+  };
+  const icons = ['🤖','🦾','🧠','⚙️','🔬','📊','💡','🎯'];
+  container.innerHTML = agents.map((agent, idx) => {
+    const name = agent.name || agent.id || 'agent';
+    const cols = Math.min(agents.length, 6);
+    const left = 4 + (idx % cols) * (92 / cols);
+    const row = Math.floor(idx / cols);
+    const isBusy = agent.progress >= 50 || !!agent.alert;
+    const icon = agentIcons[name] || icons[idx % icons.length];
+    const animDur = 2.5 + (idx % 4) * 0.7;
+    const animName = idx % 2 === 0 ? 'robotWalk' : 'robotWalk2';
+    return `<div class="robot-agent" role="button" tabindex="0" aria-label="${escHtml(name)} – ${isBusy ? 'busy' : 'idle'}" style="left:${left}%;bottom:${140 + row * 80}px;animation-name:${animName};animation-duration:${animDur}s" onclick="openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')" onkeydown="if(event.key==='Enter'||event.key===' ')openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')">
+      <div class="robot-body ${isBusy ? 'busy' : ''}">${icon}</div>
+      <div class="robot-status-dot ${agent.running ? (isBusy ? 'busy' : 'running') : ''}"></div>
+      <div class="robot-name">${escHtml(name)}</div>
+    </div>`;
+  }).join('');
+}
+
+function openOfficeModal(agentJson) {
+  let agent;
+  try {
+    agent = JSON.parse(decodeURIComponent(agentJson));
+  } catch {
+    toast('Could not open agent details', 'error');
+    return;
+  }
+  if (!agent || typeof agent !== 'object') return;
+
+  const modal = document.getElementById('office-modal');
+  if (!modal) return;
+  modal.classList.add('open');
+  const titleEl = document.getElementById('office-modal-title');
+  const statusEl = document.getElementById('office-modal-status');
+  const progressEl = document.getElementById('office-modal-progress');
+  const timeEl = document.getElementById('office-modal-time');
+  const actionEl = document.getElementById('office-modal-action');
+  if (!titleEl || !statusEl || !progressEl || !timeEl || !actionEl) return;
+
+  titleEl.textContent = agent.name || agent.id || 'Agent';
+  statusEl.textContent = agent.running
+    ? 'Status: Running and processing tasks'
+    : 'Status: Currently stopped';
+  const progress = agent.running ? (agent.progress || 15) : 0;
+  progressEl.style.width = progress + '%';
+  timeEl.textContent = agent.running ? `${agent.elapsed_minutes || 0} min` : '-';
+  actionEl.textContent = agent.running
+    ? (agent.alert ? `Issue detected: ${agent.alert_reason || 'Unknown error'}` : (agent.last_action || 'Analyzing assigned workload'))
+    : 'Waiting for assignment';
+}
+
+function closeOfficeModal() {
+  document.getElementById('office-modal')?.classList.remove('open');
+}
+
+async function startAll() {
+  _setStartStopDisabled(true);
+  // Update hero button text to show loading state
+  const heroBtn = document.getElementById('hero-start-btn');
+  if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Starting…';
+  const res = await api('/api/agents/start-all', {method:'POST'});
+  if (res.ok) {
+    toast(`▶ Starting ${res.started || 0} agents (${res.mode || 'mode'})…`);
+  } else {
+    toast(`⚠ Started ${res.started || 0}, failed: ${(res.failed || []).join(', ')}`, 'info');
+  }
+  setTimeout(() => {
+    loadDashboard();
+    _setStartStopDisabled(false);
+    if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">▶</span> Start All Agents';
+  }, 2500);
+}
+
+async function stopAll() {
+  if (!confirm('Stop all running agents?')) return;
+  _setStartStopDisabled(true);
+  const heroBtn = document.getElementById('hero-stop-btn');
+  if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Stopping…';
+  const res = await api('/api/agents/stop-all', {method:'POST'});
+  if (res.ok) {
+    toast(`■ Stopping ${res.stopped || 0} agents…`, 'error');
+  } else {
+    toast(`⚠ Stopped ${res.stopped || 0}, failed: ${(res.failed || []).join(', ')}`, 'info');
+  }
+  setTimeout(() => {
+    loadDashboard();
+    _setStartStopDisabled(false);
+    if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">■</span> Stop All Agents';
+  }, 2000);
+}
+
+async function runOnboard() {
+  const btn = document.querySelector('button[onclick="runOnboard()"]');
+  if (btn) btn.disabled = true;
+  toast('⚡ Running onboarding workflow…', 'info');
+  const r = await api('/api/quick-actions/onboard', {method:'POST'});
+  if (r.ok) {
+    toast('✅ Onboard started. Check Chat, Tasks, and ROI tabs for progress.', 'success');
+    loadChatLog();
+    loadTasks();
+    loadMetrics();
+  } else {
+    toast(r.detail || r.error || 'Failed to run onboard', 'error');
+  }
+  if (btn) btn.disabled = false;
+}
+
+// ── Chat ────────────────────────────────────────────────────────────────────
+function renderMarkdown(str) {
+  return str
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/`(.+?)`/g,'<code>$1</code>')
+    .replace(/^### (.+)$/gm,'<h3>$1</h3>')
+    .replace(/^## (.+)$/gm,'<h2>$1</h2>')
+    .replace(/^# (.+)$/gm,'<h1>$1</h1>')
+    .replace(/^- (.+)$/gm,'<li>$1</li>')
+    .replace(/\n\n/g,'<br><br>')
+    .replace(/\n/g,'<br>');
+}
+
+async function loadChatLog() {
+  // Refresh Hermes status indicator in the chat header
+  api('/api/workers').then(d => {
+    const agents = Array.isArray(d.agents) ? d.agents : [];
+    _updateChatHermesStatus(_isHermesRunning(agents));
+  }).catch(() => {});
+  const data = await api('/api/chat');
+  const log = document.getElementById('chat-log');
+  const msgs = data.messages || [];
+  if (!msgs.length) {
+    log.innerHTML = '<div class="empty"><div class="icon">💬</div><p>No messages yet.</p></div>';
+    return;
+  }
+
+  function sourceFromMessage(m) {
+    if (m.type === 'user') return {avatar: '👤', label: 'You'};
+    const text = String(m.message || '');
+    if (text.includes('Agent: finance-wizard')) return {avatar: '🧮', label: 'Finance Wizard'};
+    if (text.includes('Agent: social-guru')) return {avatar: '📣', label: 'Social Guru'};
+    if (text.includes('Agent: intel-agent')) return {avatar: '🔎', label: 'Intel Agent'};
+    if (text.includes('Agent: email-ninja')) return {avatar: '✉️', label: 'Email Ninja'};
+    if (text.includes('Agent: lead-generator')) return {avatar: '🎯', label: 'Lead Generator'};
+    if (text.includes('Agent:')) return {avatar: '🤖', label: text.split('Agent:')[1].split('\n')[0].trim()};
+    return {avatar: '🤖', label: 'AI Employee'};
+  }
+
+  function modelBadge(routeHint) {
+    const route = routeHint || document.getElementById('chat-model')?.value || 'auto';
+    const labels = {auto:'⚡ Auto',ollama:'🦙 Ollama',gemma:'💎 Gemma',nvidia:'🔷 NVIDIA',openai:'🌐 OpenAI',anthropic:'🤖 Claude',groq:'⚡ Groq',external:'🌐 External'};
+    return labels[route] || '🤖 AI';
+  }
+
+  log.innerHTML = msgs.slice(-60).map(m => {
+    const type = m.type === 'user' ? 'user' : 'agent';
+    const source = sourceFromMessage(m);
+    const raw = m.message || m.question || JSON.stringify(m);
+    const text = renderMarkdown(raw);
+    const ts = (m.ts||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<div class="chat-msg ${type}">
+      <div class="chat-msg-header">
+        <span class="chat-msg-avatar">${source.avatar}</span>
+        <span class="chat-msg-source">${escHtml(source.label)}</span>
+        <span style="opacity:.6">•</span>
+        <span>${type === 'user' ? 'You' : modelBadge(m.model_route)}</span>
+      </div>
+      <div>${text}</div>
+      <div class="ts">${ts}</div>
+    </div>`;
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+function updateChatModelBadge() {
+  const sel = document.getElementById('chat-model');
+  const badge = document.getElementById('chat-model-badge');
+  const indicator = document.getElementById('chat-agent-indicator');
+  if (!sel || !badge) return;
+  const labels = {auto:'Auto',ollama:'Ollama',gemma:'Gemma',nvidia:'NVIDIA NIM',openai:'OpenAI',anthropic:'Claude',groq:'Groq',external:'External'};
+  const hints = {
+    auto:'Auto-routing: Ollama → NVIDIA → Groq → OpenAI (cost-effective)',
+    ollama:'Using local Ollama (free, private)',
+    gemma:'Using Google Gemma (free, open-source — run: ollama pull gemma4)',
+    nvidia:'Using NVIDIA NIM (fast, free tier)',
+    openai:'Using OpenAI GPT-4o',
+    anthropic:'Using Anthropic Claude',
+    groq:'Using Groq (ultra-fast inference)',
+    external:'Using external AI provider'
+  };
+  badge.textContent = labels[sel.value] || sel.value;
+  if (indicator) indicator.textContent = hints[sel.value] || 'Routing to best agent';
+}
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const q = input.value.trim();
+  if (!q) return;
+  const route = document.getElementById('chat-model')?.value || 'ollama';
+  input.value = '';
+  // Optimistically add user message to chat before API response
+  const log = document.getElementById('chat-log');
+  if (log) {
+    const emptyEl = log.querySelector('.empty');
+    if (emptyEl) emptyEl.remove();
+    log.insertAdjacentHTML('beforeend', `<div class="chat-msg user">
+  <div class="chat-msg-header"><span class="chat-msg-avatar">👤</span><span class="chat-msg-source">You</span></div>
+  <div>${renderMarkdown(q)}</div>
+</div>`);
+    log.scrollTo({top: log.scrollHeight, behavior: 'smooth'});
+  }
+  await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q, model_route: route})});
+  loadChatLog();
+}
+
+// ── Scheduler ───────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const actionEl = document.getElementById('sched-action');
+  const typeEl = document.getElementById('sched-type');
+  const botRow = document.getElementById('sched-bot-row');
+  const intervalRow = document.getElementById('sched-interval-row');
+  const dailyRow = document.getElementById('sched-daily-row');
+
+  if (actionEl && botRow) {
+    const updateAction = () => {
+      botRow.style.display = (actionEl.value === 'start_bot' || actionEl.value === 'stop_bot') ? 'block' : 'none';
+    };
+    actionEl.addEventListener('change', updateAction);
+    updateAction();
+  }
+
+  if (typeEl && intervalRow && dailyRow) {
+    const updateType = () => {
+      intervalRow.style.display = typeEl.value === 'interval' ? 'block' : 'none';
+      dailyRow.style.display = typeEl.value === 'daily' ? 'block' : 'none';
+    };
+    typeEl.addEventListener('change', updateType);
+    updateType();
+  }
+
+  loadDashboard();
+  if (!_allAgents.length) loadSwarm();
+  renderAgenda();
+});
+
+async function loadSchedules() {
+  const data = await api('/api/schedules');
+  const tasks = data.tasks || [];
+  const el = document.getElementById('schedule-list');
+  if (!tasks.length) { el.innerHTML = '<div class="empty"><div class="icon">📅</div><p>No scheduled tasks yet.</p></div>'; return; }
+  el.innerHTML = tasks.map(t => {
+    const info = t.type==='interval' ? `every ${t.interval_minutes||60}m` : `daily at ${t.run_at_utc||'?'} UTC`;
+    const enabled = t.enabled !== false;
+    return `<div class="sched-row">
+      <div class="sched-info">
+        <h4>${t.label||t.id} <span class="badge ${enabled?'enabled':'disabled'}">${enabled?'enabled':'disabled'}</span></h4>
+        <p>${t.action} · ${info}</p>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="deleteSchedule('${t.id}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+let _agendaView = 'month';
+let _agendaDate = new Date();
+function setAgendaView(view, btn) {
+  _agendaView = view;
+  document.querySelectorAll('.agenda-view-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderAgenda();
+}
+function agendaNav(dir) {
+  if (_agendaView === 'month') _agendaDate.setMonth(_agendaDate.getMonth() + dir);
+  else if (_agendaView === 'week') _agendaDate.setDate(_agendaDate.getDate() + dir * 7);
+  else _agendaDate.setDate(_agendaDate.getDate() + dir);
+  renderAgenda();
+}
+function renderAgenda() {
+  const p = document.getElementById('agenda-period');
+  const g = document.getElementById('agenda-grid');
+  if (!p || !g) return;
+  const d = _agendaDate;
+  if (_agendaView === 'month') {
+    const today = new Date();
+    p.textContent = d.toLocaleDateString('en-US', {month:'long',year:'numeric'});
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    const last = new Date(d.getFullYear(), d.getMonth()+1, 0);
+    const days = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+    let html = days.map(dy => '<div style="text-align:center;color:var(--text-muted);padding:4px;font-size:.7em">' + dy + '</div>').join('');
+    for (let i = 0; i < first.getDay(); i++) html += '<div></div>';
+    for (let i = 1; i <= last.getDate(); i++) {
+      const isToday = i === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+      html += '<div onclick="selectAgendaDay(' + i + ')" style="text-align:center;padding:5px 2px;border-radius:4px;cursor:pointer;font-size:.78em;' + (isToday ? 'background:rgba(212,175,55,.2);color:var(--gold);font-weight:700;' : '') + '">' + i + '</div>';
+    }
+    g.style.display = 'grid';
+    g.style.gridTemplateColumns = 'repeat(7,1fr)';
+    g.innerHTML = html;
+  } else if (_agendaView === 'week') {
+    const today = new Date();
+    // Show a 7-column week grid with day names + date numbers
+    const startOfWeek = new Date(d);
+    startOfWeek.setDate(d.getDate() - d.getDay());
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    p.textContent = startOfWeek.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' – ' + endOfWeek.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    let html = '';
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(startOfWeek);
+      day.setDate(startOfWeek.getDate() + i);
+      const isToday = day.toDateString() === today.toDateString();
+      html += `<div onclick="selectAgendaFull(${JSON.stringify(day.toDateString())})" style="text-align:center;padding:8px 2px;border-radius:6px;cursor:pointer;border:1px solid ${isToday?'rgba(212,175,55,.5)':'transparent'};background:${isToday?'rgba(212,175,55,.12)':'transparent'}">
+        <div style="font-size:.68em;color:var(--text-muted);margin-bottom:3px">${days[i]}</div>
+        <div style="font-size:.88em;font-weight:${isToday?700:400};color:${isToday?'var(--gold)':'var(--text)'}">${day.getDate()}</div>
+      </div>`;
+    }
+    g.style.display = 'grid';
+    g.style.gridTemplateColumns = 'repeat(7,1fr)';
+    g.innerHTML = html;
+  } else if (_agendaView === 'day') {
+    p.textContent = d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    const hours = [7,8,9,10,11,12,13,14,15,16,17,18,19,20];
+    let html = hours.map(h => {
+      const label = h < 12 ? h+':00 AM' : h===12 ? '12:00 PM' : (h-12)+':00 PM';
+      return `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid rgba(148,163,184,.06);font-size:.72em">
+        <span style="color:var(--text-muted);min-width:52px">${label}</span>
+        <div style="flex:1;height:20px;border-radius:3px;background:transparent"></div>
+      </div>`;
+    }).join('');
+    g.style.display = 'block';
+    g.style.gridTemplateColumns = '';
+    g.innerHTML = html;
+  }
+}
+function selectAgendaFull(dateStr) {
+  const el = document.getElementById('agenda-day-label');
+  if (el) { const d = new Date(dateStr); el.textContent = d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }
+}
+function selectAgendaDay(day) {
+  const el = document.getElementById('agenda-day-label');
+  if (el) el.textContent = _agendaDate.toLocaleDateString('en-US',{month:'short'}) + ' ' + day;
+}
+
+function toggleSchedBot() {
+  const v = document.getElementById('sched-action').value;
+  const el = document.getElementById('sched-bot-row');
+  if (el) el.style.display = (v === 'start_bot' || v === 'stop_bot') ? 'block' : 'none';
+}
+
+function toggleSchedType() {
+  const t = document.getElementById('sched-type').value;
+  document.getElementById('sched-interval-row').style.display = t === 'interval' ? '' : 'none';
+  document.getElementById('sched-daily-row').style.display = t === 'daily' ? '' : 'none';
+  const onceRow = document.getElementById('sched-once-row');
+  if (onceRow) onceRow.style.display = t === 'once' ? '' : 'none';
+  const weeklyRow = document.getElementById('sched-weekly-row');
+  if (weeklyRow) weeklyRow.style.display = t === 'weekly' ? '' : 'none';
+}
+
+async function addSchedule() {
+  const id = document.getElementById('sched-id').value.trim();
+  const label = document.getElementById('sched-label').value.trim();
+  const action = document.getElementById('sched-action').value;
+  const bot = document.getElementById('sched-bot').value.trim();
+  const msg = document.getElementById('sched-msg').value.trim();
+  const type = document.getElementById('sched-type').value;
+  const interval = parseInt(document.getElementById('sched-interval').value) || 60;
+  const dailyTime = document.getElementById('sched-daily-time').value.trim();
+
+  if (!id || !label) { toast('ID and label are required', 'error'); return; }
+
+  const task = {id, label, action, type, enabled: true,
+    ...(bot && {bot}), ...(msg && {message: msg}),
+    ...(type==='interval' && {interval_minutes: interval}),
+    ...(type==='daily' && {run_at_utc: dailyTime||'08:00'}),
+  };
+
+  const r = await api('/api/schedules', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(task)});
+  if (r.ok) { toast('Task added!'); loadSchedules(); }
+  else { toast(r.error||'Error', 'error'); }
+}
+
+async function deleteSchedule(id) {
+  if (!confirm(`Delete task "${id}"?`)) return;
+  const r = await api(`/api/schedules/${id}`, {method:'DELETE'});
+  if (r.ok) { toast('Task deleted'); loadSchedules(); }
+}
+
+// ── Workers ─────────────────────────────────────────────────────────────────
+// ── Bundle management ───────────────────────────────────────────────────────
+let _wfSelectedAgents = new Set();
+let _workerBundlesById = {};
+
+async function loadWorkers() {
+  // Load bundles
+  const bd = await api('/api/workers/bundles');
+  const bundles = (bd && bd.bundles) || [];
+  _workerBundlesById = Object.fromEntries(bundles.map(b => [b.id, b]));
+  const bundleEl = document.getElementById('bundle-list');
+  if (!bundles.length) {
+    bundleEl.innerHTML = '<div class="empty"><div class="icon">🏭</div><p>No agent teams yet. Click <strong>+ New Agent Team</strong> to create one.</p></div>';
+  } else {
+    bundleEl.innerHTML = bundles.map(b => {
+      const enabled = b.enabled !== false;
+      const statusColor = enabled ? '#10b981' : '#64748b';
+      const agents = (b.agents || []).map(a => `<span style="background:rgba(212,175,55,.08);padding:2px 7px;border-radius:4px;font-size:.7em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18)">${escHtml(a)}</span>`).join(' ');
+      const schedMap = {continuous:'🔄 Continuous', hourly:'⏰ Hourly', every6h:'⏰ Every 6h', daily:'🌙 Daily 2AM', '3x_daily':'☀️ 3× Daily', weekly:'📅 Weekly', manual:'🖱 Manual'};
+      const schedLabel = schedMap[b.schedule] || b.schedule || 'manual';
+      const lastRun = b.last_run ? `Last: ${b.last_run.split('T')[0]}` : 'Never run';
+      return `<div style="border:1px solid ${enabled ? 'rgba(16,185,129,.2)' : 'var(--border)'};border-radius:var(--radius);padding:16px;margin-bottom:10px;border-left:4px solid ${statusColor};background:var(--surface2);transition:all .2s" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)'" onmouseleave="this.style.borderColor='${enabled ? 'rgba(16,185,129,.2)' : 'var(--border)'}'">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:.95em;display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+              🏭 ${escHtml(b.name)}
+              <span style="font-size:.7em;background:${enabled ? 'rgba(16,185,129,.15)' : 'rgba(100,116,139,.15)'};color:${statusColor};border-radius:4px;padding:2px 7px;border:1px solid ${enabled ? 'rgba(16,185,129,.25)' : 'rgba(100,116,139,.25)'}">${enabled ? 'enabled' : 'disabled'}</span>
+              <span style="font-size:.7em;color:var(--text-muted);background:var(--surface);padding:2px 7px;border-radius:4px;border:1px solid var(--border)">${schedLabel}</span>
+            </div>
+            <div style="font-size:.82em;color:var(--text-secondary);margin-bottom:6px;line-height:1.5">${escHtml((b.task_description||'').slice(0,120))}${(b.task_description||'').length>120?'…':''}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">${agents}</div>
+            <div style="font-size:.72em;color:var(--text-muted)">${lastRun}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;min-width:88px">
+            <button class="btn btn-primary btn-sm" onclick="runBundle('${escHtml(b.id)}')">▶ Run</button>
+            <button class="btn btn-ghost btn-sm" onclick="editBundleById('${escHtml(b.id)}')">✏️ Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="toggleBundle('${escHtml(b.id)}', ${!enabled})">${enabled ? '⏸ Pause' : '▶ Enable'}</button>
+            <button class="btn btn-ghost btn-sm" onclick="deleteBundle('${escHtml(b.id)}')" style="color:var(--danger);border-color:rgba(239,68,68,.3)">🗑 Delete</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Load agent workers
+  const wd = await api('/api/workers');
+  const agents_list = (wd && wd.agents) || [];
+  const el = document.getElementById('worker-list');
+  if (!agents_list.length) { el.innerHTML = '<div class="empty"><div class="icon">👷</div><p>No agents found.</p></div>'; return; }
+  el.innerHTML = agents_list.map(b => {
+    const cls = b.running ? 'on' : 'off';
+    const progressColor = b.progress > 70 ? '#34d399' : b.progress > 30 ? '#D4AF37' : '#6b7280';
+    const lbl = b.running ? 'running' : 'stopped';
+    const startBtn = b.running ? '' : `<button class="btn btn-success btn-sm" onclick="startBot('${b.name}')">▶ Start</button>`;
+    const stopBtn = b.running ? `<button class="btn btn-danger btn-sm" onclick="stopBot('${b.name}')">■ Stop</button>` : '';
+    return `<div class="sched-row">
+      <div class="dot ${cls}" style="margin-top:4px;flex-shrink:0"></div>
+      ${b.running && b.progress > 0 ? `<div style="flex:1;max-width:80px;background:rgba(255,255,255,.05);border-radius:4px;height:4px;overflow:hidden;margin:0 8px"><div style="width:${b.progress}%;height:100%;background:${progressColor};transition:width .5s"></div></div>` : ''}
+      <div class="sched-info"><h4>${b.name} <span class="badge ${lbl}">${lbl}</span></h4></div>
+      <div style="display:flex;gap:6px">${startBtn}${stopBtn}</div>
+    </div>`;
+  }).join('');
+}
+
+async function openCreateWorker(prefill) {
+  document.getElementById('wf-editing-id').value = '';
+  document.getElementById('wf-name').value = (prefill && prefill.name) || '';
+  document.getElementById('wf-task').value = (prefill && prefill.task_description) || '';
+  document.getElementById('wf-desc').value = (prefill && prefill.description) || '';
+  document.getElementById('wf-schedule').value = (prefill && prefill.schedule) || 'continuous';
+  document.getElementById('worker-form-title').textContent = 'Create Agent Team';
+  document.getElementById('wf-save-btn').textContent = '💾 Save Agent Team';
+  document.getElementById('wf-save-result').textContent = '';
+  _wfSelectedAgents = new Set((prefill && prefill.agents) || []);
+  if (!_allAgents.length) {
+    await loadSwarm();
+  }
+  renderWfAgentGrid();
+  document.getElementById('worker-form-card').style.display = 'block';
+  document.getElementById('worker-form-card').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function editBundle(b) {
+  openCreateWorker(b);
+  document.getElementById('wf-editing-id').value = b.id;
+  document.getElementById('worker-form-title').textContent = 'Edit Agent Team';
+  document.getElementById('wf-save-btn').textContent = '💾 Update Agent Team';
+}
+
+function editBundleById(id) {
+  const bundle = _workerBundlesById[id];
+  if (!bundle) {
+    toast('Bundle not found', 'error');
+    return;
+  }
+  editBundle(bundle);
+}
+
+function closeWorkerForm() {
+  document.getElementById('worker-form-card').style.display = 'none';
+  _wfSelectedAgents.clear();
+}
+
+function renderWfAgentGrid() {
+  const grid = document.getElementById('wf-agent-grid');
+  if (!_allAgents.length) {
+    grid.innerHTML = '<p style="color:var(--text-muted);font-size:.82em">Agents not loaded yet. Open Tasks tab first to load agent list.</p>';
+    return;
+  }
+  grid.innerHTML = _allAgents.map(a => {
+    const sel = _wfSelectedAgents.has(a.id);
+    const color = _catColors[a.category] || '#64748b';
+    return `<div id="wfcard-${a.id}" onclick="toggleWfAgent('${escHtml(a.id)}')"
+      style="cursor:pointer;border:2px solid ${sel ? color : 'var(--border)'};border-radius:var(--radius-sm);padding:6px;background:${sel ? 'var(--surface2)' : 'var(--surface)'};transition:all .15s">
+      <div style="font-size:.75em;font-weight:600;color:${sel ? color : 'var(--text)'}">${escHtml(a.id)}</div>
+      <div style="font-size:.65em;color:var(--text-muted)">${escHtml(a.category||'')}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('wf-agent-count').textContent = `(${_wfSelectedAgents.size} selected)`;
+}
+
+function toggleWfAgent(id) {
+  if (_wfSelectedAgents.has(id)) _wfSelectedAgents.delete(id);
+  else _wfSelectedAgents.add(id);
+  const a = _allAgents.find(x => x.id === id);
+  const card = document.getElementById('wfcard-' + id);
+  if (!card || !a) return;
+  const sel = _wfSelectedAgents.has(id);
+  const color = _catColors[a.category] || '#64748b';
+  card.style.border = `2px solid ${sel ? color : 'var(--border)'}`;
+  card.style.background = sel ? 'var(--surface2)' : 'var(--surface)';
+  card.querySelector('div').style.color = sel ? color : 'var(--text)';
+  document.getElementById('wf-agent-count').textContent = `(${_wfSelectedAgents.size} selected)`;
+}
+
+function wfSelectAll() { _allAgents.forEach(a => _wfSelectedAgents.add(a.id)); renderWfAgentGrid(); }
+function wfClearAll()  { _wfSelectedAgents.clear(); renderWfAgentGrid(); }
+
+function presetEcomWorker() {
+  const preset = {
+    name: 'E-commerce Automation Worker',
+    description: 'Full 100% automated e-commerce operation — orders, support, inventory, marketing, and reporting.',
+    task_description: 'Run the full e-commerce automation pipeline: process new orders via Shopify webhook, handle customer support tickets, sync inventory with supplier, run email marketing campaigns, post to social media, research new products, and generate daily P&L reports.',
+    schedule: 'continuous',
+    agents: ['order-processor','support-bot','bookkeeper','inventory-sync','email-marketer','social-poster','product-researcher','ecom-dashboard']
+  };
+  openCreateWorker(preset);
+  toast('E-commerce preset loaded! Adjust agents and save.', 'success');
+}
+
+async function saveWorkerBundle() {
+  const name = document.getElementById('wf-name').value.trim();
+  const task_description = document.getElementById('wf-task').value.trim();
+  const description = document.getElementById('wf-desc').value.trim();
+  const schedule = document.getElementById('wf-schedule').value;
+  const agents = [..._wfSelectedAgents];
+  const editingId = document.getElementById('wf-editing-id').value.trim();
+  const resultEl = document.getElementById('wf-save-result');
+
+  if (!name) { toast('Agent team name is required', 'error'); return; }
+  if (!task_description) { toast('Task description is required', 'error'); return; }
+  if (!agents.length) { toast('Select at least one agent', 'error'); return; }
+
+  resultEl.textContent = '⏳ Saving…';
+  const payload = {name, description, task_description, schedule, agents, enabled: true};
+
+  let r;
+  if (editingId) {
+    r = await api(`/api/workers/bundles/${editingId}`, {method:'PATCH', body: JSON.stringify(payload)});
+  } else {
+    r = await api('/api/workers/bundles', {method:'POST', body: JSON.stringify(payload)});
+  }
+
+  if (r && r.ok !== false) {
+    resultEl.innerHTML = `<span style="color:var(--success)">✅ Agent team ${editingId ? 'updated' : 'created'}!</span>`;
+    setTimeout(() => { closeWorkerForm(); loadWorkers(); }, 800);
+  } else {
+    resultEl.innerHTML = `<span style="color:var(--danger)">❌ Save failed. Check API.</span>`;
+  }
+}
+
+async function runBundle(id) {
+  const r = await api(`/api/workers/bundles/${id}/run`, {method:'POST'});
+  if (r && r.ok !== false) toast('Agent team triggered ▶', 'success');
+  else toast('Run failed', 'error');
+  setTimeout(loadWorkers, 1500);
+}
+
+async function toggleBundle(id, enabled) {
+  const r = await api(`/api/workers/bundles/${id}`, {method:'PATCH', body: JSON.stringify({enabled})});
+  if (r && r.ok !== false) toast(enabled ? 'Agent team enabled ✅' : 'Agent team disabled ⏸', enabled ? 'success' : 'info');
+  else toast('Update failed', 'error');
+  loadWorkers();
+}
+
+async function deleteBundle(id) {
+  if (!confirm('Delete this agent team?')) return;
+  const r = await api(`/api/workers/bundles/${id}`, {method:'DELETE'});
+  if (r && r.ok !== false) { toast('Agent team deleted', 'error'); loadWorkers(); }
+  else toast('Delete failed', 'error');
+}
+
+async function startBot(name) {
+  await api('/api/agents/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({agent: name})});
+  toast(`Starting ${name}…`);
+  setTimeout(loadWorkers, 1800);
+}
+
+async function stopBot(name) {
+  if (!confirm(`Stop ${name}?`)) return;
+  await api('/api/agents/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({agent: name})});
+  toast(`Stopping ${name}…`, 'error');
+  setTimeout(loadWorkers, 1800);
+}
+
+// ── Improvements ────────────────────────────────────────────────────────────
+async function loadImprovements() {
+  const data = await api('/api/improvements');
+  const items = data.improvements || [];
+  const el = document.getElementById('improvement-list');
+  if (!items.length) { el.innerHTML = '<div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery agent will add them over time.</p></div>'; return; }
+  el.innerHTML = items.map(imp => `
+    <div class="improv-row" style="cursor:pointer" onclick="toggleImprovDetail('${jsEsc(imp.id)}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <h4 style="display:flex;align-items:center;gap:8px">
+          <span id="improv-arrow-${escHtml(imp.id)}" style="font-size:.8em;color:var(--text-muted)">▶</span>
+          ${escHtml(imp.title||imp.id)} <span class="badge ${imp.status||'pending'}">${imp.status||'pending'}</span>
+        </h4>
+        ${imp.status==='pending' ? `<div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
+          <button class="btn btn-success btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','approved')">✓ Approve</button>
+          <button class="btn btn-danger btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','rejected')">✕ Reject</button>
+        </div>` : ''}
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin:4px 0">${escHtml((imp.description||'').slice(0,120))}${(imp.description||'').length>120?'…':''}</p>
+      <div id="improv-detail-${escHtml(imp.id)}" style="display:none;margin-top:10px;padding:12px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border)">
+        <p style="font-size:.84em;color:var(--text-secondary);line-height:1.6;margin-bottom:10px">${escHtml(imp.description||'No description provided.')}</p>
+        ${imp.agent ? `<p style="font-size:.78em;color:var(--primary);margin-bottom:8px">Agent: <strong>${escHtml(imp.agent)}</strong> · Type: ${escHtml(imp.type||'?')} · Effort: ${escHtml(imp.effort||'?')}</p>` : ''}
+        ${imp.rationale ? `<p style="font-size:.8em;color:var(--text-muted);margin-bottom:10px"><strong>Rationale:</strong> ${escHtml(imp.rationale)}</p>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap" onclick="event.stopPropagation()">
+          <button class="btn btn-primary btn-sm" onclick="sendImprovToAI('${jsEsc(imp.id)}','${jsEsc(imp.title||imp.id)}','${jsEsc(imp.description||'')}')">🚀 Send to Main AI for Execution</button>
+          ${imp.status==='pending' ? `<button class="btn btn-success btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','approved')">✓ Approve</button>
+          <button class="btn btn-danger btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','rejected')">✕ Reject</button>` : ''}
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function toggleImprovDetail(id) {
+  const detail = document.getElementById('improv-detail-' + id);
+  const arrow = document.getElementById('improv-arrow-' + id);
+  if (!detail) return;
+  const open = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'block';
+  if (arrow) arrow.textContent = open ? '▶' : '▼';
+}
+
+async function sendImprovToAI(id, title, description) {
+  const msg = `Execute this improvement proposal:\n\nTitle: ${title}\n\nDescription: ${description}\n\nPlease implement this improvement and report back with the result.`;
+  // Switch to chat tab and send
+  const chatTabBtn = document.querySelector('nav button[onclick*="chat"]');
+  if (chatTabBtn) chatTabBtn.click();
+  setTimeout(() => {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.value = msg;
+      toast(`📤 Sending "${title}" to Main AI…`, 'info');
+      sendChat();
+    }
+  }, 200);
+}
+
+async function reviewImprovement(id, decision) {
+  const r = await api(`/api/improvements/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status: decision})});
+  if (r.ok) { toast(decision==='approved' ? '✓ Approved' : '✕ Rejected', decision==='approved'?'success':'error'); loadImprovements(); }
+}
+
+// ── Skills ───────────────────────────────────────────────────────────────────
+let allSkills = [];
+let selectedSkillIds = new Set();
+let activeCategory = '';
+
+const CAT_COLORS = {
+  'Content & Writing':'#f472b6','Research & Analysis':'#60a5fa',
+  'Trading & Finance':'#34d399','Social Media':'#fb923c',
+  'Lead Generation & Sales':'#a78bfa','Customer Support':'#fbbf24',
+  'Development & Technical':'#22d3ee','Data Analysis':'#4ade80',
+  'E-commerce & Product':'#f87171','Marketing & SEO':'#c084fc',
+  'Automation & Productivity':'#e2e8f0',
+};
+
+async function loadSkills() {
+  const data = await api('/api/skills');
+  allSkills = data.skills || [];
+  document.getElementById('skill-total-badge').textContent = `(${allSkills.length})`;
+  renderCategoryPills(data.categories || []);
+  renderSkillGrid(allSkills);
+  loadAgents();
+}
+
+function renderCategoryPills(cats) {
+  const el = document.getElementById('category-pills');
+  el.innerHTML = `<span class="cat-pill active" onclick="setCat('',this)">All</span>` +
+    cats.map(c => `<span class="cat-pill" onclick="setCat('${escHtml(c)}',this)">${c}</span>`).join('');
+}
+
+function setCat(cat, btn) {
+  activeCategory = cat;
+  document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  filterSkills();
+}
+
+function filterSkills() {
+  const q = (document.getElementById('skill-search').value || '').toLowerCase();
+  const filtered = allSkills.filter(s => {
+    const catMatch = !activeCategory || s.category === activeCategory;
+    const textMatch = !q || s.id.includes(q) || s.name.toLowerCase().includes(q) ||
+                      s.description.toLowerCase().includes(q) ||
+                      (s.tags||[]).some(t => t.toLowerCase().includes(q));
+    return catMatch && textMatch;
+  });
+  renderSkillGrid(filtered);
+}
+
+function renderSkillGrid(skills) {
+  const el = document.getElementById('skill-grid');
+  if (!skills.length) { el.innerHTML = '<div class="empty"><div class="icon">🔍</div><p>No skills match.</p></div>'; return; }
+  el.innerHTML = skills.map(s => {
+    const color = CAT_COLORS[s.category] || '#94a3b8';
+    const sel = selectedSkillIds.has(s.id);
+    const tags = (s.tags||[]).slice(0,4).map(t=>`<span class="tag">${t}</span>`).join('');
+    return `<div class="skill-card${sel?' selected':''}" onclick="toggleSkill(${JSON.stringify(s.id)},this)">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">
+        <h5 style="flex:1">${escHtml(s.name)} <span style="color:${color};font-size:.72em;font-weight:500">${escHtml(s.category)}</span></h5>
+        <button onclick="event.stopPropagation();showSkillDetail(${JSON.stringify(s.id)})" title="View details"
+          style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:.68em;padding:1px 5px;cursor:pointer;flex-shrink:0">ℹ</button>
+      </div>
+      <p>${escHtml(s.description.slice(0,110))}${s.description.length>110?'…':''}</p>
+      <div class="tags">${tags}</div>
+    </div>`;
+  }).join('');
+}
+
+function showSkillDetail(id) {
+  const s = allSkills.find(x => x.id === id);
+  if (!s) return;
+  const color = CAT_COLORS[s.category] || '#94a3b8';
+  const tags = (s.tags||[]).map(t=>`<span class="tag">${escHtml(t)}</span>`).join('');
+  const steps = (s.steps||[]).map((step,i)=>`<li style="margin-bottom:6px">${escHtml(step)}</li>`).join('');
+  let html = `<div style="position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:2000;display:flex;align-items:center;justify-content:center" id="skill-detail-overlay" onclick="if(event.target.id==='skill-detail-overlay')closeSkillDetail()">
+    <div style="background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:28px;max-width:560px;width:90%;max-height:80vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+        <div>
+          <div style="font-size:1.1em;font-weight:700;color:var(--text)">${escHtml(s.name)}</div>
+          <span style="font-size:.78em;background:${color}22;color:${color};padding:2px 8px;border-radius:4px;border:1px solid ${color}44">${escHtml(s.category)}</span>
+        </div>
+        <button onclick="closeSkillDetail()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);padding:4px 10px;cursor:pointer">✕</button>
+      </div>
+      <p style="font-size:.88em;color:var(--text-secondary);line-height:1.6;margin-bottom:14px">${escHtml(s.description)}</p>
+      ${tags ? `<div style="margin-bottom:14px"><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Tags</div><div class="tags">${tags}</div></div>` : ''}
+      ${steps ? `<div style="margin-bottom:14px"><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">How it works</div><ol style="font-size:.83em;color:var(--text-secondary);margin:0 0 0 16px;line-height:1.7">${steps}</ol></div>` : ''}
+      ${s.prompt_template ? `<div><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Prompt Template</div><pre style="font-size:.75em;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-word;color:var(--text-secondary)">${escHtml(s.prompt_template.slice(0,400))}${s.prompt_template.length>400?'\n…':''}</pre></div>` : ''}
+      <div style="margin-top:16px;display:flex;gap:8px">
+        <button class="btn btn-success btn-sm" onclick="toggleSkillFromModal(${JSON.stringify(s.id)});closeSkillDetail()" id="skill-detail-add-btn">${selectedSkillIds.has(s.id)?'✓ Deselect':'+ Add to Agent'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeSkillDetail()">Close</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeSkillDetail() {
+  const el = document.getElementById('skill-detail-overlay');
+  if (el) el.remove();
+}
+
+function toggleSkillFromModal(id) {
+  if (selectedSkillIds.has(id)) selectedSkillIds.delete(id);
+  else selectedSkillIds.add(id);
+  updateSelectedPanel();
+  filterSkills();
+}
+
+function toggleSkill(id, card) {
+  if (selectedSkillIds.has(id)) { selectedSkillIds.delete(id); card.classList.remove('selected'); }
+  else { selectedSkillIds.add(id); card.classList.add('selected'); }
+  updateSelectedPanel();
+}
+
+function updateSelectedPanel() {
+  const count = selectedSkillIds.size;
+  document.getElementById('selected-count').textContent = `(${count})`;
+  const el = document.getElementById('selected-skills-list');
+  if (!count) { el.textContent = 'No skills selected. Click cards on the left.'; return; }
+  el.innerHTML = [...selectedSkillIds].map(id => {
+    const s = allSkills.find(x => x.id === id);
+    return `<span style="display:inline-flex;align-items:center;gap:4px;margin:2px 4px 2px 0;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:.8em">
+      ${s ? s.name : id}
+      <span onclick="selectedSkillIds.delete(${JSON.stringify(id)});updateSelectedPanel();filterSkills();"
+        style="cursor:pointer;color:var(--danger);font-weight:bold;margin-left:2px">×</span>
+    </span>`;
+  }).join('');
+}
+
+async function createAgent() {
+  const name = document.getElementById('agent-name-input').value.trim();
+  const desc = document.getElementById('agent-desc-input').value.trim();
+  if (!name) { toast('Agent name is required', 'error'); return; }
+  if (!selectedSkillIds.size) { toast('Select at least one skill', 'error'); return; }
+  const r = await api('/api/agents/custom', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, description: desc, skills: [...selectedSkillIds]}),
+  });
+  if (r.ok) {
+    toast(`Agent "${name}" created with ${r.skill_count} skills!`);
+    document.getElementById('agent-name-input').value = '';
+    document.getElementById('agent-desc-input').value = '';
+    selectedSkillIds.clear();
+    updateSelectedPanel();
+    filterSkills();
+    loadAgents();
+  } else { toast(r.error || 'Error creating agent', 'error'); }
+}
+
+async function loadAgents() {
+  const data = await api('/api/agents/custom');
+  const agents = data.agents || [];
+  const el = document.getElementById('agents-list');
+  if (!agents.length) { el.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No agents yet. Create one above.</p></div>'; return; }
+  el.innerHTML = agents.map(a => `
+    <div class="agent-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <h4>${a.name}</h4>
+        <button class="btn btn-danger btn-sm" onclick="deleteAgent('${a.id}')">🗑</button>
+      </div>
+      <p>${a.description || 'No description'}</p>
+      <p style="margin-top:6px;color:var(--primary);font-size:.78em">${a.skill_count} skills: ${(a.skills||[]).slice(0,5).join(', ')}${a.skill_count>5?'…':''}</p>
+    </div>`).join('');
+}
+
+async function deleteAgent(id) {
+  if (!confirm('Delete this agent?')) return;
+  const r = await api('/api/agents/custom/' + id, {method:'DELETE'});
+  if (r.ok) { toast('Agent deleted', 'error'); loadAgents(); }
+}
+
+// ── Tasks — agent selector state ─────────────────────────────────────────────
+let _allAgents = [];          // full list from /api/agents
+let _autoSelectedIds = new Set(); // IDs suggested by auto-select
+let _selectedAgentIds = new Set(); // currently selected (user may adjust)
+let _taskMode = 'auto';       // 'auto' | 'parallel' | 'single'
+
+function onTaskInputChange() {
+  const v = document.getElementById('task-input').value.trim();
+  document.getElementById('btn-autoselect').disabled = !v;
+  document.getElementById('autoselect-status').textContent = '';
+}
+
+function setMode(m) {
+  _taskMode = m;
+  ['auto','parallel','single'].forEach(id => {
+    const el = document.getElementById('mode-' + id);
+    el.style.border = id === m ? '2px solid var(--primary)' : '1px solid var(--border)';
+  });
+}
+
+async function runAutoSelect() {
+  const desc = document.getElementById('task-input').value.trim();
+  if (!desc) return;
+  const statusEl = document.getElementById('autoselect-status');
+  statusEl.textContent = '⏳ Analysing task…';
+  document.getElementById('btn-autoselect').disabled = true;
+
+  // Fetch all agents if we don't have them yet
+  if (!_allAgents.length) {
+    const r = await api('/api/agents');
+    if (r.ok) { _allAgents = r.agents || []; }
+  }
+
+  const r = await api('/api/task/auto-agents', {method:'POST', body: JSON.stringify({description: desc})});
+  if (r.ok) {
+    _autoSelectedIds = new Set(r.suggested || []);
+    _selectedAgentIds = new Set(_autoSelectedIds);
+    statusEl.innerHTML = `<span style="color:var(--success)">✅ ${_autoSelectedIds.size} agent${_autoSelectedIds.size!==1?'s':''} auto-selected</span>`;
+    renderAgentPicker();
+    document.getElementById('task-step2').style.display = 'block';
+    document.getElementById('task-step3').style.display = 'block';
+    document.getElementById('task-step-badge').textContent = 'Step 2';
+  } else {
+    statusEl.innerHTML = '<span style="color:var(--danger)">❌ Auto-select failed — use Manual to pick agents</span>';
+    showManualAgentPicker();
+  }
+  document.getElementById('btn-autoselect').disabled = false;
+}
+
+async function showManualAgentPicker() {
+  if (!_allAgents.length) {
+    const r = await api('/api/agents');
+    if (r.ok) { _allAgents = r.agents || []; }
+  }
+  renderAgentPicker();
+  document.getElementById('task-step2').style.display = 'block';
+  document.getElementById('task-step3').style.display = 'block';
+  document.getElementById('task-step-badge').textContent = 'Step 2';
+}
+
+const _catColors = {
+  coordination:'#6366f1', sales:'#10b981', content:'#22d3ee', social:'#f59e0b',
+  research:'#3b82f6', ecommerce:'#ec4899', analytics:'#8b5cf6', creative:'#ef4444',
+  trading:'#f97316', development:'#14b8a6', hr:'#84cc16', finance:'#eab308',
+  marketing:'#06b6d4', growth:'#a855f7', management:'#64748b', crypto:'#f59e0b',
+  strategy:'#6366f1', support:'#10b981'
+};
+const _catEmoji = {
+  coordination:'🎯', sales:'💼', content:'✍️', social:'📱', research:'🔍',
+  ecommerce:'🛒', analytics:'📊', creative:'🎨', trading:'📈', development:'💻',
+  hr:'👔', finance:'💰', marketing:'🚀', growth:'📈', management:'📋',
+  crypto:'🪙', strategy:'🏢', support:'🎧'
+};
+
+function renderAgentPicker() {
+  const grid = document.getElementById('agent-picker-grid');
+  if (!_allAgents.length) {
+    grid.innerHTML = '<p style="color:var(--text-muted);font-size:.84em">No agents loaded. Check /api/agents.</p>';
+    return;
+  }
+  grid.innerHTML = _allAgents.map(a => {
+    const selected = _selectedAgentIds.has(a.id);
+    const wasAuto = _autoSelectedIds.has(a.id);
+    const color = _catColors[a.category] || '#64748b';
+    const emoji = _catEmoji[a.category] || '🤖';
+    const isRunning = a.running;
+    return `<div id="agentcard-${a.id}"
+      onclick="toggleAgent('${escHtml(a.id)}')"
+      title="${escHtml(a.description||'')}"
+      class="agent-pick-item${selected ? ' selected' : ''}"
+      style="position:relative;user-select:none;flex-direction:column;align-items:flex-start;gap:4px">
+      ${wasAuto ? `<span style="position:absolute;top:4px;right:4px;font-size:.58em;background:rgba(212,175,55,.2);color:var(--gold);border-radius:3px;padding:1px 5px;border:1px solid rgba(212,175,55,.3)">AUTO</span>` : ''}
+      <div style="display:flex;align-items:center;gap:6px;width:100%">
+        <span style="font-size:1em">${emoji}</span>
+        <span class="pick-dot ${isRunning ? 'on' : 'off'}"></span>
+        <span style="font-size:.76em;font-weight:600;color:${selected ? 'var(--gold-light)' : 'var(--text)'};line-height:1.2;flex:1">${escHtml(a.id)}</span>
+      </div>
+      <div style="font-size:.65em;color:${color};margin-left:22px;font-weight:500">${escHtml(a.category||'')}</div>
+    </div>`;
+  }).join('');
+  updateAgentSelCount();
+}
+
+function toggleAgent(id) {
+  if (_selectedAgentIds.has(id)) _selectedAgentIds.delete(id);
+  else _selectedAgentIds.add(id);
+  const a = _allAgents.find(x => x.id === id);
+  const card = document.getElementById('agentcard-' + id);
+  if (!card || !a) return;
+  const selected = _selectedAgentIds.has(id);
+  const color = _catColors[a.category] || '#64748b';
+  card.style.border = `2px solid ${selected ? color : 'var(--border)'}`;
+  card.style.background = selected ? 'var(--surface2)' : 'var(--surface)';
+  card.querySelector('div:last-child').previousElementSibling.style.color = selected ? color : 'var(--text)';
+  updateAgentSelCount();
+}
+
+function selectAllAgents() {
+  _allAgents.forEach(a => _selectedAgentIds.add(a.id));
+  renderAgentPicker();
+}
+function clearAllAgents() {
+  _selectedAgentIds.clear();
+  renderAgentPicker();
+}
+function resetToAutoSelected() {
+  _selectedAgentIds = new Set(_autoSelectedIds);
+  renderAgentPicker();
+}
+
+function updateAgentSelCount() {
+  const n = _selectedAgentIds.size;
+  document.getElementById('agent-sel-count').textContent = `(${n} selected)`;
+}
+
+async function submitTask() {
+  const desc = document.getElementById('task-input').value.trim();
+  if (!desc) { toast('Please enter a task description', 'error'); return; }
+  const resultEl = document.getElementById('task-submit-result');
+  resultEl.innerHTML = '⏳ Submitting…';
+  const agents = [..._selectedAgentIds];
+  const r = await api('/api/task/submit', {method:'POST', body: JSON.stringify({
+    description: desc,
+    agents: agents,
+    mode: _taskMode
+  })});
+  if (r.ok) {
+    resultEl.innerHTML = `<span style="color:var(--success)">✅ Task launched! ID: <code>${r.task_id||'?'}</code> | ${agents.length || 'auto'} agent${agents.length!==1?'s':''} | mode: ${_taskMode}</span>`;
+    document.getElementById('task-input').value = '';
+    _selectedAgentIds.clear();
+    _autoSelectedIds.clear();
+    document.getElementById('task-step2').style.display = 'none';
+    document.getElementById('task-step3').style.display = 'none';
+    document.getElementById('task-step-badge').textContent = 'Step 1';
+    document.getElementById('autoselect-status').textContent = '';
+    setTimeout(loadTasks, 2000);
+  } else {
+    resultEl.innerHTML = '<span style="color:var(--danger)">❌ Failed to submit. Is task-orchestrator running?</span>';
+  }
+}
+
+// Task store: indexed by task ID to avoid XSS from inline JSON in onclick attributes
+const _taskStore = new Map();
+
+function renderTaskRow(t) {
+  const tid = t.id || t.plan_id || ('task_' + _taskStore.size);
+  _taskStore.set(tid, t);
+  const desc = escHtml((t.description||t.id||'Task').slice(0,60));
+  const ts = new Date(t.created_at||t.ts||Date.now()).toLocaleDateString();
+  const status = escHtml(t.status||'completed');
+  const agent = escHtml(t.agent||'');
+  return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid rgba(212,175,55,.08);margin-bottom:6px">' +
+    '<div><div style="font-weight:600;font-size:.87em;color:var(--text)">' + desc + '</div>' +
+    '<div style="font-size:.74em;color:var(--text-muted);margin-top:2px">' + status + ' · ' + agent + ' · ' + ts + '</div></div>' +
+    '<button class="btn btn-ghost btn-sm" aria-label="View task details" onclick="openTaskDetail(' + JSON.stringify(tid) + ')" style="border:1px solid rgba(212,175,55,.3);color:var(--gold)">View →</button></div>';
+}
+let _taskDetailTrigger = null;
+
+async function loadTasks() {
+  const r = await api('/api/task/list');
+  if (!r.ok) return;
+  const plans = r.plans || [];
+
+  const activePanel = document.getElementById('active-task-panel');
+  const active = plans.find(p => p.status === 'running' || p.status === 'planning');
+  if (active) {
+    const subtasks = active.subtasks || [];
+    const done = subtasks.filter(s => s.status === 'done').length;
+    const pct = subtasks.length ? Math.round(done/subtasks.length*100) : 0;
+    const statusEmoji = {running:'⏳',planning:'🧠',done:'✅',failed:'❌'}[active.status]||'?';
+    const modeTag = active.mode ? `<span style="font-size:.72em;background:var(--surface2);padding:1px 6px;border-radius:3px;margin-left:6px">${active.mode}</span>` : '';
+    activePanel.innerHTML = `
+      <div style="margin-bottom:12px">
+        <div style="font-weight:600;margin-bottom:4px">${statusEmoji} ${escHtml(active.title||active.id)}${modeTag}</div>
+        <div style="font-size:.82em;color:var(--text-muted)">ID: ${active.id} | ${done}/${subtasks.length} subtasks</div>
+        <div style="background:var(--border);border-radius:4px;height:6px;margin:8px 0">
+          <div style="background:var(--primary);height:100%;width:${pct}%;border-radius:4px;transition:width .3s"></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${subtasks.map(st => {
+          const e = {done:'✅',running:'⏳',pending:'⏸️',failed:'❌',skipped:'⏭️'}[st.status]||'?';
+          const agColor = _catColors[(_allAgents.find(a=>a.id===st.agent_id)||{}).category] || '#64748b';
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:.84em;padding:4px 6px;border-radius:4px;background:var(--surface)">
+            <span>${e}</span>
+            <span style="color:${agColor};font-weight:600;min-width:110px;font-size:.9em">${escHtml(st.agent_id||'?')}</span>
+            <span style="color:var(--text-secondary);flex:1">${escHtml(st.title||st.subtask_id||'')}</span>
+            ${st.status==='pending' ? `<button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:.7em" onclick="reassignSubtask('${escHtml(active.id)}','${escHtml(st.subtask_id||'')}')">↩ Reassign</button>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="cancelTask()">🛑 Cancel</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadTasks()">↻ Refresh</button>
+      </div>
+    `;
+    setTimeout(loadTasks, 5000);
+  } else {
+    activePanel.innerHTML = '<div class="empty"><div class="icon">🚀</div><p>No active task. Build one on the left.</p></div>';
+  }
+
+  const histEl = document.getElementById('task-history-list');
+  const history = plans.filter(p => !['running','planning'].includes(p.status)).slice(0,10);
+  if (!history.length) { histEl.innerHTML = '<div class="empty"><p>No task history yet.</p></div>'; return; }
+  histEl.innerHTML = history.map(p => {
+    const tid = p.id || (`hist_${Math.random().toString(36).slice(2)}`);
+    _taskStore.set(tid, p);
+    const e = {done:'✅',failed:'❌',cancelled:'🛑',timed_out:'⏰'}[p.status]||'?';
+    const agents = [...new Set((p.subtasks||[]).map(s=>s.agent_id).filter(Boolean))].join(', ');
+    const mode = p.mode ? ` · ${p.mode}` : '';
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:background .15s" 
+      onclick="openTaskDetail(${JSON.stringify(tid)})"
+      onmouseenter="this.style.background='rgba(212,175,55,.05)'" onmouseleave="this.style.background=''">
+      <div>
+        <div style="font-weight:500">${e} ${escHtml(p.title||p.id)}</div>
+        <div style="font-size:.78em;color:var(--text-muted)">${(p.subtasks||[]).length} subtasks${mode} | Agents: ${escHtml(agents)||'—'} | ${(p.created_at||'').split('T')[0]}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:.78em;background:var(--surface2);padding:2px 8px;border-radius:4px;color:var(--text-secondary)">${p.status}</span>
+        <span style="color:var(--text-muted);font-size:.8em">▶</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function cancelTask() {
+  const r = await api('/api/task/cancel', {method:'POST'});
+  if (r.ok) { toast('Task cancelled', 'info'); loadTasks(); }
+}
+
+async function reassignSubtask(taskId, subtaskId) {
+  if (!_allAgents.length) {
+    const r = await api('/api/agents');
+    if (r.ok) { _allAgents = r.agents || []; }
+  }
+  const agentId = prompt(
+    'Reassign subtask to which agent?\nAvailable: ' +
+    _allAgents.map(a=>a.id).join(', ')
+  );
+  if (!agentId) return;
+  const r = await api('/api/task/reassign', {method:'POST', body: JSON.stringify({task_id: taskId, subtask_id: subtaskId, agent_id: agentId.trim()})});
+  if (r.ok) { toast('Subtask reassigned ✅', 'success'); loadTasks(); }
+  else toast('Reassign failed', 'error');
+}
+
+function openTaskDetail(tidOrPlan) {
+  // Accept either a task ID string (looks up _taskStore) or a full plan object
+  const plan = (typeof tidOrPlan === 'string') ? _taskStore.get(tidOrPlan) : tidOrPlan;
+  if (!plan) return;
+  const modal = document.getElementById('task-detail-modal');
+  const content = document.getElementById('task-detail-content');
+  if (!modal || !content) return;
+  _taskDetailTrigger = document.activeElement;
+  modal.style.display = 'flex';
+  const e = {done:'✅',failed:'❌',cancelled:'🛑',timed_out:'⏰',running:'⏳',planning:'🧠'}[plan.status]||'?';
+  const subtasks = plan.subtasks || [];
+  const subtaskRows = subtasks.map(st => {
+    const se = {done:'✅',running:'⏳',pending:'⏸️',failed:'❌',skipped:'⏭️'}[st.status]||'?';
+    return `<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:.83em">
+      <span>${se}</span>
+      <div style="flex:1">
+        <div style="font-weight:500;color:var(--text)">${escHtml(st.agent_id||'?')}</div>
+        <div style="color:var(--text-secondary)">${escHtml(st.title||st.subtask_id||'')}</div>
+        ${st.result ? `<div style="color:var(--text-muted);font-size:.88em;margin-top:2px;white-space:pre-wrap;max-height:80px;overflow:hidden">${escHtml(String(st.result).slice(0,300))}</div>` : ''}
+      </div>
+      <span style="font-size:.73em;color:var(--text-muted);white-space:nowrap">${st.status}</span>
+    </div>`;
+  }).join('');
+  content.innerHTML = `
+    <div style="margin-bottom:12px">
+      <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Goal</div>
+      <div style="margin-top:4px">${escHtml(plan.description||plan.goal||plan.title||'N/A')}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div><div style="font-size:.75em;color:var(--text-muted)">Status</div><div style="color:var(--gold);font-weight:600">${escHtml(plan.status||'?')}</div></div>
+      <div><div style="font-size:.75em;color:var(--text-muted)">Mode</div><div>${escHtml(plan.mode||'auto')}</div></div>
+      <div><div style="font-size:.75em;color:var(--text-muted)">ID</div><div style="font-size:.8em;font-family:monospace">${escHtml(plan.id||'?')}</div></div>
+      <div><div style="font-size:.75em;color:var(--text-muted)">Created</div><div>${(plan.created_at||'').split('T')[0]||'—'}</div></div>
+    </div>
+    ${subtasks.length ? `<div style="font-size:.84em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Subtasks</div>
+    <div style="max-height:340px;overflow-y:auto">${subtaskRows}</div>` : ''}
+    ${plan.result ? `<div style="margin-top:14px"><div style="font-size:.84em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Final Output</div><pre style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;white-space:pre-wrap;max-height:200px;overflow-y:auto">${escHtml(String(plan.result).slice(0,1500))}</pre></div>` : ''}
+  `;
+  document.getElementById('task-detail-heading').textContent = (plan.title||plan.id||'Task Detail');
+  document.getElementById('task-detail-dialog')?.focus();
+}
+
+function closeTaskDetail() {
+  const modal = document.getElementById('task-detail-modal');
+  if (modal) modal.style.display = 'none';
+  if (_taskDetailTrigger && typeof _taskDetailTrigger.focus === 'function') _taskDetailTrigger.focus();
+  _taskDetailTrigger = null;
+}
+
+// ── Swarm ────────────────────────────────────────────────────────────────────
+async function loadSwarm() {
+  const r = await api('/api/agents');
+  if (!r.ok) return;
+  const agents = r.agents || [];
+  _allAgents = agents; // cache for task picker
+  renderSwarmGrid(agents);
+}
+
+function renderSwarmGrid(agents) {
+  const grid = document.getElementById('swarm-grid');
+  if (!agents.length) {
+    grid.innerHTML = '<div class="empty"><div class="icon">🐝</div><p>No agent data.</p></div>';
+    return;
+  }
+  grid.innerHTML = agents.map(a => {
+    const color = _catColors[a.category] || '#64748b';
+    const isRunning = a.running;
+    const dotColor = isRunning ? '#10b981' : '#4b5563';
+    const dotGlow = isRunning ? 'box-shadow:0 0 8px rgba(16,185,129,.7)' : '';
+    const cardGlow = isRunning ? 'box-shadow:0 4px 24px rgba(0,0,0,.5),0 0 0 1px rgba(16,185,129,.1)' : '';
+    const statusLabel = isRunning ? '<span style="font-size:.7em;color:#34d399;font-weight:600;letter-spacing:.02em">ONLINE</span>' : '<span style="font-size:.7em;color:#4b5563;font-weight:600;letter-spacing:.02em">OFFLINE</span>';
+    const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:rgba(212,175,55,.08);padding:2px 7px;border-radius:4px;font-size:.7em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18)">${escHtml(s)}</span>`).join('');
+    const moreSkills = (a.skills||[]).length > 4 ? `<span style="font-size:.7em;color:var(--text-muted);padding:2px 6px">+${(a.skills||[]).length-4} more</span>` : '';
+    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid ${isRunning ? 'rgba(16,185,129,.2)' : 'var(--border)'};border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;transition:all .25s;${cardGlow}" onmouseenter="this.style.transform='translateY(-3px)';this.style.borderColor='rgba(212,175,55,.3)';this.style.boxShadow='0 8px 32px rgba(0,0,0,.5),0 0 0 1px rgba(212,175,55,.08)'" onmouseleave="this.style.transform='';this.style.borderColor='${isRunning ? 'rgba(16,185,129,.2)' : 'var(--border)'}';this.style.boxShadow='${cardGlow}'">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+          <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,${color}22,${color}11);border:1px solid ${color}44;display:flex;align-items:center;justify-content:center;font-size:1.1em;flex-shrink:0">🤖</div>
+          <div style="min-width:0">
+            <div style="font-weight:700;font-size:.88em;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(a.id)}</div>
+            <div style="font-size:.7em;color:${color};font-weight:500;margin-top:1px">${escHtml(a.category||'General')}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+          ${statusLabel}
+          <span style="width:8px;height:8px;border-radius:50%;background:${dotColor};display:inline-block;${dotGlow}"></span>
+        </div>
+      </div>
+      <div style="font-size:.8em;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;flex:1">${escHtml((a.description||'No description available.').slice(0,100))}${(a.description||'').length>100?'…':''}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">${skills}${moreSkills}</div>
+      <button class="btn btn-ghost btn-sm" onclick="assignTaskToAgent('${escHtml(a.id)}')" style="width:100%;font-size:.78em;border:1px solid rgba(212,175,55,.3);color:var(--gold);padding:6px;border-radius:6px;transition:all .2s" onmouseenter="this.style.background='rgba(212,175,55,.1)';this.style.borderColor='rgba(212,175,55,.6)'" onmouseleave="this.style.background='';this.style.borderColor='rgba(212,175,55,.3)'">⚡ Assign Task</button>
+    </div>`;
+  }).join('');
+}
+
+function filterSwarm(category, btn) {
+  if (btn) {
+    document.querySelectorAll('.swarm-pill').forEach(p => {
+      p.classList.remove('active');
+      p.style.background = '';
+      p.style.color = '';
+      p.style.border = '';
+    });
+    btn.classList.add('active');
+    btn.style.background = 'linear-gradient(135deg,var(--primary-dark),var(--primary))';
+    btn.style.color = '#000';
+    btn.style.border = 'none';
+  }
+  const searchVal = (document.getElementById('swarm-search')?.value || '').toLowerCase();
+  let filtered = category === 'all' || !category ? _allAgents : _allAgents.filter(a => a.category === category);
+  if (searchVal) {
+    filtered = filtered.filter(a =>
+      (a.id||'').toLowerCase().includes(searchVal) ||
+      (a.description||'').toLowerCase().includes(searchVal) ||
+      (a.skills||[]).some(s => s.toLowerCase().includes(searchVal)) ||
+      (a.category||'').toLowerCase().includes(searchVal)
+    );
+  }
+  renderSwarmGrid(filtered);
+}
+
+// ── Commands Tab ─────────────────────────────────────────────────────────────
+const COMMAND_GROUPS = [
+  {
+    cat: '⚙️ System',
+    cmds: [
+      ['status', 'Get current agent status report'],
+      ['workers', 'List all active workers'],
+      ['start <agent>', 'Start a specific agent', true],
+      ['stop <agent>', 'Stop a specific agent', true],
+      ['schedule', 'List all scheduled tasks'],
+      ['improvements', 'List pending skill proposals'],
+      ['skills', 'Show skills library summary'],
+      ['agents', 'List all AI agents'],
+      ['switch to <agent>', 'Switch active agent (WhatsApp session)', true],
+      ['help', 'Show full command list'],
+      ['cmds', 'Show this commands reference'],
+    ]
+  },
+  {
+    cat: '🏭 Worker Bundles',
+    cmds: [
+      ['worker list', 'List all worker bundles'],
+      ['worker create <name> agents:<a1,a2> task:<desc>', 'Create a worker bundle'],
+      ['worker run <name>', 'Manually trigger a worker'],
+      ['worker enable <name>', 'Enable a worker bundle'],
+      ['worker disable <name>', 'Pause a worker bundle'],
+      ['worker delete <name>', 'Delete a worker bundle'],
+      ['worker status <name>', 'Show worker details & last run'],
+      ['worker ecom', 'Create full e-commerce automation worker preset'],
+    ]
+  },
+  {
+    cat: '🛒 E-commerce Automation',
+    cmds: [
+      ['ecom metrics', 'Real-time revenue / profit / orders dashboard'],
+      ['ecom research <niche>', 'Find top 5 trending product opportunities'],
+      ['ecom listing <product>', 'Generate full Shopify listing (title/desc/tags/price)'],
+      ['ecom email <type> <product>', 'Email flow: welcome|abandoned_cart|post_purchase|upsell'],
+      ['ecom ads <product>', 'Facebook/Google ad copy (headline + body + CTA)'],
+      ['ecom trends', 'Current trending products & niches'],
+      ['ecom service <issue>', 'Customer service reply template'],
+      ['ecom status', 'Listings, emails, and research session count'],
+      ['order process <order_id>', 'Process a specific order'],
+      ['order status <order_id>', 'Get order fulfillment status'],
+      ['inventory check', 'Current stock levels across all products'],
+      ['inventory forecast', '7-day demand forecast & reorder recommendations'],
+      ['inventory reorder', 'Trigger auto-reorder for low-stock items'],
+      ['support ticket <issue>', 'Classify & auto-resolve a support ticket'],
+      ['support refund <order_id>', 'Process a refund automatically'],
+      ['books daily', 'Daily P&L summary from Stripe'],
+      ['books pl', 'Full P&L report (revenue / COGS / ads / profit)'],
+      ['books tax', 'Quarterly tax export'],
+      ['email campaign <segment>', 'Launch email campaign (new/abandoned/repeat)'],
+      ['email abtest <subject1> vs <subject2>', 'Run A/B subject line test'],
+      ['social post <product>', 'Generate & schedule viral social post'],
+      ['social script <topic>', 'TikTok viral script'],
+      ['product scan', 'Daily TikTok/Amazon trending product scan'],
+      ['product validate <idea>', 'Demand validation via Google Trends / JungleScout'],
+      ['product publish <product>', 'Auto-generate listing and publish to Shopify'],
+    ]
+  },
+  {
+    cat: '🚀 Tasks & Orchestration',
+    cmds: [
+      ['task <description>', 'Submit a multi-agent task'],
+      ['task status', 'Show status of active task'],
+      ['task list', 'List recent tasks'],
+      ['task cancel', 'Cancel active task'],
+      ['task agents <a1,a2>', 'Set agents for next task'],
+      ['task mode auto|parallel|single', 'Set execution mode'],
+      ['task config', 'Show current task configuration'],
+      ['assign <agent> <subtask>', 'Manually dispatch a subtask'],
+    ]
+  },
+  {
+    cat: '🏢 Company Building',
+    cmds: [
+      ['company build <idea>', 'Full company launch package'],
+      ['company validate <idea>', 'Viability check & SWOT'],
+      ['company plan <idea>', 'Business plan only'],
+      ['company simulate <scenario>', 'Growth simulation'],
+      ['company gtm <idea>', 'Go-to-market strategy'],
+      ['company pitch <company>', 'Investor pitch deck'],
+      ['company org <company>', 'Org chart design'],
+      ['company swot <topic>', 'SWOT analysis'],
+    ]
+  },
+  {
+    cat: '🪙 Memecoin & Web3',
+    cmds: [
+      ['memecoin create <concept>', 'Full token launch package'],
+      ['memecoin name <concept>', 'Generate token names'],
+      ['memecoin tokenomics <name>', 'Design tokenomics model'],
+      ['memecoin whitepaper <name>', 'Draft whitepaper'],
+      ['memecoin community <name>', 'Community strategy'],
+      ['memecoin viral <name>', 'Viral launch campaign'],
+    ]
+  },
+  {
+    cat: '💰 Finance',
+    cmds: [
+      ['finance model <business>', '3-year financial model'],
+      ['finance pl <business>', 'P&L projections'],
+      ['finance runway <burn> <cash>', 'Burn rate & runway'],
+      ['finance raise <stage> <amount>', 'Fundraising prep'],
+      ['finance unit <product> <price>', 'Unit economics (CAC/LTV)'],
+      ['finance pricing <product>', 'Pricing strategy'],
+      ['finance pitch <company>', 'Investor pitch financials'],
+      ['finance valuation <company>', 'Valuation methodology'],
+    ]
+  },
+  {
+    cat: '👔 HR & People',
+    cmds: [
+      ['hr hire <role>', 'Full hiring package'],
+      ['hr jd <role>', 'Write job description'],
+      ['hr screen <cv-text>', 'AI CV screening & scoring'],
+      ['hr interview <role>', 'Interview question pack'],
+      ['hr onboard <role>', '90-day onboarding plan'],
+      ['hr review <role>', 'Performance review template'],
+      ['hr org <company>', 'Org chart design'],
+      ['hr culture <company>', 'Culture & values document'],
+    ]
+  },
+  {
+    cat: '🎨 Brand',
+    cmds: [
+      ['brand identity <company>', 'Full brand identity system'],
+      ['brand name <industry>', 'Brand name generation (15 options)'],
+      ['brand position <company>', 'Brand positioning strategy'],
+      ['brand voice <company>', 'Brand voice & tone guide'],
+      ['brand messaging <company>', 'Messaging framework'],
+      ['brand story <company>', 'Brand story & narrative'],
+      ['brand audit <company>', 'Competitive brand audit'],
+    ]
+  },
+  {
+    cat: '📈 Growth',
+    cmds: [
+      ['growth loop <product>', 'Viral growth loop design'],
+      ['growth funnel <product>', 'Conversion funnel optimization'],
+      ['growth abtests <feature>', 'A/B test framework'],
+      ['growth retention <product>', 'Retention strategy'],
+      ['growth referral <product>', 'Referral program design'],
+      ['growth plg <product>', 'Product-led growth strategy'],
+      ['growth experiments <product>', 'ICE-scored experiment backlog'],
+    ]
+  },
+  {
+    cat: '📋 Project Management',
+    cmds: [
+      ['pm start <project>', 'Kick off a project'],
+      ['pm breakdown <project>', 'Work breakdown structure'],
+      ['pm sprint <goal>', '2-week sprint plan'],
+      ['pm roadmap <project>', 'Project roadmap & milestones'],
+      ['pm risks <project>', 'Risk register & mitigation'],
+      ['pm raci <project>', 'RACI responsibility matrix'],
+      ['pm gantt <project>', 'Gantt chart (text-based)'],
+      ['pm retro <sprint>', 'Sprint retrospective facilitation'],
+    ]
+  },
+  {
+    cat: '✍️ Content & Social',
+    cmds: [
+      ['content <brief>', 'Full content package'],
+      ['social <brief>', 'Social media content pack'],
+      ['social plan <brief>', 'Strategy plan only'],
+      ['video <topic>', 'Faceless video full pipeline'],
+      ['video script <topic>', 'Video script only'],
+      ['video seo <topic>', 'YouTube SEO pack'],
+      ['newsletter create <topic>', 'Generate newsletter issue'],
+      ['course create <topic>', 'Full course package'],
+      ['course outline <topic>', 'Course structure only'],
+    ]
+  },
+  {
+    cat: '💼 Sales & Leads',
+    cmds: [
+      ['leads <niche> <location>', 'Local business lead generation'],
+      ['outreach <campaign>', 'Outreach campaign'],
+      ['email <brief>', 'Cold email sequence'],
+      ['prospect <niche> <location>', 'Appointment setter prospects'],
+      ['websales audit <url>', 'Website audit + sales pitch'],
+      ['recruit <role> <requirements>', 'Find & screen candidates'],
+    ]
+  },
+  {
+    cat: '📈 Crypto & Trading',
+    cmds: [
+      ['crypto <pair>', 'Technical analysis with signals'],
+      ['trade <pair>', 'Trading signal & risk analysis'],
+      ['signals', 'Current trading signals'],
+      ['signal daily', 'Daily market summary'],
+      ['arb scan <product>', 'Arbitrage opportunity scan'],
+      ['arb opportunities', 'Top arbitrage opportunities'],
+    ]
+  },
+  {
+    cat: '📅 Scheduling',
+    cmds: [
+      ['schedule', 'List all scheduled tasks'],
+      ['schedule add <label> <action> <cron>', 'Add scheduled task (via UI)'],
+    ]
+  },
+];
+
+let _cmdActiveFilter = null;
+let _renderedCmds = [];
+
+function loadCommandsTab() {
+  // Category pills
+  const pills = document.getElementById('cmd-category-pills');
+  pills.innerHTML = `<span onclick="setCmdFilter(null)" id="cmd-pill-all"
+    style="cursor:pointer;padding:4px 10px;border-radius:10px;font-size:.8em;background:var(--primary);color:#fff">All</span>` +
+    COMMAND_GROUPS.map((g,i) => `<span onclick="setCmdFilter(${i})" id="cmd-pill-${i}"
+      style="cursor:pointer;padding:4px 10px;border-radius:10px;font-size:.8em;background:var(--surface2);color:var(--text-secondary)">${g.cat}</span>`
+    ).join('');
+  renderCommands();
+}
+
+function setCmdFilter(idx) {
+  _cmdActiveFilter = idx;
+  document.getElementById('cmd-pill-all').style.background = idx===null ? 'var(--primary)' : 'var(--surface2)';
+  document.getElementById('cmd-pill-all').style.color = idx===null ? '#fff' : 'var(--text-secondary)';
+  COMMAND_GROUPS.forEach((_,i) => {
+    const p = document.getElementById('cmd-pill-' + i);
+    if (!p) return;
+    p.style.background = i===idx ? 'var(--primary)' : 'var(--surface2)';
+    p.style.color = i===idx ? '#fff' : 'var(--text-secondary)';
+  });
+  renderCommands();
+}
+
+function filterCommands() { renderCommands(); }
+
+let _cmdType = 'whatsapp';
+function switchCmdType(type, btn) {
+  _cmdType = type;
+  document.querySelectorAll('.cmd-type-btn').forEach(b => {
+    b.classList.remove('active');
+    b.style.background = '';
+    b.style.color = '';
+    b.style.border = '';
+  });
+  btn.classList.add('active');
+  btn.style.background = 'linear-gradient(135deg,#B8960C,#D4AF37)';
+  btn.style.color = '#000';
+  btn.style.border = 'none';
+  renderCommands();
+}
+
+function renderCommands() {
+  const q = (document.getElementById('cmd-search')?.value || '').toLowerCase();
+  const isWA = _cmdType === 'whatsapp';
+  const groups = _cmdActiveFilter !== null ? [COMMAND_GROUPS[_cmdActiveFilter]] : COMMAND_GROUPS;
+  const list = document.getElementById('cmd-list');
+  if (!list) return;
+  list.innerHTML = groups.map(g => {
+    const rows = g.cmds
+      .filter(cmd => !q || cmd[0].toLowerCase().includes(q) || cmd[1].toLowerCase().includes(q))
+      .map(cmd => {
+        const [cmdStr, desc, waOnly] = cmd;
+        let execBtn = '';
+        if (!isWA && !waOnly) {
+          execBtn = `<button onclick="executeCmd('${escHtml(cmdStr)}')" style="flex-shrink:0;padding:3px 10px;font-size:.72em;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.3);color:var(--gold);border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s" onmouseenter="this.style.background='rgba(212,175,55,.2)'" onmouseleave="this.style.background='rgba(212,175,55,.1)'" title="Execute in Chat">▶ Run</button>`;
+        } else if (!isWA && waOnly) {
+          execBtn = `<span style="flex-shrink:0;padding:3px 8px;font-size:.7em;opacity:.4;color:var(--text-muted)">📱 WA only</span>`;
+        }
+        const waShort = isWA ? `<span style="font-size:.68em;color:var(--text-muted);margin-left:4px">→ send via WhatsApp</span>` : '';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;transition:background .15s;cursor:default" onmouseenter="this.style.background='rgba(212,175,55,.04)'" onmouseleave="this.style.background=''">
+          <code onclick="copyCmd('${escHtml(cmdStr)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();copyCmd('${escHtml(cmdStr)}')}" tabindex="0" role="button" aria-label="Copy command: ${escHtml(cmdStr)}" title="Click to copy" style="cursor:pointer;min-width:160px;max-width:220px;background:rgba(10,15,30,.9);padding:4px 9px;border-radius:5px;font-size:.8em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color .15s" onmouseenter="this.style.borderColor='rgba(212,175,55,.5)'" onmouseleave="this.style.borderColor='rgba(212,175,55,.18)'">${escHtml(cmdStr)}</code>
+          <div style="flex:1;font-size:.83em;color:var(--text-secondary);line-height:1.4">${escHtml(desc)}${waShort}</div>
+          <button onclick="copyCmd('${escHtml(cmdStr)}')" style="flex-shrink:0;padding:3px 8px;font-size:.7em;background:transparent;border:1px solid rgba(148,163,184,.12);color:var(--text-muted);border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)';this.style.color='var(--gold)'" onmouseleave="this.style.borderColor='rgba(148,163,184,.12)';this.style.color='var(--text-muted)'" title="Copy">Copy</button>
+          ${execBtn}
+        </div>`;
+      }).join('');
+    if (!rows) return '';
+    return `<div style="margin-bottom:20px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <div style="font-weight:700;font-size:.83em;color:var(--gold-light);padding:10px 14px;background:rgba(212,175,55,.06);border-bottom:1px solid rgba(212,175,55,.12);letter-spacing:.02em">${g.cat}</div>
+      <div style="padding:6px 6px">${rows}</div>
+    </div>`;
+  }).join('');
+}
+function copyCmd(cmd) {
+  navigator.clipboard.writeText(cmd).then(() => toast(`Copied: ${cmd}`, 'info')).catch(() => {});
+}
+
+function executeCmd(cmd) {
+  // Switch to chat tab and send the command
+  const chatTabBtn = document.querySelector('nav button[onclick*="chat"]');
+  if (chatTabBtn) chatTabBtn.click();
+  setTimeout(() => {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.value = cmd;
+      sendChat();
+      toast(`Executing: ${cmd}`, 'info');
+    }
+  }, 200);
+}
+
+// ── ROI Metrics ──────────────────────────────────────────────────────────────
+async function loadMetrics() {
+  const period = document.getElementById('roi-period')?.value || 'all';
+  const d = await api('/api/metrics?period=' + period);
+  const s = d.summary || {};
+  document.getElementById('m-tasks').textContent  = (s.tasks_completed   || 0).toLocaleString();
+  document.getElementById('m-leads').textContent  = (s.leads_generated   || 0).toLocaleString();
+  document.getElementById('m-hours').textContent  = (s.hours_saved       || 0).toLocaleString();
+  document.getElementById('m-saved').textContent  = '€' + (s.cost_saved  || 0).toLocaleString();
+  document.getElementById('m-emails').textContent = (s.emails_sent       || 0).toLocaleString();
+  document.getElementById('m-content').textContent= (s.content_created   || 0).toLocaleString();
+
+  // New ROI fields
+  const humanSavedEl = document.getElementById('m-human-saved');
+  // Assume 1 AI hour = 3 human hours due to parallel execution and no context-switching overhead
+  if (humanSavedEl) humanSavedEl.textContent = (s.human_hours_saved || Math.round((s.hours_saved||0) * 3)) + 'h';
+  const agentsEl = document.getElementById('m-agents-used');
+  if (agentsEl) agentsEl.textContent = (s.agents_used || 0).toLocaleString();
+
+  // ROI Summary
+  const effEl = document.getElementById('roi-efficiency');
+  // Use server-provided efficiency_rate if available, otherwise omit the default rather than fabricate
+  if (effEl) effEl.textContent = s.efficiency_rate ? s.efficiency_rate + '%' : '–%';
+  const effDescEl = document.getElementById('roi-efficiency-desc');
+  if (effDescEl) {
+    const eff = s.efficiency_rate ? parseFloat(s.efficiency_rate) : null;
+    if (eff !== null && !isNaN(eff)) {
+      effDescEl.textContent = eff >= 80 ? 'Excellent — agents are highly productive' : eff >= 50 ? 'Good — solid AI utilization' : 'Growing — run more tasks to improve';
+    } else {
+      effDescEl.textContent = 'Complete tasks to calculate efficiency';
+    }
+  }
+  const avgDurEl = document.getElementById('roi-avg-duration');
+  if (avgDurEl) avgDurEl.textContent = s.avg_task_duration || '–';
+  const topBotEl = document.getElementById('roi-top-bot');
+  if (topBotEl) topBotEl.textContent = s.top_bot || '–';
+  const valueEl = document.getElementById('roi-value');
+  if (valueEl) valueEl.textContent = '€' + (s.total_value || s.cost_saved || 0).toLocaleString();
+
+  const events = d.events || [];
+  const el = document.getElementById('metrics-events');
+  if (!events.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">📊</div><p>No events yet. Run tasks to start tracking ROI.</p></div>';
+    return;
+  }
+  const typeIcon = {task_completed:'✅',lead_generated:'🎯',email_sent:'📧',content_created:'📝',call_booked:'📞',deal_closed:'💰',ticket_resolved:'🎫',custom:'⭐'};
+  el.innerHTML = events.slice(-30).reverse().map(e => {
+    const icon = typeIcon[e.type] || '⭐';
+    const val = e.value ? ` <span style="color:var(--success);font-weight:600">€${e.value}</span>` : '';
+    const agent = e.agent ? ` <code style="font-size:.72em">${escHtml(e.agent)}</code>` : '';
+    const note = e.notes ? `<div style="font-size:.77em;color:var(--text-muted);margin-top:2px">${escHtml(e.notes)}</div>` : '';
+    const ts = (e.ts||'').split('T')[0];
+    return `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:1.1em;margin-top:1px">${icon}</span>
+      <div style="flex:1">
+        <div style="font-size:.86em">${escHtml(e.type.replace(/_/g,' '))}${agent}${val}</div>
+        ${note}
+      </div>
+      <span style="font-size:.73em;color:var(--text-muted);white-space:nowrap">${ts}</span>
+    </div>`;
+  }).join('');
+}
+
+async function recordMetric() {
+  const type  = document.getElementById('metric-type').value;
+  const agent = document.getElementById('metric-agent').value.trim();
+  const value = parseFloat(document.getElementById('metric-value').value) || null;
+  const notes = document.getElementById('metric-notes').value.trim();
+  const r = await api('/api/metrics', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({type, agent: agent||null, value, notes: notes||null})});
+  if (r.ok) {
+    toast('Metric recorded!');
+    document.getElementById('metric-value').value = '';
+    document.getElementById('metric-notes').value = '';
+    loadMetrics();
+  } else { toast(r.detail || r.error || 'Error', 'error'); }
+}
+
+// ── Templates ────────────────────────────────────────────────────────────────
+async function loadTemplates() {
+  const d = await api('/api/templates');
+  const templates = d.templates || [];
+  const el = document.getElementById('templates-grid');
+  if (!templates.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No templates found.</p></div>';
+    return;
+  }
+  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)'};
+  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(99,102,241,.3)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)'};
+  el.innerHTML = templates.map(t => {
+    const col = catColors[t.category] || 'rgba(212,175,55,.1)';
+    const bdr = catBorderColors[t.category] || 'rgba(212,175,55,.2)';
+    const agents = (t.agents||[]).map(a => `<span style="background:rgba(212,175,55,.08);padding:2px 8px;border-radius:4px;font-size:.72em;border:1px solid rgba(212,175,55,.2);color:var(--gold-light)">${escHtml(a)}</span>`).join(' ');
+    const expected = t.expected_results || {};
+    const roi = expected.estimated_monthly_revenue || expected.estimated_monthly_savings || expected.estimated_monthly_value || '';
+    const steps = (t.setup_steps||[]).map(s => `<li style="margin-bottom:4px">${escHtml(s)}</li>`).join('');
+    return `<div style="border:1px solid ${bdr};border-radius:var(--radius);padding:20px;background:linear-gradient(135deg,var(--surface2) 0%,rgba(12,18,36,.98) 100%);display:flex;flex-direction:column;gap:14px;transition:all .25s;position:relative;overflow:hidden" onmouseenter="this.style.transform='translateY(-3px)';this.style.borderColor='rgba(212,175,55,.5)';this.style.boxShadow='0 12px 40px rgba(0,0,0,.6),0 0 0 1px rgba(212,175,55,.1)'" onmouseleave="this.style.transform='';this.style.borderColor='${bdr}';this.style.boxShadow=''">
+      <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,${bdr},transparent);pointer-events:none"></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:52px;height:52px;border-radius:14px;background:${col};border:1px solid ${bdr};display:flex;align-items:center;justify-content:center;font-size:1.8em;flex-shrink:0">${escHtml(t.icon||'📋')}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:1em;color:var(--text);margin-bottom:3px">${escHtml(t.name)}</div>
+          <span style="font-size:.73em;background:${col};padding:2px 9px;border-radius:20px;color:var(--text-secondary);border:1px solid ${bdr}">${escHtml(t.category)}</span>
+        </div>
+        ${roi ? `<div style="text-align:right;flex-shrink:0"><div style="font-size:.68em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Expected</div><div style="font-size:.88em;color:var(--success);font-weight:700;background:rgba(16,185,129,.1);padding:4px 10px;border-radius:8px;border:1px solid rgba(16,185,129,.2)">${escHtml(roi)}</div></div>` : ''}
+      </div>
+      <p style="font-size:.83em;color:var(--text-secondary);line-height:1.6;margin:0">${escHtml(t.description)}</p>
+      <div>
+        <div style="font-size:.7em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Agents Deployed</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">${agents}</div>
+      </div>
+      ${steps ? `<details style="font-size:.8em"><summary style="cursor:pointer;color:var(--gold);font-weight:600;list-style:none;display:flex;align-items:center;gap:5px"><span>▶</span> Setup Steps</summary><ol style="color:var(--text-muted);margin:8px 0 0 16px;line-height:1.7;padding:0">${steps}</ol></details>` : ''}
+      <button onclick="deployTemplate('${jsEsc(t.id)}','${jsEsc(t.name)}')" style="width:100%;padding:12px;background:linear-gradient(135deg,var(--primary-dark),var(--primary));border:none;border-radius:9px;color:#000;font-weight:700;font-size:.88em;cursor:pointer;transition:all .2s;letter-spacing:.02em;font-family:inherit" onmouseenter="this.style.filter='brightness(1.1)';this.style.boxShadow='0 6px 24px rgba(212,175,55,.5)'" onmouseleave="this.style.filter='';this.style.boxShadow=''">🚀 Deploy Template</button>
+    </div>`;
+  }).join('');
+}
+
+async function deployTemplate(id, name) {
+  if (!confirm(`Deploy template "${name}"?\n\nThis will create a new Worker Bundle with pre-configured agents and schedule.`)) return;
+  const r = await api(`/api/templates/${id}/deploy`, {method:'POST'});
+  if (r.ok) {
+    toast(`✅ Template "${name}" deployed! Check Agents tab.`, 'success');
+  } else { toast(r.detail || r.error || 'Deployment failed', 'error'); }
+}
+
+// ── Guardrails ───────────────────────────────────────────────────────────────
+async function loadGuardrails() {
+  const d = await api('/api/guardrails');
+  const pending  = d.pending  || [];
+  const log      = d.log      || [];
+  const summary  = d.summary  || {};
+
+  document.getElementById('g-pending').textContent  = pending.length;
+  document.getElementById('g-approved').textContent = summary.approved || 0;
+  document.getElementById('g-rejected').textContent = summary.rejected || 0;
+  document.getElementById('g-total').textContent    = summary.total    || 0;
+
+  // Show/hide notification banner
+  const banner = document.getElementById('guardrails-notification-banner');
+  if (banner) {
+    if (pending.length > 0) {
+      banner.style.display = 'flex';
+      banner.innerHTML = `<span style="font-size:1.2em">⚠️</span> <strong>${pending.length} pending approval${pending.length!==1?'s':''} require your attention.</strong> Review below before agents proceed.`;
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
+  const pEl = document.getElementById('guardrails-pending');
+  if (!pending.length) {
+    pEl.innerHTML = '<div class="empty"><div class="icon">✅</div><p>No pending approvals. All clear!</p></div>';
+  } else {
+    const riskColor = {high:'#ef4444', medium:'#f59e0b', low:'#10b981'};
+    pEl.innerHTML = pending.map(a => {
+      const col = riskColor[a.risk_level] || '#f59e0b';
+      return `<div style="border:1px solid ${col};border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;background:var(--surface2)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1">
+            <div style="font-size:.88em;font-weight:600">${escHtml(a.action_type||'Action')}</div>
+            <div style="font-size:.82em;color:var(--text-secondary);margin:3px 0">${escHtml(a.description||'')}</div>
+            <div style="font-size:.77em;color:var(--text-muted)">Agent: <code>${escHtml(a.agent||'?')}</code> · Risk: <span style="color:${col};font-weight:600">${escHtml(a.risk_level||'medium')}</span></div>
+          </div>
+          <div style="display:flex;gap:5px;flex-shrink:0">
+            <button class="btn btn-success btn-sm" onclick="approveAction('${jsEsc(a.id)}')">✅ Approve</button>
+            <button class="btn btn-danger btn-sm" onclick="rejectAction('${jsEsc(a.id)}')">🚫 Reject</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  const lEl = document.getElementById('guardrails-log');
+  if (!log.length) {
+    lEl.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No actions logged yet.</p></div>';
+  } else {
+    const statusIcon = {approved:'✅', rejected:'🚫', pending:'⏳', auto_approved:'✔️'};
+    lEl.innerHTML = log.slice(-20).reverse().map(e => {
+      const icon = statusIcon[e.status] || '📋';
+      const ts = (e.ts||'').replace('T',' ').slice(0,16);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:.83em">
+        <span>${icon}</span>
+        <div style="flex:1">
+          <span>${escHtml(e.action_type||'action')}</span>
+          <code style="font-size:.77em;margin-left:4px">${escHtml(e.agent||'?')}</code>
+        </div>
+        <span style="font-size:.73em;color:var(--text-muted)">${ts}</span>
+      </div>`;
+    }).join('');
+  }
+}
+
+async function approveAction(id) {
+  const r = await api(`/api/guardrails/${id}/approve`, {method:'POST'});
+  if (r.ok) { toast('Action approved ✅'); loadGuardrails(); }
+  else { toast(r.detail || 'Error', 'error'); }
+}
+
+async function rejectAction(id) {
+  const reason = prompt('Reason for rejection (optional):') || '';
+  const r = await api(`/api/guardrails/${id}/reject`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason})});
+  if (r.ok) { toast('Action rejected 🚫', 'error'); loadGuardrails(); }
+  else { toast(r.detail || 'Error', 'error'); }
+}
+
+async function saveGuardrailSettings() {
+  const settings = {
+    require_approval_for: {
+      send_email:    document.getElementById('gr-send-email').checked,
+      social_post:   document.getElementById('gr-social-post').checked,
+      make_purchase: document.getElementById('gr-make-purchase').checked,
+      delete_data:   document.getElementById('gr-delete-data').checked,
+      api_calls:     document.getElementById('gr-api-calls').checked,
+    },
+    rate_limits: {
+      emails_per_day: parseInt(document.getElementById('rl-emails').value) || 200,
+      posts_per_day:  parseInt(document.getElementById('rl-posts').value) || 10,
+      api_per_hour:   parseInt(document.getElementById('rl-api').value) || 100,
+    }
+  };
+  const r = await api('/api/guardrails/settings', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(settings)});
+  if (r.ok) { toast('Settings saved ✅'); }
+  else { toast(r.detail || 'Error', 'error'); }
+}
+
+// ── Memory ───────────────────────────────────────────────────────────────────
+async function loadMemory() {
+  const d = await api('/api/memory');
+  const clients = d.clients || [];
+  const recent  = d.recent_interactions || [];
+
+  const cEl = document.getElementById('memory-clients');
+  if (!clients.length) {
+    cEl.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No clients remembered yet. Add one below.</p></div>';
+  } else {
+    const statusColor = {prospect:'rgba(245,158,11,.2)', lead:'rgba(34,211,238,.2)', customer:'rgba(16,185,129,.2)', churned:'rgba(239,68,68,.12)'};
+    cEl.innerHTML = clients.map(c => {
+      const col = statusColor[c.status] || 'var(--surface)';
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;background:var(--surface2)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div style="font-weight:600;font-size:.9em">${escHtml(c.name)}</div>
+            ${c.company ? `<div style="font-size:.8em;color:var(--text-secondary)">${escHtml(c.company)}</div>` : ''}
+            ${c.email   ? `<div style="font-size:.77em;color:var(--text-muted)">✉ ${escHtml(c.email)}</div>`   : ''}
+            ${c.phone   ? `<div style="font-size:.77em;color:var(--text-muted)">📞 ${escHtml(c.phone)}</div>`   : ''}
+          </div>
+          <span style="font-size:.73em;background:${col};padding:2px 8px;border-radius:4px;border:1px solid var(--border)">${escHtml(c.status||'prospect')}</span>
+        </div>
+        ${c.notes ? `<div style="font-size:.78em;color:var(--text-muted);margin-top:6px;line-height:1.4">${escHtml(c.notes)}</div>` : ''}
+        <div style="font-size:.72em;color:var(--text-muted);margin-top:4px">${(c.interactions||0)} interactions · added ${(c.added_at||'').split('T')[0]} · last update ${(c.updated_at||c.added_at||'').split('T')[0]}</div>
+        <div style="margin-top:8px;display:flex;gap:5px">
+          <button class="btn btn-ghost btn-sm" onclick="updateClientStatus('${jsEsc(c.id)}','customer')" title="Mark as customer">Mark customer</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteClient('${jsEsc(c.id)}')">🗑</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  const rEl = document.getElementById('memory-recent');
+  if (!recent.length) {
+    rEl.innerHTML = '<div class="empty"><div class="icon">📝</div><p>No recent interactions.</p></div>';
+  } else {
+    rEl.innerHTML = recent.slice(-10).reverse().map(i => {
+      const ts = (i.ts||'').replace('T',' ').slice(0,16);
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:.83em">
+        <div>${escHtml(i.summary||i.message||'interaction')}</div>
+        <div style="font-size:.77em;color:var(--text-muted);margin-top:2px">${ts} · ${escHtml(i.agent||'system')}</div>
+      </div>`;
+    }).join('');
+  }
+}
+
+async function addClient() {
+  const name    = document.getElementById('mem-name').value.trim();
+  const company = document.getElementById('mem-company').value.trim();
+  const email   = document.getElementById('mem-email').value.trim();
+  const phone   = (document.getElementById('mem-phone')?.value || '').trim();
+  const status  = document.getElementById('mem-status').value;
+  const notes   = document.getElementById('mem-notes').value.trim();
+  if (!name) { toast('Name is required', 'error'); return; }
+  const r = await api('/api/memory/clients', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, company: company||null, email: email||null, phone: phone||null, status, notes: notes||null})});
+  if (r.ok) {
+    toast('Client added ✅');
+    document.getElementById('mem-name').value    = '';
+    document.getElementById('mem-company').value = '';
+    document.getElementById('mem-email').value   = '';
+    const phoneEl = document.getElementById('mem-phone');
+    if (phoneEl) phoneEl.value = '';
+    document.getElementById('mem-notes').value   = '';
+    loadMemory();
+  } else { toast(r.detail || 'Error', 'error'); }
+}
+
+async function updateClientStatus(id, status) {
+  await api(`/api/memory/clients/${id}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({status})});
+  loadMemory();
+}
+
+async function deleteClient(id) {
+  if (!confirm('Delete this client from memory?')) return;
+  await api(`/api/memory/clients/${id}`, {method:'DELETE'});
+  loadMemory();
+}
+
+// ── Integrations ─────────────────────────────────────────────────────────────
+async function loadIntegrations() {
+  const d = await api('/api/integrations');
+  const integrations = d.integrations || [];
+  const el = document.getElementById('integrations-grid');
+  if (!integrations.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">🔌</div><p>No integrations configured.</p></div>';
+    return;
+  }
+  el.innerHTML = integrations.map(intg => {
+    const enabled = intg.enabled === true;
+    const statusCol = enabled ? 'var(--success)' : 'var(--text-muted)';
+  const fields = (intg.fields||[]).map(f => {
+    const isPass = f.type === 'password';
+    const savedVal = intg.config && intg.config[f.key] ? String(intg.config[f.key]) : '';
+    // Never pre-fill password fields with saved values — show placeholder bullets instead
+    const displayVal = isPass ? '' : escHtml(savedVal);
+    const placeholder = isPass && savedVal ? '●●●●●●●● (set — paste new value to update)' : escHtml(f.placeholder||'');
+    return `
+      <div class="form-group" style="margin-bottom:8px">
+        <label style="font-size:.78em">${escHtml(f.label)}${isPass && savedVal ? ' <span style="color:var(--success);font-size:.85em">● saved</span>' : ''}</label>
+        <input type="${isPass?'password':f.type||'text'}" id="intg-${escHtml(intg.id)}-${escHtml(f.key)}"
+          placeholder="${placeholder}"
+          value="${displayVal}"
+          ${isPass?'autocomplete="new-password"':''}/>
+      </div>`}).join('');
+    return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:18px;background:var(--surface2)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-size:1.6em">${escHtml(intg.icon||'🔌')}</span>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:.95em">${escHtml(intg.name)}</div>
+          <div style="font-size:.8em;color:var(--text-muted)">${escHtml(intg.description||'')}</div>
+        </div>
+        <span style="font-size:.73em;font-weight:600;color:${statusCol}">${enabled ? '● Connected' : '○ Not configured'}</span>
+      </div>
+      <div>${fields}</div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn btn-primary btn-sm" style="flex:1" onclick="saveIntegration('${jsEsc(intg.id)}')">💾 Save</button>
+        <button class="btn btn-ghost btn-sm" onclick="testIntegration('${jsEsc(intg.id)}')">🔍 Test</button>
+      </div>
+      <div id="intg-result-${escHtml(intg.id)}" style="margin-top:6px;font-size:.8em"></div>
+    </div>`;
+  }).join('');
+}
+
+async function saveIntegration(id) {
+  const d = await api('/api/integrations');
+  const intg = (d.integrations||[]).find(i => i.id === id);
+  if (!intg) { toast('Integration not found', 'error'); return; }
+  const config = {};
+  (intg.fields||[]).forEach(f => {
+    const el = document.getElementById(`intg-${id}-${f.key}`);
+    if (!el) return;
+    const isPass = f.type === 'password';
+    const val = el.value;
+    if (isPass && !val.trim()) {
+      // Keep existing value — user did not provide a new one
+      if (intg.config && intg.config[f.key]) config[f.key] = intg.config[f.key];
+    } else {
+      config[f.key] = val;
+    }
+  });
+  const enabled = Object.values(config).some(v => v && v.toString().trim());
+  const r = await api(`/api/integrations/${id}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({config, enabled})});
+  if (r.ok) { toast(`${intg.name} saved ✅`); loadIntegrations(); }
+  else { toast(r.detail || 'Error', 'error'); }
+}
+
+async function testIntegration(id) {
+  const el = document.getElementById(`intg-result-${id}`);
+  if (el) el.textContent = '⏳ Testing…';
+  const r = await api(`/api/integrations/${id}/test`, {method:'POST'});
+  if (el) {
+    if (r.ok) { el.style.color = 'var(--success)'; el.textContent = '✅ ' + (r.message || 'Connection OK'); }
+    else       { el.style.color = 'var(--danger)';  el.textContent = '❌ ' + (r.message || r.detail || 'Test failed'); }
+  }
+}
+
+
+// ── Options / Settings ────────────────────────────────────────────────────────
+async function loadOptions() {
+  const d = await api('/api/settings');
+  renderSettingsSection('opt-api-keys',   d.api_keys    || []);
+  renderSettingsSection('opt-preferences', d.preferences || []);
+}
+
+function renderSettingsSection(containerId, fields) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = fields.map(f => `
+    <div class="form-group" style="margin-bottom:10px">
+      <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <span>${escHtml(f.label)}</span>
+        ${f.has_value
+          ? '<span style="font-size:.73em;color:var(--success);font-weight:600">● set</span>'
+          : '<span style="font-size:.73em;color:var(--text-muted)">○ not set</span>'}
+      </label>
+      <div style="display:flex;gap:6px">
+        <input id="opt-field-${escHtml(f.key)}"
+          type="${f.type === 'password' ? 'password' : 'text'}"
+          placeholder="${escHtml(f.placeholder)}"
+          value="${escHtml(f.value)}"
+          autocomplete="off"
+          style="flex:1"/>
+        ${f.type === 'password'
+          ? `<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:5px 9px"
+               onclick="toggleSecret('opt-field-${jsEsc(f.key)}',this)" title="Show/hide">👁</button>`
+          : ''}
+      </div>
+    </div>`).join('');
+}
+
+function toggleSecret(inputId, btn) {
+  const el = document.getElementById(inputId);
+  if (!el) return;
+  el.type = el.type === 'password' ? 'text' : 'password';
+  btn.textContent = el.type === 'password' ? '👁' : '🙈';
+}
+
+async function saveSettings(category) {
+  const containerId = 'opt-' + category.replace(/_/g, '-');
+  const inputs = document.querySelectorAll('#' + containerId + ' input');
+  const updates = {};
+  inputs.forEach(el => {
+    const key = el.id.replace('opt-field-', '');
+    if (key) updates[key] = el.value;
+  });
+  if (!Object.keys(updates).length) { toast('Nothing to save'); return; }
+  const r = await api('/api/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({updates})
+  });
+  if (r.ok) {
+    const msg = r.saved
+      ? `✅ Saved ${r.saved} setting${r.saved !== 1 ? 's' : ''}`
+      : 'No changes (all values were unchanged)';
+    toast(msg, r.saved ? 'success' : 'info');
+    if (r.saved) loadOptions();
+  } else {
+    toast(r.detail || 'Error saving', 'error');
+  }
+}
+
+async function runSecurityCheck() {
+  const el = document.getElementById('opt-security-results');
+  el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em;padding:8px 0">⏳ Running security checklist…</p>';
+  const d = await api('/api/settings/security-check');
+  const findings = d.findings || [];
+
+  const colorMap   = {ok:'var(--success)', warning:'#f59e0b', error:'var(--danger)', info:'var(--accent)'};
+  const iconMap    = {ok:'✅', warning:'⚠️', error:'❌', info:'ℹ️'};
+  const badgeMap   = {ok:'DONE', warning:'ACTION NEEDED', error:'NOT DONE', info:'INFO'};
+  const badgeBgMap = {
+    ok:      'rgba(34,197,94,.15)',
+    warning: 'rgba(245,158,11,.15)',
+    error:   'rgba(239,68,68,.15)',
+    info:    'rgba(99,102,241,.15)',
+  };
+  const warnColor = colorMap.warning;
+
+  if (!findings.length) {
+    el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em">No findings.</p>';
+    return;
+  }
+
+  const done    = findings.filter(f => f.level === 'ok').length;
+  const errors  = findings.filter(f => f.level === 'error').length;
+  const warns   = findings.filter(f => f.level === 'warning').length;
+  const summaryColor = errors ? 'var(--danger)' : warns ? warnColor : 'var(--success)';
+  const summaryIcon  = errors ? '❌' : warns ? '⚠️' : '✅';
+  const summaryText  = errors
+    ? `${errors} critical issue${errors>1?'s':''} found`
+    : warns
+      ? `${warns} warning${warns>1?'s':''} — review recommended`
+      : 'All checks passed — ready for production';
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:7px;
+         background:var(--surface2);border:1px solid var(--border);margin-bottom:10px">
+      <span style="font-size:1.2em">${summaryIcon}</span>
+      <div>
+        <div style="font-size:.88em;font-weight:700;color:${summaryColor}">${summaryText}</div>
+        <div style="font-size:.76em;color:var(--text-muted);margin-top:2px">
+          ${done} passed · ${errors} critical · ${warns} warnings · ${findings.filter(f=>f.level==='info').length} info
+        </div>
+      </div>
+    </div>
+    ${findings.map((f, idx) => {
+      const color   = colorMap[f.level]   || 'var(--text)';
+      const icon    = iconMap[f.level]    || '•';
+      const badge   = badgeMap[f.level]   || f.level.toUpperCase();
+      const badgeBg = badgeBgMap[f.level] || 'rgba(255,255,255,.1)';
+
+      let actionHtml = '';
+      if (f.action) {
+        if (f.action_type === 'command') {
+          actionHtml = `
+            <div style="margin-top:7px">
+              <div style="font-size:.74em;color:var(--text-muted);margin-bottom:3px;font-weight:600;letter-spacing:.03em">▶ COMMAND</div>
+              <code style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:5px;
+                   padding:6px 10px;font-size:.78em;color:var(--accent);word-break:break-all;
+                   white-space:pre-wrap">${escHtml(f.action)}</code>
+            </div>`;
+        } else if (f.action_type === 'config') {
+          actionHtml = `
+            <div style="margin-top:7px">
+              <div style="font-size:.74em;color:var(--text-muted);margin-bottom:3px;font-weight:600;letter-spacing:.03em">⚙️ ADD TO security.local.yml</div>
+              <code style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:5px;
+                   padding:6px 10px;font-size:.78em;color:${warnColor};word-break:break-all;
+                   white-space:pre-wrap">${escHtml(f.action)}</code>
+            </div>`;
+        } else {
+          actionHtml = `<div style="margin-top:5px;font-size:.78em;color:var(--text-muted)">💡 ${escHtml(f.action)}</div>`;
+        }
+      }
+
+      let markDoneHtml = '';
+      if (f.level !== 'ok' && f.action) {
+        const btnId = `sec-done-btn-${idx}`;
+        const fbId  = `sec-done-fb-${idx}`;
+        markDoneHtml = `
+          <div style="margin-top:8px;padding-left:26px;display:flex;align-items:center;gap:8px" id="${fbId}">
+            <button id="${btnId}" class="btn btn-ghost btn-sm"
+                    style="font-size:.74em;padding:3px 10px;border-color:var(--border)"
+                    onclick="markSecurityActionDone(${idx+1},${JSON.stringify(f.title)},${JSON.stringify(f.action)},${JSON.stringify(f.action_type)},'${btnId}','${fbId}')">
+              ${f.action_type === 'command' ? '📋 Copy & Mark Done' : '✓ Mark Done'}
+            </button>
+          </div>`;
+      }
+
+      return `
+        <div style="display:flex;gap:10px;padding:10px 12px;border-radius:7px;
+             background:var(--surface2);border:1px solid var(--border);margin-bottom:6px;
+             border-left:3px solid ${color};align-items:flex-start">
+          <span style="flex-shrink:0;font-size:1.05em;margin-top:1px">${icon}</span>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:.76em;color:var(--text-muted);font-weight:600;min-width:18px">${idx+1}.</span>
+              <span style="font-size:.87em;font-weight:600;color:${color}">${escHtml(f.title)}</span>
+              <span style="font-size:.7em;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:99px;
+                   background:${badgeBg};color:${color};border:1px solid ${color}55;flex-shrink:0">${badge}</span>
+            </div>
+            <div style="font-size:.8em;color:var(--text-muted);margin-top:3px;padding-left:26px">
+              ${escHtml(f.detail)}
+            </div>
+            ${actionHtml ? `<div style="padding-left:26px">${actionHtml}</div>` : ''}
+            ${markDoneHtml}
+          </div>
+        </div>`;
+    }).join('')}`;
+}
+
+async function markSecurityActionDone(num, title, action, actionType, btnId, fbId) {
+  const btn = document.getElementById(btnId);
+  const fb  = document.getElementById(fbId);
+  if (btn) btn.disabled = true;
+  if (actionType === 'command' && action) {
+    try { await navigator.clipboard.writeText(action); } catch(e) {}
+  }
+  await api('/api/history/mark-action', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({title, action, action_type: actionType, check_number: num}),
+  });
+  if (fb) {
+    fb.innerHTML = `<span style="font-size:.78em;color:var(--success);font-weight:600">
+      ✅ ${actionType === 'command' ? 'Copied to clipboard — ' : ''}Marked as done and logged to History
+    </span>`;
+  }
+}
+
+
+// ── Activity History ──────────────────────────────────────────────────────────
+let _historyEntries = [];
+
+async function loadHistory() {
+  const el = document.getElementById('history-timeline');
+  if (!el) return;
+  el.innerHTML = '<div class="empty"><div class="icon">⏳</div><p>Loading…</p></div>';
+  const d = await api('/api/history?limit=1000');
+  _historyEntries = d.entries || [];
+  document.getElementById('history-count').textContent =
+    `${_historyEntries.length} entr${_historyEntries.length === 1 ? 'y' : 'ies'}`;
+  renderHistory(_historyEntries);
+}
+
+function filterHistory() {
+  const q      = (document.getElementById('history-search')?.value || '').toLowerCase();
+  const type   = document.getElementById('history-type-filter')?.value || '';
+  const source = document.getElementById('history-source-filter')?.value || '';
+  const filtered = _historyEntries.filter(e => {
+    if (type   && e.event_type !== type)   return false;
+    if (source && e.source     !== source) return false;
+    if (q) {
+      const hay = (e.description + ' ' + e.event_type + ' ' + (e.source||'')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  document.getElementById('history-count').textContent =
+    `${filtered.length} / ${_historyEntries.length} entr${_historyEntries.length === 1 ? 'y' : 'ies'}`;
+  renderHistory(filtered);
+}
+
+function renderHistory(entries) {
+  const el = document.getElementById('history-timeline');
+  if (!el) return;
+  if (!entries.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">🕐</div><p>No activity recorded yet.</p></div>';
+    return;
+  }
+
+  const typeColor = {
+    security_check:       'var(--accent)',
+    security_action_done: 'var(--success)',
+    settings_saved:       '#6366f1',
+    guardrail_approved:   'var(--success)',
+    guardrail_rejected:   'var(--danger)',
+    agent_command:        'var(--text)',
+    task_run:             'var(--accent)',
+    worker_triggered:     '#f59e0b',
+    system:               'var(--text-muted)',
+  };
+
+  // Group entries by date
+  const groups = {};
+  for (const e of entries) {
+    const day = e.ts ? e.ts.slice(0, 10) : 'Unknown';
+    (groups[day] = groups[day] || []).push(e);
+  }
+
+  el.innerHTML = Object.entries(groups).map(([day, items]) => `
+    <div style="margin-bottom:18px">
+      <div style="font-size:.74em;font-weight:700;color:var(--text-muted);letter-spacing:.06em;
+           text-transform:uppercase;margin-bottom:8px;padding-left:4px">${escHtml(day)}</div>
+      ${items.map(e => {
+        const color = typeColor[e.event_type] || 'var(--text-muted)';
+        const ts    = e.ts ? e.ts.slice(11, 19) : '';
+        let detailsHtml = '';
+        if (e.details && Object.keys(e.details).length) {
+          const dLines = Object.entries(e.details)
+            .filter(([,v]) => v !== '' && v !== null && v !== undefined)
+            .map(([k, v]) => `<span style="color:var(--text-muted)">${escHtml(k)}:</span> ${escHtml(String(v))}`)
+            .join('  ·  ');
+          if (dLines) detailsHtml = `
+            <div style="font-size:.76em;color:var(--text-muted);margin-top:3px;
+                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${dLines}</div>`;
+        }
+        return `
+          <div style="display:flex;gap:10px;padding:9px 12px;border-radius:6px;
+               background:var(--surface2);border:1px solid var(--border);margin-bottom:5px;
+               border-left:3px solid ${color};align-items:flex-start">
+            <span style="flex-shrink:0;font-size:1em">${escHtml(e.icon||'📋')}</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:.86em;font-weight:600;color:${color}">${escHtml(e.description)}</span>
+                <span style="font-size:.7em;padding:1px 7px;border-radius:99px;background:var(--bg);
+                     border:1px solid var(--border);color:var(--text-muted);flex-shrink:0">
+                  ${escHtml(e.source || e.event_type || '')}
+                </span>
+              </div>
+              ${detailsHtml}
+            </div>
+            <span style="flex-shrink:0;font-size:.74em;color:var(--text-muted);white-space:nowrap;
+                 padding-top:2px">${escHtml(ts)}</span>
+          </div>`;
+      }).join('')}
+    </div>`).join('');
+}
+
+async function clearHistory() {
+  if (!confirm('Clear all activity history? This cannot be undone.')) return;
+  const r = await api('/api/history/clear', {method:'POST'});
+  if (r.ok) { _historyEntries = []; renderHistory([]); toast('History cleared'); }
+  else toast('Failed to clear history', 'error');
+}
+
+// ── Auto-updater ──────────────────────────────────────────────────────────────
+async function loadUpdaterStatus() {
+  const el = document.getElementById('opt-updater-status');
+  if (!el) return;
+  const d = await api('/api/updater/status');
+  if (d.error) {
+    el.innerHTML = '<p style="color:var(--text-muted)">Updater not running yet — starts automatically with the agent runtime.</p>';
+    return;
+  }
+  const statusColor = {
+    up_to_date: 'var(--success)', updated: 'var(--accent)',
+    updating: 'var(--warning)', check_failed: 'var(--danger)',
+    started: 'var(--text-muted)', initialized: 'var(--text-muted)',
+  };
+  const local  = d.local_sha  ? d.local_sha.slice(0,8)  : '—';
+  const remote = d.remote_sha ? d.remote_sha.slice(0,8) : '—';
+  const col    = statusColor[d.status] || 'var(--text-muted)';
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
+        <div style="font-size:.75em;color:var(--text-muted);margin-bottom:2px">INSTALLED</div>
+        <code style="font-size:.9em">${escHtml(local)}</code>
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
+        <div style="font-size:.75em;color:var(--text-muted);margin-bottom:2px">LATEST ON ${escHtml((d.branch||'main').toUpperCase())}</div>
+        <code style="font-size:.9em">${escHtml(remote)}</code>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="font-size:.8em;font-weight:700;color:${col}">${escHtml(d.status||'unknown')}</span>
+      ${d.last_check ? `<span style="font-size:.76em;color:var(--text-muted)">Last check: ${escHtml(d.last_check.slice(0,19).replace('T',' '))} UTC</span>` : ''}
+    </div>
+    ${d.last_update ? `<div style="font-size:.78em;color:var(--text-muted)">Last update: ${escHtml(d.last_update.slice(0,19).replace('T',' '))} UTC</div>` : ''}
+    ${d.restarted_agents && d.restarted_agents.length
+      ? `<div style="font-size:.78em;color:var(--text-muted);margin-top:4px">Restarted agents: ${escHtml(d.restarted_agents.join(', '))}</div>` : ''}
+    <div style="font-size:.76em;color:var(--text-muted);margin-top:6px">
+      Polls every ${d.interval_seconds || 300}s · Repo: ${escHtml(d.repo||'F-game25/AI-EMPLOYEE')}
+    </div>`;
+}
+
+async function checkForUpdates() {
+  const el = document.getElementById('opt-updater-status');
+  if (el) el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em;padding:8px 0">⏳ Checking GitHub…</p>';
+  const r = await api('/api/updater/check', {method:'POST'});
+  if (r.ok) {
+    toast(r.message || 'Check triggered');
+    setTimeout(loadUpdaterStatus, 3000);
+  } else {
+    toast(r.detail || 'Check failed', 'error');
+  }
+}
+
+async function triggerUpdate() {
+  const el = document.getElementById('opt-updater-status');
+  if (el) el.innerHTML = '<p style="color:var(--text-muted);font-size:.85em;padding:8px 0">⏳ Downloading update…</p>';
+  const r = await api('/api/updater/update', {method:'POST'});
+  if (r.ok) {
+    toast(r.message || 'Update triggered — affected agents restarting…', 'info');
+    setTimeout(loadUpdaterStatus, 8000);
+  } else {
+    toast(r.detail || 'Update failed', 'error');
+  }
+}
+
+// ── Nuke data ─────────────────────────────────────────────────────────────────
+async function nukeData() {
+  const confirm_val = document.getElementById('nuke-confirm').value;
+  const el = document.getElementById('nuke-result');
+  el.textContent = '⏳ Processing…';
+  el.style.color = 'var(--text-muted)';
+  const r = await api('/api/settings/nuke', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({confirm: confirm_val})
+  });
+  if (r.ok) {
+    el.style.color = 'var(--success)';
+    el.textContent = `✅ Deleted ${r.deleted.length} file(s)${r.deleted.length ? ': ' + r.deleted.join(', ') : ''}`;
+    document.getElementById('nuke-confirm').value = '';
+    if (r.errors && r.errors.length) {
+      el.textContent += ' | Errors: ' + r.errors.join(', ');
+      el.style.color = 'var(--warning)';
+    }
+  } else {
+    el.style.color = 'var(--danger)';
+    el.textContent = '❌ ' + (r.detail || 'Error');
+  }
+}
+
+// ── Delete Complete Bot (two-step confirmation) ───────────────────────────────
+function deleteBotStep2() {
+  const c1 = document.getElementById('uninstall-check1');
+  const c2 = document.getElementById('uninstall-check2');
+  const el = document.getElementById('uninstall-result');
+  if (!c1 || !c2) return;
+  if (!c1.checked || !c2.checked) {
+    el.style.color = 'var(--danger)';
+    el.textContent = '❌ Please tick both checkboxes before continuing.';
+    return;
+  }
+  el.textContent = '';
+  document.getElementById('uninstall-step2').style.display = 'block';
+  document.getElementById('uninstall-confirm').focus();
+}
+
+function deleteBotCancel() {
+  document.getElementById('uninstall-step2').style.display = 'none';
+  document.getElementById('uninstall-confirm').value = '';
+  document.getElementById('uninstall-check1').checked = false;
+  document.getElementById('uninstall-check2').checked = false;
+  const el = document.getElementById('uninstall-result');
+  el.textContent = '';
+}
+
+async function deleteBotFinal() {
+  const confirm_val = document.getElementById('uninstall-confirm').value;
+  const el = document.getElementById('uninstall-result');
+  el.style.color = 'var(--text-muted)';
+  el.textContent = '⏳ Stopping all agents and removing installation…';
+  const r = await api('/api/settings/uninstall', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({confirm: confirm_val})
+  });
+  if (r.ok) {
+    el.style.color = 'var(--success)';
+    el.textContent = '✅ AI Employee has been fully uninstalled. You can close this tab.';
+    // Disable all further interaction
+    document.querySelectorAll('#tab-options button, #tab-options input').forEach(b => b.disabled = true);
+  } else {
+    el.style.color = 'var(--danger)';
+    el.textContent = '❌ ' + (r.detail || 'Uninstall failed');
+    document.getElementById('uninstall-confirm').value = '';
+  }
+}
+
+// Auto-refresh dashboard every 30s
+setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
+
+// ── Auto-generate scheduler task ID from label ────────────────────────────────
+function autoSchedId() {
+  const label = document.getElementById('sched-label')?.value || '';
+  const idEl = document.getElementById('sched-id');
+  if (!idEl || idEl.dataset.manuallySet) return;
+  const slug = label.toLowerCase().trim()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 30);
+  const ts = Date.now().toString().slice(-4);
+  idEl.value = slug ? slug + '_' + ts : '';
+}
+
+// ── Assign task to agent from swarm ──────────────────────────────────────────
+function assignTaskToAgent(agentId) {
+  const tasksBtn = document.querySelector('nav button[onclick*="tasks"]');
+  if (tasksBtn) tasksBtn.click();
+  setTimeout(() => {
+    const taskInput = document.getElementById('task-input');
+    if (taskInput) {
+      taskInput.focus();
+      taskInput.placeholder = `Describe what you want ${agentId} to do…`;
+    }
+    if (typeof showManualAgentPicker === 'function') showManualAgentPicker();
+    setTimeout(() => {
+      const checkbox = document.querySelector(`[data-agent-id="${agentId}"]`);
+      if (checkbox) checkbox.click();
+    }, 300);
+  }, 200);
+}
+
+// ── Server-Sent Events for real-time updates ──────────────────────────────────
+let _sseRetries = 0;
+function connectSSE() {
+  if (typeof EventSource === 'undefined') return;
+  const es = new EventSource('/api/events');
+  es.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (typeof d.running === 'number') {
+        animateCount('stat-running', d.running);
+        const headerSub = document.getElementById('header-sub');
+        if (headerSub) headerSub.textContent = `${d.running} agents running`;
+      }
+      if (d.active_task) {
+        const el = document.getElementById('sys-control-sub');
+        if (el) el.textContent = `◈ Active task: ${d.active_task}`;
+      }
+    } catch {}
+    _sseRetries = 0;
+  };
+  es.onerror = () => {
+    es.close();
+    _sseRetries++;
+    if (_sseRetries < 10) setTimeout(connectSSE, Math.min(5000 * _sseRetries, 30000));
+  };
+}
+connectSSE();
+
+// ── BLACKLIGHT ───────────────────────────────────────────────────────────────
+const BL_REFRESH_INTERVAL_MS = 8000;  // auto-refresh rate while BLACKLIGHT is running
+let _blAutoRefreshTimer = null;
+
+function _blSyncUI(running, goal) {
+  // status dot + label (in BLACKLIGHT tab header)
+  const dot = document.getElementById('bl-status-dot');
+  if (dot) {
+    dot.style.background = running ? '#a855f7' : '#6b7280';
+    dot.style.boxShadow = running ? '0 0 12px rgba(168,85,247,.8),0 0 24px rgba(168,85,247,.4)' : 'none';
+  }
+  const lbl = document.getElementById('bl-status-label');
+  if (lbl) { lbl.textContent = running ? '⚡ RUNNING' : 'IDLE'; lbl.style.color = running ? '#c084fc' : '#a78bfa'; }
+
+  // tab toggle
+  const tabToggle = document.getElementById('bl-toggle');
+  if (tabToggle) tabToggle.checked = running;
+  const tabLbl = document.getElementById('bl-toggle-label');
+  if (tabLbl) { tabLbl.textContent = running ? 'ON' : 'OFF'; tabLbl.style.color = running ? '#a855f7' : 'var(--text-muted)'; }
+
+  // dashboard toggle
+  const dashToggle = document.getElementById('dash-bl-toggle');
+  if (dashToggle) dashToggle.checked = running;
+  const dashSub = document.getElementById('dash-bl-sublabel');
+  if (dashSub) dashSub.textContent = running ? `⚡ Running — ${goal || 'no goal set'}` : 'Autonomous agent — idle';
+
+  // goal input (pre-fill if known)
+  const goalEl = document.getElementById('bl-goal-input');
+  if (goalEl && goal && !goalEl.value) goalEl.value = goal;
+  const dashGoalEl = document.getElementById('dash-bl-goal-input');
+  if (dashGoalEl && goal && !dashGoalEl.value) dashGoalEl.value = goal;
+
+  // auto-refresh timer
+  if (running && !_blAutoRefreshTimer) {
+    _blAutoRefreshTimer = setInterval(() => { blRefresh(); blLoadLogs(); }, BL_REFRESH_INTERVAL_MS);
+  } else if (!running && _blAutoRefreshTimer) {
+    clearInterval(_blAutoRefreshTimer);
+    _blAutoRefreshTimer = null;
+  }
+}
+
+async function blRefresh() {
+  const d = await api('/api/blacklight/status');
+  const running = d.running || false;
+  document.getElementById('bl-stat-cycle').textContent   = d.cycle   || 0;
+  document.getElementById('bl-stat-opps').textContent    = d.opportunities_found || 0;
+  document.getElementById('bl-stat-actions').textContent = d.actions_taken || 0;
+  const last = d.last_activity ? d.last_activity.replace('T',' ').replace('Z','') : '—';
+  document.getElementById('bl-stat-last').textContent    = last;
+  _blSyncUI(running, d.goal || '');
+}
+
+async function blLoadLogs() {
+  const entries = await api('/api/blacklight/logs?limit=80');
+  const el = document.getElementById('bl-log');
+  if (!el) return;
+  if (!entries || !entries.length) {
+    el.innerHTML = '<span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>';
+    return;
+  }
+  const _levelColor = { system:'#818cf8', cycle:'#a78bfa', info:'#67e8f9', action:'#4ade80',
+                        result:'#facc15', eval:'#fb923c', improve:'#f472b6',
+                        warn:'#fbbf24', error:'#f87171' };
+  const html = entries.slice().reverse().map(e => {
+    const col   = _levelColor[e.level] || '#c9d1d9';
+    const ts    = (e.ts || '').replace('T',' ').replace('Z','');
+    const badge = `<span style="color:${col};font-weight:600;min-width:54px;display:inline-block">[${e.level || 'info'}]</span>`;
+    const msg   = (e.msg || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<div>${badge} <span style="color:#6b7280;font-size:.72em">${ts}</span> ${msg}</div>`;
+  }).join('');
+  el.innerHTML = html;
+}
+
+async function blToggle(on) {
+  // Sync both toggles immediately so neither feels laggy
+  _blSyncUI(on, document.getElementById('bl-goal-input')?.value || document.getElementById('dash-bl-goal-input')?.value || '');
+
+  if (on) {
+    const goal = (document.getElementById('bl-goal-input')?.value || document.getElementById('dash-bl-goal-input')?.value || '').trim();
+    if (!goal) {
+      // Determine which context triggered the toggle to give a useful hint
+      const onDash = !!document.getElementById('dash-bl-goal-input');
+      toast(onDash ? 'Set a goal first — type one in the goal field below the BLACKLIGHT toggle' : 'Set a goal first — type one in the goal field above the start button', 'error');
+      _blSyncUI(false, '');
+      return;
+    }
+    const r = await api('/api/blacklight/start', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({goal})});
+    if (r.ok) {
+      toast('⚡ BLACKLIGHT started!');
+      blRefresh();
+      blLoadLogs();
+    } else {
+      toast(r.message || 'Failed to start', 'error');
+      _blSyncUI(false, '');
+    }
+  } else {
+    const r = await api('/api/blacklight/stop', {method:'POST'});
+    toast(r.ok ? '■ BLACKLIGHT stopped' : (r.message || 'Stop failed'), r.ok ? 'info' : 'error');
+    setTimeout(blRefresh, 800);
+  }
+}
+
+async function hermesToggle(on) {
+  const r = await api('/api/agents/' + (on ? 'start' : 'stop'), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({bot: 'hermes-agent'})
+  });
+  if (r.ok) {
+    toast(on ? '🧠 Hermes Agent started' : '■ Hermes Agent stopped', on ? 'success' : 'info');
+    const sub = document.getElementById('dash-hermes-sublabel');
+    if (sub) sub.textContent = on ? '🧠 Running — ready for tasks' : 'Reasoning agent — stopped';
+    _updateChatHermesStatus(on);
+  } else {
+    toast(r.message || (on ? 'Failed to start Hermes' : 'Failed to stop Hermes'), 'error');
+    const el = document.getElementById('dash-hermes-toggle');
+    if (el) el.checked = !on;
+  }
+}
+
+function _updateChatHermesStatus(running) {
+  const dot = document.getElementById('chat-hermes-dot');
+  const lbl = document.getElementById('chat-hermes-label');
+  if (dot) dot.style.background = running ? '#4ade80' : '#6b7280';
+  if (lbl) lbl.textContent = running ? 'Hermes ● online' : 'Hermes ○ offline';
+  const wrap = document.getElementById('chat-hermes-status');
+  if (wrap) wrap.style.borderColor = running ? 'rgba(74,222,128,.4)' : 'rgba(148,163,184,.2)';
+}
+
+// ── ASCEND FORGE JS ───────────────────────────────────────────────────────────
+const RISK_COLORS = {LOW:'#4ade80', MEDIUM:'#fb923c', HIGH:'#ef4444'};
+const STATUS_EMOJI = {pending:'⏳', approved:'✅', rejected:'❌', rolled_back:'↩️', failed:'💥'};
+
+async function afRefresh() {
+  try {
+    const s = await api('/api/ascend/status');
+    // Mode badge
+    const badge = document.getElementById('af-mode-badge');
+    if (badge) { badge.textContent = s.mode || 'AUTO'; }
+    // Stats
+    const set = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+    set('af-stat-pending',  s.pending_count  || 0);
+    set('af-stat-approved', s.patches_approved || 0);
+    set('af-stat-rejected', s.patches_rejected || 0);
+    set('af-stat-total',    s.total_patches   || 0);
+    // Activity
+    const act = document.getElementById('af-current-activity');
+    if (act) act.textContent = 'Activity: ' + (s.current_activity || 'idle');
+    const tgt = document.getElementById('af-current-target');
+    if (tgt) tgt.textContent = 'Target: ' + (s.current_target || '—');
+    // Highlight active mode button
+    ['GENERAL','MONEY','AUTO'].forEach(m => {
+      const btn = document.getElementById('af-mode-'+m.toLowerCase());
+      if (btn) {
+        if (s.mode === m) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      }
+    });
+    // Auto-approve toggle
+    const aa = document.getElementById('af-auto-approve');
+    if (aa) aa.checked = !!s.auto_approve_low;
+    // Activity feed
+    const logEl = document.getElementById('af-activity-log');
+    if (logEl && Array.isArray(s.activity) && s.activity.length) {
+      logEl.innerHTML = s.activity.map(e => {
+        const color = e.level==='warn'?'#fb923c':e.level==='error'?'#ef4444':e.level==='success'?'#4ade80':'#c9d1d9';
+        return `<div style="color:${color}">[${(e.ts||'').slice(11,19)}] ${escHtml(e.msg)}</div>`;
+      }).join('');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  } catch(e) { console.warn('afRefresh', e); }
+}
+
+async function afSetMode(mode) {
+  const r = await api('/api/ascend/mode', {method:'POST',body:{mode}});
+  if (r.ok) { toast(`⚙️ Mode: ${mode}`); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+
+async function afScan() {
+  toast('🔍 Scanning system…', 'info');
+  const r = await api('/api/ascend/scan', {method:'POST'});
+  if (r.ok) {
+    toast(`✅ Scan complete — ${(r.patches||[]).length} patch(es) queued`);
+    afLoadPatches(); afRefresh();
+  } else { toast(r.detail || 'Scan failed', 'error'); }
+}
+
+async function afLoadPatches() {
+  try {
+    const patches = await api('/api/ascend/patches');
+    const el = document.getElementById('af-patches-list');
+    if (!el) return;
+    if (!Array.isArray(patches) || !patches.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>';
+      return;
+    }
+    el.innerHTML = patches.map(p => `
+      <div style="border:1px solid #374151;border-radius:8px;padding:10px 14px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${RISK_COLORS[p.risk_level]||'#6b7280'};color:#000">${p.risk_level}</span>
+          <span style="font-size:.8em;color:#9ca3af">${p.patch_type}</span>
+          <span style="font-size:.8em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}</span>
+        </div>
+        <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
+        <div style="font-size:.8em;color:#9ca3af;margin-bottom:6px">${escHtml(p.reason||'')}</div>
+        ${p.diff_preview ? `<details style="margin-bottom:6px"><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" style="background:#15803d;color:#fff" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
+          <button class="btn btn-sm" style="background:#7f1d1d;color:#fff" onclick="afReject('${p.patch_id}')">❌ Reject</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.warn('afLoadPatches', e); }
+}
+
+async function afApprove(id) {
+  const r = await api(`/api/ascend/patches/${id}/approve`, {method:'POST'});
+  if (r.ok) { toast('✅ Patch approved'); afLoadPatches(); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+async function afReject(id) {
+  const r = await api(`/api/ascend/patches/${id}/reject`, {method:'POST'});
+  if (r.ok) { toast('❌ Patch rejected'); afLoadPatches(); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+async function afRollback(id) {
+  if (!confirm('Roll back this patch?')) return;
+  const r = await api(`/api/ascend/patches/${id}/rollback`, {method:'POST'});
+  if (r.ok) { toast('↩️ Rolled back'); afLoadChangelog(); afRefresh(); }
+  else toast(r.detail || 'Failed', 'error');
+}
+
+async function afApplyAllLow() {
+  const r = await api('/api/ascend/patches');
+  const low = (Array.isArray(r)?r:[]).filter(p=>p.risk_level==='LOW');
+  if (!low.length) { toast('No LOW-risk patches pending', 'info'); return; }
+  for (const p of low) { await api(`/api/ascend/patches/${p.patch_id}/approve`,{method:'POST'}); }
+  toast(`✅ Applied ${low.length} LOW-risk patch(es)`);
+  afLoadPatches(); afRefresh();
+}
+
+async function afCancelAll() {
+  if (!confirm('Cancel all pending patches?')) return;
+  const r = await api('/api/ascend/patches');
+  const pending = Array.isArray(r) ? r : [];
+  for (const p of pending) { await api(`/api/ascend/patches/${p.patch_id}/reject`,{method:'POST'}); }
+  toast(`🗑 Cancelled ${pending.length} patch(es)`);
+  afLoadPatches(); afRefresh();
+}
+
+async function afShowPending() {
+  afLoadPatches();
+  document.getElementById('tab-ascend').scrollIntoView({behavior:'smooth'});
+}
+
+async function afLoadChangelog() {
+  try {
+    const log = await api('/api/ascend/changelog?limit=30');
+    const el = document.getElementById('af-changelog');
+    if (!el) return;
+    if (!Array.isArray(log) || !log.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>';
+      return;
+    }
+    el.innerHTML = log.map(p => {
+      const emoji = STATUS_EMOJI[p.status] || '?';
+      const riskColor = RISK_COLORS[p.risk_level] || '#6b7280';
+      const appliedAt = p.applied_timestamp ? ` → applied ${p.applied_timestamp.slice(0,16)}` : '';
+      return `
+        <div style="border:1px solid #1f2937;border-radius:8px;padding:10px 14px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+            <span style="font-size:1em">${emoji}</span>
+            <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${riskColor};color:#000">${p.risk_level}</span>
+            <span style="font-size:.78em;font-weight:600;color:#e5e7eb">${escHtml(p.patch_id)}</span>
+            <span style="font-size:.75em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}${appliedAt}</span>
+          </div>
+          <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
+          <div style="font-size:.8em;color:#9ca3af;margin-bottom:4px">${escHtml(p.reason||'')}</div>
+          ${p.diff_preview ? `<details><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff / code changes</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
+          ${p.status==='approved' ? `<button class="btn btn-sm" style="margin-top:6px;background:#7f1d1d;color:#fff" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
+        </div>`;
+    }).join('');
+  } catch(e) { console.warn('afLoadChangelog', e); }
+}
+
+async function afSetAutoApprove(enabled) {
+  const r = await api('/api/ascend/auto-approve', {method:'POST',body:{enabled}});
+  if (r.ok) toast(`Auto-approve LOW: ${enabled?'ON':'OFF'}`);
+  else toast('Failed', 'error');
+}
+
+// Helper: escape HTML
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Auto-refresh ASCEND FORGE every 15s when tab is active
+setInterval(() => { if (currentTab === 'ascend') { afRefresh(); afLoadPatches(); } }, 15000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── BUDGET TAB ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadBudget() {
+  try {
+    const data = await api('/api/budget/status');
+    const agents = Array.isArray(data) ? data : (data.agents || []);
+    const totalSpent = agents.reduce((sum, a) => sum + (a.spent_usd || 0), 0);
+    const warned = agents.filter(a => a.status === 'warning').length;
+    const exceeded = agents.filter(a => a.status === 'exceeded').length;
+    document.getElementById('bud-total-spent').textContent = '$' + totalSpent.toFixed(4);
+    document.getElementById('bud-agents-warn').textContent = warned;
+    document.getElementById('bud-agents-exceeded').textContent = exceeded;
+    document.getElementById('bud-agents-tracked').textContent = agents.length;
+    const el = document.getElementById('budget-agents-list');
+    if (!agents.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">💰</div><p>No agents tracked yet. Run a task to see spending.</p></div>';
+      return;
+    }
+    const statusColor = {ok:'#34d399', warning:'#f59e0b', exceeded:'#ef4444'};
+    el.innerHTML = agents.map(a => {
+      const col = statusColor[a.status] || '#34d399';
+      const pct = Math.min(100, Math.round((a.spent_usd / (a.budget_usd || 10)) * 100));
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-weight:600;font-size:.9em"><code>${escHtml(a.agent_id)}</code></div>
+          <div style="font-size:.82em;color:${col};font-weight:600">${escHtml(a.status)}</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:4px;height:6px;margin-bottom:6px">
+          <div style="background:${col};width:${pct}%;height:100%;border-radius:4px;transition:width .3s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:.78em;color:var(--text-muted)">
+          <span>$${(a.spent_usd||0).toFixed(4)} spent</span>
+          <span>Budget: $${(a.budget_usd||10).toFixed(2)}</span>
+          <span>${pct}%</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadBudget', e); }
+}
+
+async function setBudget() {
+  const agent_id = document.getElementById('bud-agent-id').value.trim();
+  const monthly_budget_usd = parseFloat(document.getElementById('bud-amount').value);
+  if (!agent_id || isNaN(monthly_budget_usd)) { toast('Fill in agent ID and budget amount', 'error'); return; }
+  const r = await api('/api/budget/set', {method:'POST', body:{agent_id, monthly_budget_usd}});
+  if (r.ok) { toast(`✅ Budget set: ${agent_id} = $${monthly_budget_usd}/month`); loadBudget(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function resetBudget() {
+  const agent_id = document.getElementById('bud-agent-id').value.trim();
+  if (!agent_id) { toast('Enter agent ID to reset', 'error'); return; }
+  if (!confirm(`Reset usage for ${agent_id}?`)) return;
+  const r = await api(`/api/budget/reset/${encodeURIComponent(agent_id)}`, {method:'POST'});
+  if (r.ok) { toast(`↺ Usage reset for ${agent_id}`); loadBudget(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function recordBudgetUsage() {
+  const agent_id = document.getElementById('bud-rec-agent').value.trim();
+  const model = document.getElementById('bud-rec-model').value.trim() || 'gpt-4o';
+  const input_tokens = parseInt(document.getElementById('bud-rec-in').value) || 0;
+  const output_tokens = parseInt(document.getElementById('bud-rec-out').value) || 0;
+  if (!agent_id) { toast('Enter agent ID', 'error'); return; }
+  const r = await api('/api/budget/record', {method:'POST', body:{agent_id, model, input_tokens, output_tokens}});
+  if (r.ok) { toast(`📥 Usage recorded for ${agent_id}`); loadBudget(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── ORG CHART TAB ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadOrg() {
+  try {
+    const d = await api('/api/org/chart');
+    const roles = d.roles || [];
+    const el = document.getElementById('org-chart-tree');
+    if (!roles.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">🏢</div><p>No roles defined yet.</p></div>';
+      return;
+    }
+    // Build tree map
+    const byId = {};
+    roles.forEach(r => { byId[r.role_id] = r; });
+    const roots = roles.filter(r => !r.reports_to);
+    function renderRole(role, depth=0) {
+      const indent = depth * 20;
+      const children = roles.filter(r => r.reports_to === role.role_id);
+      return `<div style="margin-left:${indent}px;border-left:${depth>0?'2px solid var(--border)':'none'};padding-left:${depth>0?'10px':'0'};margin-bottom:8px">
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:600;font-size:.9em">${escHtml(role.title)}</div>
+            <div style="font-size:.78em;color:var(--text-muted)"><code>${escHtml(role.role_id)}</code>${role.agent_id ? ` → <span style="color:var(--primary)">${escHtml(role.agent_id)}</span>` : ' <em>unassigned</em>'}</div>
+            ${role.description ? `<div style="font-size:.77em;color:var(--text-secondary);margin-top:3px">${escHtml(role.description)}</div>` : ''}
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="deleteOrgRole('${jsEsc(role.role_id)}')">🗑</button>
+        </div>
+        ${children.map(c => renderRole(c, depth+1)).join('')}
+      </div>`;
+    }
+    el.innerHTML = roots.map(r => renderRole(r)).join('') ||
+      '<div class="empty"><p>Add roles using the form →</p></div>';
+  } catch(e) { console.warn('loadOrg', e); }
+}
+
+async function upsertOrgRole() {
+  const role_id = document.getElementById('org-role-id').value.trim();
+  const title   = document.getElementById('org-role-title').value.trim();
+  const description = document.getElementById('org-role-desc').value.trim();
+  const reports_to = document.getElementById('org-role-reports').value.trim() || null;
+  const agent_id = document.getElementById('org-role-agent').value.trim() || null;
+  if (!role_id || !title) { toast('Role ID and Title are required', 'error'); return; }
+  const r = await api('/api/org/roles', {method:'POST', body:{role_id, title, description, reports_to, agent_id}});
+  if (r.ok) { toast(`✅ Role '${title}' saved`); loadOrg(); }
+  else toast(r.detail || 'Error saving role', 'error');
+}
+
+async function deleteOrgRole(role_id) {
+  if (!confirm(`Delete role '${role_id}'?`)) return;
+  const r = await api(`/api/org/roles/${encodeURIComponent(role_id)}`, {method:'DELETE'});
+  if (r.ok) { toast('🗑 Role deleted'); loadOrg(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function delegateOrgTask() {
+  const from_role = document.getElementById('org-del-from').value.trim();
+  const to_role   = document.getElementById('org-del-to').value.trim();
+  const task      = document.getElementById('org-del-task').value.trim();
+  if (!from_role || !to_role || !task) { toast('Fill in all delegation fields', 'error'); return; }
+  const r = await api('/api/org/delegate', {method:'POST', body:{from_role, to_role, task}});
+  if (r.ok) { toast(`✅ Delegated from ${from_role} → ${to_role}`); loadOrg(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function loadOrgAdapters() {
+  try {
+    const adapters = await api('/api/org/adapters') || [];
+    const el = document.getElementById('org-adapters-list');
+    if (!Array.isArray(adapters) || !adapters.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">🔌</div><p>No adapters. Register a BYOA agent below.</p></div>';
+      return;
+    }
+    el.innerHTML = adapters.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <span style="font-weight:600">${escHtml(a.name)}</span>
+        <code style="font-size:.75em;margin-left:6px;color:var(--text-muted)">${escHtml(a.adapter_id)}</code>
+        <span style="font-size:.73em;margin-left:6px;color:var(--text-muted)">${escHtml(a.type)}</span>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="deregisterOrgAdapter('${jsEsc(a.adapter_id)}')">🗑</button>
+    </div>`).join('');
+  } catch(e) { console.warn('loadOrgAdapters', e); }
+}
+
+async function registerOrgAdapter() {
+  const adapter_id = document.getElementById('org-adp-id').value.trim();
+  const name = document.getElementById('org-adp-name').value.trim();
+  if (!adapter_id || !name) { toast('Adapter ID and Name required', 'error'); return; }
+  const r = await api('/api/org/adapters', {method:'POST', body:{adapter_id, name}});
+  if (r.ok) { toast('🔌 Adapter registered'); loadOrgAdapters(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deregisterOrgAdapter(adapter_id) {
+  if (!confirm(`Remove adapter '${adapter_id}'?`)) return;
+  const r = await api(`/api/org/adapters/${encodeURIComponent(adapter_id)}`, {method:'DELETE'});
+  if (r.ok) { toast('Adapter removed'); loadOrgAdapters(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── GOALS TAB ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadGoals() {
+  try {
+    const [company, projects] = await Promise.all([
+      api('/api/goals/company'),
+      api('/api/goals/projects'),
+    ]);
+    const mission = company.mission || '';
+    const vision  = company.vision  || '';
+    document.getElementById('goals-mission-display').innerHTML = mission
+      ? `<div style="font-weight:600;color:var(--text)">${escHtml(mission)}</div>${vision ? `<div style="font-size:.82em;color:var(--text-muted);margin-top:4px">${escHtml(vision)}</div>` : ''}`
+      : '<em style="color:var(--text-muted)">No mission set.</em>';
+    document.getElementById('goals-mission-input').value = mission;
+    document.getElementById('goals-vision-input').value = vision;
+    const el = document.getElementById('goals-projects-list');
+    const plist = Array.isArray(projects) ? projects : (projects.projects || []);
+    if (!plist.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📁</div><p>No projects yet.</p></div>';
+      return;
+    }
+    const pri = {high:'🔴', medium:'🟡', low:'🟢'};
+    el.innerHTML = plist.map(p => `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.9em">${pri[p.priority]||'🟡'} ${escHtml(p.name)}</div>
+          <div style="font-size:.82em;color:var(--text-secondary);margin:3px 0">${escHtml(p.goal)}</div>
+          ${p.description ? `<div style="font-size:.77em;color:var(--text-muted)">${escHtml(p.description)}</div>` : ''}
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="deleteGoalProject('${jsEsc(p.project_id)}')">🗑</button>
+      </div>
+    </div>`).join('');
+  } catch(e) { console.warn('loadGoals', e); }
+}
+
+async function saveCompanyMission() {
+  const mission = document.getElementById('goals-mission-input').value.trim();
+  const vision = document.getElementById('goals-vision-input').value.trim();
+  if (!mission) { toast('Mission is required', 'error'); return; }
+  const r = await api('/api/goals/company', {method:'POST', body:{mission, vision}});
+  if (r.ok) { toast('🎯 Mission saved!'); loadGoals(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function addGoalProject() {
+  const name = document.getElementById('goals-proj-name').value.trim();
+  const goal = document.getElementById('goals-proj-goal').value.trim();
+  const description = document.getElementById('goals-proj-desc').value.trim();
+  const priority = document.getElementById('goals-proj-priority').value;
+  if (!name || !goal) { toast('Name and Goal are required', 'error'); return; }
+  const r = await api('/api/goals/projects', {method:'POST', body:{name, goal, description, priority}});
+  if (r.ok) { toast('📁 Project added'); loadGoals(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deleteGoalProject(project_id) {
+  if (!confirm('Delete this project?')) return;
+  const r = await api(`/api/goals/projects/${encodeURIComponent(project_id)}`, {method:'DELETE'});
+  if (r.ok) { toast('🗑 Project deleted'); loadGoals(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function sendCEOMessage() {
+  const input = document.getElementById('ceo-chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+  const btn = document.getElementById('ceo-send-btn');
+  const log = document.getElementById('ceo-chat-log');
+  const status = document.getElementById('ceo-chat-status');
+  btn.disabled = true; btn.textContent = '⏳ Sending…';
+  status.textContent = 'Routing to CEO agent…';
+  input.value = '';
+  // Append user message
+  log.innerHTML += `<div style="margin-bottom:8px"><span style="color:#f59e0b;font-weight:600">Board → CEO:</span> ${escHtml(message)}</div>`;
+  log.scrollTop = log.scrollHeight;
+  try {
+    const r = await api('/api/ceo/chat', {method:'POST', body:{message}});
+    const response = r.response || r.detail || 'No response';
+    log.innerHTML += `<div style="margin-bottom:12px;padding-left:12px;border-left:2px solid #f59e0b"><span style="color:#34d399;font-weight:600">CEO → Board:</span><div style="margin-top:3px;white-space:pre-wrap">${escHtml(response)}</div>${r.ticket_id ? `<div style="font-size:.75em;color:var(--text-muted);margin-top:3px">Ticket created: <code>${escHtml(r.ticket_id)}</code></div>` : ''}</div>`;
+    log.scrollTop = log.scrollHeight;
+    status.textContent = r.goal_context_injected ? '✓ Goal context injected' : '';
+  } catch(e) {
+    log.innerHTML += `<div style="color:#ef4444">Error: ${escHtml(String(e))}</div>`;
+  }
+  btn.disabled = false; btn.textContent = '📨 Send';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── TICKETS TAB ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _activeTicketId = null;
+
+async function loadTickets() {
+  try {
+    const status = document.getElementById('tkt-filter-status').value;
+    const params = status ? `?status=${status}` : '';
+    const data = await api('/api/tickets' + params);
+    const tickets = Array.isArray(data) ? data : [];
+    const total = tickets.length;
+    const open = tickets.filter(t => t.status === 'open').length;
+    const inprog = tickets.filter(t => t.status === 'in_progress').length;
+    const done = tickets.filter(t => t.status === 'done').length;
+    document.getElementById('tkt-total').textContent = total;
+    document.getElementById('tkt-open').textContent = open;
+    document.getElementById('tkt-inprog').textContent = inprog;
+    document.getElementById('tkt-done').textContent = done;
+    const el = document.getElementById('tickets-list');
+    if (!tickets.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">🎫</div><p>No tickets. Create one →</p></div>';
+      return;
+    }
+    const statusIcon = {open:'🟡', in_progress:'🔵', blocked:'🔴', done:'✅', cancelled:'⛔'};
+    const priColor = {high:'#ef4444', medium:'#f59e0b', low:'#10b981'};
+    el.innerHTML = tickets.map(t => {
+      const icon = statusIcon[t.status] || '🎫';
+      const pc = priColor[t.priority] || '#f59e0b';
+      const ts = (t.created_at||'').slice(0,16).replace('T',' ');
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;cursor:pointer;background:${_activeTicketId===t.ticket_id?'var(--surface2)':'transparent'}" onclick="openTicket('${jsEsc(t.ticket_id)}')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:.88em;font-weight:600">${icon} ${escHtml(t.title)}</div>
+            <div style="font-size:.77em;color:var(--text-muted);margin-top:3px">
+              <code>${escHtml(t.ticket_id)}</code>
+              ${t.agent_id ? ` · ${escHtml(t.agent_id)}` : ''}
+              · <span style="color:${pc}">${escHtml(t.priority||'medium')}</span>
+              · ${ts}
+            </div>
+          </div>
+          <span style="font-size:.78em;color:var(--text-muted)">${escHtml(t.status)}</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadTickets', e); }
+}
+
+async function openTicket(ticket_id) {
+  _activeTicketId = ticket_id;
+  const card = document.getElementById('tkt-detail-card');
+  card.style.display = 'block';
+  card.scrollIntoView({behavior:'smooth', block:'start'});
+  try {
+    const t = await api(`/api/tickets/${ticket_id}`);
+    const statusOpts = ['open','in_progress','blocked','done','cancelled']
+      .map(s => `<option value="${s}"${t.status===s?' selected':''}>${s}</option>`).join('');
+    const thread = (t.thread||[]);
+    document.getElementById('tkt-detail-body').innerHTML = `
+      <div style="margin-bottom:10px">
+        <div style="font-weight:700;font-size:.95em;margin-bottom:6px">${escHtml(t.title)}</div>
+        <div style="font-size:.82em;color:var(--text-muted);margin-bottom:8px">ID: <code>${escHtml(t.ticket_id)}</code> · Created: ${(t.created_at||'').slice(0,16)}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="tkt-status-sel" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:5px 8px;font-size:.82em">${statusOpts}</select>
+          <button class="btn btn-primary btn-sm" onclick="updateTicketStatus('${jsEsc(ticket_id)}')">💾 Save Status</button>
+        </div>
+      </div>
+      ${t.description ? `<div style="font-size:.84em;color:var(--text-secondary);margin-bottom:10px">${escHtml(t.description)}</div>` : ''}
+      <div style="font-size:.82em;font-weight:600;margin-bottom:6px;color:var(--text-muted)">Thread (${thread.length})</div>
+      <div style="max-height:220px;overflow-y:auto;background:var(--bg-deep,#0d1117);border-radius:6px;padding:10px;font-size:.8em;line-height:1.6">
+        ${thread.length ? thread.map(c => `<div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <span style="font-weight:600;color:var(--primary)">${escHtml(c.author||'user')}</span>
+          <span style="color:var(--text-muted);font-size:.78em;margin-left:6px">${(c.created_at||'').slice(0,16)}</span>
+          <div style="margin-top:3px;white-space:pre-wrap">${escHtml(c.body||'')}</div>
+        </div>`).join('') : '<span style="color:var(--text-muted)">No comments yet.</span>'}
+      </div>`;
+    document.getElementById('tkt-comment-input').dataset.ticketId = ticket_id;
+    loadTickets();
+  } catch(e) { console.warn('openTicket', e); }
+}
+
+async function createTicket() {
+  const title = document.getElementById('tkt-new-title').value.trim();
+  const description = document.getElementById('tkt-new-desc').value.trim();
+  const priority = document.getElementById('tkt-new-priority').value;
+  const agent_id = document.getElementById('tkt-new-agent').value.trim() || null;
+  if (!title) { toast('Ticket title is required', 'error'); return; }
+  const r = await api('/api/tickets', {method:'POST', body:{title, description, priority, agent_id, created_by:'user'}});
+  if (r.ok || r.ticket_id) {
+    toast('🎫 Ticket created!');
+    document.getElementById('tkt-new-title').value = '';
+    document.getElementById('tkt-new-desc').value = '';
+    loadTickets();
+  } else toast(r.detail || 'Error', 'error');
+}
+
+async function updateTicketStatus(ticket_id) {
+  const status = document.getElementById('tkt-status-sel').value;
+  const r = await api(`/api/tickets/${ticket_id}`, {method:'PATCH', body:{status, updated_by:'user'}});
+  if (r.ok || r.ticket_id) { toast(`✅ Status → ${status}`); loadTickets(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function addTicketComment() {
+  const input = document.getElementById('tkt-comment-input');
+  const ticket_id = _activeTicketId || input.dataset.ticketId;
+  const body = input.value.trim();
+  if (!ticket_id) { toast('Select a ticket first', 'error'); return; }
+  if (!body) { toast('Write a comment', 'error'); return; }
+  const r = await api(`/api/tickets/${ticket_id}/comment`, {method:'POST', body:{body, author:'user'}});
+  if (r.ok || r.comment_id) { toast('💬 Comment posted'); input.value=''; openTicket(ticket_id); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function loadTicketAudit() {
+  try {
+    const events = await api('/api/tickets/audit/log?limit=30') || [];
+    const el = document.getElementById('tickets-audit');
+    if (!Array.isArray(events) || !events.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No audit events yet.</p></div>';
+      return;
+    }
+    const actionIcon = {created:'🆕', status_changed:'🔄', comment_added:'💬'};
+    el.innerHTML = events.slice().reverse().slice(0,30).map(e => {
+      const icon = actionIcon[e.action] || '📋';
+      const ts = (e.ts||'').slice(0,16).replace('T',' ');
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:.82em">
+        <span>${icon}</span>
+        <div style="flex:1"><code>${escHtml(e.ticket_id||'?')}</code> ${escHtml(e.action||'')} ${e.field ? `· ${escHtml(e.field)}: ${escHtml(String(e.old_value||''))}→${escHtml(String(e.new_value||''))}` : ''}</div>
+        <span style="font-size:.74em;color:var(--text-muted)">${ts}</span>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadTicketAudit', e); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── BOARDROOM TAB (GOVERNANCE) ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadBoardroom() {
+  try {
+    const [pending, audit] = await Promise.all([
+      api('/api/governance/pending'),
+      api('/api/governance/audit?limit=30'),
+    ]);
+    const pList = Array.isArray(pending) ? pending : [];
+    const aList = Array.isArray(audit) ? audit : [];
+    const approved = aList.filter(e => e.state==='approved').length;
+    const rejected = aList.filter(e => e.state==='rejected').length;
+    document.getElementById('gov-pending').textContent = pList.length;
+    document.getElementById('gov-approved').textContent = approved;
+    document.getElementById('gov-rejected').textContent = rejected;
+    document.getElementById('gov-total').textContent = aList.length;
+    // Banner
+    const banner = document.getElementById('gov-pending-banner');
+    if (pList.length > 0) {
+      banner.style.display = 'flex';
+      banner.innerHTML = `<span style="font-size:1.2em">⚠️</span> <strong>${pList.length} action${pList.length!==1?'s':''} pending board approval.</strong> Review below.`;
+    } else {
+      banner.style.display = 'none';
+    }
+    // Pending list
+    const pEl = document.getElementById('gov-pending-list');
+    if (!pList.length) {
+      pEl.innerHTML = '<div class="empty"><div class="icon">✅</div><p>No pending approvals.</p></div>';
+    } else {
+      const riskCol = {critical:'#ef4444', high:'#ef4444', medium:'#f59e0b', low:'#10b981'};
+      pEl.innerHTML = pList.map(a => {
+        const col = riskCol[a.risk_level] || '#f59e0b';
+        return `<div style="border:1px solid ${col};border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;background:var(--surface2)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1">
+              <div style="font-size:.88em;font-weight:600">${escHtml(a.action)}</div>
+              <div style="font-size:.8em;color:var(--text-secondary);margin:3px 0">${escHtml(a.description||'')}</div>
+              <div style="font-size:.77em;color:var(--text-muted)">Agent: <code>${escHtml(a.agent_id||'?')}</code> · Risk: <span style="color:${col};font-weight:600">${escHtml(a.risk_level||'medium')}</span></div>
+            </div>
+            <div style="display:flex;gap:5px;flex-shrink:0">
+              <button class="btn btn-success btn-sm" onclick="govApprove('${jsEsc(a.action_id)}')">✅ Approve</button>
+              <button class="btn btn-danger btn-sm" onclick="govReject('${jsEsc(a.action_id)}')">🚫 Reject</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+    // Audit list
+    const aEl = document.getElementById('gov-audit-list');
+    const stateIcon = {approved:'✅', rejected:'🚫', auto_approved:'✔️', pending:'⏳'};
+    aEl.innerHTML = aList.slice().reverse().slice(0,20).map(e => {
+      const icon = stateIcon[e.state] || '📋';
+      const ts = (e.decided_at||e.requested_at||'').slice(0,16).replace('T',' ');
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:.82em">
+        <span>${icon}</span>
+        <div style="flex:1"><code>${escHtml(e.agent_id||'?')}</code> · ${escHtml(e.action||'')} <span style="color:var(--text-muted)">· ${escHtml(e.state||'')}</span></div>
+        <span style="font-size:.74em;color:var(--text-muted)">${ts}</span>
+      </div>`;
+    }).join('') || '<div class="empty"><div class="icon">📋</div><p>No audit events.</p></div>';
+  } catch(e) { console.warn('loadBoardroom', e); }
+}
+
+async function govApprove(action_id) {
+  const r = await api(`/api/governance/${encodeURIComponent(action_id)}/approve`, {method:'POST', body:{decided_by:'board'}});
+  if (r.ok || r.action_id) { toast('✅ Action approved'); loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govReject(action_id) {
+  const note = prompt('Reason for rejection (optional):') || '';
+  const r = await api(`/api/governance/${encodeURIComponent(action_id)}/reject`, {method:'POST', body:{decided_by:'board', note}});
+  if (r.ok || r.action_id) { toast('🚫 Action rejected', 'error'); loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govPauseAgent() {
+  const agent_id = document.getElementById('gov-agent-ctrl-id').value.trim();
+  if (!agent_id) { toast('Enter agent ID', 'error'); return; }
+  const reason = prompt(`Reason for pausing ${agent_id}?`) || '';
+  const r = await api(`/api/governance/pause/${encodeURIComponent(agent_id)}`, {method:'POST', body:{reason}});
+  if (r.ok || r.agent_id) { toast(`⏸ ${agent_id} paused`); document.getElementById('gov-agent-status-display').textContent = `${agent_id} is now paused.`; loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govResumeAgent() {
+  const agent_id = document.getElementById('gov-agent-ctrl-id').value.trim();
+  if (!agent_id) { toast('Enter agent ID', 'error'); return; }
+  const r = await api(`/api/governance/resume/${encodeURIComponent(agent_id)}`, {method:'POST', body:{reason:'Board decision'}});
+  if (r.ok || r.agent_id) { toast(`▶️ ${agent_id} resumed`); document.getElementById('gov-agent-status-display').textContent = `${agent_id} is now active.`; loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govTerminateAgent() {
+  const agent_id = document.getElementById('gov-agent-ctrl-id').value.trim();
+  if (!agent_id) { toast('Enter agent ID', 'error'); return; }
+  if (!confirm(`Permanently terminate ${agent_id}? This cannot be undone.`)) return;
+  const reason = prompt('Reason for termination:') || 'Board decision';
+  const r = await api(`/api/governance/terminate/${encodeURIComponent(agent_id)}`, {method:'POST', body:{reason}});
+  if (r.ok || r.agent_id) { toast(`⛔ ${agent_id} terminated`, 'error'); document.getElementById('gov-agent-status-display').textContent = `${agent_id} has been terminated.`; loadBoardroom(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function govTestAction() {
+  const agent_id = document.getElementById('gov-test-agent').value.trim();
+  const action = document.getElementById('gov-test-action').value.trim();
+  const description = document.getElementById('gov-test-desc').value.trim();
+  const risk_level = document.getElementById('gov-test-risk').value;
+  if (!agent_id || !action) { toast('Agent ID and Action are required', 'error'); return; }
+  const r = await api('/api/governance/request', {method:'POST', body:{agent_id, action, description, risk_level}});
+  if (r.ok || r.action_id) {
+    const state = r.state || '?';
+    toast(`🧪 Action submitted — state: ${state}`, state==='auto_approved'?'success':'warning');
+    loadBoardroom();
+  } else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── COMPANIES TAB ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadCompanies() {
+  try {
+    const [companies, active] = await Promise.all([
+      api('/api/companies'),
+      api('/api/companies/active'),
+    ]);
+    const list = Array.isArray(companies) ? companies : [];
+    const banner = document.getElementById('companies-active-banner');
+    if (active && active.name) {
+      banner.style.display = 'block';
+      banner.innerHTML = `🏗️ Active company: <strong>${escHtml(active.name)}</strong> <code style="font-size:.8em">${escHtml(active.company_id)}</code>`;
+    } else {
+      banner.style.display = 'none';
+    }
+    const el = document.getElementById('companies-list');
+    if (!list.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">🏗️</div><p>No companies yet.</p></div>';
+      return;
+    }
+    el.innerHTML = list.map(c => {
+      const isActive = active && c.company_id === active.company_id;
+      return `<div style="border:1px solid ${isActive?'var(--success)':'var(--border)'};border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;background:${isActive?'rgba(52,211,153,.05)':'transparent'}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:600">${escHtml(c.name)} ${isActive?'<span style="font-size:.73em;color:var(--success);margin-left:6px">● ACTIVE</span>':''}</div>
+            <div style="font-size:.78em;color:var(--text-muted)"><code>${escHtml(c.company_id)}</code>${c.mission ? ` · ${escHtml(c.mission.slice(0,60))}${c.mission.length>60?'…':''}` : ''}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            ${!isActive ? `<button class="btn btn-primary btn-sm" onclick="switchCompany('${jsEsc(c.company_id)}')">⚡ Switch</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="exportCompanyById('${jsEsc(c.company_id)}')">📤</button>
+            ${!isActive ? `<button class="btn btn-danger btn-sm" onclick="deleteCompany('${jsEsc(c.company_id)}')">🗑</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadCompanies', e); }
+}
+
+async function createCompany() {
+  const name = document.getElementById('co-new-name').value.trim();
+  const mission = document.getElementById('co-new-mission').value.trim();
+  const description = document.getElementById('co-new-desc').value.trim();
+  if (!name) { toast('Company name is required', 'error'); return; }
+  const r = await api('/api/companies', {method:'POST', body:{name, mission, description}});
+  if (r.ok || r.company_id) { toast(`🏗️ Company '${name}' created!`); loadCompanies(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function switchCompany(company_id) {
+  const r = await api('/api/companies/switch', {method:'POST', body:{company_id}});
+  if (r.ok || r.company_id) { toast(`⚡ Switched to ${company_id}`); loadCompanies(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deleteCompany(company_id) {
+  if (!confirm(`Delete company '${company_id}'? This is irreversible.`)) return;
+  const r = await api(`/api/companies/${encodeURIComponent(company_id)}`, {method:'DELETE'});
+  if (r.ok) { toast('🗑 Company deleted'); loadCompanies(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function exportCompany() {
+  const company_id = document.getElementById('co-export-id').value.trim();
+  if (!company_id) { toast('Enter company ID to export', 'error'); return; }
+  exportCompanyById(company_id);
+}
+
+async function exportCompanyById(company_id) {
+  const r = await api(`/api/companies/${encodeURIComponent(company_id)}/export`);
+  if (r.export_version || r.company) {
+    const blob = new Blob([JSON.stringify(r, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `company-${company_id}.json`;
+    a.click();
+    toast('📤 Exported!');
+  } else toast(r.detail || 'Error exporting', 'error');
+}
+
+async function importCompany() {
+  const raw = document.getElementById('co-import-json').value.trim();
+  if (!raw) { toast('Paste JSON template to import', 'error'); return; }
+  let template;
+  try { template = JSON.parse(raw); } catch { toast('Invalid JSON', 'error'); return; }
+  const r = await api('/api/companies/import', {method:'POST', body:template});
+  if (r.ok || r.company_id) { toast(`📥 Imported: ${r.name||r.company_id}`); loadCompanies(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── ARTIFACTS TAB ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadArtifacts() {
+  try {
+    const type = document.getElementById('art-filter-type').value;
+    const params = type ? `?artifact_type=${type}` : '';
+    const data = await api('/api/artifacts' + params);
+    const arts = Array.isArray(data) ? data : [];
+    document.getElementById('art-total').textContent = arts.length;
+    document.getElementById('art-drafts').textContent = arts.filter(a=>a.status==='draft').length;
+    document.getElementById('art-deployed').textContent = arts.filter(a=>a.status==='deployed').length;
+    document.getElementById('art-approved').textContent = arts.filter(a=>a.status==='approved').length;
+    const el = document.getElementById('artifacts-list');
+    if (!arts.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📦</div><p>No artifacts yet.</p></div>';
+      return;
+    }
+    const typeIcon = {code:'💻', report:'📊', campaign:'📣', business_plan:'📋', config:'⚙️', other:'📦'};
+    const statCol = {draft:'var(--text-muted)', review:'#f59e0b', approved:'#34d399', deployed:'#38bdf8', archived:'#6b7280'};
+    el.innerHTML = arts.map(a => {
+      const icon = typeIcon[a.type] || '📦';
+      const sc = statCol[a.status] || 'var(--text-muted)';
+      const ts = (a.updated_at||'').slice(0,16).replace('T',' ');
+      const kb = a.content_length ? `${(a.content_length/1024).toFixed(1)}KB` : '';
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;cursor:pointer" onclick="openArtifact('${jsEsc(a.artifact_id)}')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:.88em;font-weight:600">${icon} ${escHtml(a.title)}</div>
+            <div style="font-size:.77em;color:var(--text-muted);margin-top:2px"><code>${escHtml(a.artifact_id)}</code> · ${escHtml(a.type)} · v${a.version||1} · ${kb}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:.78em;color:${sc};font-weight:600">${escHtml(a.status)}</div>
+            <div style="font-size:.72em;color:var(--text-muted)">${ts}</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadArtifacts', e); }
+}
+
+async function openArtifact(artifact_id) {
+  const card = document.getElementById('art-detail-card');
+  card.style.display = 'block';
+  card.scrollIntoView({behavior:'smooth'});
+  try {
+    const a = await api(`/api/artifacts/${artifact_id}`);
+    const statusOpts = ['draft','review','approved','archived']
+      .map(s => `<option value="${s}"${a.status===s?' selected':''}>${s}</option>`).join('');
+    document.getElementById('art-detail-body').innerHTML = `
+      <div style="margin-bottom:10px">
+        <div style="font-weight:700">${escHtml(a.title)}</div>
+        <div style="font-size:.8em;color:var(--text-muted);margin-bottom:8px"><code>${escHtml(a.artifact_id)}</code> · v${a.version||1} · ${escHtml(a.type)} · ${escHtml(a.status)}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="art-status-sel" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:5px 8px;font-size:.82em">${statusOpts}</select>
+          <button class="btn btn-primary btn-sm" onclick="updateArtifactStatus('${jsEsc(artifact_id)}')">💾 Status</button>
+          <button class="btn btn-success btn-sm" onclick="deployArtifact('${jsEsc(artifact_id)}')">🚀 Deploy</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteArtifact('${jsEsc(artifact_id)}')">🗑 Delete</button>
+        </div>
+      </div>
+      <div style="background:var(--bg-deep,#0d1117);border-radius:6px;padding:12px;max-height:300px;overflow-y:auto">
+        <pre style="font-size:.78em;color:#c9d1d9;margin:0;white-space:pre-wrap;word-break:break-word">${escHtml(a.content||'')}</pre>
+      </div>`;
+  } catch(e) { console.warn('openArtifact', e); }
+}
+
+async function createArtifact() {
+  const title = document.getElementById('art-new-title').value.trim();
+  const type = document.getElementById('art-new-type').value;
+  const content = document.getElementById('art-new-content').value.trim();
+  if (!title || !content) { toast('Title and content are required', 'error'); return; }
+  const r = await api('/api/artifacts', {method:'POST', body:{title, artifact_type:type, content, agent_id:'user'}});
+  if (r.ok || r.artifact_id) {
+    toast('📦 Artifact created!');
+    document.getElementById('art-new-title').value = '';
+    document.getElementById('art-new-content').value = '';
+    loadArtifacts();
+  } else toast(r.detail || 'Error', 'error');
+}
+
+async function updateArtifactStatus(artifact_id) {
+  const status = document.getElementById('art-status-sel').value;
+  const r = await api(`/api/artifacts/${artifact_id}`, {method:'PATCH', body:{status}});
+  if (r.ok || r.artifact_id) { toast(`✅ Status → ${status}`); loadArtifacts(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deployArtifact(artifact_id) {
+  const notes = prompt('Deployment notes (optional):') || '';
+  const r = await api(`/api/artifacts/${artifact_id}/deploy`, {method:'POST', body:{deploy_notes:notes}});
+  if (r.ok || r.artifact_id) { toast('🚀 Artifact deployed!'); openArtifact(artifact_id); loadArtifacts(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function deleteArtifact(artifact_id) {
+  if (!confirm('Delete this artifact?')) return;
+  const r = await api(`/api/artifacts/${artifact_id}`, {method:'DELETE'});
+  if (r.ok) { document.getElementById('art-detail-card').style.display='none'; toast('🗑 Artifact deleted'); loadArtifacts(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── SESSIONS TAB ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadSessions() {
+  try {
+    const data = await api('/api/sessions');
+    const sessions = Array.isArray(data) ? data : (data.sessions || []);
+    document.getElementById('ses-total').textContent = sessions.length;
+    document.getElementById('ses-active').textContent = sessions.filter(s=>s.status==='active').length;
+    document.getElementById('ses-paused').textContent = sessions.filter(s=>s.status==='paused').length;
+    document.getElementById('ses-completed').textContent = sessions.filter(s=>s.status==='completed').length;
+    const el = document.getElementById('sessions-list');
+    if (!sessions.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">💾</div><p>No sessions. Agents create sessions automatically when tasks start.</p></div>';
+      return;
+    }
+    const statusIcon = {active:'▶️', paused:'⏸', completed:'✅', abandoned:'🗑'};
+    el.innerHTML = sessions.map(s => {
+      const icon = statusIcon[s.status] || '💾';
+      const ts = (s.updated_at||'').slice(0,16).replace('T',' ');
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;cursor:pointer" onclick="openSession('${jsEsc(s.session_id)}')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:.88em;font-weight:600">${icon} ${escHtml(s.title||s.session_id)}</div>
+            <div style="font-size:.77em;color:var(--text-muted);margin-top:2px"><code>${escHtml(s.session_id)}</code> · ${escHtml(s.agent_id||'?')}</div>
+          </div>
+          <div style="font-size:.77em;color:var(--text-muted)">${ts}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadSessions', e); }
+}
+
+async function createSession() {
+  const agent_id = document.getElementById('ses-new-agent').value.trim();
+  const title = document.getElementById('ses-new-title').value.trim();
+  const ctxRaw = document.getElementById('ses-new-ctx').value.trim();
+  if (!agent_id) { toast('Agent ID is required', 'error'); return; }
+  let context = {};
+  if (ctxRaw) { try { context = JSON.parse(ctxRaw); } catch { toast('Invalid JSON context', 'error'); return; } }
+  const r = await api('/api/sessions', {method:'POST', body:{agent_id, title, context}});
+  if (r.ok || r.session_id) { toast('💾 Session created!'); loadSessions(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function openSession(session_id) {
+  const card = document.getElementById('ses-detail-card');
+  try {
+    const s = await api(`/api/sessions/${session_id}`);
+    const checkpoints = s.checkpoints || [];
+    const ctx = JSON.stringify(s.context||{}, null, 2);
+    document.getElementById('ses-detail-body').innerHTML = `
+      <div style="margin-bottom:10px">
+        <div style="font-weight:700">${escHtml(s.title||s.session_id)}</div>
+        <div style="font-size:.8em;color:var(--text-muted);margin-bottom:8px"><code>${escHtml(s.session_id)}</code> · Agent: <code>${escHtml(s.agent_id)}</code> · Status: ${escHtml(s.status)}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-success btn-sm" onclick="resumeSession('${jsEsc(session_id)}')">▶️ Resume</button>
+          <button class="btn btn-warning btn-sm" onclick="closeSession('${jsEsc(session_id)}')">✅ Close</button>
+          <button class="btn btn-ghost btn-sm" onclick="saveCheckpoint('${jsEsc(session_id)}')">📌 Checkpoint</button>
+        </div>
+      </div>
+      <div style="font-size:.82em;font-weight:600;margin-bottom:6px">Context</div>
+      <pre style="background:var(--bg-deep,#0d1117);border-radius:6px;padding:10px;font-size:.77em;color:#c9d1d9;max-height:180px;overflow:auto;white-space:pre-wrap">${escHtml(ctx)}</pre>
+      ${checkpoints.length ? `<div style="font-size:.82em;font-weight:600;margin:10px 0 6px">Checkpoints (${checkpoints.length})</div>
+      ${checkpoints.map(cp => `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:.8em">
+        <span>📌 ${escHtml(cp.label)}</span>
+        <div style="display:flex;gap:5px">
+          <span style="color:var(--text-muted)">${(cp.created_at||'').slice(0,16)}</span>
+          <button class="btn btn-warning btn-sm" onclick="restoreCheckpoint('${jsEsc(session_id)}','${jsEsc(cp.checkpoint_id)}')">↩ Restore</button>
+        </div>
+      </div>`).join('')}` : ''}`;
+    card.scrollIntoView({behavior:'smooth'});
+  } catch(e) { console.warn('openSession', e); }
+}
+
+async function resumeSession(session_id) {
+  const r = await api(`/api/sessions/${session_id}/resume`, {method:'POST'});
+  if (r.ok || r.session_id) { toast('▶️ Session resumed'); loadSessions(); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function closeSession(session_id) {
+  if (!confirm('Mark this session as completed?')) return;
+  const r = await api(`/api/sessions/${session_id}`, {method:'DELETE'});
+  if (r.ok) { toast('✅ Session closed'); loadSessions(); document.getElementById('ses-detail-body').innerHTML='<div class="empty"><p>Session closed.</p></div>'; }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function saveCheckpoint(session_id) {
+  const label = prompt('Checkpoint label (e.g. "After auth module"):');
+  if (!label) return;
+  const r = await api(`/api/sessions/${session_id}/checkpoint`, {method:'POST', body:{label}});
+  if (r.ok || r.checkpoint_id) { toast('📌 Checkpoint saved'); openSession(session_id); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+async function restoreCheckpoint(session_id, checkpoint_id) {
+  if (!confirm('Restore session context to this checkpoint? Current context will be overwritten.')) return;
+  const r = await api(`/api/sessions/${session_id}/restore/${checkpoint_id}`, {method:'POST'});
+  if (r.ok || r.session_id) { toast('↩ Checkpoint restored'); openSession(session_id); }
+  else toast(r.detail || 'Error', 'error');
+}
+
+// Auto-refresh new tabs every 30s when active
+setInterval(() => {
+  if (currentTab === 'budget') loadBudget();
+  if (currentTab === 'boardroom') loadBoardroom();
+  if (currentTab === 'tickets') loadTickets();
+  if (currentTab === 'sessions') loadSessions();
+}, 30000);
+</script>
+</body>
+</html>"""
+
+
+# ─── API endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'"
+    )
+    return HTMLResponse(content=INDEX_HTML, headers={"Content-Security-Policy": csp})
+
+
+# ── Security endpoints (openclaw-2) ───────────────────────────────────────────
+
+class _HealthResponse(BaseModel):
+    status: str
+    version: str
+    secure_mode: bool
+    privacy_mode: bool
+
+
+class _UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=12)
+
+
+class _TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@app.get("/health", response_model=_HealthResponse)
+def health_check():
+    """Health-check endpoint — always responds with current security posture."""
+    return _HealthResponse(
+        status="healthy",
+        version=_security_config.app_version if _security_config else "2.0.0",
+        secure_mode=_SECURITY_AVAILABLE,
+        privacy_mode=(
+            not _security_config.privacy.telemetry_enabled
+            if _security_config else True
+        ),
+    )
+
+
+@app.get("/security/status")
+def security_status():
+    """Return the current security configuration posture and any warnings."""
+    warnings = validate_security_config(_security_config) if _security_config else []
+    return JSONResponse({
+        "secure_mode": _SECURITY_AVAILABLE,
+        "encryption_enabled": (
+            _security_config.privacy.encrypt_data_at_rest if _security_config else False
+        ),
+        "rate_limiting_enabled": (
+            _security_config.security.rate_limit_enabled if _security_config else False
+        ),
+        "external_calls_blocked": (
+            _security_config.privacy.external_api_calls_disabled if _security_config else False
+        ),
+        "telemetry_disabled": (
+            not _security_config.privacy.telemetry_enabled if _security_config else True
+        ),
+        "security_module_loaded": _SECURITY_AVAILABLE,
+        "warnings": warnings,
+    })
+
+
+@app.post("/auth/register", response_model=_TokenResponse,
+          status_code=status.HTTP_201_CREATED)
+@_auth_rate_limit
+def auth_register(request: Request, user_data: _UserCreate):
+    """
+    Register a dashboard user and return a JWT bearer token.
+
+    Password is validated against the configured strength policy (openclaw-2).
+    Rate limited to 5 requests/minute per IP to prevent abuse.
+    """
+    if not _SECURITY_AVAILABLE:
+      logger.warning("Security module unavailable — using fallback auth primitives.")
+
+    cfg = _security_config
+    is_valid, err_msg = PasswordValidator.validate(
+        user_data.password,
+        min_length=cfg.security.min_password_length if cfg else 12,
+        require_special=cfg.security.require_special_chars if cfg else True,
+        require_numbers=cfg.security.require_numbers if cfg else True,
+        require_uppercase=cfg.security.require_uppercase if cfg else True,
+    )
+    if not is_valid:
+        _audit_logger.warning(json.dumps({
+            "event": "registration_failed",
+            "reason": "weak_password",
+            "username": user_data.username,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg)
+
+    username = InputSanitizer.sanitize_input(user_data.username, max_length=50)
+
+    # ── Persist user with bcrypt-hashed password ───────────────────────────────
+    _users_file = STATE_DIR / "users.json"
+    try:
+        users: dict = json.loads(_users_file.read_text()) if _users_file.exists() else {}
+    except Exception as _ue:
+        logger.warning("users.json could not be parsed (%s) — starting with empty store", _ue)
+        users = {}
+    if username in users:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Username already exists.")
+    auth = AuthManager(
+        secret_key=(cfg.security.jwt_secret_key if cfg else _jwt_secret_env),
+        algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
+        expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+    )
+    users[username] = {"password_hash": auth.hash_password(user_data.password)}
+    _users_file.parent.mkdir(parents=True, exist_ok=True)
+    _users_file.write_text(json.dumps(users, indent=2))
+    _users_file.chmod(0o600)
+
+    token = auth.create_access_token({"sub": username, "type": "user"})
+    _audit_logger.info(json.dumps({
+        "event": "user_registered",
+        "username": username,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }))
+    return _TokenResponse(access_token=token)
+
+
+class _LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=50)
+    password: str = Field(..., min_length=1)
+
+
+@app.post("/auth/login", response_model=_TokenResponse)
+@_auth_rate_limit
+def auth_login(request: Request, login_data: _LoginRequest):
+    """
+    Authenticate a registered user and return a JWT bearer token.
+
+    Rate limited to 5 requests/minute per IP to prevent brute-force attacks.
+    Returns the same 401 error for both unknown user and wrong password (no user enumeration).
+    """
+    if not _SECURITY_AVAILABLE:
+      logger.warning("Security module unavailable — using fallback auth primitives.")
+
+    cfg = _security_config
+    username = InputSanitizer.sanitize_input(login_data.username, max_length=50)
+
+    _users_file = STATE_DIR / "users.json"
+    try:
+        users: dict = json.loads(_users_file.read_text()) if _users_file.exists() else {}
+    except Exception as _ue:
+        logger.warning("users.json could not be parsed (%s) — treating as empty", _ue)
+        users = {}
+
+    _generic_fail = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid username or password.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    user_record = users.get(username)
+    auth = AuthManager(
+        secret_key=(cfg.security.jwt_secret_key if cfg else _jwt_secret_env),
+        algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
+        expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+    )
+
+    if not user_record or not auth.verify_password(
+        login_data.password, user_record.get("password_hash", "")
+    ):
+        _audit_logger.warning(json.dumps({
+            "event": "login_failed",
+            "username": username,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }))
+        raise _generic_fail
+
+    token = auth.create_access_token({"sub": username, "type": "user"})
+    _audit_logger.info(json.dumps({
+        "event": "login_success",
+        "username": username,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }))
+    return _TokenResponse(access_token=token)
+
+# ── End security endpoints ─────────────────────────────────────────────────────
+
+
+import asyncio
+
+@app.get("/api/events")
+async def sse_events(request: Request):
+    """Server-Sent Events stream for real-time dashboard updates."""
+    async def generate():
+        last_state: Optional[str] = None
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                mode = _current_mode()
+                running = 0
+                for agent_name in _mode_agent_targets(mode):
+                    if agent_name in INFRA_AGENTS:
+                        continue
+                    pid_file = AI_HOME / "run" / f"{agent_name}.pid"
+                    if pid_file.exists():
+                        try:
+                            os.kill(int(pid_file.read_text().strip()), 0)
+                            running += 1
+                        except Exception:
+                            pass
+                plans = _load_task_plans()
+                active = next((p for p in plans if p.get("status") in ("running", "planning")), None)
+                active_title = active.get("title", "") if active else None
+                # Only emit an SSE event when state has actually changed to
+                # avoid flooding connected clients with identical messages.
+                current_state = f"{running}|{active_title}"
+                if current_state != last_state:
+                    data = json.dumps({
+                        "running": running,
+                        "active_task": active_title,
+                        "ts": now_iso(),
+                    })
+                    yield f"data: {data}\n\n"
+                    last_state = current_state
+            except Exception:
+                pass
+            await asyncio.sleep(8)
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
+
+
+@app.get("/api/status")
+def get_status():
+  agents = []
+  mode = _current_mode()
+  for agent_name in _mode_agent_targets(mode):
+    if agent_name in INFRA_AGENTS:
+      continue
+    pid_file = AI_HOME / "run" / f"{agent_name}.pid"
+    running = False
+    if pid_file.exists():
+      try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)
+        running = True
+      except Exception:
+        running = False
+    agents.append({"agent": agent_name, "running": running})
+
+  ollama_host_url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+  # Add active task hint
+  active_plans = _load_task_plans()
+  active_task = next((p for p in active_plans if p.get("status") in ("running", "planning")), None)
+  active_agents: set = set()
+  if active_task:
+    active_agents = {st.get("agent_id", "") for st in active_task.get("subtasks", [])}
+    for a in (active_task.get("agents_hint") or []):
+      active_agents.add(a)
+
+  return JSONResponse({
+    "ts": now_iso(),
+    "mode": mode,
+    "agents": agents,
+    "total": len(agents),
+    "running": sum(1 for a in agents if a["running"]),
+    "active_task": active_task.get("title", "") if active_task else None,
+    "active_task_id": active_task.get("id") if active_task else None,
+    "active_agents": list(active_agents),
+    "ollama_ok": _ollama_reachable(ollama_host_url),
+  })
+
+
+@app.get("/api/doctor")
+def get_doctor():
+    rc, out = ai_employee("doctor")
+    return JSONResponse({"output": out, "rc": rc})
+
+
+@app.post("/api/agents/start-all")
+def start_all_agents(_auth: None = Depends(require_auth)):
+    mode = _current_mode()
+    targets = _mode_agent_targets(mode)
+    outputs = []
+    failures = []
+    for agent_name in targets:
+      if agent_name in INFRA_AGENTS:
+        continue
+      rc, out = ai_employee("start", agent_name)
+      outputs.append(f"[{agent_name}] {out.strip()}")
+      if rc != 0:
+        failures.append(agent_name)
+    return JSONResponse({
+      "ok": len(failures) == 0,
+      "mode": mode,
+      "targets": targets,
+      "started": len(targets) - len(failures),
+      "failed": failures,
+      "output": "\n".join(outputs),
+    })
+
+
+@app.post("/api/agents/stop-all")
+def stop_all_agents(_auth: None = Depends(require_auth)):
+    mode = _current_mode()
+    targets = _mode_agent_targets(mode)
+    outputs = []
+    failures = []
+    for agent_name in targets:
+      if agent_name in INFRA_AGENTS:
+        continue
+      rc, out = ai_employee("stop", agent_name)
+      outputs.append(f"[{agent_name}] {out.strip()}")
+      if rc != 0:
+        failures.append(agent_name)
+    return JSONResponse({
+      "ok": len(failures) == 0,
+      "mode": mode,
+      "targets": targets,
+      "stopped": len(targets) - len(failures),
+      "failed": failures,
+      "output": "\n".join(outputs),
+    })
+
+
+@app.post("/api/quick-actions/onboard")
+def run_onboard_quick_action():
+  rc, out = ai_employee("do", "onboard")
+  return JSONResponse({
+    "ok": rc == 0,
+    "output": out,
+    "message": "Onboard workflow started." if rc == 0 else "Failed to start onboard workflow.",
+  })
+
+
+@app.post("/api/agents/start")
+def start_bot(payload: dict, _auth: None = Depends(require_auth)):
+    bot = payload.get("bot", "")
+    _validate_bot_name(bot)
+    rc, out = ai_employee("start", bot)
+    return JSONResponse({"ok": rc == 0, "output": out})
+
+
+@app.post("/api/agents/stop")
+def stop_bot(payload: dict, _auth: None = Depends(require_auth)):
+    bot = payload.get("bot", "")
+    _validate_bot_name(bot)
+    rc, out = ai_employee("stop", bot)
+    return JSONResponse({"ok": rc == 0, "output": out})
+
+
+@app.get("/api/workers")
+def get_workers():
+  agents = []
+  if BOTS_DIR.exists():
+    for d in sorted(BOTS_DIR.iterdir()):
+      if not d.is_dir() or not (d / "run.sh").exists():
+        continue
+      if d.name in INFRA_AGENTS:
+        continue
+      pid_file = AI_HOME / "run" / f"{d.name}.pid"
+      running = False
+      if pid_file.exists():
+        try:
+          pid = int(pid_file.read_text().strip())
+          os.kill(pid, 0)
+          running = True
+        except Exception:
+          pass
+
+      progress = 0
+      elapsed_minutes = 0
+      last_action = "Waiting for assignment"
+      alert = False
+      alert_reason = ""
+      state_file = STATE_DIR / f"{d.name}.state.json"
+      if state_file.exists():
+        try:
+          st = json.loads(state_file.read_text())
+          progress = int(st.get("progress", 0) or 0)
+          progress = max(0, min(progress, 100))
+          last_action = st.get("last_action") or st.get("active_plan_title") or st.get("current_task") or last_action
+          err = st.get("last_error") or st.get("error")
+          if err:
+            alert = True
+            alert_reason = str(err)[:160]
+
+          started_at = st.get("started_at")
+          if started_at:
+            try:
+              start_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+              elapsed_minutes = max(0, int((datetime.now(timezone.utc) - start_dt).total_seconds() / 60))
+            except Exception:
+              elapsed_minutes = 0
+        except Exception:
+          pass
+
+      if running and progress == 0:
+        progress = 15
+
+      agents.append({
+        "name": d.name,
+        "running": running,
+        "progress": progress,
+        "elapsed_minutes": elapsed_minutes,
+        "last_action": last_action,
+        "alert": alert,
+        "alert_reason": alert_reason,
+      })
+  return JSONResponse({"agents": agents})
+
+
+# ─── Chat ─────────────────────────────────────────────────────────────────────
+
+# ── Chatlog sanitizer — strip accidental API key leakage ─────────────────────
+_API_KEY_PATTERN = re.compile(
+    r"(sk-ant-[a-zA-Z0-9\-]{20,}|sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9\-_]{30,})",
+    re.IGNORECASE,
+)
+
+def _sanitize_for_log(text: str) -> str:
+    """Replace any API key patterns with [REDACTED] before writing to chatlog."""
+    return _API_KEY_PATTERN.sub("[REDACTED_API_KEY]", text)
+
+
+@app.get("/api/chat")
+def get_chat():
+    messages = _read_last_n_lines(CHATLOG, 100)
+    return JSONResponse({"messages": messages})
+
+
+@app.post("/api/chat")
+async def post_chat(payload: dict):
+    raw_message = (payload or {}).get("message", "").strip()
+    model_route = ((payload or {}).get("model_route") or "").strip().lower()
+    if not raw_message:
+        raise HTTPException(400, "message required")
+
+    # Enforce max length and strip null bytes; redact any accidental API keys
+    if _SECURITY_AVAILABLE:
+        message = InputSanitizer.sanitize_input(raw_message, max_length=10000)
+    else:
+        message = raw_message[:10000].replace("\x00", "")
+    message = _sanitize_for_log(message)
+
+    entry = {"ts": now_iso(), "type": "user", "message": message, "model_route": model_route}
+    append_chatlog(entry)
+
+    # Run handle_command in a thread pool to avoid blocking the async event loop
+    response = await run_in_threadpool(handle_command, message, model_route=model_route)
+    safe_response = _sanitize_for_log(response)
+    resp_entry = {"ts": now_iso(), "type": "agent", "message": safe_response, "model_route": model_route}
+    append_chatlog(resp_entry)
+
+    _log_activity(
+        "agent_command",
+        f"Command: {message[:120]}",
+        details={"command": message[:500], "response_preview": safe_response[:200]},
+        source="chat",
+    )
+    return JSONResponse({"ok": True, "response": response})
+
+
+def handle_command(message: str, model_route: Optional[str] = None) -> str:
+    msg_lower = message.lower().strip()
+
+    # ── ASCEND_FORGE chat commands ─────────────────────────────────────────────
+    if msg_lower.startswith("ascend:"):
+        try:
+            af = _load_ascend_module()
+            return af.handle_chat_command(message)
+        except Exception as exc:
+            logger.error("ascend chat command error: %s", exc)
+            return f"❌ ASCEND_FORGE error: {exc}"
+
+    if msg_lower in ("status", "s"):
+        rc, out = ai_employee("status")
+        return f"Agent status:\n{out}" if out.strip() else "No status data."
+
+    if msg_lower in ("workers", "w"):
+        rc, out = ai_employee("status")
+        return f"Agents:\n{out}"
+
+    if msg_lower.startswith("start "):
+        bot = message[6:].strip()
+        if not _BOT_NAME_RE.match(bot):
+          return f"Invalid agent name '{bot}'. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{{0,63}}."
+        rc, out = ai_employee("start", bot)
+        return f"Started {bot}. {out}"
+
+    if msg_lower.startswith("stop "):
+        bot = message[5:].strip()
+        if not _BOT_NAME_RE.match(bot):
+          return f"Invalid agent name '{bot}'. Must match [a-zA-Z0-9][a-zA-Z0-9_-]{{0,63}}."
+        rc, out = ai_employee("stop", bot)
+        return f"Stopped {bot}. {out}"
+
+    # ── Task configuration commands ───────────────────────────────────────────
+    if msg_lower in ("task status", "task list"):
+        plans = _load_task_plans()
+        active = next((p for p in plans if p.get("status") in ("running", "planning")), None)
+        if active:
+            subs = active.get("subtasks", [])
+            done = sum(1 for s in subs if s.get("status") == "done")
+            agents_used = ", ".join({s.get("agent_id","?") for s in subs if s.get("agent_id")})
+            return (
+                f"🚀 Active task: {active.get('title','?')}\n"
+                f"Status: {active.get('status')} | Mode: {active.get('mode','auto')}\n"
+                f"Progress: {done}/{len(subs)} subtasks\n"
+                f"Agents: {agents_used or '—'}"
+            )
+        recent = [p for p in plans[:5] if p.get("status") not in ("running", "planning")]
+        if recent:
+            lines = [f"• {p.get('title','?')[:40]} [{p.get('status')}]" for p in recent]
+            return "No active task. Recent tasks:\n" + "\n".join(lines)
+        return "No tasks found."
+
+    if msg_lower == "task cancel":
+        plans = _load_task_plans()
+        for p in plans:
+            if p.get("status") in ("running", "planning"):
+                p["status"] = "cancelled"
+                p["completed_at"] = now_iso()
+                _save_task_plans(plans)
+                return f"🛑 Cancelled task: {p.get('title','?')}"
+        return "No active task to cancel."
+
+    # task agents <agent1,agent2,...> — set agents for next task submitted via WhatsApp
+    if msg_lower.startswith("task agents "):
+        agents_raw = message[12:].strip()
+        agent_list = [a.strip() for a in agents_raw.replace(";", ",").split(",") if a.strip()]
+        capabilities = _load_agent_capabilities()
+        valid = list(capabilities.get("agents", {}).keys())
+        invalid = [a for a in agent_list if a not in valid]
+        if invalid:
+            return (
+                f"❌ Unknown agents: {', '.join(invalid)}\n"
+                f"Available: {', '.join(valid[:10])}…\n"
+                f"Tip: use exact IDs e.g. company-builder, finance-wizard"
+            )
+        # Store in a temp config file so next 'task <description>' via WhatsApp uses them
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        cfg = {}
+        if _task_cfg_file.exists():
+            try:
+                cfg = json.loads(_task_cfg_file.read_text())
+            except Exception:
+                pass
+        cfg["agents"] = agent_list
+        _task_cfg_file.write_text(json.dumps(cfg))
+        return f"✅ Agents set for next task: {', '.join(agent_list)}\nNow send: task <description>"
+
+    # task mode auto|parallel|single
+    if msg_lower.startswith("task mode "):
+        mode = message[10:].strip().lower()
+        if mode not in ("auto", "parallel", "single"):
+            return "❌ Valid modes: auto, parallel, single\nExample: task mode parallel"
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        cfg = {}
+        if _task_cfg_file.exists():
+            try:
+                cfg = json.loads(_task_cfg_file.read_text())
+            except Exception:
+                pass
+        cfg["mode"] = mode
+        _task_cfg_file.write_text(json.dumps(cfg))
+        mode_desc = {"auto": "🧠 Orchestrator decides agent assignments", "parallel": "⚡ All selected agents run simultaneously", "single": "1️⃣ Only first/best agent runs"}[mode]
+        return f"✅ Task mode set to: {mode}\n{mode_desc}\nNext task will use this mode."
+
+    # task config — show current WhatsApp task config
+    if msg_lower in ("task config", "task settings"):
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        cfg = {}
+        if _task_cfg_file.exists():
+            try:
+                cfg = json.loads(_task_cfg_file.read_text())
+            except Exception:
+                pass
+        agents = cfg.get("agents", [])
+        mode = cfg.get("mode", "auto")
+        return (
+            f"📋 Current task config:\n"
+            f"Mode: {mode}\n"
+            f"Agents: {', '.join(agents) if agents else 'auto-select'}\n"
+            f"\nChange with:\n"
+            f"  task mode <auto|parallel|single>\n"
+            f"  task agents <agent1,agent2>\n"
+            f"  task agents clear"
+        )
+
+    # task agents clear
+    if msg_lower in ("task agents clear", "task agents reset"):
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        if _task_cfg_file.exists():
+            try:
+                cfg = json.loads(_task_cfg_file.read_text())
+                cfg.pop("agents", None)
+                _task_cfg_file.write_text(json.dumps(cfg))
+            except Exception:
+                pass
+        return "✅ Agent selection cleared. Next task will use auto-select."
+
+    # ── Worker bundle commands ─────────────────────────────────────────────────
+    # worker list
+    if msg_lower in ("worker list", "workers list", "workers"):
+        bundles = _load_worker_bundles()
+        if not bundles:
+            return "🏭 No worker bundles yet.\nCreate one: worker create <name> agents:<a1,a2> task:<description>"
+        lines = []
+        for b in bundles:
+            enabled_tag = "✅" if b.get("enabled", True) else "⏸"
+            agents_short = ", ".join((b.get("agents") or [])[:3])
+            if len(b.get("agents") or []) > 3:
+                agents_short += f" +{len(b['agents'])-3} more"
+            lines.append(f"{enabled_tag} *{b['name']}* [{b.get('schedule','manual')}]\n   Agents: {agents_short}")
+        return f"🏭 Worker Bundles ({len(bundles)}):\n\n" + "\n\n".join(lines)
+
+    # worker create <name> agents:<a1,a2> task:<description>
+    if msg_lower.startswith("worker create "):
+        rest = message[14:].strip()
+        # Parse agents: param
+        import re as _re
+        agents_match = _re.search(r'agents:([\w,\-]+(?:[ \t]+[\w,\-]+)*)(?:[ \t]+task:|$)', rest, _re.IGNORECASE)
+        task_match = _re.search(r'task:(.+)', rest, _re.IGNORECASE)
+        worker_name = _re.split(r'[ \t]+agents:', rest, maxsplit=1, flags=_re.IGNORECASE)[0].strip()
+        if not worker_name:
+            return "❌ Usage: worker create <name> agents:<a1,a2> task:<description>"
+        agents_raw = agents_match.group(1).strip() if agents_match else ""
+        agent_list = [a.strip() for a in agents_raw.replace(";", ",").split(",") if a.strip()] if agents_raw else []
+        task_desc = task_match.group(1).strip() if task_match else ""
+        if not task_desc:
+            return "❌ Usage: worker create <name> agents:<a1,a2> task:<description>"
+        if not agent_list:
+            return "❌ Specify at least one agent: agents:order-processor,support-bot"
+        # Validate agents
+        capabilities = _load_agent_capabilities()
+        valid_agents = set(capabilities.get("agents", {}).keys())
+        invalid = [a for a in agent_list if a not in valid_agents]
+        if invalid:
+            return (f"❌ Unknown agents: {', '.join(invalid)}\n"
+                    f"Available: {', '.join(list(valid_agents)[:10])}…")
+        import uuid as _uuid
+        bundle = {
+            "id": _uuid.uuid4().hex[:10],
+            "name": worker_name,
+            "description": "Created via WhatsApp",
+            "task_description": task_desc,
+            "schedule": "continuous",
+            "agents": agent_list,
+            "enabled": True,
+            "created_at": now_iso(),
+            "last_run": None,
+        }
+        bundles = _load_worker_bundles()
+        bundles.append(bundle)
+        _save_worker_bundles(bundles)
+        return (f"✅ Worker created: *{worker_name}*\n"
+                f"Agents: {', '.join(agent_list)}\n"
+                f"Task: {task_desc[:80]}\n"
+                f"Use *worker run {worker_name}* to trigger it now.")
+
+    # worker run <name>
+    if msg_lower.startswith("worker run "):
+        w_name = message[11:].strip()
+        bundles = _load_worker_bundles()
+        match = next((b for b in bundles if b["name"].lower() == w_name.lower()), None)
+        if not match:
+            names = [b["name"] for b in bundles]
+            return f"❌ Worker '{w_name}' not found.\nKnown workers: {', '.join(names) or '(none)'}"
+        agents = match.get("agents", [])
+        agents_str = f" [agents:{','.join(agents)}]" if agents else ""
+        msg = f"task {match.get('task_description','')}{agents_str}"
+        entry = {"ts": now_iso(), "type": "user", "message": msg}
+        CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(CHATLOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        match["last_run"] = now_iso()
+        _save_worker_bundles(bundles)
+        return (f"▶ Worker *{match['name']}* triggered!\n"
+                f"Agents: {', '.join(agents)}\n"
+                f"Check *task status* for progress.")
+
+    # worker enable / disable <name>
+    if msg_lower.startswith("worker enable ") or msg_lower.startswith("worker disable "):
+        enable = msg_lower.startswith("worker enable ")
+        w_name = message[14:].strip() if enable else message[15:].strip()
+        bundles = _load_worker_bundles()
+        match = next((b for b in bundles if b["name"].lower() == w_name.lower()), None)
+        if not match:
+            return f"❌ Worker '{w_name}' not found. Use *worker list* to see workers."
+        match["enabled"] = enable
+        _save_worker_bundles(bundles)
+        return f"{'✅ Enabled' if enable else '⏸ Disabled'}: *{match['name']}*"
+
+    # worker delete <name>
+    if msg_lower.startswith("worker delete "):
+        w_name = message[14:].strip()
+        bundles = _load_worker_bundles()
+        remaining = [b for b in bundles if b["name"].lower() != w_name.lower()]
+        if len(remaining) == len(bundles):
+            return f"❌ Worker '{w_name}' not found. Use *worker list* to see workers."
+        _save_worker_bundles(remaining)
+        return f"🗑 Worker '{w_name}' deleted."
+
+    # worker status <name>
+    if msg_lower.startswith("worker status "):
+        w_name = message[14:].strip()
+        bundles = _load_worker_bundles()
+        match = next((b for b in bundles if b["name"].lower() == w_name.lower()), None)
+        if not match:
+            return f"❌ Worker '{w_name}' not found. Use *worker list* to see workers."
+        agents = ", ".join(match.get("agents") or [])
+        last = match.get("last_run") or "Never"
+        enabled = "✅ Enabled" if match.get("enabled", True) else "⏸ Disabled"
+        return (f"🏭 Worker: *{match['name']}*\n"
+                f"Status: {enabled}\n"
+                f"Schedule: {match.get('schedule','manual')}\n"
+                f"Agents: {agents}\n"
+                f"Task: {match.get('task_description','')[:100]}\n"
+                f"Last run: {last}")
+
+    # worker ecom — create the e-commerce preset worker
+    if msg_lower in ("worker ecom", "worker ecom preset", "ecom worker"):
+        ecom_agents = ["order-processor","support-bot","bookkeeper","inventory-sync","email-marketer","social-poster","product-researcher","ecom-dashboard"]
+        capabilities = _load_agent_capabilities()
+        known = set(capabilities.get("agents", {}).keys())
+        available = [a for a in ecom_agents if a in known]
+        import uuid as _uuid
+        bundle = {
+            "id": _uuid.uuid4().hex[:10],
+            "name": "E-commerce Automation Worker",
+            "description": "Full 100% automated e-commerce operation",
+            "task_description": "Run the full e-commerce automation pipeline: process new orders, handle customer support, sync inventory, run email campaigns, post to social media, research new products, and generate daily P&L reports.",
+            "schedule": "continuous",
+            "agents": available,
+            "enabled": True,
+            "created_at": now_iso(),
+            "last_run": None,
+        }
+        bundles = _load_worker_bundles()
+        # Avoid duplicate
+        if not any(b["name"] == bundle["name"] for b in bundles):
+            bundles.append(bundle)
+            _save_worker_bundles(bundles)
+        return (f"🛒 E-commerce Worker created!\n"
+                f"Agents ({len(available)}): {', '.join(available)}\n"
+                f"Use *worker run E-commerce Automation Worker* to start.")
+
+    # cmds / commands — show command categories
+    if msg_lower in ("cmds", "commands", "cmd list"):
+        return (
+            "📜 Command categories — open *📜 Commands* tab in dashboard for full list.\n\n"
+            "⚙️ System: status, workers, start/stop <agent>\n"
+            "🏭 Workers: worker list, worker create, worker run, worker enable/disable, worker delete, worker ecom\n"
+            "🚀 Tasks: task <desc>, task agents <a1,a2>, task mode <m>, task config, task cancel\n"
+            "🏢 Company: company build/validate/plan/simulate/gtm/pitch/org/swot\n"
+            "🪙 Crypto: memecoin create/tokenomics/whitepaper, crypto <pair>, signals\n"
+            "💰 Finance: finance model/pl/runway/raise/unit/pricing/pitch/valuation\n"
+            "👔 HR: hr hire/jd/screen/interview/onboard/review/org/culture\n"
+            "🎨 Brand: brand identity/name/position/voice/messaging/story/audit\n"
+            "📈 Growth: growth loop/funnel/abtests/retention/referral/plg\n"
+            "📋 PM: pm start/breakdown/sprint/roadmap/risks/raci/gantt/retro\n"
+            "✍️ Content: content/social/video/newsletter/course\n"
+            "💼 Sales: leads/outreach/email/recruit/websales\n"
+            "Type *help* for the full command list."
+        )
+
+    if msg_lower == "help":
+        return (
+            "Available commands:\n"
+            "  status / workers — agent status\n"
+            "  start <agent> / stop <agent> — control agents\n"
+            "  schedule / improvements — view tasks & proposals\n"
+            "  skills / agents — skills library & custom agents\n"
+            "  worker list — list all worker bundles\n"
+            "  worker create <name> agents:<a1,a2> task:<desc> — create bundle\n"
+            "  worker run <name> — trigger a worker now\n"
+            "  worker enable/disable/delete/status <name> — manage workers\n"
+            "  worker ecom — create full e-commerce automation worker\n"
+            "  research <query> — web research\n"
+            "  find <topic> / web search <query> / latest news <topic>\n"
+            "  social <brief> — full social media content package\n"
+            "  social plan <brief> — strategy plan only\n"
+            "  content <brief> — same as social\n"
+            "  leads <niche> <location> — local business lead generation\n"
+            "  leads real-estate <location> — real estate leads\n"
+            "  leads status / leads pipeline / leads followup\n"
+            "  recruit <role> <requirements> — find candidates\n"
+            "  recruit screen <cv_text> — AI CV screening\n"
+            "  recruit candidates / recruit status\n"
+            "  ecom research <niche> — trending product research\n"
+            "  ecom listing <product> — generate full product listing\n"
+            "  ecom email <type> <product> — email marketing flow\n"
+            "  ecom trends / ecom ads <product>\n"
+            "  creator plan <topic> — 30-day content calendar\n"
+            "  creator dm-funnel <style> — DM funnel sequence\n"
+            "  creator upsell <tier> — upsell scripts\n"
+            "  creator brand <name> <niche> — full brand kit\n"
+            "  signals — current trading signals (Telegram/Discord)\n"
+            "  signal daily — daily market summary\n"
+            "  signal post <analysis> — post a manual signal\n"
+            "  community update — community newsletter\n"
+            "  prospect <niche> <location> — appointment setter prospects\n"
+            "  outreach <campaign> — generate outreach campaign\n"
+            "  pipeline / setter followup / setter scripts\n"
+            "  newsletter create <topic> — generate newsletter issue\n"
+            "  newsletter subscribe <email> — add subscriber\n"
+            "  newsletter send <issue_id> — send newsletter\n"
+            "  chatbot create <niche> — build niche chatbot\n"
+            "  chatbot flow <niche> — conversation flow\n"
+            "  chatbot scripts <niche> — response scripts\n"
+            "  video <topic> — faceless video full pipeline\n"
+            "  video script <topic> — video script only\n"
+            "  video seo <topic> — YouTube SEO pack\n"
+            "  video tiktok <topic> — TikTok short-form\n"
+            "  pod research <niche> — print-on-demand trends\n"
+            "  pod design <niche> — AI design prompts\n"
+            "  pod listing <product> — full POD listing\n"
+            "  pod ads <product> — ad copy\n"
+            "  course create <topic> — full course package\n"
+            "  course outline <topic> — course structure\n"
+            "  course lesson <module> <title> — lesson content\n"
+            "  course market <topic> — marketing pack\n"
+            "  arb scan <product> — arbitrage scan\n"
+            "  arb trends — hot arbitrage categories\n"
+            "  arb opportunities / arb watchlist\n"
+            "  task <description> — multi-agent orchestration\n"
+            "  task status / task list / task cancel\n"
+            "  agents — list all 20 AI agents\n"
+            "  assign <agent> <subtask> — manual agent dispatch\n"
+            "  company build <idea> — build a company from scratch\n"
+            "  company validate / plan / simulate / gtm / pitch / org / swot\n"
+            "  memecoin create <concept> — full token launch package\n"
+            "  memecoin name / tokenomics / whitepaper / community / viral\n"
+            "  hr hire <role> — full hiring package\n"
+            "  hr jd / screen / interview / onboard / review / org / culture\n"
+            "  finance model <business> — full financial model\n"
+            "  finance pl / runway / raise / unit / pricing / pitch / valuation\n"
+            "  brand identity <company> — full brand system\n"
+            "  brand name / position / voice / messaging / story / audit\n"
+            "  growth loop <product> — viral growth loop\n"
+            "  growth funnel / abtests / retention / referral / plg / experiments\n"
+            "  pm start <project> — kick off a project\n"
+            "  pm breakdown / sprint / roadmap / risks / raci / gantt / retro\n"
+            "  help — this help"
+        )
+
+    if msg_lower in ("schedule", "schedules"):
+        if SCHEDULES_FILE.exists():
+            try:
+                tasks = json.loads(SCHEDULES_FILE.read_text())
+            except (json.JSONDecodeError, OSError):
+                tasks = []
+            if tasks:
+                lines = [f"• {t.get('label',t.get('id'))} ({t.get('action')})" for t in tasks[:10]]
+                return "Scheduled tasks:\n" + "\n".join(lines)
+        return "No scheduled tasks."
+
+    if msg_lower in ("improvements", "i"):
+        if IMPROVEMENTS_FILE.exists():
+            try:
+                items = json.loads(IMPROVEMENTS_FILE.read_text())
+            except (json.JSONDecodeError, OSError):
+                items = []
+            pending = [i for i in items if i.get("status") == "pending"]
+            if pending:
+                lines = [f"• {i.get('title', i.get('id'))}" for i in pending[:5]]
+                return f"{len(pending)} pending proposals:\n" + "\n".join(lines) + "\nGo to UI > Improvements to approve."
+        return "No pending improvements."
+
+    # ── Skills commands (pass-through; skills-manager processes these) ──
+    if (msg_lower.startswith("skills") or msg_lower.startswith("agents")
+            or msg_lower.startswith("agent ") or msg_lower.startswith("create agent")
+            or msg_lower.startswith("add skill") or msg_lower.startswith("remove skill")
+            or msg_lower.startswith("delete agent")):
+        if SKILLS_LIBRARY_FILE.exists():
+            try:
+                lib = json.loads(SKILLS_LIBRARY_FILE.read_text())
+                total = len(lib.get("skills", []))
+                cats = len(lib.get("categories", []))
+                return (
+                    f"📚 Skills Library: {total} skills in {cats} categories.\n"
+                    "The skills-manager is processing your command — check the chat in a moment.\n"
+                    "Tip: open the *🛠️ Skills* tab in the dashboard for the full interactive UI."
+                )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return "Skills library not loaded yet. Ensure skills-manager is running."
+
+    # ── Research commands (pass-through; web-researcher processes these) ──
+    if ((msg_lower.startswith("web search ") or msg_lower.startswith("search web ")
+            or msg_lower.startswith("latest news ") or msg_lower.startswith("news about ")
+        or msg_lower.startswith("lookup "))):
+        web_bot_state = STATE_DIR / "web-researcher.state.json"
+        if web_bot_state.exists():
+            try:
+                st = json.loads(web_bot_state.read_text())
+                if st.get("status") == "running":
+                    return (
+                        "🔍 Research request queued — web-researcher agent is processing it.\n"
+                        "The answer will appear in the chat shortly."
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return (
+            "🔍 Research request noted — ensure web-researcher agent is running.\n"
+            "Start it: `start web-researcher`"
+        )
+
+    # ── Social media commands (pass-through; social-media-manager processes these) ──
+    if (msg_lower.startswith("social ") or msg_lower.startswith("content ")
+            or msg_lower.startswith("create content ") or msg_lower.startswith("create social ")):
+        social_bot_state = STATE_DIR / "social-media-manager.state.json"
+        if social_bot_state.exists():
+            try:
+                st = json.loads(social_bot_state.read_text())
+                if st.get("status") == "running":
+                    return (
+                        "🎨 Content creation request queued — social-media-manager agent is processing it.\n"
+                        "Full content package will appear in the chat shortly (30-90 seconds)."
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return (
+            "🎨 Content request noted — ensure social-media-manager agent is running.\n"
+            "Start it: `start social-media-manager`"
+        )
+
+    # ── Pass-through routing helper ───────────────────────────────────────────
+    def _bot_passthrough(prefixes: list, bot_name: str, emoji: str, desc: str) -> str | None:
+        """Return a pass-through ack if msg matches any prefix, else None."""
+        if not any(msg_lower.startswith(p) for p in prefixes):
+            return None
+        st_file = STATE_DIR / f"{bot_name}.state.json"
+        if st_file.exists():
+            try:
+                st = json.loads(st_file.read_text())
+                if st.get("status") == "running":
+                    return (
+                        f"{emoji} Request queued — {bot_name} agent is processing it.\n"
+                        f"Result will appear in chat shortly."
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        return f"{emoji} {desc}\nStart it: `start {bot_name}`"
+
+    # Special handler for 'task <description>' — injects stored agent/mode config
+    if msg_lower.startswith("task "):
+        # Load stored WhatsApp task config
+        _task_cfg_file = CONFIG_DIR / "whatsapp_task_config.json"
+        _task_cfg: dict = {}
+        if _task_cfg_file.exists():
+            try:
+                _task_cfg = json.loads(_task_cfg_file.read_text())
+            except Exception:
+                pass
+        _agents_hint = _task_cfg.get("agents", [])
+        _mode_hint = _task_cfg.get("mode", "auto")
+        desc_part = message[5:].strip()
+        # Append hints to the chat message for task-orchestrator to parse
+        agents_str = f" [agents:{','.join(_agents_hint)}]" if _agents_hint else ""
+        mode_str = f" [mode:{_mode_hint}]" if _mode_hint and _mode_hint != "auto" else ""
+        enriched_msg = f"task {desc_part}{agents_str}{mode_str}"
+        entry = {"ts": now_iso(), "type": "user", "message": enriched_msg}
+        CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+        append_chatlog(entry)
+        config_note = ""
+        if _agents_hint:
+            config_note = f"\nAgents: {', '.join(_agents_hint)} | Mode: {_mode_hint}"
+        elif _mode_hint and _mode_hint != "auto":
+            config_note = f"\nMode: {_mode_hint}"
+        else:
+            config_note = "\nAgents: auto-selected | Mode: auto"
+        return (
+            f"🚀 Task queued: '{desc_part[:60]}'{config_note}\n"
+            f"Tip: use *task config* to see/change agent settings."
+        )
+
+    for _prefixes, _bot, _emoji, _desc in [
+        (["leads ", "outreach "], "lead-generator", "📋", "Lead generator not running."),
+        (["recruit "], "recruiter", "👔", "Recruiter not running."),
+        (["ecom "], "ecom-agent", "🛒", "Ecom agent not running."),
+        (["creator "], "creator-agency", "🎭", "Creator agency not running."),
+        (["signals", "signal ", "community update"], "signal-community", "📊", "Signal community not running."),
+        (["prospect ", "pipeline", "setter "], "appointment-setter", "📅", "Appointment setter not running."),
+        (['newsletter '], "newsletter-bot", "📧", "Newsletter agent not running."),
+        (['chatbot '], "chatbot-builder", "🤖", "Chatbot builder agent not running."),
+        (['video '], "faceless-video", "🎬", "Faceless video agent not running."),
+        (['pod '], "print-on-demand", "👕", "Print-on-demand agent not running."),
+        (['course '], "course-creator", "🎓", "Course creator agent not running."),
+        (['arb '], "arbitrage-bot", "💹", "Arbitrage agent not running."),
+        (["orchestrate "], "task-orchestrator", "🚀", "Task orchestrator not running. Start it: `start task-orchestrator`"),
+        (["company "], "company-builder", "🏢", "Company builder not running. Start it: `start company-builder`"),
+        (["memecoin "], "memecoin-creator", "🪙", "Memecoin creator not running. Start it: `start memecoin-creator`"),
+        (["hr "], "hr-manager", "👔", "HR manager not running. Start it: `start hr-manager`"),
+        (["finance "], "finance-wizard", "💰", "Finance wizard not running. Start it: `start finance-wizard`"),
+        (["brand "], "brand-strategist", "🎨", "Brand strategist not running. Start it: `start brand-strategist`"),
+        (["growth "], "growth-hacker", "🚀", "Growth hacker not running. Start it: `start growth-hacker`"),
+        (["pm "], "project-manager", "📋", "Project manager not running. Start it: `start project-manager`"),
+    ]:
+        _reply = _bot_passthrough(_prefixes, _bot, _emoji, _desc)
+        if _reply is not None:
+            return _reply
+
+    # ── ROI / Metrics commands ────────────────────────────────────────────────
+    if msg_lower in ("metrics", "roi", "stats", "kpis"):
+        data = _load_metrics()
+        s = data.get("summary", {})
+        lines = [
+            "📊 ROI Summary",
+            f"Tasks completed : {s.get('tasks_completed', 0)}",
+            f"Leads generated : {s.get('leads_generated', 0)}",
+            f"Emails sent     : {s.get('emails_sent', 0)}",
+            f"Content created : {s.get('content_created', 0)}",
+            f"Hours saved     : {s.get('hours_saved', 0):.1f}h",
+            f"Cost saved      : €{s.get('cost_saved', 0):.0f}",
+            f"Revenue tracked : €{s.get('revenue', 0):.0f}",
+            "",
+            "Open *📈 ROI* tab for full dashboard.",
+        ]
+        return "\n".join(lines)
+
+    if msg_lower.startswith("metrics record "):
+        parts = message[15:].strip().split(":")
+        event_type = parts[0].strip() if parts else "custom"
+        value = None
+        if len(parts) > 1:
+            try:
+                value = float(parts[1].strip())
+            except ValueError:
+                pass
+        valid_types = list(_HOURS_PER_EVENT.keys())
+        if event_type not in valid_types:
+            return f"❌ Unknown type. Valid: {', '.join(valid_types)}"
+        data = _load_metrics()
+        events = data.get("events", [])
+        import uuid as _uuid
+        events.append({"id": _uuid.uuid4().hex[:8], "type": event_type, "value": value, "ts": now_iso(), "agent": "manual"})
+        data["events"] = events[-500:]
+        data["summary"] = _recalc_summary(data["events"])
+        _save_metrics(data)
+        return f"✅ Recorded: {event_type}" + (f" · €{value:.0f}" if value else "")
+
+    # ── Guardrails commands ───────────────────────────────────────────────────
+    if msg_lower in ("guardrails", "pending approvals", "approvals"):
+        data = _load_guardrails()
+        pending = data.get("pending", [])
+        if not pending:
+            return "🔒 Guardrails: No pending approvals. All clear!"
+        lines = [f"🔒 {len(pending)} pending approval(s):"]
+        for a in pending[:5]:
+            lines.append(f"  [{a['id']}] {a.get('action_type','?')} by {a.get('agent','?')} — risk:{a.get('risk_level','?')}")
+        lines.append("\nOpen *🔒 Guardrails* tab to approve/reject.")
+        return "\n".join(lines)
+
+    if msg_lower.startswith("approve "):
+        action_id = message[8:].strip()
+        data = _load_guardrails()
+        pending = data.get("pending", [])
+        action = next((a for a in pending if a["id"] == action_id), None)
+        if not action:
+            return f"❌ Action '{action_id}' not found in pending queue."
+        action["status"] = "approved"
+        action["resolved_at"] = now_iso()
+        data["pending"] = [a for a in pending if a["id"] != action_id]
+        data.setdefault("log", []).append(action)
+        data["log"] = data["log"][-200:]
+        _save_guardrails(data)
+        return f"✅ Action {action_id} approved."
+
+    if msg_lower.startswith("reject "):
+        action_id = message[7:].strip()
+        data = _load_guardrails()
+        pending = data.get("pending", [])
+        action = next((a for a in pending if a["id"] == action_id), None)
+        if not action:
+            return f"❌ Action '{action_id}' not found in pending queue."
+        action["status"] = "rejected"
+        action["resolved_at"] = now_iso()
+        data["pending"] = [a for a in pending if a["id"] != action_id]
+        data.setdefault("log", []).append(action)
+        data["log"] = data["log"][-200:]
+        _save_guardrails(data)
+        return f"🚫 Action {action_id} rejected."
+
+    # ── Memory commands ───────────────────────────────────────────────────────
+    if msg_lower in ("memory", "clients", "crm"):
+        data = _load_memory()
+        clients = list(data.get("clients", {}).values())
+        if not clients:
+            return "🧠 Memory: No clients yet.\nAdd one: `client add <name> <company>`"
+        lines = [f"🧠 {len(clients)} client(s) in memory:"]
+        for c in clients[:10]:
+            status = c.get("status", "prospect")
+            lines.append(f"  • {c['name']} ({c.get('company','?')}) [{status}]")
+        if len(clients) > 10:
+            lines.append(f"  … and {len(clients)-10} more. Open *🧠 Memory* tab for full list.")
+        return "\n".join(lines)
+
+    if msg_lower.startswith("client add "):
+        rest = message[11:].strip().split(" ", 1)
+        name = rest[0] if rest else ""
+        company = rest[1] if len(rest) > 1 else None
+        if not name:
+            return "❌ Usage: client add <name> [company]"
+        data = _load_memory()
+        clients = data.get("clients", {})
+        import re as _re
+        import uuid as _uuid
+        client_id = _re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-") or _uuid.uuid4().hex[:8]
+        clients[client_id] = {
+            "id": client_id, "name": name, "company": company,
+            "status": "prospect", "interactions": 0, "added_at": now_iso(), "updated_at": now_iso(),
+        }
+        data["clients"] = clients
+        _save_memory(data)
+        return f"✅ Client added: {name}" + (f" ({company})" if company else "")
+
+    # ── Templates commands ────────────────────────────────────────────────────
+    if msg_lower in ("templates", "template list"):
+        templates = _load_templates()
+        if not templates:
+            return "📋 No templates found."
+        lines = [f"📋 {len(templates)} available templates:"]
+        for t in templates:
+            roi = (t.get("expected_results") or {}).get("estimated_monthly_revenue") or (t.get("expected_results") or {}).get("estimated_monthly_savings") or ""
+            roi_str = f" · {roi}" if roi else ""
+            lines.append(f"  {t.get('icon','📋')} {t['name']}{roi_str}")
+        lines.append("\nDeploy: `template deploy <id>` or use *📋 Templates* tab.")
+        return "\n".join(lines)
+
+    if msg_lower.startswith("template deploy "):
+        tmpl_id = message[16:].strip()
+        templates = _load_templates()
+        tmpl = next((t for t in templates if t["id"] == tmpl_id), None)
+        if not tmpl:
+            ids = [t["id"] for t in templates]
+            return f"❌ Template '{tmpl_id}' not found.\nAvailable: {', '.join(ids)}"
+        import uuid as _uuid
+        agents = tmpl.get("agents") or []
+        bundle = {
+            "id": _uuid.uuid4().hex[:10],
+            "name": tmpl["name"],
+            "description": tmpl.get("description", "")[:200],
+            "task_description": tmpl.get("task_description", ""),
+            "schedule": tmpl.get("schedule", "manual"),
+            "agents": agents,
+            "enabled": True,
+            "template_id": tmpl_id,
+            "created_at": now_iso(),
+            "last_run": None,
+        }
+        bundles = _load_worker_bundles()
+        bundles.append(bundle)
+        _save_worker_bundles(bundles)
+        return (f"🚀 Template deployed: *{tmpl['name']}*\n"
+                f"Agents: {', '.join(agents)}\n"
+                f"Schedule: {tmpl.get('schedule','manual')}\n"
+                f"Use `worker run {tmpl['name']}` to start it now.")
+
+
+    routed_agent = route_to_agent(message)
+    mode = _current_mode()
+    if ("all 20 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
+      allowed = ", ".join(_available_agent_ids(mode))
+      return (
+        f"Only {len(_available_agent_ids(mode))} agents are available in {mode} mode: {allowed}. "
+        "Switch to power mode to run all 20 agents, or I can handle this with the current set."
+      )
+    if not _agent_allowed_in_mode(routed_agent, mode):
+      return (
+        f"{routed_agent} is not available in {mode} mode. "
+        f"Run: ai-employee mode {'business' if mode == 'starter' else 'power'} to unlock more agents."
+      )
+
+    return _generate_llm_response(message, routed_agent, mode, model_route=model_route)
+
+    return (
+        f"Task queued: '{message}'\n"
+        "Tip: use 'start <agent>', 'stop <agent>', 'status', 'help' for commands."
+    )
+
+
+# ─── Schedules ────────────────────────────────────────────────────────────────
+
+@app.get("/api/schedules")
+def get_schedules():
+    if SCHEDULES_FILE.exists():
+        try:
+            return JSONResponse({"tasks": json.loads(SCHEDULES_FILE.read_text())})
+        except Exception:
+            pass
+    return JSONResponse({"tasks": []})
+
+
+@app.post("/api/schedules")
+def add_schedule(task: dict):
+    import uuid as _uuid
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tasks = []
+    if SCHEDULES_FILE.exists():
+        try:
+            tasks = json.loads(SCHEDULES_FILE.read_text())
+        except Exception:
+            pass
+
+    task_id = task.get("id", "")
+    if not task_id:
+        # Auto-generate an id from task name or a UUID
+        raw_name = (task.get("task") or task.get("name") or "").strip()
+        if raw_name:
+            task_id = re.sub(r"[^a-z0-9-]", "-", raw_name.lower()).strip("-") or _uuid.uuid4().hex[:12]
+        else:
+            task_id = _uuid.uuid4().hex[:12]
+        task["id"] = task_id
+
+    # Replace if exists
+    tasks = [t for t in tasks if t.get("id") != task_id]
+    tasks.append(task)
+    SCHEDULES_FILE.write_text(json.dumps(tasks, indent=2))
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/schedules/{task_id}")
+def delete_schedule(task_id: str):
+    if not SCHEDULES_FILE.exists():
+        return JSONResponse({"ok": True})
+    try:
+        tasks = json.loads(SCHEDULES_FILE.read_text())
+        tasks = [t for t in tasks if t.get("id") != task_id]
+        SCHEDULES_FILE.write_text(json.dumps(tasks, indent=2))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    return JSONResponse({"ok": True})
+
+
+# ─── Improvements ─────────────────────────────────────────────────────────────
+
+@app.get("/api/improvements")
+def get_improvements():
+    if IMPROVEMENTS_FILE.exists():
+        try:
+            return JSONResponse({"improvements": json.loads(IMPROVEMENTS_FILE.read_text())})
+        except Exception:
+            pass
+    return JSONResponse({"improvements": []})
+
+
+@app.patch("/api/improvements/{improvement_id}")
+def review_improvement(improvement_id: str, payload: dict):
+    status = payload.get("status", "")
+    if status not in ("approved", "rejected"):
+        raise HTTPException(400, "status must be 'approved' or 'rejected'")
+
+    if not IMPROVEMENTS_FILE.exists():
+        raise HTTPException(404, "no improvements found")
+
+    try:
+        items = json.loads(IMPROVEMENTS_FILE.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(500, f"improvements file is corrupt: {exc}") from exc
+    found = False
+    for item in items:
+        if item.get("id") == improvement_id:
+            item["status"] = status
+            item["reviewed_at"] = now_iso()
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(404, f"improvement {improvement_id!r} not found")
+
+    IMPROVEMENTS_FILE.write_text(json.dumps(items, indent=2))
+    return JSONResponse({"ok": True, "id": improvement_id, "status": status})
+
+
+# ─── Skills Library ────────────────────────────────────────────────────────────
+
+@app.get("/api/skills")
+def get_skills(category: str = "", q: str = ""):
+    lib = {}
+    for candidate in (SKILLS_LIBRARY_FILE, _REPO_SKILLS_FILE):
+        if candidate.exists():
+            try:
+                lib = json.loads(candidate.read_text())
+                break
+            except Exception:
+                pass
+    skills = lib.get("skills", [])
+    categories = lib.get("categories", sorted({s["category"] for s in skills}))
+    if category:
+        skills = [s for s in skills if s["category"].lower() == category.lower()]
+    if q:
+        ql = q.lower()
+        skills = [
+            s for s in skills
+            if (ql in s["id"].lower() or ql in s["name"].lower()
+                or ql in s["description"].lower()
+                or any(ql in t.lower() for t in s.get("tags", [])))
+        ]
+    return JSONResponse({"skills": skills, "categories": categories, "total": len(skills)})
+
+
+# ─── Custom Agents ─────────────────────────────────────────────────────────────
+
+def _load_library():
+    if SKILLS_LIBRARY_FILE.exists():
+        try:
+            return json.loads(SKILLS_LIBRARY_FILE.read_text())
+        except Exception:
+            pass
+    return {"skills": []}
+
+
+def _load_custom_agents() -> dict:
+    if CUSTOM_AGENTS_FILE.exists():
+        try:
+            return json.loads(CUSTOM_AGENTS_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_custom_agents(agents: dict) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CUSTOM_AGENTS_FILE.write_text(json.dumps(agents, indent=2))
+
+
+def _build_system_prompt(name: str, skill_ids: list, library: dict) -> str:
+    skills_map = {s["id"]: s for s in library.get("skills", [])}
+    lines = [f"You are {name}, a specialised AI assistant with the following expertise:", ""]
+    for sid in skill_ids:
+        s = skills_map.get(sid)
+        if s:
+            lines.append(f"- **{s['name']}** ({s['category']}): {s['description']}")
+        else:
+            lines.append(f"- {sid}")
+    lines += ["", "Apply your full expertise when responding. Be precise, actionable, and thorough."]
+    return "\n".join(lines)
+
+
+@app.get("/api/agents/custom")
+def list_custom_agents():
+    agents = _load_custom_agents()
+    result = []
+    for a in agents.values():
+        result.append({
+            "id": a["id"],
+            "name": a["name"],
+            "description": a.get("description", ""),
+            "skills": a.get("skills", []),
+            "skill_count": len(a.get("skills", [])),
+            "created_at": a.get("created_at", ""),
+            "updated_at": a.get("updated_at", ""),
+        })
+    return JSONResponse({"agents": result})
+
+
+@app.post("/api/agents/custom")
+def create_custom_agent(payload: dict):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    skill_ids = [str(s).strip() for s in (payload.get("skills") or []) if str(s).strip()]
+    description = (payload.get("description") or "").strip()
+
+    library = _load_library()
+    known_ids = {s["id"] for s in library.get("skills", [])}
+    valid_ids = [s for s in skill_ids if s in known_ids][:20]
+    unknown = [s for s in skill_ids if s not in known_ids]
+
+    import re as _re
+    agent_id = _re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-")
+    agents = _load_custom_agents()
+    ts = now_iso()
+    agent = {
+        "id": agent_id,
+        "name": name,
+        "description": description,
+        "skills": valid_ids,
+        "created_at": agents.get(agent_id, {}).get("created_at", ts),
+        "updated_at": ts,
+        "system_prompt": _build_system_prompt(name, valid_ids, library),
+    }
+    agents[agent_id] = agent
+    _save_custom_agents(agents)
+    return JSONResponse({
+        "ok": True,
+        "id": agent_id,
+        "skill_count": len(valid_ids),
+        "unknown_skills": unknown,
+    })
+
+
+@app.delete("/api/agents/custom/{agent_id}")
+def delete_custom_agent(agent_id: str):
+    agents = _load_custom_agents()
+    if agent_id not in agents:
+        raise HTTPException(404, f"agent '{agent_id}' not found")
+    del agents[agent_id]
+    _save_custom_agents(agents)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/agents/custom/{agent_id}")
+def get_custom_agent(agent_id: str):
+    agents = _load_custom_agents()
+    if agent_id not in agents:
+        raise HTTPException(404, f"agent '{agent_id}' not found")
+    return JSONResponse(agents[agent_id])
+
+
+# ─── Task Orchestration API ────────────────────────────────────────────────────
+
+AGENT_CAPS_FILE = CONFIG_DIR / "agent_capabilities.json"
+TASK_PLANS_FILE = CONFIG_DIR / "task_plans.json"
+AGENT_TASKS_DIR = STATE_DIR / "agent_tasks"
+WORKER_BUNDLES_FILE = CONFIG_DIR / "worker_bundles.json"
+
+
+def _load_worker_bundles() -> list:
+    data = _cached_read(WORKER_BUNDLES_FILE)
+    return data if isinstance(data, list) else []
+
+
+def _save_worker_bundles(bundles: list) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    WORKER_BUNDLES_FILE.write_text(json.dumps(bundles, indent=2))
+    _invalidate_cache(WORKER_BUNDLES_FILE)
+
+
+# ─── Worker Bundle API ────────────────────────────────────────────────────────
+
+@app.get("/api/workers/bundles")
+def list_worker_bundles():
+    """List all worker bundles."""
+    return JSONResponse({"bundles": _load_worker_bundles()})
+
+
+@app.post("/api/workers/bundles")
+def create_worker_bundle(payload: dict):
+    """Create a new worker bundle."""
+    import uuid as _uuid
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    agents = payload.get("agents") or []
+    if not agents:
+        raise HTTPException(400, "at least one agent required")
+    task_description = (payload.get("task_description") or "").strip()
+    if not task_description:
+        raise HTTPException(400, "task_description required")
+    schedule = (payload.get("schedule") or "manual").strip()
+    description = (payload.get("description") or "").strip()
+    enabled = payload.get("enabled", True)
+
+    # Validate agents
+    capabilities = _load_agent_capabilities()
+    known_agents = set(capabilities.get("agents", {}).keys())
+    invalid = [a for a in agents if a not in known_agents]
+    if invalid:
+        raise HTTPException(400, f"Unknown agents: {', '.join(invalid)}")
+
+    bundle = {
+        "id": _uuid.uuid4().hex[:10],
+        "name": name,
+        "description": description,
+        "task_description": task_description,
+        "schedule": schedule,
+        "agents": agents,
+        "enabled": enabled,
+        "created_at": now_iso(),
+        "last_run": None,
+    }
+    bundles = _load_worker_bundles()
+    bundles.append(bundle)
+    _save_worker_bundles(bundles)
+    return JSONResponse({"ok": True, "bundle": bundle})
+
+
+@app.patch("/api/workers/bundles/{bundle_id}")
+def update_worker_bundle(bundle_id: str, payload: dict):
+    """Update an existing worker bundle."""
+    bundles = _load_worker_bundles()
+    for b in bundles:
+        if b["id"] == bundle_id:
+            for field in ("name", "description", "task_description", "schedule", "agents", "enabled"):
+                if field in payload:
+                    b[field] = payload[field]
+            b["updated_at"] = now_iso()
+            _save_worker_bundles(bundles)
+            return JSONResponse({"ok": True, "bundle": b})
+    raise HTTPException(404, f"bundle '{bundle_id}' not found")
+
+
+@app.delete("/api/workers/bundles/{bundle_id}")
+def delete_worker_bundle(bundle_id: str):
+    """Delete a worker bundle."""
+    bundles = _load_worker_bundles()
+    remaining = [b for b in bundles if b["id"] != bundle_id]
+    if len(remaining) == len(bundles):
+        raise HTTPException(404, f"bundle '{bundle_id}' not found")
+    _save_worker_bundles(remaining)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/workers/bundles/{bundle_id}/run")
+def run_worker_bundle(bundle_id: str):
+    """Manually trigger a worker bundle — submits its task to the orchestrator chatlog."""
+    bundles = _load_worker_bundles()
+    for b in bundles:
+        if b["id"] != bundle_id:
+            continue
+        desc = b.get("task_description", "")
+        agents = b.get("agents", [])
+        agents_str = f" [agents:{','.join(agents)}]" if agents else ""
+        msg = f"task {desc}{agents_str}"
+        entry = {"ts": now_iso(), "type": "user", "message": msg}
+        CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(CHATLOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        b["last_run"] = now_iso()
+        _save_worker_bundles(bundles)
+        return JSONResponse({"ok": True, "message": f"Worker '{b['name']}' triggered", "agents": agents})
+    raise HTTPException(404, f"bundle '{bundle_id}' not found")
+
+
+def _load_agent_capabilities() -> dict:
+    for candidate in (AGENT_CAPS_FILE, _REPO_CAPS_FILE):
+        if candidate.exists():
+            try:
+                return json.loads(candidate.read_text())
+            except Exception:
+                pass
+    return {}
+
+
+def _load_task_plans() -> list:
+    if not TASK_PLANS_FILE.exists():
+        return []
+    try:
+        return json.loads(TASK_PLANS_FILE.read_text())
+    except Exception:
+        return []
+
+
+def _save_task_plans(plans: list) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    TASK_PLANS_FILE.write_text(json.dumps(plans, indent=2))
+
+
+@app.post("/api/task/submit")
+def submit_task(payload: dict):
+    """Submit a task for multi-agent orchestration via chatlog.
+    Accepts optional 'agents' list and 'mode' string.
+    """
+    description = (payload.get("description") or "").strip()
+    if not description:
+        raise HTTPException(400, "description required")
+
+    agents: list = payload.get("agents") or []
+    mode: str = (payload.get("mode") or "auto").strip()
+
+    # Build the chat message so task-orchestrator can pick it up
+    agents_hint = ""
+    if agents:
+        agents_hint = f" [agents:{','.join(agents)}]"
+    mode_hint = f" [mode:{mode}]" if mode and mode != "auto" else ""
+    task_msg = f"task {description}{agents_hint}{mode_hint}"
+
+    entry = {"ts": now_iso(), "type": "user", "message": task_msg}
+    CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(CHATLOG, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+    # Create a pending plan entry so the UI can show it immediately
+    import uuid as _uuid
+    task_id = _uuid.uuid4().hex[:12]
+    plan = {
+        "id": task_id,
+        "title": description[:80],
+        "status": "planning",
+        "mode": mode,
+        "agents_hint": agents,
+        "subtasks": [],
+        "created_at": now_iso(),
+    }
+    plans = _load_task_plans()
+    plans.insert(0, plan)
+    _save_task_plans(plans[:50])  # keep last 50
+
+    # Auto-start assigned agents if they're not running
+    import re as _re
+    _safe_id_pat = _re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+    if agents:
+        for agent_id in agents:
+            # Validate agent_id to prevent path traversal
+            if not isinstance(agent_id, str) or not _safe_id_pat.match(agent_id):
+                continue
+            target = _resolve_agent_target(agent_id)
+            if target and _agent_dir_exists(target):
+                pid_file = AI_HOME / "run" / (target + ".pid")
+                already_running = False
+                if pid_file.exists():
+                    try:
+                        pid_text = pid_file.read_text().strip()
+                        pid = int(pid_text)
+                        os.kill(pid, 0)
+                        already_running = True
+                    except Exception:
+                        pass
+                if not already_running:
+                    try:
+                        ai_employee("start", target)
+                    except Exception:
+                        pass
+
+    return JSONResponse({"ok": True, "task_id": task_id, "message": f"Task submitted: {description[:60]}", "agents": agents, "mode": mode})
+
+
+@app.post("/api/task/cancel")
+def cancel_task(_auth: None = Depends(require_auth)):
+    """Cancel the currently running task plan."""
+    plans = _load_task_plans()
+    for p in plans:
+        if p.get("status") in ("running", "planning"):
+            p["status"] = "cancelled"
+            p["completed_at"] = now_iso()
+            _save_task_plans(plans)
+            return JSONResponse({"ok": True, "cancelled_id": p["id"]})
+    return JSONResponse({"ok": False, "message": "No active task found"})
+
+
+@app.post("/api/task/reassign")
+def reassign_subtask(payload: dict):
+    """Reassign a pending subtask to a different agent."""
+    task_id = (payload.get("task_id") or "").strip()
+    subtask_id = (payload.get("subtask_id") or "").strip()
+    agent_id = (payload.get("agent_id") or "").strip()
+    if not all([task_id, subtask_id, agent_id]):
+        raise HTTPException(400, "task_id, subtask_id, and agent_id are required")
+
+    # Validate agent exists
+    capabilities = _load_agent_capabilities()
+    if agent_id not in capabilities.get("agents", {}):
+        raise HTTPException(400, f"Unknown agent '{agent_id}'")
+
+    plans = _load_task_plans()
+    for p in plans:
+        if p.get("id") != task_id:
+            continue
+        for st in p.get("subtasks", []):
+            if (st.get("subtask_id") or st.get("id")) == subtask_id:
+                if st.get("status") not in ("pending", "failed"):
+                    raise HTTPException(400, f"Can only reassign pending/failed subtasks (current: {st.get('status')})")
+                old = st.get("agent_id")
+                st["agent_id"] = agent_id
+                st["status"] = "pending"
+                _save_task_plans(plans)
+                return JSONResponse({"ok": True, "subtask_id": subtask_id, "old_agent": old, "new_agent": agent_id})
+        raise HTTPException(404, f"Subtask '{subtask_id}' not found in task '{task_id}'")
+    raise HTTPException(404, f"Task '{task_id}' not found")
+
+
+# Agent keyword→category scoring map used by auto-select.
+# Keys use task-description vocabulary (not agent skill IDs), so this intentionally
+# differs from agent_capabilities.json.  It is derived from each agent's specialties
+# and kept here for fast, dependency-free lookup.  Update when adding new agents.
+_AGENT_KEYWORDS: dict[str, list[str]] = {
+    "company-builder":   ["company", "startup", "build", "launch", "found", "business plan", "enterprise", "venture", "gtm", "go-to-market", "mvp", "market entry", "b2b", "b2c"],
+    "brand-strategist":  ["brand", "logo", "identity", "name", "naming", "visual", "design", "positioning", "voice", "messaging", "tagline", "story", "rebrand"],
+    "finance-wizard":    ["finance", "financial", "revenue", "profit", "pl", "p&l", "model", "valuation", "fundrais", "investor", "pitch", "vc", "budget", "unit economics", "burn", "runway", "cac", "ltv"],
+    "hr-manager":        ["hire", "hiring", "recruit", "hr", "team", "culture", "onboard", "job description", "interview", "employee", "headcount", "org chart", "talent", "people"],
+    "growth-hacker":     ["grow", "growth", "viral", "funnel", "retention", "referral", "plg", "activation", "conversion", "ab test", "churn", "user acquisition", "marketing channel"],
+    "project-manager":   ["project", "sprint", "roadmap", "milestone", "gantt", "risk", "plan", "timeline", "deadline", "deliverable", "backlog", "agile", "scrum", "scope"],
+    "content-master":    ["content", "blog", "article", "seo", "write", "copywrite", "post", "long-form", "keyword", "headline", "editorial"],
+    "social-guru":       ["social", "instagram", "twitter", "tiktok", "linkedin", "facebook", "viral post", "caption", "hashtag", "reel", "story", "thread", "community"],
+    "intel-agent":       ["research", "competitor", "market", "intelligence", "swot", "analyse", "analyze", "landscape", "benchmark", "trend", "industry", "sector"],
+    "lead-hunter":       ["lead", "prospect", "b2b list", "cold outreach", "decision maker", "crm", "pipeline", "contact list"],
+    "email-ninja":       ["email", "cold email", "drip", "sequence", "deliverability", "open rate", "subject line", "newsletter email"],
+    "creative-studio":   ["ad", "creative", "banner", "image prompt", "ad copy", "campaign", "visual", "design brief"],
+    "crypto-trader":     ["crypto", "bitcoin", "ethereum", "trade", "trading", "chart", "technical analysis", "signal", "defi", "altcoin"],
+    "memecoin-creator":  ["memecoin", "token", "tokenomics", "whitepaper", "web3", "nft", "meme coin", "launch token", "smart contract"],
+    "data-analyst":      ["data", "analytics", "dashboard", "kpi", "metric", "report", "insight", "survey", "statistic"],
+    "support-bot":       ["support", "faq", "ticket", "customer service", "helpdesk", "escalat", "sentiment", "complaint", "refund", "customer complaint", "help desk", "return", "exchange"],
+    "product-scout":     ["product", "ecommerce", "shopify", "amazon", "arbitrage", "dropship", "supplier", "niche product", "trend product"],
+    "bot-dev":           ["code", "develop", "python", "script", "api", "bot", "automate", "integration", "endpoint", "webhook"],
+    "web-sales":         ["website", "landing page", "ux", "conversion rate", "seo audit", "pitch website", "sales page"],
+    "orchestrator":      ["coordinate", "orchestrate", "multi-agent", "full pipeline", "end-to-end", "all agents"],
+    # Ecom agents
+    "order-processor":   ["order", "shopify", "webhook", "printful", "fulfill", "dispatch", "tracking", "payment validation", "supplier order"],
+    "bookkeeper":        ["bookkeeping", "accounting", "p&l", "expense", "stripe data", "quickbooks", "tax", "profit report", "daily report"],
+    "inventory-sync":    ["inventory", "stock", "reorder", "supplier sync", "demand forecast", "low stock", "out of stock", "printful sync"],
+    "email-marketer":    ["email campaign", "mailchimp", "welcome email", "abandoned cart", "drip sequence", "newsletter campaign", "segment customers"],
+    "social-poster":     ["tiktok post", "instagram post", "twitter post", "social schedule", "viral script", "auto post", "social media automation"],
+    "product-researcher":["product research", "trending product", "tiktok trend", "amazon trend", "junglescout", "product listing", "auto-list", "shopify product"],
+    "ecom-dashboard":    ["ecom metrics", "revenue report", "profit margin report", "daily digest", "order analytics", "ecommerce kpi", "ecom dashboard"],
+    # Niche Growth Agency specialists
+    "lead-hunter-elite": ["leads hunt", "b2b leads", "lead scraping", "qualify leads", "enrich crm", "lead enrichment", "icp scoring", "find leads", "hunt leads", "lead list", "prospect list", "decision maker"],
+    "cold-outreach-assassin": ["cold outreach", "cold sequence", "outreach sequence", "email sequence", "linkedin sequence", "whatsapp outreach", "multi-channel outreach", "follow-up sequence", "ab test outreach", "reply rate", "cold email campaign"],
+    "sales-closer-pro": ["close deal", "closing", "objection", "negotiate", "negotiation", "sales script", "deal close", "handle objection", "sales closer", "spin sell", "meddic", "sales pipeline"],
+    "linkedin-growth-hacker": ["linkedin growth", "linkedin profile", "linkedin content", "linkedin campaign", "linkedin audience", "linkedin connections", "linkedin post", "linkedin optimize", "ssi score", "linkedin leads"],
+    "ad-campaign-wizard": ["paid ads", "meta ads", "google ads", "linkedin ads", "facebook ads", "ad campaign", "ad copy", "roas", "budget allocation", "ad performance", "ppc", "cpm", "performance marketing"],
+    "referral-rocket": ["referral program", "referral", "viral referral", "refer a friend", "referral incentive", "referral tracking", "ambassador program", "word of mouth", "k-factor"],
+    "partnership-matchmaker": ["partnership", "joint venture", "jv partner", "affiliate partner", "co-marketing", "partnership pitch", "partner scoring", "business development", "biz dev", "strategic alliance"],
+    "conversion-rate-optimizer": ["conversion rate", "cro", "funnel optimization", "ab test", "a/b test", "landing page cro", "checkout optimization", "conversion funnel", "funnel analysis", "funnel leak", "optimize conversion"],
+}
+
+
+@app.post("/api/task/auto-agents")
+def auto_select_agents(payload: dict):
+    """Return suggested agent IDs for a given task description using keyword scoring."""
+    description = (payload.get("description") or "").strip().lower()
+    if not description:
+        raise HTTPException(400, "description required")
+
+    scores: dict[str, int] = {}
+    for agent_id, keywords in _AGENT_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in description)
+        if score > 0:
+            scores[agent_id] = score
+
+    mode = _current_mode()
+    available = set(_available_agent_ids(mode))
+
+    # Sort by score descending; take top agents covering the task
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    # Always include at least 1; cap at 6 unless the description is very broad
+    max_agents = 6 if len(description) > 80 else 4
+    suggested = [aid for aid, _ in ranked if aid in available][:max_agents]
+
+    # If nothing matched, fall back to orchestrator
+    if not suggested:
+      suggested = ["task-orchestrator"]
+
+    # Attach reasons
+    reasons = {aid: [kw for kw in _AGENT_KEYWORDS.get(aid, []) if kw in description][:3] for aid in suggested}
+
+    return JSONResponse({"suggested": suggested, "scores": dict(ranked[:max_agents]), "reasons": reasons})
+
+
+@app.get("/api/task/list")
+def list_tasks():
+    """List all task plans (active and history)."""
+    plans = _load_task_plans()
+    return JSONResponse({"plans": plans[:20]})
+
+
+@app.get("/api/task/status/{task_id}")
+def get_task_status(task_id: str):
+    """Get status of a specific task plan."""
+    plans = _load_task_plans()
+    for p in plans:
+        if p.get("id") == task_id:
+            return JSONResponse(p)
+    raise HTTPException(404, f"task '{task_id}' not found")
+
+
+@app.get("/api/agents")
+def get_all_agents():
+  """Get mode-aware agent list with capabilities and running status."""
+  capabilities = _load_agent_capabilities()
+  agents_config = capabilities.get("agents", {})
+  mode = _current_mode()
+
+  # Map dashboard agent IDs → capabilities file IDs
+  _CAPS_ID_MAP = {
+    "task-orchestrator": ["orchestrator", "task-orchestrator"],
+    "lead-generator": ["lead-hunter", "lead-generator"],
+    "offer-agent": ["email-ninja", "offer-agent"],
+    "social-media-manager": ["social-guru", "social-poster", "social-media-manager"],
+    "web-researcher": ["intel-agent", "web-researcher"],
+    "ecom-agent": ["product-scout", "ecom-dashboard", "ecom-agent", "order-processor"],
+    "chatbot-builder": ["support-bot", "chatbot-builder"],
+    "creator-agency": ["creative-studio", "creator-agency"],
+    "recruiter": ["hr-manager", "recruiter"],
+    "conversion-rate-optimizer": ["conversion-rate-optimizer"],
+    "ad-campaign-wizard": ["ad-campaign-wizard"],
+    "cold-outreach-assassin": ["cold-outreach-assassin"],
+    "partnership-matchmaker": ["partnership-matchmaker"],
+    "linkedin-growth-hacker": ["linkedin-growth-hacker"],
+    "referral-rocket": ["referral-rocket"],
+    "sales-closer-pro": ["sales-closer-pro"],
+    "financial-deepsearch": ["data-analyst", "financial-deepsearch"],
+    "mirofish-researcher": ["product-researcher", "mirofish-researcher"],
+    "skills-manager": ["skills-manager"],
+    "arbitrage-bot": ["bot-dev", "arbitrage-bot"],
+  }
+
+  result = []
+  for agent_id in _available_agent_ids(mode):
+    canonical_ids = _agent_aliases(agent_id)
+    # Try direct lookup, then _CAPS_ID_MAP aliases, then existing AGENT_ALIASES
+    caps_ids_to_try = _CAPS_ID_MAP.get(agent_id, [agent_id]) + canonical_ids
+    info = None
+    for caps_id in caps_ids_to_try:
+      if caps_id in agents_config:
+        info = agents_config[caps_id]
+        break
+    info = info or {}
+
+    pid_file = None
+    for alias in canonical_ids:
+      candidate = AI_HOME / "run" / f"{alias}.pid"
+      if candidate.exists():
+        pid_file = candidate
+        break
+
+    running = False
+    if pid_file and pid_file.exists():
+      try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)
+        running = True
+      except Exception:
+        pass
+
+    current_task = None
+    for alias in canonical_ids:
+      state_file = STATE_DIR / f"{alias}.state.json"
+      if state_file.exists():
+        try:
+          st = json.loads(state_file.read_text())
+          current_task = st.get("active_plan_title") or st.get("current_task")
+          break
+        except Exception:
+          pass
+
+    result.append({
+      "id": agent_id,
+      "description": info.get("description", ""),
+      "category": info.get("category", ""),
+      "skills": info.get("skills", []),
+      "commands": info.get("commands", []),
+      "specialties": info.get("specialties", []),
+      "parallel_capable": info.get("parallel_capable", True),
+      "running": running,
+      "current_task": current_task,
+    })
+
+  return JSONResponse({"agents": result, "total": len(result), "mode": mode})
+
+
+
+# ─── ROI Metrics API ─────────────────────────────────────────────────────────
+
+# Cost-per-hour estimate used to calculate cost savings from hours saved
+_COST_PER_HOUR_EUR = float(os.environ.get("AI_EMPLOYEE_HOURLY_RATE", "75"))
+# Hours saved estimate per task type
+_HOURS_PER_EVENT = {
+    "task_completed": 0.5,
+    "lead_generated": 0.1,
+    "email_sent": 0.05,
+    "content_created": 1.5,
+    "call_booked": 0.25,
+    "deal_closed": 0.0,
+    "ticket_resolved": 0.2,
+    "hours_saved": 0.0,  # uses explicit "hours" field
+    "custom": 0.0,
+}
+
+
+def _load_metrics() -> dict:
+    data = _cached_read(METRICS_FILE)
+    return data if data else {"summary": {}, "events": []}
+
+
+def _save_metrics(data: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    METRICS_FILE.write_text(json.dumps(data, indent=2))
+    _invalidate_cache(METRICS_FILE)
+
+
+def _recalc_summary(events: list) -> dict:
+    s: dict = {
+        "tasks_completed": 0,
+        "leads_generated": 0,
+        "emails_sent": 0,
+        "content_created": 0,
+        "calls_booked": 0,
+        "deals_closed": 0,
+        "tickets_resolved": 0,
+        "hours_saved": 0.0,
+        "human_hours_saved": 0.0,
+        "cost_saved": 0.0,
+        "revenue": 0.0,
+        "by_agent": {},
+        "agents_used": 0,
+        "top_bot": None,
+    }
+    for e in events:
+        t = e.get("type", "")
+        if t == "task_completed":
+            s["tasks_completed"] += 1
+        elif t == "lead_generated":
+            s["leads_generated"] += 1
+        elif t == "email_sent":
+            s["emails_sent"] += 1
+        elif t == "content_created":
+            s["content_created"] += 1
+        elif t == "call_booked":
+            s["calls_booked"] += 1
+        elif t == "deal_closed":
+            s["deals_closed"] += 1
+            if e.get("value"):
+                s["revenue"] += float(e["value"])
+        elif t == "ticket_resolved":
+            s["tickets_resolved"] += 1
+        # Use explicit hours field if provided, otherwise default estimate
+        explicit_hours = e.get("hours")
+        if explicit_hours is not None:
+            try:
+                hours = float(explicit_hours)
+            except (TypeError, ValueError):
+                hours = _HOURS_PER_EVENT.get(t, 0.0)
+        else:
+            hours = _HOURS_PER_EVENT.get(t, 0.0)
+        s["hours_saved"] += hours
+        # Track by-agent usage
+        agent = e.get("agent")
+        if agent:
+            s["by_agent"][agent] = s["by_agent"].get(agent, 0) + 1
+    s["hours_saved"] = round(s["hours_saved"], 2)
+    # Human hours saved = 3× AI hours (AI works ~3× faster than a human)
+    s["human_hours_saved"] = round(s["hours_saved"] * 3, 2)
+    s["cost_saved"] = round(s["hours_saved"] * _COST_PER_HOUR_EUR, 2)
+    s["agents_used"] = len(s["by_agent"])
+    if s["by_agent"]:
+        s["top_bot"] = max(s["by_agent"], key=lambda k: s["by_agent"][k])
+    return s
+
+
+@app.get("/api/metrics")
+def get_metrics(period: str = "all"):
+    data = _load_metrics()
+    events = data.get("events", [])
+    now_dt = datetime.now(timezone.utc)
+    if period == "today":
+        cutoff = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        events = [e for e in events if e.get("ts", "") >= cutoff.isoformat()]
+    elif period == "7d":
+        cutoff = now_dt - timedelta(days=7)
+        events = [e for e in events if e.get("ts", "") >= cutoff.isoformat()]
+    elif period == "30d":
+        cutoff = now_dt - timedelta(days=30)
+        events = [e for e in events if e.get("ts", "") >= cutoff.isoformat()]
+    summary = _recalc_summary(events) if period != "all" else data.get("summary", {})
+    return JSONResponse({"summary": summary, "events": events})
+
+
+@app.post("/api/metrics")
+def record_metric(payload: dict):
+    import uuid as _uuid
+    event_type = (payload.get("type") or "custom").strip()
+    valid_types = list(_HOURS_PER_EVENT.keys())
+    if event_type not in valid_types:
+        event_type = "custom"
+    agent = (payload.get("agent") or "").strip() or None
+    value = payload.get("value")
+    if value is not None:
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = None
+    # Accept explicit hours field for direct hour-tracking events
+    hours = payload.get("hours")
+    if hours is not None:
+        try:
+            hours = float(hours)
+            hours = max(0.0, hours)  # ensure non-negative
+        except (TypeError, ValueError):
+            hours = None
+    notes = (payload.get("notes") or "").strip() or None
+
+    data = _load_metrics()
+    events = data.get("events", [])
+    event: dict = {
+        "id": _uuid.uuid4().hex[:10],
+        "type": event_type,
+        "agent": agent,
+        "value": value,
+        "notes": notes,
+        "ts": now_iso(),
+    }
+    if hours is not None:
+        event["hours"] = hours
+    events.append(event)
+    # Keep last 500 events
+    data["events"] = events[-500:]
+    data["summary"] = _recalc_summary(data["events"])
+    _save_metrics(data)
+    return JSONResponse({"ok": True, "summary": data["summary"]})
+
+
+# ─── Agent Templates API ──────────────────────────────────────────────────────
+
+def _load_templates() -> list:
+    # Prefer installed copy; fall back to repo copy
+    for candidate in (AGENT_TEMPLATES_FILE, _REPO_TEMPLATES_FILE):
+        if candidate.exists():
+            try:
+                return json.loads(candidate.read_text()).get("templates", [])
+            except Exception:
+                pass
+    return []
+
+
+@app.get("/api/templates")
+def list_templates():
+    return JSONResponse({"templates": _load_templates()})
+
+
+@app.post("/api/templates/{template_id}/deploy")
+def deploy_template(template_id: str):
+    import uuid as _uuid
+    templates = _load_templates()
+    tmpl = next((t for t in templates if t["id"] == template_id), None)
+    if not tmpl:
+        raise HTTPException(404, f"Template '{template_id}' not found")
+
+    capabilities = _load_agent_capabilities()
+    known_agents = set(capabilities.get("agents", {}).keys())
+    agents = [a for a in (tmpl.get("agents") or []) if a in known_agents]
+    if not agents:
+        # Accept unknown agents — they may be installed later
+        agents = tmpl.get("agents") or []
+
+    bundle = {
+        "id": _uuid.uuid4().hex[:10],
+        "name": tmpl["name"],
+        "description": tmpl.get("description", "")[:200],
+        "task_description": tmpl.get("task_description", ""),
+        "schedule": tmpl.get("schedule", "manual"),
+        "agents": agents,
+        "enabled": True,
+        "template_id": template_id,
+        "created_at": now_iso(),
+        "last_run": None,
+    }
+    bundles = _load_worker_bundles()
+    bundles.append(bundle)
+    _save_worker_bundles(bundles)
+    return JSONResponse({"ok": True, "bundle_id": bundle["id"], "name": bundle["name"]})
+
+
+# ─── Guardrails API ───────────────────────────────────────────────────────────
+
+def _load_guardrails() -> dict:
+    data = _cached_read(GUARDRAILS_FILE)
+    return data if data else {"pending": [], "log": [], "settings": {}, "summary": {}}
+
+
+def _save_guardrails(data: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    GUARDRAILS_FILE.write_text(json.dumps(data, indent=2))
+    _invalidate_cache(GUARDRAILS_FILE)
+
+
+def _recalc_guardrail_summary(data: dict) -> dict:
+    log = data.get("log", [])
+    return {
+        "total": len(log),
+        "approved": sum(1 for e in log if e.get("status") == "approved"),
+        "rejected": sum(1 for e in log if e.get("status") == "rejected"),
+        "auto_approved": sum(1 for e in log if e.get("status") == "auto_approved"),
+        "pending": len(data.get("pending", [])),
+    }
+
+
+@app.get("/api/guardrails")
+def get_guardrails():
+    data = _load_guardrails()
+    data["summary"] = _recalc_guardrail_summary(data)
+    return JSONResponse(data)
+
+
+@app.post("/api/guardrails/request")
+def request_guardrail_action(payload: dict):
+    """Submit an action for approval (called by agents before performing risky actions)."""
+    import uuid as _uuid
+    action_type = (payload.get("action_type") or "unknown").strip()
+    agent = (payload.get("agent") or "system").strip()
+    description = (payload.get("description") or "").strip()
+    risk_level = (payload.get("risk_level") or "medium").strip()
+    if risk_level not in ("low", "medium", "high"):
+        risk_level = "medium"
+
+    data = _load_guardrails()
+    settings = data.get("settings", {})
+    require_approval = settings.get("require_approval_for", {})
+
+    # Map action types to setting keys
+    action_key_map = {
+        "send_email": "send_email",
+        "email": "send_email",
+        "bulk_email": "send_email",
+        "social_post": "social_post",
+        "post": "social_post",
+        "social": "social_post",
+        "tweet": "social_post",
+        "publish": "social_post",
+        "purchase": "make_purchase",
+        "order": "make_purchase",
+        "buy": "make_purchase",
+        "checkout": "make_purchase",
+        "delete": "delete_data",
+        "remove": "delete_data",
+        "drop": "delete_data",
+        "api_call": "api_calls",
+        "webhook": "api_calls",
+    }
+    # Try full action_type first, then first word of action_type
+    at_lower = action_type.lower()
+    at_prefix = at_lower.split("_")[0] if at_lower else ""
+    setting_key = action_key_map.get(at_lower) or action_key_map.get(at_prefix, None)
+    needs_approval = require_approval.get(setting_key, False) if setting_key else risk_level in ("high",)
+
+    action = {
+        "id": _uuid.uuid4().hex[:10],
+        "action_type": action_type,
+        "agent": agent,
+        "description": description,
+        "risk_level": risk_level,
+        "status": "pending" if needs_approval else "auto_approved",
+        "ts": now_iso(),
+    }
+
+    if needs_approval:
+        data.setdefault("pending", []).append(action)
+    else:
+        data.setdefault("log", []).append(action)
+
+    # Keep log to last 200 entries
+    data["log"] = data.get("log", [])[-200:]
+    _save_guardrails(data)
+    return JSONResponse({"ok": True, "id": action["id"], "status": action["status"], "needs_approval": needs_approval})
+
+
+@app.post("/api/guardrails/{action_id}/approve")
+def approve_guardrail_action(action_id: str):
+    data = _load_guardrails()
+    pending = data.get("pending", [])
+    action = next((a for a in pending if a["id"] == action_id), None)
+    if not action:
+        raise HTTPException(404, f"Action '{action_id}' not found in pending queue")
+    action["status"] = "approved"
+    action["resolved_at"] = now_iso()
+    data["pending"] = [a for a in pending if a["id"] != action_id]
+    data.setdefault("log", []).append(action)
+    data["log"] = data["log"][-200:]
+    _save_guardrails(data)
+    _log_activity(
+        "guardrail_approved",
+        f"Guardrail action approved: {action.get('action_type', action_id)}",
+        details={"action_id": action_id,
+                 "action_type": action.get("action_type"),
+                 "description": action.get("description", "")},
+        source="guardrails",
+    )
+    return JSONResponse({"ok": True, "action_id": action_id})
+
+
+@app.post("/api/guardrails/{action_id}/reject")
+def reject_guardrail_action(action_id: str, payload: dict = None):
+    data = _load_guardrails()
+    pending = data.get("pending", [])
+    action = next((a for a in pending if a["id"] == action_id), None)
+    if not action:
+        raise HTTPException(404, f"Action '{action_id}' not found in pending queue")
+    action["status"] = "rejected"
+    action["resolved_at"] = now_iso()
+    if payload and payload.get("reason"):
+        action["reject_reason"] = payload["reason"]
+    data["pending"] = [a for a in pending if a["id"] != action_id]
+    data.setdefault("log", []).append(action)
+    data["log"] = data["log"][-200:]
+    _save_guardrails(data)
+    _log_activity(
+        "guardrail_rejected",
+        f"Guardrail action rejected: {action.get('action_type', action_id)}",
+        details={"action_id": action_id,
+                 "action_type": action.get("action_type"),
+                 "description": action.get("description", ""),
+                 "reason": action.get("reject_reason", "")},
+        source="guardrails",
+    )
+    return JSONResponse({"ok": True, "action_id": action_id})
+
+
+@app.post("/api/guardrails/settings")
+def save_guardrail_settings(payload: dict):
+    data = _load_guardrails()
+    data["settings"] = payload
+    _save_guardrails(data)
+    return JSONResponse({"ok": True})
+
+
+# ─── Memory API ───────────────────────────────────────────────────────────────
+
+def _load_memory() -> dict:
+    data = _cached_read(MEMORY_FILE)
+    return data if data else {"clients": {}, "recent_interactions": []}
+
+
+def _save_memory(data: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    MEMORY_FILE.write_text(json.dumps(data, indent=2))
+    _invalidate_cache(MEMORY_FILE)
+
+
+@app.get("/api/memory")
+def get_memory():
+    data = _load_memory()
+    clients_list = sorted(data.get("clients", {}).values(), key=lambda c: c.get("added_at", ""), reverse=True)
+    return JSONResponse({
+        "clients": clients_list,
+        "recent_interactions": data.get("recent_interactions", [])[-20:],
+        "total_clients": len(clients_list),
+    })
+
+
+@app.post("/api/memory/clients")
+def add_memory_client(payload: dict):
+    import uuid as _uuid
+    import re as _re
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    data = _load_memory()
+    clients = data.get("clients", {})
+    client_id = _re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-") or _uuid.uuid4().hex[:8]
+    # Ensure unique id
+    base_id = client_id
+    counter = 1
+    while client_id in clients:
+        client_id = f"{base_id}-{counter}"
+        counter += 1
+    client = {
+        "id": client_id,
+        "name": name,
+        "company": (payload.get("company") or "").strip() or None,
+        "email": (payload.get("email") or "").strip() or None,
+        "phone": (payload.get("phone") or "").strip() or None,
+        "status": (payload.get("status") or "prospect").strip(),
+        "notes": (payload.get("notes") or "").strip() or None,
+        "interactions": 0,
+        "added_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    clients[client_id] = client
+    data["clients"] = clients
+    _save_memory(data)
+    return JSONResponse({"ok": True, "id": client_id})
+
+
+@app.patch("/api/memory/clients/{client_id}")
+def update_memory_client(client_id: str, payload: dict):
+    data = _load_memory()
+    clients = data.get("clients", {})
+    if client_id not in clients:
+        raise HTTPException(404, f"Client '{client_id}' not found")
+    client = clients[client_id]
+    for field in ("name", "company", "email", "phone", "status", "notes"):
+        if field in payload:
+            client[field] = payload[field]
+    client["updated_at"] = now_iso()
+    _save_memory(data)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/memory/clients/{client_id}")
+def delete_memory_client(client_id: str):
+    data = _load_memory()
+    clients = data.get("clients", {})
+    if client_id not in clients:
+        raise HTTPException(404, f"Client '{client_id}' not found")
+    del clients[client_id]
+    _save_memory(data)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/memory/interactions")
+def record_interaction(payload: dict):
+    """Record a new interaction/event in memory (called by agents)."""
+    data = _load_memory()
+    interaction = {
+        "ts": now_iso(),
+        "agent": (payload.get("agent") or "system").strip(),
+        "summary": (payload.get("summary") or "").strip(),
+        "client_id": (payload.get("client_id") or "").strip() or None,
+    }
+    interactions = data.get("recent_interactions", [])
+    interactions.append(interaction)
+    data["recent_interactions"] = interactions[-200:]
+
+    # Increment interaction count for client if specified
+    client_id = interaction.get("client_id")
+    if client_id and client_id in data.get("clients", {}):
+        data["clients"][client_id]["interactions"] = data["clients"][client_id].get("interactions", 0) + 1
+        data["clients"][client_id]["updated_at"] = now_iso()
+
+    _save_memory(data)
+    return JSONResponse({"ok": True})
+
+
+# ─── Integrations API ─────────────────────────────────────────────────────────
+
+_DEFAULT_INTEGRATIONS = [
+    {
+        "id": "gmail",
+        "name": "Gmail / Google Workspace",
+        "icon": "📧",
+        "description": "Send and receive emails, read inbox, create drafts",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "email", "label": "Gmail address", "type": "email", "placeholder": "you@gmail.com"},
+            {"key": "client_id", "label": "OAuth Client ID", "type": "text", "placeholder": "...apps.googleusercontent.com"},
+            {"key": "client_secret", "label": "OAuth Client Secret", "type": "password", "placeholder": "GOCSPX-…"},
+        ],
+    },
+    {
+        "id": "google_sheets",
+        "name": "Google Sheets / CRM",
+        "icon": "📊",
+        "description": "Read/write leads, pipeline, and data to Google Sheets",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "spreadsheet_id", "label": "Spreadsheet ID", "type": "text", "placeholder": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"},
+            {"key": "service_account_json", "label": "Service Account JSON path", "type": "text", "placeholder": "/path/to/service-account.json"},
+        ],
+    },
+    {
+        "id": "telegram",
+        "name": "Telegram Bot",
+        "icon": "✈️",
+        "description": "Send messages and receive commands via Telegram",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "bot_token", "label": "Bot Token", "type": "password", "placeholder": "123456:ABC-DEF…"},
+            {"key": "chat_id", "label": "Chat / Channel ID", "type": "text", "placeholder": "-1001234567890"},
+        ],
+    },
+    {
+        "id": "slack",
+        "name": "Slack",
+        "icon": "💬",
+        "description": "Post messages, receive commands, and manage channels via Slack",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "bot_token", "label": "Bot OAuth Token", "type": "password", "placeholder": "xoxb-…"},
+            {"key": "channel", "label": "Default Channel", "type": "text", "placeholder": "#general"},
+        ],
+    },
+    {
+        "id": "openai",
+        "name": "OpenAI (Cloud Fallback)",
+        "icon": "🤖",
+        "description": "Use GPT-4 as a cloud AI fallback when Ollama is unavailable",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "OpenAI API Key", "type": "password", "placeholder": "sk-…"},
+            {"key": "model", "label": "Model", "type": "text", "placeholder": "gpt-4o"},
+        ],
+    },
+    {
+        "id": "anthropic",
+        "name": "Anthropic Claude",
+        "icon": "🧠",
+        "description": "Use Claude as an AI provider for complex reasoning tasks",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "Anthropic API Key", "type": "password", "placeholder": "sk-ant-…"},
+            {"key": "model", "label": "Model", "type": "text", "placeholder": "claude-3-5-sonnet-20241022"},
+        ],
+    },
+    {
+        "id": "webhook",
+        "name": "Outbound Webhook",
+        "icon": "🔗",
+        "description": "Send task results and events to any URL (Zapier, Make, n8n, custom API)",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "url", "label": "Webhook URL", "type": "url", "placeholder": "https://hooks.zapier.com/…"},
+            {"key": "secret", "label": "Shared Secret (optional)", "type": "password", "placeholder": "mysecret"},
+        ],
+    },
+    {
+        "id": "linkedin",
+        "name": "LinkedIn",
+        "icon": "💼",
+        "description": "Post content, manage connections, and run LinkedIn lead generation",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "access_token", "label": "LinkedIn Access Token", "type": "password", "placeholder": "AQV…"},
+            {"key": "person_urn", "label": "Person URN (optional)", "type": "text", "placeholder": "urn:li:person:XXXXXXX"},
+        ],
+    },
+    {
+        "id": "youtube",
+        "name": "YouTube",
+        "icon": "▶️",
+        "description": "Upload videos, manage channel, and analyze performance via YouTube Data API",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "YouTube API Key", "type": "password", "placeholder": "AIza…"},
+            {"key": "channel_id", "label": "Channel ID", "type": "text", "placeholder": "UCxxxxxxxxxxxxxxxx"},
+        ],
+    },
+    {
+        "id": "instagram",
+        "name": "Instagram / Meta",
+        "icon": "📸",
+        "description": "Post to Instagram, manage content calendar, and track engagement via Meta Graph API",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "access_token", "label": "Meta Access Token", "type": "password", "placeholder": "EAAxxxxxx…"},
+            {"key": "instagram_account_id", "label": "Instagram Account ID", "type": "text", "placeholder": "17841400000000000"},
+        ],
+    },
+    {
+        "id": "hubspot",
+        "name": "HubSpot CRM",
+        "icon": "🟠",
+        "description": "Sync leads, deals, contacts, and activities with HubSpot CRM",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "HubSpot Private App Token", "type": "password", "placeholder": "pat-na1-…"},
+            {"key": "portal_id", "label": "Portal ID (optional)", "type": "text", "placeholder": "12345678"},
+        ],
+    },
+    {
+        "id": "notion",
+        "name": "Notion",
+        "icon": "📓",
+        "description": "Create and update pages in Notion databases — CRM, tasks, reports",
+        "enabled": False,
+        "config": {},
+        "fields": [
+            {"key": "api_key", "label": "Notion API Key", "type": "password", "placeholder": "secret_…"},
+            {"key": "database_id", "label": "Default Database ID", "type": "text", "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+        ],
+    },
+]
+
+
+def _load_integrations() -> list:
+    if not INTEGRATIONS_FILE.exists():
+        return _DEFAULT_INTEGRATIONS[:]
+    try:
+        saved = json.loads(INTEGRATIONS_FILE.read_text())
+    except Exception:
+        saved = []
+    # Merge saved configs into defaults so new integrations always appear
+    saved_map = {i["id"]: i for i in saved if isinstance(i, dict)}
+    merged = []
+    for default in _DEFAULT_INTEGRATIONS:
+        intg = dict(default)
+        if default["id"] in saved_map:
+            intg["enabled"] = saved_map[default["id"]].get("enabled", False)
+            intg["config"] = saved_map[default["id"]].get("config", {})
+        merged.append(intg)
+    return merged
+
+
+def _save_integrations(integrations: list) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    # Only save id + enabled + config (not the field definitions)
+    slim = [{"id": i["id"], "enabled": i.get("enabled", False), "config": i.get("config", {})} for i in integrations]
+    INTEGRATIONS_FILE.write_text(json.dumps(slim, indent=2))
+
+
+@app.get("/api/integrations")
+def list_integrations():
+    return JSONResponse({"integrations": _load_integrations()})
+
+
+@app.patch("/api/integrations/{integration_id}")
+def update_integration(integration_id: str, payload: dict):
+    integrations = _load_integrations()
+    intg = next((i for i in integrations if i["id"] == integration_id), None)
+    if not intg:
+        raise HTTPException(404, f"Integration '{integration_id}' not found")
+    if "enabled" in payload:
+        intg["enabled"] = bool(payload["enabled"])
+    if "config" in payload and isinstance(payload["config"], dict):
+        intg["config"] = payload["config"]
+    _save_integrations(integrations)
+    return JSONResponse({"ok": True, "id": integration_id, "enabled": intg["enabled"]})
+
+
+@app.post("/api/integrations/{integration_id}/test")
+def test_integration(integration_id: str):
+    """Basic connectivity test for an integration."""
+    integrations = _load_integrations()
+    intg = next((i for i in integrations if i["id"] == integration_id), None)
+    if not intg:
+        raise HTTPException(404, f"Integration '{integration_id}' not found")
+
+    config = intg.get("config", {})
+
+    if integration_id == "webhook":
+        url = config.get("url", "").strip()
+        if not url:
+            return JSONResponse({"ok": False, "message": "No webhook URL configured"})
+        try:
+            import urllib.request as _req
+            req = _req.Request(url, method="POST",
+                               data=b'{"test":true}',
+                               headers={"Content-Type": "application/json"})
+            with _req.urlopen(req, timeout=5) as resp:
+                return JSONResponse({"ok": True, "message": f"HTTP {resp.status} — webhook reachable"})
+        except Exception as exc:
+            return JSONResponse({"ok": False, "message": str(exc)})
+
+    if integration_id in ("openai", "anthropic"):
+        key_field = "api_key"
+        key = config.get(key_field, "").strip()
+        if not key:
+            return JSONResponse({"ok": False, "message": "No API key configured"})
+        return JSONResponse({"ok": True, "message": "API key present — live test requires the key to be used in a real request"})
+
+    if integration_id == "telegram":
+        token = config.get("bot_token", "").strip()
+        if not token:
+            return JSONResponse({"ok": False, "message": "No bot token configured"})
+        try:
+            import urllib.request as _req
+            url = f"https://api.telegram.org/bot{token}/getMe"
+            with _req.urlopen(url, timeout=5) as resp:
+                result = json.loads(resp.read())
+                if result.get("ok"):
+                    name = result.get("result", {}).get("username", "?")
+                    return JSONResponse({"ok": True, "message": f"Connected as @{name}"})
+                return JSONResponse({"ok": False, "message": "Telegram returned error"})
+        except Exception as exc:
+            return JSONResponse({"ok": False, "message": str(exc)})
+
+    # Generic: just check required fields are filled
+    required_fields = [f["key"] for f in intg.get("fields", []) if not f.get("optional")]
+    missing = [k for k in required_fields if not config.get(k, "").strip()]
+    if missing:
+        return JSONResponse({"ok": False, "message": f"Missing required fields: {', '.join(missing)}"})
+    return JSONResponse({"ok": True, "message": "Configuration looks complete — deploy agents to test live"})
+
+
+# ── Settings: read/write .env + security audit + data nuke ────────────────────
+
+_SECRET_KEYS: frozenset = frozenset({
+    "JWT_SECRET_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+    "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "SENDGRID_API_KEY",
+    "SMTP_PASS", "DISCORD_BOT_TOKEN", "TELEGRAM_BOT_TOKEN",
+    "WHATSAPP_TOKEN", "TAVILY_API_KEY", "SERP_API_KEY",
+    "NEWS_API_KEY", "ELEVEN_LABS_KEY", "ALPHA_INSIDER_KEY",
+    "DISCORD_WEBHOOK_URL",
+})
+_MASK = "••••••••"
+
+_SETTINGS_SCHEMA: list = [
+    # (key, label, input_type, placeholder, category)
+    # API Keys
+    ("OPENAI_API_KEY",        "OpenAI API Key",              "password", "sk-…",                          "api_keys"),
+    ("ANTHROPIC_API_KEY",     "Anthropic API Key",           "password", "sk-ant-…",                      "api_keys"),
+    ("TAVILY_API_KEY",        "Tavily Search Key",           "password", "tvly-…",                        "api_keys"),
+    ("SERP_API_KEY",          "SerpAPI Key",                 "password", "your-serpapi-key",              "api_keys"),
+    ("NEWS_API_KEY",          "NewsAPI Key",                 "password", "your-newsapi-key",              "api_keys"),
+    ("ELEVEN_LABS_KEY",       "ElevenLabs API Key",          "password", "your-elevenlabs-key",           "api_keys"),
+    ("ALPHA_INSIDER_KEY",     "Alpha Insider Key",           "password", "your-key",                      "api_keys"),
+    ("DISCORD_BOT_TOKEN",     "Discord Bot Token",           "password", "MTxxxxxxx",                     "api_keys"),
+    ("DISCORD_WEBHOOK_URL",   "Discord Webhook URL",         "password", "https://discord.com/api/webhooks/…", "api_keys"),
+    ("TELEGRAM_BOT_TOKEN",    "Telegram Bot Token",          "password", "1234567:ABC…",                  "api_keys"),
+    ("TWILIO_ACCOUNT_SID",    "Twilio Account SID",          "password", "ACxxxxxxxx",                    "api_keys"),
+    ("TWILIO_AUTH_TOKEN",     "Twilio Auth Token",           "password", "your-auth-token",               "api_keys"),
+    ("TWILIO_WHATSAPP_FROM",  "Twilio WhatsApp Number",      "text",     "whatsapp:+14155238886",         "api_keys"),
+    ("SENDGRID_API_KEY",      "SendGrid API Key",            "password", "SG.…",                          "api_keys"),
+    ("WHATSAPP_TOKEN",        "WhatsApp Cloud API Token",    "password", "your-meta-token",               "api_keys"),
+    ("WHATSAPP_PHONE_ID",     "WhatsApp Phone ID",           "text",     "your-phone-id",                 "api_keys"),
+    ("SMTP_USER",             "SMTP Username / Email",       "text",     "you@example.com",               "api_keys"),
+    ("SMTP_PASS",             "SMTP Password",               "password", "your-app-password",             "api_keys"),
+    # Preferences
+    ("PROBLEM_SOLVER_UI_PORT","Dashboard Port",              "text",     "8787",                          "preferences"),
+    ("DASHBOARD_PORT",        "Legacy Dashboard Port",       "text",     "3000",                          "preferences"),
+    ("OLLAMA_HOST",           "Ollama Host URL",             "text",     "http://localhost:11434",        "preferences"),
+    ("OLLAMA_MODEL",          "Ollama Model",                "text",     "llama3.2",                      "preferences"),
+    ("LOG_LEVEL",             "Log Level",                   "text",     "INFO",                          "preferences"),
+    ("RATE_LIMIT_PER_MINUTE", "Rate Limit (req/min)",        "text",     "60",                            "preferences"),
+    ("TASK_ORCHESTRATOR_MAX_PARALLEL", "Max Parallel Tasks", "text",    "10",                            "preferences"),
+    ("TASK_ORCHESTRATOR_PEER_REVIEW",  "Peer Review",        "text",    "true",                          "preferences"),
+    ("MEMORY_MAX_CONVERSATION","Memory Max Turns",           "text",     "50",                            "preferences"),
+    ("EMAIL_DRY_RUN",         "Email Dry Run",               "text",     "false",                         "preferences"),
+    ("WHATSAPP_DRY_RUN",      "WhatsApp Dry Run",            "text",     "false",                         "preferences"),
+    ("SMTP_HOST",             "SMTP Host",                   "text",     "smtp.gmail.com",                "preferences"),
+    ("SMTP_PORT",             "SMTP Port",                   "text",     "587",                           "preferences"),
+    ("SMTP_FROM",             "SMTP From Address",           "text",     "you@example.com",               "preferences"),
+    ("AI_EMPLOYEE_REPO",      "GitHub Repo (owner/name)",    "text",     "F-game25/AI-EMPLOYEE",          "preferences"),
+    ("AI_EMPLOYEE_BRANCH",    "GitHub Branch",               "text",     "main",                          "preferences"),
+    ("AI_EMPLOYEE_UPDATE_INTERVAL", "Update Poll Interval (s)", "text", "300",                           "preferences"),
+]
+
+
+def _env_path() -> Path:
+    return AI_HOME / ".env"
+
+
+def _read_env() -> dict:
+    result: dict = {}
+    p = _env_path()
+    if not p.exists():
+        return result
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key:
+            result[key] = val
+    return result
+
+
+def _write_env(updates: dict) -> None:
+    p = _env_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = p.read_text(encoding="utf-8", errors="replace").splitlines() if p.exists() else []
+    updated_keys: set = set()
+    new_lines: list = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped or "=" not in stripped:
+            new_lines.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key in updates:
+            new_lines.append(f"{key}={updates[key]}")
+            updated_keys.add(key)
+        else:
+            new_lines.append(line)
+    for key, val in updates.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={val}")
+    # Atomic write via temp file
+    tmp = p.parent / f".env.tmp.{os.getpid()}"
+    try:
+        tmp.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        tmp.replace(p)
+    finally:
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+    try:
+        p.chmod(0o600)
+    except Exception:
+        pass
+
+
+@app.get("/api/settings")
+def get_settings():
+    env = _read_env()
+    result: dict = {"api_keys": [], "preferences": []}
+    for key, label, input_type, placeholder, category in _SETTINGS_SCHEMA:
+        raw = env.get(key, "")
+        is_secret = key in _SECRET_KEYS
+        result[category].append({
+            "key":         key,
+            "label":       label,
+            "type":        input_type,
+            "placeholder": placeholder,
+            "value":       _MASK if (is_secret and raw) else raw,
+            "has_value":   bool(raw),
+        })
+    return JSONResponse(result)
+
+
+class _SettingsUpdateRequest(BaseModel):
+    updates: dict = Field(default_factory=dict)
+
+
+@app.post("/api/settings")
+def save_settings(body: _SettingsUpdateRequest):
+    # Skip masked values — user didn't change them
+    clean = {k: v for k, v in body.updates.items() if v != _MASK and k.strip()}
+    if not clean:
+        return JSONResponse({"ok": True, "saved": 0})
+    _write_env(clean)
+    keys_saved = [k for k in clean if k not in _SECRET_KEYS]
+    secret_count = sum(1 for k in clean if k in _SECRET_KEYS)
+    desc = f"Settings saved: {', '.join(keys_saved)}" + (
+        f" + {secret_count} secret key(s)" if secret_count else ""
+    )
+    _log_activity("settings_saved", desc,
+                  details={"count": len(clean)}, source="dashboard")
+    return JSONResponse({"ok": True, "saved": len(clean)})
+
+
+@app.get("/api/settings/security-check")
+def security_check():
+    findings: list = []
+    env = _read_env()
+    cfg = _security_config
+
+    def _add(level: str, title: str, detail: str,
+             action: str = "", action_type: str = "") -> None:
+        findings.append({
+            "level": level, "title": title, "detail": detail,
+            "action": action, "action_type": action_type,
+        })
+
+    # ── 1. JWT_SECRET_KEY changed from default placeholder ────────────────────
+    jwt = env.get("JWT_SECRET_KEY", os.environ.get("JWT_SECRET_KEY", ""))
+    _gen_cmd = 'python3 -c "import secrets; print(secrets.token_hex(32))"'
+    if not jwt or jwt.lower() in _KNOWN_WEAK_SECRETS:
+        _add("error", "JWT_SECRET_KEY is still the default placeholder",
+             "Replace it with a random 64-char hex string before going to production.",
+             action=_gen_cmd, action_type="command")
+    elif len(jwt) < 32:
+        _add("error", "JWT_SECRET_KEY is too short",
+             f"Current length: {len(jwt)} chars. Minimum: 32 characters.",
+             action=_gen_cmd, action_type="command")
+    elif len(jwt) < 64:
+        _add("warning", "JWT_SECRET_KEY could be stronger",
+             f"Length {len(jwt)} is acceptable but 64+ chars is recommended.",
+             action=_gen_cmd, action_type="command")
+    else:
+        _add("ok", "JWT_SECRET_KEY changed from default placeholder",
+             f"Key length: {len(jwt)} characters.")
+
+    # ── 2. Strong passwords configured ───────────────────────────────────────
+    if cfg:
+        min_len = cfg.security.min_password_length
+        has_special = cfg.security.require_special_chars
+        has_numbers = cfg.security.require_numbers
+        has_upper = cfg.security.require_uppercase
+        if min_len >= 12 and has_special and has_numbers and has_upper:
+            _add("ok", "Strong passwords configured",
+                 f"Min length: {min_len}, requires uppercase, numbers and special chars.")
+        else:
+            issues = []
+            if min_len < 12:
+                issues.append(f"min_password_length={min_len} (needs ≥12)")
+            if not has_special:
+                issues.append("require_special_chars=false")
+            if not has_numbers:
+                issues.append("require_numbers=false")
+            if not has_upper:
+                issues.append("require_uppercase=false")
+            _add("warning", "Password policy not fully enforced",
+                 f"Issues: {', '.join(issues)}",
+                 action="Edit security.local.yml: set min_password_length≥12, "
+                        "require_special_chars/numbers/uppercase: true",
+                 action_type="info")
+    else:
+        _add("warning", "Strong passwords — config not loaded",
+             "Using built-in defaults (min 12 chars, all checks enabled). "
+             "Create security.local.yml to customise.")
+
+    # ── 3. Application bound to localhost only ────────────────────────────────
+    host = os.environ.get("PROBLEM_SOLVER_UI_HOST", HOST)
+    if host in ("0.0.0.0", "::"):
+        _add("warning", "Application NOT bound to localhost",
+             f"HOST={host} — anyone on the network can reach the dashboard.",
+             action="Set HOST=127.0.0.1 in ~/.ai-employee/.env",
+             action_type="info")
+    else:
+        _add("ok", "Application bound to localhost only", f"HOST={host}")
+
+    # ── 4. Rate limiting enabled ──────────────────────────────────────────────
+    if cfg:
+        if cfg.security.rate_limit_enabled:
+            _add("ok", "Rate limiting enabled",
+                 f"security.rate_limit_enabled=true "
+                 f"({cfg.security.rate_limit_per_minute} req/min)")
+        else:
+            _add("error", "Rate limiting disabled",
+                 "Enable it to protect against brute-force and DoS attacks.",
+                 action="security.rate_limit_enabled: true",
+                 action_type="config")
+    else:
+        _add("warning", "Rate limiting — config not loaded",
+             "Defaulting to 60 req/min. Create security.local.yml to confirm.")
+
+    # ── 5. Encryption at rest enabled ─────────────────────────────────────────
+    if cfg:
+        if cfg.privacy.encrypt_data_at_rest:
+            _add("ok", "Encryption at rest enabled",
+                 f"privacy.encrypt_data_at_rest=true "
+                 f"(algorithm: {cfg.privacy.encryption_algorithm})")
+        else:
+            _add("error", "Encryption at rest disabled",
+                 "Sensitive data is stored unencrypted.",
+                 action="privacy.encrypt_data_at_rest: true",
+                 action_type="config")
+    else:
+        _add("warning", "Encryption at rest — config not loaded",
+             "Default is enabled (encrypt_data_at_rest=true). "
+             "Create security.local.yml to confirm.")
+
+    # ── 6. Telemetry disabled ─────────────────────────────────────────────────
+    if cfg:
+        tel = cfg.privacy.telemetry_enabled
+        ana = cfg.privacy.analytics_enabled
+        if not tel and not ana:
+            _add("ok", "Telemetry disabled",
+                 "privacy.telemetry_enabled=false, analytics_enabled=false")
+        else:
+            extra = []
+            if tel:
+                extra.append("privacy.telemetry_enabled: false")
+            if ana:
+                extra.append("privacy.analytics_enabled: false")
+            _add("warning", "Telemetry / analytics is enabled",
+                 "Disable to prevent external data collection.",
+                 action="\n".join(extra), action_type="config")
+    else:
+        _add("ok", "Telemetry disabled",
+             "Defaults: telemetry_enabled=false, analytics_enabled=false")
+
+    # ── 7. Audit logging enabled ──────────────────────────────────────────────
+    if cfg:
+        if cfg.logging.audit_enabled:
+            _add("ok", "Audit logging enabled",
+                 "logging.audit_enabled=true — auth, file access and API calls are logged.")
+        else:
+            _add("error", "Audit logging disabled",
+                 "Failed logins and sensitive operations will not be recorded.",
+                 action="logging.audit_enabled: true",
+                 action_type="config")
+    else:
+        _add("warning", "Audit logging — config not loaded",
+             "Default is enabled (audit_enabled=true). "
+             "Create security.local.yml to confirm.")
+
+    # ── 8. Security headers verified ─────────────────────────────────────────
+    if _SECURITY_AVAILABLE:
+        _add("ok", "Security headers active",
+             "CSP, X-Frame-Options, X-Content-Type-Options and more are set automatically.",
+             action="curl -I http://127.0.0.1:8787",
+             action_type="command")
+    else:
+        _add("warning", "Security headers — module not loaded",
+             "The security module is unavailable. Verify headers manually.",
+             action="curl -I http://127.0.0.1:8787",
+             action_type="command")
+
+    # ── 9. Dependencies updated ───────────────────────────────────────────────
+    req_file = Path(__file__).resolve().parent / "requirements.txt"
+    if req_file.exists():
+        _add("info", "Dependencies — keep up to date",
+             "Run this command regularly to pull the latest security patches.",
+             action="pip install -r requirements.txt --upgrade",
+             action_type="command")
+    else:
+        _add("warning", "requirements.txt not found",
+             "Could not locate requirements.txt to check dependencies.")
+
+    # ── 10. File permissions secured ──────────────────────────────────────────
+    env_file = _env_path()
+    sec_local = Path("security.local.yml")
+    insecure: list[str] = []
+    if env_file.exists():
+        if env_file.stat().st_mode & 0o077:
+            insecure.append(str(env_file))
+    else:
+        insecure.append(str(env_file) + " (missing)")
+    if sec_local.exists() and sec_local.stat().st_mode & 0o077:
+        insecure.append("security.local.yml")
+    if insecure:
+        _add("warning", "File permissions not secured",
+             f"World/group-readable: {', '.join(insecure)}",
+             action="chmod 600 ~/.ai-employee/.env security.local.yml",
+             action_type="command")
+    else:
+        mode = oct(env_file.stat().st_mode & 0o777) if env_file.exists() else "N/A"
+        _add("ok", "File permissions secured",
+             f".env permissions: {mode}")
+
+    # ── 11. No secrets committed to version control ───────────────────────────
+    repo_root = Path(__file__).resolve().parents[3]
+    git_dir = repo_root / ".git"
+    gitignore = repo_root / ".gitignore"
+    if git_dir.exists():
+        if gitignore.exists():
+            gi_content = gitignore.read_text(errors="replace")
+            required = [".env", "security.local.yml", "*.key", "*.pem"]
+            missing = [p for p in required if p not in gi_content]
+            if not missing:
+                _add("ok", "No secrets committed to version control",
+                     ".env, security.local.yml, *.key and *.pem are in .gitignore")
+            else:
+                lines = "\n".join(missing)
+                _add("warning", "Some secret patterns missing from .gitignore",
+                     f"Missing entries: {', '.join(missing)}",
+                     action=f"printf '{lines}' >> .gitignore",
+                     action_type="command")
+        else:
+            _add("warning", ".gitignore not found",
+                 "Create a .gitignore to prevent accidental secret commits.",
+                 action="printf '.env\\nsecurity.local.yml\\n*.key\\n*.pem\\n' >> .gitignore",
+                 action_type="command")
+    else:
+        _add("info", "No secrets check — not a git repository",
+             "No .git directory found; version-control check skipped.")
+
+    _ok  = sum(1 for f in findings if f["level"] == "ok")
+    _err = sum(1 for f in findings if f["level"] == "error")
+    _wrn = sum(1 for f in findings if f["level"] == "warning")
+    _log_activity(
+        "security_check",
+        f"Security checklist run: {_ok} passed, {_err} critical, {_wrn} warnings",
+        details={"passed": _ok, "errors": _err, "warnings": _wrn,
+                 "total": len(findings)},
+        source="security-checklist",
+    )
+    return JSONResponse({"findings": findings})
+
+
+# ─── Activity History API ──────────────────────────────────────────────────────
+
+_ACTIVITY_EVENT_ICONS: dict = {
+    "security_check":      "🛡️",
+    "security_action_done": "✅",
+    "settings_saved":      "⚙️",
+    "guardrail_approved":  "✅",
+    "guardrail_rejected":  "🚫",
+    "agent_command":       "💬",
+    "task_run":            "🚀",
+    "agent_started":       "▶️",
+    "agent_stopped":       "⏹️",
+    "worker_triggered":    "👷",
+    "system":              "ℹ️",
+}
+
+
+@app.get("/api/history")
+def get_history(limit: int = 500):
+    """Return the most recent *limit* activity log entries, newest first."""
+    entries: list = []
+    if ACTIVITY_LOG.exists():
+        try:
+            for line in ACTIVITY_LOG.read_text(errors="replace").splitlines():
+                if line.strip():
+                    try:
+                        entries.append(json.loads(line))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    entries.sort(key=lambda e: e.get("ts", ""), reverse=True)
+    entries = entries[:limit]
+    # Attach display icons
+    for e in entries:
+        e["icon"] = _ACTIVITY_EVENT_ICONS.get(e.get("event_type", ""), "📋")
+    return JSONResponse({"entries": entries, "total": len(entries)})
+
+
+class _MarkActionRequest(BaseModel):
+    title: str = ""
+    action: str = ""
+    action_type: str = ""
+    check_number: int = 0
+
+
+@app.post("/api/history/mark-action")
+def mark_security_action(body: _MarkActionRequest):
+    """Record that the user acknowledged a security checklist action."""
+    desc = f"Security action acknowledged: {body.title}" if body.title else \
+           "Security checklist action acknowledged"
+    _log_activity(
+        "security_action_done",
+        desc,
+        details={
+            "check_number": body.check_number,
+            "title": body.title,
+            "action": body.action[:200] if body.action else "",
+            "action_type": body.action_type,
+        },
+        source="security-checklist",
+    )
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/history/clear")
+def clear_history():
+    """Wipe the activity log."""
+    try:
+        if ACTIVITY_LOG.exists():
+            ACTIVITY_LOG.unlink()
+        _log_activity("system", "Activity history cleared", source="dashboard")
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+class _NukeRequest(BaseModel):
+    confirm: str = ""
+
+
+@app.post("/api/settings/nuke")
+def nuke_data(body: _NukeRequest):
+    if body.confirm != "DELETE ALL DATA":
+        raise HTTPException(
+            400,
+            "Confirmation text does not match. "
+            "Type exactly: DELETE ALL DATA",
+        )
+    deleted: list = []
+    errors:  list = []
+
+    targets = [
+        CHATLOG,
+        ACTIVITY_LOG,
+        METRICS_FILE,
+        MEMORY_FILE,
+        GUARDRAILS_FILE,
+        IMPROVEMENTS_FILE,
+        STATE_DIR / "guardrails_settings.json",
+        STATE_DIR / "memory_interactions.json",
+    ]
+    for f in targets:
+        try:
+            if f.exists():
+                f.unlink()
+                deleted.append(f.name)
+        except Exception as exc:
+            errors.append(f"{f.name}: {exc}")
+
+    # Also clear any extra .jsonl chat files
+    try:
+        for jsonl in STATE_DIR.glob("*.jsonl"):
+            jsonl.unlink()
+            deleted.append(jsonl.name)
+    except Exception as exc:
+        errors.append(str(exc))
+
+    logger.warning("DATA NUKE performed — deleted: %s", deleted)
+    return JSONResponse({"ok": True, "deleted": deleted, "errors": errors})
+
+
+class _UninstallRequest(BaseModel):
+    confirm: str = ""
+
+
+@app.post("/api/settings/uninstall")
+def uninstall_bot(body: _UninstallRequest):
+    """Stop all agents and remove the entire AI_HOME directory tree.
+
+    Requires the exact confirmation phrase "UNINSTALL AI EMPLOYEE".
+    This endpoint stops accepting requests mid-execution since the process
+    itself is inside AI_HOME — the response is sent before the directory
+    is removed.
+    """
+    if body.confirm != "UNINSTALL AI EMPLOYEE":
+        raise HTTPException(
+            400,
+            "Confirmation text does not match. "
+            "Type exactly: UNINSTALL AI EMPLOYEE",
+        )
+
+    import shutil
+    import threading
+
+    errors: list = []
+
+    # ── Step 1: stop all agents gracefully ────────────────────────────────────
+    ai_bin = AI_HOME / "bin" / "ai-employee"
+    try:
+        import subprocess as _sp
+        _sp.run([str(ai_bin), "stop", "--all"], timeout=30,
+                capture_output=True)
+        logger.warning("UNINSTALL: all agents stopped")
+    except Exception as exc:
+        errors.append(f"stop-all: {exc}")
+        logger.warning("UNINSTALL: stop-all warning: %s", exc)
+
+    logger.warning("UNINSTALL initiated by user — removing %s", AI_HOME)
+
+    # ── Step 2: remove the directory tree in a background thread ──────────────
+    # We respond first so the browser gets the confirmation, then delete.
+    def _do_remove():
+        import time as _t
+        _t.sleep(1)   # give uvicorn time to flush the HTTP response
+        try:
+            if AI_HOME.exists():
+                shutil.rmtree(AI_HOME, ignore_errors=True)
+        except Exception as exc:
+            logger.error("UNINSTALL rmtree error: %s", exc)
+
+    threading.Thread(target=_do_remove, daemon=True).start()
+
+    return JSONResponse({
+        "ok": True,
+        "message": (
+            "AI Employee is being uninstalled. "
+            "All agents have been stopped and the installation directory "
+            f"({AI_HOME}) will be deleted in seconds."
+        ),
+    })
+
+
+# ── Updater status / trigger ──────────────────────────────────────────────────
+
+_UPDATER_STATE_FILE = STATE_DIR / "updater.json"
+_UPDATER_COMMIT_FILE = STATE_DIR / "installed_commit.txt"
+_UPDATER_TRIGGER_FILE = AI_HOME / "run" / "updater.trigger"
+
+
+@app.get("/api/updater/status")
+def updater_status():
+    try:
+        if _UPDATER_STATE_FILE.exists():
+            data = json.loads(_UPDATER_STATE_FILE.read_text())
+            return JSONResponse(data)
+    except Exception:
+        pass
+    # Fallback: return minimal info
+    local_sha = ""
+    try:
+        if _UPDATER_COMMIT_FILE.exists():
+            local_sha = _UPDATER_COMMIT_FILE.read_text().strip()
+    except Exception:
+        pass
+    return JSONResponse({
+        "status":    "not_started",
+        "local_sha": local_sha,
+        "repo":      "F-game25/AI-EMPLOYEE",
+        "branch":    "main",
+    })
+
+
+@app.post("/api/updater/check")
+def updater_check():
+    """Trigger an immediate update check by writing the trigger file."""
+    try:
+        _UPDATER_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _UPDATER_TRIGGER_FILE.write_text("check")
+        return JSONResponse({"ok": True, "message": "Check triggered — results appear in Auto Update card within seconds"})
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/api/updater/update")
+def updater_update():
+    """Trigger an immediate forced update (downloads + restarts even if already up to date)."""
+    try:
+        _UPDATER_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _UPDATER_TRIGGER_FILE.write_text("force")
+        # Also send SIGUSR1 to the updater process if its PID is known
+        try:
+            if _UPDATER_STATE_FILE.exists():
+                state = json.loads(_UPDATER_STATE_FILE.read_text())
+                pid = state.get("pid")
+                if pid:
+                    import signal as _sig
+                    os.kill(int(pid), _sig.SIGUSR1)
+        except Exception:
+            pass
+        return JSONResponse({"ok": True, "message": "Update triggered — agents will restart momentarily if changes are found"})
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+# ─── Compatibility alias endpoints ────────────────────────────────────────────
+# These thin wrappers expose the URLs used by the CLI, curl tests, and
+# documentation so external callers always get a 2xx response.
+
+@app.get("/api/agents")
+def get_bots_alias():
+    """Alias for GET /api/workers — returns list of all agents with running status."""
+    return get_workers()
+
+
+@app.get("/api/chat/history")
+def get_chat_history_alias(limit: int = 500):
+    """Alias for GET /api/history — returns activity log entries."""
+    return get_history(limit=limit)
+
+
+@app.get("/api/tasks")
+def list_tasks_alias():
+    """Alias for GET /api/task/list — returns task plans."""
+    return list_tasks()
+
+
+@app.post("/api/tasks")
+def create_task_alias(payload: dict):
+    """Alias for POST /api/task/submit.
+    Accepts {task, agent} or the native {description, agents, mode} shape.
+    """
+    # Normalise legacy shape used by the CLI: {"task": "...", "agent": "..."}
+    if "description" not in payload and "task" in payload:
+        agent = payload.get("agent", "")
+        payload = {
+            "description": payload["task"],
+            "agents": [agent] if agent else [],
+            "mode": "auto",
+        }
+    return submit_task(payload)
+
+
+@app.post("/api/metrics/record")
+def record_metric_alias(payload: dict):
+    """Alias for POST /api/metrics — records a metric event.
+    Accepts either native shape or simplified {"event": "lead_generated"} shape.
+    """
+    # Normalise simplified shape: {"event": "lead_generated"} or
+    # {"event": "deal_closed:5000"}
+    if "type" not in payload and "event" in payload:
+        raw = payload["event"]
+        parts = raw.split(":", 1)
+        norm = {"type": parts[0].strip()}
+        if len(parts) == 2:
+            try:
+                norm["value"] = float(parts[1])
+            except ValueError:
+                norm["notes"] = parts[1].strip()
+        payload = norm
+    return record_metric(payload)
+
+
+@app.post("/api/templates/deploy")
+def deploy_template_alias(payload: dict):
+    """Convenience endpoint — calls POST /api/templates/{template_id}/deploy.
+    Accepts {"template_id": "get-10-leads-24h"}.
+    """
+    template_id = (payload.get("template_id") or "").strip()
+    if not template_id:
+        raise HTTPException(400, "template_id required")
+    return deploy_template(template_id)
+
+
+@app.post("/api/guardrails/approve")
+def approve_guardrail_alias(payload: dict):
+    """Convenience endpoint — approves a pending guardrail action.
+    Accepts {"action_id": "..."}.
+    Returns 200 always; {"ok": false} if the action was not found in the queue.
+    """
+    action_id = (payload.get("action_id") or "").strip()
+    if not action_id:
+        raise HTTPException(400, "action_id required")
+    try:
+        return approve_guardrail_action(action_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return JSONResponse({"ok": False, "action_id": action_id, "message": "action not found in pending queue"})
+        raise
+
+
+@app.post("/api/guardrails/reject")
+def reject_guardrail_alias(payload: dict):
+    """Convenience endpoint — rejects a pending guardrail action.
+    Accepts {"action_id": "...", "reason": "..."}.
+    Returns 200 always; {"ok": false} if the action was not found in the queue.
+    """
+    action_id = (payload.get("action_id") or "").strip()
+    if not action_id:
+        raise HTTPException(400, "action_id required")
+    try:
+        return reject_guardrail_action(action_id, payload)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return JSONResponse({"ok": False, "action_id": action_id, "message": "action not found in pending queue"})
+        raise
+
+
+@app.post("/api/memory")
+def add_memory_alias(payload: dict):
+    """Alias for POST /api/memory/clients — adds a new CRM client."""
+    return add_memory_client(payload)
+
+
+@app.post("/api/integrations/save")
+def save_integration_alias(payload: dict):
+    """Save/update a single integration config.
+    Accepts {"integration": "<id>", "token": "...", ...} or
+            {"integration": "<id>", "config": {...}}.
+    """
+    integration_id = (payload.get("integration") or "").strip()
+    if not integration_id:
+        raise HTTPException(400, "integration field required")
+    # Build config dict from remaining keys (excluding "integration")
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {
+        k: v for k, v in payload.items() if k != "integration"
+    }
+    integrations = _load_integrations()
+    intg = next((i for i in integrations if i["id"] == integration_id), None)
+    if not intg:
+        # Auto-create a minimal entry so the save always succeeds
+        intg = {"id": integration_id, "name": integration_id, "enabled": True, "config": {}}
+        integrations.append(intg)
+    intg["config"] = config
+    intg["enabled"] = True
+    _save_integrations(integrations)
+    return JSONResponse({"ok": True, "integration": integration_id})
+
+
+# ── BLACKLIGHT API ────────────────────────────────────────────────────────────
+
+_blacklight_mod = None
+
+
+def _load_blacklight_module():
+    """Lazy-import and cache the blacklight module from the agents directory."""
+    global _blacklight_mod
+    if _blacklight_mod is not None:
+        return _blacklight_mod
+    _bl_path = AI_HOME / "agents" / "blacklight"
+    if str(_bl_path) not in sys.path:
+        sys.path.insert(0, str(_bl_path))
+    import importlib
+    _blacklight_mod = importlib.import_module("blacklight")
+    return _blacklight_mod
+
+
+@app.get("/api/blacklight/status")
+def blacklight_status():
+    """Return BLACKLIGHT running state and stats."""
+    try:
+        bl = _load_blacklight_module()
+        return JSONResponse(bl.get_status())
+    except Exception as exc:
+        logger.warning("blacklight status error: %s", exc)
+        return JSONResponse({"running": False, "goal": "", "cycle": 0,
+                             "opportunities_found": 0, "actions_taken": 0,
+                             "last_activity": None})
+
+
+@app.post("/api/blacklight/start")
+def blacklight_start(payload: dict, _auth: None = Depends(require_auth)):
+    """Start the BLACKLIGHT autonomous loop with the given goal."""
+    goal = (payload.get("goal") or "").strip()
+    if not goal:
+        raise HTTPException(400, "goal is required")
+    if len(goal) > 2000:
+        raise HTTPException(400, "goal must be 2000 characters or fewer")
+    try:
+        bl = _load_blacklight_module()
+        started = bl.start(goal)
+        if started:
+            return JSONResponse({"ok": True, "goal": goal,
+                                 "message": "BLACKLIGHT started"})
+        return JSONResponse({"ok": False, "message": "BLACKLIGHT is already running"})
+    except Exception as exc:
+        logger.error("blacklight start error: %s", exc)
+        raise HTTPException(500, "Failed to start BLACKLIGHT")
+
+
+@app.post("/api/blacklight/stop")
+def blacklight_stop():
+    """Stop the BLACKLIGHT autonomous loop."""
+    try:
+        bl = _load_blacklight_module()
+        stopped = bl.stop()
+        return JSONResponse({"ok": stopped,
+                             "message": "BLACKLIGHT stopped" if stopped
+                             else "BLACKLIGHT was not running"})
+    except Exception as exc:
+        logger.error("blacklight stop error: %s", exc)
+        raise HTTPException(500, "Failed to stop BLACKLIGHT")
+
+
+@app.get("/api/blacklight/logs")
+def blacklight_logs(limit: int = 100):
+    """Return recent BLACKLIGHT log entries."""
+    try:
+        bl = _load_blacklight_module()
+        return JSONResponse(bl.get_logs(limit=min(limit, 500)))
+    except Exception as exc:
+        logger.warning("blacklight logs error: %s", exc)
+        return JSONResponse([])
+
+
+# ── ASCEND_FORGE API ──────────────────────────────────────────────────────────
+
+_ascend_mod = None
+
+
+def _load_ascend_module():
+    """Lazy-import and cache the ascend_forge module from the agents directory."""
+    global _ascend_mod
+    if _ascend_mod is not None:
+        return _ascend_mod
+    _af_path = AI_HOME / "agents" / "ascend-forge"
+    if str(_af_path) not in sys.path:
+        sys.path.insert(0, str(_af_path))
+    _ascend_mod = importlib.import_module("ascend_forge")
+    return _ascend_mod
+
+
+@app.get("/api/ascend/status")
+def ascend_status():
+    """Return ASCEND_FORGE current state, mode, and activity feed."""
+    try:
+        af = _load_ascend_module()
+        return JSONResponse(af.get_status())
+    except Exception as exc:
+        logger.warning("ascend status error: %s", exc)
+        return JSONResponse({"mode": "AUTO", "pending_count": 0,
+                             "observe_only": False, "activity": []})
+
+
+@app.post("/api/ascend/mode")
+def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth)):
+    """Set ASCEND_FORGE operating mode (GENERAL / MONEY / AUTO)."""
+    mode = (payload.get("mode") or "").strip().upper()
+    if not mode:
+        raise HTTPException(400, "mode is required")
+    try:
+        af = _load_ascend_module()
+        af.set_mode(mode)
+        return JSONResponse({"ok": True, "mode": mode})
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend set_mode error: %s", exc)
+        raise HTTPException(500, "Failed to set mode")
+
+
+@app.post("/api/ascend/scan")
+def ascend_scan(_auth: None = Depends(require_auth)):
+    """Trigger a system scan and return queued patches."""
+    try:
+        af = _load_ascend_module()
+        patches = af.scan_system(trigger="UI scan")
+        return JSONResponse({"ok": True, "patches": patches})
+    except Exception as exc:
+        logger.error("ascend scan error: %s", exc)
+        raise HTTPException(500, "Scan failed")
+
+
+@app.get("/api/ascend/patches")
+def ascend_patches():
+    """Return all pending patches."""
+    try:
+        af = _load_ascend_module()
+        return JSONResponse(af.get_pending_patches())
+    except Exception as exc:
+        logger.warning("ascend patches error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/ascend/patches/{patch_id}/approve")
+def ascend_approve(patch_id: str, _auth: None = Depends(require_auth)):
+    """Approve a pending patch."""
+    try:
+        af = _load_ascend_module()
+        patch = af.approve_patch(patch_id)
+        return JSONResponse({"ok": True, "patch": patch})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend approve error: %s", exc)
+        raise HTTPException(500, "Approval failed")
+
+
+@app.post("/api/ascend/patches/{patch_id}/reject")
+def ascend_reject(patch_id: str, _auth: None = Depends(require_auth)):
+    """Reject a pending patch."""
+    try:
+        af = _load_ascend_module()
+        patch = af.reject_patch(patch_id)
+        return JSONResponse({"ok": True, "patch": patch})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend reject error: %s", exc)
+        raise HTTPException(500, "Rejection failed")
+
+
+@app.post("/api/ascend/patches/{patch_id}/rollback")
+def ascend_rollback(patch_id: str, _auth: None = Depends(require_auth)):
+    """Roll back an approved patch."""
+    try:
+        af = _load_ascend_module()
+        patch = af.rollback_patch(patch_id)
+        return JSONResponse({"ok": True, "patch": patch})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error("ascend rollback error: %s", exc)
+        raise HTTPException(500, "Rollback failed")
+
+
+@app.get("/api/ascend/changelog")
+def ascend_changelog(limit: int = 50):
+    """Return change history."""
+    try:
+        af = _load_ascend_module()
+        return JSONResponse(af.get_changelog(limit=min(limit, 200)))
+    except Exception as exc:
+        logger.warning("ascend changelog error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/ascend/auto-approve")
+def ascend_auto_approve(payload: dict, _auth: None = Depends(require_auth)):
+    """Toggle auto-approve for LOW risk patches."""
+    enabled = bool(payload.get("enabled", False))
+    try:
+        af = _load_ascend_module()
+        af.set_auto_approve_low(enabled)
+        return JSONResponse({"ok": True, "auto_approve_low": enabled})
+    except Exception as exc:
+        logger.error("ascend auto-approve error: %s", exc)
+        raise HTTPException(500, "Failed to update setting")
+
+
+# ── New Paperclip-parity features ─────────────────────────────────────────────
+# Org Chart, Budget Tracker, Goal Alignment, Ticket System, Governance,
+# Company Manager — all lazy-loaded from their respective agent directories.
+
+_org_chart_mod = None
+_budget_mod = None
+_goal_mod = None
+_ticket_mod = None
+_gov_mod = None
+_company_mod = None
+
+# Lock to ensure thread-safe lazy loading of feature modules
+import threading as _threading
+_module_load_lock = _threading.Lock()
+
+
+def _load_module(name: str, agent_dir: str, global_var_name: str):
+    """Thread-safe generic lazy-loader for the new feature modules.
+
+    Uses a double-checked locking pattern:
+    1. Fast path (no lock) — return immediately if already loaded.
+    2. Slow path (under lock) — load the module, guarded by _module_load_lock
+       to prevent two threads both observing a None cache and loading twice.
+    The double-check inside the lock handles the race where two threads both
+    pass the fast path check before either acquires the lock.
+
+    Module search order:
+    1. Sibling directory next to server.py (runtime/agents/<agent_dir>/)
+    2. AI_HOME/agents/<agent_dir>/  (for installed/deployed setups)
+    """
+    frame = globals()
+    # Fast path: return if already loaded.
+    cached = frame.get(global_var_name)
+    if cached is not None:
+        return cached
+    # Slow path: load under lock to prevent concurrent double-loading
+    with _module_load_lock:
+        # Re-check after acquiring lock in case another thread loaded it first
+        cached = frame.get(global_var_name)
+        if cached is not None:
+            return cached
+        # Prefer sibling directory (dev/deployed-from-source setups)
+        server_dir = Path(__file__).resolve().parent.parent  # runtime/agents/
+        candidate_paths = [
+            str(server_dir / agent_dir),         # runtime/agents/<dir>/
+            str(AI_HOME / "agents" / agent_dir), # ~/.ai-employee/agents/<dir>/
+        ]
+        for path_str in candidate_paths:
+            if Path(path_str).is_dir() and path_str not in sys.path:
+                sys.path.insert(0, path_str)
+        mod = importlib.import_module(name)
+        frame[global_var_name] = mod
+        return mod
+
+
+def _org():
+    return _load_module("org_chart", "org-chart", "_org_chart_mod")
+
+
+def _budget():
+    return _load_module("budget_tracker", "budget-tracker", "_budget_mod")
+
+
+def _goals():
+    return _load_module("goal_alignment", "goal-alignment", "_goal_mod")
+
+
+def _tickets():
+    return _load_module("ticket_system", "ticket-system", "_ticket_mod")
+
+
+def _gov():
+    return _load_module("governance", "governance", "_gov_mod")
+
+
+def _company():
+    return _load_module("company_manager", "company-manager", "_company_mod")
+
+
+# ── Org Chart API ──────────────────────────────────────────────────────────────
+
+@app.get("/api/org/chart")
+def org_get_chart():
+    """Return the full org chart with roles, reporting lines, and direct reports."""
+    try:
+        return JSONResponse(_org().get_chart())
+    except Exception as exc:
+        logger.warning("org chart error: %s", exc)
+        return JSONResponse({"roles": []})
+
+
+@app.post("/api/org/roles")
+def org_upsert_role(payload: dict):
+    """Create or update an org-chart role."""
+    role_id = (payload.get("role_id") or "").strip()
+    title = (payload.get("title") or "").strip()
+    if not role_id or not title:
+        raise HTTPException(400, "role_id and title are required")
+    try:
+        role = _org().upsert_role(
+            role_id=role_id,
+            title=title,
+            description=payload.get("description", ""),
+            reports_to=payload.get("reports_to"),
+            heartbeat_interval_minutes=int(payload.get("heartbeat_interval_minutes", 60)),
+            agent_id=payload.get("agent_id"),
+        )
+        return JSONResponse(role)
+    except Exception as exc:
+        logger.error("org upsert_role error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/org/roles/{role_id}")
+def org_delete_role(role_id: str):
+    try:
+        deleted = _org().delete_role(role_id)
+        return JSONResponse({"ok": deleted})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/org/assign")
+def org_assign_agent(payload: dict):
+    """Assign an AI-EMPLOYEE agent to an org-chart role."""
+    role_id = (payload.get("role_id") or "").strip()
+    agent_id = (payload.get("agent_id") or "").strip()
+    if not role_id or not agent_id:
+        raise HTTPException(400, "role_id and agent_id are required")
+    try:
+        return JSONResponse(_org().assign_agent_to_role(role_id, agent_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/org/delegate")
+def org_delegate_task(payload: dict):
+    """Delegate a task from one role to another."""
+    from_role = (payload.get("from_role") or "").strip()
+    to_role = (payload.get("to_role") or "").strip()
+    task = (payload.get("task") or "").strip()
+    if not from_role or not to_role or not task:
+        raise HTTPException(400, "from_role, to_role, and task are required")
+    try:
+        return JSONResponse(_org().delegate_task(from_role, to_role, task, payload.get("context")))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/org/adapters")
+def org_list_adapters():
+    try:
+        return JSONResponse(_org().list_adapters())
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.post("/api/org/adapters")
+def org_register_adapter(payload: dict):
+    """Register a BYOA (Bring Your Own Agent) adapter."""
+    adapter_id = (payload.get("adapter_id") or "").strip()
+    name = (payload.get("name") or "").strip()
+    adapter_type = (payload.get("type") or "http_webhook").strip().lower()
+    if not adapter_id or not name:
+        raise HTTPException(400, "adapter_id and name are required")
+    try:
+        return JSONResponse(
+            _org().register_adapter(
+                adapter_id=adapter_id,
+                name=name,
+                adapter_type=adapter_type,
+                config=payload.get("config", {}),
+                description=payload.get("description", ""),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/org/adapters/{adapter_id}")
+def org_deregister_adapter(adapter_id: str):
+    try:
+        ok = _org().deregister_adapter(adapter_id)
+        return JSONResponse({"ok": ok})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Budget Tracker API ─────────────────────────────────────────────────────────
+
+@app.get("/api/budget/status")
+def budget_all_status():
+    """Return budget status for all tracked agents."""
+    try:
+        _budget().auto_reset_all_if_new_month()
+        return JSONResponse(_budget().get_all_status())
+    except Exception as exc:
+        logger.warning("budget status error: %s", exc)
+        return JSONResponse([])
+
+
+@app.get("/api/budget/status/{agent_id}")
+def budget_agent_status(agent_id: str):
+    """Return budget status for a single agent."""
+    try:
+        _budget().auto_reset_all_if_new_month()
+        return JSONResponse(_budget().get_agent_status(agent_id))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/budget/set")
+def budget_set(payload: dict):
+    """Set the monthly budget cap for an agent."""
+    agent_id = (payload.get("agent_id") or "").strip()
+    budget = payload.get("monthly_budget_usd")
+    if not agent_id or budget is None:
+        raise HTTPException(400, "agent_id and monthly_budget_usd are required")
+    try:
+        return JSONResponse(_budget().set_budget(agent_id, float(budget)))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/budget/reset/{agent_id}")
+def budget_reset(agent_id: str):
+    """Reset monthly usage for an agent."""
+    try:
+        return JSONResponse(_budget().reset_usage(agent_id))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/budget/record")
+def budget_record_usage(payload: dict):
+    """Record token usage for an agent (called by ai_router or manually)."""
+    agent_id = (payload.get("agent_id") or "").strip()
+    model = (payload.get("model") or "unknown").strip()
+    if not agent_id:
+        raise HTTPException(400, "agent_id is required")
+    try:
+        return JSONResponse(
+            _budget().record_usage(
+                agent_id=agent_id,
+                model=model,
+                input_tokens=int(payload.get("input_tokens", 0)),
+                output_tokens=int(payload.get("output_tokens", 0)),
+                cost_usd=payload.get("cost_usd"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Goal Alignment API ─────────────────────────────────────────────────────────
+
+@app.get("/api/goals/company")
+def goals_get_company():
+    """Return the company mission and vision."""
+    try:
+        return JSONResponse(_goals().get_company_mission())
+    except Exception as exc:
+        return JSONResponse({"mission": "", "vision": ""})
+
+
+@app.post("/api/goals/company")
+def goals_set_company(payload: dict):
+    """Set the company mission."""
+    mission = (payload.get("mission") or "").strip()
+    if not mission:
+        raise HTTPException(400, "mission is required")
+    try:
+        return JSONResponse(
+            _goals().set_company_mission(
+                mission=mission,
+                vision=payload.get("vision", ""),
+                values=payload.get("values"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/goals/projects")
+def goals_list_projects():
+    try:
+        return JSONResponse(_goals().list_projects())
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.post("/api/goals/projects")
+def goals_upsert_project(payload: dict):
+    """Create or update a project under the company mission."""
+    name = (payload.get("name") or "").strip()
+    goal = (payload.get("goal") or "").strip()
+    if not name or not goal:
+        raise HTTPException(400, "name and goal are required")
+    try:
+        return JSONResponse(
+            _goals().upsert_project(
+                project_id=payload.get("project_id"),
+                name=name,
+                goal=goal,
+                description=payload.get("description", ""),
+                assigned_roles=payload.get("assigned_roles"),
+                assigned_agents=payload.get("assigned_agents"),
+                priority=payload.get("priority", "medium"),
+                status=payload.get("status", "active"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/goals/projects/{project_id}")
+def goals_delete_project(project_id: str):
+    try:
+        return JSONResponse({"ok": _goals().delete_project(project_id)})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/goals/context/{project_id}")
+def goals_get_context(project_id: str):
+    """Return the full goal ancestry for a project (for prompt injection)."""
+    try:
+        ctx = _goals().get_goal_context(project_id=project_id)
+        preamble = _goals().build_goal_preamble(project_id=project_id)
+        return JSONResponse({**ctx, "preamble": preamble})
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Ticket System API ──────────────────────────────────────────────────────────
+
+@app.get("/api/tickets")
+def tickets_list(
+    status: str | None = None,
+    agent_id: str | None = None,
+    project_id: str | None = None,
+    limit: int = 50,
+):
+    """List tickets with optional filters."""
+    try:
+        return JSONResponse(
+            _tickets().list_tickets(
+                status=status, agent_id=agent_id, project_id=project_id, limit=min(limit, 200)
+            )
+        )
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.post("/api/tickets")
+def tickets_create(payload: dict):
+    """Create a new ticket."""
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title is required")
+    try:
+        return JSONResponse(
+            _tickets().create_ticket(
+                title=title,
+                description=payload.get("description", ""),
+                created_by=payload.get("created_by", "user"),
+                agent_id=payload.get("agent_id"),
+                project_id=payload.get("project_id"),
+                priority=payload.get("priority", "medium"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/tickets/{ticket_id}")
+def tickets_get(ticket_id: str):
+    try:
+        ticket = _tickets().get_ticket(ticket_id)
+        if ticket is None:
+            raise HTTPException(404, f"Ticket '{ticket_id}' not found")
+        return JSONResponse(ticket)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.patch("/api/tickets/{ticket_id}")
+def tickets_update(ticket_id: str, payload: dict):
+    """Update ticket status, title, priority, or agent assignment."""
+    try:
+        return JSONResponse(
+            _tickets().update_ticket(
+                ticket_id=ticket_id,
+                status=payload.get("status"),
+                title=payload.get("title"),
+                description=payload.get("description"),
+                priority=payload.get("priority"),
+                agent_id=payload.get("agent_id"),
+                updated_by=payload.get("updated_by", "user"),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/tickets/{ticket_id}/comment")
+def tickets_add_comment(ticket_id: str, payload: dict):
+    """Add a comment to a ticket thread."""
+    body = (payload.get("body") or "").strip()
+    if not body:
+        raise HTTPException(400, "body is required")
+    try:
+        return JSONResponse(
+            _tickets().add_comment(
+                ticket_id=ticket_id,
+                body=body,
+                author=payload.get("author", "user"),
+                tool_call=payload.get("tool_call"),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/tickets/{ticket_id}/audit")
+def tickets_audit(ticket_id: str):
+    """Return the immutable audit trail for a ticket."""
+    try:
+        return JSONResponse(_tickets().get_audit_trail(ticket_id))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/tickets/audit/log")
+def tickets_full_audit(limit: int = 200):
+    """Return the most recent audit events across all tickets."""
+    try:
+        return JSONResponse(_tickets().get_full_audit_log(limit=min(limit, 500)))
+    except Exception as exc:
+        return JSONResponse([])
+
+
+# ── Governance API ─────────────────────────────────────────────────────────────
+
+@app.get("/api/governance/pending")
+def governance_pending():
+    """List all pending approval requests."""
+    try:
+        return JSONResponse(_gov().list_pending())
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.get("/api/governance/audit")
+def governance_audit(limit: int = 200):
+    """Return the governance audit trail."""
+    try:
+        return JSONResponse(_gov().get_audit_trail(limit=min(limit, 500)))
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.get("/api/governance/history")
+def governance_history(limit: int = 100):
+    """Return recent governance decisions."""
+    try:
+        return JSONResponse(_gov().get_history(limit=min(limit, 200)))
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.post("/api/governance/request")
+def governance_request(payload: dict):
+    """Agent submits an action for board approval."""
+    agent_id = (payload.get("agent_id") or "").strip()
+    action = (payload.get("action") or "").strip()
+    description = (payload.get("description") or "").strip()
+    if not agent_id or not action:
+        raise HTTPException(400, "agent_id and action are required")
+    try:
+        return JSONResponse(
+            _gov().request_approval(
+                agent_id=agent_id,
+                action=action,
+                description=description,
+                risk_level=payload.get("risk_level", "medium"),
+                payload=payload.get("payload"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/{action_id}/approve")
+def governance_approve(action_id: str, payload: dict = {}):
+    """Board approves a pending action."""
+    try:
+        return JSONResponse(
+            _gov().approve_action(
+                action_id=action_id,
+                decided_by=payload.get("decided_by", "board"),
+                note=payload.get("note", ""),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/{action_id}/reject")
+def governance_reject(action_id: str, payload: dict = {}):
+    """Board rejects a pending action."""
+    try:
+        return JSONResponse(
+            _gov().reject_action(
+                action_id=action_id,
+                decided_by=payload.get("decided_by", "board"),
+                note=payload.get("note", ""),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/pause/{agent_id}")
+def governance_pause(agent_id: str, payload: dict = {}):
+    """Board pauses an agent."""
+    try:
+        return JSONResponse(_gov().pause_agent(agent_id, reason=payload.get("reason", "")))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/resume/{agent_id}")
+def governance_resume(agent_id: str, payload: dict = {}):
+    """Board resumes a paused agent."""
+    try:
+        return JSONResponse(_gov().resume_agent(agent_id, reason=payload.get("reason", "")))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/governance/terminate/{agent_id}")
+def governance_terminate(agent_id: str, payload: dict = {}):
+    """Board terminates an agent."""
+    try:
+        return JSONResponse(_gov().terminate_agent(agent_id, reason=payload.get("reason", "")))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/governance/agent/{agent_id}")
+def governance_agent_status(agent_id: str):
+    """Return governance status for a specific agent."""
+    try:
+        return JSONResponse(_gov().get_agent_gov_status(agent_id))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/governance/settings")
+def governance_get_settings():
+    try:
+        return JSONResponse(_gov().get_settings())
+    except Exception as exc:
+        return JSONResponse({})
+
+
+@app.post("/api/governance/settings")
+def governance_update_settings(payload: dict):
+    """Update governance settings (auto-approve thresholds, timeouts, etc.)."""
+    try:
+        return JSONResponse(_gov().update_settings(payload))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Company Manager API ────────────────────────────────────────────────────────
+
+@app.get("/api/companies")
+def companies_list():
+    """List all companies in this deployment."""
+    try:
+        return JSONResponse(_company().list_companies())
+    except Exception as exc:
+        return JSONResponse([])
+
+
+@app.get("/api/companies/active")
+def companies_active():
+    """Return the currently active company."""
+    try:
+        c = _company().get_active_company()
+        return JSONResponse(c or {})
+    except Exception as exc:
+        return JSONResponse({})
+
+
+@app.post("/api/companies")
+def companies_create(payload: dict):
+    """Create a new company."""
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    try:
+        return JSONResponse(
+            _company().create_company(
+                name=name,
+                description=payload.get("description", ""),
+                mission=payload.get("mission", ""),
+                company_id=payload.get("company_id"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/companies/switch")
+def companies_switch(payload: dict):
+    """Switch the active company context."""
+    company_id = (payload.get("company_id") or "").strip()
+    if not company_id:
+        raise HTTPException(400, "company_id is required")
+    try:
+        return JSONResponse(_company().switch_company(company_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/companies/{company_id}")
+def companies_delete(company_id: str):
+    try:
+        ok = _company().delete_company(company_id)
+        return JSONResponse({"ok": ok})
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/companies/{company_id}/export")
+def companies_export(company_id: str):
+    """Export a company configuration with secrets scrubbed."""
+    try:
+        return JSONResponse(_company().export_company(company_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/companies/import")
+def companies_import(payload: dict):
+    """Import a company template."""
+    if not payload:
+        raise HTTPException(400, "template payload is required")
+    try:
+        return JSONResponse(
+            _company().import_company(
+                template=payload,
+                name_override=payload.get("name_override"),
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Session Manager & Artifacts lazy-loaders ──────────────────────────────────
+
+_session_mod = None
+_artifacts_mod = None
+
+
+def _sessions():
+    return _load_module("session_manager", "session-manager", "_session_mod")
+
+
+def _arts():
+    return _load_module("artifacts", "artifacts", "_artifacts_mod")
+
+
+# ── Session Manager API ────────────────────────────────────────────────────────
+
+
+@app.get("/api/sessions")
+def sessions_list(agent_id: str = None, status: str = None, limit: int = 50):
+    """List all sessions, optionally filtered by agent or status."""
+    try:
+        return JSONResponse(_sessions().list_sessions(agent_id=agent_id, status=status, limit=limit))
+    except Exception as exc:
+        logger.warning("sessions list error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/sessions")
+def sessions_create(payload: dict):
+    """Create a new persistent session."""
+    agent_id = (payload.get("agent_id") or "").strip()
+    if not agent_id:
+        raise HTTPException(400, "agent_id is required")
+    try:
+        s = _sessions().create_session(
+            agent_id=agent_id,
+            title=payload.get("title", ""),
+            context=payload.get("context") or {},
+            ticket_id=payload.get("ticket_id"),
+            task_plan_id=payload.get("task_plan_id"),
+        )
+        return JSONResponse(s)
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/sessions/{session_id}")
+def sessions_get(session_id: str):
+    """Get session details including context and checkpoints."""
+    s = _sessions().get_session(session_id)
+    if s is None:
+        raise HTTPException(404, f"Session '{session_id}' not found")
+    return JSONResponse(s)
+
+
+@app.patch("/api/sessions/{session_id}")
+def sessions_update(session_id: str, payload: dict):
+    """Update session context or status."""
+    try:
+        return JSONResponse(_sessions().update_session(
+            session_id,
+            context=payload.get("context"),
+            status=payload.get("status"),
+            title=payload.get("title"),
+            merge_context=payload.get("merge_context", True),
+        ))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/sessions/{session_id}")
+def sessions_close(session_id: str):
+    """Close (complete) a session."""
+    ok = _sessions().close_session(session_id)
+    return JSONResponse({"ok": ok})
+
+
+@app.post("/api/sessions/{session_id}/resume")
+def sessions_resume(session_id: str):
+    """Resume a paused session."""
+    try:
+        return JSONResponse(_sessions().resume_session(session_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.post("/api/sessions/{session_id}/checkpoint")
+def sessions_save_checkpoint(session_id: str, payload: dict = None):
+    """Save a named checkpoint for rollback."""
+    if payload is None:
+        payload = {}
+    label = (payload.get("label") or "checkpoint").strip()
+    try:
+        cp = _sessions().save_checkpoint(session_id, label=label, snapshot=payload.get("snapshot"))
+        return JSONResponse(cp)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.get("/api/sessions/{session_id}/checkpoints")
+def sessions_list_checkpoints(session_id: str):
+    return JSONResponse(_sessions().list_checkpoints(session_id))
+
+
+@app.post("/api/sessions/{session_id}/restore/{checkpoint_id}")
+def sessions_restore_checkpoint(session_id: str, checkpoint_id: str):
+    """Restore session context to a checkpoint (rollback)."""
+    try:
+        return JSONResponse(_sessions().restore_checkpoint(session_id, checkpoint_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+# ── Artifacts API ──────────────────────────────────────────────────────────────
+
+
+@app.get("/api/artifacts")
+def artifacts_list(artifact_type: str = None, agent_id: str = None, status: str = None, limit: int = 50):
+    """List artifacts, optionally filtered."""
+    try:
+        return JSONResponse(_arts().list_artifacts(
+            artifact_type=artifact_type, agent_id=agent_id, status=status, limit=limit
+        ))
+    except Exception as exc:
+        logger.warning("artifacts list error: %s", exc)
+        return JSONResponse([])
+
+
+@app.post("/api/artifacts")
+def artifacts_create(payload: dict):
+    """Create a new artifact."""
+    title = (payload.get("title") or "").strip()
+    content = (payload.get("content") or "").strip()
+    if not title or not content:
+        raise HTTPException(400, "title and content are required")
+    try:
+        return JSONResponse(_arts().create_artifact(
+            title=title,
+            content=content,
+            artifact_type=payload.get("artifact_type", "other"),
+            agent_id=payload.get("agent_id"),
+            ticket_id=payload.get("ticket_id"),
+            task_plan_id=payload.get("task_plan_id"),
+            metadata=payload.get("metadata") or {},
+        ))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/artifacts/{artifact_id}")
+def artifacts_get(artifact_id: str):
+    """Get artifact with full content."""
+    a = _arts().get_artifact(artifact_id)
+    if a is None:
+        raise HTTPException(404, f"Artifact '{artifact_id}' not found")
+    return JSONResponse(a)
+
+
+@app.patch("/api/artifacts/{artifact_id}")
+def artifacts_update(artifact_id: str, payload: dict):
+    """Update artifact content, title, or status."""
+    try:
+        return JSONResponse(_arts().update_artifact(
+            artifact_id,
+            title=payload.get("title"),
+            content=payload.get("content"),
+            status=payload.get("status"),
+            metadata=payload.get("metadata"),
+        ))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.delete("/api/artifacts/{artifact_id}")
+def artifacts_delete(artifact_id: str):
+    ok = _arts().delete_artifact(artifact_id)
+    return JSONResponse({"ok": ok})
+
+
+@app.post("/api/artifacts/{artifact_id}/deploy")
+def artifacts_deploy(artifact_id: str, payload: dict = None):
+    """Mark artifact as deployed."""
+    notes = (payload or {}).get("deploy_notes", "")
+    try:
+        return JSONResponse(_arts().deploy_artifact(artifact_id, deploy_notes=notes))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.get("/api/artifacts/{artifact_id}/versions")
+def artifacts_versions(artifact_id: str):
+    return JSONResponse(_arts().get_versions(artifact_id))
+
+
+# ── CEO Chat (direct message to top-level agent) ──────────────────────────────
+
+
+@app.post("/api/ceo/chat")
+async def ceo_chat(payload: dict):
+    """Send a message directly to the CEO agent and get a response.
+
+    This implements Paperclip's "CEO Chat" concept — a direct channel to the
+    top-level agent that propagates context down the org chart.
+    """
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(400, "message is required")
+
+    # Find CEO role from org chart to get the assigned agent
+    ceo_agent_id = "ceo"
+    try:
+        chart = _org().get_chart()
+        ceo_role = next(
+            (r for r in chart.get("roles", [])
+             if r.get("role_id") == "ceo" and r.get("agent_id")),
+            None,
+        )
+        if ceo_role and ceo_role.get("agent_id"):
+            ceo_agent_id = ceo_role["agent_id"]
+    except Exception:
+        pass
+
+    # Get goal context to inject company mission
+    goal_preamble = ""
+    try:
+        goal_preamble = _goals().build_goal_preamble()
+    except Exception:
+        pass
+
+    # Route to AI router
+    try:
+        from ai_router import query_ai_for_agent  # type: ignore
+        ai_available = True
+    except ImportError:
+        ai_available = False
+
+    if ai_available:
+        system = (
+            f"{goal_preamble}\n\n"
+            f"You are the CEO of this company. You receive direct messages from the board "
+            f"and coordinate the entire agent team to execute on the company's mission. "
+            f"Respond strategically and concisely."
+        ).strip()
+        try:
+            result = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: query_ai_for_agent(ceo_agent_id, message, system=system),
+            )
+            response_text = result.get("content", result.get("text", str(result)))
+        except Exception:
+            logger.warning("CEO agent call failed", exc_info=True)
+            response_text = "[CEO Agent unavailable — Ollama or AI provider not running]"
+    else:
+        response_text = (
+            f"[CEO simulated response] Mission acknowledged. "
+            f"I have received your message: '{message[:80]}'. "
+            f"Coordinating team to execute on this directive."
+        )
+
+    # Store as a ticket for traceability
+    ticket_id = None
+    try:
+        ticket = _tickets().create_ticket(
+            title=f"CEO Directive: {message[:60]}",
+            description=message,
+            priority="high",
+            agent_id=ceo_agent_id,
+            created_by="board",
+        )
+        ticket_id = ticket.get("ticket_id")
+    except Exception:
+        pass
+
+    return JSONResponse({
+        "message": message,
+        "response": response_text,
+        "agent_id": ceo_agent_id,
+        "ticket_id": ticket_id,
+        "goal_context_injected": bool(goal_preamble),
+    })
+
+
+if __name__ == "__main__":
+    _trim_jsonl(CHATLOG, 1000)
+    _trim_jsonl(ACTIVITY_LOG, 2000)
+
+    try:
+        import uvloop  # noqa: F401
+        _loop = "uvloop"
+    except ImportError:
+        _loop = "asyncio"
+
+    try:
+        import httptools  # noqa: F401
+        _http = "httptools"
+    except ImportError:
+        _http = "auto"
+
+    uvicorn.run(
+        app,
+        host=HOST,
+        port=PORT,
+        workers=1,
+        loop=_loop,
+        http=_http,
+        access_log=False,
+        server_header=False,
+    )

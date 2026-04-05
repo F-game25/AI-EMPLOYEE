@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# AI Employee - Multi-bot runner
+# AI Employee - Multi-agent runner
 # Usage: ai-employee <command> [args]
 set -euo pipefail
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-BOTS_DIR="$AI_HOME/bots"
+AGENTS_DIR="$AI_HOME/agents"
 LOGS_DIR="$AI_HOME/logs"
 RUN_DIR="$AI_HOME/run"
 STATE_DIR="$AI_HOME/state"
@@ -158,11 +158,11 @@ usage() {
   cat <<'USAGE'
 ai-employee commands:
   do <task>              Send any task to your AI employee (e.g. ai-employee do "find 10 leads")
-  start --all | <agent>    Start one or all agents
-  stop  --all | <agent>    Stop one or all agents
-  restart --all | <agent>  Restart one or all agents
+  start --all | <agent>   Start one or all agents
+  stop  --all | <agent>   Stop one or all agents
+  restart --all | <agent> Restart one or all agents
   status                   Show running status of all agents
-  logs <agent>             Tail logs for an agent
+  logs <agent>            Tail logs for an agent
   doctor                 Health-check all services (✅/❌ per component)
   onboard                Run the First 15 Minutes Value Flow (3 starter tasks)
   mode [starter|business|power]  Show or set the active mode
@@ -170,12 +170,12 @@ ai-employee commands:
 USAGE
 }
 
-bot_pid_file() { echo "$RUN_DIR/$1.pid"; }
+agent_pid_file() { echo "$RUN_DIR/$1.pid"; }
 
 is_running() {
   local bot="$1"
   local pid_file
-  pid_file="$(bot_pid_file "$bot")"
+  pid_file="$(agent_pid_file "$bot")"
   [[ -f "$pid_file" ]] || return 1
   local pid
   pid="$(cat "$pid_file" 2>/dev/null || true)"
@@ -183,20 +183,20 @@ is_running() {
   kill -0 "$pid" 2>/dev/null
 }
 
-start_bot() {
+start_agent() {
   local bot="$1"
 
   # Validate bot name — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}
   if [[ ! "$bot" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$ ]]; then
-    echo "ERROR: invalid bot name: '$bot' — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
+    echo "ERROR: invalid agent name: '$bot' — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
     return 1
   fi
 
-  local bot_dir="$BOTS_DIR/$bot"
+  local bot_dir="$AGENTS_DIR/$bot"
   local entry="$bot_dir/run.sh"
   local log="$LOGS_DIR/$bot.log"
   local pid_file
-  pid_file="$(bot_pid_file "$bot")"
+  pid_file="$(agent_pid_file "$bot")"
 
   # Library/module directories (e.g. ai-router) have no run.sh — skip silently
   if [[ ! -f "$entry" ]]; then
@@ -220,27 +220,27 @@ start_bot() {
     gzip -f "${log}.1" &
   fi
 
-  echo "Starting $bot ..."
+  echo "Starting agent: $bot ..."
   nohup "$entry" >>"$log" 2>&1 &
   echo $! > "$pid_file"
-  echo "Started $bot pid=$!"
+  echo "Started agent: $bot pid=$!"
 
   # Record start time in state
   local state_file="$STATE_DIR/$bot.state.json"
   echo "{\"bot\":\"$bot\",\"status\":\"running\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"pid\":$!}" > "$state_file"
 }
 
-stop_bot() {
+stop_agent() {
   local bot="$1"
 
   # Validate bot name — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}
   if [[ ! "$bot" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$ ]]; then
-    echo "ERROR: invalid bot name: '$bot' — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
+    echo "ERROR: invalid agent name: '$bot' — must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
     return 1
   fi
 
   local pid_file
-  pid_file="$(bot_pid_file "$bot")"
+  pid_file="$(agent_pid_file "$bot")"
   if ! [[ -f "$pid_file" ]]; then
     echo "Not running (no pid file): $bot"
     return 0
@@ -253,7 +253,7 @@ stop_bot() {
     return 0
   fi
   if kill -0 "$pid" 2>/dev/null; then
-    echo "Stopping $bot pid=$pid ..."
+    echo "Stopping agent: $bot pid=$pid ..."
     kill "$pid" 2>/dev/null || true
     sleep 1
     kill -9 "$pid" 2>/dev/null || true
@@ -263,22 +263,22 @@ stop_bot() {
   # Update state
   local state_file="$STATE_DIR/$bot.state.json"
   echo "{\"bot\":\"$bot\",\"status\":\"stopped\",\"stopped_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$state_file"
-  echo "Stopped $bot"
+  echo "Stopped agent: $bot"
 }
 
 # Batch stop: send SIGTERM to all, wait once, then SIGKILL stragglers.
-# Reduces stop-all time from (N bots × 1s) to just 1s total.
-stop_all_bots() {
-  local bots=()
+# Reduces stop-all time from (N agents × 1s) to just 1s total.
+stop_all_agents() {
+  local agents=()
   while read -r bot; do
     [[ -n "$bot" ]] || continue
-    bots+=("$bot")
+    agents+=("$bot")
   done < <(list_mode_agents)
 
   # Phase 1: SIGTERM all
-  for bot in "${bots[@]}"; do
+  for bot in "${agents[@]}"; do
     local pid_file
-    pid_file="$(bot_pid_file "$bot")"
+    pid_file="$(agent_pid_file "$bot")"
     if [[ -f "$pid_file" ]]; then
       local pid
       pid="$(cat "$pid_file" 2>/dev/null || true)"
@@ -290,9 +290,9 @@ stop_all_bots() {
   sleep 1
 
   # Phase 3: SIGKILL anything still alive and clean up state
-  for bot in "${bots[@]}"; do
+  for bot in "${agents[@]}"; do
     local pid_file
-    pid_file="$(bot_pid_file "$bot")"
+    pid_file="$(agent_pid_file "$bot")"
     if [[ -f "$pid_file" ]]; then
       local pid
       pid="$(cat "$pid_file" 2>/dev/null || true)"
@@ -300,14 +300,14 @@ stop_all_bots() {
       rm -f "$pid_file"
       local state_file="$STATE_DIR/$bot.state.json"
       echo "{\"bot\":\"$bot\",\"status\":\"stopped\",\"stopped_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$state_file"
-      echo "Stopped $bot"
+      echo "Stopped agent: $bot"
     fi
   done
 }
 
-list_bots() {
-  [[ -d "$BOTS_DIR" ]] || return 0
-  for d in "$BOTS_DIR"/*/; do
+list_agents() {
+  [[ -d "$AGENTS_DIR" ]] || return 0
+  for d in "$AGENTS_DIR"/*/; do
     [[ -d "$d" ]] && basename "$d"
   done | sort
 }
@@ -375,7 +375,7 @@ EOF
 list_mode_agents() {
   while read -r agent; do
     [[ -n "$agent" ]] || continue
-    [[ -x "$BOTS_DIR/$agent/run.sh" ]] || continue
+    [[ -x "$AGENTS_DIR/$agent/run.sh" ]] || continue
     echo "$agent"
   done < <(_mode_agents)
 }
@@ -400,41 +400,41 @@ case "$cmd" in
         fi
       fi
       while read -r bot; do
-        [[ -n "$bot" ]] && start_bot "$bot" || true
+        [[ -n "$bot" ]] && start_agent "$bot" || true
       done < <(list_mode_agents)
     else
       [[ -n "$arg" ]] || { usage; exit 1; }
-      start_bot "$arg"
+      start_agent "$arg"
     fi
     ;;
   stop)
     arg="${1:-}"
     if [[ "$arg" == "--all" ]]; then
-      stop_all_bots
+      stop_all_agents
     else
       [[ -n "$arg" ]] || { usage; exit 1; }
-      stop_bot "$arg"
+      stop_agent "$arg"
     fi
     ;;
   restart)
     arg="${1:-}"
     if [[ "$arg" == "--all" ]]; then
-      stop_all_bots
+      stop_all_agents
       while read -r bot; do
-        [[ -n "$bot" ]] && start_bot "$bot" || true
+        [[ -n "$bot" ]] && start_agent "$bot" || true
       done < <(list_mode_agents)
     else
       [[ -n "$arg" ]] || { usage; exit 1; }
-      stop_bot "$arg"
+      stop_agent "$arg"
       sleep 1
-      start_bot "$arg"
+      start_agent "$arg"
     fi
     ;;
   status)
     while read -r bot; do
       [[ -n "$bot" ]] || continue
       if is_running "$bot"; then
-        echo "RUNNING  $bot  pid=$(cat "$(bot_pid_file "$bot")")"
+        echo "RUNNING  $bot  pid=$(cat "$(agent_pid_file "$bot")")"
       else
         echo "STOPPED  $bot"
       fi
@@ -562,14 +562,14 @@ case "$cmd" in
     echo "── Configuration ─────────────────────────────"
     echo "  $OK Mode           : $_mode  (change: ai-employee mode starter|business|power)"
     echo "  $OK AI_HOME        : $AI_HOME"
-    echo "  $OK Bots dir       : $BOTS_DIR"
+    echo "  $OK Bots dir       : $AGENTS_DIR"
     echo "  $OK Logs dir       : $LOGS_DIR"
     echo ""
     echo "  Tip: Run  ai-employee start --all  to start all services."
     echo ""
     ;;
   ui)
-    start_bot "problem-solver-ui"
+    start_agent "problem-solver-ui"
     url="http://127.0.0.1:${PROBLEM_SOLVER_UI_PORT:-8787}"
     echo "UI started — open $url in your browser (or wait for auto-open)."
     if command -v xdg-open >/dev/null 2>&1; then
@@ -600,7 +600,7 @@ case "$cmd" in
     # Start UI if not running
     if ! is_running "problem-solver-ui"; then
       echo "Starting AI employee..."
-      start_bot "problem-solver-ui" >/dev/null 2>&1 || true
+      start_agent "problem-solver-ui" >/dev/null 2>&1 || true
       sleep 3
     fi
 
@@ -646,7 +646,7 @@ case "$cmd" in
     # Start UI if not running
     if ! is_running "problem-solver-ui"; then
       echo "Starting AI employee..."
-      start_bot "problem-solver-ui" >/dev/null 2>&1 || true
+      start_agent "problem-solver-ui" >/dev/null 2>&1 || true
       sleep 5
     fi
 

@@ -239,7 +239,7 @@ AI Employee is a multi-layer system where a single user command fans out across 
 
 | Component | Role |
 |---|---|
-| **Problem Solver** | Orchestrator — watches all bots, routes tasks, restarts crashed bots |
+| **Problem Solver** | Orchestrator — watches all agents, routes tasks, restarts crashed agents |
 | **AI Router** | Picks the best LLM per task type (sales→GPT-4o, analysis→Claude, local→Ollama) |
 | **35 Specialist Agents** | Each expert in one domain; task execution mode: Auto (orchestrator decides), Parallel (all at once), or Single (one agent) |
 | **Skills Library** | 147 reusable building blocks composed into agents |
@@ -362,7 +362,7 @@ The dashboard is your primary control center. Use it for full control over tasks
 | 🚀 Tasks | Build & launch multi-agent tasks |
 | 🐝 Swarm | All agents — status, workload (filterable by category) |
 | 📅 Scheduler | Create & manage scheduled tasks |
-| 👷 Workers | Start/stop individual bots |
+| 👷 Workers | Start/stop individual agents |
 | 📈 ROI | Tasks done, leads, hours saved, €€ saved |
 | 📋 Templates | Deploy goal-based templates in one click |
 | 🔒 Guardrails | Approval queue, safety logs |
@@ -387,7 +387,7 @@ WhatsApp lets you:
 | Command | What it does |
 |---|---|
 | `status` | Quick status check |
-| `workers` | List running bots |
+| `workers` | List running agents |
 | `help` | Show available commands |
 
 Get notified when tasks complete, leads are generated, or deals close — without leaving your phone.
@@ -402,7 +402,7 @@ For everything else: **use the dashboard**.
 ai-employee do <task>               # Send any task to your AI employee
 ai-employee start                   # Start all services
 ai-employee stop                    # Stop all services
-ai-employee status                  # Show running bots
+ai-employee status                  # Show running agents
 ai-employee logs <bot>              # Tail logs for a specific bot
 ai-employee doctor                  # Health check (✅/❌ per service)
 ai-employee selftest                # Safety self-test (see below)
@@ -488,7 +488,7 @@ ai-employee do "reject <action_id>"
 | **Linux** | Ubuntu 20.04+ / Debian / Mint / Fedora | `main` branch |
 | **macOS** | 12+ (Monterey or newer) | `main` branch |
 | **Windows** | Windows 10/11 (PowerShell 5.1+) | `main` branch |
-| **Python 3** | 3.10+ | for bots and dashboard |
+| **Python 3** | 3.10+ | for agents and dashboard |
 | **curl** | any | for downloading |
 | **OpenSSL** | any | for token generation |
 | **Node.js** | 20+ | recommended (for OpenClaw gateway) |
@@ -580,7 +580,7 @@ Invoke-WebRequest https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/in
 .\install-windows.ps1
 ```
 Or use the one-click batch file: download and run `quick-install-windows.bat`.
-No WSL or Git Bash required — installs Python, Git, Ollama, and all 35 bots natively.
+No WSL or Git Bash required — installs Python, Git, Ollama, and all 35 agents natively.
 
 Everything is installed into **`~/.ai-employee/`** (Linux/macOS) or **`%USERPROFILE%\.ai-employee\`** (Windows).
 
@@ -790,14 +790,14 @@ DISCORD_COMMAND_PREFIX=!
 #### Step 4 — Start the Discord bot
 
 ```bash
-cd ~/.ai-employee/bots/discord-bot
+cd ~/.ai-employee/agents/discord-bot
 python3 discord_bot.py
 ```
 
 Or start it in the background (it will keep running):
 
 ```bash
-nohup python3 ~/.ai-employee/bots/discord-bot/discord_bot.py \
+nohup python3 ~/.ai-employee/agents/discord-bot/discord_bot.py \
   >> ~/.ai-employee/logs/discord-bot.log 2>&1 &
 echo "Discord bot started (PID $!)"
 ```
@@ -861,7 +861,7 @@ The full dashboard runs at **http://127.0.0.1:8787** and has 9 tabs:
 | 🐝 **Swarm** | All 20 agents: capabilities, status, workload |
 | 📜 **Commands** | Full WhatsApp commands reference — searchable, click to copy |
 | 📅 **Scheduler** | Create/edit/delete scheduled tasks |
-| 👷 **Workers** | Start/stop/toggle individual bots |
+| 👷 **Workers** | Start/stop/toggle individual agents |
 | 💡 **Improvements** | Review and approve/reject skill proposals |
 | 🛠️ **Skills** | Browse and search 126+ business skills |
 
@@ -1115,8 +1115,8 @@ The hourly WhatsApp status report now includes a MiroFish research summary line.
 ├── stop.sh              Stop all services
 ├── bin/
 │   └── ai-employee      Multi-bot CLI runner
-├── bots/                Bot code (overwritten on update)
-│   ├── problem-solver/     Watchdog — keeps other bots alive
+├── agents/              Agent code (overwritten on update)
+│   ├── problem-solver/     Watchdog — keeps other agents alive
 │   ├── problem-solver-ui/  Full dashboard (FastAPI)
 │   ├── polymarket-trader/  Trading bot with inline MiroFish predictor
 │   ├── mirofish-researcher/ MiroFish deep market research agent
@@ -1211,7 +1211,7 @@ Should show: `"mode": "local"`
 ### UI not opening
 Start it manually:
 ```bash
-cd ~/.ai-employee/bots/problem-solver-ui
+cd ~/.ai-employee/agents/problem-solver-ui
 python3 server.py
 ```
 Then open: http://127.0.0.1:8787
@@ -1230,7 +1230,7 @@ Then open: http://127.0.0.1:8787
 Before going live, run the safety self-test. It checks every component and shows a clear ✅ or ❌ for each:
 
 ```bash
-python3 ~/.ai-employee/bots/bot_selftest.py
+python3 ~/.ai-employee/agents/agent_selftest.py
 ```
 
 Or (after install):
@@ -1292,7 +1292,7 @@ ai-employee selftest
 **Send a real Discord test ping** (proves the webhook actually works):
 
 ```bash
-python3 ~/.ai-employee/bots/bot_selftest.py --live
+python3 ~/.ai-employee/agents/agent_selftest.py --live
 ```
 
 ---
@@ -1329,7 +1329,7 @@ cd ~/.ai-employee && ./stop.sh
 # Or use the CLI from any directory
 ai-employee start
 ai-employee stop
-ai-employee status          # Shows which bots are running
+ai-employee status          # Shows which agents are running
 ```
 
 ### Send Tasks
@@ -1362,8 +1362,8 @@ ai-employee logs status-reporter           # Status reporter logs
 ai-employee logs problem-solver-ui         # Dashboard logs
 ai-employee doctor                         # Health check
 ai-employee selftest                       # Safety self-test (✅/❌)
-python3 ~/.ai-employee/bots/bot_selftest.py         # Same — direct
-python3 ~/.ai-employee/bots/bot_selftest.py --live  # + real Discord ping
+python3 ~/.ai-employee/agents/agent_selftest.py         # Same — direct
+python3 ~/.ai-employee/agents/agent_selftest.py --live  # + real Discord ping
 ```
 
 ### ROI & Metrics
@@ -1413,10 +1413,10 @@ followup reset <lead_id>           # Reset follow-up counter for a lead
 
 ```bash
 # Start the Discord bot
-python3 ~/.ai-employee/bots/discord-bot/discord_bot.py
+python3 ~/.ai-employee/agents/discord-bot/discord_bot.py
 
 # Start in background (stays running after you close terminal)
-nohup python3 ~/.ai-employee/bots/discord-bot/discord_bot.py \
+nohup python3 ~/.ai-employee/agents/discord-bot/discord_bot.py \
   >> ~/.ai-employee/logs/discord-bot.log 2>&1 &
 echo "Discord bot PID: $!"
 
@@ -1439,14 +1439,14 @@ openclaw channels login            # Link WhatsApp (scan QR code once)
 ai-employee start <bot>            # Start one bot
 ai-employee stop <bot>             # Stop one bot
 ai-employee logs <bot>             # Tail logs for one bot
-ai-employee start --all            # Start all enabled bots
-ai-employee stop --all             # Stop all bots
+ai-employee start --all            # Start all enabled agents
+ai-employee stop --all             # Stop all agents
 
 # Direct bot start (fallback if CLI unavailable)
-python3 ~/.ai-employee/bots/status-reporter/status_reporter.py
-python3 ~/.ai-employee/bots/follow-up-agent/follow_up_agent.py
-python3 ~/.ai-employee/bots/lead-generator/lead_generator.py
-python3 ~/.ai-employee/bots/discord-bot/discord_bot.py
+python3 ~/.ai-employee/agents/status-reporter/status_reporter.py
+python3 ~/.ai-employee/agents/follow-up-agent/follow_up_agent.py
+python3 ~/.ai-employee/agents/lead-generator/lead_generator.py
+python3 ~/.ai-employee/agents/discord-bot/discord_bot.py
 ```
 
 ### Config & Environment
@@ -1458,7 +1458,7 @@ nano ~/.ai-employee/.env
 # Generate a new JWT secret (security)
 python3 -c "import secrets; print(secrets.token_hex(32))"
 
-# Check what bots are configured
+# Check what agents are configured
 cat ~/.ai-employee/config.json | python3 -m json.tool
 ```
 
@@ -1567,7 +1567,7 @@ Contributions are welcome! Whether you're fixing a bug, adding a new agent skill
 
 ### Ideas for contributions
 
-- 🤖 **New agent skills** — add skills to the 147-skill library (see `runtime/bots/skills/`)
+- 🤖 **New agent skills** — add skills to the 147-skill library (see `runtime/agents/skills/`)
 - 🐛 **Bug fixes** — check the [open issues](https://github.com/F-game25/AI-EMPLOYEE/issues)
 - 📖 **Documentation** — improve guides, add examples, fix typos
 - 🌍 **Translations** — translate the README or UI to other languages

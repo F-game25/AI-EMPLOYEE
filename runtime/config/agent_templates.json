@@ -1,519 +1,713 @@
 {
-    "_meta": {
-        "version": "2.0",
-        "description": "Pre-built plug-and-play agent templates \u2014 outcome-driven, goal-based",
-        "updated_at": "2026-03-28"
+  "_meta": {
+    "version": "2.0",
+    "description": "Pre-built plug-and-play agent templates \u2014 outcome-driven, goal-based",
+    "updated_at": "2026-03-28"
+  },
+  "templates": [
+    {
+      "id": "get-10-leads-24h",
+      "name": "Get 10 Qualified Leads in 24h",
+      "icon": "\ud83c\udfaf",
+      "category": "Sales",
+      "mode": [
+        "starter",
+        "business",
+        "power"
+      ],
+      "description": "Generate 10 qualified B2B leads for your business within 24 hours \u2014 complete with contact info, company context, and ICP scoring. No setup required.",
+      "agents": [
+        "lead-hunter",
+        "intel-agent",
+        "data-analyst"
+      ],
+      "task_description": "Find 10 qualified B2B leads matching my ideal customer profile. For each lead: company name, decision-maker name and role, email (if findable), company size, and a 1-line reason why they are a good fit. Score each lead 1-10 for ICP match. Export as a ready-to-use list.",
+      "schedule": "daily",
+      "kpis": [
+        "leads_generated",
+        "icp_match_rate",
+        "enrichment_rate"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Define your Ideal Customer Profile (ICP): industry, company size, location",
+        "Set daily lead volume target (default: 10)"
+      ],
+      "expected_results": {
+        "leads_in_24h": 10,
+        "icp_match_pct": 70,
+        "estimated_weekly_value": "\u20ac200 \u2013 \u20ac1,000 in pipeline"
+      }
     },
-    "templates": [
-        {
-            "id": "get-10-leads-24h",
-            "name": "Get 10 Qualified Leads in 24h",
-            "icon": "\ud83c\udfaf",
-            "category": "Sales",
-            "mode": [
-                "starter",
-                "business",
-                "power"
-            ],
-            "description": "Generate 10 qualified B2B leads for your business within 24 hours \u2014 complete with contact info, company context, and ICP scoring. No setup required.",
-            "agents": [
-                "lead-hunter",
-                "intel-agent",
-                "data-analyst"
-            ],
-            "task_description": "Find 10 qualified B2B leads matching my ideal customer profile. For each lead: company name, decision-maker name and role, email (if findable), company size, and a 1-line reason why they are a good fit. Score each lead 1-10 for ICP match. Export as a ready-to-use list.",
-            "schedule": "daily",
-            "kpis": [
-                "leads_generated",
-                "icp_match_rate",
-                "enrichment_rate"
-            ],
-            "guardrail_level": "low",
-            "setup_steps": [
-                "Define your Ideal Customer Profile (ICP): industry, company size, location",
-                "Set daily lead volume target (default: 10)"
-            ],
-            "expected_results": {
-                "leads_in_24h": 10,
-                "icp_match_pct": 70,
-                "estimated_weekly_value": "\u20ac200 \u2013 \u20ac1,000 in pipeline"
-            }
-        },
-        {
-            "id": "first-1k-deal",
-            "name": "Close Your First \u20ac1k Deal",
-            "icon": "\ud83d\udcb0",
-            "category": "Sales",
-            "mode": [
-                "starter",
-                "business",
-                "power"
-            ],
-            "description": "Full end-to-end sales cycle: find prospects, send personalised outreach, follow up, and book a discovery call \u2014 all automated. Designed to close your first \u20ac1,000 deal.",
-            "agents": [
-                "lead-hunter",
-                "email-ninja",
-                "growth-hacker",
-                "intel-agent"
-            ],
-            "task_description": "Run the full sales pipeline to close a \u20ac1,000 deal: find 20 qualified prospects in my niche, write and send personalised cold emails, follow up automatically 3 days later, qualify interested replies, and book discovery calls. Track pipeline value and report daily.",
-            "schedule": "3x_daily",
-            "kpis": [
-                "leads_generated",
-                "emails_sent",
-                "calls_booked",
-                "pipeline_value"
-            ],
-            "guardrail_level": "medium",
-            "setup_steps": [
-                "Configure your target niche and ideal customer profile",
-                "Add your email sending credentials",
-                "Review and approve the first batch of outreach messages"
-            ],
-            "expected_results": {
-                "leads_per_week": 50,
-                "emails_per_week": 200,
-                "reply_rate_pct": 8,
-                "meetings_per_week": 4,
-                "estimated_monthly_revenue": "\u20ac1,000 \u2013 \u20ac8,000"
-            }
-        },
-        {
-            "id": "automate-support-1h",
-            "name": "Automate Customer Support in 1 Hour",
-            "icon": "\ud83c\udfa7",
-            "category": "Support",
-            "mode": [
-                "starter",
-                "business",
-                "power"
-            ],
-            "description": "Set up 24/7 AI customer support in under 1 hour: auto-resolves 70% of tickets, escalates edge cases, tracks satisfaction. Saves 30\u201340 hours/month of manual support.",
-            "agents": [
-                "support-bot",
-                "data-analyst"
-            ],
-            "task_description": "Set up automated customer support: import FAQs, classify all incoming tickets by urgency, auto-resolve common questions, escalate complex issues with full context, and generate daily support analytics. Time-to-first-response under 2 minutes.",
-            "schedule": "continuous",
-            "kpis": [
-                "tickets_resolved",
-                "avg_response_time",
-                "escalation_rate",
-                "satisfaction_score"
-            ],
-            "guardrail_level": "high",
-            "setup_steps": [
-                "Import your FAQ document into the support-bot knowledge base",
-                "Configure escalation rules (which issues need a human)",
-                "Set up your email or chat integration to receive tickets"
-            ],
-            "expected_results": {
-                "tickets_auto_resolved_pct": 70,
-                "avg_first_response_minutes": 2,
-                "hours_saved_per_month": 35,
-                "estimated_monthly_savings": "\u20ac2,500 \u2013 \u20ac5,000"
-            }
-        },
-        {
-            "id": "hire-best-candidate",
-            "name": "Hire Your Best Candidate Faster",
-            "icon": "\ud83d\udc54",
-            "category": "HR",
-            "mode": [
-                "business",
-                "power"
-            ],
-            "description": "Cut time-to-hire from 6 weeks to 2 weeks: sources candidates, screens CVs, schedules interviews, manages pipeline \u2014 fully automated.",
-            "agents": [
-                "recruiter",
-                "hr-manager",
-                "email-ninja"
-            ],
-            "task_description": "Automate the full recruitment pipeline: source candidates from job boards, screen CVs against job requirements, send personalised outreach to top candidates, schedule screening calls, and maintain the hiring pipeline. Report weekly on candidate funnel metrics.",
-            "schedule": "daily",
-            "kpis": [
-                "cvs_screened",
-                "candidates_contacted",
-                "interviews_scheduled",
-                "time_to_hire_days"
-            ],
-            "guardrail_level": "medium",
-            "setup_steps": [
-                "Upload your job descriptions and requirements",
-                "Configure candidate scoring criteria",
-                "Connect your calendar for interview scheduling"
-            ],
-            "expected_results": {
-                "cvs_screened_per_week": 100,
-                "qualified_candidates_per_week": 15,
-                "time_to_hire_reduction_pct": 65,
-                "estimated_monthly_savings": "\u20ac4,000 \u2013 \u20ac10,000"
-            }
-        },
-        {
-            "id": "10x-content-output",
-            "name": "10x Your Content Output This Week",
-            "icon": "\u270d\ufe0f",
-            "category": "Content",
-            "mode": [
-                "business",
-                "power"
-            ],
-            "description": "Full content marketing on autopilot: SEO blog posts, social media, email newsletters, and video scripts \u2014 10x output with zero extra headcount.",
-            "agents": [
-                "content-master",
-                "social-guru",
-                "email-ninja",
-                "creative-studio"
-            ],
-            "task_description": "Run the full content automation pipeline: write 2 SEO-optimised blog posts, create daily social media content for LinkedIn/Instagram, generate a weekly email newsletter, produce video scripts, and repurpose long-form content into multiple formats. Track all content performance.",
-            "schedule": "daily",
-            "kpis": [
-                "content_pieces_created",
-                "words_written",
-                "social_posts",
-                "newsletter_issues"
-            ],
-            "guardrail_level": "low",
-            "setup_steps": [
-                "Set your brand voice and tone guidelines",
-                "Configure target keywords for SEO content",
-                "Connect social media accounts via integrations"
-            ],
-            "expected_results": {
-                "blog_posts_per_month": 8,
-                "social_posts_per_month": 60,
-                "newsletters_per_month": 4,
-                "hours_saved_per_month": 40,
-                "estimated_monthly_value": "\u20ac2,000 \u2013 \u20ac6,000"
-            }
-        },
-        {
-            "id": "run-ecom-on-autopilot",
-            "name": "Run Your E-commerce Store on Autopilot",
-            "icon": "\ud83d\uded2",
-            "category": "E-commerce",
-            "mode": [
-                "power"
-            ],
-            "description": "100% automated e-commerce: order processing, inventory sync, customer emails, social posting, and daily P&L. Run a full Shopify store without lifting a finger.",
-            "agents": [
-                "order-processor",
-                "support-bot",
-                "bookkeeper",
-                "inventory-sync",
-                "email-marketer",
-                "social-poster",
-                "product-researcher",
-                "ecom-dashboard"
-            ],
-            "task_description": "Automate the full e-commerce operation: process Shopify orders, validate payments, place supplier orders, sync inventory, handle support tickets, send transactional and marketing emails, post daily social content, research trending products, and generate daily P&L reports.",
-            "schedule": "continuous",
-            "kpis": [
-                "orders_processed",
-                "revenue",
-                "support_tickets_resolved",
-                "new_products_listed"
-            ],
-            "guardrail_level": "high",
-            "setup_steps": [
-                "Connect your Shopify store via API",
-                "Connect print-on-demand supplier (Printful, Printify)",
-                "Set up Stripe/payment processor integration",
-                "Configure email marketing integration"
-            ],
-            "expected_results": {
-                "orders_auto_processed_pct": 95,
-                "support_auto_resolved_pct": 70,
-                "hours_saved_per_month": 80,
-                "estimated_monthly_savings": "\u20ac5,000 \u2013 \u20ac15,000"
-            }
-        },
-        {
-            "id": "hunt-20-leads-24h",
-            "name": "Hunt 20 Qualified Leads in 24h",
-            "icon": "\ud83c\udfaf",
-            "category": "Sales",
-            "mode": [
-                "starter",
-                "business",
-                "power"
-            ],
-            "description": "Full B2B lead hunt: LeadHunterElite scrapes, qualifies, and enriches 20 leads matching your ICP \u2014 complete with outreach scripts ready to deploy.",
-            "agents": [
-                "lead-hunter-elite",
-                "lead-hunter",
-                "email-ninja"
-            ],
-            "task_description": "Hunt 20 qualified B2B leads in [niche]: scrape public sources, score each against ICP (min score 7/10), enrich with decision-maker contact details, and generate personalised outreach scripts for each. Export as ready-to-use list with outreach copy.",
-            "schedule": "daily",
-            "kpis": [
-                "leads_generated",
-                "icp_match_rate",
-                "enrichment_rate",
-                "outreach_scripts_ready"
-            ],
-            "guardrail_level": "low",
-            "setup_steps": [
-                "Define your Ideal Customer Profile (ICP): industry, company size, location, role",
-                "Set target lead volume (default: 20)",
-                "Choose outreach channel: email, LinkedIn, or WhatsApp"
-            ],
-            "expected_results": {
-                "leads_in_24h": 20,
-                "icp_match_pct": 75,
-                "outreach_scripts": 20,
-                "estimated_weekly_pipeline": "\u20ac500 \u2013 \u20ac5,000"
-            }
-        },
-        {
-            "id": "cold-outreach-campaign",
-            "name": "Launch Cold Outreach Campaign",
-            "icon": "\ud83d\udce7",
-            "category": "Sales",
-            "mode": [
-                "business",
-                "power"
-            ],
-            "description": "Full multi-channel cold sequence with A/B testing: build sequences, launch across email/LinkedIn/WhatsApp, track replies, and auto follow-up on silence.",
-            "agents": [
-                "cold-outreach-assassin",
-                "lead-hunter-elite",
-                "email-ninja"
-            ],
-            "task_description": "Build and launch a 5-step multi-channel cold outreach sequence for [target_audience]: write A/B tested subject lines, personalized openers, value propositions, and follow-ups. Launch across email and LinkedIn. Track replies and auto-follow up after 3 days of silence.",
-            "schedule": "3x_daily",
-            "kpis": [
-                "sequences_built",
-                "messages_sent",
-                "reply_rate",
-                "meetings_booked"
-            ],
-            "guardrail_level": "medium",
-            "setup_steps": [
-                "Define your target audience and offer",
-                "Configure email sending credentials",
-                "Set follow-up delay (default: 3 days)"
-            ],
-            "expected_results": {
-                "reply_rate_pct": 8,
-                "meetings_per_100_leads": 5,
-                "estimated_monthly_revenue": "\u20ac2,000 \u2013 \u20ac15,000"
-            }
-        },
-        {
-            "id": "linkedin-growth-blitz",
-            "name": "LinkedIn Growth Blitz (30 Days)",
-            "icon": "\ud83d\udcbc",
-            "category": "Sales",
-            "mode": [
-                "business",
-                "power"
-            ],
-            "description": "30-day LinkedIn growth plan: optimize your profile, launch connection campaigns, and publish 3 viral posts per week to build audience and generate inbound leads.",
-            "agents": [
-                "linkedin-growth-hacker",
-                "cold-outreach-assassin",
-                "content-master"
-            ],
-            "task_description": "Run a 30-day LinkedIn growth blitz: optimize profile for [role/audience], create weekly viral content plan (3 posts/week), launch targeted connection campaigns to [target_audience], and generate DM templates for warm leads. Track follower growth and lead inbound rate.",
-            "schedule": "daily",
-            "kpis": [
-                "connections_added",
-                "post_impressions",
-                "profile_views",
-                "inbound_leads"
-            ],
-            "guardrail_level": "low",
-            "setup_steps": [
-                "Provide LinkedIn profile URL or key profile details",
-                "Define your target audience and content topics",
-                "Set connection request limit (default: 25/day)"
-            ],
-            "expected_results": {
-                "new_connections_30d": 500,
-                "post_impressions_30d": 50000,
-                "inbound_leads_30d": 15,
-                "estimated_pipeline_value": "\u20ac3,000 \u2013 \u20ac20,000"
-            }
-        },
-        {
-            "id": "close-5-deals-this-week",
-            "name": "Close 5 Deals This Week",
-            "icon": "\ud83d\udcb0",
-            "category": "Sales",
-            "mode": [
-                "business",
-                "power"
-            ],
-            "description": "Sales closing toolkit: handle objections, prepare negotiation tactics, and generate closing scripts for your 5 hottest prospects \u2014 ready to deploy in calls and emails.",
-            "agents": [
-                "sales-closer-pro",
-                "cold-outreach-assassin",
-                "email-ninja"
-            ],
-            "task_description": "Prepare deal-closing assets for 5 prospects: generate objection-handling scripts for [top 3 objections], negotiation tactics brief, closing email templates, and next-step CTA scripts. Prioritise deals by close probability and recommend closing approach per deal.",
-            "schedule": "weekly",
-            "kpis": [
-                "deals_closed",
-                "revenue_closed",
-                "objections_handled",
-                "meetings_converted"
-            ],
-            "guardrail_level": "low",
-            "setup_steps": [
-                "List your top 5 hot prospects with deal context",
-                "Describe your product/service and pricing",
-                "Identify the 3 most common objections you face"
-            ],
-            "expected_results": {
-                "deals_closed": 5,
-                "revenue_per_week": "\u20ac5,000 \u2013 \u20ac50,000",
-                "closing_rate_improvement_pct": 40
-            }
-        },
-        {
-            "id": "launch-paid-ads-roas3x",
-            "name": "Launch Paid Ads with 3x ROAS Target",
-            "icon": "\ud83d\udce2",
-            "category": "Marketing",
-            "mode": [
-                "business",
-                "power"
-            ],
-            "description": "Full paid ads launch: creative brief, ad copy variants, audience targeting, budget allocation, and ROAS prediction for Meta and/or Google ads.",
-            "agents": [
-                "ad-campaign-wizard",
-                "creative-studio",
-                "data-analyst"
-            ],
-            "task_description": "Launch a paid ad campaign for [product] on [Meta/Google/LinkedIn]: write 5 ad copy variants (A/B testable), design creative brief, set audience targeting strategy, allocate [budget] across campaigns, predict ROAS, and set up weekly performance review framework.",
-            "schedule": "weekly",
-            "kpis": [
-                "roas",
-                "cpa",
-                "ctr",
-                "revenue_from_ads"
-            ],
-            "guardrail_level": "medium",
-            "setup_steps": [
-                "Define your product, offer, and target audience",
-                "Set total ad budget and ROAS target",
-                "Choose platforms: Meta, Google, LinkedIn, or all"
-            ],
-            "expected_results": {
-                "roas_target": "3x",
-                "ctr_benchmark_pct": 2,
-                "estimated_monthly_revenue": "\u20ac5,000 \u2013 \u20ac50,000"
-            }
-        },
-        {
-            "id": "referral-program-launch",
-            "name": "Launch a Referral Program",
-            "icon": "\ud83d\ude80",
-            "category": "Marketing",
-            "mode": [
-                "business",
-                "power"
-            ],
-            "description": "End-to-end referral program: design structure, calculate optimal incentives, write referral copy, and create launch plan to turn customers into ambassadors.",
-            "agents": [
-                "referral-rocket",
-                "growth-hacker",
-                "email-ninja"
-            ],
-            "task_description": "Design and launch a referral program for [product]: model incentive economics (LTV = [value], CAC = [value]), design two-sided reward structure, write referral email sequence (5 emails), create social sharing copy, set up tracking metrics, and plan fraud prevention.",
-            "schedule": "once",
-            "kpis": [
-                "referral_signups",
-                "referred_customers",
-                "referral_revenue",
-                "k_factor"
-            ],
-            "guardrail_level": "low",
-            "setup_steps": [
-                "Provide product LTV and current CAC",
-                "Set referral reward budget (% of LTV)",
-                "Define customer base size for seeding"
-            ],
-            "expected_results": {
-                "k_factor_target": 0.5,
-                "referral_revenue_pct": 20,
-                "cac_reduction_pct": 30,
-                "estimated_monthly_referrals": 25
-            }
-        },
-        {
-            "id": "jv-partnership-pipeline",
-            "name": "Build JV Partnership Pipeline",
-            "icon": "\ud83e\udd1d",
-            "category": "Sales",
-            "mode": [
-                "business",
-                "power"
-            ],
-            "description": "Find, score, and pitch 5 joint venture partners in your niche \u2014 complete with partner brief, pitch deck outline, and outreach email per partner.",
-            "agents": [
-                "partnership-matchmaker",
-                "intel-agent",
-                "email-ninja"
-            ],
-            "task_description": "Build a JV partnership pipeline in [niche]: identify 10 potential partners, score by fit (audience overlap, offer complement, reach), shortlist top 5, generate pitch deck outline and outreach email for each, and recommend deal structure (rev-share/affiliate/co-marketing).",
-            "schedule": "weekly",
-            "kpis": [
-                "partners_identified",
-                "pitches_sent",
-                "partnerships_closed",
-                "partner_revenue"
-            ],
-            "guardrail_level": "low",
-            "setup_steps": [
-                "Describe your product/service and target audience",
-                "Define your ideal partner profile",
-                "Set partnership goal: distribution, revenue-share, or co-marketing"
-            ],
-            "expected_results": {
-                "partners_identified": 10,
-                "pitches_sent": 5,
-                "partnerships_closed_30d": 2,
-                "estimated_revenue_per_partner": "\u20ac2,000 \u2013 \u20ac20,000/mo"
-            }
-        },
-        {
-            "id": "cro-funnel-boost",
-            "name": "Boost Conversion Rate by 50%",
-            "icon": "\ud83d\udcc8",
-            "category": "Marketing",
-            "mode": [
-                "business",
-                "power"
-            ],
-            "description": "Full CRO audit and A/B test roadmap: analyze your funnel, identify drop-off points, design 5 A/B tests, and get quick-win improvements to implement today.",
-            "agents": [
-                "conversion-rate-optimizer",
-                "data-analyst",
-                "growth-hacker"
-            ],
-            "task_description": "Run a full CRO audit on [funnel/product]: analyze each funnel stage for drop-off, benchmark vs industry, identify top 3 conversion leaks, design 5 A/B tests (ICE scored), provide quick-win copy/UX improvements, and calculate revenue impact of fixing each issue.",
-            "schedule": "weekly",
-            "kpis": [
-                "conversion_rate_lift_pct",
-                "ab_tests_running",
-                "revenue_per_visitor",
-                "funnel_completion_rate"
-            ],
-            "guardrail_level": "low",
-            "setup_steps": [
-                "Provide funnel stages with current conversion rates",
-                "Share monthly visitor/traffic volume",
-                "Define primary conversion goal (signup/purchase/call)"
-            ],
-            "expected_results": {
-                "conversion_lift_pct": 50,
-                "ab_tests_designed": 5,
-                "revenue_impact_monthly": "\u20ac1,000 \u2013 \u20ac30,000",
-                "quick_wins_identified": 5
-            }
-        }
-    ]
+    {
+      "id": "first-1k-deal",
+      "name": "Close Your First \u20ac1k Deal",
+      "icon": "\ud83d\udcb0",
+      "category": "Sales",
+      "mode": [
+        "starter",
+        "business",
+        "power"
+      ],
+      "description": "Full end-to-end sales cycle: find prospects, send personalised outreach, follow up, and book a discovery call \u2014 all automated. Designed to close your first \u20ac1,000 deal.",
+      "agents": [
+        "lead-hunter",
+        "email-ninja",
+        "growth-hacker",
+        "intel-agent"
+      ],
+      "task_description": "Run the full sales pipeline to close a \u20ac1,000 deal: find 20 qualified prospects in my niche, write and send personalised cold emails, follow up automatically 3 days later, qualify interested replies, and book discovery calls. Track pipeline value and report daily.",
+      "schedule": "3x_daily",
+      "kpis": [
+        "leads_generated",
+        "emails_sent",
+        "calls_booked",
+        "pipeline_value"
+      ],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Configure your target niche and ideal customer profile",
+        "Add your email sending credentials",
+        "Review and approve the first batch of outreach messages"
+      ],
+      "expected_results": {
+        "leads_per_week": 50,
+        "emails_per_week": 200,
+        "reply_rate_pct": 8,
+        "meetings_per_week": 4,
+        "estimated_monthly_revenue": "\u20ac1,000 \u2013 \u20ac8,000"
+      }
+    },
+    {
+      "id": "automate-support-1h",
+      "name": "Automate Customer Support in 1 Hour",
+      "icon": "\ud83c\udfa7",
+      "category": "Support",
+      "mode": [
+        "starter",
+        "business",
+        "power"
+      ],
+      "description": "Set up 24/7 AI customer support in under 1 hour: auto-resolves 70% of tickets, escalates edge cases, tracks satisfaction. Saves 30\u201340 hours/month of manual support.",
+      "agents": [
+        "support-bot",
+        "data-analyst"
+      ],
+      "task_description": "Set up automated customer support: import FAQs, classify all incoming tickets by urgency, auto-resolve common questions, escalate complex issues with full context, and generate daily support analytics. Time-to-first-response under 2 minutes.",
+      "schedule": "continuous",
+      "kpis": [
+        "tickets_resolved",
+        "avg_response_time",
+        "escalation_rate",
+        "satisfaction_score"
+      ],
+      "guardrail_level": "high",
+      "setup_steps": [
+        "Import your FAQ document into the support-bot knowledge base",
+        "Configure escalation rules (which issues need a human)",
+        "Set up your email or chat integration to receive tickets"
+      ],
+      "expected_results": {
+        "tickets_auto_resolved_pct": 70,
+        "avg_first_response_minutes": 2,
+        "hours_saved_per_month": 35,
+        "estimated_monthly_savings": "\u20ac2,500 \u2013 \u20ac5,000"
+      }
+    },
+    {
+      "id": "hire-best-candidate",
+      "name": "Hire Your Best Candidate Faster",
+      "icon": "\ud83d\udc54",
+      "category": "HR",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Cut time-to-hire from 6 weeks to 2 weeks: sources candidates, screens CVs, schedules interviews, manages pipeline \u2014 fully automated.",
+      "agents": [
+        "recruiter",
+        "hr-manager",
+        "email-ninja"
+      ],
+      "task_description": "Automate the full recruitment pipeline: source candidates from job boards, screen CVs against job requirements, send personalised outreach to top candidates, schedule screening calls, and maintain the hiring pipeline. Report weekly on candidate funnel metrics.",
+      "schedule": "daily",
+      "kpis": [
+        "cvs_screened",
+        "candidates_contacted",
+        "interviews_scheduled",
+        "time_to_hire_days"
+      ],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Upload your job descriptions and requirements",
+        "Configure candidate scoring criteria",
+        "Connect your calendar for interview scheduling"
+      ],
+      "expected_results": {
+        "cvs_screened_per_week": 100,
+        "qualified_candidates_per_week": 15,
+        "time_to_hire_reduction_pct": 65,
+        "estimated_monthly_savings": "\u20ac4,000 \u2013 \u20ac10,000"
+      }
+    },
+    {
+      "id": "10x-content-output",
+      "name": "10x Your Content Output This Week",
+      "icon": "\u270d\ufe0f",
+      "category": "Content",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Full content marketing on autopilot: SEO blog posts, social media, email newsletters, and video scripts \u2014 10x output with zero extra headcount.",
+      "agents": [
+        "content-master",
+        "social-guru",
+        "email-ninja",
+        "creative-studio"
+      ],
+      "task_description": "Run the full content automation pipeline: write 2 SEO-optimised blog posts, create daily social media content for LinkedIn/Instagram, generate a weekly email newsletter, produce video scripts, and repurpose long-form content into multiple formats. Track all content performance.",
+      "schedule": "daily",
+      "kpis": [
+        "content_pieces_created",
+        "words_written",
+        "social_posts",
+        "newsletter_issues"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Set your brand voice and tone guidelines",
+        "Configure target keywords for SEO content",
+        "Connect social media accounts via integrations"
+      ],
+      "expected_results": {
+        "blog_posts_per_month": 8,
+        "social_posts_per_month": 60,
+        "newsletters_per_month": 4,
+        "hours_saved_per_month": 40,
+        "estimated_monthly_value": "\u20ac2,000 \u2013 \u20ac6,000"
+      }
+    },
+    {
+      "id": "run-ecom-on-autopilot",
+      "name": "Run Your E-commerce Store on Autopilot",
+      "icon": "\ud83d\uded2",
+      "category": "E-commerce",
+      "mode": [
+        "power"
+      ],
+      "description": "100% automated e-commerce: order processing, inventory sync, customer emails, social posting, and daily P&L. Run a full Shopify store without lifting a finger.",
+      "agents": [
+        "order-processor",
+        "support-bot",
+        "bookkeeper",
+        "inventory-sync",
+        "email-marketer",
+        "social-poster",
+        "product-researcher",
+        "ecom-dashboard"
+      ],
+      "task_description": "Automate the full e-commerce operation: process Shopify orders, validate payments, place supplier orders, sync inventory, handle support tickets, send transactional and marketing emails, post daily social content, research trending products, and generate daily P&L reports.",
+      "schedule": "continuous",
+      "kpis": [
+        "orders_processed",
+        "revenue",
+        "support_tickets_resolved",
+        "new_products_listed"
+      ],
+      "guardrail_level": "high",
+      "setup_steps": [
+        "Connect your Shopify store via API",
+        "Connect print-on-demand supplier (Printful, Printify)",
+        "Set up Stripe/payment processor integration",
+        "Configure email marketing integration"
+      ],
+      "expected_results": {
+        "orders_auto_processed_pct": 95,
+        "support_auto_resolved_pct": 70,
+        "hours_saved_per_month": 80,
+        "estimated_monthly_savings": "\u20ac5,000 \u2013 \u20ac15,000"
+      }
+    },
+    {
+      "id": "hunt-20-leads-24h",
+      "name": "Hunt 20 Qualified Leads in 24h",
+      "icon": "\ud83c\udfaf",
+      "category": "Sales",
+      "mode": [
+        "starter",
+        "business",
+        "power"
+      ],
+      "description": "Full B2B lead hunt: LeadHunterElite scrapes, qualifies, and enriches 20 leads matching your ICP \u2014 complete with outreach scripts ready to deploy.",
+      "agents": [
+        "lead-hunter-elite",
+        "lead-hunter",
+        "email-ninja"
+      ],
+      "task_description": "Hunt 20 qualified B2B leads in [niche]: scrape public sources, score each against ICP (min score 7/10), enrich with decision-maker contact details, and generate personalised outreach scripts for each. Export as ready-to-use list with outreach copy.",
+      "schedule": "daily",
+      "kpis": [
+        "leads_generated",
+        "icp_match_rate",
+        "enrichment_rate",
+        "outreach_scripts_ready"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Define your Ideal Customer Profile (ICP): industry, company size, location, role",
+        "Set target lead volume (default: 20)",
+        "Choose outreach channel: email, LinkedIn, or WhatsApp"
+      ],
+      "expected_results": {
+        "leads_in_24h": 20,
+        "icp_match_pct": 75,
+        "outreach_scripts": 20,
+        "estimated_weekly_pipeline": "\u20ac500 \u2013 \u20ac5,000"
+      }
+    },
+    {
+      "id": "cold-outreach-campaign",
+      "name": "Launch Cold Outreach Campaign",
+      "icon": "\ud83d\udce7",
+      "category": "Sales",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Full multi-channel cold sequence with A/B testing: build sequences, launch across email/LinkedIn/WhatsApp, track replies, and auto follow-up on silence.",
+      "agents": [
+        "cold-outreach-assassin",
+        "lead-hunter-elite",
+        "email-ninja"
+      ],
+      "task_description": "Build and launch a 5-step multi-channel cold outreach sequence for [target_audience]: write A/B tested subject lines, personalized openers, value propositions, and follow-ups. Launch across email and LinkedIn. Track replies and auto-follow up after 3 days of silence.",
+      "schedule": "3x_daily",
+      "kpis": [
+        "sequences_built",
+        "messages_sent",
+        "reply_rate",
+        "meetings_booked"
+      ],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Define your target audience and offer",
+        "Configure email sending credentials",
+        "Set follow-up delay (default: 3 days)"
+      ],
+      "expected_results": {
+        "reply_rate_pct": 8,
+        "meetings_per_100_leads": 5,
+        "estimated_monthly_revenue": "\u20ac2,000 \u2013 \u20ac15,000"
+      }
+    },
+    {
+      "id": "linkedin-growth-blitz",
+      "name": "LinkedIn Growth Blitz (30 Days)",
+      "icon": "\ud83d\udcbc",
+      "category": "Sales",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "30-day LinkedIn growth plan: optimize your profile, launch connection campaigns, and publish 3 viral posts per week to build audience and generate inbound leads.",
+      "agents": [
+        "linkedin-growth-hacker",
+        "cold-outreach-assassin",
+        "content-master"
+      ],
+      "task_description": "Run a 30-day LinkedIn growth blitz: optimize profile for [role/audience], create weekly viral content plan (3 posts/week), launch targeted connection campaigns to [target_audience], and generate DM templates for warm leads. Track follower growth and lead inbound rate.",
+      "schedule": "daily",
+      "kpis": [
+        "connections_added",
+        "post_impressions",
+        "profile_views",
+        "inbound_leads"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Provide LinkedIn profile URL or key profile details",
+        "Define your target audience and content topics",
+        "Set connection request limit (default: 25/day)"
+      ],
+      "expected_results": {
+        "new_connections_30d": 500,
+        "post_impressions_30d": 50000,
+        "inbound_leads_30d": 15,
+        "estimated_pipeline_value": "\u20ac3,000 \u2013 \u20ac20,000"
+      }
+    },
+    {
+      "id": "close-5-deals-this-week",
+      "name": "Close 5 Deals This Week",
+      "icon": "\ud83d\udcb0",
+      "category": "Sales",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Sales closing toolkit: handle objections, prepare negotiation tactics, and generate closing scripts for your 5 hottest prospects \u2014 ready to deploy in calls and emails.",
+      "agents": [
+        "sales-closer-pro",
+        "cold-outreach-assassin",
+        "email-ninja"
+      ],
+      "task_description": "Prepare deal-closing assets for 5 prospects: generate objection-handling scripts for [top 3 objections], negotiation tactics brief, closing email templates, and next-step CTA scripts. Prioritise deals by close probability and recommend closing approach per deal.",
+      "schedule": "weekly",
+      "kpis": [
+        "deals_closed",
+        "revenue_closed",
+        "objections_handled",
+        "meetings_converted"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "List your top 5 hot prospects with deal context",
+        "Describe your product/service and pricing",
+        "Identify the 3 most common objections you face"
+      ],
+      "expected_results": {
+        "deals_closed": 5,
+        "revenue_per_week": "\u20ac5,000 \u2013 \u20ac50,000",
+        "closing_rate_improvement_pct": 40
+      }
+    },
+    {
+      "id": "launch-paid-ads-roas3x",
+      "name": "Launch Paid Ads with 3x ROAS Target",
+      "icon": "\ud83d\udce2",
+      "category": "Marketing",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Full paid ads launch: creative brief, ad copy variants, audience targeting, budget allocation, and ROAS prediction for Meta and/or Google ads.",
+      "agents": [
+        "ad-campaign-wizard",
+        "creative-studio",
+        "data-analyst"
+      ],
+      "task_description": "Launch a paid ad campaign for [product] on [Meta/Google/LinkedIn]: write 5 ad copy variants (A/B testable), design creative brief, set audience targeting strategy, allocate [budget] across campaigns, predict ROAS, and set up weekly performance review framework.",
+      "schedule": "weekly",
+      "kpis": [
+        "roas",
+        "cpa",
+        "ctr",
+        "revenue_from_ads"
+      ],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Define your product, offer, and target audience",
+        "Set total ad budget and ROAS target",
+        "Choose platforms: Meta, Google, LinkedIn, or all"
+      ],
+      "expected_results": {
+        "roas_target": "3x",
+        "ctr_benchmark_pct": 2,
+        "estimated_monthly_revenue": "\u20ac5,000 \u2013 \u20ac50,000"
+      }
+    },
+    {
+      "id": "referral-program-launch",
+      "name": "Launch a Referral Program",
+      "icon": "\ud83d\ude80",
+      "category": "Marketing",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "End-to-end referral program: design structure, calculate optimal incentives, write referral copy, and create launch plan to turn customers into ambassadors.",
+      "agents": [
+        "referral-rocket",
+        "growth-hacker",
+        "email-ninja"
+      ],
+      "task_description": "Design and launch a referral program for [product]: model incentive economics (LTV = [value], CAC = [value]), design two-sided reward structure, write referral email sequence (5 emails), create social sharing copy, set up tracking metrics, and plan fraud prevention.",
+      "schedule": "once",
+      "kpis": [
+        "referral_signups",
+        "referred_customers",
+        "referral_revenue",
+        "k_factor"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Provide product LTV and current CAC",
+        "Set referral reward budget (% of LTV)",
+        "Define customer base size for seeding"
+      ],
+      "expected_results": {
+        "k_factor_target": 0.5,
+        "referral_revenue_pct": 20,
+        "cac_reduction_pct": 30,
+        "estimated_monthly_referrals": 25
+      }
+    },
+    {
+      "id": "jv-partnership-pipeline",
+      "name": "Build JV Partnership Pipeline",
+      "icon": "\ud83e\udd1d",
+      "category": "Sales",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Find, score, and pitch 5 joint venture partners in your niche \u2014 complete with partner brief, pitch deck outline, and outreach email per partner.",
+      "agents": [
+        "partnership-matchmaker",
+        "intel-agent",
+        "email-ninja"
+      ],
+      "task_description": "Build a JV partnership pipeline in [niche]: identify 10 potential partners, score by fit (audience overlap, offer complement, reach), shortlist top 5, generate pitch deck outline and outreach email for each, and recommend deal structure (rev-share/affiliate/co-marketing).",
+      "schedule": "weekly",
+      "kpis": [
+        "partners_identified",
+        "pitches_sent",
+        "partnerships_closed",
+        "partner_revenue"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Describe your product/service and target audience",
+        "Define your ideal partner profile",
+        "Set partnership goal: distribution, revenue-share, or co-marketing"
+      ],
+      "expected_results": {
+        "partners_identified": 10,
+        "pitches_sent": 5,
+        "partnerships_closed_30d": 2,
+        "estimated_revenue_per_partner": "\u20ac2,000 \u2013 \u20ac20,000/mo"
+      }
+    },
+    {
+      "id": "cro-funnel-boost",
+      "name": "Boost Conversion Rate by 50%",
+      "icon": "\ud83d\udcc8",
+      "category": "Marketing",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Full CRO audit and A/B test roadmap: analyze your funnel, identify drop-off points, design 5 A/B tests, and get quick-win improvements to implement today.",
+      "agents": [
+        "conversion-rate-optimizer",
+        "data-analyst",
+        "growth-hacker"
+      ],
+      "task_description": "Run a full CRO audit on [funnel/product]: analyze each funnel stage for drop-off, benchmark vs industry, identify top 3 conversion leaks, design 5 A/B tests (ICE scored), provide quick-win copy/UX improvements, and calculate revenue impact of fixing each issue.",
+      "schedule": "weekly",
+      "kpis": [
+        "conversion_rate_lift_pct",
+        "ab_tests_running",
+        "revenue_per_visitor",
+        "funnel_completion_rate"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Provide funnel stages with current conversion rates",
+        "Share monthly visitor/traffic volume",
+        "Define primary conversion goal (signup/purchase/call)"
+      ],
+      "expected_results": {
+        "conversion_lift_pct": 50,
+        "ab_tests_designed": 5,
+        "revenue_impact_monthly": "\u20ac1,000 \u2013 \u20ac30,000",
+        "quick_wins_identified": 5
+      }
+    },
+    {
+      "id": "improve-ai-employee",
+      "name": "Improve the AI Employee",
+      "icon": "\ud83d\udd27",
+      "category": "AI Optimization",
+      "description": "Systematically analyze the current AI Employee setup and propose concrete improvements to speed, accuracy, agent coordination, and output quality.",
+      "task_description": "Analyze the current AI Employee agent setup. Identify bottlenecks, inefficiencies, and missed opportunities. Propose 5 concrete improvements with implementation steps.",
+      "agents": [
+        "discovery",
+        "feedback-loop",
+        "auto-updater"
+      ],
+      "schedule": "weekly",
+      "setup_steps": [
+        "Review current agent configuration and active skills",
+        "Analyze task completion rates and identify failures",
+        "Run discovery agent to find optimization opportunities",
+        "Generate improvement proposals ranked by impact",
+        "Apply approved improvements automatically"
+      ],
+      "expected_results": {
+        "estimated_monthly_savings": "+20% task efficiency"
+      }
+    },
+    {
+      "id": "optimize-lead-gen",
+      "name": "Optimize Lead Generation",
+      "icon": "\ud83c\udfaf",
+      "category": "Sales",
+      "description": "Audit your current lead generation process, identify the highest-converting channels, and deploy a multi-channel outreach campaign targeting your ideal customer profile.",
+      "task_description": "Optimize our lead generation pipeline. Analyze current lead sources, identify the top 3 channels by conversion rate, and launch targeted outreach on each channel.",
+      "agents": [
+        "lead-generator",
+        "lead-hunter-elite",
+        "cold-outreach-assassin",
+        "financial-deepsearch"
+      ],
+      "schedule": "daily",
+      "setup_steps": [
+        "Define your ideal customer profile (ICP)",
+        "Configure lead-generator with target industry and location",
+        "Set up cold-outreach-assassin with email sequences",
+        "Connect LinkedIn for social selling via LinkedIn growth hacker",
+        "Monitor and optimize based on reply rates"
+      ],
+      "expected_results": {
+        "estimated_monthly_revenue": "\u20ac3,000\u2013\u20ac8,000/mo"
+      }
+    },
+    {
+      "id": "linkedin-content-calendar",
+      "name": "LinkedIn 30-Day Content Calendar",
+      "icon": "\ud83d\udcc5",
+      "category": "Content",
+      "description": "Create a full 30-day LinkedIn content calendar with posts, carousels, and engagement hooks tailored to your niche. Includes scheduling and posting automation.",
+      "task_description": "Create a 30-day LinkedIn content calendar for my business. Include 3 posts per week: 1 educational post, 1 story/personal post, 1 promotional post. Add hooks, CTAs, and hashtags.",
+      "agents": [
+        "linkedin-growth-hacker",
+        "brand-strategist",
+        "course-creator"
+      ],
+      "schedule": "monthly",
+      "setup_steps": [
+        "Define your content pillars (3 topics you want to own)",
+        "Connect LinkedIn integration",
+        "Set your posting schedule (Mon/Wed/Fri recommended)",
+        "Review and approve content batch before publishing",
+        "Monitor engagement and adjust topics monthly"
+      ],
+      "expected_results": {
+        "estimated_monthly_value": "+500 followers/month"
+      }
+    },
+    {
+      "id": "competitor-analysis",
+      "name": "Competitor Analysis & Gap Finding",
+      "icon": "\ud83d\udd0d",
+      "category": "Research",
+      "description": "Deep-dive into your top 5 competitors \u2014 pricing, messaging, offers, traffic sources, and reviews. Find the gaps you can exploit to win market share.",
+      "task_description": "Analyze my top 5 competitors. Find: their pricing, unique selling points, messaging, customer complaints (from reviews), traffic sources, and content strategy. Identify 3 gaps I can exploit.",
+      "agents": [
+        "mirofish-researcher",
+        "financial-deepsearch",
+        "brand-strategist",
+        "growth-hacker"
+      ],
+      "schedule": "monthly",
+      "setup_steps": [
+        "List your top 5 competitors (domain names)",
+        "Run deep research on each competitor",
+        "Analyze review sites for customer complaints",
+        "Map competitor content and SEO strategy",
+        "Receive gap analysis report with recommended actions"
+      ],
+      "expected_results": {
+        "estimated_monthly_value": "3\u20135 market opportunities identified"
+      }
+    },
+    {
+      "id": "automate-customer-support",
+      "name": "Automate Customer Support",
+      "icon": "\ud83c\udfa7",
+      "category": "Support",
+      "description": "Build a fully automated first-line customer support system. Handles FAQs, ticket triage, escalation to humans, and proactive follow-up \u2014 24/7.",
+      "task_description": "Set up automated customer support. Create FAQ responses for the top 20 questions, build an escalation workflow, and configure proactive follow-up messages for unresolved tickets.",
+      "agents": [
+        "chatbot-builder",
+        "hr-manager",
+        "feedback-loop"
+      ],
+      "schedule": "manual",
+      "setup_steps": [
+        "Upload your FAQ document or top support tickets",
+        "Configure escalation rules (what gets passed to human)",
+        "Connect your support email or helpdesk",
+        "Test with 10 sample queries",
+        "Go live and monitor resolution rate"
+      ],
+      "expected_results": {
+        "estimated_monthly_savings": "\u20ac1,500/mo in support costs"
+      }
+    },
+    {
+      "id": "email-newsletter-automation",
+      "name": "Email Newsletter Automation",
+      "icon": "\ud83d\udce7",
+      "category": "Content",
+      "description": "Set up a fully automated weekly email newsletter with curated industry news, original insights, and promotional segments \u2014 researched and written by AI.",
+      "task_description": "Create and automate a weekly email newsletter. Research top industry news, write an original insight piece, include a promotional section, and schedule delivery every Tuesday at 9am.",
+      "agents": [
+        "newsletter-bot",
+        "mirofish-researcher",
+        "brand-strategist"
+      ],
+      "schedule": "weekly",
+      "setup_steps": [
+        "Connect your email platform (Gmail or Mailchimp)",
+        "Define your newsletter niche and audience",
+        "Set the 3-section structure (news, insight, promo)",
+        "Schedule first issue for next Tuesday",
+        "Review and approve first issue before sending"
+      ],
+      "expected_results": {
+        "estimated_monthly_value": "200+ subscribers/month"
+      }
+    },
+    {
+      "id": "ecom-revenue-boost",
+      "name": "E-commerce Revenue Boost",
+      "icon": "\ud83d\uded2",
+      "category": "E-commerce",
+      "description": "Optimize your e-commerce store for maximum revenue: product descriptions, pricing strategy, abandoned cart sequences, and upsell/cross-sell funnels.",
+      "task_description": "Boost e-commerce revenue by: rewriting product descriptions for SEO and conversion, setting up abandoned cart email sequence (3 emails), creating upsell recommendations, and optimizing pricing.",
+      "agents": [
+        "ecom-agent",
+        "conversion-rate-optimizer",
+        "cold-outreach-assassin"
+      ],
+      "schedule": "manual",
+      "setup_steps": [
+        "Connect your store (Shopify/WooCommerce URL)",
+        "Export product list (CSV with titles and descriptions)",
+        "AI rewrites descriptions with SEO + conversion copy",
+        "Set up 3-email abandoned cart sequence",
+        "Deploy upsell widget on checkout page"
+      ],
+      "expected_results": {
+        "estimated_monthly_revenue": "+15\u201330% revenue uplift"
+      }
+    },
+    {
+      "id": "paid-ads-setup",
+      "name": "Paid Ads Setup (Google + Meta)",
+      "icon": "\ud83d\udce2",
+      "category": "Marketing",
+      "description": "Launch high-converting paid ad campaigns on Google and Meta. Includes keyword research, ad copy, audience targeting, and budget optimization strategy.",
+      "task_description": "Set up paid advertising campaigns on Google Ads and Meta. Research keywords, write ad copy variants (3 per platform), define audience targeting, and set up conversion tracking.",
+      "agents": [
+        "paid-media-specialist",
+        "ad-campaign-wizard",
+        "conversion-rate-optimizer"
+      ],
+      "schedule": "manual",
+      "setup_steps": [
+        "Define campaign goal (leads, sales, awareness)",
+        "Set monthly budget and target CPA",
+        "AI generates keyword list and ad copy variants",
+        "Review and approve creative before launch",
+        "Connect conversion tracking to your website"
+      ],
+      "expected_results": {
+        "estimated_monthly_revenue": "3x ROAS target"
+      }
+    }
+  ]
 }
