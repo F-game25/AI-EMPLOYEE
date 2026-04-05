@@ -29,7 +29,18 @@ from pathlib import Path
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
-AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
+_installed_home = Path.home() / ".ai-employee"
+# When running from the repository (e.g. via `npm test`), fall back to the
+# runtime/ directory that sits one level above this file so module lookups
+# resolve correctly without a full installation.
+_repo_runtime = Path(__file__).parent.parent
+if (_repo_runtime / "agents").is_dir() and not (_installed_home / "agents").is_dir():
+    _default_home = _repo_runtime
+    _DEV_MODE = True   # running from repo clone, not a deployed install
+else:
+    _default_home = _installed_home
+    _DEV_MODE = False
+AI_HOME = Path(os.environ.get("AI_HOME", str(_default_home)))
 
 _GREEN  = "\033[0;32m"
 _RED    = "\033[0;31m"
@@ -69,21 +80,24 @@ def check_python_version() -> None:
 
 
 def check_env_file() -> None:
-    """~/.ai-employee/.env must exist."""
+    """~/.ai-employee/.env must exist (optional in dev/repo mode)."""
     env_path = AI_HOME / ".env"
     if env_path.exists():
         _ok(".env file", str(env_path))
     else:
-        _fail(".env file", f"not found at {env_path} — run install.sh first")
+        _fail(".env file", f"not found at {env_path} — run install.sh first",
+              required=not _DEV_MODE)
 
 
 def check_required_env_vars() -> None:
-    """JWT_SECRET_KEY must be set (security requirement)."""
+    """JWT_SECRET_KEY must be set (optional in dev/repo mode, required in production)."""
     val = os.environ.get("JWT_SECRET_KEY", "")
     if val:
         _ok("JWT_SECRET_KEY", "set ✓")
     else:
-        _fail("JWT_SECRET_KEY", "not set — generate with: python3 -c \"import secrets; print(secrets.token_hex(32))\"")
+        _fail("JWT_SECRET_KEY",
+              "not set — generate with: python3 -c \"import secrets; print(secrets.token_hex(32))\"",
+              required=not _DEV_MODE)
 
 
 def check_state_dir() -> None:
@@ -395,12 +409,6 @@ def check_obsidian_vault_path() -> None:
             f"directory not found: {vault}",
             required=False,
         )
-def check_hermes_agent() -> None:
-    """hermes_agent module must be importable and its run.sh executable."""
-    _check_bot_module("hermes-agent", "hermes_agent")
-def check_blacklight() -> None:
-    """blacklight module must be importable and its run.sh executable."""
-    _check_bot_module("blacklight", "blacklight")
 
 
 def check_blacklight() -> None:
