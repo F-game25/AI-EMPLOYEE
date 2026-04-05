@@ -42,6 +42,7 @@ import logging
 import math
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -116,6 +117,7 @@ class VectorMemory:
     def __init__(self) -> None:
         VECTOR_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
         self._index_path = VECTOR_MEMORY_DIR / "_vector_index.json"
+        self._index_lock = threading.Lock()
 
     # ── Storage helpers ───────────────────────────────────────────────────────
 
@@ -148,16 +150,17 @@ class VectorMemory:
         return {"entities": {}}
 
     def _update_index(self, entity: dict) -> None:
-        index = self._load_index()
-        eid = entity["entity_id"]
-        index["entities"][eid] = {
-            "entity_type": entity.get("entity_type", "unknown"),
-            "updated_at": entity.get("updated_at", ""),
-            "summary": (entity.get("summary", ""))[:120],
-            "has_embedding": bool(entity.get("embedding")),
-            "interaction_count": len(entity.get("interactions", [])),
-        }
-        self._index_path.write_text(json.dumps(index, indent=2))
+        with self._index_lock:
+            index = self._load_index()
+            eid = entity["entity_id"]
+            index["entities"][eid] = {
+                "entity_type": entity.get("entity_type", "unknown"),
+                "updated_at": entity.get("updated_at", ""),
+                "summary": (entity.get("summary", ""))[:120],
+                "has_embedding": bool(entity.get("embedding")),
+                "interaction_count": len(entity.get("interactions", [])),
+            }
+            self._index_path.write_text(json.dumps(index, indent=2))
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -345,9 +348,10 @@ class VectorMemory:
         p = self._entity_path(entity_id)
         if p.exists():
             p.unlink()
-            index = self._load_index()
-            index["entities"].pop(entity_id, None)
-            self._index_path.write_text(json.dumps(index, indent=2))
+            with self._index_lock:
+                index = self._load_index()
+                index["entities"].pop(entity_id, None)
+                self._index_path.write_text(json.dumps(index, indent=2))
             return True
         return False
 
