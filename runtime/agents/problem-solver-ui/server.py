@@ -4664,14 +4664,14 @@ async function deleteBundle(id) {
 }
 
 async function startBot(name) {
-  await api('/api/agents/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({agent: name})});
+  await api('/api/agents/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
   toast(`Starting ${name}…`);
   setTimeout(loadWorkers, 1800);
 }
 
 async function stopBot(name) {
   if (!confirm(`Stop ${name}?`)) return;
-  await api('/api/agents/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({agent: name})});
+  await api('/api/agents/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
   toast(`Stopping ${name}…`, 'error');
   setTimeout(loadWorkers, 1800);
 }
@@ -8447,7 +8447,7 @@ def run_onboard_quick_action():
 
 @app.post("/api/agents/start")
 def start_bot(payload: dict, _auth: None = Depends(require_auth)):
-    bot = payload.get("bot", "")
+    bot = payload.get("bot") or payload.get("agent") or ""
     _validate_bot_name(bot)
     rc, out = ai_employee("start", bot)
     return JSONResponse({"ok": rc == 0, "output": out})
@@ -8455,7 +8455,7 @@ def start_bot(payload: dict, _auth: None = Depends(require_auth)):
 
 @app.post("/api/agents/stop")
 def stop_bot(payload: dict, _auth: None = Depends(require_auth)):
-    bot = payload.get("bot", "")
+    bot = payload.get("bot") or payload.get("agent") or ""
     _validate_bot_name(bot)
     rc, out = ai_employee("stop", bot)
     return JSONResponse({"ok": rc == 0, "output": out})
