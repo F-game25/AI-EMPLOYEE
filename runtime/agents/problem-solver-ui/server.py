@@ -1722,7 +1722,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- ── Navigation ── -->
 <nav>
   <button class="active" onclick="switchTab('dashboard',this)">📊 Dashboard</button>
-  <button onclick="switchTab('chat',this)">💬 Chat</button>
+  <button id="nav-btn-chat" onclick="switchTab('chat',this)">💬 Chat</button>
   <button onclick="switchTab('tasks',this)">🚀 Tasks</button>
   <button onclick="switchTab('swarm',this)">🐝 Swarm</button>
   <button onclick="switchTab('live-office',this)">🏢 Live Office</button>
@@ -3665,6 +3665,11 @@ INDEX_HTML = r"""<!doctype html>
 let currentTab = 'dashboard';
 const _startTime = Date.now();
 
+function switchToChatTab() {
+  const btn = document.getElementById('nav-btn-chat');
+  if (btn) btn.click();
+}
+
 function switchTab(tab, btn) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
@@ -4733,8 +4738,7 @@ async function sendImprovToAI(id, title, description) {
   // Mark as in_progress
   await api(`/api/improvements/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status: 'in_progress'})});
   // Switch to chat tab and send
-  const chatTabBtn = document.querySelector('nav button[onclick*="\'chat\'"]');
-  if (chatTabBtn) chatTabBtn.click();
+  switchToChatTab();
   setTimeout(() => {
     const input = document.getElementById('chat-input');
     if (input) {
@@ -4985,8 +4989,7 @@ async function saveNewSkill() {
 
 function useSkillNow(id, name) {
   // Switch to chat tab and pre-fill the prompt with the skill
-  const chatTabBtn = document.querySelector('nav button[onclick*="\'chat\'"]');
-  if (chatTabBtn) chatTabBtn.click();
+  switchToChatTab();
   setTimeout(() => {
     const input = document.getElementById('chat-input');
     if (input) {
@@ -5744,8 +5747,7 @@ function copyCmd(cmd) {
 
 function executeCmd(cmd) {
   // Switch to chat tab and send the command
-  const chatTabBtn = document.querySelector('nav button[onclick*="chat"]');
-  if (chatTabBtn) chatTabBtn.click();
+  switchToChatTab();
   setTimeout(() => {
     const input = document.getElementById('chat-input');
     if (input) {
@@ -5864,7 +5866,12 @@ function _renderRoiBreakdowns(events) {
   const agentEl = document.getElementById('roi-agent-breakdown');
   if (agentEl) {
     const byAgent = {};
-    events.forEach(e => { if (e.agent) byAgent[e.agent] = (byAgent[e.agent]||{count:0,value:0}), byAgent[e.agent].count++, byAgent[e.agent].value += parseFloat(e.value)||0; });
+    events.forEach(e => {
+      if (!e.agent) return;
+      if (!byAgent[e.agent]) byAgent[e.agent] = {count: 0, value: 0};
+      byAgent[e.agent].count++;
+      byAgent[e.agent].value += parseFloat(e.value) || 0;
+    });
     const agentEntries = Object.entries(byAgent).sort(([,a],[,b]) => b.count - a.count).slice(0,10);
     if (!agentEntries.length) {
       agentEl.innerHTML = '<div class="empty"><div class="icon">🤖</div><p style="font-size:.84em">No agent data yet.</p></div>';
@@ -5888,7 +5895,12 @@ function _renderRoiBreakdowns(events) {
   const typeEl = document.getElementById('roi-type-breakdown');
   if (typeEl) {
     const byType = {};
-    events.forEach(e => { byType[e.type||'custom'] = (byType[e.type||'custom']||{count:0,value:0}), byType[e.type||'custom'].count++, byType[e.type||'custom'].value += parseFloat(e.value)||0; });
+    events.forEach(e => {
+      const t = e.type || 'custom';
+      if (!byType[t]) byType[t] = {count: 0, value: 0};
+      byType[t].count++;
+      byType[t].value += parseFloat(e.value) || 0;
+    });
     const typeEntries = Object.entries(byType).sort(([,a],[,b]) => b.count - a.count);
     const typeIcon2 = {task_completed:'✅',lead_generated:'🎯',email_sent:'📧',content_created:'📝',call_booked:'📞',deal_closed:'💰',ticket_resolved:'🎫',custom:'⭐'};
     if (!typeEntries.length) {
@@ -6158,15 +6170,16 @@ function _renderCustomGuardrails(rules) {
           <div style="font-size:.78em;font-weight:600;color:${col};margin-bottom:3px">${icon} ${escHtml((rule.type||'custom').replace(/_/g,' '))} · ${escHtml(rule.severity||'medium')}</div>
           <div style="font-size:.83em;color:var(--text-secondary);line-height:1.4">${escHtml(rule.rule||'')}</div>
         </div>
-        <button class="btn btn-danger btn-sm" onclick="deleteCustomGuardrail(${idx})" title="Remove rule" style="flex-shrink:0;padding:2px 7px;font-size:.7em">✕</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCustomGuardrail(${JSON.stringify(rule.id||'')})" title="Remove rule" style="flex-shrink:0;padding:2px 7px;font-size:.7em">✕</button>
       </div>
     </div>`;
   }).join('');
 }
 
-async function deleteCustomGuardrail(idx) {
+async function deleteCustomGuardrail(ruleId) {
+  if (!ruleId) { toast('Invalid rule ID', 'error'); return; }
   if (!confirm('Remove this guardrail rule?')) return;
-  const r = await api(`/api/guardrails/custom/${idx}`, {method: 'DELETE'});
+  const r = await api(`/api/guardrails/custom/${encodeURIComponent(ruleId)}`, {method: 'DELETE'});
   if (r.ok) { toast('Rule removed', 'error'); loadGuardrails(); }
   else { toast(r.detail || 'Error', 'error'); }
 }
@@ -9373,8 +9386,10 @@ def create_skill(payload: dict):
             try:
                 lib = json.loads(candidate.read_text())
                 break
-            except Exception:
-                pass
+            except json.JSONDecodeError as exc:
+                raise HTTPException(500, f"Skills library file is corrupt: {exc}") from exc
+            except OSError:
+                continue
     if not lib:
         lib = {"skills": [], "categories": []}
 
@@ -10306,12 +10321,15 @@ def save_guardrail_settings(payload: dict):
 
 @app.post("/api/guardrails/custom")
 def add_custom_guardrail(payload: dict):
+    import uuid as _uuid
     rule_text = (payload.get("rule") or "").strip()
     if not rule_text:
         raise HTTPException(400, "rule is required")
     data = _load_guardrails()
     custom_rules = data.get("custom_rules", [])
+    rule_id = _uuid.uuid4().hex[:12]
     custom_rules.append({
+        "id": rule_id,
         "type": payload.get("type", "custom"),
         "rule": rule_text,
         "severity": payload.get("severity", "medium"),
@@ -10319,16 +10337,17 @@ def add_custom_guardrail(payload: dict):
     })
     data["custom_rules"] = custom_rules
     _save_guardrails(data)
-    return JSONResponse({"ok": True, "total": len(custom_rules)})
+    return JSONResponse({"ok": True, "id": rule_id, "total": len(custom_rules)})
 
 
-@app.delete("/api/guardrails/custom/{idx}")
-def delete_custom_guardrail(idx: int):
+@app.delete("/api/guardrails/custom/{rule_id}")
+def delete_custom_guardrail(rule_id: str):
     data = _load_guardrails()
     custom_rules = data.get("custom_rules", [])
-    if idx < 0 or idx >= len(custom_rules):
-        raise HTTPException(404, "rule not found")
-    custom_rules.pop(idx)
+    original_len = len(custom_rules)
+    custom_rules = [r for r in custom_rules if r.get("id") != rule_id]
+    if len(custom_rules) == original_len:
+        raise HTTPException(404, f"Custom rule '{rule_id}' not found")
     data["custom_rules"] = custom_rules
     _save_guardrails(data)
     return JSONResponse({"ok": True})
