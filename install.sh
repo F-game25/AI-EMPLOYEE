@@ -483,7 +483,7 @@ setup_jwt_secret() {
 setup_directories() {
     step "5/8 — Creating directory structure"
 
-    mkdir -p "$AI_HOME"/{workspace,credentials,downloads,logs,ui,backups,bin,run,bots,config,state,improvements}
+    mkdir -p "$AI_HOME"/{workspace,credentials,downloads,logs,ui,backups,bin,run,agents,config,state,improvements}
 
     for a in orchestrator lead-hunter content-master social-guru intel-agent product-scout \
               email-ninja support-bot data-analyst creative-studio crypto-trader bot-dev web-sales \
@@ -516,96 +516,96 @@ install_runtime() {
         }
 
         dl "bin/ai-employee"
-        dl "bots/problem-solver/run.sh"
-        dl "bots/problem-solver/problem_solver.py"
-        dl "bots/problem-solver-ui/run.sh"
-        dl "bots/problem-solver-ui/server.py"
-        dl "bots/problem-solver-ui/requirements.txt"
-        dl "bots/polymarket-trader/run.sh"
-        dl "bots/polymarket-trader/trader.py"
-        dl "bots/status-reporter/run.sh"
-        dl "bots/status-reporter/status_reporter.py"
-        dl "bots/scheduler-runner/run.sh"
-        dl "bots/scheduler-runner/scheduler.py"
-        dl "bots/discovery/run.sh"
-        dl "bots/discovery/discovery.py"
-        dl "bots/skills-manager/run.sh"
-        dl "bots/skills-manager/skills_manager.py"
-        dl "bots/mirofish-researcher/run.sh"
-        dl "bots/mirofish-researcher/researcher.py"
-        dl "bots/ai-router/ai_router.py"
-        dl "bots/ollama-agent/run.sh"
-        dl "bots/ollama-agent/ollama_agent.py"
-        dl "bots/ollama-agent/requirements.txt"
-        dl "bots/claude-agent/run.sh"
-        dl "bots/claude-agent/claude_agent.py"
-        dl "bots/claude-agent/requirements.txt"
-        dl "bots/web-researcher/run.sh"
-        dl "bots/web-researcher/web_researcher.py"
-        dl "bots/web-researcher/requirements.txt"
-        dl "bots/social-media-manager/run.sh"
-        dl "bots/social-media-manager/social_media_manager.py"
-        dl "bots/social-media-manager/requirements.txt"
-        dl "bots/lead-generator/run.sh"
-        dl "bots/lead-generator/lead_generator.py"
-        dl "bots/lead-generator/requirements.txt"
-        dl "bots/recruiter/run.sh"
-        dl "bots/recruiter/recruiter.py"
-        dl "bots/recruiter/requirements.txt"
-        dl "bots/ecom-agent/run.sh"
-        dl "bots/ecom-agent/ecom_agent.py"
-        dl "bots/ecom-agent/requirements.txt"
-        dl "bots/creator-agency/run.sh"
-        dl "bots/creator-agency/creator_agency.py"
-        dl "bots/creator-agency/requirements.txt"
-        dl "bots/signal-community/run.sh"
-        dl "bots/signal-community/signal_community.py"
-        dl "bots/signal-community/requirements.txt"
-        dl "bots/appointment-setter/run.sh"
-        dl "bots/appointment-setter/appointment_setter.py"
-        dl "bots/appointment-setter/requirements.txt"
-        dl "bots/newsletter-bot/run.sh"
-        dl "bots/newsletter-bot/newsletter_bot.py"
-        dl "bots/newsletter-bot/requirements.txt"
-        dl "bots/chatbot-builder/run.sh"
-        dl "bots/chatbot-builder/chatbot_builder.py"
-        dl "bots/chatbot-builder/requirements.txt"
-        dl "bots/faceless-video/run.sh"
-        dl "bots/faceless-video/faceless_video.py"
-        dl "bots/faceless-video/requirements.txt"
-        dl "bots/print-on-demand/run.sh"
-        dl "bots/print-on-demand/print_on_demand.py"
-        dl "bots/print-on-demand/requirements.txt"
-        dl "bots/course-creator/run.sh"
-        dl "bots/course-creator/course_creator.py"
-        dl "bots/course-creator/requirements.txt"
-        dl "bots/arbitrage-bot/run.sh"
-        dl "bots/arbitrage-bot/arbitrage_bot.py"
-        dl "bots/arbitrage-bot/requirements.txt"
-        dl "bots/task-orchestrator/run.sh"
-        dl "bots/task-orchestrator/task_orchestrator.py"
-        dl "bots/task-orchestrator/requirements.txt"
-        dl "bots/company-builder/run.sh"
-        dl "bots/company-builder/company_builder.py"
-        dl "bots/company-builder/requirements.txt"
-        dl "bots/memecoin-creator/run.sh"
-        dl "bots/memecoin-creator/memecoin_creator.py"
-        dl "bots/memecoin-creator/requirements.txt"
-        dl "bots/hr-manager/run.sh"
-        dl "bots/hr-manager/hr_manager.py"
-        dl "bots/hr-manager/requirements.txt"
-        dl "bots/finance-wizard/run.sh"
-        dl "bots/finance-wizard/finance_wizard.py"
-        dl "bots/finance-wizard/requirements.txt"
-        dl "bots/brand-strategist/run.sh"
-        dl "bots/brand-strategist/brand_strategist.py"
-        dl "bots/brand-strategist/requirements.txt"
-        dl "bots/growth-hacker/run.sh"
-        dl "bots/growth-hacker/growth_hacker.py"
-        dl "bots/growth-hacker/requirements.txt"
-        dl "bots/project-manager/run.sh"
-        dl "bots/project-manager/project_manager.py"
-        dl "bots/project-manager/requirements.txt"
+        dl "agents/problem-solver/run.sh"
+        dl "agents/problem-solver/problem_solver.py"
+        dl "agents/problem-solver-ui/run.sh"
+        dl "agents/problem-solver-ui/server.py"
+        dl "agents/problem-solver-ui/requirements.txt"
+        dl "agents/polymarket-trader/run.sh"
+        dl "agents/polymarket-trader/trader.py"
+        dl "agents/status-reporter/run.sh"
+        dl "agents/status-reporter/status_reporter.py"
+        dl "agents/scheduler-runner/run.sh"
+        dl "agents/scheduler-runner/scheduler.py"
+        dl "agents/discovery/run.sh"
+        dl "agents/discovery/discovery.py"
+        dl "agents/skills-manager/run.sh"
+        dl "agents/skills-manager/skills_manager.py"
+        dl "agents/mirofish-researcher/run.sh"
+        dl "agents/mirofish-researcher/researcher.py"
+        dl "agents/ai-router/ai_router.py"
+        dl "agents/ollama-agent/run.sh"
+        dl "agents/ollama-agent/ollama_agent.py"
+        dl "agents/ollama-agent/requirements.txt"
+        dl "agents/claude-agent/run.sh"
+        dl "agents/claude-agent/claude_agent.py"
+        dl "agents/claude-agent/requirements.txt"
+        dl "agents/web-researcher/run.sh"
+        dl "agents/web-researcher/web_researcher.py"
+        dl "agents/web-researcher/requirements.txt"
+        dl "agents/social-media-manager/run.sh"
+        dl "agents/social-media-manager/social_media_manager.py"
+        dl "agents/social-media-manager/requirements.txt"
+        dl "agents/lead-generator/run.sh"
+        dl "agents/lead-generator/lead_generator.py"
+        dl "agents/lead-generator/requirements.txt"
+        dl "agents/recruiter/run.sh"
+        dl "agents/recruiter/recruiter.py"
+        dl "agents/recruiter/requirements.txt"
+        dl "agents/ecom-agent/run.sh"
+        dl "agents/ecom-agent/ecom_agent.py"
+        dl "agents/ecom-agent/requirements.txt"
+        dl "agents/creator-agency/run.sh"
+        dl "agents/creator-agency/creator_agency.py"
+        dl "agents/creator-agency/requirements.txt"
+        dl "agents/signal-community/run.sh"
+        dl "agents/signal-community/signal_community.py"
+        dl "agents/signal-community/requirements.txt"
+        dl "agents/appointment-setter/run.sh"
+        dl "agents/appointment-setter/appointment_setter.py"
+        dl "agents/appointment-setter/requirements.txt"
+        dl "agents/newsletter-bot/run.sh"
+        dl "agents/newsletter-bot/newsletter_bot.py"
+        dl "agents/newsletter-bot/requirements.txt"
+        dl "agents/chatbot-builder/run.sh"
+        dl "agents/chatbot-builder/chatbot_builder.py"
+        dl "agents/chatbot-builder/requirements.txt"
+        dl "agents/faceless-video/run.sh"
+        dl "agents/faceless-video/faceless_video.py"
+        dl "agents/faceless-video/requirements.txt"
+        dl "agents/print-on-demand/run.sh"
+        dl "agents/print-on-demand/print_on_demand.py"
+        dl "agents/print-on-demand/requirements.txt"
+        dl "agents/course-creator/run.sh"
+        dl "agents/course-creator/course_creator.py"
+        dl "agents/course-creator/requirements.txt"
+        dl "agents/arbitrage-bot/run.sh"
+        dl "agents/arbitrage-bot/arbitrage_bot.py"
+        dl "agents/arbitrage-bot/requirements.txt"
+        dl "agents/task-orchestrator/run.sh"
+        dl "agents/task-orchestrator/task_orchestrator.py"
+        dl "agents/task-orchestrator/requirements.txt"
+        dl "agents/company-builder/run.sh"
+        dl "agents/company-builder/company_builder.py"
+        dl "agents/company-builder/requirements.txt"
+        dl "agents/memecoin-creator/run.sh"
+        dl "agents/memecoin-creator/memecoin_creator.py"
+        dl "agents/memecoin-creator/requirements.txt"
+        dl "agents/hr-manager/run.sh"
+        dl "agents/hr-manager/hr_manager.py"
+        dl "agents/hr-manager/requirements.txt"
+        dl "agents/finance-wizard/run.sh"
+        dl "agents/finance-wizard/finance_wizard.py"
+        dl "agents/finance-wizard/requirements.txt"
+        dl "agents/brand-strategist/run.sh"
+        dl "agents/brand-strategist/brand_strategist.py"
+        dl "agents/brand-strategist/requirements.txt"
+        dl "agents/growth-hacker/run.sh"
+        dl "agents/growth-hacker/growth_hacker.py"
+        dl "agents/growth-hacker/requirements.txt"
+        dl "agents/project-manager/run.sh"
+        dl "agents/project-manager/project_manager.py"
+        dl "agents/project-manager/requirements.txt"
         dl "config/openclaw.template.json"
         dl "config/problem-solver.env"
         dl "config/problem-solver-ui.env"
@@ -643,8 +643,8 @@ install_runtime() {
         dl "config/task_plans.json"
         dl "start.sh"
         dl "stop.sh"
-        dl "bots/auto-updater/run.sh"
-        dl "bots/auto-updater/auto_updater.py"
+        dl "agents/auto-updater/run.sh"
+        dl "agents/auto-updater/auto_updater.py"
 
         src="$TMP_RUNTIME"
     fi
@@ -654,15 +654,15 @@ install_runtime() {
     cp -f "$src/bin/ai-employee" "$AI_HOME/bin/ai-employee"
     chmod +x "$AI_HOME/bin/ai-employee"
 
-    # bots/ (overwrite code; never overwrite .env)
-    for bot_dir in "$src/bots"/*/; do
+    # agents/ (overwrite code; never overwrite .env)
+    for bot_dir in "$src/agents"/*/; do
         bot_name="$(basename "$bot_dir")"
-        mkdir -p "$AI_HOME/bots/$bot_name"
+        mkdir -p "$AI_HOME/agents/$bot_name"
         for f in "$bot_dir"*; do
             [[ -f "$f" ]] || continue
             fname="$(basename "$f")"
-            cp -f "$f" "$AI_HOME/bots/$bot_name/$fname"
-            [[ "$fname" == *.sh ]] && chmod +x "$AI_HOME/bots/$bot_name/$fname"
+            cp -f "$f" "$AI_HOME/agents/$bot_name/$fname"
+            [[ "$fname" == *.sh ]] && chmod +x "$AI_HOME/agents/$bot_name/$fname"
         done
     done
 
@@ -682,7 +682,7 @@ install_runtime() {
     done
 
     # Python deps for UI bot
-    local req="$AI_HOME/bots/problem-solver-ui/requirements.txt"
+    local req="$AI_HOME/agents/problem-solver-ui/requirements.txt"
     if [[ -f "$req" ]]; then
         if command -v pip3 >/dev/null 2>&1; then
             pip3 install --user -q -r "$req" 2>/dev/null \
@@ -735,10 +735,10 @@ install_claude_bot() {
     log "Configuring Claude AI agent..."
 
     # Bot files (claude_agent.py, run.sh, requirements.txt) are deployed by
-    # install_runtime() from runtime/bots/claude-agent/. This function only
+    # install_runtime() from runtime/agents/claude-agent/. This function only
     # handles config file creation and Python dep installation.
 
-    mkdir -p "$AI_HOME/bots/claude-agent"
+    mkdir -p "$AI_HOME/agents/claude-agent"
 
     if [[ ! -f "$AI_HOME/config/claude-agent.env" ]]; then
       cat > "$AI_HOME/config/claude-agent.env" << 'EOF'
@@ -752,7 +752,7 @@ EOF
     fi
 
     log "Installing Python deps for Claude Agent (best-effort)..."
-    local req="$AI_HOME/bots/claude-agent/requirements.txt"
+    local req="$AI_HOME/agents/claude-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
       pip3 install --user -q -r "$req" 2>/dev/null \
         || warn "pip install failed; run manually: pip3 install --user anthropic fastapi uvicorn"
@@ -770,10 +770,10 @@ install_ollama_bot() {
     log "Configuring Ollama local AI agent..."
 
     # Bot files (ollama_agent.py, run.sh, requirements.txt) are deployed by
-    # install_runtime() from runtime/bots/ollama-agent/. This function only
+    # install_runtime() from runtime/agents/ollama-agent/. This function only
     # handles config file creation and Python dep installation.
 
-    mkdir -p "$AI_HOME/bots/ollama-agent"
+    mkdir -p "$AI_HOME/agents/ollama-agent"
 
     if [[ ! -f "$AI_HOME/config/ollama-agent.env" ]]; then
       cat > "$AI_HOME/config/ollama-agent.env" << 'EOF'
@@ -788,7 +788,7 @@ EOF
     fi
 
     log "Installing Python deps for Ollama Agent (best-effort)..."
-    local req="$AI_HOME/bots/ollama-agent/requirements.txt"
+    local req="$AI_HOME/agents/ollama-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
       pip3 install --user -q -r "$req" 2>/dev/null \
         || warn "pip install failed; run manually: pip3 install --user fastapi uvicorn requests"
