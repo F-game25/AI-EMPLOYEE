@@ -874,17 +874,32 @@ INDEX_HTML = r"""<!doctype html>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg:#0a0a0a;--surface:rgba(18,18,18,0.98);--surface2:rgba(24,24,24,0.95);
-      --glass:rgba(255,255,255,0.03);--border:rgba(212,175,55,0.15);
-      --primary:#D4AF37;--primary-dark:#B8960C;--primary-light:#F0D060;--accent:#C9A227;--accent2:#E8C84A;
-      --success:#22c55e;--danger:#ef4444;--warning:#f59e0b;
-      --text:#f5f5f0;--text-muted:#666;--text-secondary:#999;
-      --radius:12px;--radius-sm:8px;--shadow:0 8px 40px rgba(0,0,0,.9);
-      --glow-primary:0 0 28px rgba(212,175,55,.35);
+      --bg:#080808;
+      --surface:rgba(14,14,14,0.98);
+      --surface2:rgba(20,20,20,0.96);
+      --glass:rgba(255,255,255,0.02);
+      --border:rgba(201,168,76,0.18);
+      --primary:#D4AF37;
+      --primary-dark:#B8960C;
+      --primary-light:#F0D060;
+      --accent:#C9A227;
+      --accent2:#E8C84A;
+      --gold:#D4AF37;
+      --gold-light:#F0D060;
+      --gold-dark:#B8960C;
+      --success:#22c55e;
+      --danger:#ef4444;
+      --warning:#f59e0b;
+      --text:#f5f5f0;
+      --text-secondary:#9a8a6a;
+      --text-muted:#5a4a30;
+      --radius:12px;
+      --radius-sm:8px;
+      --shadow:0 8px 40px rgba(0,0,0,.95);
+      --glow-primary:0 0 32px rgba(212,175,55,.4);
       --glow-success:0 0 28px rgba(34,197,94,.35);
       --glow-danger:0 0 28px rgba(239,68,68,.35);
       --sidebar-w:220px;
-      --gold:#D4AF37;--gold-light:#F0D060;--gold-dark:#B8960C;
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth}
@@ -999,7 +1014,8 @@ INDEX_HTML = r"""<!doctype html>
     }
     nav button:hover{color:var(--text);background:rgba(255,255,255,.04)}
     nav button.active{color:var(--gold);border-bottom-color:var(--gold);
-      background:rgba(212,175,55,.08);font-weight:600;text-shadow:0 0 12px rgba(212,175,55,.4)}
+      background:rgba(212,175,55,.08);font-weight:600;text-shadow:0 0 12px rgba(212,175,55,.4);
+      box-shadow:inset 0 -2px 8px rgba(212,175,55,.15);letter-spacing:.02em}
     nav button.active::after{content:'';position:absolute;bottom:0;left:15%;right:15%;height:2px;
       background:linear-gradient(90deg,transparent,var(--gold),transparent);
       border-radius:2px 2px 0 0;filter:blur(2px);box-shadow:0 0 8px var(--gold)}
@@ -1269,7 +1285,7 @@ INDEX_HTML = r"""<!doctype html>
 
     /* ── Chat ── */
     #chat-log{
-      max-height:480px;overflow-y:auto;padding:16px;
+      max-height:calc(100vh - 280px);overflow-y:auto;padding:16px;
       border:1px solid rgba(148,163,184,.09);
       border-radius:16px;
       background:linear-gradient(180deg,rgba(4,8,20,.95),rgba(7,12,28,.98));
@@ -1279,16 +1295,18 @@ INDEX_HTML = r"""<!doctype html>
     .chat-msg{padding:12px 16px;border-radius:14px;margin-bottom:10px;max-width:86%;
       word-break:break-word;animation:slideInUp .22s ease}
     .chat-msg.user{
-      background:linear-gradient(135deg,var(--primary-dark),var(--primary));
+      background:linear-gradient(135deg,#B8960C,#D4AF37,#F0D060);
       margin-left:auto;color:#fff;
       box-shadow:0 3px 14px rgba(99,102,241,.35),inset 0 1px 0 rgba(255,255,255,.12);
-      border-radius:14px 14px 4px 14px;
+      border-radius:18px 18px 4px 18px;
+      font-size:.92em;line-height:1.65;
     }
     .chat-msg.bot,.chat-msg.agent{
-      background:rgba(15,25,48,.85);
+      background:rgba(18,18,18,0.95);
       border:1px solid rgba(148,163,184,.1);color:var(--text);
       border-radius:14px 14px 14px 4px;
       backdrop-filter:blur(6px);
+      font-size:.92em;line-height:1.65;
     }
     .chat-msg-header{display:flex;align-items:center;gap:8px;font-size:.72em;margin-bottom:6px;opacity:.85}
     .chat-msg-avatar{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08)}
@@ -3335,12 +3353,13 @@ function switchTab(tab, btn) {
 }
 
 function toast(msg, type='success') {
+  const icons = {success:'✅', error:'❌', info:'ℹ️'};
   const el = document.getElementById('toast');
-  el.textContent = msg;
+  el.innerHTML = `<span style="font-size:1.1em">${icons[type]||'✅'}</span><span>${msg}</span>`;
   el.className = '';
-  el.classList.add(type);
-  el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 3200);
+  el.classList.add(type, 'show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 3500);
 }
 
 async function api(path, opts={}) {
@@ -3465,6 +3484,12 @@ function updateHealthChecks(data) {
   setHC('hc-db', true, 'Ready');
   setHC('hc-gateway', data.gateway_ok !== false, data.gateway_ok !== false ? 'Online' : 'Offline');
   setHC('hc-memory', true, 'Ready');
+
+  // Animate running count in header
+  const runEl = document.getElementById('stat-running');
+  if (runEl && data.running_agents !== undefined) {
+    animateCount('stat-running', data.running_agents);
+  }
 }
 
 function _isHermesRunning(agents) {
@@ -3481,7 +3506,11 @@ async function loadDashboard() {
   animateCount('stat-running', running);
   animateCount('stat-total', total);
   const modeLabel = d.mode ? ` · ${d.mode}` : '';
-  document.getElementById('header-sub').textContent = `${running}/${total} agents running${modeLabel}`;
+  const modeColors = {starter:'#34d399',business:'#D4AF37',power:'#c084fc'};
+  const mc = modeColors[d.mode] || 'var(--gold)';
+  document.getElementById('header-sub').innerHTML =
+    `${running}/${total} agents running` +
+    (d.mode ? ` <span style="background:${mc}22;color:${mc};border:1px solid ${mc}44;border-radius:8px;padding:1px 8px;font-size:.8em;font-weight:700;margin-left:4px">${d.mode.toUpperCase()}</span>` : '');
 
   // Update system control hero
   const pct = total > 0 ? Math.round((running / total) * 100) : 0;
@@ -3579,6 +3608,15 @@ async function loadLiveOffice() {
     return;
   }
 
+  const agentIcons = {
+    'task-orchestrator':'🎯','lead-generator':'🎯','lead-hunter':'🎯',
+    'brand-strategist':'🎨','finance-wizard':'💰','growth-hacker':'📈',
+    'social-media-manager':'📱','content-master':'✍️','email-ninja':'📧',
+    'intel-agent':'🔍','company-builder':'🏢','hr-manager':'👔',
+    'project-manager':'📋','crypto-trader':'📈','ecom-agent':'🛒',
+    'support-bot':'🎧','creative-studio':'🎨','data-analyst':'📊',
+    'web-researcher':'🌐','chatbot-builder':'🤖','recruiter':'👔',
+  };
   const icons = ['🤖','🦾','🧠','⚙️','🔬','📊','💡','🎯'];
   container.innerHTML = agents.map((agent, idx) => {
     const name = agent.name || agent.id || 'agent';
@@ -3586,7 +3624,7 @@ async function loadLiveOffice() {
     const left = 4 + (idx % cols) * (92 / cols);
     const row = Math.floor(idx / cols);
     const isBusy = agent.progress >= 50 || !!agent.alert;
-    const icon = icons[idx % icons.length];
+    const icon = agentIcons[name] || icons[idx % icons.length];
     const animDur = 2.5 + (idx % 4) * 0.7;
     const animName = idx % 2 === 0 ? 'robotWalk' : 'robotWalk2';
     return `<div class="robot-agent" role="button" tabindex="0" aria-label="${escHtml(name)} – ${isBusy ? 'busy' : 'idle'}" style="left:${left}%;bottom:${140 + row * 80}px;animation-name:${animName};animation-duration:${animDur}s" onclick="openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')" onkeydown="if(event.key==='Enter'||event.key===' ')openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')">
@@ -3686,6 +3724,20 @@ async function runOnboard() {
 }
 
 // ── Chat ────────────────────────────────────────────────────────────────────
+function renderMarkdown(str) {
+  return str
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/`(.+?)`/g,'<code>$1</code>')
+    .replace(/^### (.+)$/gm,'<h3>$1</h3>')
+    .replace(/^## (.+)$/gm,'<h2>$1</h2>')
+    .replace(/^# (.+)$/gm,'<h1>$1</h1>')
+    .replace(/^- (.+)$/gm,'<li>$1</li>')
+    .replace(/\n\n/g,'<br><br>')
+    .replace(/\n/g,'<br>');
+}
+
 async function loadChatLog() {
   // Refresh Hermes status indicator in the chat header
   api('/api/workers').then(d => {
@@ -3722,9 +3774,7 @@ async function loadChatLog() {
     const type = m.type === 'user' ? 'user' : 'agent';
     const source = sourceFromMessage(m);
     const raw = m.message || m.question || JSON.stringify(m);
-    // HTML-escape to prevent XSS, then convert newlines to <br>
-    const text = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-                    .replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/\n/g,'<br>');
+    const text = renderMarkdown(raw);
     const ts = (m.ts||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     return `<div class="chat-msg ${type}">
       <div class="chat-msg-header">
@@ -3772,7 +3822,7 @@ async function sendChat() {
     if (emptyEl) emptyEl.remove();
     log.insertAdjacentHTML('beforeend', `<div class="chat-msg user">
   <div class="chat-msg-header"><span class="chat-msg-avatar">👤</span><span class="chat-msg-source">You</span></div>
-  <div>${q.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</div>
+  <div>${renderMarkdown(q)}</div>
 </div>`);
     log.scrollTo({top: log.scrollHeight, behavior: 'smooth'});
   }
@@ -4004,11 +4054,13 @@ async function loadWorkers() {
   if (!agents_list.length) { el.innerHTML = '<div class="empty"><div class="icon">👷</div><p>No agents found.</p></div>'; return; }
   el.innerHTML = agents_list.map(b => {
     const cls = b.running ? 'on' : 'off';
+    const progressColor = b.progress > 70 ? '#34d399' : b.progress > 30 ? '#D4AF37' : '#6b7280';
     const lbl = b.running ? 'running' : 'stopped';
     const startBtn = b.running ? '' : `<button class="btn btn-success btn-sm" onclick="startBot('${b.name}')">▶ Start</button>`;
     const stopBtn = b.running ? `<button class="btn btn-danger btn-sm" onclick="stopBot('${b.name}')">■ Stop</button>` : '';
     return `<div class="sched-row">
       <div class="dot ${cls}" style="margin-top:4px;flex-shrink:0"></div>
+      ${b.running && b.progress > 0 ? `<div style="flex:1;max-width:80px;background:rgba(255,255,255,.05);border-radius:4px;height:4px;overflow:hidden;margin:0 8px"><div style="width:${b.progress}%;height:100%;background:${progressColor};transition:width .5s"></div></div>` : ''}
       <div class="sched-info"><h4>${b.name} <span class="badge ${lbl}">${lbl}</span></h4></div>
       <div style="display:flex;gap:6px">${startBtn}${stopBtn}</div>
     </div>`;
