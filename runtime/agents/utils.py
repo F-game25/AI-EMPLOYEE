@@ -29,7 +29,7 @@ _FILE_LOCKS: dict[str, threading.Lock] = {}
 _FILE_LOCKS_META = threading.Lock()
 
 
-def _get_file_lock(path: "str | Path") -> threading.Lock:
+def _get_file_lock(path: str | Path) -> threading.Lock:
     key = str(path)
     with _FILE_LOCKS_META:
         if key not in _FILE_LOCKS:
@@ -50,7 +50,7 @@ _now_iso = now_iso
 
 # ── JSON file helpers ─────────────────────────────────────────────────────────
 
-def load_json_safe(path: "str | Path", default: Any = None) -> Any:
+def load_json_safe(path: str | Path, default: Any = None) -> Any:
     """Load a JSON file and return its content, or *default* on any error.
 
     Args:
@@ -68,7 +68,7 @@ def load_json_safe(path: "str | Path", default: Any = None) -> Any:
         return default
 
 
-def save_json_safe(path: "str | Path", data: Any, *, indent: int = 2) -> bool:
+def save_json_safe(path: str | Path, data: Any, *, indent: int = 2) -> bool:
     """Atomically write *data* as JSON to *path*.
 
     Creates parent directories if they do not exist.
@@ -89,7 +89,7 @@ def save_json_safe(path: "str | Path", data: Any, *, indent: int = 2) -> bool:
             return False
 
 
-def append_jsonl_safe(path: "str | Path", entry: dict, *, max_lines: int = 0) -> bool:
+def append_jsonl_safe(path: str | Path, entry: dict, *, max_lines: int = 0) -> bool:
     """Append *entry* as a newline-delimited JSON record to *path*.
 
     Creates parent directories if they do not exist.
@@ -124,7 +124,7 @@ def append_jsonl_safe(path: "str | Path", entry: dict, *, max_lines: int = 0) ->
             return False
 
 
-def read_last_jsonl(path: "str | Path", n: int = 100) -> list[dict]:
+def read_last_jsonl(path: str | Path, n: int = 100) -> list[dict]:
     """Return the last *n* non-empty lines from a JSONL file as parsed dicts.
 
     Silently skips lines that fail to parse.
