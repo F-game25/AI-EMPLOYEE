@@ -52,10 +52,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import requests
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
-import uvicorn
+try:
+    import requests
+    from fastapi import FastAPI
+    from fastapi.responses import HTMLResponse, JSONResponse
+    import uvicorn
+    _FASTAPI_AVAILABLE = True
+except ImportError:
+    _FASTAPI_AVAILABLE = False
+    FastAPI = None  # type: ignore[assignment,misc]
+    HTMLResponse = None  # type: ignore[assignment,misc]
+    JSONResponse = None  # type: ignore[assignment,misc]
 
 # ── Module-level constants ────────────────────────────────────────────────────
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
@@ -1122,7 +1129,15 @@ def run_pipeline(raw_input: str | dict, *, task_id: str | None = None) -> dict:
 # 11. FASTAPI APPLICATION + DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 
-app = FastAPI(title="Hermes Agent", version="1.0.0")
+if _FASTAPI_AVAILABLE:
+    app = FastAPI(title="Hermes Agent", version="1.0.0")
+else:
+    class _StubApp:  # type: ignore[no-redef]
+        """Minimal stub so @app route decorators don't raise at import time."""
+        def _noop(self, *a, **kw):
+            return lambda f: f
+        get = post = put = delete = patch = head = options = _noop  # type: ignore[assignment]
+    app = _StubApp()  # type: ignore[assignment]
 
 _DASHBOARD_HTML = """<!doctype html>
 <html lang="en">
@@ -1474,6 +1489,10 @@ def _chatlog_worker() -> None:
 
 if __name__ == "__main__":
     import threading
+
+    if not _FASTAPI_AVAILABLE:
+        print("[hermes-agent] ERROR: fastapi/uvicorn not installed. Run: pip install fastapi uvicorn requests")
+        sys.exit(1)
 
     # Ensure state dirs exist
     (AI_HOME / "state").mkdir(parents=True, exist_ok=True)
