@@ -126,6 +126,7 @@ install_openclaw() {
 # Associative arrays require bash ≥ 4; we use parallel arrays for portability.
 _OLLAMA_MODEL_NAMES=(
     "llama3.2"
+    "gemma4"
     "gemma3"
     "llama3.1"
     "mistral"
@@ -137,7 +138,8 @@ _OLLAMA_MODEL_NAMES=(
 )
 _OLLAMA_MODEL_DESCS=(
     "Meta Llama 3.2 3B  — best all-round, fast          (2 GB RAM)"
-    "Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM) ★ best free model"
+    "Google Gemma 4     — latest Gemma, multimodal      (5 GB RAM) ★ newest free model"
+    "Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM)"
     "Meta Llama 3.1 8B  — smarter, slower               (5 GB RAM)"
     "Mistral 7B         — great instruction following   (4 GB RAM)"
     "Google Gemma 2 9B  — strong reasoning              (5 GB RAM)"

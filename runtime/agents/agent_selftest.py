@@ -421,6 +421,32 @@ def check_hermes_agent() -> None:
     _check_bot_module("hermes-agent", "hermes_agent")
 
 
+def check_gemma_agent() -> None:
+    """Gemma agent module must be importable and its run.sh executable."""
+    _check_bot_module("gemma-agent", "gemma_agent")
+
+
+def check_gemma_config() -> None:
+    """Gemma configuration check — at least one backend should be set up."""
+    via_ollama = os.environ.get("GEMMA_VIA_OLLAMA", "1").strip().lower() not in ("0", "false", "no")
+    google_key = os.environ.get("GOOGLE_API_KEY", "")
+    if via_ollama:
+        _ok(
+            "Gemma backend",
+            "Ollama mode enabled (GEMMA_VIA_OLLAMA=1) — run: ollama pull gemma3",
+        )
+    elif google_key:
+        _ok("Gemma backend", "Google AI Studio mode — GOOGLE_API_KEY set ✓")
+    else:
+        _fail(
+            "Gemma backend",
+            "No Gemma backend configured. "
+            "Either set GEMMA_VIA_OLLAMA=1 and run `ollama pull gemma3`, "
+            "or set GOOGLE_API_KEY in ~/.ai-employee/.env",
+            required=False,
+        )
+
+
 def check_discord_bot_state() -> None:
     """If the Discord bot ran before, its state file should say 'running'."""
     state = AI_HOME / "state" / "discord-bot.state.json"
@@ -533,11 +559,15 @@ def main() -> None:
     check_paid_media_specialist()
     check_financial_deepsearch()
     check_obsidian_memory()
+    check_gemma_agent()
 
     _section("Obsidian Memory Base")
     check_obsidian_vault_path()
     check_blacklight()
     check_hermes_agent()
+
+    _section("Google Gemma (Free Local Open-Source AI)")
+    check_gemma_config()
 
     _section("NVIDIA NIM Integration")
     check_nvidia_nim_config()
