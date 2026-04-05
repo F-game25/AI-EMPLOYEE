@@ -137,19 +137,20 @@ def now_iso() -> str:
 
 def _load_state() -> dict:
     if not STATE_FILE.exists():
-        return {}
+        return {"session_log": [], "last_run": None}
     try:
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
-        return {}
+        return {"session_log": [], "last_run": None}
 
 
 def _save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
-def write_state(state: dict) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+# Alias for backward compat — use _save_state directly in new code
+write_state = _save_state
 
 
 def load_chatlog() -> list:
@@ -157,7 +158,6 @@ def load_chatlog() -> list:
         return []
     try:
         lines = [line for line in CHATLOG.read_text(encoding="utf-8").splitlines() if line.strip()]
-        lines = [line for line in CHATLOG.read_text().splitlines() if line.strip()]
         return [json.loads(line) for line in lines]
     except Exception:
         return []
@@ -578,15 +578,6 @@ def cmd_status() -> str:
 
 
 # ── State helpers ─────────────────────────────────────────────────────────────
-
-
-def _load_state() -> dict:
-    if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text())
-        except Exception:
-            pass
-    return {"session_log": [], "last_run": None}
 
 
 def _save_session(question: str) -> None:

@@ -35,11 +35,12 @@ if sys.version_info < (3, 10):
           f"{sys.version_info.major}.{sys.version_info.minor}")
     sys.exit(1)
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -170,9 +171,44 @@ except ImportError:
                 return False
 
         def create_access_token(self, payload: dict) -> str:
+            """Create a verifiable HMAC-SHA256 signed token (stdlib-only fallback)."""
+            import base64
+            import json as _json
             user = str(payload.get("sub", "user"))
-            nonce = secrets.token_urlsafe(24)
-            return f"fallback.{user}.{nonce}"
+            exp = int(time.time()) + self.expire_minutes * 60
+            body = base64.urlsafe_b64encode(
+                _json.dumps({"sub": user, "exp": exp}).encode()
+            ).rstrip(b"=").decode()
+            sig = hmac.new(
+                self.secret_key.encode(),
+                body.encode(),
+                "sha256",
+            ).hexdigest()
+            return f"fb1.{body}.{sig}"
+
+        def verify_token(self, token: str) -> Optional[dict]:
+            """Verify a stdlib fallback token. Returns payload or None."""
+            import base64
+            import json as _json
+            try:
+                parts = token.split(".", 2)
+                if len(parts) != 3 or parts[0] != "fb1":
+                    return None
+                _prefix, body, sig = parts
+                expected = hmac.new(
+                    self.secret_key.encode(),
+                    body.encode(),
+                    "sha256",
+                ).hexdigest()
+                if not hmac.compare_digest(expected, sig):
+                    return None
+                padding = "=" * (4 - len(body) % 4)
+                data = _json.loads(base64.urlsafe_b64decode(body + padding))
+                if data.get("exp", 0) < int(time.time()):
+                    return None
+                return data
+            except Exception:
+                return None
 
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_DIR = AI_HOME / "state"
@@ -321,21 +357,29 @@ logger = logging.getLogger("problem-solver-ui")
 
 _ACTIVITY_LOCK = threading.Lock()
 
+# ── TTL-cached .env reader (avoids disk I/O on every chat/status request) ──────
+_ENV_MAP_CACHE: tuple[float, dict[str, str]] = (0.0, {})
+_ENV_MAP_CACHE_TTL: float = 10.0  # seconds
+
 
 def _load_runtime_env_map() -> dict[str, str]:
+  global _ENV_MAP_CACHE
+  now = time.time()
+  if now - _ENV_MAP_CACHE[0] < _ENV_MAP_CACHE_TTL:
+    return _ENV_MAP_CACHE[1]
   env_map: dict[str, str] = {}
   env_file = AI_HOME / ".env"
-  if not env_file.exists():
-    return env_map
-  try:
-    for raw_line in env_file.read_text().splitlines():
-      line = raw_line.strip()
-      if not line or line.startswith("#") or "=" not in line:
-        continue
-      key, value = line.split("=", 1)
-      env_map[key.strip()] = value.strip().strip('"').strip("'")
-  except Exception as exc:
-    logger.warning("Failed to read %s: %s", env_file, exc)
+  if env_file.exists():
+    try:
+      for raw_line in env_file.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+          continue
+        key, value = line.split("=", 1)
+        env_map[key.strip()] = value.strip().strip('"').strip("'")
+    except Exception as exc:
+      logger.warning("Failed to read %s: %s", env_file, exc)
+  _ENV_MAP_CACHE = (now, env_map)
   return env_map
 
 
@@ -679,6 +723,76 @@ except ImportError:
 
 app = FastAPI(title="AI Employee Dashboard")
 
+# ── Optional endpoint authentication (REQUIRE_AUTH=1 enables enforcement) ──────
+# When REQUIRE_AUTH is not set (default), requests from localhost are allowed
+# without a token so the dashboard works out-of-the-box.  Set REQUIRE_AUTH=1
+# in ~/.ai-employee/.env to enforce JWT on all state-modifying endpoints.
+_REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "0").strip() in ("1", "true", "yes")
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _verify_any_token(token_str: str) -> bool:
+    """Return True if the token is valid using the configured AuthManager."""
+    cfg = _security_config
+    try:
+        if _SECURITY_AVAILABLE:
+            from security import AuthManager as _AM  # type: ignore
+            _am = _AM(
+                secret_key=(cfg.security.jwt_secret_key if cfg else _jwt_secret_env),
+                algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
+                expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+            )
+            payload = _am.verify_token(token_str)
+            return payload is not None and "sub" in payload
+    except Exception:
+        pass
+    # Fallback: try stdlib HMAC token
+    try:
+        auth_fb = AuthManager(
+            secret_key=_jwt_secret_env,
+            algorithm="HS256",
+            expire_minutes=30,
+        )
+        payload = auth_fb.verify_token(token_str)
+        return payload is not None and "sub" in payload
+    except Exception:
+        return False
+
+
+def _is_localhost(request: Request) -> bool:
+    """Return True if the request originates from the loopback interface."""
+    host = (request.client.host if request.client else "") or ""
+    return host in ("127.0.0.1", "::1", "localhost")
+
+
+async def require_auth(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+) -> None:
+    """FastAPI dependency that enforces auth when REQUIRE_AUTH=1.
+
+    - When REQUIRE_AUTH is off (default): allows all requests.
+    - When REQUIRE_AUTH=1: allows localhost without a token (dev mode),
+      but requires a valid JWT for all other origins.
+    """
+    if not _REQUIRE_AUTH:
+        return  # auth not enforced globally
+    if _is_localhost(request):
+        return  # always allow local access
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Provide a Bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not _verify_any_token(credentials.credentials):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 # ── Rate limiter (openclaw-2) ─────────────────────────────────────────────────
 if _SLOWAPI_AVAILABLE:
     _rate_limit = (
@@ -731,9 +845,12 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # HSTS is only meaningful over TLS; omit it on plain HTTP to avoid browser
+    # caching a broken policy that prevents future access on port changes.
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     # Only set the fallback CSP when the index route has not already applied
-    # a tighter nonce-based policy for the dashboard HTML.
+    # its own policy for the dashboard HTML.
     if "Content-Security-Policy" not in response.headers:
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
@@ -3373,6 +3490,12 @@ async function api(path, opts={}) {
   if (hasBody && typeof fetchOpts.body === 'object' && !(fetchOpts.body instanceof FormData)) {
     fetchOpts.body = JSON.stringify(fetchOpts.body);
   }
+
+  // Attach stored JWT token when available
+  const storedToken = localStorage.getItem('ai_employee_token');
+  if (storedToken && !headers.has('Authorization')) {
+    headers.set('Authorization', 'Bearer ' + storedToken);
+  }
   fetchOpts.headers = headers;
 
   try {
@@ -3395,10 +3518,63 @@ async function api(path, opts={}) {
     if (!r.ok && !data.error && !data.detail) {
       data.detail = `Request failed: ${r.status}`;
     }
+    // Show login modal when server requires auth and we lack a valid token
+    if (r.status === 401 && !path.startsWith('/auth/')) {
+      _showAuthModal();
+    }
     data.status_code = r.status;
     return data;
   } catch(e) {
     return {ok: false, error: String(e)};
+  }
+}
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+function _showAuthModal() {
+  let m = document.getElementById('auth-modal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'auth-modal';
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+    m.setAttribute('aria-label', 'Login required');
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center';
+    m.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:32px;max-width:380px;width:90%;box-shadow:var(--shadow)">
+      <h2 style="margin-bottom:16px;font-size:1.1em;font-weight:700">🔐 Login Required</h2>
+      <p style="font-size:.85em;color:var(--text-secondary);margin-bottom:16px">REQUIRE_AUTH is enabled. Enter your credentials.</p>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <input id="auth-user" type="text" placeholder="Username" autocomplete="username"
+          style="padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit">
+        <input id="auth-pass" type="password" placeholder="Password" autocomplete="current-password"
+          style="padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit">
+        <div id="auth-err" style="color:var(--danger);font-size:.82em;min-height:1.2em"></div>
+        <button onclick="_doLogin()" style="padding:10px 20px;border-radius:var(--radius-sm);background:var(--primary);color:#000;font-weight:700;border:none;cursor:pointer;font-family:inherit">Login</button>
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+  }
+  m.style.display = 'flex';
+  setTimeout(() => document.getElementById('auth-user')?.focus(), 50);
+}
+
+async function _doLogin() {
+  const user = document.getElementById('auth-user')?.value.trim();
+  const pass = document.getElementById('auth-pass')?.value;
+  const errEl = document.getElementById('auth-err');
+  if (!user || !pass) { if(errEl) errEl.textContent = 'Enter username and password.'; return; }
+  const r = await fetch('/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: user, password: pass}),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (r.ok && data.access_token) {
+    localStorage.setItem('ai_employee_token', data.access_token);
+    const m = document.getElementById('auth-modal');
+    if (m) m.style.display = 'none';
+    toast('Logged in ✓', 'success');
+  } else {
+    if (errEl) errEl.textContent = data.detail || 'Login failed.';
   }
 }
 
@@ -4626,31 +4802,6 @@ function renderTaskRow(t) {
     '<button class="btn btn-ghost btn-sm" aria-label="View task details" onclick="openTaskDetail(' + JSON.stringify(tid) + ')" style="border:1px solid rgba(212,175,55,.3);color:var(--gold)">View →</button></div>';
 }
 let _taskDetailTrigger = null;
-function openTaskDetail(tid) {
-  const t = _taskStore.get(tid);
-  if (!t) return;
-  const modal = document.getElementById('task-detail-modal');
-  if (!modal) return;
-  _taskDetailTrigger = document.activeElement;
-  modal.style.display = 'flex';
-  document.getElementById('task-detail-content').innerHTML =
-    '<div style="margin-bottom:12px"><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Goal</div><div style="margin-top:4px">' + escHtml(t.description||t.goal||'N/A') + '</div></div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
-    '<div><div style="font-size:.75em;color:var(--text-muted)">Status</div><div style="color:var(--gold);font-weight:600">' + escHtml(t.status||'completed') + '</div></div>' +
-    '<div><div style="font-size:.75em;color:var(--text-muted)">Agent</div><div>' + escHtml(t.agent||'N/A') + '</div></div>' +
-    '<div><div style="font-size:.75em;color:var(--text-muted)">Created</div><div>' + new Date(t.created_at||t.ts||Date.now()).toLocaleString() + '</div></div>' +
-    '<div><div style="font-size:.75em;color:var(--text-muted)">Mode</div><div>' + escHtml(t.mode||'N/A') + '</div></div>' +
-    '</div>' +
-    (t.result ? '<div><div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Result</div><pre style="font-size:.8em;background:rgba(255,255,255,.03);border-radius:6px;padding:12px;white-space:pre-wrap;color:var(--text-secondary)">' + escHtml(t.result) + '</pre></div>' : '');
-  const dlg = document.getElementById('task-detail-dialog');
-  if (dlg) dlg.focus();
-}
-function closeTaskDetail() {
-  const modal = document.getElementById('task-detail-modal');
-  if (modal) modal.style.display = 'none';
-  if (_taskDetailTrigger && typeof _taskDetailTrigger.focus === 'function') _taskDetailTrigger.focus();
-  _taskDetailTrigger = null;
-}
 
 async function loadTasks() {
   const r = await api('/api/task/list');
@@ -4699,11 +4850,13 @@ async function loadTasks() {
   const history = plans.filter(p => !['running','planning'].includes(p.status)).slice(0,10);
   if (!history.length) { histEl.innerHTML = '<div class="empty"><p>No task history yet.</p></div>'; return; }
   histEl.innerHTML = history.map(p => {
+    const tid = p.id || ('hist_' + Math.random().toString(36).slice(2));
+    _taskStore.set(tid, p);
     const e = {done:'✅',failed:'❌',cancelled:'🛑',timed_out:'⏰'}[p.status]||'?';
     const agents = [...new Set((p.subtasks||[]).map(s=>s.agent_id).filter(Boolean))].join(', ');
     const mode = p.mode ? ` · ${p.mode}` : '';
     return `<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:background .15s" 
-      onclick="openTaskDetail(${JSON.stringify(p)})"
+      onclick="openTaskDetail(${JSON.stringify(tid)})"
       onmouseenter="this.style.background='rgba(212,175,55,.05)'" onmouseleave="this.style.background=''">
       <div>
         <div style="font-weight:500">${e} ${escHtml(p.title||p.id)}</div>
@@ -4737,10 +4890,14 @@ async function reassignSubtask(taskId, subtaskId) {
   else toast('Reassign failed', 'error');
 }
 
-function openTaskDetail(plan) {
+function openTaskDetail(tidOrPlan) {
+  // Accept either a task ID string (looks up _taskStore) or a full plan object
+  const plan = (typeof tidOrPlan === 'string') ? _taskStore.get(tidOrPlan) : tidOrPlan;
+  if (!plan) return;
   const modal = document.getElementById('task-detail-modal');
   const content = document.getElementById('task-detail-content');
   if (!modal || !content) return;
+  _taskDetailTrigger = document.activeElement;
   modal.style.display = 'flex';
   const e = {done:'✅',failed:'❌',cancelled:'🛑',timed_out:'⏰',running:'⏳',planning:'🧠'}[plan.status]||'?';
   const subtasks = plan.subtasks || [];
@@ -4757,16 +4914,18 @@ function openTaskDetail(plan) {
     </div>`;
   }).join('');
   content.innerHTML = `
-    <div style="margin-bottom:14px">
-      <div style="font-size:.84em;color:var(--text-muted);margin-bottom:4px">ID: ${escHtml(plan.id||'?')} · Mode: ${escHtml(plan.mode||'auto')} · Created: ${(plan.created_at||'').split('T')[0]}</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <span>${e}</span>
-        <span style="font-size:.9em;background:var(--surface2);padding:2px 8px;border-radius:4px">${escHtml(plan.status||'?')}</span>
-      </div>
-      ${subtasks.length ? `<div style="font-size:.82em;color:var(--text-muted)">${subtasks.filter(s=>s.status==='done').length}/${subtasks.length} subtasks completed</div>` : ''}
+    <div style="margin-bottom:12px">
+      <div style="font-size:.75em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Goal</div>
+      <div style="margin-top:4px">${escHtml(plan.description||plan.goal||plan.title||'N/A')}</div>
     </div>
-    <div style="font-size:.84em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Subtasks</div>
-    <div style="max-height:340px;overflow-y:auto">${subtaskRows || '<div class="empty"><p>No subtasks.</p></div>'}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div><div style="font-size:.75em;color:var(--text-muted)">Status</div><div style="color:var(--gold);font-weight:600">${escHtml(plan.status||'?')}</div></div>
+      <div><div style="font-size:.75em;color:var(--text-muted)">Mode</div><div>${escHtml(plan.mode||'auto')}</div></div>
+      <div><div style="font-size:.75em;color:var(--text-muted)">ID</div><div style="font-size:.8em;font-family:monospace">${escHtml(plan.id||'?')}</div></div>
+      <div><div style="font-size:.75em;color:var(--text-muted)">Created</div><div>${(plan.created_at||'').split('T')[0]||'—'}</div></div>
+    </div>
+    ${subtasks.length ? `<div style="font-size:.84em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Subtasks</div>
+    <div style="max-height:340px;overflow-y:auto">${subtaskRows}</div>` : ''}
     ${plan.result ? `<div style="margin-top:14px"><div style="font-size:.84em;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Final Output</div><pre style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;white-space:pre-wrap;max-height:200px;overflow-y:auto">${escHtml(String(plan.result).slice(0,1500))}</pre></div>` : ''}
   `;
   document.getElementById('task-detail-heading').textContent = (plan.title||plan.id||'Task Detail');
@@ -4776,6 +4935,8 @@ function openTaskDetail(plan) {
 function closeTaskDetail() {
   const modal = document.getElementById('task-detail-modal');
   if (modal) modal.style.display = 'none';
+  if (_taskDetailTrigger && typeof _taskDetailTrigger.focus === 'function') _taskDetailTrigger.focus();
+  _taskDetailTrigger = null;
 }
 
 // ── Swarm ────────────────────────────────────────────────────────────────────
@@ -7363,7 +7524,7 @@ import asyncio
 async def sse_events(request: Request):
     """Server-Sent Events stream for real-time dashboard updates."""
     async def generate():
-        last_running = -1
+        last_state: Optional[str] = None
         while True:
             if await request.is_disconnected():
                 break
@@ -7382,13 +7543,18 @@ async def sse_events(request: Request):
                             pass
                 plans = _load_task_plans()
                 active = next((p for p in plans if p.get("status") in ("running", "planning")), None)
-                data = json.dumps({
-                    "running": running,
-                    "active_task": active.get("title", "") if active else None,
-                    "ts": now_iso(),
-                })
-                yield f"data: {data}\n\n"
-                last_running = running
+                active_title = active.get("title", "") if active else None
+                # Only emit an SSE event when state has actually changed to
+                # avoid flooding connected clients with identical messages.
+                current_state = f"{running}|{active_title}"
+                if current_state != last_state:
+                    data = json.dumps({
+                        "running": running,
+                        "active_task": active_title,
+                        "ts": now_iso(),
+                    })
+                    yield f"data: {data}\n\n"
+                    last_state = current_state
             except Exception:
                 pass
             await asyncio.sleep(8)
@@ -7452,7 +7618,7 @@ def get_doctor():
 
 
 @app.post("/api/agents/start-all")
-def start_all_agents():
+def start_all_agents(_auth: None = Depends(require_auth)):
     mode = _current_mode()
     targets = _mode_agent_targets(mode)
     outputs = []
@@ -7475,7 +7641,7 @@ def start_all_agents():
 
 
 @app.post("/api/agents/stop-all")
-def stop_all_agents():
+def stop_all_agents(_auth: None = Depends(require_auth)):
     mode = _current_mode()
     targets = _mode_agent_targets(mode)
     outputs = []
@@ -7508,7 +7674,7 @@ def run_onboard_quick_action():
 
 
 @app.post("/api/agents/start")
-def start_bot(payload: dict):
+def start_bot(payload: dict, _auth: None = Depends(require_auth)):
     bot = payload.get("bot", "")
     _validate_bot_name(bot)
     rc, out = ai_employee("start", bot)
@@ -7516,7 +7682,7 @@ def start_bot(payload: dict):
 
 
 @app.post("/api/agents/stop")
-def stop_bot(payload: dict):
+def stop_bot(payload: dict, _auth: None = Depends(require_auth)):
     bot = payload.get("bot", "")
     _validate_bot_name(bot)
     rc, out = ai_employee("stop", bot)
@@ -8793,7 +8959,7 @@ def submit_task(payload: dict):
 
 
 @app.post("/api/task/cancel")
-def cancel_task():
+def cancel_task(_auth: None = Depends(require_auth)):
     """Cancel the currently running task plan."""
     plans = _load_task_plans()
     for p in plans:
@@ -10511,11 +10677,13 @@ def blacklight_status():
 
 
 @app.post("/api/blacklight/start")
-def blacklight_start(payload: dict):
+def blacklight_start(payload: dict, _auth: None = Depends(require_auth)):
     """Start the BLACKLIGHT autonomous loop with the given goal."""
     goal = (payload.get("goal") or "").strip()
     if not goal:
         raise HTTPException(400, "goal is required")
+    if len(goal) > 2000:
+        raise HTTPException(400, "goal must be 2000 characters or fewer")
     try:
         bl = _load_blacklight_module()
         started = bl.start(goal)
@@ -10583,7 +10751,7 @@ def ascend_status():
 
 
 @app.post("/api/ascend/mode")
-def ascend_set_mode(payload: dict):
+def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth)):
     """Set ASCEND_FORGE operating mode (GENERAL / MONEY / AUTO)."""
     mode = (payload.get("mode") or "").strip().upper()
     if not mode:
@@ -10600,7 +10768,7 @@ def ascend_set_mode(payload: dict):
 
 
 @app.post("/api/ascend/scan")
-def ascend_scan():
+def ascend_scan(_auth: None = Depends(require_auth)):
     """Trigger a system scan and return queued patches."""
     try:
         af = _load_ascend_module()
@@ -10623,7 +10791,7 @@ def ascend_patches():
 
 
 @app.post("/api/ascend/patches/{patch_id}/approve")
-def ascend_approve(patch_id: str):
+def ascend_approve(patch_id: str, _auth: None = Depends(require_auth)):
     """Approve a pending patch."""
     try:
         af = _load_ascend_module()
@@ -10637,7 +10805,7 @@ def ascend_approve(patch_id: str):
 
 
 @app.post("/api/ascend/patches/{patch_id}/reject")
-def ascend_reject(patch_id: str):
+def ascend_reject(patch_id: str, _auth: None = Depends(require_auth)):
     """Reject a pending patch."""
     try:
         af = _load_ascend_module()
@@ -10651,7 +10819,7 @@ def ascend_reject(patch_id: str):
 
 
 @app.post("/api/ascend/patches/{patch_id}/rollback")
-def ascend_rollback(patch_id: str):
+def ascend_rollback(patch_id: str, _auth: None = Depends(require_auth)):
     """Roll back an approved patch."""
     try:
         af = _load_ascend_module()
@@ -10676,7 +10844,7 @@ def ascend_changelog(limit: int = 50):
 
 
 @app.post("/api/ascend/auto-approve")
-def ascend_auto_approve(payload: dict):
+def ascend_auto_approve(payload: dict, _auth: None = Depends(require_auth)):
     """Toggle auto-approve for LOW risk patches."""
     enabled = bool(payload.get("enabled", False))
     try:
@@ -11620,7 +11788,7 @@ async def ceo_chat(payload: dict):
             f"Respond strategically and concisely."
         ).strip()
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: query_ai_for_agent(ceo_agent_id, message, system=system),
             )

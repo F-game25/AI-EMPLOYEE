@@ -102,10 +102,14 @@ def load_config(config_path: Optional[str] = None) -> Config:
         ValueError: if the JWT secret is still the placeholder default.
     """
     if config_path is None:
-        local = Path("security.local.yml")
+        # Look for security.local.yml next to THIS file first, then CWD
+        local_beside = Path(__file__).resolve().parent / "security.local.yml"
+        local_cwd = Path("security.local.yml")
         bundled = Path(__file__).resolve().parents[2] / "config" / "security.yml"
-        if local.exists():
-            config_path = str(local)
+        if local_beside.exists():
+            config_path = str(local_beside)
+        elif local_cwd.exists():
+            config_path = str(local_cwd)
         elif bundled.exists():
             config_path = str(bundled)
         else:
