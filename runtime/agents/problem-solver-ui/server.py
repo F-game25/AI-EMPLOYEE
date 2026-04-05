@@ -2194,12 +2194,32 @@ INDEX_HTML = r"""<!doctype html>
   <div class="card">
     <div class="card-header">
       <div class="card-title"><span class="icon">💡</span> Improvement Proposals</div>
-      <button class="btn btn-ghost btn-sm" onclick="loadImprovements()">↻ Refresh</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="loadImprovements()">↻ Refresh</button>
+      </div>
     </div>
-    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">
-      The discovery agent proposes new skills and markets. Review and approve or reject below.
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:10px">
+      AI-generated improvement proposals. Review, approve, or send to the main AI for immediate execution.
       <strong style="color:var(--warning)">No changes are applied automatically.</strong>
     </p>
+    <!-- Status filter -->
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px" id="improv-status-pills">
+      <button class="btn btn-primary btn-sm improv-pill active" onclick="filterImprovements('all',this)" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none">All</button>
+      <button class="btn btn-ghost btn-sm improv-pill" onclick="filterImprovements('pending',this)">⏳ Pending</button>
+      <button class="btn btn-ghost btn-sm improv-pill" onclick="filterImprovements('in_progress',this)">🔄 In Progress</button>
+      <button class="btn btn-ghost btn-sm improv-pill" onclick="filterImprovements('approved',this)">✅ Approved</button>
+      <button class="btn btn-ghost btn-sm improv-pill" onclick="filterImprovements('completed',this)">🏆 Completed</button>
+      <button class="btn btn-ghost btn-sm improv-pill" onclick="filterImprovements('rejected',this)">🚫 Rejected</button>
+    </div>
+    <!-- Priority filter -->
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px" id="improv-priority-pills">
+      <span style="font-size:.78em;color:var(--text-muted);align-self:center;font-weight:600">Priority:</span>
+      <button class="btn btn-ghost btn-sm improv-pri-pill active" onclick="filterImprovPriority('all',this)">All</button>
+      <button class="btn btn-ghost btn-sm improv-pri-pill" onclick="filterImprovPriority('critical',this)" style="border-color:rgba(239,68,68,.4);color:#ef4444">🔴 Critical</button>
+      <button class="btn btn-ghost btn-sm improv-pri-pill" onclick="filterImprovPriority('high',this)" style="border-color:rgba(245,158,11,.4);color:#f59e0b">🟠 High</button>
+      <button class="btn btn-ghost btn-sm improv-pri-pill" onclick="filterImprovPriority('medium',this)" style="border-color:rgba(234,179,8,.4);color:#eab308">🟡 Medium</button>
+      <button class="btn btn-ghost btn-sm improv-pri-pill" onclick="filterImprovPriority('low',this)" style="border-color:rgba(16,185,129,.4);color:#10b981">🟢 Low</button>
+    </div>
     <div id="improvement-list"><div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery agent will add proposals over time.</p></div></div>
   </div>
 </div>
@@ -2606,28 +2626,53 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Skills ── -->
 <div id="tab-skills" class="tab-content">
-  <div class="grid2">
-    <div class="card">
+  <div class="grid2" style="align-items:start">
+    <div class="card" style="min-height:600px;display:flex;flex-direction:column">
       <div class="card-header">
         <div class="card-title"><span class="icon">🛠️</span> Skills Library <span id="skill-total-badge" style="font-size:.8em;color:var(--text-muted)"></span></div>
+        <button class="btn btn-primary btn-sm" onclick="toggleNewSkillForm()" id="new-skill-btn" style="background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;letter-spacing:.03em;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">＋ New Skill</button>
       </div>
-      <input id="skill-search" placeholder="Search skills…" oninput="filterSkills()" />
+      <input id="skill-search" placeholder="🔍 Search skills by name, category, or tag…" oninput="filterSkills()" />
       <div id="category-pills" style="margin:10px 0"></div>
-      <div id="skill-grid" class="skill-grid"><div class="empty"><div class="icon">🛠️</div><p>Loading skills…</p></div></div>
+      <div id="skill-grid" class="skill-grid" style="flex:1;overflow-y:auto"><div class="empty"><div class="icon">🛠️</div><p>Loading skills…</p></div></div>
     </div>
-    <div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- New Skill Form (hidden by default) -->
+      <div id="new-skill-form-card" class="card" style="display:none;border:2px solid rgba(212,175,55,.4);background:linear-gradient(135deg,rgba(212,175,55,.04),var(--surface2))">
+        <div class="card-header">
+          <div class="card-title"><span style="color:var(--gold)">◈</span> Create New Skill</div>
+          <button class="btn btn-ghost btn-sm" onclick="toggleNewSkillForm()">✕ Cancel</button>
+        </div>
+        <div class="form-group"><label>Skill Name</label><input id="new-skill-name" placeholder="e.g. Cold Email Copywriting"/></div>
+        <div class="form-group"><label>Category</label>
+          <select id="new-skill-category">
+            <option>Content &amp; Writing</option><option>Lead Generation &amp; Sales</option>
+            <option>Research &amp; Analysis</option><option>Social Media</option>
+            <option>Customer Support</option><option>Marketing &amp; SEO</option>
+            <option>Development &amp; Technical</option><option>Data Analysis</option>
+            <option>Trading &amp; Finance</option><option>E-commerce &amp; Product</option>
+            <option>Automation &amp; Productivity</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Description</label><textarea id="new-skill-desc" rows="3" placeholder="Describe what this skill does and when to use it…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea></div>
+        <div class="form-group"><label>Tags (comma-separated)</label><input id="new-skill-tags" placeholder="e.g. email, sales, conversion"/></div>
+        <div class="form-group"><label>How it works (steps, one per line)</label><textarea id="new-skill-steps" rows="3" placeholder="Step 1: Analyze the target audience&#10;Step 2: Draft personalized subject line&#10;Step 3: Write compelling body copy" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea></div>
+        <button class="btn btn-success" onclick="saveNewSkill()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">◈ Save Skill to Library</button>
+        <div id="new-skill-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <!-- Create Custom Agent -->
       <div class="card">
         <div class="card-header">
           <div class="card-title"><span class="icon">🤖</span> Create Custom Agent</div>
         </div>
-        <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">Select skills from the library, name your agent, then click Create.</p>
+        <p style="color:var(--text-muted);font-size:.85em;margin-bottom:14px">Select skills from the library on the left, name your agent, then click Create.</p>
         <div class="form-group"><label>Agent Name</label><input id="agent-name-input" placeholder="e.g. My Content Writer"/></div>
         <div class="form-group"><label>Description (optional)</label><input id="agent-desc-input" placeholder="What this agent does"/></div>
         <div class="form-group">
           <label>Selected Skills <span id="selected-count" style="color:var(--primary)">(0)</span></label>
           <div id="selected-skills-list" style="font-size:.82em;color:var(--text-muted);min-height:24px">No skills selected. Click cards on the left.</div>
         </div>
-        <button class="btn btn-success" onclick="createAgent()">➕ Create Agent</button>
+        <button class="btn btn-success" onclick="createAgent()" style="background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">➕ Create Agent</button>
       </div>
       <div class="card">
         <div class="card-header">
@@ -2743,29 +2788,80 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Swarm ── -->
 <div id="tab-swarm" class="tab-content">
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title"><span class="icon">🐝</span> Agent Swarm Overview</div>
-      <button class="btn btn-ghost btn-sm" onclick="loadSwarm()">↻ Refresh</button>
+  <div style="display:flex;gap:16px;flex-wrap:wrap">
+    <!-- Left: agent grid -->
+    <div style="flex:1;min-width:320px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🐝</span> Agent Swarm Overview</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadSwarm()">↻ Refresh</button>
+        </div>
+        <p style="color:var(--text-muted);font-size:.85em;margin-bottom:12px">All AI agents — capabilities, status, and current workload.</p>
+        <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
+          <input id="swarm-search" placeholder="🔍 Search agents by name, skill, or capability…"
+            style="flex:1;background:var(--surface2);border:1px solid rgba(212,175,55,.2);border-radius:8px;color:var(--text);padding:10px 14px;font-family:inherit;font-size:.88em;outline:none"
+            oninput="filterSwarm(null,null)" onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'" />
+          <button class="btn btn-ghost btn-sm" onclick="loadSwarm()" title="Refresh swarm">↻ Refresh</button>
+        </div>
+        <div id="swarm-filter-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+          <button class="btn btn-primary btn-sm swarm-pill active" onclick="filterSwarm('all',this)" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none">All</button>
+          <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('sales',this)">💼 Sales</button>
+          <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('marketing',this)">📢 Marketing</button>
+          <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('social',this)">📱 Social</button>
+          <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('analytics',this)">📊 Analytics</button>
+          <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('content',this)">✍️ Content</button>
+          <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('ecommerce',this)">🛒 E-commerce</button>
+          <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('coordination',this)">🎯 Core</button>
+        </div>
+        <div id="swarm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px"><div class="empty"><div class="icon">🐝</div><p>Loading agents…</p></div></div>
+      </div>
     </div>
-    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:12px">All AI agents — their capabilities, current status, and workload.</p>
-    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
-      <input id="swarm-search" placeholder="🔍 Search agents by name, skill, or capability…"
-        style="flex:1;background:var(--surface2);border:1px solid rgba(212,175,55,.2);border-radius:8px;color:var(--text);padding:10px 14px;font-family:inherit;font-size:.88em;outline:none"
-        oninput="filterSwarm(null,null)" onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'" />
-      <button class="btn btn-ghost btn-sm" onclick="loadSwarm()" title="Refresh swarm">↻ Refresh</button>
+    <!-- Right: collaboration panel -->
+    <div style="width:340px;flex-shrink:0;display:flex;flex-direction:column;gap:14px">
+      <!-- Active Task Panel -->
+      <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.04),var(--surface2))">
+        <div class="card-header">
+          <div class="card-title"><span style="color:var(--gold)">◈</span> Active Task</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadSwarmActivity()">↻</button>
+        </div>
+        <div id="swarm-active-task">
+          <div class="empty"><div class="icon">⚡</div><p style="font-size:.83em">No active task. Launch one from the Tasks tab.</p></div>
+        </div>
+      </div>
+      <!-- Agent Communication Stream -->
+      <div class="card" style="flex:1;border:1px solid rgba(212,175,55,.15)">
+        <div class="card-header">
+          <div class="card-title"><span style="color:var(--gold)">◈</span> Swarm Activity Stream</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadSwarmActivity()">↻ Refresh</button>
+        </div>
+        <p style="color:var(--text-muted);font-size:.8em;margin-bottom:10px">Real-time log of agent actions, completions, and collaborations.</p>
+        <div id="swarm-activity-stream" style="max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+          <div class="empty"><div class="icon">📡</div><p style="font-size:.83em">No activity yet. Run a task to see agents collaborate.</p></div>
+        </div>
+      </div>
+      <!-- Swarm Stats -->
+      <div class="card" style="border:1px solid rgba(212,175,55,.15)">
+        <div class="card-title" style="margin-bottom:10px"><span style="color:var(--gold)">◈</span> Swarm Stats</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div style="text-align:center;padding:10px;background:rgba(212,175,55,.06);border-radius:8px;border:1px solid rgba(212,175,55,.12)">
+            <div style="font-size:1.6em;font-weight:800;color:var(--gold)" id="swarm-stat-online">–</div>
+            <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Online</div>
+          </div>
+          <div style="text-align:center;padding:10px;background:rgba(34,197,94,.06);border-radius:8px;border:1px solid rgba(34,197,94,.12)">
+            <div style="font-size:1.6em;font-weight:800;color:var(--success)" id="swarm-stat-total">–</div>
+            <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Total Agents</div>
+          </div>
+          <div style="text-align:center;padding:10px;background:rgba(99,102,241,.06);border-radius:8px;border:1px solid rgba(99,102,241,.12)">
+            <div style="font-size:1.6em;font-weight:800;color:#818cf8" id="swarm-stat-tasks">–</div>
+            <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Tasks Run</div>
+          </div>
+          <div style="text-align:center;padding:10px;background:rgba(239,68,68,.06);border-radius:8px;border:1px solid rgba(239,68,68,.12)">
+            <div style="font-size:1.6em;font-weight:800;color:#f87171" id="swarm-stat-categories">–</div>
+            <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Categories</div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div id="swarm-filter-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
-      <button class="btn btn-primary btn-sm swarm-pill active" onclick="filterSwarm('all',this)" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none">All</button>
-      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('sales',this)">💼 Sales</button>
-      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('marketing',this)">📢 Marketing</button>
-      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('social',this)">📱 Social</button>
-      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('analytics',this)">📊 Analytics</button>
-      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('content',this)">✍️ Content</button>
-      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('ecommerce',this)">🛒 E-commerce</button>
-      <button class="btn btn-ghost btn-sm swarm-pill" onclick="filterSwarm('coordination',this)">🎯 Core</button>
-    </div>
-    <div id="swarm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"><div class="empty"><div class="icon">🐝</div><p>Loading agents…</p></div></div>
   </div>
 </div>
 
@@ -2864,6 +2960,34 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
+  <!-- Value Over Time Chart -->
+  <div class="card" style="margin-top:0;border:1px solid rgba(212,175,55,.15)">
+    <div class="card-header">
+      <div class="card-title"><span style="color:var(--gold)">◈</span> Value Generated Over Time</div>
+      <span style="font-size:.75em;color:var(--text-muted)">€ per event · cumulative</span>
+    </div>
+    <div id="roi-chart-container" style="min-height:120px;display:flex;align-items:flex-end;gap:4px;padding:16px 0 0;position:relative">
+      <div class="empty" style="width:100%"><div class="icon">📈</div><p style="font-size:.84em">Record events to see value chart.</p></div>
+    </div>
+    <div id="roi-chart-labels" style="display:flex;gap:4px;margin-top:4px;overflow:hidden"></div>
+  </div>
+
+  <!-- Agent Breakdown -->
+  <div class="grid2" style="margin-top:0">
+    <div class="card" style="border:1px solid rgba(212,175,55,.12)">
+      <div class="card-header">
+        <div class="card-title"><span style="color:var(--gold)">◈</span> Breakdown by Agent</div>
+      </div>
+      <div id="roi-agent-breakdown"><div class="empty"><div class="icon">🤖</div><p style="font-size:.84em">No agent data yet.</p></div></div>
+    </div>
+    <div class="card" style="border:1px solid rgba(212,175,55,.12)">
+      <div class="card-header">
+        <div class="card-title"><span style="color:var(--gold)">◈</span> Breakdown by Task Type</div>
+      </div>
+      <div id="roi-type-breakdown"><div class="empty"><div class="icon">📋</div><p style="font-size:.84em">No task type data yet.</p></div></div>
+    </div>
+  </div>
+
   <div class="grid2">
     <div class="card">
       <div class="card-header">
@@ -2902,12 +3026,27 @@ INDEX_HTML = r"""<!doctype html>
 <div id="tab-templates" class="tab-content">
   <div class="card">
     <div class="card-header">
-      <div class="card-title"><span class="icon">📋</span> Agent Templates</div>
-      <button class="btn btn-ghost btn-sm" onclick="loadTemplates()">↻ Refresh</button>
+      <div class="card-title"><span class="icon">📋</span> Business Templates</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="template-search" placeholder="🔍 Search templates…" oninput="filterTemplates()"
+          style="background:var(--surface2);border:1px solid rgba(212,175,55,.2);border-radius:8px;color:var(--text);padding:7px 12px;font-family:inherit;font-size:.82em;outline:none;width:200px"
+          onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'" />
+        <button class="btn btn-ghost btn-sm" onclick="loadTemplates()">↻ Refresh</button>
+      </div>
     </div>
-    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px">
+    <p style="color:var(--text-muted);font-size:.85em;margin-bottom:12px">
       Pre-built plug-and-play templates for common business use-cases. One click to deploy a full AI team.
     </p>
+    <!-- Category filter -->
+    <div id="template-cat-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+      <button class="btn btn-primary btn-sm tmpl-pill active" onclick="filterTemplatesCat('',this)" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none">All</button>
+      <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('Sales',this)">💼 Sales</button>
+      <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('Content',this)">✍️ Content</button>
+      <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('Marketing',this)">📢 Marketing</button>
+      <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('Support',this)">🎧 Support</button>
+      <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('E-commerce',this)">🛒 E-commerce</button>
+      <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('HR',this)">👥 HR</button>
+    </div>
     <div id="templates-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px">
       <div class="empty"><div class="icon">📋</div><p>Loading templates…</p></div>
     </div>
@@ -2994,29 +3133,106 @@ INDEX_HTML = r"""<!doctype html>
       </div>
     </div>
   </div>
+
+  <!-- Custom Guardrails -->
+  <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:var(--gold)">◈</span> Custom Guardrails</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadGuardrails()">↻ Refresh</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Add custom safety rules the AI must follow. These are enforced across all agent actions.</p>
+    <div class="grid2" style="gap:16px;align-items:start">
+      <div>
+        <div style="font-size:.78em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Active Custom Rules</div>
+        <div id="custom-guardrails-list"><div class="empty" style="padding:12px"><div class="icon" style="font-size:1.4em">🔒</div><p style="font-size:.84em">No custom rules yet. Add one on the right.</p></div></div>
+      </div>
+      <div>
+        <div style="font-size:.78em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Add New Rule</div>
+        <div class="form-group">
+          <label>Rule Type</label>
+          <select id="gr-custom-type">
+            <option value="forbidden_action">Forbidden Action</option>
+            <option value="required_approval">Requires Approval</option>
+            <option value="content_filter">Content Filter</option>
+            <option value="data_restriction">Data Restriction</option>
+            <option value="custom">Custom Rule</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Rule Description</label>
+          <textarea id="gr-custom-rule" rows="3" placeholder="e.g. Never send emails to competitors' domains&#10;e.g. Always require approval before posting on LinkedIn&#10;e.g. Never share customer pricing data externally"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Severity</label>
+          <select id="gr-custom-severity">
+            <option value="critical">🔴 Critical (block immediately)</option>
+            <option value="high">🟠 High (require approval)</option>
+            <option value="medium" selected>🟡 Medium (log and warn)</option>
+            <option value="low">🟢 Low (log only)</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="addCustomGuardrail()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">🔒 Add Guardrail Rule</button>
+        <div id="gr-custom-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Memory ── -->
 <div id="tab-memory" class="tab-content">
-  <div class="grid2">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">👥</span> Client Memory</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadMemory()">↻ Refresh</button>
-      </div>
-      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">The AI remembers your clients across all conversations and tasks.</p>
-      <div id="memory-clients"><div class="empty"><div class="icon">👥</div><p>No clients remembered yet.</p></div></div>
-    </div>
-
-    <div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:start">
+    <!-- Left: Client Memory with search -->
+    <div style="flex:1;min-width:300px">
       <div class="card">
         <div class="card-header">
-          <div class="card-title"><span class="icon">➕</span> Add Client</div>
+          <div class="card-title"><span class="icon">👥</span> Client / Contact Memory</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadMemory()">↻ Refresh</button>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:10px">The AI remembers your clients across all conversations and tasks.</p>
+        <!-- Search and filter bar -->
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+          <input id="memory-search" placeholder="🔍 Search by name, company, email…" oninput="filterMemoryClients()"
+            style="flex:1;background:var(--surface2);border:1px solid rgba(212,175,55,.2);border-radius:8px;color:var(--text);padding:8px 12px;font-family:inherit;font-size:.84em;outline:none"
+            onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'" />
+          <select id="memory-status-filter" onchange="filterMemoryClients()"
+            style="background:var(--surface2);border:1px solid rgba(212,175,55,.2);border-radius:8px;color:var(--text);padding:8px 10px;font-size:.82em;outline:none">
+            <option value="">All Status</option>
+            <option value="prospect">Prospect</option>
+            <option value="lead">Lead</option>
+            <option value="customer">Customer</option>
+            <option value="churned">Churned</option>
+          </select>
+        </div>
+        <div id="memory-clients"><div class="empty"><div class="icon">👥</div><p>No clients remembered yet.</p></div></div>
+      </div>
+      <!-- Recent Conversations (closed chats) -->
+      <div class="card" style="margin-top:14px;border:1px solid rgba(212,175,55,.15)">
+        <div class="card-header">
+          <div class="card-title"><span style="color:var(--gold)">◈</span> Recent Conversations</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadMemoryConversations()">↻ Refresh</button>
+        </div>
+        <p style="color:var(--text-muted);font-size:.82em;margin-bottom:10px">Closed chat sessions with AI summary and date. Click any to view details.</p>
+        <input id="conv-search" placeholder="🔍 Search conversations…" oninput="filterConversations()"
+          style="width:100%;background:var(--surface2);border:1px solid rgba(212,175,55,.2);border-radius:8px;color:var(--text);padding:8px 12px;font-family:inherit;font-size:.84em;outline:none;margin-bottom:10px"
+          onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'" />
+        <div id="memory-conversations"><div class="empty"><div class="icon">💬</div><p style="font-size:.84em">No conversations recorded yet. Chat sessions are saved here automatically.</p></div></div>
+      </div>
+    </div>
+    <!-- Right: Add Client + Recent Interactions -->
+    <div style="width:320px;flex-shrink:0;display:flex;flex-direction:column;gap:14px">
+      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+        <div class="card-header">
+          <div class="card-title"><span style="color:var(--gold)">◈</span> Add Client</div>
         </div>
         <div class="form-group"><label>Name</label><input id="mem-name" placeholder="e.g. John Smith"/></div>
         <div class="form-group"><label>Company</label><input id="mem-company" placeholder="e.g. Acme Corp"/></div>
         <div class="form-group"><label>Email</label><input id="mem-email" type="email" placeholder="john@acme.com"/></div>
         <div class="form-group"><label>Phone</label><input id="mem-phone" type="tel" placeholder="+1 555 123 4567"/></div>
+        <div class="form-group">
+          <label>Last Contact</label>
+          <input id="mem-last-contact" type="date" />
+        </div>
         <div class="form-group">
           <label>Status</label>
           <select id="mem-status">
@@ -3026,11 +3242,11 @@ INDEX_HTML = r"""<!doctype html>
             <option value="churned">Churned</option>
           </select>
         </div>
-        <div class="form-group"><label>Notes</label><textarea id="mem-notes" rows="3" placeholder="Any important context…"></textarea></div>
-        <button class="btn btn-success" onclick="addClient()">➕ Add Client</button>
+        <div class="form-group"><label>Notes</label><textarea id="mem-notes" rows="3" placeholder="Any important context about this client…"></textarea></div>
+        <button class="btn btn-success" onclick="addClient()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">➕ Add Client</button>
       </div>
 
-      <div class="card" style="margin-top:0">
+      <div class="card">
         <div class="card-header">
           <div class="card-title"><span class="icon">📝</span> Recent Interactions</div>
         </div>
@@ -4412,19 +4628,76 @@ async function stopBot(name) {
 }
 
 // ── Improvements ────────────────────────────────────────────────────────────
+let _allImprovements = [];
+let _improvStatusFilter = 'all';
+let _improvPriorityFilter = 'all';
+
 async function loadImprovements() {
   const data = await api('/api/improvements');
-  const items = data.improvements || [];
+  _allImprovements = data.improvements || [];
+  renderImprovements();
+}
+
+function filterImprovements(status, btn) {
+  _improvStatusFilter = status;
+  document.querySelectorAll('.improv-pill').forEach(p => {
+    p.classList.remove('active');
+    p.style.background = '';
+    p.style.color = '';
+    p.style.border = '';
+  });
+  if (btn) {
+    btn.classList.add('active');
+    btn.style.background = 'linear-gradient(135deg,var(--primary-dark),var(--primary))';
+    btn.style.color = '#000';
+    btn.style.border = 'none';
+  }
+  renderImprovements();
+}
+
+function filterImprovPriority(priority, btn) {
+  _improvPriorityFilter = priority;
+  document.querySelectorAll('.improv-pri-pill').forEach(p => {
+    p.classList.remove('active');
+    p.style.background = '';
+  });
+  if (btn) {
+    btn.classList.add('active');
+    btn.style.background = 'rgba(212,175,55,.15)';
+  }
+  renderImprovements();
+}
+
+function renderImprovements() {
   const el = document.getElementById('improvement-list');
-  if (!items.length) { el.innerHTML = '<div class="empty"><div class="icon">💡</div><p>No proposals yet. The discovery agent will add them over time.</p></div>'; return; }
-  el.innerHTML = items.map(imp => `
-    <div class="improv-row" style="cursor:pointer" onclick="toggleImprovDetail('${jsEsc(imp.id)}')">
+  let items = _allImprovements;
+  if (_improvStatusFilter !== 'all') items = items.filter(i => (i.status || 'pending') === _improvStatusFilter);
+  if (_improvPriorityFilter !== 'all') items = items.filter(i => (i.priority || 'medium') === _improvPriorityFilter);
+
+  if (!items.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">💡</div><p>No proposals match the current filter. The discovery agent will add proposals over time.</p></div>';
+    return;
+  }
+
+  const priorityColors = {critical:'#ef4444', high:'#f59e0b', medium:'#eab308', low:'#10b981'};
+  const priorityIcons = {critical:'🔴', high:'🟠', medium:'🟡', low:'🟢'};
+  const statusColors = {pending:'rgba(245,158,11,.2)', in_progress:'rgba(99,102,241,.2)', approved:'rgba(16,185,129,.2)', completed:'rgba(34,197,94,.2)', rejected:'rgba(239,68,68,.12)'};
+
+  el.innerHTML = items.map(imp => {
+    const priority = imp.priority || 'medium';
+    const priColor = priorityColors[priority] || '#eab308';
+    const priIcon = priorityIcons[priority] || '🟡';
+    const statusCol = statusColors[imp.status || 'pending'] || 'var(--surface)';
+    return `
+    <div class="improv-row" style="cursor:pointer;border-left:3px solid ${priColor}" onclick="toggleImprovDetail('${jsEsc(imp.id)}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-        <h4 style="display:flex;align-items:center;gap:8px">
+        <h4 style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap">
           <span id="improv-arrow-${escHtml(imp.id)}" style="font-size:.8em;color:var(--text-muted)">▶</span>
-          ${escHtml(imp.title||imp.id)} <span class="badge ${imp.status||'pending'}">${imp.status||'pending'}</span>
+          <span style="font-size:.78em;background:rgba(212,175,55,.08);padding:1px 7px;border-radius:4px;border:1px solid rgba(${priColor.replace('#','').match(/../g).map(h=>parseInt(h,16)).join(',')}, .3);color:${priColor};font-weight:600">${priIcon} ${priority}</span>
+          ${escHtml(imp.title||imp.id)}
+          <span class="badge ${imp.status||'pending'}" style="background:${statusCol}">${imp.status||'pending'}</span>
         </h4>
-        ${imp.status==='pending' ? `<div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
+        ${(imp.status==='pending'||!imp.status) ? `<div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
           <button class="btn btn-success btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','approved')">✓ Approve</button>
           <button class="btn btn-danger btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','rejected')">✕ Reject</button>
         </div>` : ''}
@@ -4435,12 +4708,15 @@ async function loadImprovements() {
         ${imp.agent ? `<p style="font-size:.78em;color:var(--primary);margin-bottom:8px">Agent: <strong>${escHtml(imp.agent)}</strong> · Type: ${escHtml(imp.type||'?')} · Effort: ${escHtml(imp.effort||'?')}</p>` : ''}
         ${imp.rationale ? `<p style="font-size:.8em;color:var(--text-muted);margin-bottom:10px"><strong>Rationale:</strong> ${escHtml(imp.rationale)}</p>` : ''}
         <div style="display:flex;gap:6px;flex-wrap:wrap" onclick="event.stopPropagation()">
-          <button class="btn btn-primary btn-sm" onclick="sendImprovToAI('${jsEsc(imp.id)}','${jsEsc(imp.title||imp.id)}','${jsEsc(imp.description||'')}')">🚀 Send to Main AI for Execution</button>
-          ${imp.status==='pending' ? `<button class="btn btn-success btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','approved')">✓ Approve</button>
+          <button class="btn btn-primary btn-sm" onclick="sendImprovToAI('${jsEsc(imp.id)}','${jsEsc(imp.title||imp.id)}','${jsEsc(imp.description||'')}')" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none;font-weight:700">🚀 Execute This Improvement</button>
+          ${(imp.status==='pending'||!imp.status) ? `<button class="btn btn-success btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','approved')">✓ Approve</button>
           <button class="btn btn-danger btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','rejected')">✕ Reject</button>` : ''}
+          ${imp.status==='approved' ? `<button class="btn btn-primary btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','in_progress')">🔄 Mark In Progress</button>` : ''}
+          ${imp.status==='in_progress' ? `<button class="btn btn-success btn-sm" onclick="reviewImprovement('${jsEsc(imp.id)}','completed')">🏆 Mark Completed</button>` : ''}
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function toggleImprovDetail(id) {
@@ -4454,8 +4730,10 @@ function toggleImprovDetail(id) {
 
 async function sendImprovToAI(id, title, description) {
   const msg = `Execute this improvement proposal:\n\nTitle: ${title}\n\nDescription: ${description}\n\nPlease implement this improvement and report back with the result.`;
+  // Mark as in_progress
+  await api(`/api/improvements/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status: 'in_progress'})});
   // Switch to chat tab and send
-  const chatTabBtn = document.querySelector('nav button[onclick*="chat"]');
+  const chatTabBtn = document.querySelector('nav button[onclick*="\'chat\'"]');
   if (chatTabBtn) chatTabBtn.click();
   setTimeout(() => {
     const input = document.getElementById('chat-input');
@@ -4469,7 +4747,12 @@ async function sendImprovToAI(id, title, description) {
 
 async function reviewImprovement(id, decision) {
   const r = await api(`/api/improvements/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status: decision})});
-  if (r.ok) { toast(decision==='approved' ? '✓ Approved' : '✕ Rejected', decision==='approved'?'success':'error'); loadImprovements(); }
+  if (r.ok) {
+    const labels = {approved:'✓ Approved', rejected:'✕ Rejected', in_progress:'🔄 In Progress', completed:'🏆 Completed'};
+    const types = {approved:'success', rejected:'error', in_progress:'info', completed:'success'};
+    toast(labels[decision] || decision, types[decision] || 'info');
+    loadImprovements();
+  }
 }
 
 // ── Skills ───────────────────────────────────────────────────────────────────
@@ -4527,6 +4810,8 @@ function renderSkillGrid(skills) {
     const color = CAT_COLORS[s.category] || '#94a3b8';
     const sel = selectedSkillIds.has(s.id);
     const tags = (s.tags||[]).slice(0,4).map(t=>`<span class="tag">${t}</span>`).join('');
+    const usageCount = s.usage_count != null ? s.usage_count : 0;
+    const createdBy = s.created_by ? `<span style="font-size:.68em;color:var(--text-muted)">by ${escHtml(s.created_by)}</span>` : '';
     return `<div class="skill-card${sel?' selected':''}" onclick="toggleSkill(${JSON.stringify(s.id)},this)">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">
         <h5 style="flex:1">${escHtml(s.name)} <span style="color:${color};font-size:.72em;font-weight:500">${escHtml(s.category)}</span></h5>
@@ -4535,6 +4820,9 @@ function renderSkillGrid(skills) {
       </div>
       <p>${escHtml(s.description.slice(0,110))}${s.description.length>110?'…':''}</p>
       <div class="tags">${tags}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:.72em;color:var(--text-muted)">
+        <span>⚡ Used ${usageCount}×</span>${createdBy}
+      </div>
     </div>`;
   }).join('');
 }
@@ -4545,21 +4833,28 @@ function showSkillDetail(id) {
   const color = CAT_COLORS[s.category] || '#94a3b8';
   const tags = (s.tags||[]).map(t=>`<span class="tag">${escHtml(t)}</span>`).join('');
   const steps = (s.steps||[]).map((step,i)=>`<li style="margin-bottom:6px">${escHtml(step)}</li>`).join('');
+  const usageCount = s.usage_count != null ? s.usage_count : 0;
+  const createdBy = s.created_by || 'System';
   let html = `<div style="position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:2000;display:flex;align-items:center;justify-content:center" id="skill-detail-overlay" onclick="if(event.target.id==='skill-detail-overlay')closeSkillDetail()">
     <div style="background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:28px;max-width:560px;width:90%;max-height:80vh;overflow-y:auto">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
         <div>
           <div style="font-size:1.1em;font-weight:700;color:var(--text)">${escHtml(s.name)}</div>
-          <span style="font-size:.78em;background:${color}22;color:${color};padding:2px 8px;border-radius:4px;border:1px solid ${color}44">${escHtml(s.category)}</span>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap">
+            <span style="font-size:.78em;background:${color}22;color:${color};padding:2px 8px;border-radius:4px;border:1px solid ${color}44">${escHtml(s.category)}</span>
+            <span style="font-size:.72em;color:var(--text-muted)">⚡ Used ${usageCount}×</span>
+            <span style="font-size:.72em;color:var(--text-muted)">👤 by ${escHtml(createdBy)}</span>
+          </div>
         </div>
         <button onclick="closeSkillDetail()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);padding:4px 10px;cursor:pointer">✕</button>
       </div>
       <p style="font-size:.88em;color:var(--text-secondary);line-height:1.6;margin-bottom:14px">${escHtml(s.description)}</p>
       ${tags ? `<div style="margin-bottom:14px"><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Tags</div><div class="tags">${tags}</div></div>` : ''}
       ${steps ? `<div style="margin-bottom:14px"><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">How it works</div><ol style="font-size:.83em;color:var(--text-secondary);margin:0 0 0 16px;line-height:1.7">${steps}</ol></div>` : ''}
-      ${s.prompt_template ? `<div><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Prompt Template</div><pre style="font-size:.75em;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-word;color:var(--text-secondary)">${escHtml(s.prompt_template.slice(0,400))}${s.prompt_template.length>400?'\n…':''}</pre></div>` : ''}
-      <div style="margin-top:16px;display:flex;gap:8px">
-        <button class="btn btn-success btn-sm" onclick="toggleSkillFromModal(${JSON.stringify(s.id)});closeSkillDetail()" id="skill-detail-add-btn">${selectedSkillIds.has(s.id)?'✓ Deselect':'+ Add to Agent'}</button>
+      ${s.prompt_template ? `<div style="margin-bottom:14px"><div style="font-size:.72em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Prompt Template</div><pre style="font-size:.75em;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-word;color:var(--text-secondary)">${escHtml(s.prompt_template.slice(0,400))}${s.prompt_template.length>400?'\n…':''}</pre></div>` : ''}
+      <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-success btn-sm" onclick="useSkillNow(${JSON.stringify(s.id)},${JSON.stringify(s.name)});closeSkillDetail()" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none;font-weight:700">⚡ Use This Skill</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleSkillFromModal(${JSON.stringify(s.id)});closeSkillDetail()" id="skill-detail-add-btn">${selectedSkillIds.has(s.id)?'✓ Deselect':'＋ Add to Agent'}</button>
         <button class="btn btn-ghost btn-sm" onclick="closeSkillDetail()">Close</button>
       </div>
     </div>
@@ -4642,7 +4937,67 @@ async function deleteAgent(id) {
   if (r.ok) { toast('Agent deleted', 'error'); loadAgents(); }
 }
 
-// ── Tasks — agent selector state ─────────────────────────────────────────────
+// ── New Skill Form ────────────────────────────────────────────────────────────
+function toggleNewSkillForm() {
+  const card = document.getElementById('new-skill-form-card');
+  const btn = document.getElementById('new-skill-btn');
+  if (!card) return;
+  const isOpen = card.style.display !== 'none';
+  card.style.display = isOpen ? 'none' : 'block';
+  if (btn) btn.textContent = isOpen ? '＋ New Skill' : '✕ Cancel';
+}
+
+async function saveNewSkill() {
+  const name = (document.getElementById('new-skill-name')?.value || '').trim();
+  const category = document.getElementById('new-skill-category')?.value || 'Automation & Productivity';
+  const description = (document.getElementById('new-skill-desc')?.value || '').trim();
+  const tagsRaw = (document.getElementById('new-skill-tags')?.value || '').trim();
+  const stepsRaw = (document.getElementById('new-skill-steps')?.value || '').trim();
+  const resultEl = document.getElementById('new-skill-result');
+
+  if (!name || !description) {
+    if (resultEl) resultEl.innerHTML = '<span style="color:var(--danger)">Name and description are required.</span>';
+    return;
+  }
+  const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+  const steps = stepsRaw ? stepsRaw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
+  const r = await api('/api/skills', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id, name, category, description, tags, steps, created_by: 'user'})
+  });
+  if (r.ok) {
+    toast(`Skill "${name}" added to library! ✅`, 'success');
+    if (resultEl) resultEl.innerHTML = '<span style="color:var(--success)">✅ Skill saved!</span>';
+    document.getElementById('new-skill-name').value = '';
+    document.getElementById('new-skill-desc').value = '';
+    document.getElementById('new-skill-tags').value = '';
+    document.getElementById('new-skill-steps').value = '';
+    toggleNewSkillForm();
+    loadSkills();
+  } else {
+    const msg = r.detail || r.error || 'Error saving skill';
+    if (resultEl) resultEl.innerHTML = `<span style="color:var(--danger)">❌ ${escHtml(msg)}</span>`;
+  }
+}
+
+function useSkillNow(id, name) {
+  // Switch to chat tab and pre-fill the prompt with the skill
+  const chatTabBtn = document.querySelector('nav button[onclick*="\'chat\'"]');
+  if (chatTabBtn) chatTabBtn.click();
+  setTimeout(() => {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.value = `Use the "${name}" skill to help me: `;
+      input.focus();
+      toast(`⚡ "${name}" skill ready to use in chat!`, 'info');
+    }
+  }, 200);
+}
+
+
 let _allAgents = [];          // full list from /api/agents
 let _autoSelectedIds = new Set(); // IDs suggested by auto-select
 let _selectedAgentIds = new Set(); // currently selected (user may adjust)
@@ -4963,6 +5318,79 @@ async function loadSwarm() {
   const agents = r.agents || [];
   _allAgents = agents; // cache for task picker
   renderSwarmGrid(agents);
+  // Update stats
+  const onlineCount = agents.filter(a => a.running).length;
+  const cats = new Set(agents.map(a => a.category).filter(Boolean));
+  const statOnline = document.getElementById('swarm-stat-online');
+  const statTotal = document.getElementById('swarm-stat-total');
+  const statCats = document.getElementById('swarm-stat-categories');
+  if (statOnline) statOnline.textContent = onlineCount;
+  if (statTotal) statTotal.textContent = agents.length;
+  if (statCats) statCats.textContent = cats.size;
+  // Load activity
+  loadSwarmActivity();
+}
+
+async function loadSwarmActivity() {
+  // Pull recent task history for activity stream
+  const r = await api('/api/tasks?limit=20');
+  const streamEl = document.getElementById('swarm-activity-stream');
+  const activeTaskEl = document.getElementById('swarm-active-task');
+  const statTasksEl = document.getElementById('swarm-stat-tasks');
+
+  const tasks = r.tasks || r.history || [];
+  if (statTasksEl) statTasksEl.textContent = r.total || tasks.length || 0;
+
+  // Active task
+  const activeTasks = tasks.filter(t => t.status === 'running' || t.status === 'in_progress');
+  if (activeTaskEl) {
+    if (!activeTasks.length) {
+      activeTaskEl.innerHTML = '<div class="empty"><div class="icon">⚡</div><p style="font-size:.83em">No active task. Launch one from the Tasks tab.</p></div>';
+    } else {
+      const t = activeTasks[0];
+      const agents = (t.agents || t.selected_agents || []).slice(0,5);
+      const agentPills = agents.map(a => `<span style="background:rgba(212,175,55,.1);padding:2px 7px;border-radius:4px;font-size:.72em;border:1px solid rgba(212,175,55,.2);color:var(--gold-light)">${escHtml(a)}</span>`).join('');
+      activeTaskEl.innerHTML = `<div style="padding:8px">
+        <div style="font-size:.9em;font-weight:600;color:var(--text);margin-bottom:4px">${escHtml((t.description||t.goal||'Task').slice(0,80))}${(t.description||t.goal||'').length>80?'…':''}</div>
+        <div style="font-size:.72em;color:var(--success);font-weight:600;margin-bottom:8px">● Running</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">${agentPills}</div>
+        <div style="height:4px;background:rgba(212,175,55,.1);border-radius:2px;overflow:hidden"><div style="height:100%;width:${Math.min(90,20+Math.random()*60)|0}%;background:linear-gradient(90deg,var(--primary-dark),var(--primary));border-radius:2px;animation:pulse 2s infinite"></div></div>
+      </div>`;
+    }
+  }
+
+  // Activity stream
+  if (streamEl) {
+    if (!tasks.length) {
+      streamEl.innerHTML = '<div class="empty"><div class="icon">📡</div><p style="font-size:.83em">No activity yet. Run a task to see agents collaborate.</p></div>';
+      return;
+    }
+    const statusIcon = {completed:'✅', running:'⚡', failed:'❌', pending:'⏳', cancelled:'🚫'};
+    const statusColor = {completed:'var(--success)', running:'var(--gold)', failed:'var(--danger)', pending:'var(--text-muted)', cancelled:'var(--text-muted)'};
+    streamEl.innerHTML = tasks.slice(0,20).map(t => {
+      const icon = statusIcon[t.status] || '📋';
+      const col = statusColor[t.status] || 'var(--text-muted)';
+      const agents = (t.agents || t.selected_agents || []).slice(0,3).join(', ');
+      const ts = (t.created_at||t.ts||'').replace('T',' ').slice(0,16);
+      const dur = t.duration_seconds ? `${Math.round(t.duration_seconds)}s` : '';
+      return `<div style="padding:8px 10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);border-left:3px solid ${col}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px">
+          <div style="display:flex;gap:6px;align-items:flex-start;flex:1">
+            <span style="margin-top:1px">${icon}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:.82em;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((t.description||t.goal||'Task').slice(0,60))}</div>
+              ${agents ? `<div style="font-size:.72em;color:var(--text-muted);margin-top:2px">🤖 ${escHtml(agents)}${(t.agents||[]).length>3?'+more':''}</div>` : ''}
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:.7em;color:${col};font-weight:600">${escHtml(t.status||'?')}</div>
+            ${ts ? `<div style="font-size:.68em;color:var(--text-muted)">${ts}</div>` : ''}
+            ${dur ? `<div style="font-size:.68em;color:var(--text-muted)">${dur}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
 }
 
 function renderSwarmGrid(agents) {
@@ -5342,14 +5770,12 @@ async function loadMetrics() {
 
   // New ROI fields
   const humanSavedEl = document.getElementById('m-human-saved');
-  // Assume 1 AI hour = 3 human hours due to parallel execution and no context-switching overhead
   if (humanSavedEl) humanSavedEl.textContent = (s.human_hours_saved || Math.round((s.hours_saved||0) * 3)) + 'h';
   const agentsEl = document.getElementById('m-agents-used');
   if (agentsEl) agentsEl.textContent = (s.agents_used || 0).toLocaleString();
 
   // ROI Summary
   const effEl = document.getElementById('roi-efficiency');
-  // Use server-provided efficiency_rate if available, otherwise omit the default rather than fabricate
   if (effEl) effEl.textContent = s.efficiency_rate ? s.efficiency_rate + '%' : '–%';
   const effDescEl = document.getElementById('roi-efficiency-desc');
   if (effDescEl) {
@@ -5371,6 +5797,9 @@ async function loadMetrics() {
   const el = document.getElementById('metrics-events');
   if (!events.length) {
     el.innerHTML = '<div class="empty"><div class="icon">📊</div><p>No events yet. Run tasks to start tracking ROI.</p></div>';
+    // Render empty chart + breakdowns
+    _renderRoiChart([]);
+    _renderRoiBreakdowns([]);
     return;
   }
   const typeIcon = {task_completed:'✅',lead_generated:'🎯',email_sent:'📧',content_created:'📝',call_booked:'📞',deal_closed:'💰',ticket_resolved:'🎫',custom:'⭐'};
@@ -5389,6 +5818,98 @@ async function loadMetrics() {
       <span style="font-size:.73em;color:var(--text-muted);white-space:nowrap">${ts}</span>
     </div>`;
   }).join('');
+
+  // Render chart and breakdowns
+  _renderRoiChart(events);
+  _renderRoiBreakdowns(events);
+}
+
+function _renderRoiChart(events) {
+  const container = document.getElementById('roi-chart-container');
+  const labelsEl = document.getElementById('roi-chart-labels');
+  if (!container) return;
+  if (!events.length) {
+    container.innerHTML = '<div class="empty" style="width:100%"><div class="icon">📈</div><p style="font-size:.84em">Record events to see value chart.</p></div>';
+    if (labelsEl) labelsEl.innerHTML = '';
+    return;
+  }
+  // Group events by date, summing values
+  const byDate = {};
+  events.forEach(e => {
+    const day = (e.ts||'').split('T')[0] || 'Unknown';
+    byDate[day] = (byDate[day] || 0) + (parseFloat(e.value) || 0);
+  });
+  const sorted = Object.entries(byDate).sort(([a],[b]) => a.localeCompare(b));
+  const maxVal = Math.max(...sorted.map(([,v]) => v), 1);
+  const maxH = 100;
+  container.innerHTML = sorted.map(([date, val]) => {
+    const h = Math.max(4, Math.round((val / maxVal) * maxH));
+    const isToday = date === new Date().toISOString().split('T')[0];
+    return `<div style="flex:1;min-width:20px;display:flex;flex-direction:column;align-items:center;gap:3px" title="${date}: €${val}">
+      <div style="font-size:.68em;color:var(--success);font-weight:700">${val>0?'€'+val:''}</div>
+      <div style="width:100%;height:${h}px;background:${isToday?'linear-gradient(180deg,#D4AF37,#B8960C)':'linear-gradient(180deg,rgba(212,175,55,.6),rgba(212,175,55,.2))'};border-radius:3px 3px 0 0;transition:all .3s"></div>
+    </div>`;
+  }).join('');
+  if (labelsEl) {
+    labelsEl.innerHTML = sorted.map(([date]) => {
+      const d = new Date(date);
+      const label = isNaN(d.getTime()) ? date : d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      return `<div style="flex:1;text-align:center;font-size:.62em;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</div>`;
+    }).join('');
+  }
+}
+
+function _renderRoiBreakdowns(events) {
+  // Agent breakdown
+  const agentEl = document.getElementById('roi-agent-breakdown');
+  if (agentEl) {
+    const byAgent = {};
+    events.forEach(e => { if (e.agent) byAgent[e.agent] = (byAgent[e.agent]||{count:0,value:0}), byAgent[e.agent].count++, byAgent[e.agent].value += parseFloat(e.value)||0; });
+    const agentEntries = Object.entries(byAgent).sort(([,a],[,b]) => b.count - a.count).slice(0,10);
+    if (!agentEntries.length) {
+      agentEl.innerHTML = '<div class="empty"><div class="icon">🤖</div><p style="font-size:.84em">No agent data yet.</p></div>';
+    } else {
+      const maxCount = Math.max(...agentEntries.map(([,v])=>v.count),1);
+      agentEl.innerHTML = agentEntries.map(([agent,stats]) => {
+        const pct = Math.round((stats.count/maxCount)*100);
+        return `<div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;font-size:.82em;margin-bottom:3px">
+            <span style="color:var(--text);font-weight:600">${escHtml(agent)}</span>
+            <span style="color:var(--text-muted)">${stats.count} events${stats.value>0?' · €'+stats.value:''}</span>
+          </div>
+          <div style="height:6px;background:rgba(212,175,55,.12);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--primary-dark),var(--primary));border-radius:3px;transition:width .4s"></div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+  // Task type breakdown
+  const typeEl = document.getElementById('roi-type-breakdown');
+  if (typeEl) {
+    const byType = {};
+    events.forEach(e => { byType[e.type||'custom'] = (byType[e.type||'custom']||{count:0,value:0}), byType[e.type||'custom'].count++, byType[e.type||'custom'].value += parseFloat(e.value)||0; });
+    const typeEntries = Object.entries(byType).sort(([,a],[,b]) => b.count - a.count);
+    const typeIcon2 = {task_completed:'✅',lead_generated:'🎯',email_sent:'📧',content_created:'📝',call_booked:'📞',deal_closed:'💰',ticket_resolved:'🎫',custom:'⭐'};
+    if (!typeEntries.length) {
+      typeEl.innerHTML = '<div class="empty"><div class="icon">📋</div><p style="font-size:.84em">No task type data yet.</p></div>';
+    } else {
+      const maxCount = Math.max(...typeEntries.map(([,v])=>v.count),1);
+      typeEl.innerHTML = typeEntries.map(([type,stats]) => {
+        const pct = Math.round((stats.count/maxCount)*100);
+        const icon = typeIcon2[type] || '⭐';
+        return `<div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;font-size:.82em;margin-bottom:3px">
+            <span style="color:var(--text);font-weight:600">${icon} ${escHtml(type.replace(/_/g,' '))}</span>
+            <span style="color:var(--text-muted)">${stats.count}×${stats.value>0?' · €'+stats.value:''}</span>
+          </div>
+          <div style="height:6px;background:rgba(212,175,55,.12);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(99,102,241,.8),rgba(139,92,246,.8));border-radius:3px;transition:width .4s"></div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
 }
 
 async function recordMetric() {
@@ -5407,16 +5928,53 @@ async function recordMetric() {
 }
 
 // ── Templates ────────────────────────────────────────────────────────────────
+let _allTemplates = [];
+let _tmplCatFilter = '';
+
 async function loadTemplates() {
   const d = await api('/api/templates');
-  const templates = d.templates || [];
+  _allTemplates = d.templates || [];
+  renderTemplatesGrid();
+}
+
+function filterTemplatesCat(cat, btn) {
+  _tmplCatFilter = cat;
+  document.querySelectorAll('.tmpl-pill').forEach(p => {
+    p.classList.remove('active');
+    p.style.background = '';
+    p.style.color = '';
+    p.style.border = '';
+  });
+  if (btn) {
+    btn.classList.add('active');
+    btn.style.background = 'linear-gradient(135deg,var(--primary-dark),var(--primary))';
+    btn.style.color = '#000';
+    btn.style.border = 'none';
+  }
+  renderTemplatesGrid();
+}
+
+function filterTemplates() {
+  renderTemplatesGrid();
+}
+
+function renderTemplatesGrid() {
   const el = document.getElementById('templates-grid');
+  if (!el) return;
+  const searchVal = (document.getElementById('template-search')?.value || '').toLowerCase();
+  let templates = _allTemplates;
+  if (_tmplCatFilter) templates = templates.filter(t => (t.category||'').toLowerCase().includes(_tmplCatFilter.toLowerCase()));
+  if (searchVal) templates = templates.filter(t =>
+    (t.name||'').toLowerCase().includes(searchVal) ||
+    (t.description||'').toLowerCase().includes(searchVal) ||
+    (t.category||'').toLowerCase().includes(searchVal)
+  );
   if (!templates.length) {
-    el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No templates found.</p></div>';
+    el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No templates match your filter.</p></div>';
     return;
   }
-  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)'};
-  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(99,102,241,.3)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)'};
+  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)',Marketing:'rgba(168,85,247,.15)'};
+  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(99,102,241,.3)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)',Marketing:'rgba(168,85,247,.3)'};
   el.innerHTML = templates.map(t => {
     const col = catColors[t.category] || 'rgba(212,175,55,.1)';
     const bdr = catBorderColors[t.category] || 'rgba(212,175,55,.2)';
@@ -5440,7 +5998,7 @@ async function loadTemplates() {
         <div style="display:flex;flex-wrap:wrap;gap:4px">${agents}</div>
       </div>
       ${steps ? `<details style="font-size:.8em"><summary style="cursor:pointer;color:var(--gold);font-weight:600;list-style:none;display:flex;align-items:center;gap:5px"><span>▶</span> Setup Steps</summary><ol style="color:var(--text-muted);margin:8px 0 0 16px;line-height:1.7;padding:0">${steps}</ol></details>` : ''}
-      <button onclick="deployTemplate('${jsEsc(t.id)}','${jsEsc(t.name)}')" style="width:100%;padding:12px;background:linear-gradient(135deg,var(--primary-dark),var(--primary));border:none;border-radius:9px;color:#000;font-weight:700;font-size:.88em;cursor:pointer;transition:all .2s;letter-spacing:.02em;font-family:inherit" onmouseenter="this.style.filter='brightness(1.1)';this.style.boxShadow='0 6px 24px rgba(212,175,55,.5)'" onmouseleave="this.style.filter='';this.style.boxShadow=''">🚀 Deploy Template</button>
+      <button onclick="deployTemplate('${jsEsc(t.id)}','${jsEsc(t.name)}')" style="width:100%;padding:12px;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);border:1px solid rgba(212,175,55,.4);border-radius:9px;color:var(--gold);font-weight:700;font-size:.88em;cursor:pointer;transition:all .2s;letter-spacing:.02em;font-family:inherit" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000';this.style.boxShadow='0 6px 24px rgba(212,175,55,.5)'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)';this.style.boxShadow=''">🚀 Deploy Template</button>
     </div>`;
   }).join('');
 }
@@ -5453,7 +6011,7 @@ async function deployTemplate(id, name) {
   } else { toast(r.detail || r.error || 'Deployment failed', 'error'); }
 }
 
-// ── Guardrails ───────────────────────────────────────────────────────────────
+
 async function loadGuardrails() {
   const d = await api('/api/guardrails');
   const pending  = d.pending  || [];
@@ -5517,6 +6075,8 @@ async function loadGuardrails() {
       </div>`;
     }).join('');
   }
+  // Render custom guardrails
+  _renderCustomGuardrails(d.custom_rules || []);
 }
 
 async function approveAction(id) {
@@ -5554,38 +6114,72 @@ async function saveGuardrailSettings() {
   else { toast(r.detail || 'Error', 'error'); }
 }
 
-// ── Memory ───────────────────────────────────────────────────────────────────
+async function addCustomGuardrail() {
+  const type = document.getElementById('gr-custom-type')?.value || 'custom';
+  const rule = (document.getElementById('gr-custom-rule')?.value || '').trim();
+  const severity = document.getElementById('gr-custom-severity')?.value || 'medium';
+  const resultEl = document.getElementById('gr-custom-result');
+  if (!rule) {
+    if (resultEl) resultEl.innerHTML = '<span style="color:var(--danger)">Rule description is required.</span>';
+    return;
+  }
+  const r = await api('/api/guardrails/custom', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({type, rule, severity})
+  });
+  if (r.ok) {
+    toast('Custom guardrail added ✅', 'success');
+    if (resultEl) resultEl.innerHTML = '<span style="color:var(--success)">✅ Rule saved!</span>';
+    document.getElementById('gr-custom-rule').value = '';
+    loadGuardrails();
+    setTimeout(() => { if (resultEl) resultEl.innerHTML = ''; }, 3000);
+  } else {
+    const msg = r.detail || r.error || 'Error saving rule';
+    if (resultEl) resultEl.innerHTML = `<span style="color:var(--danger)">❌ ${escHtml(msg)}</span>`;
+  }
+}
+
+function _renderCustomGuardrails(rules) {
+  const el = document.getElementById('custom-guardrails-list');
+  if (!el) return;
+  if (!rules || !rules.length) {
+    el.innerHTML = '<div class="empty" style="padding:12px"><div class="icon" style="font-size:1.4em">🔒</div><p style="font-size:.84em">No custom rules yet. Add one on the right.</p></div>';
+    return;
+  }
+  const sevColors = {critical:'#ef4444', high:'#f59e0b', medium:'#eab308', low:'#10b981'};
+  const sevIcons = {critical:'🔴', high:'🟠', medium:'🟡', low:'🟢'};
+  el.innerHTML = rules.map((rule, idx) => {
+    const col = sevColors[rule.severity || 'medium'] || '#eab308';
+    const icon = sevIcons[rule.severity || 'medium'] || '🟡';
+    return `<div style="border:1px solid ${col}33;border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;background:var(--surface2);border-left:3px solid ${col}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="flex:1">
+          <div style="font-size:.78em;font-weight:600;color:${col};margin-bottom:3px">${icon} ${escHtml((rule.type||'custom').replace(/_/g,' '))} · ${escHtml(rule.severity||'medium')}</div>
+          <div style="font-size:.83em;color:var(--text-secondary);line-height:1.4">${escHtml(rule.rule||'')}</div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="deleteCustomGuardrail(${idx})" title="Remove rule" style="flex-shrink:0;padding:2px 7px;font-size:.7em">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function deleteCustomGuardrail(idx) {
+  if (!confirm('Remove this guardrail rule?')) return;
+  const r = await api(`/api/guardrails/custom/${idx}`, {method: 'DELETE'});
+  if (r.ok) { toast('Rule removed', 'error'); loadGuardrails(); }
+  else { toast(r.detail || 'Error', 'error'); }
+}
+
+
+let _allMemoryClients = [];
+
 async function loadMemory() {
   const d = await api('/api/memory');
-  const clients = d.clients || [];
+  _allMemoryClients = d.clients || [];
   const recent  = d.recent_interactions || [];
 
-  const cEl = document.getElementById('memory-clients');
-  if (!clients.length) {
-    cEl.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No clients remembered yet. Add one below.</p></div>';
-  } else {
-    const statusColor = {prospect:'rgba(245,158,11,.2)', lead:'rgba(34,211,238,.2)', customer:'rgba(16,185,129,.2)', churned:'rgba(239,68,68,.12)'};
-    cEl.innerHTML = clients.map(c => {
-      const col = statusColor[c.status] || 'var(--surface)';
-      return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;background:var(--surface2)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <div style="font-weight:600;font-size:.9em">${escHtml(c.name)}</div>
-            ${c.company ? `<div style="font-size:.8em;color:var(--text-secondary)">${escHtml(c.company)}</div>` : ''}
-            ${c.email   ? `<div style="font-size:.77em;color:var(--text-muted)">✉ ${escHtml(c.email)}</div>`   : ''}
-            ${c.phone   ? `<div style="font-size:.77em;color:var(--text-muted)">📞 ${escHtml(c.phone)}</div>`   : ''}
-          </div>
-          <span style="font-size:.73em;background:${col};padding:2px 8px;border-radius:4px;border:1px solid var(--border)">${escHtml(c.status||'prospect')}</span>
-        </div>
-        ${c.notes ? `<div style="font-size:.78em;color:var(--text-muted);margin-top:6px;line-height:1.4">${escHtml(c.notes)}</div>` : ''}
-        <div style="font-size:.72em;color:var(--text-muted);margin-top:4px">${(c.interactions||0)} interactions · added ${(c.added_at||'').split('T')[0]} · last update ${(c.updated_at||c.added_at||'').split('T')[0]}</div>
-        <div style="margin-top:8px;display:flex;gap:5px">
-          <button class="btn btn-ghost btn-sm" onclick="updateClientStatus('${jsEsc(c.id)}','customer')" title="Mark as customer">Mark customer</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteClient('${jsEsc(c.id)}')">🗑</button>
-        </div>
-      </div>`;
-    }).join('');
-  }
+  renderMemoryClients(_allMemoryClients);
 
   const rEl = document.getElementById('memory-recent');
   if (!recent.length) {
@@ -5599,6 +6193,107 @@ async function loadMemory() {
       </div>`;
     }).join('');
   }
+
+  // Load conversations
+  loadMemoryConversations();
+}
+
+function filterMemoryClients() {
+  const q = (document.getElementById('memory-search')?.value || '').toLowerCase();
+  const statusFilter = document.getElementById('memory-status-filter')?.value || '';
+  let filtered = _allMemoryClients;
+  if (q) filtered = filtered.filter(c =>
+    (c.name||'').toLowerCase().includes(q) ||
+    (c.company||'').toLowerCase().includes(q) ||
+    (c.email||'').toLowerCase().includes(q) ||
+    (c.phone||'').toLowerCase().includes(q)
+  );
+  if (statusFilter) filtered = filtered.filter(c => (c.status||'prospect') === statusFilter);
+  renderMemoryClients(filtered);
+}
+
+function renderMemoryClients(clients) {
+  const cEl = document.getElementById('memory-clients');
+  if (!cEl) return;
+  if (!clients.length) {
+    cEl.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No clients match. Add a new one on the right.</p></div>';
+    return;
+  }
+  const statusColor = {prospect:'rgba(245,158,11,.2)', lead:'rgba(34,211,238,.2)', customer:'rgba(16,185,129,.2)', churned:'rgba(239,68,68,.12)'};
+  cEl.innerHTML = clients.map(c => {
+    const col = statusColor[c.status] || 'var(--surface)';
+    const lastContact = c.last_contact || (c.updated_at||c.added_at||'').split('T')[0] || '–';
+    return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;background:var(--surface2);transition:all .2s" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)'" onmouseleave="this.style.borderColor='var(--border)'">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-weight:600;font-size:.9em">${escHtml(c.name)}</div>
+          ${c.company ? `<div style="font-size:.8em;color:var(--text-secondary)">${escHtml(c.company)}</div>` : ''}
+          ${c.email   ? `<div style="font-size:.77em;color:var(--text-muted)">✉ ${escHtml(c.email)}</div>`   : ''}
+          ${c.phone   ? `<div style="font-size:.77em;color:var(--text-muted)">📞 ${escHtml(c.phone)}</div>`   : ''}
+          <div style="font-size:.72em;color:var(--text-muted);margin-top:3px">🕐 Last contact: ${escHtml(lastContact)}</div>
+        </div>
+        <span style="font-size:.73em;background:${col};padding:2px 8px;border-radius:4px;border:1px solid var(--border)">${escHtml(c.status||'prospect')}</span>
+      </div>
+      ${c.notes ? `<div style="font-size:.78em;color:var(--text-muted);margin-top:6px;line-height:1.4">${escHtml(c.notes)}</div>` : ''}
+      <div style="font-size:.72em;color:var(--text-muted);margin-top:4px">${(c.interactions||0)} interactions · added ${(c.added_at||'').split('T')[0]}</div>
+      <div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="updateClientStatus('${jsEsc(c.id)}','customer')" style="font-size:.73em">Mark customer</button>
+        <button class="btn btn-ghost btn-sm" onclick="updateClientStatus('${jsEsc(c.id)}','lead')" style="font-size:.73em">Mark lead</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteClient('${jsEsc(c.id)}')">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+let _allConversations = [];
+async function loadMemoryConversations() {
+  const d = await api('/api/memory/conversations');
+  _allConversations = d.conversations || [];
+  renderConversations(_allConversations);
+}
+
+function filterConversations() {
+  const q = (document.getElementById('conv-search')?.value || '').toLowerCase();
+  const filtered = q ? _allConversations.filter(c =>
+    (c.summary||'').toLowerCase().includes(q) ||
+    (c.date||'').includes(q) ||
+    (c.title||'').toLowerCase().includes(q)
+  ) : _allConversations;
+  renderConversations(filtered);
+}
+
+function renderConversations(conversations) {
+  const el = document.getElementById('memory-conversations');
+  if (!el) return;
+  if (!conversations.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">💬</div><p style="font-size:.84em">No conversations yet. Chat sessions appear here automatically when closed.</p></div>';
+    return;
+  }
+  el.innerHTML = conversations.map((c, idx) => {
+    const date = (c.date||c.ts||'').split('T')[0] || '–';
+    const summary = (c.summary||c.message||'Chat session').slice(0,120);
+    const msgCount = c.message_count || c.messages || 0;
+    return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;background:var(--surface2);cursor:pointer;transition:all .2s" onclick="toggleConversationDetail(${idx})" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)'" onmouseleave="this.style.borderColor='var(--border)'">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="flex:1">
+          <div style="font-size:.85em;font-weight:600;color:var(--text)">${escHtml(c.title||'Chat Session #'+(idx+1))}</div>
+          <div style="font-size:.78em;color:var(--text-muted);margin-top:2px;line-height:1.4">${escHtml(summary)}${summary.length>=120?'…':''}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:.72em;color:var(--text-muted)">${date}</div>
+          ${msgCount ? `<div style="font-size:.7em;color:var(--gold);margin-top:2px">${msgCount} msgs</div>` : ''}
+        </div>
+      </div>
+      <div id="conv-detail-${idx}" style="display:none;margin-top:8px;padding:8px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border);font-size:.8em;color:var(--text-secondary);line-height:1.5">
+        ${escHtml(c.full_summary||c.summary||'No detailed summary available.')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleConversationDetail(idx) {
+  const el = document.getElementById('conv-detail-' + idx);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 async function addClient() {
@@ -5606,12 +6301,13 @@ async function addClient() {
   const company = document.getElementById('mem-company').value.trim();
   const email   = document.getElementById('mem-email').value.trim();
   const phone   = (document.getElementById('mem-phone')?.value || '').trim();
+  const lastContact = (document.getElementById('mem-last-contact')?.value || '').trim();
   const status  = document.getElementById('mem-status').value;
   const notes   = document.getElementById('mem-notes').value.trim();
   if (!name) { toast('Name is required', 'error'); return; }
   const r = await api('/api/memory/clients', {method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name, company: company||null, email: email||null, phone: phone||null, status, notes: notes||null})});
+    body: JSON.stringify({name, company: company||null, email: email||null, phone: phone||null, last_contact: lastContact||null, status, notes: notes||null})});
   if (r.ok) {
     toast('Client added ✅');
     document.getElementById('mem-name').value    = '';
@@ -5619,6 +6315,8 @@ async function addClient() {
     document.getElementById('mem-email').value   = '';
     const phoneEl = document.getElementById('mem-phone');
     if (phoneEl) phoneEl.value = '';
+    const lcEl = document.getElementById('mem-last-contact');
+    if (lcEl) lcEl.value = '';
     document.getElementById('mem-notes').value   = '';
     loadMemory();
   } else { toast(r.detail || 'Error', 'error'); }
@@ -8606,8 +9304,9 @@ def get_improvements():
 @app.patch("/api/improvements/{improvement_id}")
 def review_improvement(improvement_id: str, payload: dict):
     status = payload.get("status", "")
-    if status not in ("approved", "rejected"):
-        raise HTTPException(400, "status must be 'approved' or 'rejected'")
+    valid_statuses = ("approved", "rejected", "in_progress", "completed", "pending")
+    if status not in valid_statuses:
+        raise HTTPException(400, f"status must be one of: {', '.join(valid_statuses)}")
 
     if not IMPROVEMENTS_FILE.exists():
         raise HTTPException(404, "no improvements found")
@@ -8658,7 +9357,57 @@ def get_skills(category: str = "", q: str = ""):
     return JSONResponse({"skills": skills, "categories": categories, "total": len(skills)})
 
 
-# ─── Custom Agents ─────────────────────────────────────────────────────────────
+@app.post("/api/skills")
+def create_skill(payload: dict):
+    skill_id = (payload.get("id") or "").strip()
+    name = (payload.get("name") or "").strip()
+    category = (payload.get("category") or "Automation & Productivity").strip()
+    description = (payload.get("description") or "").strip()
+    if not skill_id or not name or not description:
+        raise HTTPException(400, "id, name, and description are required")
+
+    # Load existing library
+    lib = {}
+    for candidate in (SKILLS_LIBRARY_FILE, _REPO_SKILLS_FILE):
+        if candidate.exists():
+            try:
+                lib = json.loads(candidate.read_text())
+                break
+            except Exception:
+                pass
+    if not lib:
+        lib = {"skills": [], "categories": []}
+
+    skills = lib.get("skills", [])
+    # Check for duplicate ID
+    if any(s.get("id") == skill_id for s in skills):
+        raise HTTPException(409, f"Skill with id '{skill_id}' already exists")
+
+    new_skill = {
+        "id": skill_id,
+        "name": name,
+        "category": category,
+        "description": description,
+        "tags": payload.get("tags") or [],
+        "steps": payload.get("steps") or [],
+        "usage_count": 0,
+        "created_by": payload.get("created_by") or "user",
+        "created_at": now_iso(),
+    }
+    if payload.get("prompt_template"):
+        new_skill["prompt_template"] = payload["prompt_template"]
+
+    skills.append(new_skill)
+    lib["skills"] = skills
+    # Update categories
+    lib["categories"] = sorted({s["category"] for s in skills})
+
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    SKILLS_LIBRARY_FILE.write_text(json.dumps(lib, indent=2))
+    return JSONResponse({"ok": True, "id": skill_id, "name": name})
+
+
+
 
 def _load_library():
     if SKILLS_LIBRARY_FILE.exists():
@@ -9429,6 +10178,8 @@ def _recalc_guardrail_summary(data: dict) -> dict:
 def get_guardrails():
     data = _load_guardrails()
     data["summary"] = _recalc_guardrail_summary(data)
+    if "custom_rules" not in data:
+        data["custom_rules"] = []
     return JSONResponse(data)
 
 
@@ -9553,7 +10304,37 @@ def save_guardrail_settings(payload: dict):
     return JSONResponse({"ok": True})
 
 
-# ─── Memory API ───────────────────────────────────────────────────────────────
+@app.post("/api/guardrails/custom")
+def add_custom_guardrail(payload: dict):
+    rule_text = (payload.get("rule") or "").strip()
+    if not rule_text:
+        raise HTTPException(400, "rule is required")
+    data = _load_guardrails()
+    custom_rules = data.get("custom_rules", [])
+    custom_rules.append({
+        "type": payload.get("type", "custom"),
+        "rule": rule_text,
+        "severity": payload.get("severity", "medium"),
+        "created_at": now_iso(),
+    })
+    data["custom_rules"] = custom_rules
+    _save_guardrails(data)
+    return JSONResponse({"ok": True, "total": len(custom_rules)})
+
+
+@app.delete("/api/guardrails/custom/{idx}")
+def delete_custom_guardrail(idx: int):
+    data = _load_guardrails()
+    custom_rules = data.get("custom_rules", [])
+    if idx < 0 or idx >= len(custom_rules):
+        raise HTTPException(404, "rule not found")
+    custom_rules.pop(idx)
+    data["custom_rules"] = custom_rules
+    _save_guardrails(data)
+    return JSONResponse({"ok": True})
+
+
+
 
 def _load_memory() -> dict:
     data = _cached_read(MEMORY_FILE)
@@ -9575,6 +10356,34 @@ def get_memory():
         "recent_interactions": data.get("recent_interactions", [])[-20:],
         "total_clients": len(clients_list),
     })
+
+
+@app.get("/api/memory/conversations")
+def get_memory_conversations():
+    """Return recent closed chat sessions as conversations."""
+    data = _load_memory()
+    # Use stored conversations if available
+    conversations = data.get("conversations", [])
+    # Also pull from recent_interactions for summary
+    interactions = data.get("recent_interactions", [])
+    # Group interactions into conversation sessions (by day)
+    if not conversations and interactions:
+        sessions: dict = {}
+        for i in interactions:
+            day = (i.get("ts") or "")[:10] or "Unknown"
+            sessions.setdefault(day, []).append(i)
+        for day, msgs in sorted(sessions.items(), reverse=True):
+            first = msgs[0]
+            conversations.append({
+                "title": f"Session on {day}",
+                "summary": (first.get("summary") or first.get("message") or "Chat session")[:200],
+                "date": day,
+                "message_count": len(msgs),
+                "full_summary": "\n".join(
+                    (m.get("summary") or m.get("message") or "") for m in msgs
+                )[:600],
+            })
+    return JSONResponse({"conversations": conversations[-50:], "total": len(conversations)})
 
 
 @app.post("/api/memory/clients")
@@ -9601,6 +10410,7 @@ def add_memory_client(payload: dict):
         "phone": (payload.get("phone") or "").strip() or None,
         "status": (payload.get("status") or "prospect").strip(),
         "notes": (payload.get("notes") or "").strip() or None,
+        "last_contact": (payload.get("last_contact") or "").strip() or None,
         "interactions": 0,
         "added_at": now_iso(),
         "updated_at": now_iso(),
@@ -9618,7 +10428,7 @@ def update_memory_client(client_id: str, payload: dict):
     if client_id not in clients:
         raise HTTPException(404, f"Client '{client_id}' not found")
     client = clients[client_id]
-    for field in ("name", "company", "email", "phone", "status", "notes"):
+    for field in ("name", "company", "email", "phone", "status", "notes", "last_contact"):
         if field in payload:
             client[field] = payload[field]
     client["updated_at"] = now_iso()
