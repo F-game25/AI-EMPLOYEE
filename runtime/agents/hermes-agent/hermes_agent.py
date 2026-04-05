@@ -1134,10 +1134,9 @@ if _FASTAPI_AVAILABLE:
 else:
     class _StubApp:  # type: ignore[no-redef]
         """Minimal stub so @app route decorators don't raise at import time."""
-        def get(self, *a, **kw):
+        def _noop(self, *a, **kw):
             return lambda f: f
-        def post(self, *a, **kw):
-            return lambda f: f
+        get = post = put = delete = patch = head = options = _noop  # type: ignore[assignment]
     app = _StubApp()  # type: ignore[assignment]
 
 _DASHBOARD_HTML = """<!doctype html>
@@ -1491,6 +1490,10 @@ def _chatlog_worker() -> None:
 if __name__ == "__main__":
     import threading
 
+    if not _FASTAPI_AVAILABLE:
+        print("[hermes-agent] ERROR: fastapi/uvicorn not installed. Run: pip install fastapi uvicorn requests")
+        sys.exit(1)
+
     # Ensure state dirs exist
     (AI_HOME / "state").mkdir(parents=True, exist_ok=True)
     (AI_HOME / "config").mkdir(parents=True, exist_ok=True)
@@ -1512,9 +1515,5 @@ if __name__ == "__main__":
     # Start chatlog polling in background
     t = threading.Thread(target=_chatlog_worker, daemon=True)
     t.start()
-
-    if not _FASTAPI_AVAILABLE:
-        print("[hermes-agent] ERROR: fastapi/uvicorn not installed. Run: pip install fastapi uvicorn requests")
-        sys.exit(1)
 
     uvicorn.run(app, host=HERMES_HOST, port=HERMES_PORT, log_level="warning")
