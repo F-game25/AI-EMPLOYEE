@@ -1128,15 +1128,28 @@ INDEX_HTML = r"""<!doctype html>
     .hdr-btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
     /* ── Navigation (horizontal scrollable tab bar) ── */
+    .nav-wrapper{position:relative;display:flex;align-items:stretch}
+    .nav-scroll-btn{
+      position:absolute;top:0;bottom:0;width:36px;z-index:10;
+      background:rgba(6,10,22,0.96);border:none;cursor:pointer;
+      color:rgba(212,175,55,.8);font-size:1.1em;display:flex;align-items:center;justify-content:center;
+      transition:all .2s;user-select:none;
+    }
+    .nav-scroll-btn:hover{color:var(--gold);background:rgba(6,10,22,1)}
+    .nav-scroll-btn.left{left:0;border-right:1px solid rgba(148,163,184,.1);box-shadow:4px 0 12px rgba(0,0,0,.4)}
+    .nav-scroll-btn.right{right:0;border-left:1px solid rgba(148,163,184,.1);box-shadow:-4px 0 12px rgba(0,0,0,.4)}
+    .nav-scroll-btn.hidden{opacity:0;pointer-events:none}
     nav{
       background:rgba(6,10,22,0.92);
       border-bottom:1px solid rgba(148,163,184,.08);
-      padding:0 28px;display:flex;gap:0;overflow-x:auto;
+      padding:0 8px;display:flex;gap:0;overflow-x:auto;flex:1;
       box-shadow:0 4px 20px rgba(0,0,0,.4);
       backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-      scrollbar-width:none;
+      scrollbar-width:thin;scrollbar-color:rgba(212,175,55,.2) transparent;
     }
-    nav::-webkit-scrollbar{display:none}
+    nav::-webkit-scrollbar{height:3px}
+    nav::-webkit-scrollbar-track{background:transparent}
+    nav::-webkit-scrollbar-thumb{background:rgba(212,175,55,.25);border-radius:2px}
     nav button{
       background:none;border:none;color:rgba(148,163,184,.7);
       padding:13px 15px;cursor:pointer;font-size:.82em;font-weight:500;
@@ -1720,7 +1733,9 @@ INDEX_HTML = r"""<!doctype html>
 </header>
 
 <!-- ── Navigation ── -->
-<nav>
+<div class="nav-wrapper">
+  <button class="nav-scroll-btn left hidden" id="nav-scroll-left" onclick="navScroll(-1)" title="Scroll left">‹</button>
+<nav id="main-nav">
   <button class="active" onclick="switchTab('dashboard',this)">📊 Dashboard</button>
   <button id="nav-btn-chat" onclick="switchTab('chat',this)">💬 Chat</button>
   <button onclick="switchTab('tasks',this)">🚀 Tasks</button>
@@ -1730,16 +1745,16 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('scheduler',this)">📅 Scheduler</button>
   <button onclick="switchTab('workers',this)">👷 Agents</button>
   <button onclick="switchTab('improvements',this)">💡 Improvements</button>
-  <button onclick="switchTab('skills',this)">🛠️ Skills</button>
-  <button onclick="switchTab('metrics',this)">📈 ROI</button>
-  <button onclick="switchTab('templates',this)">📋 Templates</button>
-  <button onclick="switchTab('guardrails',this)">🔒 Guardrails</button>
-  <button onclick="switchTab('memory',this)">🧠 Memory</button>
-  <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
-  <button onclick="switchTab('history',this)">🕐 History</button>
-  <button onclick="switchTab('options',this)">⚙️ Options</button>
-  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em">⚡ BLACKLIGHT</button>
-  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="background:linear-gradient(135deg,#0a1628,#0f2240);color:#f59e0b;border:1px solid #d97706;font-weight:700;letter-spacing:.04em">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('skills',this)" style="background:linear-gradient(135deg,#0c1f2e,#0e3040);color:#22d3ee;border:1px solid #0891b2;font-weight:700">🛠️ Skills</button>
+  <button onclick="switchTab('metrics',this)" style="background:linear-gradient(135deg,#0a1f0a,#0f3318);color:#4ade80;border:1px solid #16a34a;font-weight:700">📈 ROI</button>
+  <button onclick="switchTab('templates',this)" style="background:linear-gradient(135deg,#0f172a,#162040);color:#60a5fa;border:1px solid #2563eb;font-weight:700">📋 Templates</button>
+  <button onclick="switchTab('guardrails',this)" style="background:linear-gradient(135deg,#1f0a0a,#3a1008);color:#fb923c;border:1px solid #c2410c;font-weight:700">🔒 Guardrails</button>
+  <button onclick="switchTab('memory',this)" style="background:linear-gradient(135deg,#1a0a2e,#2e0d4a);color:#e879f9;border:1px solid #a21caf;font-weight:700">🧠 Memory</button>
+  <button onclick="switchTab('integrations',this)" style="background:linear-gradient(135deg,#1e1b4b,#2a2660);color:#a78bfa;border:1px solid #6d28d9;font-weight:700">🔌 Integrations</button>
+  <button onclick="switchTab('history',this)" style="background:linear-gradient(135deg,#0f1923,#152535);color:#7dd3fc;border:1px solid #0369a1;font-weight:700">🕐 History</button>
+  <button onclick="switchTab('options',this)" style="background:linear-gradient(135deg,#18181b,#252528);color:#d4d4d8;border:1px solid #52525b;font-weight:700">⚙️ Options</button>
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em;text-shadow:0 0 8px #a855f7">⚡ BLACKLIGHT</button>
+  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="background:linear-gradient(135deg,#0a1628,#0f2240);color:#f59e0b;border:1px solid #d97706;font-weight:700;letter-spacing:.04em;text-shadow:0 0 8px #f59e0b">🔥 ASCEND FORGE</button>
   <button onclick="switchTab('budget',this)" style="background:linear-gradient(135deg,#022c22,#064e3b);color:#34d399;border:1px solid #059669;font-weight:700">💰 Budget</button>
   <button onclick="switchTab('org',this)" style="background:linear-gradient(135deg,#1e1b4b,#312e81);color:#818cf8;border:1px solid #4f46e5;font-weight:700">🏢 Org Chart</button>
   <button onclick="switchTab('goals',this)" style="background:linear-gradient(135deg,#1c1917,#292524);color:#fb923c;border:1px solid #ea580c;font-weight:700">🎯 Goals</button>
@@ -1749,6 +1764,8 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('artifacts',this)" style="background:linear-gradient(135deg,#1a1a0a,#2a2a10);color:#fde68a;border:1px solid #ca8a04;font-weight:700">📦 Artifacts</button>
   <button onclick="switchTab('sessions',this)" style="background:linear-gradient(135deg,#0a1a1a,#102828);color:#67e8f9;border:1px solid #0891b2;font-weight:700">💾 Sessions</button>
 </nav>
+  <button class="nav-scroll-btn right" id="nav-scroll-right" onclick="navScroll(1)" title="Scroll right">›</button>
+</div>
 
 <main>
 
@@ -3670,11 +3687,38 @@ function switchToChatTab() {
   if (btn) btn.click();
 }
 
+// ── Nav scroll arrows ──
+function navScroll(dir) {
+  const nav = document.getElementById('main-nav');
+  nav.scrollBy({left: dir * 220, behavior: 'smooth'});
+}
+function _updateNavArrows() {
+  const nav = document.getElementById('main-nav');
+  if (!nav) return;
+  const btnL = document.getElementById('nav-scroll-left');
+  const btnR = document.getElementById('nav-scroll-right');
+  const atStart = nav.scrollLeft <= 4;
+  const atEnd = nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 4;
+  btnL.classList.toggle('hidden', atStart);
+  btnR.classList.toggle('hidden', atEnd);
+}
+document.addEventListener('DOMContentLoaded', function() {
+  const nav = document.getElementById('main-nav');
+  if (nav) {
+    nav.addEventListener('scroll', _updateNavArrows, {passive:true});
+    _updateNavArrows();
+    // Update arrows on window resize
+    window.addEventListener('resize', _updateNavArrows, {passive:true});
+  }
+});
+
 function switchTab(tab, btn) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
   btn.classList.add('active');
+  // Scroll active tab into view
+  btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
   currentTab = tab;
   if (tab === 'dashboard') loadDashboard();
   if (tab === 'chat') loadChatLog();
