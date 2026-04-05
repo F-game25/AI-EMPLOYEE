@@ -4,7 +4,8 @@ Routing Architecture (two layers, always enforced by default):
 
   ┌─ LAYER 1 — Free / Local (always tried first) ───────────────────────────┐
   │  1a. Ollama  (local, completely free, private, no API key needed)        │
-  │  1b. NVIDIA NIM  (free-tier cloud — Nemotron / Qwen / Llama 8B)         │
+  │  1b. Gemma   (Google open-source — via Ollama or Google AI Studio free)  │
+  │  1c. NVIDIA NIM  (free-tier cloud — Nemotron / Qwen / Llama 8B)         │
   └─────────────────────────────────────────────────────────────────────────┘
   ┌─ LAYER 2 — Paid Cloud (only if Layer 1 fully unavailable) ──────────────┐
   │  2a. Anthropic Claude  (costs tokens — preferred for analytics tasks)    │
@@ -14,14 +15,23 @@ Routing Architecture (two layers, always enforced by default):
 Set LOCAL_AI_FIRST=0 to disable and use preferred-provider-first routing instead.
 
 Per-agent model routing (query_ai_for_agent):
-  - reasoning      → Layer 1b: NVIDIA Nemotron (deep logic, complex analysis)
-  - orchestrator   → Layer 1b: NVIDIA Nemotron (multi-agent planning, synthesis)
-  - coding         → Layer 1b: NVIDIA Qwen Coder (code generation, review)
-  - bulk           → Layer 1b: NVIDIA Llama 8B (fast, high-volume tasks)
+  - reasoning      → Layer 1c: NVIDIA Nemotron (deep logic, complex analysis)
+  - orchestrator   → Layer 1c: NVIDIA Nemotron (multi-agent planning, synthesis)
+  - coding         → Layer 1c: NVIDIA Qwen Coder (code generation, review)
+  - bulk           → Layer 1c: NVIDIA Llama 8B (fast, high-volume tasks)
   - general/local  → Layer 1a: Ollama (free, privacy-preserving)
+  - creative       → Layer 1b: Gemma (creative writing, content generation)
   - analytics/data → Layer 2a: Anthropic Claude (only if Layer 1 fails)
   - research       → Layer 2a: Anthropic Claude (only if Layer 1 fails)
-  - sales/creative → Layer 2b: OpenAI GPT-4o (only if Layer 1 fails)
+  - sales          → Layer 2b: OpenAI GPT-4o (only if Layer 1 fails)
+
+Auto-model selection (classify_task / query_ai_auto):
+  Automatically classifies prompts into task categories and routes to the
+  best available provider without manual agent_type specification.
+
+Sub-agent provider inheritance (ACTIVE_AI_PROVIDER):
+  Set ACTIVE_AI_PROVIDER=gemma|ollama|nvidia_nim|anthropic|openai to force
+  all sub-agents to use the same provider as the selected main AI.
 
 Batch processing (query_ai_batch):
   Sends multiple prompts to Ollama concurrently (ThreadPoolExecutor), minimising
@@ -41,14 +51,18 @@ Usage (from any bot that adds this directory to sys.path):
     from pathlib import Path
     AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
     sys.path.insert(0, str(AI_HOME / "agents" / "ai-router"))
-    from ai_router import query_ai, query_ai_for_agent, query_ai_batch, search_web
+    from ai_router import query_ai, query_ai_for_agent, query_ai_batch, query_ai_auto, search_web
 
     result = query_ai("Explain quantum computing in simple terms")
     print(result["answer"])    # the response text
-    print(result["provider"])  # "ollama" | "nvidia_nim" | "anthropic" | "openai" | "error"
+    print(result["provider"])  # "ollama" | "gemma" | "nvidia_nim" | "anthropic" | "openai" | "error"
+
+    # Auto-routing: classifies task and picks the best model automatically
+    result = query_ai_auto("Write me a Python function to sort a list")
+    print(result["answer"], result["task_type"])  # e.g. task_type="coding"
 
     # Agent-aware routing (LOCAL_AI_FIRST=1 by default):
-    #   Always tries Ollama → NIM first, then preferred cloud provider.
+    #   Always tries Ollama → Gemma → NIM first, then preferred cloud provider.
     result = query_ai_for_agent("sales", "Write a cold email for a SaaS product")
     result = query_ai_for_agent("analytical", "Analyse this dataset...", history=[...])
     result = query_ai_for_agent("coding", "Write a Python function to parse JSON")
@@ -70,6 +84,12 @@ Environment variables (loaded from ~/.ai-employee/.env):
     OLLAMA_MODEL             — model name (default: llama3.2)
     OLLAMA_TIMEOUT           — request timeout in seconds (default: 60)
     OLLAMA_BATCH_MAX_WORKERS — max concurrent Ollama workers for query_ai_batch (default: 4)
+    GEMMA_MODEL              — Gemma model name for Ollama (default: gemma3)
+    GEMMA_VIA_OLLAMA         — "1" (default) = run Gemma through local Ollama
+    GOOGLE_API_KEY           — Google AI Studio key for Gemma cloud fallback (free tier)
+    GEMMA_CLOUD_MODEL        — Gemma model via Google AI Studio (default: gemma-3-27b-it)
+    ACTIVE_AI_PROVIDER       — force all sub-agents to use this provider
+                               (ollama|gemma|nvidia_nim|anthropic|openai — empty=auto)
     NVIDIA_API_KEY           — NVIDIA NIM API key (free-tier cloud models)
     NIM_REASONING_MODEL      — reasoning model (default: nvidia/llama-3.3-nemotron-super-49b-v1)
     NIM_CODING_MODEL         — coding model    (default: qwen/qwen2.5-coder-32b-instruct)
@@ -111,6 +131,20 @@ except Exception:
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "60"))
+
+# ── Google Gemma (free local open-source AI) ──────────────────────────────────
+# Primary: run Gemma through local Ollama (ollama pull gemma4).
+# Fallback: Google AI Studio free-tier API (GOOGLE_API_KEY required).
+GEMMA_MODEL = os.environ.get("GEMMA_MODEL", "gemma4")
+GEMMA_VIA_OLLAMA: bool = os.environ.get("GEMMA_VIA_OLLAMA", "1").strip().lower() not in ("0", "false", "no")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+GEMMA_CLOUD_MODEL = os.environ.get("GEMMA_CLOUD_MODEL", "gemma-3-27b-it")
+GEMMA_TIMEOUT = int(os.environ.get("GEMMA_TIMEOUT", "120"))
+
+# ── Sub-agent provider inheritance ───────────────────────────────────────────
+# When set, ALL sub-agents will use this provider instead of their default.
+# Valid values: "ollama" | "gemma" | "nvidia_nim" | "anthropic" | "openai" | ""
+ACTIVE_AI_PROVIDER: str = os.environ.get("ACTIVE_AI_PROVIDER", "").strip().lower()
 
 # ── NVIDIA NIM (free-tier cloud models) ───────────────────────────────────────
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
@@ -159,8 +193,8 @@ def _turbo_mode() -> str:
 _AGENT_ROUTING: dict = {
     # Sales & persuasion agents → GPT-4o (best at persuasive, human-like copy)
     "sales": {"provider": "openai", "model_env": "OPENAI_SALES_MODEL", "default_model": "gpt-4o"},
-    # Creative agents → GPT-4o (best creative writing, campaigns, social content)
-    "creative": {"provider": "openai", "model_env": "OPENAI_MODEL_CREATIVE", "default_model": "gpt-4o"},
+    # Creative agents → Gemma (strong at creative writing, free and local)
+    "creative": {"provider": "gemma", "model_env": "GEMMA_MODEL", "default_model": "gemma3"},
     # Analytics & research agents → Claude (superior at long-context analysis)
     "analytics": {"provider": "anthropic", "model_env": "CLAUDE_MODEL", "default_model": "claude-opus-4-6"},
     # Research category also → Claude
@@ -319,6 +353,86 @@ def _try_ollama(prompt: str, system_prompt: str, history: list, model: Optional[
     return None
 
 
+def _try_gemma(
+    prompt: str,
+    system_prompt: str,
+    history: list,
+    model: Optional[str] = None,
+) -> Optional[dict]:
+    """Attempt to get a response from a Google Gemma model.
+
+    Two backends are tried in order:
+      1. Ollama local (GEMMA_VIA_OLLAMA=1, default) — uses GEMMA_MODEL via the
+         already-running Ollama server.  Run: ``ollama pull gemma3``
+      2. Google AI Studio REST API (free tier) — requires GOOGLE_API_KEY from
+         https://aistudio.google.com/app/apikey
+    """
+    use_model = model or GEMMA_MODEL
+
+    # ── 1. Gemma via local Ollama ──────────────────────────────────────────────
+    if GEMMA_VIA_OLLAMA:
+        result = _try_ollama(prompt, system_prompt, history, model=use_model)
+        if result:
+            # Re-label provider so callers can distinguish Gemma from generic Ollama
+            result["provider"] = "gemma"
+            logger.debug("ai_router: used Gemma/%s (via Ollama)", use_model)
+            return result
+
+    # ── 2. Google AI Studio (free-tier REST API) ────────────────────────────────
+    if not GOOGLE_API_KEY:
+        return None
+    try:
+        cloud_model = GEMMA_CLOUD_MODEL
+        messages = _build_messages(prompt, system_prompt, history)
+        # Convert OpenAI-style messages to Gemini content format
+        contents = []
+        for msg in messages:
+            role = msg["role"]
+            if role == "system":
+                # Google AI Studio doesn't have a system role in basic REST —
+                # prepend as first user turn with a model ack.
+                contents.append({"role": "user", "parts": [{"text": msg["content"]}]})
+                contents.append({"role": "model", "parts": [{"text": "Understood."}]})
+            elif role == "assistant":
+                contents.append({"role": "model", "parts": [{"text": msg["content"]}]})
+            else:
+                contents.append({"role": "user", "parts": [{"text": msg["content"]}]})
+
+        payload = json.dumps({"contents": contents}).encode("utf-8")
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{cloud_model}:generateContent?key={GOOGLE_API_KEY}"
+        )
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "AI-Employee/1.0"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=GEMMA_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        answer = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+            .strip()
+        )
+        if answer:
+            logger.debug("ai_router: used Gemma/%s (Google AI Studio)", cloud_model)
+            return {
+                "answer": answer,
+                "provider": "gemma",
+                "model": cloud_model,
+                "error": None,
+                "usage": None,
+            }
+    except Exception as exc:
+        logger.debug("ai_router: Gemma (Google AI Studio) unavailable — %s", exc)
+    return None
+
+
 def _try_nvidia_nim(
     prompt: str,
     system_prompt: str,
@@ -472,6 +586,121 @@ def _try_openai(prompt: str, system_prompt: str, history: list, model: Optional[
     return None
 
 
+def _try_forced_provider(
+    provider: str,
+    prompt: str,
+    system_prompt: str,
+    history: list,
+) -> dict:
+    """Try only the specified provider (used for sub-agent inheritance).
+
+    When ACTIVE_AI_PROVIDER is set, every call in the system — including
+    sub-agents — will be routed through this single provider.  If it fails,
+    the standard fallback chain is used so the system never goes silent.
+    """
+    provider = provider.strip().lower()
+    result: Optional[dict] = None
+    if provider == "ollama":
+        result = _try_ollama(prompt, system_prompt, history)
+    elif provider == "gemma":
+        result = _try_gemma(prompt, system_prompt, history)
+    elif provider == "nvidia_nim":
+        result = _try_nvidia_nim(prompt, system_prompt, history)
+    elif provider == "anthropic":
+        result = _try_anthropic(prompt, system_prompt, history)
+    elif provider == "openai":
+        result = _try_openai(prompt, system_prompt, history)
+    if result:
+        return result
+    # Forced provider unavailable — fall through to standard chain without
+    # ACTIVE_AI_PROVIDER so we don't recurse infinitely.
+    logger.debug("ai_router: forced provider=%s unavailable, using standard fallback", provider)
+    for fn in (_try_ollama, _try_gemma, _try_nvidia_nim, _try_anthropic, _try_openai):
+        r = fn(prompt, system_prompt, history)
+        if r:
+            return r
+    return _error_response()
+
+
+# ── Task classifier — auto-select the best provider ──────────────────────────
+
+_TASK_KEYWORDS: dict = {
+    "coding": [
+        "code", "function", "script", "program", "debug", "bug", "error", "fix",
+        "python", "javascript", "java", "typescript", "golang", "rust", "sql",
+        "api", "class", "module", "import", "compile", "test", "unit test",
+        "refactor", "algorithm", "data structure", "regex",
+    ],
+    "creative": [
+        "write", "story", "poem", "creative", "novel", "fiction", "blog post",
+        "article", "essay", "lyrics", "script", "narrative", "character",
+        "caption", "slogan", "tagline", "ad copy", "social media post",
+    ],
+    "analytics": [
+        "analyse", "analyze", "data", "statistics", "metrics", "chart", "graph",
+        "trend", "forecast", "model", "predict", "correlation", "regression",
+        "dashboard", "report", "kpi", "benchmark", "compare",
+    ],
+    "reasoning": [
+        "reason", "logic", "explain why", "evaluate", "assess", "strategy",
+        "plan", "decide", "trade-off", "pros and cons", "complex", "scenario",
+        "hypothesis", "argue", "debate", "critique",
+    ],
+    "research": [
+        "research", "find", "search", "summarise", "summarize", "overview",
+        "what is", "who is", "history of", "define", "news", "latest",
+        "information about", "tell me about",
+    ],
+    "sales": [
+        "sell", "sales", "cold email", "outreach", "pitch", "proposal",
+        "persuade", "convince", "customer", "lead", "prospect", "conversion",
+        "follow up", "close", "deal", "offer",
+    ],
+}
+
+
+def classify_task(prompt: str) -> str:
+    """Classify a prompt into a task category for optimal model routing.
+
+    Uses keyword heuristics to categorise the prompt.  Returns one of:
+      "coding" | "creative" | "analytics" | "reasoning" | "research" |
+      "sales" | "general"
+
+    This is intentionally lightweight — no external calls, runs in microseconds.
+    """
+    text = prompt.lower()
+    scores: dict[str, int] = {category: 0 for category in _TASK_KEYWORDS}
+    for category, keywords in _TASK_KEYWORDS.items():
+        for kw in keywords:
+            if kw in text:
+                scores[category] += 1
+    best = max(scores, key=lambda category: scores[category])
+    if scores[best] == 0:
+        return "general"
+    return best
+
+
+def query_ai_auto(
+    prompt: str,
+    system_prompt: str = "",
+    history: Optional[list] = None,
+) -> dict:
+    """Auto-classify the prompt and route to the best available provider.
+
+    Calls ``classify_task()`` to determine the task type, then delegates to
+    ``query_ai_for_agent()`` with that type so the best model is selected
+    automatically.
+
+    Returns the standard query_ai() dict plus an extra ``task_type`` key
+    indicating the detected category.
+    """
+    task_type = classify_task(prompt)
+    logger.debug("ai_router: query_ai_auto classified task as '%s'", task_type)
+    result = query_ai_for_agent(task_type, prompt, system_prompt=system_prompt, history=history)
+    result["task_type"] = task_type
+    return result
+
+
 def query_ai(
     prompt: str,
     system_prompt: str = "",
@@ -481,11 +710,15 @@ def query_ai(
 
     LAYER 1 — Free / Local (always tried first):
         1a. Ollama  (local model, completely free, privacy-preserving)
-        1b. NVIDIA NIM  (free-tier cloud — Nemotron reasoning model)
+        1b. Gemma   (Google open-source — via Ollama or Google AI Studio free)
+        1c. NVIDIA NIM  (free-tier cloud — Nemotron reasoning model)
 
     LAYER 2 — Paid Cloud (only if Layer 1 fully unavailable):
         2a. Anthropic Claude  (cloud, costs tokens)
         2b. OpenAI GPT  (cloud, costs tokens — last resort)
+
+    If ACTIVE_AI_PROVIDER is set, only that provider is tried (sub-agent
+    inheritance: all agents follow the same provider as the main AI).
 
     Args:
         prompt: The user message or question.
@@ -496,12 +729,16 @@ def query_ai(
     Returns:
         dict with keys:
             answer   (str)  — AI response text, empty string on failure
-            provider (str)  — "ollama" | "nvidia_nim" | "anthropic" | "openai" | "error"
+            provider (str)  — "ollama" | "gemma" | "nvidia_nim" | "anthropic" | "openai" | "error"
             model    (str)  — model identifier used
             error    (str|None) — error description if all providers failed
             usage    (dict|None) — token usage for cloud providers
     """
     history = history or []
+
+    # ── Provider inheritance: force a single provider for all sub-agents ─────
+    if ACTIVE_AI_PROVIDER:
+        return _try_forced_provider(ACTIVE_AI_PROVIDER, prompt, system_prompt, history)
 
     # ── Layer 1: Free / Local ─────────────────────────────────────────────────
     # 1a. Ollama (local, completely free)
@@ -509,7 +746,12 @@ def query_ai(
     if result:
         return result
 
-    # 1b. NVIDIA NIM (free-tier cloud — Nemotron reasoning model)
+    # 1b. Gemma (local via Ollama or Google AI Studio free tier)
+    result = _try_gemma(prompt, system_prompt, history)
+    if result:
+        return result
+
+    # 1c. NVIDIA NIM (free-tier cloud — Nemotron reasoning model)
     result = _try_nvidia_nim(prompt, system_prompt, history)
     if result:
         return result
@@ -534,8 +776,8 @@ def query_ai(
         "model": "",
         "error": (
             "No AI provider available. "
-            "Start Ollama (`ollama serve`), set NVIDIA_API_KEY, "
-            "ANTHROPIC_API_KEY, or OPENAI_API_KEY "
+            "Start Ollama (`ollama serve` then `ollama pull gemma3`), "
+            "set GOOGLE_API_KEY, NVIDIA_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY "
             "in ~/.ai-employee/.env and restart."
         ),
         "usage": None,
@@ -584,8 +826,14 @@ def query_ai_batch(
     hist = history or []
 
     def _process_one(prompt: str) -> dict:
-        # Always try local Ollama first for every item in the batch
+        # Honour ACTIVE_AI_PROVIDER for batch items too
+        if ACTIVE_AI_PROVIDER:
+            return _try_forced_provider(ACTIVE_AI_PROVIDER, prompt, system_prompt, hist)
+        # Always try local free providers first for every item in the batch
         result = _try_ollama(prompt, system_prompt, hist)
+        if result:
+            return result
+        result = _try_gemma(prompt, system_prompt, hist)
         if result:
             return result
         # Per-item cloud fallback: Anthropic → OpenAI
@@ -601,7 +849,8 @@ def query_ai_batch(
             "model": "",
             "error": (
                 "No AI provider available. "
-                "Start Ollama (`ollama serve`) or set ANTHROPIC_API_KEY / OPENAI_API_KEY "
+                "Start Ollama (`ollama serve`) or set GOOGLE_API_KEY, "
+                "ANTHROPIC_API_KEY / OPENAI_API_KEY "
                 "in ~/.ai-employee/.env and restart."
             ),
             "usage": None,
@@ -625,16 +874,24 @@ def query_ai_for_agent(
     ──────────────────────────────────────────────
     LAYER 1 — Free / Local (always run first, regardless of agent preference):
       1a. Ollama  (local model — truly free and private)
-      1b. NVIDIA NIM  (free-tier cloud — uses agent-specific model when applicable)
+      1b. Gemma   (Google open-source — via Ollama or Google AI Studio free)
+      1c. NVIDIA NIM  (free-tier cloud — uses agent-specific model when applicable)
 
     LAYER 2 — Paid Cloud (only if Layer 1 fully unavailable):
       Uses the agent's preferred paid provider with its specialist model, then
       falls back to the remaining cloud provider.
 
-    Agent → paid-cloud preference (only reached if Ollama + NIM both fail):
+    Agent → preferred provider mapping:
+      creative           → Gemma (strong creative writing, free/local)
+      coding             → NVIDIA Qwen Coder
+      reasoning/orchestrator → NVIDIA Nemotron
+      bulk               → NVIDIA Llama 8B
       sales / persuasive → OpenAI GPT-4o   (best persuasive copy)
       analytics / data   → Anthropic Claude  (superior long-context analysis)
-      general / other    → Anthropic → OpenAI
+      general / other    → Ollama → Gemma → NIM → cloud
+
+    Sub-agent inheritance: if ACTIVE_AI_PROVIDER is set, all agents use that
+    provider regardless of their category routing.
 
     Turbo Mode integration (when turbo_quant is available):
       MONEY  → forces Ollama local-only routing for cost efficiency
@@ -657,6 +914,10 @@ def query_ai_for_agent(
     """
     history = history or []
     agent_key = agent_type.lower()
+
+    # ── Provider inheritance: honour ACTIVE_AI_PROVIDER for sub-agents ────────
+    if ACTIVE_AI_PROVIDER:
+        return _try_forced_provider(ACTIVE_AI_PROVIDER, prompt, system_prompt, history)
 
     routing = _route_for_agent(None, agent_key)
     preferred_provider = routing["provider"]
@@ -708,7 +969,14 @@ def query_ai_for_agent(
         if result:
             return result
 
-        # 1b. NVIDIA NIM — free-tier cloud.
+        # 1b. Gemma — Google open-source, free and local.
+        #   Use Gemma as preferred model for creative tasks; others get default.
+        gemma_model = preferred_model if preferred_provider == "gemma" else None
+        result = _try_gemma(prompt, system_prompt, history, model=gemma_model)
+        if result:
+            return result
+
+        # 1c. NVIDIA NIM — free-tier cloud.
         #   Use the agent's specific NIM model when the agent prefers NIM;
         #   otherwise use the default NIM reasoning model.
         nim_model = preferred_model if preferred_provider == "nvidia_nim" else None
@@ -737,7 +1005,7 @@ def query_ai_for_agent(
             # Remaining cloud fallback
             return _try_openai(prompt, system_prompt, history) or _error_response()
 
-        # NIM / Ollama preferred (both already exhausted in Layer 1): try all cloud
+        # Gemma / NIM / Ollama preferred (all already exhausted in Layer 1): try cloud
         result = _try_anthropic(prompt, system_prompt, history)
         if result:
             return result
@@ -746,7 +1014,12 @@ def query_ai_for_agent(
     # ── Legacy mode: preferred-provider-first ────────────────────────────────
     result = None
 
-    if preferred_provider == "nvidia_nim":
+    if preferred_provider == "gemma":
+        result = _try_gemma(prompt, system_prompt, history, model=preferred_model)
+        if result:
+            logger.debug("ai_router: agent=%s used Gemma/%s", agent_type, preferred_model)
+
+    elif preferred_provider == "nvidia_nim":
         result = _try_nvidia_nim(prompt, system_prompt, history, model=preferred_model)
         if result:
             logger.debug("ai_router: agent=%s used NVIDIA NIM/%s", agent_type, preferred_model)
@@ -782,8 +1055,8 @@ def _error_response() -> dict:
         "model": "",
         "error": (
             "No AI provider available. "
-            "Start Ollama (`ollama serve`), set NVIDIA_API_KEY, "
-            "ANTHROPIC_API_KEY, or OPENAI_API_KEY "
+            "Start Ollama (`ollama serve` then `ollama pull gemma3`), "
+            "set GOOGLE_API_KEY, NVIDIA_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY "
             "in ~/.ai-employee/.env and restart."
         ),
         "usage": None,

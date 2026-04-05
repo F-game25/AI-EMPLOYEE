@@ -523,6 +523,12 @@ def _detect_llm_provider(model_route: Optional[str] = None) -> tuple[Optional[st
     if _ollama_reachable(ollama_host):
       return "ollama", runtime_env.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL", "llama3.2"), runtime_env
 
+  if route == "gemma":
+    ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    if _ollama_reachable(ollama_host):
+      gemma_model = runtime_env.get("GEMMA_MODEL") or os.environ.get("GEMMA_MODEL", "gemma4")
+      return "gemma", gemma_model, runtime_env
+
   anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
   if anthropic_key:
     return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
@@ -644,6 +650,12 @@ def _call_ollama_chat(prompt: str, system_prompt: str, model: str, ollama_host: 
   return ((body.get("message") or {}).get("content") or "").strip()
 
 
+def _call_gemma_chat(prompt: str, system_prompt: str, ollama_host: str) -> str:
+  """Call Gemma model via local Ollama using the configured GEMMA_MODEL."""
+  gemma_model = os.environ.get("GEMMA_MODEL", "gemma4")
+  return _call_ollama_chat(prompt, system_prompt, gemma_model, ollama_host)
+
+
 def _generate_llm_response(message: str, routed_agent: str, mode: str, model_route: Optional[str] = None) -> str:
   provider, model, runtime_env = _detect_llm_provider(model_route)
   if not provider:
@@ -663,6 +675,9 @@ def _generate_llm_response(message: str, routed_agent: str, mode: str, model_rou
     elif provider == "groq":
       api_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
       answer = _call_groq_chat(message, system_prompt, model, api_key)
+    elif provider == "gemma":
+      ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+      answer = _call_gemma_chat(message, system_prompt, ollama_host)
     else:
       ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
       answer = _call_ollama_chat(message, system_prompt, model, ollama_host)
@@ -1896,6 +1911,7 @@ INDEX_HTML = r"""<!doctype html>
           <select id="chat-model" onchange="updateChatModelBadge()" style="background:transparent;border:none;color:var(--gold-light);font-size:.82em;font-weight:600;cursor:pointer;outline:none;font-family:inherit">
             <option value="auto">⚡ Auto (Cost-Effective)</option>
             <option value="ollama">🦙 Ollama • Local AI</option>
+            <option value="gemma">💎 Gemma • Free &amp; Open Source</option>
             <option value="nvidia">🔷 NVIDIA NIM</option>
             <option value="openai">🌐 OpenAI</option>
             <option value="anthropic">🤖 Anthropic Claude</option>
@@ -3942,7 +3958,7 @@ async function loadChatLog() {
 
   function modelBadge(routeHint) {
     const route = routeHint || document.getElementById('chat-model')?.value || 'auto';
-    const labels = {auto:'⚡ Auto',ollama:'🦙 Ollama',nvidia:'🔷 NVIDIA',openai:'🌐 OpenAI',anthropic:'🤖 Claude',groq:'⚡ Groq',external:'🌐 External'};
+    const labels = {auto:'⚡ Auto',ollama:'🦙 Ollama',gemma:'💎 Gemma',nvidia:'🔷 NVIDIA',openai:'🌐 OpenAI',anthropic:'🤖 Claude',groq:'⚡ Groq',external:'🌐 External'};
     return labels[route] || '🤖 AI';
   }
 
@@ -3971,10 +3987,11 @@ function updateChatModelBadge() {
   const badge = document.getElementById('chat-model-badge');
   const indicator = document.getElementById('chat-agent-indicator');
   if (!sel || !badge) return;
-  const labels = {auto:'Auto',ollama:'Ollama',nvidia:'NVIDIA NIM',openai:'OpenAI',anthropic:'Claude',groq:'Groq',external:'External'};
+  const labels = {auto:'Auto',ollama:'Ollama',gemma:'Gemma',nvidia:'NVIDIA NIM',openai:'OpenAI',anthropic:'Claude',groq:'Groq',external:'External'};
   const hints = {
     auto:'Auto-routing: Ollama → NVIDIA → Groq → OpenAI (cost-effective)',
     ollama:'Using local Ollama (free, private)',
+    gemma:'Using Google Gemma (free, open-source — run: ollama pull gemma4)',
     nvidia:'Using NVIDIA NIM (fast, free tier)',
     openai:'Using OpenAI GPT-4o',
     anthropic:'Using Anthropic Claude',
