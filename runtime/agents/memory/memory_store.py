@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -27,6 +28,7 @@ class MemoryStore:
 
     def __init__(self) -> None:
         MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        self._index_lock = threading.Lock()
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -67,16 +69,17 @@ class MemoryStore:
         return {"entities": {}}
 
     def _update_index(self, entity: dict) -> None:
-        index = self._load_index()
-        index["entities"][entity["entity_id"]] = {
-            "entity_type": entity.get("entity_type", "unknown"),
-            "updated_at": entity.get("updated_at", ""),
-            "tags": entity.get("tags", []),
-            "score": entity.get("score", 0.0),
-            "fact_count": len(entity.get("facts", [])),
-            "conversation_turns": len(entity.get("conversation", [])),
-        }
-        INDEX_FILE.write_text(json.dumps(index, indent=2))
+        with self._index_lock:
+            index = self._load_index()
+            index["entities"][entity["entity_id"]] = {
+                "entity_type": entity.get("entity_type", "unknown"),
+                "updated_at": entity.get("updated_at", ""),
+                "tags": entity.get("tags", []),
+                "score": entity.get("score", 0.0),
+                "fact_count": len(entity.get("facts", [])),
+                "conversation_turns": len(entity.get("conversation", [])),
+            }
+            INDEX_FILE.write_text(json.dumps(index, indent=2))
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -261,9 +264,10 @@ class MemoryStore:
         path = self._entity_path(entity_id)
         if path.exists():
             path.unlink()
-            index = self._load_index()
-            index["entities"].pop(entity_id, None)
-            INDEX_FILE.write_text(json.dumps(index, indent=2))
+            with self._index_lock:
+                index = self._load_index()
+                index["entities"].pop(entity_id, None)
+                INDEX_FILE.write_text(json.dumps(index, indent=2))
             return True
         return False
 

@@ -75,7 +75,7 @@ Environment variables (loaded from ~/.ai-employee/.env):
     NIM_CODING_MODEL         — coding model    (default: qwen/qwen2.5-coder-32b-instruct)
     NIM_BULK_MODEL           — bulk model      (default: meta/llama-3.1-8b-instruct)
     ANTHROPIC_API_KEY        — Anthropic key (optional cloud fallback)
-    CLAUDE_MODEL             — Claude model name (default: claude-opus-4-5)
+    CLAUDE_MODEL             — Claude model name (default: claude-opus-4-6)
     OPENAI_API_KEY           — OpenAI key (optional last-resort fallback)
     OPENAI_MODEL             — OpenAI model name (default: gpt-4o-mini)
     OPENAI_SALES_MODEL       — OpenAI model for sales agents (default: gpt-4o)
@@ -122,7 +122,7 @@ NIM_CODING_MODEL = os.environ.get("NIM_CODING_MODEL", "qwen/qwen2.5-coder-32b-in
 NIM_BULK_MODEL = os.environ.get("NIM_BULK_MODEL", "meta/llama-3.1-8b-instruct")
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-5")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-6")
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
@@ -162,9 +162,9 @@ _AGENT_ROUTING: dict = {
     # Creative agents → GPT-4o (best creative writing, campaigns, social content)
     "creative": {"provider": "openai", "model_env": "OPENAI_MODEL_CREATIVE", "default_model": "gpt-4o"},
     # Analytics & research agents → Claude (superior at long-context analysis)
-    "analytics": {"provider": "anthropic", "model_env": "CLAUDE_MODEL", "default_model": "claude-opus-4-5"},
+    "analytics": {"provider": "anthropic", "model_env": "CLAUDE_MODEL", "default_model": "claude-opus-4-6"},
     # Research category also → Claude
-    "research": {"provider": "anthropic", "model_env": "CLAUDE_MODEL", "default_model": "claude-opus-4-5"},
+    "research": {"provider": "anthropic", "model_env": "CLAUDE_MODEL", "default_model": "claude-opus-4-6"},
     # Reasoning tasks → NVIDIA Nemotron (deep logic, complex analysis, free-tier)
     "reasoning": {
         "provider": "nvidia_nim",
@@ -752,57 +752,14 @@ def query_ai_for_agent(
             logger.debug("ai_router: agent=%s used NVIDIA NIM/%s", agent_type, preferred_model)
 
     elif preferred_provider == "openai" and OPENAI_API_KEY:
-        try:
-            import openai
-            client = openai.OpenAI(api_key=OPENAI_API_KEY)
-            messages = _build_messages(prompt, system_prompt, history)
-            response = client.chat.completions.create(
-                model=preferred_model,
-                messages=messages,
-                max_tokens=4096,
-                timeout=CLOUD_AI_TIMEOUT,
-            )
-            answer = response.choices[0].message.content.strip()
+        result = _try_openai(prompt, system_prompt, history, model=preferred_model)
+        if result:
             logger.debug("ai_router: agent=%s used OpenAI/%s", agent_type, preferred_model)
-            result = {
-                "answer": answer,
-                "provider": "openai",
-                "model": preferred_model,
-                "error": None,
-                "usage": {
-                    "input_tokens": response.usage.prompt_tokens,
-                    "output_tokens": response.usage.completion_tokens,
-                },
-            }
-        except Exception as exc:
-            logger.debug("ai_router: preferred OpenAI/%s failed — %s", preferred_model, exc)
 
     elif preferred_provider == "anthropic" and ANTHROPIC_API_KEY:
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-            messages = list(history) if history else []
-            messages.append({"role": "user", "content": prompt})
-            response = client.messages.create(
-                model=preferred_model,
-                max_tokens=4096,
-                system=system_prompt or "You are a helpful AI assistant.",
-                messages=messages,
-            )
-            answer = response.content[0].text.strip()
+        result = _try_anthropic(prompt, system_prompt, history, model=preferred_model)
+        if result:
             logger.debug("ai_router: agent=%s used Anthropic/%s", agent_type, preferred_model)
-            result = {
-                "answer": answer,
-                "provider": "anthropic",
-                "model": preferred_model,
-                "error": None,
-                "usage": {
-                    "input_tokens": response.usage.input_tokens,
-                    "output_tokens": response.usage.output_tokens,
-                },
-            }
-        except Exception as exc:
-            logger.debug("ai_router: preferred Anthropic/%s failed — %s", preferred_model, exc)
 
     elif preferred_provider == "ollama":
         result = _try_ollama(prompt, system_prompt, history)
