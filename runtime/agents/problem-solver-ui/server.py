@@ -3494,7 +3494,7 @@ async function api(path, opts={}) {
   // Attach stored JWT token when available
   const storedToken = localStorage.getItem('ai_employee_token');
   if (storedToken && !headers.has('Authorization')) {
-    headers.set('Authorization', 'Bearer ' + storedToken);
+    headers.set('Authorization', `Bearer ${storedToken}`);
   }
   fetchOpts.headers = headers;
 
@@ -4850,7 +4850,7 @@ async function loadTasks() {
   const history = plans.filter(p => !['running','planning'].includes(p.status)).slice(0,10);
   if (!history.length) { histEl.innerHTML = '<div class="empty"><p>No task history yet.</p></div>'; return; }
   histEl.innerHTML = history.map(p => {
-    const tid = p.id || ('hist_' + Math.random().toString(36).slice(2));
+    const tid = p.id || (`hist_${Math.random().toString(36).slice(2)}`);
     _taskStore.set(tid, p);
     const e = {done:'✅',failed:'❌',cancelled:'🛑',timed_out:'⏰'}[p.status]||'?';
     const agents = [...new Set((p.subtasks||[]).map(s=>s.agent_id).filter(Boolean))].join(', ');
