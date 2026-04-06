@@ -2049,7 +2049,12 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Scheduler ── -->
 <div id="tab-scheduler" class="tab-content">
-  <div style="display:flex;gap:16px;height:calc(100vh - 130px)">
+  <div class="page-header" style="border-left-color:#c084fc">
+    <div class="page-header-icon">📅</div>
+    <div><div class="page-header-title">Task Scheduler</div><div class="page-header-desc">Schedule recurring and one-time tasks for your agents. View your agenda, create schedules, and manage triggers.</div></div>
+    <span class="page-header-badge" style="color:#c084fc">Automation</span>
+  </div>
+  <div style="display:flex;gap:16px;height:calc(100vh - 175px)">
     <!-- Left: Agenda calendar -->
     <div style="width:320px;display:flex;flex-direction:column;gap:12px;flex-shrink:0">
       <div class="card" style="flex-shrink:0">
@@ -2154,6 +2159,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Workers ── -->
 <div id="tab-workers" class="tab-content">
+  <div class="page-header" style="border-left-color:#6ee7b7">
+    <div class="page-header-icon">👷</div>
+    <div><div class="page-header-title">Agent Teams</div><div class="page-header-desc">Bundle agents together with recurring tasks. Agent teams run on a schedule and always perform their assigned role automatically.</div></div>
+    <span class="page-header-badge" style="color:#6ee7b7">Workforce</span>
+  </div>
 
   <!-- Agent Team Bundles section -->
   <div class="card">
@@ -2239,6 +2249,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Improvements ── -->
 <div id="tab-improvements" class="tab-content">
+  <div class="page-header" style="border-left-color:#facc15">
+    <div class="page-header-icon">💡</div>
+    <div><div class="page-header-title">AI Improvement Proposals</div><div class="page-header-desc">AI-generated improvement proposals for your system. Review, approve, or escalate to execution. No changes applied automatically.</div></div>
+    <span class="page-header-badge" style="color:#facc15">AI Insights</span>
+  </div>
   <div class="card">
     <div class="card-header">
       <div class="card-title"><span class="icon">💡</span> Improvement Proposals</div>
@@ -2780,6 +2795,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Tasks ── -->
 <div id="tab-tasks" class="tab-content">
+  <div class="page-header" style="border-left-color:#f472b6">
+    <div class="page-header-icon">🚀</div>
+    <div><div class="page-header-title">Task Runner</div><div class="page-header-desc">Build and launch tasks for your AI workforce. Describe any goal — agents are auto-selected, you control the final launch.</div></div>
+    <span class="page-header-badge" style="color:#f472b6">Task Builder</span>
+  </div>
 
   <!-- Task Builder -->
   <div class="grid2" style="align-items:start">
@@ -2881,6 +2901,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Swarm ── -->
 <div id="tab-swarm" class="tab-content">
+  <div class="page-header" style="border-left-color:#fbbf24">
+    <div class="page-header-icon">🐝</div>
+    <div><div class="page-header-title">Agent Swarm</div><div class="page-header-desc">All AI agents at a glance — capabilities, status, and current workload. Filter by category or search by skill.</div></div>
+    <span class="page-header-badge" style="color:#fbbf24">41 Agents</span>
+  </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap">
     <!-- Left: agent grid -->
     <div style="flex:1;min-width:320px">
@@ -2960,6 +2985,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Commands ── -->
 <div id="tab-commands" class="tab-content">
+  <div class="page-header" style="border-left-color:#d4af37">
+    <div class="page-header-icon">📜</div>
+    <div><div class="page-header-title">Command Reference</div><div class="page-header-desc">Full list of WhatsApp and bot commands available across your AI system. Search, filter by category, and copy commands directly.</div></div>
+    <span class="page-header-badge" style="color:#d4af37">Commands</span>
+  </div>
   <div class="card">
     <div class="card-header">
       <div class="card-title"><span class="icon" style="color:var(--gold)">◈</span> Command Reference</div>
@@ -3158,10 +3188,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Guardrails ── -->
 <div id="tab-guardrails" class="tab-content">
-  <div class="page-header" style="border-left-color:#fb923c">
+  <div class="page-header" style="border-left-color:#f97316">
     <div class="page-header-icon">🔒</div>
     <div><div class="page-header-title">Guardrails & Safety Controls</div><div class="page-header-desc">Define rules that keep your AI agents operating safely. High-risk actions require manual approval before execution.</div></div>
-    <span class="page-header-badge" style="color:#fb923c">Security Layer</span>
+    <span class="page-header-badge" style="color:#f97316">Security Layer</span>
   </div>
   <!-- Pending approvals notification banner -->
   <div id="guardrails-notification-banner" style="display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(239,68,68,.1));border:1px solid rgba(245,158,11,.5);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.88em;color:var(--warning);font-weight:600;animation:blink 1.5s infinite"></div>
