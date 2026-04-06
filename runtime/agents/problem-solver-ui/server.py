@@ -4256,6 +4256,25 @@ function _isHermesRunning(agents) {
 
 async function loadDashboard() {
   const d = await api('/api/status');
+
+  // Server unreachable — show fully offline state and stop
+  if (!d || d.error || !Array.isArray(d.agents)) {
+    animateCount('stat-running', 0);
+    animateCount('stat-total', 0);
+    document.getElementById('header-sub').textContent = 'System offline';
+    const healthBar = document.getElementById('health-bar');
+    const sysRing = document.getElementById('sys-ring');
+    const sysControlSub = document.getElementById('sys-control-sub');
+    if (healthBar) { healthBar.style.width = '0%'; healthBar.className = 'health-bar-fill danger'; }
+    if (document.getElementById('health-label-right')) document.getElementById('health-label-right').textContent = '0%';
+    if (document.getElementById('health-label-left')) document.getElementById('health-label-left').textContent = '0 / 0 running';
+    if (sysRing) sysRing.classList.add('offline');
+    if (sysControlSub) sysControlSub.textContent = 'System offline — server is not reachable';
+    const el = document.getElementById('bot-status-list');
+    if (el) el.innerHTML = '<div class="empty"><div class="icon">🔴</div><p>System offline — server is not reachable.</p></div>';
+    return;
+  }
+
   const agents = normalizeAgents(d);
   const running = agents.filter(a => a.running).length;
   const total = agents.length;
@@ -7457,6 +7476,14 @@ function connectSSE() {
   es.onerror = () => {
     es.close();
     _sseRetries++;
+    // Server is unreachable — immediately reset displayed counts to zero
+    animateCount('stat-running', 0);
+    const headerSub = document.getElementById('header-sub');
+    if (headerSub) headerSub.textContent = 'System offline';
+    const sysRing = document.getElementById('sys-ring');
+    if (sysRing) sysRing.classList.add('offline');
+    const sysControlSub = document.getElementById('sys-control-sub');
+    if (sysControlSub) sysControlSub.textContent = 'System offline — server is not reachable';
     if (_sseRetries < 10) setTimeout(connectSSE, Math.min(5000 * _sseRetries, 30000));
   };
 }
