@@ -1164,13 +1164,13 @@ INDEX_HTML = r"""<!doctype html>
     nav button.active::after{content:'';position:absolute;bottom:0;left:15%;right:15%;height:2px;
       background:linear-gradient(90deg,transparent,var(--gold),transparent);
       border-radius:2px 2px 0 0;filter:blur(2px);box-shadow:0 0 8px var(--gold)}
-    #nav-blacklight-btn{border-bottom-color:transparent!important}
+    #nav-blacklight-btn{color:#00f0ff;border:1px solid #00f0ff!important;font-weight:700!important;letter-spacing:.04em!important;text-shadow:0 0 10px #00f0ff,0 0 20px rgba(0,240,255,.4);box-shadow:0 0 12px rgba(0,240,255,.2);border-bottom-color:transparent!important}
     #nav-blacklight-btn:hover{background:rgba(0,240,255,.06)!important;color:#00f0ff!important}
     #nav-blacklight-btn.active{background:rgba(0,240,255,.08)!important;border-bottom-color:#00f0ff!important;
       text-shadow:0 0 12px #00f0ff,0 0 24px rgba(0,240,255,.5)!important;
       box-shadow:inset 0 -2px 12px rgba(0,240,255,.2)!important}
     #nav-blacklight-btn.active::after{background:linear-gradient(90deg,transparent,#00f0ff,transparent)!important;box-shadow:0 0 10px #00f0ff!important}
-    #nav-ascend-btn{border-bottom-color:transparent!important}
+    #nav-ascend-btn{color:#ff9500;border:1px solid #ff9500!important;font-weight:700!important;letter-spacing:.04em!important;text-shadow:0 0 10px #ff9500,0 0 20px rgba(255,149,0,.4);box-shadow:0 0 12px rgba(255,149,0,.2);border-bottom-color:transparent!important}
     #nav-ascend-btn:hover{background:rgba(255,149,0,.06)!important;color:#ff9500!important}
     #nav-ascend-btn.active{background:rgba(255,149,0,.08)!important;border-bottom-color:#ff9500!important;
       text-shadow:0 0 12px #ff9500,0 0 24px rgba(255,149,0,.5)!important;
@@ -1784,8 +1784,8 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
-  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="color:#00f0ff;border:1px solid #00f0ff;font-weight:700;letter-spacing:.04em;text-shadow:0 0 10px #00f0ff,0 0 20px rgba(0,240,255,.4);box-shadow:0 0 12px rgba(0,240,255,.2)">⚡ BLACKLIGHT</button>
-  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="color:#ff9500;border:1px solid #ff9500;font-weight:700;letter-spacing:.04em;text-shadow:0 0 10px #ff9500,0 0 20px rgba(255,149,0,.4);box-shadow:0 0 12px rgba(255,149,0,.2)">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn">⚡ BLACKLIGHT</button>
+  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn">🔥 ASCEND FORGE</button>
   <button onclick="switchTab('budget',this)">💰 Budget</button>
   <button onclick="switchTab('org',this)">🏢 Org Chart</button>
   <button onclick="switchTab('goals',this)">🎯 Goals</button>
