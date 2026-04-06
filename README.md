@@ -882,7 +882,7 @@ The full dashboard runs at **http://127.0.0.1:8787** and has 9 tabs:
 | 📅 **Scheduler** | Create/edit/delete scheduled tasks |
 | 👷 **Workers** | Start/stop/toggle individual agents |
 | 💡 **Improvements** | Review and approve/reject skill proposals |
-| 🛠️ **Skills** | Browse and search 147 business skills |
+| 🛠️ **Skills** | Browse and search 126+ business skills |
 
 ### Tasks tab — Agent Selection & Auto-Assign
 
