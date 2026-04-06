@@ -1164,6 +1164,15 @@ INDEX_HTML = r"""<!doctype html>
     nav button.active::after{content:'';position:absolute;bottom:0;left:15%;right:15%;height:2px;
       background:linear-gradient(90deg,transparent,var(--gold),transparent);
       border-radius:2px 2px 0 0;filter:blur(2px);box-shadow:0 0 8px var(--gold)}
+    /* ── Special nav button accents ── */
+    nav button.nav-btn-blacklight{color:#a855f7;letter-spacing:.04em}
+    nav button.nav-btn-blacklight:hover{color:#c084fc;text-shadow:0 0 8px #a855f7}
+    nav button.nav-btn-blacklight.active{color:#c084fc;border-bottom-color:#a855f7;background:rgba(168,85,247,.1);text-shadow:0 0 12px #a855f7;box-shadow:inset 0 -2px 8px rgba(168,85,247,.2)}
+    nav button.nav-btn-blacklight.active::after{background:linear-gradient(90deg,transparent,#a855f7,transparent);box-shadow:0 0 8px #a855f7}
+    nav button.nav-btn-ascend{color:#f59e0b;letter-spacing:.04em}
+    nav button.nav-btn-ascend:hover{color:#fbbf24;text-shadow:0 0 8px #f59e0b}
+    nav button.nav-btn-ascend.active{color:#fbbf24;border-bottom-color:#f59e0b;background:rgba(245,158,11,.1);text-shadow:0 0 12px #f59e0b;box-shadow:inset 0 -2px 8px rgba(245,158,11,.2)}
+    nav button.nav-btn-ascend.active::after{background:linear-gradient(90deg,transparent,#f59e0b,transparent);box-shadow:0 0 8px #f59e0b}
 
     /* ── Main content ── */
     main{flex:1;padding:24px 28px;max-width:1320px;margin:0 auto;width:100%;position:relative;z-index:1}
@@ -1745,24 +1754,24 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('scheduler',this)">📅 Scheduler</button>
   <button onclick="switchTab('workers',this)">👷 Agents</button>
   <button onclick="switchTab('improvements',this)">💡 Improvements</button>
-  <button onclick="switchTab('skills',this)" style="background:linear-gradient(135deg,#0c1f2e,#0e3040);color:#22d3ee;border:1px solid #0891b2;font-weight:700">🛠️ Skills</button>
-  <button onclick="switchTab('metrics',this)" style="background:linear-gradient(135deg,#0a1f0a,#0f3318);color:#4ade80;border:1px solid #16a34a;font-weight:700">📈 ROI</button>
-  <button onclick="switchTab('templates',this)" style="background:linear-gradient(135deg,#0f172a,#162040);color:#60a5fa;border:1px solid #2563eb;font-weight:700">📋 Templates</button>
-  <button onclick="switchTab('guardrails',this)" style="background:linear-gradient(135deg,#1f0a0a,#3a1008);color:#fb923c;border:1px solid #c2410c;font-weight:700">🔒 Guardrails</button>
-  <button onclick="switchTab('memory',this)" style="background:linear-gradient(135deg,#1a0a2e,#2e0d4a);color:#e879f9;border:1px solid #a21caf;font-weight:700">🧠 Memory</button>
-  <button onclick="switchTab('integrations',this)" style="background:linear-gradient(135deg,#1e1b4b,#2a2660);color:#a78bfa;border:1px solid #6d28d9;font-weight:700">🔌 Integrations</button>
-  <button onclick="switchTab('history',this)" style="background:linear-gradient(135deg,#0f1923,#152535);color:#7dd3fc;border:1px solid #0369a1;font-weight:700">🕐 History</button>
-  <button onclick="switchTab('options',this)" style="background:linear-gradient(135deg,#18181b,#252528);color:#d4d4d8;border:1px solid #52525b;font-weight:700">⚙️ Options</button>
-  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em;text-shadow:0 0 8px #a855f7">⚡ BLACKLIGHT</button>
-  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="background:linear-gradient(135deg,#0a1628,#0f2240);color:#f59e0b;border:1px solid #d97706;font-weight:700;letter-spacing:.04em;text-shadow:0 0 8px #f59e0b">🔥 ASCEND FORGE</button>
-  <button onclick="switchTab('budget',this)" style="background:linear-gradient(135deg,#022c22,#064e3b);color:#34d399;border:1px solid #059669;font-weight:700">💰 Budget</button>
-  <button onclick="switchTab('org',this)" style="background:linear-gradient(135deg,#1e1b4b,#312e81);color:#818cf8;border:1px solid #4f46e5;font-weight:700">🏢 Org Chart</button>
-  <button onclick="switchTab('goals',this)" style="background:linear-gradient(135deg,#1c1917,#292524);color:#fb923c;border:1px solid #ea580c;font-weight:700">🎯 Goals</button>
-  <button onclick="switchTab('tickets',this)" style="background:linear-gradient(135deg,#0c1a2e,#0f2947);color:#38bdf8;border:1px solid #0284c7;font-weight:700">🎫 Tickets</button>
-  <button onclick="switchTab('boardroom',this)" style="background:linear-gradient(135deg,#1a0a0a,#2d1515);color:#f87171;border:1px solid #dc2626;font-weight:700">🛡️ Boardroom</button>
-  <button onclick="switchTab('companies',this)" style="background:linear-gradient(135deg,#0a1a0a,#152815);color:#86efac;border:1px solid #16a34a;font-weight:700">🏗️ Companies</button>
-  <button onclick="switchTab('artifacts',this)" style="background:linear-gradient(135deg,#1a1a0a,#2a2a10);color:#fde68a;border:1px solid #ca8a04;font-weight:700">📦 Artifacts</button>
-  <button onclick="switchTab('sessions',this)" style="background:linear-gradient(135deg,#0a1a1a,#102828);color:#67e8f9;border:1px solid #0891b2;font-weight:700">💾 Sessions</button>
+  <button onclick="switchTab('skills',this)">🛠️ Skills</button>
+  <button onclick="switchTab('metrics',this)">📈 ROI</button>
+  <button onclick="switchTab('templates',this)">📋 Templates</button>
+  <button onclick="switchTab('guardrails',this)">🔒 Guardrails</button>
+  <button onclick="switchTab('memory',this)">🧠 Memory</button>
+  <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
+  <button onclick="switchTab('history',this)">🕐 History</button>
+  <button onclick="switchTab('options',this)">⚙️ Options</button>
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" class="nav-btn-blacklight">⚡ BLACKLIGHT</button>
+  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" class="nav-btn-ascend">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('budget',this)">💰 Budget</button>
+  <button onclick="switchTab('org',this)">🏢 Org Chart</button>
+  <button onclick="switchTab('goals',this)">🎯 Goals</button>
+  <button onclick="switchTab('tickets',this)">🎫 Tickets</button>
+  <button onclick="switchTab('boardroom',this)">🛡️ Boardroom</button>
+  <button onclick="switchTab('companies',this)">🏗️ Companies</button>
+  <button onclick="switchTab('artifacts',this)">📦 Artifacts</button>
+  <button onclick="switchTab('sessions',this)">💾 Sessions</button>
 </nav>
   <button class="nav-scroll-btn right" id="nav-scroll-right" onclick="navScroll(1)" title="Scroll right">›</button>
 </div>
