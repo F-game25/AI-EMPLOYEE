@@ -1243,12 +1243,13 @@ INDEX_HTML = r"""<!doctype html>
     #nav-ascend-btn.active::after{background:linear-gradient(90deg,transparent,#ff9500,transparent)!important;box-shadow:0 0 10px #ff9500!important}
 
     /* ── Main content ── */
-    main{flex:1;padding:24px 28px;max-width:1320px;margin:0 auto;width:100%;position:relative;z-index:1}
-    @media(max-width:768px){main{padding:12px 14px}}
+    main{flex:1;padding:24px 28px;max-width:100%;margin:0 auto;width:100%;position:relative;z-index:1;box-sizing:border-box}
+    @media(min-width:1921px){main{padding:28px 3vw}}
+    @media(max-width:768px){main{padding:12px 10px}}
 
     /* ── Tab panels ── */
-    .tab-content{display:none}
-    .tab-content.active{display:block;animation:fadeIn .3s ease}
+    .tab-content{display:none;width:100%;box-sizing:border-box}
+    .tab-content.active{display:block;animation:fadeIn .3s ease;width:100%}
 
     /* ── Tab page headers ── */
     .page-header{
@@ -1292,7 +1293,9 @@ INDEX_HTML = r"""<!doctype html>
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
     .grid-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin-bottom:16px}
+    @media(max-width:1100px){.grid3{grid-template-columns:repeat(2,1fr)}}
     @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
+    @media(min-width:1921px){.grid2{grid-template-columns:1fr 1fr}.grid3{grid-template-columns:repeat(3,1fr)}.grid-stat{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}}
 
     /* ── Stat cards ── */
     .stat-card{
@@ -1987,6 +1990,28 @@ INDEX_HTML = r"""<!doctype html>
           </label>
         </div>
       </div>
+      <!-- ASCEND FORGE status widget -->
+      <div style="padding:10px 0;border-bottom:1px solid rgba(148,163,184,.08);margin-bottom:6px" id="dash-af-widget">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.1rem">🔥</span>
+            <div>
+              <div style="font-size:.86em;font-weight:600;color:var(--text)">ASCEND FORGE</div>
+              <div style="font-size:.75em;color:#f59e0b" id="dash-af-sublabel">Self-improver — idle</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div id="dash-af-pct-badge" style="font-size:.72em;font-weight:700;color:#fbbf24;padding:2px 7px;border-radius:12px;background:rgba(217,119,6,.15);border:1px solid rgba(217,119,6,.3);display:none">0%</div>
+            <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:.72em;border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="switchTab('ascend',document.querySelector('nav button[onclick*=ascend]'))">Open →</button>
+          </div>
+        </div>
+        <div id="dash-af-progress-wrap" style="display:none">
+          <div style="background:rgba(0,0,0,.4);border-radius:100px;height:6px;overflow:hidden;border:1px solid rgba(217,119,6,.15)">
+            <div id="dash-af-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#92400e,#d97706,#fbbf24);border-radius:100px;transition:width .4s ease"></div>
+          </div>
+          <div id="dash-af-task-text" style="font-size:.72em;color:var(--text-muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+        </div>
+      </div>
       <div id="system-info" style="display:none"></div>
     </div>
   </div>
@@ -2222,11 +2247,81 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 
 <!-- ── Workers ── -->
-<div id="tab-workers" class="tab-content">
+<div id="tab-workers" class="tab-content" style="width:100%;box-sizing:border-box">
   <div class="page-header" style="border-left-color:#6ee7b7">
     <div class="page-header-icon">👷</div>
     <div><div class="page-header-title">Agent Teams</div><div class="page-header-desc">Bundle agents together with recurring tasks. Agent teams run on a schedule and always perform their assigned role automatically.</div></div>
     <span class="page-header-badge" style="color:#6ee7b7">Workforce</span>
+  </div>
+
+  <!-- ── Quick Presets ── -->
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.04),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:var(--gold)">⚡</span> One-Click Power Presets</div>
+      <span style="font-size:.78em;color:var(--text-muted)">Select agents → bundle → send to swarm</span>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Click a preset to instantly configure and launch a coordinated agent bundle. Then click <strong style="color:var(--gold)">Send Bundle to Swarm</strong> to deploy.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px">
+      <button onclick="applyAgentPreset('business_automator')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(16,185,129,.06));border:1px solid rgba(16,185,129,.3);border-radius:12px;color:#34d399;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(16,185,129,.6)';this.style.background='linear-gradient(135deg,rgba(16,185,129,.2),rgba(16,185,129,.1))'" onmouseleave="this.style.borderColor='rgba(16,185,129,.3)';this.style.background='linear-gradient(135deg,rgba(16,185,129,.12),rgba(16,185,129,.06))'">
+        <span style="font-size:1.3em">🏢</span>
+        <span style="font-weight:700;font-size:.9em">Business Automator</span>
+        <span style="font-size:.74em;color:var(--text-muted)">Automate ops, admin & scheduling</span>
+      </button>
+      <button onclick="applyAgentPreset('money_printer')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.12),rgba(212,175,55,.06));border:1px solid rgba(212,175,55,.3);border-radius:12px;color:#fbbf24;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.6)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.1))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.3)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.12),rgba(212,175,55,.06))'">
+        <span style="font-size:1.3em">💰</span>
+        <span style="font-weight:700;font-size:.9em">Money Printer</span>
+        <span style="font-size:.74em;color:var(--text-muted)">Revenue, upsells & monetization</span>
+      </button>
+      <button onclick="applyAgentPreset('research_team')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(99,102,241,.06));border:1px solid rgba(99,102,241,.3);border-radius:12px;color:#818cf8;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(99,102,241,.6)';this.style.background='linear-gradient(135deg,rgba(99,102,241,.2),rgba(99,102,241,.1))'" onmouseleave="this.style.borderColor='rgba(99,102,241,.3)';this.style.background='linear-gradient(135deg,rgba(99,102,241,.12),rgba(99,102,241,.06))'">
+        <span style="font-size:1.3em">🔬</span>
+        <span style="font-weight:700;font-size:.9em">Research Team</span>
+        <span style="font-size:.74em;color:var(--text-muted)">Deep research & competitive intel</span>
+      </button>
+      <button onclick="applyAgentPreset('lead_gen_swarm')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(239,68,68,.12),rgba(239,68,68,.06));border:1px solid rgba(239,68,68,.3);border-radius:12px;color:#f87171;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(239,68,68,.6)';this.style.background='linear-gradient(135deg,rgba(239,68,68,.2),rgba(239,68,68,.1))'" onmouseleave="this.style.borderColor='rgba(239,68,68,.3)';this.style.background='linear-gradient(135deg,rgba(239,68,68,.12),rgba(239,68,68,.06))'">
+        <span style="font-size:1.3em">🎯</span>
+        <span style="font-weight:700;font-size:.9em">Lead Generation Swarm</span>
+        <span style="font-size:.74em;color:var(--text-muted)">Hunt, score & convert leads</span>
+      </button>
+      <button onclick="applyAgentPreset('content_empire')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(236,72,153,.12),rgba(236,72,153,.06));border:1px solid rgba(236,72,153,.3);border-radius:12px;color:#f472b6;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(236,72,153,.6)';this.style.background='linear-gradient(135deg,rgba(236,72,153,.2),rgba(236,72,153,.1))'" onmouseleave="this.style.borderColor='rgba(236,72,153,.3)';this.style.background='linear-gradient(135deg,rgba(236,72,153,.12),rgba(236,72,153,.06))'">
+        <span style="font-size:1.3em">✍️</span>
+        <span style="font-weight:700;font-size:.9em">Content Empire</span>
+        <span style="font-size:.74em;color:var(--text-muted)">Content, SEO & brand building</span>
+      </button>
+      <button onclick="applyAgentPreset('ecom_powerhouse')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(251,146,60,.12),rgba(251,146,60,.06));border:1px solid rgba(251,146,60,.3);border-radius:12px;color:#fb923c;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(251,146,60,.6)';this.style.background='linear-gradient(135deg,rgba(251,146,60,.2),rgba(251,146,60,.1))'" onmouseleave="this.style.borderColor='rgba(251,146,60,.3)';this.style.background='linear-gradient(135deg,rgba(251,146,60,.12),rgba(251,146,60,.06))'">
+        <span style="font-size:1.3em">🛒</span>
+        <span style="font-weight:700;font-size:.9em">E-com Powerhouse</span>
+        <span style="font-size:.74em;color:var(--text-muted)">Orders, inventory & fulfillment</span>
+      </button>
+      <button onclick="applyAgentPreset('outreach_machine')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(0,240,255,.12),rgba(0,240,255,.06));border:1px solid rgba(0,240,255,.3);border-radius:12px;color:#00f0ff;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(0,240,255,.6)';this.style.background='linear-gradient(135deg,rgba(0,240,255,.2),rgba(0,240,255,.1))'" onmouseleave="this.style.borderColor='rgba(0,240,255,.3)';this.style.background='linear-gradient(135deg,rgba(0,240,255,.12),rgba(0,240,255,.06))'">
+        <span style="font-size:1.3em">📣</span>
+        <span style="font-weight:700;font-size:.9em">Outreach Machine</span>
+        <span style="font-size:.74em;color:var(--text-muted)">Email, calls & social DMs</span>
+      </button>
+      <button onclick="applyAgentPreset('analytics_squad')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(52,211,153,.12),rgba(52,211,153,.06));border:1px solid rgba(52,211,153,.3);border-radius:12px;color:#34d399;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(52,211,153,.6)';this.style.background='linear-gradient(135deg,rgba(52,211,153,.2),rgba(52,211,153,.1))'" onmouseleave="this.style.borderColor='rgba(52,211,153,.3)';this.style.background='linear-gradient(135deg,rgba(52,211,153,.12),rgba(52,211,153,.06))'">
+        <span style="font-size:1.3em">📊</span>
+        <span style="font-weight:700;font-size:.9em">Analytics Squad</span>
+        <span style="font-size:.74em;color:var(--text-muted)">Reports, KPIs & insights</span>
+      </button>
+    </div>
+    <!-- Bundle builder row -->
+    <div style="background:rgba(0,0,0,.3);border:1px solid rgba(212,175,55,.15);border-radius:12px;padding:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-weight:700;color:var(--gold);font-size:.9em" id="swarm-preset-label">🎯 Select a preset or pick agents below</div>
+          <div style="font-size:.78em;color:var(--text-muted)" id="swarm-agent-count-label">0 agents selected</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="swarmSelectAll()">All</button>
+          <button class="btn btn-ghost btn-sm" onclick="swarmClearAll()">None</button>
+          <button onclick="sendBundleToSwarm()" id="btn-send-bundle" style="padding:9px 20px;background:linear-gradient(135deg,#B8960C,#D4AF37);border:none;border-radius:10px;color:#000;font-weight:800;font-size:.84em;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 14px rgba(212,175,55,.25)" onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 20px rgba(212,175,55,.4)'" onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 14px rgba(212,175,55,.25)'">🚀 Send Bundle to Swarm</button>
+        </div>
+      </div>
+      <div style="margin-bottom:8px">
+        <input id="swarm-bundle-task" placeholder="Describe the mission for this bundle (optional)…" style="width:100%;box-sizing:border-box;font-size:.84em" />
+      </div>
+      <div id="swarm-agent-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:5px;max-height:220px;overflow-y:auto"></div>
+      <div id="swarm-bundle-result" style="margin-top:8px;font-size:.84em"></div>
+    </div>
   </div>
 
   <!-- Agent Team Bundles section -->
@@ -3782,7 +3877,7 @@ INDEX_HTML = r"""<!doctype html>
     <div style="margin-top:14px;font-size:.8em;color:var(--text-muted)" id="theme-save-note">Theme is saved to your browser and persists across sessions.</div>
   </div>
 </div>
-<div id="tab-blacklight" class="tab-content">
+<div id="tab-blacklight" class="tab-content" style="width:100%;box-sizing:border-box">
 
   <!-- Header banner -->
   <div style="background:linear-gradient(135deg,#000d1a 0%,#001428 60%,#000a14 100%);border:1px solid #00f0ff;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(0,240,255,.15),0 8px 32px rgba(0,0,0,.8)">
@@ -3850,6 +3945,40 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
+  <!-- ── BLACKLIGHT Direct Task Composer ── -->
+  <div class="card" style="margin-bottom:18px;border:2px solid rgba(0,240,255,.3);background:linear-gradient(135deg,rgba(0,20,40,.9),rgba(0,5,15,.98));box-shadow:0 0 40px rgba(0,240,255,.1)">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#00f0ff">⚡</span> Direct Task Assignment</div>
+      <span style="font-size:.78em;color:#00f0ff;font-weight:600;padding:3px 10px;border-radius:20px;background:rgba(0,240,255,.1);border:1px solid rgba(0,240,255,.3)">INDEPENDENT MODE</span>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+      Assign a task directly to BLACKLIGHT — it runs <strong style="color:#00f0ff">independently</strong>, without the main orchestrator. BLACKLIGHT will start immediately and iterate autonomously.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <textarea id="bl-task-input" rows="3" placeholder="e.g. Find 10 local businesses that need better social media marketing and draft outreach emails&#10;e.g. Identify SaaS companies with weak onboarding and generate improvement proposals&#10;e.g. Scan for e-commerce stores with abandoned cart problems and create solutions"
+        style="width:100%;box-sizing:border-box;background:rgba(0,0,0,.7);border:1px solid rgba(0,240,255,.25);border-radius:10px;color:#e0f9ff;padding:12px 16px;font-family:inherit;font-size:.9em;resize:vertical;outline:none;transition:border-color .2s"
+        onfocus="this.style.borderColor='rgba(0,240,255,.7)'" onblur="this.style.borderColor='rgba(0,240,255,.25)'"
+        onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();blSendTask();}"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button onclick="blSendTask()" style="padding:10px 24px;background:linear-gradient(135deg,#004466,#006688,#00a0c0);border:none;border-radius:10px;color:#fff;font-weight:800;font-size:.9em;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 16px rgba(0,240,255,.2);letter-spacing:.03em" onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 24px rgba(0,240,255,.4)'" onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(0,240,255,.2)'">⚡ Launch BLACKLIGHT Task <kbd style="background:rgba(255,255,255,.15);padding:1px 5px;border-radius:4px;font-size:.75em">Ctrl+↵</kbd></button>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(0,240,255,.3);color:#00f0ff" onclick="blFillTask('find local businesses struggling with digital marketing and generate cold outreach sequences')">📣 Lead Outreach</button>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(0,240,255,.3);color:#00f0ff" onclick="blFillTask('identify high-value e-commerce opportunities and generate monetization strategies')">💰 Money Finder</button>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(0,240,255,.3);color:#00f0ff" onclick="blFillTask('research the top 5 competitors in my niche and generate a competitive advantage report')">🔬 Research</button>
+      </div>
+    </div>
+    <!-- Task progress panel -->
+    <div id="bl-task-progress-panel" style="margin-top:16px;display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:.84em;font-weight:700;color:#00f0ff" id="bl-task-status-text">⚡ Launching…</div>
+        <div style="font-size:.84em;color:#00ccff;font-weight:700" id="bl-task-pct">0%</div>
+      </div>
+      <div style="background:rgba(0,0,0,.6);border-radius:100px;height:10px;overflow:hidden;border:1px solid rgba(0,240,255,.15)">
+        <div id="bl-task-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#004466,#00a0c0,#00f0ff);border-radius:100px;transition:width .4s ease;box-shadow:0 0 10px rgba(0,240,255,.4)"></div>
+      </div>
+      <div id="bl-task-result" style="margin-top:8px;font-size:.84em;color:#4ade80;display:none"></div>
+    </div>
+  </div>
+
   <!-- Live activity log -->
   <div class="card" style="border:1px solid rgba(0,240,255,.25);background:linear-gradient(135deg,rgba(0,240,255,.04),var(--surface2))">
     <div class="card-header">
@@ -3864,7 +3993,7 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 
 <!-- ── ASCEND FORGE ── -->
-<div id="tab-ascend" class="tab-content">
+<div id="tab-ascend" class="tab-content" style="width:100%;box-sizing:border-box">
 
   <!-- Header banner -->
   <div style="background:linear-gradient(135deg,#0a1628 0%,#1a0e05 50%,#0f2240 100%);border:1px solid #d97706;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(217,119,6,.12),0 8px 32px rgba(0,0,0,.6)">
@@ -3892,6 +4021,41 @@ INDEX_HTML = r"""<!doctype html>
   .af-stat-card:hover{border-color:rgba(251,191,36,.4);box-shadow:0 0 20px rgba(217,119,6,.15)}
   @media(prefers-reduced-motion:reduce){.af-mode-btn{transition:none}.af-stat-card{transition:none}}
   </style>
+
+  <!-- ── Ascend Forge Task Composer ── -->
+  <div class="card" style="margin-bottom:18px;border:2px solid rgba(251,191,36,.35);background:linear-gradient(135deg,rgba(120,53,15,.18),rgba(10,5,0,.95));box-shadow:0 0 40px rgba(217,119,6,.12)">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#fbbf24">⚡</span> Direct Task Assignment</div>
+      <span style="font-size:.78em;color:#f59e0b;font-weight:600;padding:3px 10px;border-radius:20px;background:rgba(217,119,6,.15);border:1px solid rgba(217,119,6,.3)">INDEPENDENT MODE</span>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+      Assign tasks directly to Ascend Forge — it works <strong style="color:#fbbf24">independently</strong>, without going through the main orchestrator. Tasks run in the background immediately.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <textarea id="af-task-input" rows="3" placeholder="e.g. Optimize all AI prompts for better revenue generation&#10;e.g. Scan for code improvements and apply low-risk patches automatically&#10;e.g. Improve the agent response quality for sales tasks"
+        style="width:100%;box-sizing:border-box;background:rgba(0,0,0,.6);border:1px solid rgba(251,191,36,.3);border-radius:10px;color:#fef3c7;padding:12px 16px;font-family:inherit;font-size:.9em;resize:vertical;outline:none;transition:border-color .2s"
+        onfocus="this.style.borderColor='rgba(251,191,36,.7)'" onblur="this.style.borderColor='rgba(251,191,36,.3)'"
+        onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();afSendTask();}"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button onclick="afSendTask()" style="padding:10px 24px;background:linear-gradient(135deg,#92400e,#d97706,#f59e0b);border:none;border-radius:10px;color:#fff;font-weight:800;font-size:.9em;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 16px rgba(217,119,6,.3);letter-spacing:.03em" onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 24px rgba(217,119,6,.5)'" onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(217,119,6,.3)'">🔥 Send to Ascend Forge <kbd style="background:rgba(255,255,255,.15);padding:1px 5px;border-radius:4px;font-size:.75em">Ctrl+↵</kbd></button>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('optimize all AI prompts for higher revenue and better output quality')">💰 Optimize Prompts</button>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('scan system for improvements and automatically apply all low-risk patches')">🔍 Auto-Improve</button>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('analyze all agent modules and improve their performance and reliability')">🤖 Boost Agents</button>
+      </div>
+    </div>
+    <!-- Live progress panel -->
+    <div id="af-task-progress-panel" style="margin-top:16px;display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:.84em;font-weight:700;color:#fbbf24" id="af-task-status-text">🔥 Running task…</div>
+        <div style="font-size:.84em;color:#f59e0b;font-weight:700" id="af-task-pct">0%</div>
+      </div>
+      <div style="background:rgba(0,0,0,.5);border-radius:100px;height:10px;overflow:hidden;border:1px solid rgba(217,119,6,.2)">
+        <div id="af-task-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#92400e,#d97706,#fbbf24);border-radius:100px;transition:width .4s ease;box-shadow:0 0 10px rgba(251,191,36,.4)"></div>
+      </div>
+      <div id="af-task-desc" style="margin-top:8px;font-size:.8em;color:var(--text-muted);font-style:italic"></div>
+      <div id="af-task-result" style="margin-top:8px;font-size:.84em;color:#4ade80;display:none"></div>
+    </div>
+  </div>
 
   <!-- Mode + controls -->
   <div class="card" style="margin-bottom:18px;border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.1),var(--surface2))">
@@ -4025,7 +4189,7 @@ function switchTab(tab, btn) {
   if (tab === 'dashboard') loadDashboard();
   if (tab === 'chat') loadChatLog();
   if (tab === 'scheduler') loadSchedules();
-  if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm(); }
+  if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm().then(renderSwarmAgentGrid); else renderSwarmAgentGrid(); }
   if (tab === 'improvements') loadImprovements();
   if (tab === 'skills') loadSkills();
   if (tab === 'tasks') loadTasks();
@@ -4768,6 +4932,8 @@ let _wfSelectedAgents = new Set();
 let _workerBundlesById = {};
 
 async function loadWorkers() {
+  // Populate swarm agent grid for preset bundles
+  if (_allAgents.length) renderSwarmAgentGrid();
   // Load bundles
   const bd = await api('/api/workers/bundles');
   const bundles = (bd && bd.bundles) || [];
@@ -7755,6 +7921,252 @@ async function afSetAutoApprove(enabled) {
   const r = await api('/api/ascend/auto-approve', {method:'POST',body:{enabled}});
   if (r.ok) toast(`Auto-approve LOW: ${enabled?'ON':'OFF'}`);
   else toast('Failed', 'error');
+}
+
+// ── Ascend Forge Direct Task Assignment ──────────────────────────────────────
+let _afTaskTimer = null;
+
+function afFillTask(text) {
+  const el = document.getElementById('af-task-input');
+  if (el) { el.value = text; el.focus(); }
+}
+
+async function afSendTask() {
+  const input = document.getElementById('af-task-input');
+  const task = (input?.value || '').trim();
+  if (!task) { toast('Enter a task for Ascend Forge', 'error'); return; }
+  const panel = document.getElementById('af-task-progress-panel');
+  const bar   = document.getElementById('af-task-progress-bar');
+  const pct   = document.getElementById('af-task-pct');
+  const stxt  = document.getElementById('af-task-status-text');
+  const desc  = document.getElementById('af-task-desc');
+  const res   = document.getElementById('af-task-result');
+  if (panel) { panel.style.display = 'block'; }
+  if (bar)   { bar.style.width = '5%'; }
+  if (pct)   { pct.textContent = '5%'; }
+  if (stxt)  { stxt.textContent = '🔥 Sending task to Ascend Forge…'; }
+  if (desc)  { desc.textContent = task; }
+  if (res)   { res.style.display = 'none'; res.textContent = ''; }
+  const r = await api('/api/ascend/task', {method:'POST', body:{task}});
+  if (!r.ok) { toast(r.detail || 'Failed to send task', 'error'); return; }
+  toast('🔥 Task sent to Ascend Forge!');
+  if (input) input.value = '';
+  if (_afTaskTimer) clearInterval(_afTaskTimer);
+  _afTaskTimer = setInterval(_afPollTaskProgress, 1200);
+}
+
+async function _afPollTaskProgress() {
+  const p = await api('/api/ascend/progress');
+  const bar  = document.getElementById('af-task-progress-bar');
+  const pct  = document.getElementById('af-task-pct');
+  const stxt = document.getElementById('af-task-status-text');
+  const res  = document.getElementById('af-task-result');
+  // Dashboard mini-widget
+  const dashBar  = document.getElementById('dash-af-progress-bar');
+  const dashPct  = document.getElementById('dash-af-pct-badge');
+  const dashSub  = document.getElementById('dash-af-sublabel');
+  const dashWrap = document.getElementById('dash-af-progress-wrap');
+  const dashTask = document.getElementById('dash-af-task-text');
+
+  const progress = p.progress || 0;
+  const status   = p.status || 'idle';
+  const pctStr   = progress + '%';
+
+  if (bar)  bar.style.width  = pctStr;
+  if (pct)  pct.textContent  = pctStr;
+  if (dashBar) dashBar.style.width = pctStr;
+  if (dashPct) { dashPct.textContent = pctStr; dashPct.style.display = progress > 0 ? 'inline-block' : 'none'; }
+  if (dashWrap) dashWrap.style.display = status === 'running' ? 'block' : 'none';
+  if (dashTask) dashTask.textContent = p.task || '';
+
+  const statusMap = {idle:'idle', running:'🔥 Running…', done:'✅ Done', error:'❌ Error'};
+  const statusLabel = statusMap[status] || status;
+  if (stxt)  stxt.textContent = statusLabel;
+  if (dashSub) dashSub.textContent = status === 'running' ? `🔥 ${p.task?.slice(0,40) || 'Running task…'}` : `Self-improver — ${status}`;
+
+  if (status === 'done' || status === 'error') {
+    if (_afTaskTimer) { clearInterval(_afTaskTimer); _afTaskTimer = null; }
+    if (res) {
+      res.style.display = 'block';
+      res.style.color = status === 'error' ? '#ef4444' : '#4ade80';
+      res.textContent = p.result || '';
+    }
+  }
+}
+
+// Auto-poll Ascend Forge progress on the dashboard widget
+setInterval(() => { if (currentTab === 'dashboard') _afPollTaskProgress(); }, 8000);
+
+// ── BLACKLIGHT Direct Task Assignment ────────────────────────────────────────
+let _blTaskTimer = null;
+
+function blFillTask(text) {
+  const el = document.getElementById('bl-task-input');
+  if (el) { el.value = text; el.focus(); }
+}
+
+async function blSendTask() {
+  const input = document.getElementById('bl-task-input');
+  const task  = (input?.value || '').trim();
+  if (!task) { toast('Enter a task for BLACKLIGHT', 'error'); return; }
+  const panel = document.getElementById('bl-task-progress-panel');
+  const bar   = document.getElementById('bl-task-progress-bar');
+  const pct   = document.getElementById('bl-task-pct');
+  const stxt  = document.getElementById('bl-task-status-text');
+  const res   = document.getElementById('bl-task-result');
+  if (panel) panel.style.display = 'block';
+  if (bar)   bar.style.width = '10%';
+  if (pct)   pct.textContent = '10%';
+  if (stxt)  stxt.textContent = '⚡ Launching BLACKLIGHT task…';
+  if (res)   { res.style.display = 'none'; res.textContent = ''; }
+  const r = await api('/api/blacklight/task', {method:'POST', body:{task}});
+  if (!r.ok) { toast(r.detail || 'Failed to launch task', 'error'); return; }
+  toast('⚡ BLACKLIGHT launched!');
+  if (input) input.value = '';
+  if (_blTaskTimer) clearInterval(_blTaskTimer);
+  _blTaskTimer = setInterval(_blPollTaskProgress, 1200);
+}
+
+async function _blPollTaskProgress() {
+  const p   = await api('/api/blacklight/task-progress');
+  const bar  = document.getElementById('bl-task-progress-bar');
+  const pct  = document.getElementById('bl-task-pct');
+  const stxt = document.getElementById('bl-task-status-text');
+  const res  = document.getElementById('bl-task-result');
+  const progress = p.progress || 0;
+  const status   = p.status   || 'idle';
+  if (bar) bar.style.width = progress + '%';
+  if (pct) pct.textContent = progress + '%';
+  const statusMap = {idle:'idle', running:'⚡ Launching…', done:'✅ BLACKLIGHT running', error:'❌ Error'};
+  if (stxt) stxt.textContent = statusMap[status] || status;
+  if (status === 'done' || status === 'error') {
+    if (_blTaskTimer) { clearInterval(_blTaskTimer); _blTaskTimer = null; }
+    if (res) {
+      res.style.display = 'block';
+      res.style.color = status === 'error' ? '#ef4444' : '#4ade80';
+      res.textContent = p.result || '';
+    }
+    if (status === 'done') { blRefresh(); blLoadLogs(); }
+  }
+}
+
+// ── Agent Presets & Bundle-to-Swarm ──────────────────────────────────────────
+const AGENT_PRESETS = {
+  business_automator: {
+    label: '🏢 Business Automator',
+    task:  'Automate all business operations: scheduling, admin tasks, CRM updates, and workflow optimization',
+    agents: ['orchestrator','scheduler','task-manager','email-agent','crm-agent','workflow-agent','compliance-agent'],
+  },
+  money_printer: {
+    label: '💰 Money Printer',
+    task:  'Maximize revenue through upsells, cross-sells, pricing optimization, and monetization strategies',
+    agents: ['sales-agent','pricing-agent','upsell-agent','payment-agent','analytics-agent','lead-scorer','deal-matcher'],
+  },
+  research_team: {
+    label: '🔬 Research Team',
+    task:  'Deep research: competitive intelligence, market analysis, trend identification, and strategic insights',
+    agents: ['research-agent','financial-deepsearch','web-scraper','data-analyst','report-generator','knowledge-base-agent'],
+  },
+  lead_gen_swarm: {
+    label: '🎯 Lead Generation Swarm',
+    task:  'Hunt, qualify, score, and convert high-value leads across all channels',
+    agents: ['lead-hunter','lead-scorer','outreach-agent','email-agent','call-agent','linkedin-agent','deal-matcher'],
+  },
+  content_empire: {
+    label: '✍️ Content Empire',
+    task:  'Create, optimize, and distribute content across all platforms for maximum reach and SEO value',
+    agents: ['content-creator','seo-agent','social-media-agent','blog-writer','video-script-agent','email-copywriter'],
+  },
+  ecom_powerhouse: {
+    label: '🛒 E-com Powerhouse',
+    task:  'Manage full e-commerce operations: orders, inventory, fulfillment, and customer experience',
+    agents: ['ecom-agent','inventory-agent','fulfillment-agent','customer-support-agent','review-agent','pricing-agent'],
+  },
+  outreach_machine: {
+    label: '📣 Outreach Machine',
+    task:  'Execute multi-channel outreach via email, phone, social DMs, and LinkedIn at scale',
+    agents: ['email-agent','call-agent','linkedin-agent','social-media-agent','outreach-agent','sequence-agent'],
+  },
+  analytics_squad: {
+    label: '📊 Analytics Squad',
+    task:  'Generate comprehensive analytics reports, track KPIs, and surface actionable insights',
+    agents: ['analytics-agent','data-analyst','report-generator','kpi-tracker','financial-deepsearch','dashboard-agent'],
+  },
+};
+
+let _swarmSelectedIds = new Set();
+
+function applyAgentPreset(preset) {
+  const p = AGENT_PRESETS[preset];
+  if (!p) return;
+  _swarmSelectedIds = new Set(p.agents);
+  const taskEl = document.getElementById('swarm-bundle-task');
+  if (taskEl) taskEl.value = p.task;
+  const label = document.getElementById('swarm-preset-label');
+  if (label) label.textContent = p.label + ' preset loaded';
+  renderSwarmAgentGrid();
+  toast(`${p.label} preset loaded — click Send Bundle to Swarm`);
+}
+
+function renderSwarmAgentGrid() {
+  const grid = document.getElementById('swarm-agent-grid');
+  if (!grid) return;
+  const agents = _allAgents.length ? _allAgents : (window._swarmAgentList || []);
+  if (!agents.length) {
+    grid.innerHTML = '<div style="color:var(--text-muted);font-size:.84em;grid-column:1/-1">Load the Swarm tab first to see agents here.</div>';
+  } else {
+    grid.innerHTML = agents.map(a => {
+      const sel = _swarmSelectedIds.has(a.id);
+      return `<div onclick="swarmToggleAgent('${a.id}')" style="padding:6px 10px;border-radius:8px;cursor:pointer;font-size:.78em;border:1px solid ${sel?'var(--primary)':'rgba(148,163,184,.15)'};background:${sel?'rgba(212,175,55,.12)':'rgba(255,255,255,.03)'};color:${sel?'var(--gold)':'var(--text-muted)'};transition:all .15s;user-select:none">${sel?'✓ ':''}<span>${a.name||a.id}</span></div>`;
+    }).join('');
+  }
+  const countEl = document.getElementById('swarm-agent-count-label');
+  if (countEl) countEl.textContent = _swarmSelectedIds.size + ' agent' + (_swarmSelectedIds.size===1?'':'s') + ' selected';
+}
+
+function swarmToggleAgent(id) {
+  if (_swarmSelectedIds.has(id)) _swarmSelectedIds.delete(id);
+  else _swarmSelectedIds.add(id);
+  renderSwarmAgentGrid();
+}
+
+function swarmSelectAll() {
+  (_allAgents.length ? _allAgents : []).forEach(a => _swarmSelectedIds.add(a.id));
+  renderSwarmAgentGrid();
+}
+
+function swarmClearAll() {
+  _swarmSelectedIds.clear();
+  renderSwarmAgentGrid();
+}
+
+async function sendBundleToSwarm() {
+  if (!_swarmSelectedIds.size) { toast('Select at least one agent', 'error'); return; }
+  const taskEl  = document.getElementById('swarm-bundle-task');
+  const task    = taskEl?.value?.trim() || '';
+  const presetEl= document.getElementById('swarm-preset-label');
+  const preset  = (presetEl?.textContent || '').replace(' preset loaded','').replace(/^[🏢💰🔬🎯✍️🛒📣📊] /, '');
+  const resultEl= document.getElementById('swarm-bundle-result');
+  if (resultEl) resultEl.innerHTML = '<span style="color:var(--gold)">Sending bundle to swarm…</span>';
+  const btn = document.getElementById('btn-send-bundle');
+  if (btn) btn.disabled = true;
+  const r = await api('/api/agents/bundle-swarm', {method:'POST', body:{
+    agents: [..._swarmSelectedIds],
+    task,
+    preset,
+  }});
+  if (btn) btn.disabled = false;
+  if (r.ok) {
+    toast(`🚀 Bundle sent! ${r.agents} agent${r.agents===1?'':'s'} dispatched to swarm`);
+    if (resultEl) resultEl.innerHTML = `<span style="color:#4ade80">✅ Bundle "${escHtml(r.name)}" deployed — ${r.agents} agent(s) ready.</span>`;
+    if (taskEl) taskEl.value = '';
+    _swarmSelectedIds.clear();
+    renderSwarmAgentGrid();
+    setTimeout(loadWorkers, 1500);
+  } else {
+    toast(r.detail || 'Failed to send bundle', 'error');
+    if (resultEl) resultEl.innerHTML = `<span style="color:#ef4444">❌ ${escHtml(r.detail||'Failed')}</span>`;
+  }
 }
 
 // Helper: escape HTML
@@ -12247,6 +12659,205 @@ def ascend_auto_approve(payload: dict, _auth: None = Depends(require_auth)):
     except Exception as exc:
         logger.error("ascend auto-approve error: %s", exc)
         raise HTTPException(500, "Failed to update setting")
+
+
+# ── Ascend Forge independent task queue ──────────────────────────────────────
+import uuid as _uuid_mod
+
+_af_task_lock = threading.Lock()
+_af_current_task: dict = {
+    "task_id": "",
+    "task": "",
+    "status": "idle",   # idle | running | done | error
+    "progress": 0,      # 0-100
+    "result": "",
+    "started_at": "",
+    "finished_at": "",
+}
+
+
+def _run_ascend_task(task_id: str, task: str) -> None:
+    """Run an Ascend Forge task in a background thread with progress tracking."""
+    with _af_task_lock:
+        _af_current_task.update({
+            "task_id": task_id,
+            "task": task,
+            "status": "running",
+            "progress": 5,
+            "result": "",
+            "started_at": now_iso(),
+            "finished_at": "",
+        })
+    try:
+        af = _load_ascend_module()
+        # Step 1 – parse intent (20%)
+        with _af_task_lock:
+            _af_current_task["progress"] = 20
+        result = af.handle_chat_command("ascend: " + task)
+        if not result:
+            # Fall back to scan if command not handled
+            with _af_task_lock:
+                _af_current_task["progress"] = 40
+            patches = af.scan_system(trigger=f"user task: {task[:60]}")
+            with _af_task_lock:
+                _af_current_task["progress"] = 80
+            if patches:
+                result = f"✅ Task queued {len(patches)} patch(es): " + "; ".join(
+                    p["description"][:50] for p in patches[:3]
+                )
+            else:
+                result = "✅ Task processed — system already optimal for this request."
+        with _af_task_lock:
+            _af_current_task.update({
+                "status": "done",
+                "progress": 100,
+                "result": result,
+                "finished_at": now_iso(),
+            })
+    except Exception as exc:
+        logger.error("ascend task error: %s", exc)
+        with _af_task_lock:
+            _af_current_task.update({
+                "status": "error",
+                "progress": 0,
+                "result": str(exc),
+                "finished_at": now_iso(),
+            })
+
+
+@app.post("/api/ascend/task")
+def ascend_run_task(payload: dict, _auth: None = Depends(require_auth)):
+    """Assign an independent task directly to Ascend Forge."""
+    task = (payload.get("task") or "").strip()
+    if not task:
+        raise HTTPException(400, "task is required")
+    task_id = str(_uuid_mod.uuid4())[:8]
+    t = threading.Thread(target=_run_ascend_task, args=(task_id, task), daemon=True)
+    t.start()
+    return JSONResponse({"ok": True, "task_id": task_id, "task": task})
+
+
+@app.get("/api/ascend/progress")
+def ascend_progress():
+    """Return current Ascend Forge task progress."""
+    with _af_task_lock:
+        return JSONResponse(dict(_af_current_task))
+
+
+# ── Blacklight direct task assignment ────────────────────────────────────────
+
+_bl_task_lock = threading.Lock()
+_bl_direct_task: dict = {
+    "task_id": "",
+    "task": "",
+    "status": "idle",
+    "progress": 0,
+    "result": "",
+    "started_at": "",
+    "finished_at": "",
+}
+
+
+def _run_blacklight_task(task_id: str, task: str) -> None:
+    """Run a direct Blacklight task independently in a background thread."""
+    with _bl_task_lock:
+        _bl_direct_task.update({
+            "task_id": task_id,
+            "task": task,
+            "status": "running",
+            "progress": 10,
+            "result": "",
+            "started_at": now_iso(),
+            "finished_at": "",
+        })
+    try:
+        bl_path = AI_HOME / "agents" / "blacklight"
+        if str(bl_path) not in sys.path:
+            sys.path.insert(0, str(bl_path))
+        bl = importlib.import_module("blacklight")
+        with _bl_task_lock:
+            _bl_direct_task["progress"] = 30
+        # Re-start with task as goal
+        if bl.is_running():
+            bl.stop()
+        with _bl_task_lock:
+            _bl_direct_task["progress"] = 50
+        started = bl.start(task)
+        with _bl_task_lock:
+            _bl_direct_task.update({
+                "status": "done",
+                "progress": 100,
+                "result": "⚡ BLACKLIGHT started with task: " + task if started else "ℹ️ Already running — goal updated.",
+                "finished_at": now_iso(),
+            })
+    except Exception as exc:
+        logger.error("blacklight task error: %s", exc)
+        with _bl_task_lock:
+            _bl_direct_task.update({
+                "status": "error",
+                "progress": 0,
+                "result": str(exc),
+                "finished_at": now_iso(),
+            })
+
+
+@app.post("/api/blacklight/task")
+def blacklight_run_task(payload: dict, _auth: None = Depends(require_auth)):
+    """Assign a direct task to BLACKLIGHT, bypassing the normal goal toggle."""
+    task = (payload.get("task") or "").strip()
+    if not task:
+        raise HTTPException(400, "task is required")
+    task_id = str(_uuid_mod.uuid4())[:8]
+    t = threading.Thread(target=_run_blacklight_task, args=(task_id, task), daemon=True)
+    t.start()
+    return JSONResponse({"ok": True, "task_id": task_id, "task": task})
+
+
+@app.get("/api/blacklight/task-progress")
+def blacklight_task_progress():
+    """Return current Blacklight direct-task progress."""
+    with _bl_task_lock:
+        return JSONResponse(dict(_bl_direct_task))
+
+
+# ── Agent bundle → swarm ──────────────────────────────────────────────────────
+
+@app.post("/api/agents/bundle-swarm")
+def agents_bundle_swarm(payload: dict, _auth: None = Depends(require_auth)):
+    """Bundle selected agents and dispatch them as a coordinated swarm task."""
+    agent_ids: list = payload.get("agents") or []
+    task: str = (payload.get("task") or "").strip()
+    preset: str = (payload.get("preset") or "").strip()
+    if not agent_ids:
+        raise HTTPException(400, "agents list is required")
+    label = preset or f"{len(agent_ids)}-agent bundle"
+    logger.info("Bundle-to-swarm: %s agents, preset=%s, task=%s", len(agent_ids), preset, task[:60])
+    # Persist as a worker bundle so the swarm can pick it up
+    try:
+        bundle = {
+            "id": str(_uuid_mod.uuid4()),
+            "name": label,
+            "task": task or f"Execute {label} coordinated mission",
+            "agents": agent_ids,
+            "schedule": "manual",
+            "created_at": now_iso(),
+            "preset": preset,
+        }
+        state_dir = AI_HOME / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        bundles_file = state_dir / "worker_bundles.json"
+        existing = []
+        if bundles_file.exists():
+            try:
+                existing = json.loads(bundles_file.read_text())
+            except Exception:
+                pass
+        existing.append(bundle)
+        bundles_file.write_text(json.dumps(existing, indent=2))
+        return JSONResponse({"ok": True, "bundle_id": bundle["id"], "name": label, "agents": len(agent_ids)})
+    except Exception as exc:
+        logger.error("bundle-swarm error: %s", exc)
+        raise HTTPException(500, "Failed to create bundle")
 
 
 # ── New Paperclip-parity features ─────────────────────────────────────────────
