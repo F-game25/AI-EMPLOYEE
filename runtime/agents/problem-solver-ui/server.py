@@ -9212,9 +9212,9 @@ def gateway_pull_model(body: dict, _auth: None = Depends(require_auth)):
     """Pull an Ollama model in the background."""
     import re as _re, subprocess, threading
     model = (body.get("model") or "llama3.2").strip()
-    # Allow only safe alphanumeric model names with dots, hyphens, underscores and colons (tags)
-    if not model or not _re.fullmatch(r"[a-zA-Z0-9._:\-]+", model) or len(model) > 80:
-        raise HTTPException(400, "Invalid model name — only alphanumeric, dots, hyphens, underscores and colons allowed")
+    # Allow alphanumeric model names with dots, hyphens, underscores; optionally one colon for tag (e.g., llama3.2:latest)
+    if not model or not _re.fullmatch(r"[a-zA-Z0-9._\-]+(?::[a-zA-Z0-9._\-]+)?", model) or len(model) > 80:
+        raise HTTPException(400, "Invalid model name — use format 'modelname' or 'modelname:tag'")
     def _pull():
         try:
             subprocess.run(["ollama", "pull", model], timeout=600, check=False)
@@ -9227,7 +9227,12 @@ def gateway_pull_model(body: dict, _auth: None = Depends(require_auth)):
 @app.get("/api/gateway/status")
 def gateway_status():
     """Return local AI provider status including Ollama models list."""
-    ollama_host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    import re as _re
+    raw_host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    # Validate host to prevent SSRF — only allow localhost/127.0.0.1 hosts
+    if not _re.match(r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$", raw_host.rstrip("/")):
+        raw_host = "http://127.0.0.1:11434"
+    ollama_host = raw_host
     ollama_ok = _ollama_reachable(ollama_host)
     models: list = []
     if ollama_ok:
