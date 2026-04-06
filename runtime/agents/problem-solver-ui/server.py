@@ -12703,7 +12703,7 @@ def _run_ascend_task(task_id: str, task: str) -> None:
                 _af_current_task["progress"] = 80
             if patches:
                 result = f"✅ Task queued {len(patches)} patch(es): " + "; ".join(
-                    p["description"][:50] for p in patches[:3]
+                    p.get("description", "patch")[:50] for p in patches[:3]
                 )
             else:
                 result = "✅ Task processed — system already optimal for this request."
@@ -12771,10 +12771,7 @@ def _run_blacklight_task(task_id: str, task: str) -> None:
             "finished_at": "",
         })
     try:
-        bl_path = AI_HOME / "agents" / "blacklight"
-        if str(bl_path) not in sys.path:
-            sys.path.insert(0, str(bl_path))
-        bl = importlib.import_module("blacklight")
+        bl = _load_blacklight_module()
         with _bl_task_lock:
             _bl_direct_task["progress"] = 30
         # Re-start with task as goal
@@ -12850,8 +12847,9 @@ def agents_bundle_swarm(payload: dict, _auth: None = Depends(require_auth)):
         if bundles_file.exists():
             try:
                 existing = json.loads(bundles_file.read_text())
-            except Exception:
-                pass
+            except Exception as _parse_exc:
+                logger.warning("bundle-swarm: corrupt bundles file, starting fresh: %s", _parse_exc)
+                existing = []
         existing.append(bundle)
         bundles_file.write_text(json.dumps(existing, indent=2))
         return JSONResponse({"ok": True, "bundle_id": bundle["id"], "name": label, "agents": len(agent_ids)})
