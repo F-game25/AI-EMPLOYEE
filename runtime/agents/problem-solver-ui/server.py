@@ -1006,11 +1006,11 @@ INDEX_HTML = r"""<!doctype html>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg:#080808;
-      --surface:rgba(14,14,14,0.98);
-      --surface2:rgba(20,20,20,0.96);
+      --bg:#0a0a0a;
+      --surface:rgba(15,15,15,0.98);
+      --surface2:rgba(22,22,22,0.96);
       --glass:rgba(255,255,255,0.02);
-      --border:rgba(201,168,76,0.18);
+      --border:rgba(255,255,255,0.08);
       --primary:#D4AF37;
       --primary-dark:#B8960C;
       --primary-light:#F0D060;
@@ -1022,9 +1022,9 @@ INDEX_HTML = r"""<!doctype html>
       --success:#22c55e;
       --danger:#ef4444;
       --warning:#f59e0b;
-      --text:#f5f5f0;
-      --text-secondary:#9a8a6a;
-      --text-muted:#5a4a30;
+      --text:#e5e5e5;
+      --text-secondary:#a0a0a0;
+      --text-muted:#606060;
       --radius:12px;
       --radius-sm:8px;
       --shadow:0 8px 40px rgba(0,0,0,.95);
@@ -1131,48 +1131,51 @@ INDEX_HTML = r"""<!doctype html>
     .nav-wrapper{position:relative;display:flex;align-items:stretch}
     .nav-scroll-btn{
       position:absolute;top:0;bottom:0;width:36px;z-index:10;
-      background:rgba(6,10,22,0.96);border:none;cursor:pointer;
-      color:rgba(212,175,55,.8);font-size:1.1em;display:flex;align-items:center;justify-content:center;
+      background:rgba(10,10,10,0.96);border:none;cursor:pointer;
+      color:rgba(229,229,229,.5);font-size:1.1em;display:flex;align-items:center;justify-content:center;
       transition:all .2s;user-select:none;
     }
-    .nav-scroll-btn:hover{color:var(--gold);background:rgba(6,10,22,1)}
-    .nav-scroll-btn.left{left:0;border-right:1px solid rgba(148,163,184,.1);box-shadow:4px 0 12px rgba(0,0,0,.4)}
-    .nav-scroll-btn.right{right:0;border-left:1px solid rgba(148,163,184,.1);box-shadow:-4px 0 12px rgba(0,0,0,.4)}
+    .nav-scroll-btn:hover{color:var(--text);background:rgba(10,10,10,1)}
+    .nav-scroll-btn.left{left:0;border-right:1px solid rgba(255,255,255,.06);box-shadow:4px 0 12px rgba(0,0,0,.4)}
+    .nav-scroll-btn.right{right:0;border-left:1px solid rgba(255,255,255,.06);box-shadow:-4px 0 12px rgba(0,0,0,.4)}
     .nav-scroll-btn.hidden{opacity:0;pointer-events:none}
     nav{
-      background:rgba(6,10,22,0.92);
-      border-bottom:1px solid rgba(148,163,184,.08);
+      background:rgba(10,10,10,0.95);
+      border-bottom:1px solid rgba(255,255,255,.06);
       padding:0 8px;display:flex;gap:0;overflow-x:auto;flex:1;
-      box-shadow:0 4px 20px rgba(0,0,0,.4);
+      box-shadow:0 4px 20px rgba(0,0,0,.6);
       backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-      scrollbar-width:thin;scrollbar-color:rgba(212,175,55,.2) transparent;
+      scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent;
     }
     nav::-webkit-scrollbar{height:3px}
     nav::-webkit-scrollbar-track{background:transparent}
-    nav::-webkit-scrollbar-thumb{background:rgba(212,175,55,.25);border-radius:2px}
+    nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
     nav button{
-      background:none;border:none;color:rgba(148,163,184,.7);
+      background:none;border:none;color:rgba(229,229,229,.55);
       padding:13px 15px;cursor:pointer;font-size:.82em;font-weight:500;
       border-bottom:2px solid transparent;transition:all .22s;
       white-space:nowrap;display:flex;align-items:center;gap:5px;
       font-family:inherit;position:relative;letter-spacing:.01em;
     }
-    nav button:hover{color:var(--text);background:rgba(255,255,255,.04)}
+    nav button:hover{color:var(--text);background:rgba(31,31,31,.8)}
     nav button.active{color:var(--gold);border-bottom-color:var(--gold);
       background:rgba(212,175,55,.08);font-weight:600;text-shadow:0 0 12px rgba(212,175,55,.4);
       box-shadow:inset 0 -2px 8px rgba(212,175,55,.15);letter-spacing:.02em}
     nav button.active::after{content:'';position:absolute;bottom:0;left:15%;right:15%;height:2px;
       background:linear-gradient(90deg,transparent,var(--gold),transparent);
       border-radius:2px 2px 0 0;filter:blur(2px);box-shadow:0 0 8px var(--gold)}
-    /* ── Special nav button accents ── */
-    nav button.nav-btn-blacklight{color:#a855f7;letter-spacing:.04em}
-    nav button.nav-btn-blacklight:hover{color:#c084fc;text-shadow:0 0 8px #a855f7}
-    nav button.nav-btn-blacklight.active{color:#c084fc;border-bottom-color:#a855f7;background:rgba(168,85,247,.1);text-shadow:0 0 12px #a855f7;box-shadow:inset 0 -2px 8px rgba(168,85,247,.2)}
-    nav button.nav-btn-blacklight.active::after{background:linear-gradient(90deg,transparent,#a855f7,transparent);box-shadow:0 0 8px #a855f7}
-    nav button.nav-btn-ascend{color:#f59e0b;letter-spacing:.04em}
-    nav button.nav-btn-ascend:hover{color:#fbbf24;text-shadow:0 0 8px #f59e0b}
-    nav button.nav-btn-ascend.active{color:#fbbf24;border-bottom-color:#f59e0b;background:rgba(245,158,11,.1);text-shadow:0 0 12px #f59e0b;box-shadow:inset 0 -2px 8px rgba(245,158,11,.2)}
-    nav button.nav-btn-ascend.active::after{background:linear-gradient(90deg,transparent,#f59e0b,transparent);box-shadow:0 0 8px #f59e0b}
+    #nav-blacklight-btn{color:#00f0ff;border:1px solid #00f0ff!important;font-weight:700!important;letter-spacing:.04em!important;text-shadow:0 0 10px #00f0ff,0 0 20px rgba(0,240,255,.4);box-shadow:0 0 12px rgba(0,240,255,.2);border-bottom-color:transparent!important}
+    #nav-blacklight-btn:hover{background:rgba(0,240,255,.06)!important;color:#00f0ff!important}
+    #nav-blacklight-btn.active{background:rgba(0,240,255,.08)!important;border-bottom-color:#00f0ff!important;
+      text-shadow:0 0 12px #00f0ff,0 0 24px rgba(0,240,255,.5)!important;
+      box-shadow:inset 0 -2px 12px rgba(0,240,255,.2)!important}
+    #nav-blacklight-btn.active::after{background:linear-gradient(90deg,transparent,#00f0ff,transparent)!important;box-shadow:0 0 10px #00f0ff!important}
+    #nav-ascend-btn{color:#ff9500;border:1px solid #ff9500!important;font-weight:700!important;letter-spacing:.04em!important;text-shadow:0 0 10px #ff9500,0 0 20px rgba(255,149,0,.4);box-shadow:0 0 12px rgba(255,149,0,.2);border-bottom-color:transparent!important}
+    #nav-ascend-btn:hover{background:rgba(255,149,0,.06)!important;color:#ff9500!important}
+    #nav-ascend-btn.active{background:rgba(255,149,0,.08)!important;border-bottom-color:#ff9500!important;
+      text-shadow:0 0 12px #ff9500,0 0 24px rgba(255,149,0,.5)!important;
+      box-shadow:inset 0 -2px 12px rgba(255,149,0,.2)!important}
+    #nav-ascend-btn.active::after{background:linear-gradient(90deg,transparent,#ff9500,transparent)!important;box-shadow:0 0 10px #ff9500!important}
 
     /* ── Main content ── */
     main{flex:1;padding:24px 28px;max-width:1320px;margin:0 auto;width:100%;position:relative;z-index:1}
@@ -1181,6 +1184,25 @@ INDEX_HTML = r"""<!doctype html>
     /* ── Tab panels ── */
     .tab-content{display:none}
     .tab-content.active{display:block;animation:fadeIn .3s ease}
+
+    /* ── Tab page headers ── */
+    .page-header{
+      display:flex;align-items:center;gap:16px;
+      padding:20px 24px;margin-bottom:20px;
+      background:var(--surface2);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      border-left-width:3px;
+      position:relative;overflow:hidden;
+    }
+    .page-header::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent);
+    }
+    .page-header-icon{font-size:1.8rem;line-height:1;flex-shrink:0}
+    .page-header-title{font-size:1.1em;font-weight:700;color:var(--text);letter-spacing:-.01em;margin-bottom:3px}
+    .page-header-desc{font-size:.8em;color:var(--text-secondary);line-height:1.4}
+    .page-header-badge{margin-left:auto;font-size:.7em;font-weight:700;padding:5px 12px;border-radius:20px;letter-spacing:.06em;text-transform:uppercase;border:1px solid currentColor;opacity:.85;flex-shrink:0}
 
     /* ── Cards ── */
     .card{
@@ -1195,7 +1217,7 @@ INDEX_HTML = r"""<!doctype html>
       content:'';position:absolute;top:0;left:0;right:0;height:1px;
       background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);
     }
-    .card:hover{border-color:rgba(212,175,55,.25);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(212,175,55,.08);transform:translateY(-1px)}
+    .card:hover{border-color:rgba(255,255,255,.12);box-shadow:0 8px 32px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);transform:translateY(-1px)}
     .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
     .card-title{font-size:.92em;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;letter-spacing:.005em}
     .card-title .icon{color:var(--primary-light)}
@@ -1762,8 +1784,8 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
-  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em;text-shadow:0 0 8px #a855f7">⚡ BLACKLIGHT</button>
-  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="background:linear-gradient(135deg,#0a1628,#0f2240);color:#f59e0b;border:1px solid #d97706;font-weight:700;letter-spacing:.04em;text-shadow:0 0 8px #f59e0b">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn">⚡ BLACKLIGHT</button>
+  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn">🔥 ASCEND FORGE</button>
   <button onclick="switchTab('budget',this)">💰 Budget</button>
   <button onclick="switchTab('org',this)">🏢 Org Chart</button>
   <button onclick="switchTab('goals',this)">🎯 Goals</button>
@@ -2026,7 +2048,12 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Scheduler ── -->
 <div id="tab-scheduler" class="tab-content">
-  <div style="display:flex;gap:16px;height:calc(100vh - 130px)">
+  <div class="page-header" style="border-left-color:#c084fc">
+    <div class="page-header-icon">📅</div>
+    <div><div class="page-header-title">Task Scheduler</div><div class="page-header-desc">Schedule recurring and one-time tasks for your agents. View your agenda, create schedules, and manage triggers.</div></div>
+    <span class="page-header-badge" style="color:#c084fc">Automation</span>
+  </div>
+  <div style="display:flex;gap:16px;height:calc(100vh - 175px)">
     <!-- Left: Agenda calendar -->
     <div style="width:320px;display:flex;flex-direction:column;gap:12px;flex-shrink:0">
       <div class="card" style="flex-shrink:0">
@@ -2131,6 +2158,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Workers ── -->
 <div id="tab-workers" class="tab-content">
+  <div class="page-header" style="border-left-color:#6ee7b7">
+    <div class="page-header-icon">👷</div>
+    <div><div class="page-header-title">Agent Teams</div><div class="page-header-desc">Bundle agents together with recurring tasks. Agent teams run on a schedule and always perform their assigned role automatically.</div></div>
+    <span class="page-header-badge" style="color:#6ee7b7">Workforce</span>
+  </div>
 
   <!-- Agent Team Bundles section -->
   <div class="card">
@@ -2216,6 +2248,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Improvements ── -->
 <div id="tab-improvements" class="tab-content">
+  <div class="page-header" style="border-left-color:#facc15">
+    <div class="page-header-icon">💡</div>
+    <div><div class="page-header-title">AI Improvement Proposals</div><div class="page-header-desc">AI-generated improvement proposals for your system. Review, approve, or escalate to execution. No changes applied automatically.</div></div>
+    <span class="page-header-badge" style="color:#facc15">AI Insights</span>
+  </div>
   <div class="card">
     <div class="card-header">
       <div class="card-title"><span class="icon">💡</span> Improvement Proposals</div>
@@ -2251,6 +2288,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Budget ── -->
 <div id="tab-budget" class="tab-content">
+  <div class="page-header" style="border-left-color:#34d399">
+    <div class="page-header-icon">💰</div>
+    <div><div class="page-header-title">Budget & Cost Management</div><div class="page-header-desc">Track monthly AI compute spend per agent. Set hard caps, monitor warnings, and record usage manually.</div></div>
+    <span class="page-header-badge" style="color:#34d399">Cost Control</span>
+  </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="bud-total-spent">–</div><div class="lbl">Total Spent (month)</div></div></div>
     <div class="stat-card"><div class="stat-icon yellow">⚠️</div><div class="stat-body"><div class="val" id="bud-agents-warn">–</div><div class="lbl">Agents at Warning</div></div></div>
@@ -2292,6 +2334,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Org Chart ── -->
 <div id="tab-org" class="tab-content">
+  <div class="page-header" style="border-left-color:#818cf8">
+    <div class="page-header-icon">🏢</div>
+    <div><div class="page-header-title">Org Chart & Agent Hierarchy</div><div class="page-header-desc">Visual hierarchy of roles and reporting lines. Assign agents to roles for structured delegation and task routing.</div></div>
+    <span class="page-header-badge" style="color:#818cf8">Agent Structure</span>
+  </div>
   <div class="grid2">
     <div class="card">
       <div class="card-header">
@@ -2337,6 +2384,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Goals ── -->
 <div id="tab-goals" class="tab-content">
+  <div class="page-header" style="border-left-color:#fb923c">
+    <div class="page-header-icon">🎯</div>
+    <div><div class="page-header-title">Goals & Company Mission</div><div class="page-header-desc">Set OKR-style goals, define the company mission, and track strategic objectives across your AI team.</div></div>
+    <span class="page-header-badge" style="color:#fb923c">Strategic Layer</span>
+  </div>
   <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,rgba(234,88,12,.08),rgba(251,146,60,.04));border-color:rgba(251,146,60,.3)">
     <div class="card-header">
       <div class="card-title"><span class="icon">💬</span> CEO Chat</div>
@@ -2395,6 +2447,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Tickets ── -->
 <div id="tab-tickets" class="tab-content">
+  <div class="page-header" style="border-left-color:#38bdf8">
+    <div class="page-header-icon">🎫</div>
+    <div><div class="page-header-title">Tickets & Task Tracker</div><div class="page-header-desc">Track system tickets, feature requests, and AI tasks. Filter by status, assign agents, and monitor progress.</div></div>
+    <span class="page-header-badge" style="color:#38bdf8">Issue Tracker</span>
+  </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon blue">🎫</div><div class="stat-body"><div class="val" id="tkt-total">–</div><div class="lbl">Total Tickets</div></div></div>
     <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="tkt-open">–</div><div class="lbl">Open</div></div></div>
@@ -2460,6 +2517,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Boardroom (Governance) ── -->
 <div id="tab-boardroom" class="tab-content">
+  <div class="page-header" style="border-left-color:#f87171">
+    <div class="page-header-icon">🛡️</div>
+    <div><div class="page-header-title">Boardroom & Governance</div><div class="page-header-desc">High-level approval workflows, governance decisions, and strategic oversight. Human-in-the-loop for critical actions.</div></div>
+    <span class="page-header-badge" style="color:#f87171">Governance</span>
+  </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="gov-pending">–</div><div class="lbl">Pending Approvals</div></div></div>
     <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="gov-approved">–</div><div class="lbl">Approved</div></div></div>
@@ -2520,6 +2582,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Companies ── -->
 <div id="tab-companies" class="tab-content">
+  <div class="page-header" style="border-left-color:#86efac">
+    <div class="page-header-icon">🏗️</div>
+    <div><div class="page-header-title">Multi-Company Manager</div><div class="page-header-desc">One deployment, many companies. Complete data isolation with a single control plane for your entire portfolio.</div></div>
+    <span class="page-header-badge" style="color:#86efac">Portfolio CRM</span>
+  </div>
   <div class="card" style="margin-bottom:16px">
     <div class="card-header">
       <div class="card-title"><span class="icon">🏗️</span> Multi-Company Manager</div>
@@ -2558,15 +2625,16 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Outputs (Artifacts + Sessions) ── -->
 <div id="tab-artifacts" class="tab-content">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-    <div>
-      <h2 style="font-size:1.15em;font-weight:800;color:var(--text);letter-spacing:-.02em;margin:0">📦 Outputs</h2>
-      <p style="font-size:.8em;color:var(--text-muted);margin:2px 0 0">AI-generated artifacts and persistent agent sessions</p>
-    </div>
-    <div style="display:flex;gap:6px">
-      <button class="btn btn-ghost btn-sm outputs-tab-btn active" id="outputs-btn-artifacts" onclick="switchOutputTab('artifacts',this)">📦 Artifacts</button>
-      <button class="btn btn-ghost btn-sm outputs-tab-btn" id="outputs-btn-sessions" onclick="switchOutputTab('sessions',this)">💾 Sessions</button>
-    </div>
+  <div class="page-header" style="border-left-color:#fde68a">
+    <div class="page-header-icon">📦</div>
+    <div><div class="page-header-title">Artifacts & Generated Content</div><div class="page-header-desc">Browse and manage all files, documents, and code generated by your AI agents. Filter, preview, and deploy artifacts.</div></div>
+    <span class="page-header-badge" style="color:#fde68a">Output Library</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon yellow">📦</div><div class="stat-body"><div class="val" id="art-total">–</div><div class="lbl">Total Artifacts</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📝</div><div class="stat-body"><div class="val" id="art-drafts">–</div><div class="lbl">Drafts</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">🚀</div><div class="stat-body"><div class="val" id="art-deployed">–</div><div class="lbl">Deployed</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="art-approved">–</div><div class="lbl">Approved</div></div></div>
   </div>
 
   <!-- ── Artifacts panel ── -->
@@ -2626,13 +2694,29 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
-  <!-- ── Sessions panel (hidden by default) ── -->
-  <div id="outputs-sessions-panel" style="display:none">
-    <div class="grid-stat" style="margin-bottom:16px">
-      <div class="stat-card"><div class="stat-icon cyan">💾</div><div class="stat-body"><div class="val" id="ses-total">–</div><div class="lbl">Total</div></div></div>
-      <div class="stat-card"><div class="stat-icon green">▶️</div><div class="stat-body"><div class="val" id="ses-active">–</div><div class="lbl">Active</div></div></div>
-      <div class="stat-card"><div class="stat-icon yellow">⏸</div><div class="stat-body"><div class="val" id="ses-paused">–</div><div class="lbl">Paused</div></div></div>
-      <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="ses-completed">–</div><div class="lbl">Completed</div></div></div>
+<!-- ── Sessions ── -->
+<div id="tab-sessions" class="tab-content">
+  <div class="page-header" style="border-left-color:#67e8f9">
+    <div class="page-header-icon">💾</div>
+    <div><div class="page-header-title">AI Sessions</div><div class="page-header-desc">Persistent sessions let agents resume exactly where they left off. Track active, paused, and completed sessions.</div></div>
+    <span class="page-header-badge" style="color:#67e8f9">Session Manager</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon cyan">💾</div><div class="stat-body"><div class="val" id="ses-total">–</div><div class="lbl">Total Sessions</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">▶️</div><div class="stat-body"><div class="val" id="ses-active">–</div><div class="lbl">Active</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">⏸</div><div class="stat-body"><div class="val" id="ses-paused">–</div><div class="lbl">Paused</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="ses-completed">–</div><div class="lbl">Completed</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">💾</span> Persistent Sessions</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadSessions()">↻ Refresh</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+        Sessions persist across reboots. Agents resume their exact task context rather than starting from scratch.
+      </p>
+      <div id="sessions-list"><div class="empty"><div class="icon">💾</div><p>No sessions yet.</p></div></div>
     </div>
     <div class="grid2" style="align-items:start">
       <div class="card">
@@ -2667,6 +2751,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Skills ── -->
 <div id="tab-skills" class="tab-content">
+  <div class="page-header" style="border-left-color:#22d3ee">
+    <div class="page-header-icon">🛠️</div>
+    <div><div class="page-header-title">Skills Library</div><div class="page-header-desc">Manage capabilities your agents can learn and use. Train skills, assign them to agents, and build new ones.</div></div>
+    <span class="page-header-badge" style="color:#22d3ee">Agent Capabilities</span>
+  </div>
   <div class="grid2" style="align-items:start">
     <div class="card" style="min-height:600px;display:flex;flex-direction:column">
       <div class="card-header">
@@ -2728,6 +2817,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Tasks ── -->
 <div id="tab-tasks" class="tab-content">
+  <div class="page-header" style="border-left-color:#f472b6">
+    <div class="page-header-icon">🚀</div>
+    <div><div class="page-header-title">Task Runner</div><div class="page-header-desc">Build and launch tasks for your AI workforce. Describe any goal — agents are auto-selected, you control the final launch.</div></div>
+    <span class="page-header-badge" style="color:#f472b6">Task Builder</span>
+  </div>
 
   <!-- Task Builder -->
   <div class="grid2" style="align-items:start">
@@ -2829,6 +2923,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Swarm ── -->
 <div id="tab-swarm" class="tab-content">
+  <div class="page-header" style="border-left-color:#fbbf24">
+    <div class="page-header-icon">🐝</div>
+    <div><div class="page-header-title">Agent Swarm</div><div class="page-header-desc">All AI agents at a glance — capabilities, status, and current workload. Filter by category or search by skill.</div></div>
+    <span class="page-header-badge" style="color:#fbbf24">41 Agents</span>
+  </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap">
     <!-- Left: agent grid -->
     <div style="flex:1;min-width:320px">
@@ -2908,6 +3007,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Commands ── -->
 <div id="tab-commands" class="tab-content">
+  <div class="page-header" style="border-left-color:#d4af37">
+    <div class="page-header-icon">📜</div>
+    <div><div class="page-header-title">Command Reference</div><div class="page-header-desc">Full list of WhatsApp and bot commands available across your AI system. Search, filter by category, and copy commands directly.</div></div>
+    <span class="page-header-badge" style="color:#d4af37">Commands</span>
+  </div>
   <div class="card">
     <div class="card-header">
       <div class="card-title"><span class="icon" style="color:var(--gold)">◈</span> Command Reference</div>
@@ -2924,6 +3028,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── ROI Metrics ── -->
 <div id="tab-metrics" class="tab-content">
+  <div class="page-header" style="border-left-color:#4ade80">
+    <div class="page-header-icon">📈</div>
+    <div><div class="page-header-title">ROI & Performance Analytics</div><div class="page-header-desc">Real usage data tracked automatically from all agent activity. Measure tasks, hours saved, cost efficiency, and business impact.</div></div>
+    <span class="page-header-badge" style="color:#4ade80">Analytics</span>
+  </div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
     <div>
       <h2 style="font-size:1.15em;font-weight:800;color:var(--text);letter-spacing:-.02em">ROI &amp; Usage Tracking</h2>
@@ -3065,6 +3174,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Templates ── -->
 <div id="tab-templates" class="tab-content">
+  <div class="page-header" style="border-left-color:#60a5fa">
+    <div class="page-header-icon">📋</div>
+    <div><div class="page-header-title">Business Templates</div><div class="page-header-desc">Pre-built plug-and-play templates for common business use-cases. One click to deploy a full AI team.</div></div>
+    <span class="page-header-badge" style="color:#60a5fa">Templates</span>
+  </div>
   <div class="card">
     <div class="card-header">
       <div class="card-title"><span class="icon">📋</span> Business Templates</div>
@@ -3096,6 +3210,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Guardrails ── -->
 <div id="tab-guardrails" class="tab-content">
+  <div class="page-header" style="border-left-color:#f97316">
+    <div class="page-header-icon">🔒</div>
+    <div><div class="page-header-title">Guardrails & Safety Controls</div><div class="page-header-desc">Define rules that keep your AI agents operating safely. High-risk actions require manual approval before execution.</div></div>
+    <span class="page-header-badge" style="color:#f97316">Security Layer</span>
+  </div>
   <!-- Pending approvals notification banner -->
   <div id="guardrails-notification-banner" style="display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(239,68,68,.1));border:1px solid rgba(245,158,11,.5);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.88em;color:var(--warning);font-weight:600;animation:blink 1.5s infinite"></div>
   <div class="grid-stat">
@@ -3222,6 +3341,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Memory ── -->
 <div id="tab-memory" class="tab-content">
+  <div class="page-header" style="border-left-color:#e879f9">
+    <div class="page-header-icon">🧠</div>
+    <div><div class="page-header-title">Memory & Knowledge Base</div><div class="page-header-desc">Client contacts, conversation history, and contextual knowledge stored across all AI sessions.</div></div>
+    <span class="page-header-badge" style="color:#e879f9">Persistent Memory</span>
+  </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:start">
     <!-- Left: Client Memory with search -->
     <div style="flex:1;min-width:300px">
@@ -3299,6 +3423,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Integrations ── -->
 <div id="tab-integrations" class="tab-content">
+  <div class="page-header" style="border-left-color:#a78bfa">
+    <div class="page-header-icon">🔌</div>
+    <div><div class="page-header-title">Integrations & Connections</div><div class="page-header-desc">Connect your tools and services. The AI uses these integrations to take real actions across your business.</div></div>
+    <span class="page-header-badge" style="color:#a78bfa">Connected Services</span>
+  </div>
   <div class="card">
     <div class="card-header">
       <div class="card-title"><span class="icon">🔌</span> Integrations</div>
@@ -3315,6 +3444,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── History ── -->
 <div id="tab-history" class="tab-content">
+  <div class="page-header" style="border-left-color:#7dd3fc">
+    <div class="page-header-icon">🕐</div>
+    <div><div class="page-header-title">Activity History</div><div class="page-header-desc">A persistent, filterable timeline of all agent activities, security checks, and system events from all time.</div></div>
+    <span class="page-header-badge" style="color:#7dd3fc">Full Audit Log</span>
+  </div>
   <div class="card">
     <div class="card-header">
       <div class="card-title"><span class="icon">🕐</span> Activity History</div>
@@ -3367,6 +3501,11 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Options ── -->
 <div id="tab-options" class="tab-content">
+  <div class="page-header" style="border-left-color:#94a3b8">
+    <div class="page-header-icon">⚙️</div>
+    <div><div class="page-header-title">Settings & Configuration</div><div class="page-header-desc">API keys, agent behavior, security settings, and system preferences. Changes take effect immediately.</div></div>
+    <span class="page-header-badge" style="color:#94a3b8">System Config</span>
+  </div>
   <div class="grid2">
 
     <!-- Left column: API Keys -->
@@ -3508,47 +3647,47 @@ INDEX_HTML = r"""<!doctype html>
 <div id="tab-blacklight" class="tab-content">
 
   <!-- Header banner -->
-  <div style="background:linear-gradient(135deg,#1a0a2e 0%,#16213e 60%,#0f172a 100%);border:1px solid #7c3aed;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(124,58,237,.15),0 8px 32px rgba(0,0,0,.6)">
-    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(124,58,237,.2) 0%,transparent 60%);pointer-events:none"></div>
-    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(167,139,250,.6),transparent)"></div>
+  <div style="background:linear-gradient(135deg,#000d1a 0%,#001428 60%,#000a14 100%);border:1px solid #00f0ff;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(0,240,255,.15),0 8px 32px rgba(0,0,0,.8)">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(0,240,255,.12) 0%,transparent 60%);pointer-events:none"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,240,255,.8),transparent)"></div>
     <div style="font-size:2.6rem;line-height:1;animation:blLightning 3s ease-in-out infinite;position:relative;z-index:1">⚡</div>
     <div style="flex:1;position:relative;z-index:1">
-      <div style="font-size:1.3rem;font-weight:800;color:#e2d9f3;letter-spacing:.1em;text-shadow:0 0 20px rgba(167,139,250,.5)">BLACKLIGHT</div>
-      <div style="font-size:.83em;color:#a78bfa;margin-top:3px;font-weight:500">Autonomous money-making agent — runs above Hermes without user input</div>
+      <div style="font-size:1.3rem;font-weight:800;color:#e0f9ff;letter-spacing:.1em;text-shadow:0 0 20px rgba(0,240,255,.7),0 0 40px rgba(0,240,255,.3)">BLACKLIGHT</div>
+      <div style="font-size:.83em;color:#00f0ff;margin-top:3px;font-weight:500;opacity:.85">Autonomous money-making agent — runs above Hermes without user input</div>
     </div>
     <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
       <div id="bl-status-dot" style="width:12px;height:12px;border-radius:50%;background:#6b7280;transition:background .4s,box-shadow .4s"></div>
-      <span id="bl-status-label" style="font-size:.84em;color:#a78bfa;font-weight:700;letter-spacing:.04em">IDLE</span>
+      <span id="bl-status-label" style="font-size:.84em;color:#00f0ff;font-weight:700;letter-spacing:.04em">IDLE</span>
     </div>
   </div>
   <style>
-  @keyframes blLightning{0%,90%,100%{opacity:1;filter:drop-shadow(0 0 8px #a855f7)}5%{opacity:.3;filter:none}10%{opacity:1;filter:drop-shadow(0 0 20px #c084fc)}15%{opacity:.7}20%{opacity:1;filter:drop-shadow(0 0 12px #a855f7)}}
-  .bl-stat-card{background:linear-gradient(135deg,rgba(88,28,135,.2),rgba(124,58,237,.1));border:1px solid rgba(124,58,237,.3);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
-  .bl-stat-card:hover{border-color:rgba(167,139,250,.5);box-shadow:0 0 20px rgba(124,58,237,.2)}
+  @keyframes blLightning{0%,90%,100%{opacity:1;filter:drop-shadow(0 0 8px #00f0ff)}5%{opacity:.3;filter:none}10%{opacity:1;filter:drop-shadow(0 0 20px #00f0ff)}15%{opacity:.7}20%{opacity:1;filter:drop-shadow(0 0 12px #00ccff)}}
+  .bl-stat-card{background:linear-gradient(135deg,rgba(0,240,255,.06),rgba(0,180,220,.04));border:1px solid rgba(0,240,255,.2);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
+  .bl-stat-card:hover{border-color:rgba(0,240,255,.5);box-shadow:0 0 20px rgba(0,240,255,.12)}
   @media(prefers-reduced-motion:reduce){[style*="blLightning"],[style*="animation"]{animation:none!important}}
   </style>
 
   <!-- Control row -->
-  <div class="card" style="margin-bottom:18px;border:1px solid rgba(124,58,237,.2);background:linear-gradient(135deg,rgba(88,28,135,.1),var(--surface2))">
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(0,240,255,.2);background:linear-gradient(135deg,rgba(0,240,255,.04),var(--surface2))">
     <div class="card-header">
-      <div class="card-title"><span style="color:#a78bfa">🎯</span> Goal &amp; Control</div>
+      <div class="card-title"><span style="color:#00f0ff">🎯</span> Goal &amp; Control</div>
       <button class="btn btn-ghost btn-sm" onclick="blRefresh()">↻ Refresh</button>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
-      Set a goal, then hit <strong style="color:#a78bfa">Start</strong>. BLACKLIGHT will find opportunities, analyze them with Hermes, generate outreach, and iterate — without waiting for input.
+      Set a goal, then hit <strong style="color:#00f0ff">Start</strong>. BLACKLIGHT will find opportunities, analyze them with Hermes, generate outreach, and iterate — without waiting for input.
     </p>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
       <div style="flex:1;min-width:220px">
-        <label style="font-size:.82em;color:#a78bfa;display:block;margin-bottom:4px;font-weight:600">Goal</label>
+        <label style="font-size:.82em;color:#00f0ff;display:block;margin-bottom:4px;font-weight:600">Goal</label>
         <input id="bl-goal-input" placeholder="e.g. Find local restaurants that need better marketing"
-          style="width:100%;box-sizing:border-box;border-color:rgba(124,58,237,.3)" autocomplete="off"/>
+          style="width:100%;box-sizing:border-box;border-color:rgba(0,240,255,.3)" autocomplete="off"/>
       </div>
       <div style="display:flex;align-items:center;gap:10px;padding-bottom:2px">
         <label class="toggle" style="width:54px;height:30px" title="Toggle BLACKLIGHT on/off">
           <input type="checkbox" id="bl-toggle" onchange="blToggle(this.checked)"/>
           <span class="slider" style="border-radius:30px"></span>
         </label>
-        <span id="bl-toggle-label" style="font-size:.9em;font-weight:700;color:#a78bfa;min-width:52px">OFF</span>
+        <span id="bl-toggle-label" style="font-size:.9em;font-weight:700;color:#00f0ff;min-width:52px">OFF</span>
       </div>
     </div>
   </div>
@@ -3556,31 +3695,31 @@ INDEX_HTML = r"""<!doctype html>
   <!-- Stats row -->
   <div class="grid-stat" style="margin-bottom:18px" id="bl-stat-cards">
     <div class="bl-stat-card">
-      <div style="width:40px;height:40px;border-radius:10px;background:rgba(124,58,237,.2);display:flex;align-items:center;justify-content:center;font-size:1.1em">🔄</div>
-      <div class="stat-body"><div class="val" id="bl-stat-cycle" style="color:#a78bfa">0</div><div class="lbl">Cycles Run</div></div>
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(0,240,255,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">🔄</div>
+      <div class="stat-body"><div class="val" id="bl-stat-cycle" style="color:#00f0ff">0</div><div class="lbl">Cycles Run</div></div>
     </div>
     <div class="bl-stat-card">
-      <div style="width:40px;height:40px;border-radius:10px;background:rgba(6,182,212,.15);display:flex;align-items:center;justify-content:center;font-size:1.1em">🎯</div>
-      <div class="stat-body"><div class="val" id="bl-stat-opps" style="color:#22d3ee">0</div><div class="lbl">Opportunities Found</div></div>
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(0,240,255,.1);display:flex;align-items:center;justify-content:center;font-size:1.1em">🎯</div>
+      <div class="stat-body"><div class="val" id="bl-stat-opps" style="color:#00f0ff">0</div><div class="lbl">Opportunities Found</div></div>
     </div>
     <div class="bl-stat-card">
-      <div style="width:40px;height:40px;border-radius:10px;background:rgba(74,222,128,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">⚡</div>
-      <div class="stat-body"><div class="val" id="bl-stat-actions" style="color:#4ade80">0</div><div class="lbl">Actions Taken</div></div>
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(0,240,255,.08);display:flex;align-items:center;justify-content:center;font-size:1.1em">⚡</div>
+      <div class="stat-body"><div class="val" id="bl-stat-actions" style="color:#00f0ff">0</div><div class="lbl">Actions Taken</div></div>
     </div>
     <div class="bl-stat-card">
-      <div style="width:40px;height:40px;border-radius:10px;background:rgba(251,146,60,.12);display:flex;align-items:center;justify-content:center;font-size:1.1em">🕐</div>
-      <div class="stat-body"><div class="val" id="bl-stat-last" style="font-size:.75em;color:#fb923c">—</div><div class="lbl">Last Activity</div></div>
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(0,240,255,.06);display:flex;align-items:center;justify-content:center;font-size:1.1em">🕐</div>
+      <div class="stat-body"><div class="val" id="bl-stat-last" style="font-size:.75em;color:#00ccff">—</div><div class="lbl">Last Activity</div></div>
     </div>
   </div>
 
   <!-- Live activity log -->
-  <div class="card" style="border:1px solid rgba(124,58,237,.3);background:linear-gradient(135deg,rgba(88,28,135,.1),var(--surface2))">
+  <div class="card" style="border:1px solid rgba(0,240,255,.25);background:linear-gradient(135deg,rgba(0,240,255,.04),var(--surface2))">
     <div class="card-header">
-      <div class="card-title"><span style="color:#a78bfa">📡</span> Live Activity Log</div>
+      <div class="card-title"><span style="color:#00f0ff">📡</span> Live Activity Log</div>
       <button class="btn btn-ghost btn-sm" onclick="blLoadLogs()">↻ Refresh</button>
     </div>
-    <div id="bl-log" style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace;font-size:.77em;background:rgba(2,0,10,.9);border:1px solid rgba(124,58,237,.2);border-radius:8px;padding:14px;height:340px;overflow-y:auto;color:#c9d1d9;line-height:1.7;box-shadow:inset 0 0 40px rgba(88,28,135,.2)">
-      <span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>
+    <div id="bl-log" style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace;font-size:.77em;background:rgba(0,5,12,.95);border:1px solid rgba(0,240,255,.15);border-radius:8px;padding:14px;height:340px;overflow-y:auto;color:#b0f0ff;line-height:1.7;box-shadow:inset 0 0 40px rgba(0,240,255,.05)">
+      <span style="color:#4a7080">No activity yet — start BLACKLIGHT to see the live log.</span>
     </div>
   </div>
 
@@ -7072,17 +7211,17 @@ function _blSyncUI(running, goal) {
   // status dot + label (in BLACKLIGHT tab header)
   const dot = document.getElementById('bl-status-dot');
   if (dot) {
-    dot.style.background = running ? '#a855f7' : '#6b7280';
-    dot.style.boxShadow = running ? '0 0 12px rgba(168,85,247,.8),0 0 24px rgba(168,85,247,.4)' : 'none';
+    dot.style.background = running ? '#00f0ff' : '#6b7280';
+    dot.style.boxShadow = running ? '0 0 12px rgba(0,240,255,.8),0 0 24px rgba(0,240,255,.4)' : 'none';
   }
   const lbl = document.getElementById('bl-status-label');
-  if (lbl) { lbl.textContent = running ? '⚡ RUNNING' : 'IDLE'; lbl.style.color = running ? '#c084fc' : '#a78bfa'; }
+  if (lbl) { lbl.textContent = running ? '⚡ RUNNING' : 'IDLE'; lbl.style.color = running ? '#00f0ff' : 'rgba(0,240,255,.6)'; }
 
   // tab toggle
   const tabToggle = document.getElementById('bl-toggle');
   if (tabToggle) tabToggle.checked = running;
   const tabLbl = document.getElementById('bl-toggle-label');
-  if (tabLbl) { tabLbl.textContent = running ? 'ON' : 'OFF'; tabLbl.style.color = running ? '#a855f7' : 'var(--text-muted)'; }
+  if (tabLbl) { tabLbl.textContent = running ? 'ON' : 'OFF'; tabLbl.style.color = running ? '#00f0ff' : 'var(--text-muted)'; }
 
   // dashboard toggle
   const dashToggle = document.getElementById('dash-bl-toggle');
@@ -7124,7 +7263,7 @@ async function blLoadLogs() {
     el.innerHTML = '<span style="color:#6b7280">No activity yet — start BLACKLIGHT to see the live log.</span>';
     return;
   }
-  const _levelColor = { system:'#818cf8', cycle:'#a78bfa', info:'#67e8f9', action:'#4ade80',
+  const _levelColor = { system:'#00d4e8', cycle:'#00f0ff', info:'#67e8f9', action:'#4ade80',
                         result:'#facc15', eval:'#fb923c', improve:'#f472b6',
                         warn:'#fbbf24', error:'#f87171' };
   const html = entries.slice().reverse().map(e => {
