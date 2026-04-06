@@ -2,7 +2,7 @@
 
 The orchestrator accepts any natural-language task and autonomously:
   1. Decomposes the task into subtasks using AI
-  2. Selects which of the 20 agents and skills are needed
+  2. Selects which of the 56 agents and skills are needed
   3. Decides parallel vs sequential execution strategy
   4. Dispatches subtasks into each agent's queue file
   5. Runs up to 10+ subtasks concurrently via a thread-pool
@@ -21,7 +21,7 @@ Commands (via chatlog / WhatsApp / Dashboard):
 State files:
   ~/.ai-employee/state/task-orchestrator.state.json   — current orchestrator state
   ~/.ai-employee/config/task_plans.json               — active & recent task plans
-  ~/.ai-employee/config/agent_capabilities.json       — 20-agent capabilities map
+  ~/.ai-employee/config/agent_capabilities.json       — 56-agent capabilities map
   ~/.ai-employee/state/agent_tasks/<agent>.queue.jsonl — per-agent task queues
 """
 import json

@@ -745,7 +745,7 @@ case "$cmd" in
             ;;
           power)
             echo ""
-            echo "  Power mode: all 20 agents, all 126 skills, full dashboard."
+            echo "  Power mode: all 56 agents, all 147 skills, full dashboard."
             ;;
         esac
         ;;
@@ -756,7 +756,7 @@ case "$cmd" in
         echo "Available modes:"
         echo "  starter  — 3 agents, 5 commands (best for getting started)"
         echo "  business — templates, ROI, scheduling (recommended for solo founders)"
-        echo "  power    — everything, all 20 agents (advanced users)"
+        echo "  power    — everything, all 56 agents (advanced users)"
         echo ""
         echo "Change mode: ai-employee mode <starter|business|power>"
         ;;

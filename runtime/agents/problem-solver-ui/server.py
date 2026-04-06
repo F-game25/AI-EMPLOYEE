@@ -240,34 +240,83 @@ CHATLOG_MAX_ENTRIES = 1000
 LLM_TIMEOUT_SECONDS = 30
 
 ROUTING_MAP = {
+  # Core business ops
   "business plan": "company-builder",
-  "customer": "support-bot",
-  "support": "support-bot",
+  "customer": "qualification-agent",
+  "support": "qualification-agent",
+  "ticket": "ticket-system",
+  # Lead gen & sales
   "prospect": "lead-generator",
   "lead": "lead-generator",
-  "outreach": "email-ninja",
-  "email": "email-ninja",
-  "blog": "content-master",
-  "article": "content-master",
-  "seo": "content-master",
-  "linkedin": "social-guru",
-  "instagram": "social-guru",
-  "twitter": "social-guru",
-  "post": "social-guru",
-  "competitor": "intel-agent",
-  "research": "intel-agent",
-  "market": "data-analyst",
-  "analyse": "data-analyst",
-  "analyze": "data-analyst",
-  "ad": "creative-studio",
-  "copy": "creative-studio",
-  "website": "web-sales",
-  "hire": "hr-manager",
-  "recruit": "hr-manager",
+  "outreach": "cold-outreach-assassin",
+  "email": "cold-outreach-assassin",
+  "cold email": "cold-outreach-assassin",
+  "appointment": "appointment-setter",
+  "book meeting": "appointment-setter",
+  "close deal": "sales-closer-pro",
+  "objection": "sales-closer-pro",
+  "negotiate": "sales-closer-pro",
+  # Content & media
+  "blog": "social-media-manager",
+  "article": "social-media-manager",
+  "seo": "social-media-manager",
+  "newsletter": "newsletter-bot",
+  "course": "course-creator",
+  "video": "faceless-video",
+  "youtube": "faceless-video",
+  "tiktok": "faceless-video",
+  # Social & brand
+  "linkedin": "linkedin-growth-hacker",
+  "instagram": "social-media-manager",
+  "twitter": "social-media-manager",
+  "post": "social-media-manager",
+  "brand": "brand-strategist",
+  "chatbot": "chatbot-builder",
+  # Research & analysis
+  "competitor": "web-researcher",
+  "research": "web-researcher",
+  "deepsearch": "financial-deepsearch",
+  "market": "financial-deepsearch",
+  "analyse": "financial-deepsearch",
+  "analyze": "financial-deepsearch",
+  "sec filing": "financial-deepsearch",
+  "earnings": "financial-deepsearch",
+  # Ads & paid media
+  "ad copy": "ad-campaign-wizard",
+  "ad campaign": "ad-campaign-wizard",
+  "meta ads": "ad-campaign-wizard",
+  "google ads": "ad-campaign-wizard",
+  "ppc": "paid-media-specialist",
+  "website": "engineering-assistant",
+  # Finance & trading
   "finance": "finance-wizard",
   "revenue": "finance-wizard",
+  "trading": "turbo-quant",
+  "crypto": "turbo-quant",
+  "arbitrage": "arbitrage-bot",
+  "signal": "signal-community",
+  "polymarket": "polymarket-trader",
+  # HR & team
+  "hire": "hr-manager",
+  "recruit": "recruiter",
+  # E-commerce
+  "ecommerce": "ecom-agent",
+  "shopify": "ecom-agent",
+  "print on demand": "print-on-demand",
+  "merch": "print-on-demand",
+  # Growth & strategy
   "grow": "growth-hacker",
+  "conversion": "conversion-rate-optimizer",
+  "funnel": "conversion-rate-optimizer",
+  "referral": "referral-rocket",
+  "partnership": "partnership-matchmaker",
+  # Project & ops
   "project": "project-manager",
+  "obsidian": "obsidian-memory",
+  "memory": "obsidian-memory",
+  "goal": "goal-alignment",
+  "budget": "budget-tracker",
+  "org chart": "org-chart",
 }
 
 AGENTS_BY_MODE = {
@@ -331,6 +380,22 @@ AGENTS_BY_MODE = {
     "partnership-matchmaker",
     "referral-rocket",
     "sales-closer-pro",
+    # AI Intelligence Layer
+    "turbo-quant",
+    "ascend-forge",
+    "blacklight",
+    "hermes-agent",
+    "obsidian-memory",
+    "lead-intelligence",
+    # Business operations
+    "company-manager",
+    "budget-tracker",
+    "goal-alignment",
+    "governance",
+    "org-chart",
+    "session-manager",
+    "ticket-system",
+    "discord-bot",
   ],
 }
 
@@ -441,7 +506,7 @@ def route_to_agent(message: str) -> str:
   for keyword in sorted(ROUTING_MAP, key=len, reverse=True):
     if keyword in message_lower:
       return ROUTING_MAP[keyword]
-  if "all 20 agents" in message_lower or "all agents" in message_lower:
+  if "all 56 agents" in message_lower or "all agents" in message_lower:
     return "task-orchestrator"
   return "task-orchestrator"
 
@@ -9182,7 +9247,7 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
             "  arb opportunities / arb watchlist\n"
             "  task <description> — multi-agent orchestration\n"
             "  task status / task list / task cancel\n"
-            "  agents — list all 20 AI agents\n"
+            "  agents — list all 56 AI agents\n"
             "  assign <agent> <subtask> — manual agent dispatch\n"
             "  company build <idea> — build a company from scratch\n"
             "  company validate / plan / simulate / gtm / pitch / org / swot\n"
@@ -9517,11 +9582,11 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
 
     routed_agent = route_to_agent(message)
     mode = _current_mode()
-    if ("all 20 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
+    if ("all 56 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
       allowed = ", ".join(_available_agent_ids(mode))
       return (
         f"Only {len(_available_agent_ids(mode))} agents are available in {mode} mode: {allowed}. "
-        "Switch to power mode to run all 20 agents, or I can handle this with the current set."
+        "Switch to power mode to run all 56 agents, or I can handle this with the current set."
       )
     if not _agent_allowed_in_mode(routed_agent, mode):
       return (
