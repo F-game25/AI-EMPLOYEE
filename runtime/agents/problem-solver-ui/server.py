@@ -1762,16 +1762,15 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
-  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" class="nav-btn-blacklight">⚡ BLACKLIGHT</button>
-  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" class="nav-btn-ascend">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn" style="background:linear-gradient(135deg,#1a0a2e,#16213e);color:#a855f7;border:1px solid #7c3aed;font-weight:700;letter-spacing:.04em;text-shadow:0 0 8px #a855f7">⚡ BLACKLIGHT</button>
+  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn" style="background:linear-gradient(135deg,#0a1628,#0f2240);color:#f59e0b;border:1px solid #d97706;font-weight:700;letter-spacing:.04em;text-shadow:0 0 8px #f59e0b">🔥 ASCEND FORGE</button>
   <button onclick="switchTab('budget',this)">💰 Budget</button>
   <button onclick="switchTab('org',this)">🏢 Org Chart</button>
   <button onclick="switchTab('goals',this)">🎯 Goals</button>
   <button onclick="switchTab('tickets',this)">🎫 Tickets</button>
   <button onclick="switchTab('boardroom',this)">🛡️ Boardroom</button>
   <button onclick="switchTab('companies',this)">🏗️ Companies</button>
-  <button onclick="switchTab('artifacts',this)">📦 Artifacts</button>
-  <button onclick="switchTab('sessions',this)">💾 Sessions</button>
+  <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
 </nav>
   <button class="nav-scroll-btn right" id="nav-scroll-right" onclick="navScroll(1)" title="Scroll right">›</button>
 </div>
@@ -2557,94 +2556,110 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
-<!-- ── Artifacts ── -->
+<!-- ── Outputs (Artifacts + Sessions) ── -->
 <div id="tab-artifacts" class="tab-content">
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon yellow">📦</div><div class="stat-body"><div class="val" id="art-total">–</div><div class="lbl">Total Artifacts</div></div></div>
-    <div class="stat-card"><div class="stat-icon cyan">📝</div><div class="stat-body"><div class="val" id="art-drafts">–</div><div class="lbl">Drafts</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">🚀</div><div class="stat-body"><div class="val" id="art-deployed">–</div><div class="lbl">Deployed</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="art-approved">–</div><div class="lbl">Approved</div></div></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div>
+      <h2 style="font-size:1.15em;font-weight:800;color:var(--text);letter-spacing:-.02em;margin:0">📦 Outputs</h2>
+      <p style="font-size:.8em;color:var(--text-muted);margin:2px 0 0">AI-generated artifacts and persistent agent sessions</p>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm outputs-tab-btn active" id="outputs-btn-artifacts" onclick="switchOutputTab('artifacts',this)">📦 Artifacts</button>
+      <button class="btn btn-ghost btn-sm outputs-tab-btn" id="outputs-btn-sessions" onclick="switchOutputTab('sessions',this)">💾 Sessions</button>
+    </div>
   </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">📦</span> Artifacts</div>
-        <div style="display:flex;gap:6px">
-          <select id="art-filter-type" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadArtifacts()">
-            <option value="">All Types</option>
-            <option value="code">Code</option>
+
+  <!-- ── Artifacts panel ── -->
+  <div id="outputs-artifacts-panel">
+    <div class="grid-stat" style="margin-bottom:16px">
+      <div class="stat-card"><div class="stat-icon yellow">📦</div><div class="stat-body"><div class="val" id="art-total">–</div><div class="lbl">Total</div></div></div>
+      <div class="stat-card"><div class="stat-icon cyan">📝</div><div class="stat-body"><div class="val" id="art-drafts">–</div><div class="lbl">Drafts</div></div></div>
+      <div class="stat-card"><div class="stat-icon green">🚀</div><div class="stat-body"><div class="val" id="art-deployed">–</div><div class="lbl">Deployed</div></div></div>
+      <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="art-approved">–</div><div class="lbl">Approved</div></div></div>
+    </div>
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📦</span> Artifacts</div>
+          <div style="display:flex;gap:6px">
+            <select id="art-filter-type" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadArtifacts()">
+              <option value="">All Types</option>
+              <option value="code">Code</option>
+              <option value="report">Report</option>
+              <option value="campaign">Campaign</option>
+              <option value="business_plan">Business Plan</option>
+              <option value="config">Config</option>
+              <option value="other">Other</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="loadArtifacts()">↻</button>
+          </div>
+        </div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:10px">Files, reports, code, and plans produced by agents. Review, approve, and deploy them here.</p>
+        <div id="artifacts-list"><div class="empty"><div class="icon">📦</div><p>No artifacts yet. Create a task to generate artifacts.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Artifact</div></div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Manually create an artifact from existing content.</p>
+        <div class="form-group"><label>Title</label><input id="art-new-title" placeholder="e.g. Marketing Plan Q2"/></div>
+        <div class="form-group"><label>Type</label>
+          <select id="art-new-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
             <option value="report">Report</option>
+            <option value="code">Code</option>
             <option value="campaign">Campaign</option>
             <option value="business_plan">Business Plan</option>
             <option value="config">Config</option>
             <option value="other">Other</option>
           </select>
-          <button class="btn btn-ghost btn-sm" onclick="loadArtifacts()">↻</button>
         </div>
+        <div class="form-group"><label>Content</label>
+          <textarea id="art-new-content" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder="Artifact content…"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="createArtifact()">📦 Create Artifact</button>
       </div>
-      <div id="artifacts-list"><div class="empty"><div class="icon">📦</div><p>No artifacts yet. Create a task to generate artifacts.</p></div></div>
     </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Artifact</div></div>
-      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Manually create an artifact from content.</p>
-      <div class="form-group"><label>Title</label><input id="art-new-title" placeholder="e.g. Marketing Plan Q2"/></div>
-      <div class="form-group"><label>Type</label>
-        <select id="art-new-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="report">Report</option>
-          <option value="code">Code</option>
-          <option value="campaign">Campaign</option>
-          <option value="business_plan">Business Plan</option>
-          <option value="config">Config</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Content</label>
-        <textarea id="art-new-content" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder="Artifact content…"></textarea>
-      </div>
-      <button class="btn btn-primary" onclick="createArtifact()">📦 Create Artifact</button>
-    </div>
-  </div>
-  <div class="card" style="margin-top:16px" id="art-detail-card" style="display:none">
-    <div class="card-header">
-      <div class="card-title"><span class="icon">🔍</span> Artifact Detail</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('art-detail-card').style.display='none'">✕ Close</button>
-    </div>
-    <div id="art-detail-body"></div>
-  </div>
-</div>
-
-<!-- ── Sessions ── -->
-<div id="tab-sessions" class="tab-content">
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon cyan">💾</div><div class="stat-body"><div class="val" id="ses-total">–</div><div class="lbl">Total Sessions</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">▶️</div><div class="stat-body"><div class="val" id="ses-active">–</div><div class="lbl">Active</div></div></div>
-    <div class="stat-card"><div class="stat-icon yellow">⏸</div><div class="stat-body"><div class="val" id="ses-paused">–</div><div class="lbl">Paused</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="ses-completed">–</div><div class="lbl">Completed</div></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
+    <div class="card" style="margin-top:16px;display:none" id="art-detail-card">
       <div class="card-header">
-        <div class="card-title"><span class="icon">💾</span> Persistent Sessions</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadSessions()">↻ Refresh</button>
+        <div class="card-title"><span class="icon">🔍</span> Artifact Detail</div>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('art-detail-card').style.display='none'">✕ Close</button>
       </div>
-      <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
-        Sessions persist across reboots. Agents resume their exact task context rather than starting from scratch.
-      </p>
-      <div id="sessions-list"><div class="empty"><div class="icon">💾</div><p>No sessions yet.</p></div></div>
+      <div id="art-detail-body"></div>
     </div>
-    <div>
+  </div>
+
+  <!-- ── Sessions panel (hidden by default) ── -->
+  <div id="outputs-sessions-panel" style="display:none">
+    <div class="grid-stat" style="margin-bottom:16px">
+      <div class="stat-card"><div class="stat-icon cyan">💾</div><div class="stat-body"><div class="val" id="ses-total">–</div><div class="lbl">Total</div></div></div>
+      <div class="stat-card"><div class="stat-icon green">▶️</div><div class="stat-body"><div class="val" id="ses-active">–</div><div class="lbl">Active</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow">⏸</div><div class="stat-body"><div class="val" id="ses-paused">–</div><div class="lbl">Paused</div></div></div>
+      <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="ses-completed">–</div><div class="lbl">Completed</div></div></div>
+    </div>
+    <div class="grid2" style="align-items:start">
       <div class="card">
-        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Session</div></div>
-        <div class="form-group"><label>Agent ID</label><input id="ses-new-agent" placeholder="e.g. engineering-assistant"/></div>
-        <div class="form-group"><label>Title</label><input id="ses-new-title" placeholder="e.g. MVP feature development"/></div>
-        <div class="form-group"><label>Initial Context (JSON)</label>
-          <textarea id="ses-new-ctx" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder='{"goal": "Build login feature", "stack": "React + FastAPI"}'></textarea>
+        <div class="card-header">
+          <div class="card-title"><span class="icon">💾</span> Persistent Sessions</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadSessions()">↻ Refresh</button>
         </div>
-        <button class="btn btn-primary" onclick="createSession()">💾 Create Session</button>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">
+          Sessions persist across reboots. Agents resume their exact task context rather than starting from scratch.
+        </p>
+        <div id="sessions-list"><div class="empty"><div class="icon">💾</div><p>No sessions yet. Agents create sessions automatically when tasks start.</p></div></div>
       </div>
-      <div class="card" style="margin-top:14px" id="ses-detail-card">
-        <div class="card-header"><div class="card-title"><span class="icon">📋</span> Session Detail</div></div>
-        <div id="ses-detail-body"><div class="empty"><p>Click a session to view details and checkpoints.</p></div></div>
+      <div>
+        <div class="card">
+          <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Session</div></div>
+          <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Manually create a persistent session for an agent with a specific goal and context.</p>
+          <div class="form-group"><label>Agent ID</label><input id="ses-new-agent" placeholder="e.g. engineering-assistant"/></div>
+          <div class="form-group"><label>Title</label><input id="ses-new-title" placeholder="e.g. MVP feature development"/></div>
+          <div class="form-group"><label>Initial Context (JSON)</label>
+            <textarea id="ses-new-ctx" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder='{"goal": "Build login feature", "stack": "React + FastAPI"}'></textarea>
+          </div>
+          <button class="btn btn-primary" onclick="createSession()">💾 Create Session</button>
+        </div>
+        <div class="card" style="margin-top:14px" id="ses-detail-card">
+          <div class="card-header"><div class="card-title"><span class="icon">📋</span> Session Detail</div></div>
+          <div id="ses-detail-body"><div class="empty"><p>Click a session to view details and checkpoints.</p></div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -3305,12 +3320,13 @@ INDEX_HTML = r"""<!doctype html>
       <div class="card-title"><span class="icon">🕐</span> Activity History</div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn btn-ghost btn-sm" onclick="loadHistory()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportHistory()" title="Download history as JSON">⬇️ Export</button>
         <button class="btn btn-ghost btn-sm" style="color:var(--danger)"
                 onclick="clearHistory()">🗑️ Clear</button>
       </div>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
-      A persistent log of all agent activities, security checks, settings changes and more — from all time.
+      A persistent log of all agent activities, security checks, settings changes and more. Click <strong style="color:var(--text)">↩ Re-run</strong> on any task to send it to the Tasks tab, or <strong style="color:var(--text)">💬 Send Again</strong> to replay a chat command.
     </p>
 
     <!-- Filter bar -->
@@ -3755,8 +3771,7 @@ function switchTab(tab, btn) {
   if (tab === 'tickets') { loadTickets(); loadTicketAudit(); }
   if (tab === 'boardroom') loadBoardroom();
   if (tab === 'companies') loadCompanies();
-  if (tab === 'artifacts') loadArtifacts();
-  if (tab === 'sessions') loadSessions();
+  if (tab === 'artifacts') { loadArtifacts(); loadSessions(); }
 }
 
 function toast(msg, type='success') {
@@ -4673,14 +4688,14 @@ async function deleteBundle(id) {
 }
 
 async function startBot(name) {
-  await api('/api/agents/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({agent: name})});
+  await api('/api/agents/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
   toast(`Starting ${name}…`);
   setTimeout(loadWorkers, 1800);
 }
 
 async function stopBot(name) {
   if (!confirm(`Stop ${name}?`)) return;
-  await api('/api/agents/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({agent: name})});
+  await api('/api/agents/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
   toast(`Stopping ${name}…`, 'error');
   setTimeout(loadWorkers, 1800);
 }
@@ -6750,6 +6765,27 @@ function renderHistory(entries) {
             <div style="font-size:.76em;color:var(--text-muted);margin-top:3px;
                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${dLines}</div>`;
         }
+        // Action buttons for actionable event types
+        let actionsHtml = '';
+        if (e.event_type === 'task_run') {
+          const raw = (e.details && e.details.description) ? e.details.description : e.description;
+          const taskDesc = raw.replace(/^task\s+launched[:\s]+/i,'').replace(/^task[:\s]+/i,'').trim();
+          const viewBtn = (e.details && e.details.task_id)
+            ? `<button class="btn btn-ghost btn-sm" style="font-size:.72em;padding:2px 8px"
+                 onclick="viewTaskById(${JSON.stringify(e.details.task_id)})">📋 View</button>`
+            : '';
+          actionsHtml = `<div style="display:flex;gap:5px;margin-top:6px">
+            <button class="btn btn-ghost btn-sm" style="font-size:.72em;padding:2px 8px;color:var(--gold);border-color:rgba(212,175,55,.3)"
+              onclick="rerunTaskFromHistory(${JSON.stringify(taskDesc)})">↩ Re-run</button>
+            ${viewBtn}
+          </div>`;
+        } else if (e.event_type === 'agent_command') {
+          const cmd = (e.details && e.details.command) ? e.details.command : e.description;
+          actionsHtml = `<div style="margin-top:4px">
+            <button class="btn btn-ghost btn-sm" style="font-size:.72em;padding:2px 8px"
+              onclick="sendAgentCommandFromHistory(${JSON.stringify(cmd)})">💬 Send Again</button>
+          </div>`;
+        }
         return `
           <div style="display:flex;gap:10px;padding:9px 12px;border-radius:6px;
                background:var(--surface2);border:1px solid var(--border);margin-bottom:5px;
@@ -6764,6 +6800,7 @@ function renderHistory(entries) {
                 </span>
               </div>
               ${detailsHtml}
+              ${actionsHtml}
             </div>
             <span style="flex-shrink:0;font-size:.74em;color:var(--text-muted);white-space:nowrap;
                  padding-top:2px">${escHtml(ts)}</span>
@@ -6777,6 +6814,56 @@ async function clearHistory() {
   const r = await api('/api/history/clear', {method:'POST'});
   if (r.ok) { _historyEntries = []; renderHistory([]); toast('History cleared'); }
   else toast('Failed to clear history', 'error');
+}
+
+function exportHistory() {
+  if (!_historyEntries.length) { toast('No history to export', 'info'); return; }
+  const blob = new Blob([JSON.stringify(_historyEntries, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `activity-history-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('History exported ✅');
+}
+
+function rerunTaskFromHistory(description) {
+  const taskInput = document.getElementById('task-input');
+  if (taskInput) { taskInput.value = description; }
+  const tasksBtn = document.querySelector('nav button[onclick*="\'tasks\'"]');
+  if (tasksBtn) switchTab('tasks', tasksBtn);
+  setTimeout(() => {
+    const el = document.getElementById('task-input');
+    if (el) { el.focus(); el.scrollIntoView({behavior:'smooth', block:'nearest'}); }
+  }, 150);
+  toast('Task pre-filled — review and click Launch ↗', 'info');
+}
+
+async function viewTaskById(taskId) {
+  const r = await api('/api/task/list');
+  if (!r.ok) { toast('Could not load tasks', 'error'); return; }
+  const plan = (r.plans || []).find(p => p.id === taskId);
+  if (plan) {
+    const tasksBtn = document.querySelector('nav button[onclick*="\'tasks\'"]');
+    if (tasksBtn) switchTab('tasks', tasksBtn);
+    setTimeout(() => {
+      _taskStore.set(taskId, plan);
+      openTaskDetail(taskId);
+    }, 200);
+  } else {
+    toast('Task not found in recent history — it may have been pruned', 'info');
+    const tasksBtn = document.querySelector('nav button[onclick*="\'tasks\'"]');
+    if (tasksBtn) switchTab('tasks', tasksBtn);
+  }
+}
+
+function sendAgentCommandFromHistory(cmd) {
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) { chatInput.value = cmd; chatInput.focus(); }
+  const chatBtn = document.querySelector('#nav-btn-chat');
+  if (chatBtn) switchTab('chat', chatBtn);
+  toast('Command pre-filled in chat — press Enter to send', 'info');
 }
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
@@ -7991,8 +8078,17 @@ async function deleteArtifact(artifact_id) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ── SESSIONS TAB ─────────────────────────────────────────────────────────────
+// ── OUTPUTS TAB (Artifacts + Sessions) ───────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════
+
+function switchOutputTab(tab, btn) {
+  document.querySelectorAll('.outputs-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const artPanel = document.getElementById('outputs-artifacts-panel');
+  const sesPanel = document.getElementById('outputs-sessions-panel');
+  if (artPanel) artPanel.style.display = tab === 'artifacts' ? '' : 'none';
+  if (sesPanel) sesPanel.style.display = tab === 'sessions' ? '' : 'none';
+}
 
 async function loadSessions() {
   try {
@@ -8456,7 +8552,7 @@ def run_onboard_quick_action():
 
 @app.post("/api/agents/start")
 def start_bot(payload: dict, _auth: None = Depends(require_auth)):
-    bot = payload.get("bot", "")
+    bot = payload.get("bot") or payload.get("agent") or ""
     _validate_bot_name(bot)
     rc, out = ai_employee("start", bot)
     return JSONResponse({"ok": rc == 0, "output": out})
@@ -8464,7 +8560,7 @@ def start_bot(payload: dict, _auth: None = Depends(require_auth)):
 
 @app.post("/api/agents/stop")
 def stop_bot(payload: dict, _auth: None = Depends(require_auth)):
-    bot = payload.get("bot", "")
+    bot = payload.get("bot") or payload.get("agent") or ""
     _validate_bot_name(bot)
     rc, out = ai_employee("stop", bot)
     return JSONResponse({"ok": rc == 0, "output": out})
