@@ -1164,6 +1164,15 @@ INDEX_HTML = r"""<!doctype html>
     nav button.active::after{content:'';position:absolute;bottom:0;left:15%;right:15%;height:2px;
       background:linear-gradient(90deg,transparent,var(--gold),transparent);
       border-radius:2px 2px 0 0;filter:blur(2px);box-shadow:0 0 8px var(--gold)}
+    /* ── Special nav button accents ── */
+    nav button.nav-btn-blacklight{color:#a855f7;letter-spacing:.04em}
+    nav button.nav-btn-blacklight:hover{color:#c084fc;text-shadow:0 0 8px #a855f7}
+    nav button.nav-btn-blacklight.active{color:#c084fc;border-bottom-color:#a855f7;background:rgba(168,85,247,.1);text-shadow:0 0 12px #a855f7;box-shadow:inset 0 -2px 8px rgba(168,85,247,.2)}
+    nav button.nav-btn-blacklight.active::after{background:linear-gradient(90deg,transparent,#a855f7,transparent);box-shadow:0 0 8px #a855f7}
+    nav button.nav-btn-ascend{color:#f59e0b;letter-spacing:.04em}
+    nav button.nav-btn-ascend:hover{color:#fbbf24;text-shadow:0 0 8px #f59e0b}
+    nav button.nav-btn-ascend.active{color:#fbbf24;border-bottom-color:#f59e0b;background:rgba(245,158,11,.1);text-shadow:0 0 12px #f59e0b;box-shadow:inset 0 -2px 8px rgba(245,158,11,.2)}
+    nav button.nav-btn-ascend.active::after{background:linear-gradient(90deg,transparent,#f59e0b,transparent);box-shadow:0 0 8px #f59e0b}
 
     /* ── Main content ── */
     main{flex:1;padding:24px 28px;max-width:1320px;margin:0 auto;width:100%;position:relative;z-index:1}
