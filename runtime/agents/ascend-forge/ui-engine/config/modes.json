@@ -1,0 +1,68 @@
+{
+  "_comment": "AscendForge UI-Engine — behavioural mode profiles.",
+  "money_mode": {
+    "description": "Maximize conversion, CTA clarity, and friction reduction.",
+    "priorities": ["conversion", "cta_clarity", "friction_reduction", "trust_signals"],
+    "scoring_weights": {
+      "conversion_heuristics": 0.40,
+      "vision_score":          0.30,
+      "structural_consistency": 0.20,
+      "hierarchy_quality":     0.10
+    },
+    "accept_threshold":        3.0,
+    "variant_generation":      false,
+    "auto_apply":              false,
+    "checks": {
+      "cta_above_fold":        true,
+      "single_primary_cta":    true,
+      "form_field_minimum":    true,
+      "social_proof_visible":  true,
+      "color_contrast_aa":     true
+    }
+  },
+  "general_mode": {
+    "description": "Prioritize maintainability and consistency across the codebase.",
+    "priorities": ["consistency", "maintainability", "accessibility", "performance"],
+    "scoring_weights": {
+      "structural_consistency": 0.35,
+      "hierarchy_quality":     0.30,
+      "vision_score":          0.25,
+      "conversion_heuristics": 0.10
+    },
+    "accept_threshold":        2.0,
+    "variant_generation":      false,
+    "auto_apply":              false,
+    "checks": {
+      "design_system_compliance": true,
+      "duplicate_style_removal":  true,
+      "prop_type_completeness":   true,
+      "accessibility_labels":     true,
+      "color_contrast_aa":        true
+    }
+  },
+  "blacklight_mode": {
+    "description": "Maximum optimization intensity with variant generation and automatic selection.",
+    "priorities": ["conversion", "cta_clarity", "consistency", "maintainability", "friction_reduction"],
+    "scoring_weights": {
+      "conversion_heuristics": 0.30,
+      "vision_score":          0.30,
+      "structural_consistency": 0.25,
+      "hierarchy_quality":     0.15
+    },
+    "accept_threshold":        1.0,
+    "variant_generation":      true,
+    "variant_count":           3,
+    "auto_apply":              false,
+    "checks": {
+      "cta_above_fold":           true,
+      "single_primary_cta":       true,
+      "design_system_compliance": true,
+      "duplicate_style_removal":  true,
+      "form_field_minimum":       true,
+      "social_proof_visible":     true,
+      "accessibility_labels":     true,
+      "color_contrast_aa":        true,
+      "prop_type_completeness":   true
+    }
+  }
+}
