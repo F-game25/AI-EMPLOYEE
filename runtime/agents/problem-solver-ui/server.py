@@ -1786,12 +1786,17 @@ INDEX_HTML = r"""<!doctype html>
     .robot-agent:hover{transform:scale(1.2)!important;z-index:100}
     .robot-body{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.3em;border:2px solid var(--gold);box-shadow:0 0 16px rgba(212,175,55,.5),0 0 32px rgba(212,175,55,.15);background:var(--surface2)}
     .robot-body.busy{border-color:var(--success);box-shadow:0 0 16px rgba(34,197,94,.6),0 0 32px rgba(34,197,94,.2);animation:robotBusy .8s ease-in-out infinite}
+    .robot-body.alert{border-color:#ef4444;box-shadow:0 0 20px rgba(239,68,68,.8),0 0 40px rgba(239,68,68,.3);animation:robotAlert .6s ease-in-out infinite}
+    .robot-alert-badge{position:absolute;top:-6px;right:-6px;width:16px;height:16px;background:#ef4444;border-radius:50%;border:2px solid var(--surface2);display:flex;align-items:center;justify-content:center;font-size:.55em;animation:blink .6s infinite;z-index:10}
     .robot-name{font-size:.6em;color:var(--gold-light);text-align:center;margin-top:3px;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+    .robot-name.alert{color:#f87171}
     .robot-status-dot{width:8px;height:8px;border-radius:50%;margin:2px auto;background:var(--text-muted)}
     .robot-status-dot.running{background:var(--success);box-shadow:0 0 8px var(--success);animation:blink 1.5s infinite}
     .robot-status-dot.busy{background:var(--gold);box-shadow:0 0 8px var(--gold);animation:blink .8s infinite}
+    .robot-status-dot.alert{background:#ef4444;box-shadow:0 0 8px #ef4444;animation:blink .5s infinite}
     @keyframes robotWalk{0%,100%{transform:translateY(0) rotate(-1deg)}25%{transform:translateY(-5px) rotate(1.5deg)}50%{transform:translateY(-2px) rotate(0deg)}75%{transform:translateY(-6px) rotate(-1.5deg)}}
     @keyframes robotBusy{0%,100%{box-shadow:0 0 8px rgba(34,197,94,.4),0 4px 12px rgba(0,0,0,.3)}50%{box-shadow:0 0 24px rgba(34,197,94,.9),0 4px 20px rgba(34,197,94,.3)}}
+    @keyframes robotAlert{0%,100%{box-shadow:0 0 8px rgba(239,68,68,.5),0 4px 12px rgba(0,0,0,.3)}50%{box-shadow:0 0 28px rgba(239,68,68,1),0 4px 20px rgba(239,68,68,.4)}}
     @keyframes robotWalk2{0%,100%{transform:translateY(0) rotate(1deg)}25%{transform:translateY(-3px) rotate(-1deg)}50%{transform:translateY(-5px) rotate(0deg)}75%{transform:translateY(-2px) rotate(1deg)}}
 
     /* ── Agent picker grid (Task tab) ── */
@@ -1936,7 +1941,7 @@ INDEX_HTML = r"""<!doctype html>
         <button class="btn btn-success" onclick="startAll()">▶ Start All Agents</button>
         <button class="btn btn-danger" onclick="stopAll()">■ Stop All Agents</button>
         <button class="btn btn-primary" onclick="runOnboard()">⚡ Run Onboard</button>
-        <a class="btn btn-ghost btn-sm" href="http://localhost:18789" target="_blank">📡 Gateway</a>
+        <button class="btn btn-ghost btn-sm" onclick="openGatewayModal()">📡 AI Gateway</button>
       </div>
       <hr>
       <div class="card-title" style="margin-bottom:10px"><span class="icon" style="color:var(--gold)">◈</span> System Health</div>
@@ -2001,6 +2006,22 @@ INDEX_HTML = r"""<!doctype html>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">workers</code><span style="font-size:.78em;color:var(--text-muted)">List active agents</span></div>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">schedule</code><span style="font-size:.78em;color:var(--text-muted)">List scheduled tasks</span></div>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">help</code><span style="font-size:.78em;color:var(--text-muted)">Show all commands</span></div>
+    </div>
+  </div>
+
+  <!-- Live Agent Activity Map -->
+  <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:var(--gold)">◈</span> Live Agent Activity Map</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="dash-agent-map-status" style="font-size:.73em;padding:2px 8px;border-radius:8px;background:rgba(212,175,55,.1);color:var(--gold);border:1px solid rgba(212,175,55,.2)">● Watching</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadDashboard()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="switchTab('live-office',document.querySelector('nav button[onclick*=live-office]'))">🏢 Full Office View →</button>
+      </div>
+    </div>
+    <p style="font-size:.8em;color:var(--text-muted);margin-bottom:12px">Real-time view of all agents and their current task. Click any agent to inspect.</p>
+    <div id="dash-agent-map" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
+      <div class="empty"><div class="icon" style="font-size:1.4em">🤖</div><p style="font-size:.84em">Loading agent map…</p></div>
     </div>
   </div>
 </div>
@@ -2108,6 +2129,53 @@ INDEX_HTML = r"""<!doctype html>
       <div><strong style="color:var(--text)">Time Busy:</strong> <span id="office-modal-time">-</span></div>
       <div><strong style="color:var(--text)">Last Action:</strong> <span id="office-modal-action">-</span></div>
     </div>
+  </div>
+</div>
+
+<!-- ── AI Gateway Modal ── -->
+<div class="office-modal" id="gateway-modal" onclick="if(event.target===this)closeGatewayModal()">
+  <div class="office-modal-card" style="border:1px solid rgba(212,175,55,.3);box-shadow:0 24px 64px rgba(0,0,0,.8),0 0 60px rgba(212,175,55,.1);max-width:520px;width:92%">
+    <div class="card-header" style="margin-bottom:14px">
+      <div class="card-title"><span style="color:var(--gold)">📡</span> AI Gateway — Local Provider Setup</div>
+      <button class="btn btn-ghost btn-sm" onclick="closeGatewayModal()">✕ Close</button>
+    </div>
+    <p style="font-size:.84em;color:var(--text-muted);margin-bottom:16px;line-height:1.6">
+      AI Employee uses local AI models — no paid API required. Choose your preferred local AI backend below.
+    </p>
+    <!-- Provider cards -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div id="gw-card-ollama" onclick="selectGatewayProvider('ollama')" style="border:2px solid rgba(212,175,55,.5);border-radius:12px;padding:16px;cursor:pointer;background:rgba(212,175,55,.06);transition:all .2s">
+        <div style="font-size:1.6em;margin-bottom:8px">🦙</div>
+        <div style="font-weight:700;font-size:.9em;color:var(--text);margin-bottom:4px">Ollama</div>
+        <div style="font-size:.76em;color:var(--text-muted);line-height:1.5">Free, private, runs on CPU/GPU. Best for general use.</div>
+        <div id="gw-ollama-status" style="margin-top:8px;font-size:.73em;padding:3px 8px;border-radius:8px;display:inline-block;background:rgba(148,163,184,.1);color:var(--text-muted)">Checking…</div>
+      </div>
+      <div id="gw-card-nvidia" onclick="selectGatewayProvider('nvidia')" style="border:2px solid rgba(148,163,184,.2);border-radius:12px;padding:16px;cursor:pointer;background:rgba(148,163,184,.03);transition:all .2s">
+        <div style="font-size:1.6em;margin-bottom:8px">🔷</div>
+        <div style="font-weight:700;font-size:.9em;color:var(--text);margin-bottom:4px">NVIDIA NIM</div>
+        <div style="font-size:.76em;color:var(--text-muted);line-height:1.5">Free tier, fast inference. Requires NVIDIA_API_KEY in settings.</div>
+        <div id="gw-nvidia-status" style="margin-top:8px;font-size:.73em;padding:3px 8px;border-radius:8px;display:inline-block;background:rgba(148,163,184,.1);color:var(--text-muted)">Checking…</div>
+      </div>
+    </div>
+    <!-- Ollama model picker (shown when Ollama selected) -->
+    <div id="gw-ollama-section" style="margin-bottom:14px">
+      <div style="font-size:.78em;font-weight:600;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Ollama Model</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="gw-model-pills">
+        <button class="btn btn-primary btn-sm gw-model-pill" onclick="setOllamaModel('llama3.2',this)" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none">🦙 llama3.2 (default)</button>
+        <button class="btn btn-ghost btn-sm gw-model-pill" onclick="setOllamaModel('gemma4',this)">💎 gemma4</button>
+        <button class="btn btn-ghost btn-sm gw-model-pill" onclick="setOllamaModel('mistral',this)">🌟 mistral</button>
+        <button class="btn btn-ghost btn-sm gw-model-pill" onclick="setOllamaModel('qwen2.5',this)">⚡ qwen2.5</button>
+      </div>
+      <div id="gw-pull-section" style="margin-top:10px;display:none">
+        <div style="font-size:.78em;color:var(--warning);margin-bottom:6px">⚠️ Model not found locally. Pull it now?</div>
+        <button class="btn btn-primary btn-sm" id="gw-pull-btn" onclick="pullOllamaModel()" style="background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700">⬇️ Pull Model (ollama pull)</button>
+      </div>
+    </div>
+    <div id="gw-current-provider" style="font-size:.82em;padding:10px 14px;background:rgba(212,175,55,.06);border:1px solid rgba(212,175,55,.2);border-radius:8px;margin-bottom:14px">
+      <span style="color:var(--text-muted)">Active provider: </span><span id="gw-provider-label" style="color:var(--gold);font-weight:700">–</span>
+    </div>
+    <button class="btn btn-success" onclick="applyGatewayProvider()" style="width:100%;background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700;padding:12px">✓ Apply &amp; Save Gateway Settings</button>
+    <div id="gw-result" style="margin-top:8px;font-size:.84em;min-height:20px"></div>
   </div>
 </div>
 
@@ -2976,7 +3044,7 @@ INDEX_HTML = r"""<!doctype html>
   <div class="page-header" style="border-left-color:#fbbf24">
     <div class="page-header-icon">🐝</div>
     <div><div class="page-header-title">Agent Swarm</div><div class="page-header-desc">All AI agents at a glance — capabilities, status, and current workload. Filter by category or search by skill.</div></div>
-    <span class="page-header-badge" style="color:#fbbf24">41 Agents</span>
+    <span class="page-header-badge" style="color:#fbbf24" id="swarm-header-badge">56 Agents</span>
   </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap">
     <!-- Left: agent grid -->
@@ -3270,6 +3338,7 @@ INDEX_HTML = r"""<!doctype html>
       <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('Support',this)">🎧 Support</button>
       <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('E-commerce',this)">🛒 E-commerce</button>
       <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('HR',this)">👥 HR</button>
+      <button class="btn btn-ghost btn-sm tmpl-pill" onclick="filterTemplatesCat('Analytics',this)">📊 Analytics</button>
     </div>
     <div id="templates-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px">
       <div class="empty"><div class="icon">📋</div><p>Loading templates…</p></div>
@@ -4339,6 +4408,51 @@ async function loadDashboard() {
   const hermesSub = document.getElementById('dash-hermes-sublabel');
   if (hermesSub) hermesSub.textContent = hermesRunning ? '🧠 Running — ready for tasks' : 'Reasoning agent — stopped';
   _updateChatHermesStatus(hermesRunning);
+  // Update live agent map
+  _renderDashAgentMap(agents, d);
+}
+
+function _renderDashAgentMap(agents, statusData) {
+  const el = document.getElementById('dash-agent-map');
+  if (!el) return;
+  const activeAgents = new Set(statusData?.active_agents || []);
+  if (!agents.length) {
+    el.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="icon">🤖</div><p style="font-size:.84em">No agents loaded. Start agents from the button above.</p></div>';
+    return;
+  }
+  const agentEmoji = {
+    'task-orchestrator':'🎯','lead-generator':'🎯','lead-hunter':'🎯','offer-agent':'📧',
+    'company-builder':'🏢','brand-strategist':'🎨','finance-wizard':'💰','growth-hacker':'📈',
+    'social-media-manager':'📱','paid-media-specialist':'📣','qualification-agent':'🔍',
+    'follow-up-agent':'🔄','appointment-setter':'📅','ui-designer':'🎨','web-researcher':'🌐',
+    'engineering-assistant':'💻','ecom-agent':'🛒','chatbot-builder':'🤖','creator-agency':'✍️',
+    'recruiter':'👔','hr-manager':'👔','project-manager':'📋','finance':'💰',
+    'newsletter-bot':'📰','faceless-video':'🎬','course-creator':'📚',
+  };
+  const taskLabels = {
+    'task-orchestrator':'Routing tasks','lead-generator':'Finding leads','offer-agent':'Writing outreach',
+    'company-builder':'Building strategy','brand-strategist':'Crafting brand','finance-wizard':'Analyzing finances',
+    'growth-hacker':'Growing traffic','social-media-manager':'Posting content','paid-media-specialist':'Optimizing ads',
+    'web-researcher':'Researching web','engineering-assistant':'Writing code','ecom-agent':'Managing store',
+    'follow-up-agent':'Following up leads','project-manager':'Managing tasks',
+  };
+  el.innerHTML = agents.map(a => {
+    const isRunning = a.running;
+    const isActive = activeAgents.has(a.id);
+    const emoji = agentEmoji[a.id] || '🤖';
+    const task = isActive ? (taskLabels[a.id] || 'Working on task') : (isRunning ? 'Ready — standing by' : 'Stopped');
+    const dotColor = isActive ? 'var(--gold)' : (isRunning ? 'var(--success)' : 'rgba(148,163,184,.3)');
+    const cardBg = isActive ? 'rgba(212,175,55,.07)' : (isRunning ? 'rgba(16,185,129,.04)' : 'transparent');
+    const cardBorder = isActive ? 'rgba(212,175,55,.4)' : (isRunning ? 'rgba(16,185,129,.2)' : 'rgba(148,163,184,.12)');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid ${cardBorder};background:${cardBg};transition:all .2s;cursor:pointer" title="${a.id}" onclick="switchTab('live-office',document.querySelector('nav button[onclick*=\\'live-office\\']'))">
+      <div style="font-size:1.2em;flex-shrink:0">${emoji}</div>
+      <div style="min-width:0;flex:1">
+        <div style="font-size:.8em;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.id)}</div>
+        <div style="font-size:.7em;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(task)}</div>
+      </div>
+      <div style="width:7px;height:7px;border-radius:50%;background:${dotColor};flex-shrink:0;${isActive||isRunning?'box-shadow:0 0 6px '+dotColor:''}"></div>
+    </div>`;
+  }).join('');
 }
 
 async function loadLiveOffice() {
@@ -4381,15 +4495,21 @@ async function loadLiveOffice() {
     const cols = Math.min(agents.length, 6);
     const left = 4 + (idx % cols) * (92 / cols);
     const row = Math.floor(idx / cols);
-    const isBusy = agent.progress >= 50 || !!agent.alert;
+    const hasAlert = !!agent.alert;
+    const isBusy = agent.progress >= 50 || hasAlert;
     const icon = agentIcons[name] || icons[idx % icons.length];
     const animDur = 2.5 + (idx % 4) * 0.7;
     const animName = idx % 2 === 0 ? 'robotWalk' : 'robotWalk2';
-    return `<div class="robot-agent" role="button" tabindex="0" aria-label="${escHtml(name)} – ${isBusy ? 'busy' : 'idle'}" style="left:${left}%;bottom:${140 + row * 80}px;animation-name:${animName};animation-duration:${animDur}s" onclick="openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')" onkeydown="if(event.key==='Enter'||event.key===' ')openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')">
-      <div class="robot-body ${isBusy ? 'busy' : ''}">${icon}</div>
-      <div class="robot-status-dot ${agent.running ? (isBusy ? 'busy' : 'running') : ''}"></div>
-      <div class="robot-name">${escHtml(name)}</div>
+    const bodyClass = hasAlert ? 'alert' : (isBusy ? 'busy' : '');
+    const dotClass = hasAlert ? 'alert' : (agent.running ? (isBusy ? 'busy' : 'running') : '');
+    const alertBadge = hasAlert ? `<div class="robot-alert-badge">⚠</div>` : '';
+    return `<div class="robot-agent" role="button" tabindex="0" aria-label="${escHtml(name)} – ${hasAlert ? 'ERROR' : (isBusy ? 'busy' : 'idle')}" style="position:absolute;left:${left}%;bottom:${140 + row * 80}px;animation-name:${animName};animation-duration:${animDur}s" onclick="openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')" onkeydown="if(event.key==='Enter'||event.key===' ')openOfficeModal('${encodeURIComponent(JSON.stringify(agent))}')">
+      ${alertBadge}
+      <div class="robot-body ${bodyClass}">${icon}</div>
+      <div class="robot-status-dot ${dotClass}"></div>
+      <div class="robot-name ${hasAlert ? 'alert' : ''}">${escHtml(name)}</div>
     </div>`;
+  }).join('');
   }).join('');
 }
 
@@ -4414,14 +4534,24 @@ function openOfficeModal(agentJson) {
   if (!titleEl || !statusEl || !progressEl || !timeEl || !actionEl) return;
 
   titleEl.textContent = agent.name || agent.id || 'Agent';
-  statusEl.textContent = agent.running
-    ? 'Status: Running and processing tasks'
-    : 'Status: Currently stopped';
+  if (agent.alert) {
+    statusEl.innerHTML = '<span style="color:#f87171;font-weight:700">⚠️ ALERT: ' + escHtml(agent.alert_reason || 'Agent error detected') + '</span>';
+    statusEl.style.background = 'rgba(239,68,68,.1)';
+    statusEl.style.padding = '6px 10px';
+    statusEl.style.borderRadius = '6px';
+    statusEl.style.border = '1px solid rgba(239,68,68,.3)';
+  } else {
+    statusEl.textContent = agent.running ? 'Status: Running and processing tasks' : 'Status: Currently stopped';
+    statusEl.style.background = '';
+    statusEl.style.padding = '';
+    statusEl.style.borderRadius = '';
+    statusEl.style.border = '';
+  }
   const progress = agent.running ? (agent.progress || 15) : 0;
   progressEl.style.width = progress + '%';
   timeEl.textContent = agent.running ? `${agent.elapsed_minutes || 0} min` : '-';
   actionEl.textContent = agent.running
-    ? (agent.alert ? `Issue detected: ${agent.alert_reason || 'Unknown error'}` : (agent.last_action || 'Analyzing assigned workload'))
+    ? (agent.alert ? `Error: ${agent.alert_reason || 'Unknown error'}` : (agent.last_action || 'Analyzing assigned workload'))
     : 'Waiting for assignment';
 }
 
@@ -4429,7 +4559,144 @@ function closeOfficeModal() {
   document.getElementById('office-modal')?.classList.remove('open');
 }
 
-async function startAll() {
+// ── Gateway Modal ────────────────────────────────────────────────────────────
+let _gwSelectedProvider = 'ollama';
+let _gwSelectedModel = 'llama3.2';
+
+function openGatewayModal() {
+  const modal = document.getElementById('gateway-modal');
+  if (!modal) return;
+  modal.classList.add('open');
+  checkGatewayStatus();
+  // Load current settings
+  api('/api/settings').then(s => {
+    const provider = s.settings?.AI_PROVIDER || s.AI_PROVIDER || 'ollama';
+    const model = s.settings?.OLLAMA_MODEL || s.OLLAMA_MODEL || 'llama3.2';
+    _gwSelectedProvider = provider;
+    _gwSelectedModel = model;
+    updateGatewayUI();
+  }).catch(() => {});
+}
+
+function closeGatewayModal() {
+  document.getElementById('gateway-modal')?.classList.remove('open');
+}
+
+function selectGatewayProvider(provider) {
+  _gwSelectedProvider = provider;
+  updateGatewayUI();
+}
+
+function setOllamaModel(model, btn) {
+  _gwSelectedModel = model;
+  document.querySelectorAll('.gw-model-pill').forEach(b => {
+    b.classList.remove('active');
+    b.style.background = '';
+    b.style.color = '';
+    b.style.border = '';
+  });
+  if (btn) {
+    btn.classList.add('active');
+    btn.style.background = 'linear-gradient(135deg,var(--primary-dark),var(--primary))';
+    btn.style.color = '#000';
+    btn.style.border = 'none';
+  }
+}
+
+function updateGatewayUI() {
+  const ollamaCard = document.getElementById('gw-card-ollama');
+  const nvidiaCard = document.getElementById('gw-card-nvidia');
+  const providerLabel = document.getElementById('gw-provider-label');
+  const ollamaSection = document.getElementById('gw-ollama-section');
+  if (ollamaCard) {
+    ollamaCard.style.border = _gwSelectedProvider === 'ollama' ? '2px solid rgba(212,175,55,.7)' : '2px solid rgba(148,163,184,.2)';
+    ollamaCard.style.background = _gwSelectedProvider === 'ollama' ? 'rgba(212,175,55,.08)' : 'rgba(148,163,184,.03)';
+  }
+  if (nvidiaCard) {
+    nvidiaCard.style.border = _gwSelectedProvider === 'nvidia' ? '2px solid rgba(56,189,248,.6)' : '2px solid rgba(148,163,184,.2)';
+    nvidiaCard.style.background = _gwSelectedProvider === 'nvidia' ? 'rgba(56,189,248,.06)' : 'rgba(148,163,184,.03)';
+  }
+  if (providerLabel) {
+    const labels = {ollama:'🦙 Ollama (local)', nvidia:'🔷 NVIDIA NIM', groq:'⚡ Groq', openai:'🌐 OpenAI', anthropic:'🤖 Claude'};
+    providerLabel.textContent = labels[_gwSelectedProvider] || _gwSelectedProvider;
+  }
+  if (ollamaSection) ollamaSection.style.display = _gwSelectedProvider === 'ollama' ? 'block' : 'none';
+}
+
+async function checkGatewayStatus() {
+  // Check Ollama
+  const ollamaStatus = document.getElementById('gw-ollama-status');
+  try {
+    const r = await fetch('http://localhost:11434/api/tags', {signal: AbortSignal.timeout(2000)});
+    if (r.ok) {
+      const data = await r.json();
+      const models = (data.models || []).map(m => m.name || m.model || '').filter(Boolean);
+      if (ollamaStatus) {
+        ollamaStatus.textContent = '✅ Online — ' + (models.length ? models.slice(0,3).join(', ') : 'no models');
+        ollamaStatus.style.background = 'rgba(16,185,129,.15)';
+        ollamaStatus.style.color = 'var(--success)';
+      }
+      // Check if selected model exists
+      const pullSection = document.getElementById('gw-pull-section');
+      const pullBtn = document.getElementById('gw-pull-btn');
+      const modelExists = models.some(m => m.startsWith(_gwSelectedModel));
+      if (pullSection) pullSection.style.display = modelExists ? 'none' : 'block';
+      if (pullBtn) pullBtn.textContent = `⬇️ ollama pull ${_gwSelectedModel}`;
+    } else throw new Error('not ok');
+  } catch {
+    if (ollamaStatus) {
+      ollamaStatus.textContent = '⚠️ Offline — install Ollama first';
+      ollamaStatus.style.background = 'rgba(239,68,68,.1)';
+      ollamaStatus.style.color = '#f87171';
+    }
+  }
+  // Check NVIDIA
+  const nvidiaStatus = document.getElementById('gw-nvidia-status');
+  const d = await api('/api/status');
+  const hasNvidiaKey = d.nvidia_nim_ok || false;
+  if (nvidiaStatus) {
+    if (hasNvidiaKey) {
+      nvidiaStatus.textContent = '✅ Configured';
+      nvidiaStatus.style.background = 'rgba(16,185,129,.15)';
+      nvidiaStatus.style.color = 'var(--success)';
+    } else {
+      nvidiaStatus.textContent = 'Add NVIDIA_API_KEY in Settings';
+      nvidiaStatus.style.background = 'rgba(148,163,184,.1)';
+      nvidiaStatus.style.color = 'var(--text-muted)';
+    }
+  }
+}
+
+async function pullOllamaModel() {
+  const btn = document.getElementById('gw-pull-btn');
+  if (btn) { btn.textContent = '⏳ Pulling…'; btn.disabled = true; }
+  toast(`⬇️ Running: ollama pull ${_gwSelectedModel} — this may take a few minutes`, 'info');
+  const r = await api('/api/gateway/pull-model', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model: _gwSelectedModel})});
+  if (r.ok) {
+    toast(`✅ Model ${_gwSelectedModel} ready!`, 'success');
+    checkGatewayStatus();
+  } else {
+    toast(r.error || 'Pull failed. Run manually: ollama pull ' + _gwSelectedModel, 'error');
+  }
+  if (btn) { btn.disabled = false; }
+}
+
+async function applyGatewayProvider() {
+  const resultEl = document.getElementById('gw-result');
+  const payload = {AI_PROVIDER: _gwSelectedProvider};
+  if (_gwSelectedProvider === 'ollama') payload.OLLAMA_MODEL = _gwSelectedModel;
+  const r = await api('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({settings: payload})});
+  if (r.ok) {
+    toast(`✅ Gateway set to ${_gwSelectedProvider.toUpperCase()} · model: ${_gwSelectedProvider === 'ollama' ? _gwSelectedModel : 'default'}`, 'success');
+    if (resultEl) { resultEl.style.color = 'var(--success)'; resultEl.textContent = '✓ Settings saved. Restart agents for changes to take effect.'; }
+    setTimeout(closeGatewayModal, 1800);
+  } else {
+    toast(r.error || 'Failed to save gateway settings', 'error');
+    if (resultEl) { resultEl.style.color = 'var(--danger)'; resultEl.textContent = r.error || 'Save failed'; }
+  }
+}
+
+
   _setStartStopDisabled(true);
   // Update hero button text to show loading state
   const heroBtn = document.getElementById('hero-start-btn');
@@ -4524,8 +4791,19 @@ async function loadChatLog() {
 
   function modelBadge(routeHint) {
     const route = routeHint || document.getElementById('chat-model')?.value || 'auto';
-    const labels = {auto:'⚡ Auto',ollama:'🦙 Ollama',gemma:'💎 Gemma',nvidia:'🔷 NVIDIA',openai:'🌐 OpenAI',anthropic:'🤖 Claude',groq:'⚡ Groq',external:'🌐 External'};
-    return labels[route] || '🤖 AI';
+    const ollamaModel = _gwSelectedModel || 'llama3.2';
+    const labels = {
+      auto: '⚡ Auto (Cost-Effective)',
+      ollama: `🦙 Ollama • ${ollamaModel}`,
+      gemma: '💎 Gemma • Free AI',
+      nvidia: '🔷 NVIDIA NIM',
+      openai: '🌐 OpenAI • GPT-4o',
+      anthropic: '🤖 Anthropic • Claude',
+      groq: '⚡ Groq • Fast',
+      external: '🌐 External AI'
+    };
+    const label = labels[route] || '🤖 AI';
+    return `<span style="background:rgba(212,175,55,.12);border:1px solid rgba(212,175,55,.25);border-radius:6px;padding:1px 7px;font-size:.88em;color:var(--gold-light)">${label}</span>`;
   }
 
   log.innerHTML = msgs.slice(-60).map(m => {
@@ -4539,7 +4817,7 @@ async function loadChatLog() {
         <span class="chat-msg-avatar">${source.avatar}</span>
         <span class="chat-msg-source">${escHtml(source.label)}</span>
         <span style="opacity:.6">•</span>
-        <span>${type === 'user' ? 'You' : modelBadge(m.model_route)}</span>
+        ${type === 'user' ? '<span style="opacity:.7">You</span>' : modelBadge(m.model_route)}
       </div>
       <div>${text}</div>
       <div class="ts">${ts}</div>
@@ -5053,6 +5331,11 @@ function renderImprovements() {
         </div>` : ''}
       </div>
       <p style="color:var(--text-muted);font-size:.84em;margin:4px 0">${escHtml((imp.description||'').slice(0,120))}${(imp.description||'').length>120?'…':''}</p>
+      <!-- Execute button always visible -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px" onclick="event.stopPropagation()">
+        <button class="btn btn-primary btn-sm" onclick="sendImprovToAI('${jsEsc(imp.id)}','${jsEsc(imp.title||imp.id)}','${jsEsc(imp.description||'')}')" style="background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700;letter-spacing:.02em">🚀 Execute This Improvement</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleImprovDetail('${jsEsc(imp.id)}')" style="font-size:.78em">🔍 Details</button>
+      </div>
       <div id="improv-detail-${escHtml(imp.id)}" style="display:none;margin-top:10px;padding:12px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border)">
         <p style="font-size:.84em;color:var(--text-secondary);line-height:1.6;margin-bottom:10px">${escHtml(imp.description||'No description provided.')}</p>
         ${imp.agent ? `<p style="font-size:.78em;color:var(--primary);margin-bottom:8px">Agent: <strong>${escHtml(imp.agent)}</strong> · Type: ${escHtml(imp.type||'?')} · Effort: ${escHtml(imp.effort||'?')}</p>` : ''}
@@ -5675,6 +5958,9 @@ async function loadSwarm() {
   if (statOnline) statOnline.textContent = onlineCount;
   if (statTotal) statTotal.textContent = agents.length;
   if (statCats) statCats.textContent = cats.size;
+  // Update header badge with total count
+  const headerBadge = document.getElementById('swarm-header-badge');
+  if (headerBadge && agents.length > 0) headerBadge.textContent = agents.length + ' Agents';
   // Load activity
   loadSwarmActivity();
 }
@@ -6367,8 +6653,8 @@ function renderTemplatesGrid() {
     el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No templates match your filter.</p></div>';
     return;
   }
-  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)',Marketing:'rgba(168,85,247,.15)'};
-  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(99,102,241,.3)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)',Marketing:'rgba(168,85,247,.3)'};
+  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)',Marketing:'rgba(168,85,247,.15)',Analytics:'rgba(74,222,128,.15)',Research:'rgba(56,189,248,.15)'};
+  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(99,102,241,.3)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)',Marketing:'rgba(168,85,247,.3)',Analytics:'rgba(74,222,128,.3)',Research:'rgba(56,189,248,.3)'};
   el.innerHTML = templates.map(t => {
     const col = catColors[t.category] || 'rgba(212,175,55,.1)';
     const bdr = catBorderColors[t.category] || 'rgba(212,175,55,.2)';
@@ -8890,6 +9176,22 @@ def get_status():
 def get_doctor():
     rc, out = ai_employee("doctor")
     return JSONResponse({"output": out, "rc": rc})
+
+
+@app.post("/api/gateway/pull-model")
+def gateway_pull_model(body: dict, _auth: None = Depends(require_auth)):
+    """Pull an Ollama model in the background."""
+    model = (body.get("model") or "llama3.2").strip()
+    if not model or "/" in model or len(model) > 80:
+        raise HTTPException(400, "Invalid model name")
+    import subprocess, threading
+    def _pull():
+        try:
+            subprocess.run(["ollama", "pull", model], timeout=600, check=False)
+        except Exception:
+            pass
+    threading.Thread(target=_pull, daemon=True).start()
+    return JSONResponse({"ok": True, "message": f"Pulling {model} in background…"})
 
 
 @app.post("/api/agents/start-all")
