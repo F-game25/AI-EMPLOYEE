@@ -173,7 +173,10 @@ def _extract_inline_styles(source: str) -> list[dict[str, Any]]:
 # ── Vue SFC ───────────────────────────────────────────────────────────────────
 
 _VUE_TEMPLATE_RE = re.compile(r"<template>(.*?)</\s*template\s*>", re.DOTALL | re.IGNORECASE)
-_VUE_SCRIPT_RE   = re.compile(r"<script[^>]*>(.*?)</\s*script\s*>",  re.DOTALL | re.IGNORECASE)
+_VUE_SCRIPT_RE   = re.compile(
+    r"<script[^>]*>(.*?)</\s*script(?:\s[^>]*)?>",
+    re.DOTALL | re.IGNORECASE,
+)
 _VUE_STYLE_RE    = re.compile(r"<style[^>]*>(.*?)</\s*style\s*>",    re.DOTALL | re.IGNORECASE)
 
 
