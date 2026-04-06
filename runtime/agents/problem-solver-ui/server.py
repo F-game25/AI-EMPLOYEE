@@ -1849,7 +1849,7 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('skills',this)">🛠️ Skills</button>
   <button onclick="switchTab('metrics',this)">📈 ROI</button>
   <button onclick="switchTab('templates',this)">📋 Templates</button>
-  <button onclick="switchTab('guardrails',this)">🔒 Guardrails</button>
+  <button onclick="switchTab('guardrails',this)" id="nav-btn-guardrails">🔒 Guardrails <span id="guardrail-pending-badge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:1px 6px;font-size:.7em;font-weight:700;margin-left:3px;animation:blink 1.5s infinite"></span></button>
   <button onclick="switchTab('memory',this)">🧠 Memory</button>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
@@ -4332,6 +4332,10 @@ async function loadDashboard() {
   // Animate stat numbers
   animateCount('stat-running', running);
   animateCount('stat-total', total);
+  const modeCapacity = {starter: 3, business: 8, power: 56};
+  const capacity = modeCapacity[d.mode] || total;
+  const totalSubEl = document.getElementById('stat-total-sub');
+  if (totalSubEl && d.mode) totalSubEl.textContent = `${d.mode} mode · ${capacity} max`;
   const modeLabel = d.mode ? ` · ${d.mode}` : '';
   const modeColors = {starter:'#34d399',business:'#D4AF37',power:'#c084fc'};
   const mc = modeColors[d.mode] || 'var(--gold)';
@@ -4510,7 +4514,6 @@ async function loadLiveOffice() {
       <div class="robot-name ${hasAlert ? 'alert' : ''}">${escHtml(name)}</div>
     </div>`;
   }).join('');
-  }).join('');
 }
 
 function openOfficeModal(agentJson) {
@@ -4567,15 +4570,8 @@ function openGatewayModal() {
   const modal = document.getElementById('gateway-modal');
   if (!modal) return;
   modal.classList.add('open');
+  // checkGatewayStatus also loads current provider/model from /api/gateway/status
   checkGatewayStatus();
-  // Load current settings
-  api('/api/settings').then(s => {
-    const provider = s.settings?.AI_PROVIDER || s.AI_PROVIDER || 'ollama';
-    const model = s.settings?.OLLAMA_MODEL || s.OLLAMA_MODEL || 'llama3.2';
-    _gwSelectedProvider = provider;
-    _gwSelectedModel = model;
-    updateGatewayUI();
-  }).catch(() => {});
 }
 
 function closeGatewayModal() {
@@ -4624,46 +4620,48 @@ function updateGatewayUI() {
 }
 
 async function checkGatewayStatus() {
-  // Check Ollama
+  // Use backend API to check status (avoids hardcoded localhost URL in browser)
   const ollamaStatus = document.getElementById('gw-ollama-status');
+  const nvidiaStatus = document.getElementById('gw-nvidia-status');
   try {
-    const r = await fetch('http://localhost:11434/api/tags', {signal: AbortSignal.timeout(2000)});
-    if (r.ok) {
-      const data = await r.json();
-      const models = (data.models || []).map(m => m.name || m.model || '').filter(Boolean);
+    const d = await api('/api/gateway/status');
+    if (d.ollama_ok) {
+      const models = d.ollama_models || [];
       if (ollamaStatus) {
-        ollamaStatus.textContent = '✅ Online — ' + (models.length ? models.slice(0,3).join(', ') : 'no models');
+        ollamaStatus.textContent = '✅ Online — ' + (models.length ? models.slice(0,3).join(', ') : 'no models pulled');
         ollamaStatus.style.background = 'rgba(16,185,129,.15)';
         ollamaStatus.style.color = 'var(--success)';
       }
-      // Check if selected model exists
+      // Show pull section if selected model not yet downloaded
       const pullSection = document.getElementById('gw-pull-section');
       const pullBtn = document.getElementById('gw-pull-btn');
       const modelExists = models.some(m => m.startsWith(_gwSelectedModel));
       if (pullSection) pullSection.style.display = modelExists ? 'none' : 'block';
       if (pullBtn) pullBtn.textContent = `⬇️ ollama pull ${_gwSelectedModel}`;
-    } else throw new Error('not ok');
-  } catch {
-    if (ollamaStatus) {
-      ollamaStatus.textContent = '⚠️ Offline — install Ollama first';
-      ollamaStatus.style.background = 'rgba(239,68,68,.1)';
-      ollamaStatus.style.color = '#f87171';
-    }
-  }
-  // Check NVIDIA
-  const nvidiaStatus = document.getElementById('gw-nvidia-status');
-  const d = await api('/api/status');
-  const hasNvidiaKey = d.nvidia_nim_ok || false;
-  if (nvidiaStatus) {
-    if (hasNvidiaKey) {
-      nvidiaStatus.textContent = '✅ Configured';
-      nvidiaStatus.style.background = 'rgba(16,185,129,.15)';
-      nvidiaStatus.style.color = 'var(--success)';
     } else {
-      nvidiaStatus.textContent = 'Add NVIDIA_API_KEY in Settings';
-      nvidiaStatus.style.background = 'rgba(148,163,184,.1)';
-      nvidiaStatus.style.color = 'var(--text-muted)';
+      if (ollamaStatus) {
+        ollamaStatus.textContent = '⚠️ Offline — install Ollama first';
+        ollamaStatus.style.background = 'rgba(239,68,68,.1)';
+        ollamaStatus.style.color = '#f87171';
+      }
     }
+    if (nvidiaStatus) {
+      if (d.nvidia_ok) {
+        nvidiaStatus.textContent = '✅ Configured';
+        nvidiaStatus.style.background = 'rgba(16,185,129,.15)';
+        nvidiaStatus.style.color = 'var(--success)';
+      } else {
+        nvidiaStatus.textContent = 'Add NVIDIA_API_KEY in Settings';
+        nvidiaStatus.style.background = 'rgba(148,163,184,.1)';
+        nvidiaStatus.style.color = 'var(--text-muted)';
+      }
+    }
+    // Pre-select current provider
+    if (d.current_provider) { _gwSelectedProvider = d.current_provider; }
+    if (d.current_model) { _gwSelectedModel = d.current_model; }
+    updateGatewayUI();
+  } catch {
+    if (ollamaStatus) { ollamaStatus.textContent = '⚠️ Could not check status'; }
   }
 }
 
@@ -4685,7 +4683,7 @@ async function applyGatewayProvider() {
   const resultEl = document.getElementById('gw-result');
   const payload = {AI_PROVIDER: _gwSelectedProvider};
   if (_gwSelectedProvider === 'ollama') payload.OLLAMA_MODEL = _gwSelectedModel;
-  const r = await api('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({settings: payload})});
+  const r = await api('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({updates: payload})});
   if (r.ok) {
     toast(`✅ Gateway set to ${_gwSelectedProvider.toUpperCase()} · model: ${_gwSelectedProvider === 'ollama' ? _gwSelectedModel : 'default'}`, 'success');
     if (resultEl) { resultEl.style.color = 'var(--success)'; resultEl.textContent = '✓ Settings saved. Restart agents for changes to take effect.'; }
@@ -6703,6 +6701,17 @@ async function loadGuardrails() {
   document.getElementById('g-rejected').textContent = summary.rejected || 0;
   document.getElementById('g-total').textContent    = summary.total    || 0;
 
+  // Update nav badge for pending approvals
+  const navBadge = document.getElementById('guardrail-pending-badge');
+  if (navBadge) {
+    if (pending.length > 0) {
+      navBadge.textContent = pending.length;
+      navBadge.style.display = 'inline-block';
+    } else {
+      navBadge.style.display = 'none';
+    }
+  }
+
   // Show/hide notification banner
   const banner = document.getElementById('guardrails-notification-banner');
   if (banner) {
@@ -6719,18 +6728,27 @@ async function loadGuardrails() {
     pEl.innerHTML = '<div class="empty"><div class="icon">✅</div><p>No pending approvals. All clear!</p></div>';
   } else {
     const riskColor = {high:'#ef4444', medium:'#f59e0b', low:'#10b981'};
+    const riskBg = {high:'rgba(239,68,68,.08)', medium:'rgba(245,158,11,.08)', low:'rgba(16,185,129,.06)'};
     pEl.innerHTML = pending.map(a => {
       const col = riskColor[a.risk_level] || '#f59e0b';
-      return `<div style="border:1px solid ${col};border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;background:var(--surface2)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-          <div style="flex:1">
-            <div style="font-size:.88em;font-weight:600">${escHtml(a.action_type||'Action')}</div>
-            <div style="font-size:.82em;color:var(--text-secondary);margin:3px 0">${escHtml(a.description||'')}</div>
-            <div style="font-size:.77em;color:var(--text-muted)">Agent: <code>${escHtml(a.agent||'?')}</code> · Risk: <span style="color:${col};font-weight:600">${escHtml(a.risk_level||'medium')}</span></div>
+      const bg = riskBg[a.risk_level] || 'rgba(245,158,11,.06)';
+      const reqTime = a.requested_at ? new Date(a.requested_at).toLocaleTimeString() : '';
+      return `<div style="border:2px solid ${col};border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:12px;background:${bg};animation:borderGlow 3s ease infinite">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <span style="background:${col};color:#fff;border-radius:4px;padding:1px 7px;font-size:.72em;font-weight:700;text-transform:uppercase">${escHtml(a.risk_level||'medium')} RISK</span>
+              <span style="font-size:.88em;font-weight:700;color:var(--text)">${escHtml(a.action_type||'Action')}</span>
+            </div>
+            <div style="font-size:.84em;color:var(--text-secondary);margin:4px 0;line-height:1.5">${escHtml(a.description||'No description')}</div>
+            <div style="font-size:.76em;color:var(--text-muted);margin-top:4px">
+              Agent: <code style="background:rgba(255,255,255,.06);padding:1px 5px;border-radius:3px">${escHtml(a.agent||'?')}</code>
+              ${reqTime ? ` · Requested: ${reqTime}` : ''}
+            </div>
           </div>
-          <div style="display:flex;gap:5px;flex-shrink:0">
-            <button class="btn btn-success btn-sm" onclick="approveAction('${jsEsc(a.id)}')">✅ Approve</button>
-            <button class="btn btn-danger btn-sm" onclick="rejectAction('${jsEsc(a.id)}')">🚫 Reject</button>
+          <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+            <button onclick="approveAction('${jsEsc(a.id)}')" style="padding:8px 16px;background:linear-gradient(135deg,#064e3b,#065f46);color:#34d399;border:2px solid rgba(52,211,153,.4);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap" onmouseenter="this.style.background='linear-gradient(135deg,#065f46,#047857)';this.style.boxShadow='0 0 16px rgba(52,211,153,.4)'" onmouseleave="this.style.background='linear-gradient(135deg,#064e3b,#065f46)';this.style.boxShadow=''">✅ Accept</button>
+            <button onclick="rejectAction('${jsEsc(a.id)}')" style="padding:8px 16px;background:linear-gradient(135deg,#450a0a,#7f1d1d);color:#f87171;border:2px solid rgba(248,113,113,.4);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap" onmouseenter="this.style.background='linear-gradient(135deg,#7f1d1d,#991b1b)';this.style.boxShadow='0 0 16px rgba(248,113,113,.4)'" onmouseleave="this.style.background='linear-gradient(135deg,#450a0a,#7f1d1d)';this.style.boxShadow=''">🚫 Reject</button>
           </div>
         </div>
       </div>`;
@@ -7688,6 +7706,17 @@ async function deleteBotFinal() {
 
 // Auto-refresh dashboard every 30s
 setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
+// Poll guardrails for pending approvals badge (every 60 seconds)
+setInterval(() => {
+  api('/api/guardrails').then(d => {
+    const pending = (d.pending || []).length;
+    const navBadge = document.getElementById('guardrail-pending-badge');
+    if (navBadge) {
+      if (pending > 0) { navBadge.textContent = pending; navBadge.style.display = 'inline-block'; }
+      else { navBadge.style.display = 'none'; }
+    }
+  }).catch(() => {});
+}, 60000);
 
 // ── Auto-generate scheduler task ID from label ────────────────────────────────
 function autoSchedId() {
@@ -9181,10 +9210,11 @@ def get_doctor():
 @app.post("/api/gateway/pull-model")
 def gateway_pull_model(body: dict, _auth: None = Depends(require_auth)):
     """Pull an Ollama model in the background."""
+    import re as _re, subprocess, threading
     model = (body.get("model") or "llama3.2").strip()
-    if not model or "/" in model or len(model) > 80:
-        raise HTTPException(400, "Invalid model name")
-    import subprocess, threading
+    # Allow only safe alphanumeric model names with dots, hyphens, underscores and colons (tags)
+    if not model or not _re.fullmatch(r"[a-zA-Z0-9._:\-]+", model) or len(model) > 80:
+        raise HTTPException(400, "Invalid model name — only alphanumeric, dots, hyphens, underscores and colons allowed")
     def _pull():
         try:
             subprocess.run(["ollama", "pull", model], timeout=600, check=False)
@@ -9192,6 +9222,35 @@ def gateway_pull_model(body: dict, _auth: None = Depends(require_auth)):
             pass
     threading.Thread(target=_pull, daemon=True).start()
     return JSONResponse({"ok": True, "message": f"Pulling {model} in background…"})
+
+
+@app.get("/api/gateway/status")
+def gateway_status():
+    """Return local AI provider status including Ollama models list."""
+    ollama_host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    ollama_ok = _ollama_reachable(ollama_host)
+    models: list = []
+    if ollama_ok:
+        try:
+            import urllib.request as _urlreq
+            req = _urlreq.Request(f"{ollama_host.rstrip('/')}/api/tags", headers={"Accept": "application/json"})
+            with _urlreq.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read())
+            models = [m.get("name", m.get("model", "")) for m in data.get("models", [])]
+            models = [m for m in models if m]
+        except Exception:
+            pass
+    nvidia_ok = bool(os.environ.get("NVIDIA_API_KEY"))
+    current_provider = os.environ.get("AI_PROVIDER", "ollama")
+    current_model = os.environ.get("OLLAMA_MODEL", "llama3.2")
+    return JSONResponse({
+        "ok": True,
+        "ollama_ok": ollama_ok,
+        "ollama_models": models,
+        "nvidia_ok": nvidia_ok,
+        "current_provider": current_provider,
+        "current_model": current_model,
+    })
 
 
 @app.post("/api/agents/start-all")
