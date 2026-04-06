@@ -7,7 +7,7 @@
 [![Platform: Linux](https://img.shields.io/badge/Platform-Linux-informational.svg)](#-install--choose-your-platform)
 [![Platform: macOS](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)](#-install--choose-your-platform)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078d4.svg)](#-install--choose-your-platform)
-[![Agents: 35](https://img.shields.io/badge/Agents-35-success.svg)](#-new-niche-specialists--ai-growth-agency)
+[![Agents: 56](https://img.shields.io/badge/Agents-56-success.svg)](#-new-niche-specialists--ai-growth-agency)
 [![Skills: 147](https://img.shields.io/badge/Skills-147-orange.svg)](#skills-library-147-skills)
 
 ---
@@ -31,6 +31,8 @@
 - [🎮 Discord Bot](#-discord-bot--control-panel--live-notifications)
 - [🔌 Integrations](#-integrations)
 - [🚀 New Niche Specialists](#-new-niche-specialists--ai-growth-agency)
+- [🧠 AI Intelligence Layer](#-ai-intelligence-layer)
+- [🏭 New Business Automation Specialists](#-new-business-automation-specialists)
 - [Skills Library](#skills-library-147-skills)
 - [🧪 Safety Self-Test](#-safety-self-test--verify-everything-works)
 - [💻 Complete Terminal Reference](#-complete-terminal-command-reference)
@@ -45,18 +47,21 @@
 
 | Feature | Description |
 |---|---|
-| 🤖 **35 Specialist Agents** | A full team of AI agents — each expert in a specific business domain |
+| 🤖 **56 Specialist Agents** | A full team of AI agents — each expert in a specific business domain |
 | 🛠️ **147 Reusable Skills** | Modular skill library you can compose into custom agents |
 | 🖥️ **Web Dashboard** | Full control panel at `http://127.0.0.1:8787` — no terminal needed |
-| 🗂️ **Three Modes** | Start with 3 agents (Starter), grow to 8 (Business), or unleash all 35 (Power) |
+| 🗂️ **Three Modes** | Start with 3 agents (Starter), grow to 8 (Business), or unleash all 56 (Power) |
 | 📋 **Goal Templates** | One-click business templates: 10 leads in 24h, close €1k deal, automate support |
-| 🧠 **AI Router** | Automatically routes tasks to the best model (GPT-4o, Claude, or local Ollama) |
+| 🧠 **AI Router** | 3-layer routing: local Ollama → Gemma (local/cloud) → NVIDIA NIM → paid APIs. Zero cost by default. |
 | 📊 **ROI Tracking** | Tracks leads generated, deals closed, hours saved, and € value created |
 | 🔒 **Guardrails** | Human-in-the-loop approval queue for high-risk actions (bulk email, purchases) |
 | 📱 **WhatsApp + Discord** | Get notified and send commands from your phone or Discord server |
 | 🆓 **Works Locally** | Fully operational without any paid API — uses Ollama for free local AI |
 | 🔄 **Memory & CRM** | Built-in lead CRM with follow-up tracking and per-lead memory |
 | ⏱️ **Scheduler** | Schedule recurring tasks (daily lead generation, weekly reports, etc.) |
+| 🔥 **ASCEND FORGE** | Self-improving UI engine — scans, patches, and auto-refactors your web interfaces |
+| ⚡ **BLACKLIGHT** | Autonomous darknet & blockchain intelligence agent running 24/7 |
+| 📈 **Turbo Quant** | Quantitative trading engine with backtesting, signal generation, and portfolio management |
 
 ---
 
@@ -64,7 +69,7 @@
 
 **AI Employee is built for solo founders and small agencies** who want leverage — not complexity.
 
-You run a business. You don't have time to manage 35 agents and 147 skills. You just want results:
+You run a business. You don't have time to manage 56 agents and 147 skills. You just want results:
 - 10 qualified leads today
 - A sales email in your inbox
 - Your customer support running on autopilot
@@ -220,7 +225,7 @@ AI Employee is a multi-layer system where a single user command fans out across 
    ┌─────────┼─────────────────────────────────┐
    │         │                                 │
 ┌──▼──┐  ┌───▼───┐  ┌───────┐  ┌──────────┐  ┌▼──────────────┐
-│Lead │  │Content│  │Sales  │  │Analytics │  │ 27+ more      │
+│Lead │  │Content│  │Sales  │  │Analytics │  │ 50+ more      │
 │Hunt.│  │Master │  │Closer │  │& Reports │  │ specialist    │
 │Elite│  │       │  │Pro    │  │          │  │ agents...     │
 └──┬──┘  └───┬───┘  └───┬───┘  └────┬─────┘  └───────┬───────┘
@@ -240,8 +245,8 @@ AI Employee is a multi-layer system where a single user command fans out across 
 | Component | Role |
 |---|---|
 | **Problem Solver** | Orchestrator — watches all agents, routes tasks, restarts crashed agents |
-| **AI Router** | Picks the best LLM per task type (sales→GPT-4o, analysis→Claude, local→Ollama) |
-| **35 Specialist Agents** | Each expert in one domain; task execution mode: Auto (orchestrator decides), Parallel (all at once), or Single (one agent) |
+| **AI Router** | 3-layer free routing: Ollama → Gemma → NVIDIA NIM → paid APIs. Routes by task type (reasoning→Nemotron, coding→Qwen, creative→Gemma, bulk→Llama 8B) |
+| **56 Specialist Agents** | Each expert in one domain; task execution mode: Auto (orchestrator decides), Parallel (all at once), or Single (one agent) |
 | **Skills Library** | 147 reusable building blocks composed into agents |
 | **Memory / CRM** | Per-lead memory and interaction history persisted in JSON |
 | **Guardrails** | Human approval queue for high-risk actions before execution |
@@ -254,14 +259,14 @@ AI Employee is a multi-layer system where a single user command fans out across 
 ```bash
 ai-employee mode starter    # 3 agents, 5 commands — zero overwhelm
 ai-employee mode business   # templates, ROI tracking, scheduling (recommended)
-ai-employee mode power      # all 39 agents, 147+ skills, full dashboard
+ai-employee mode power      # all 56 agents, 147+ skills, full dashboard
 ```
 
 | Mode | Agents | What you see | Best for |
 |---|---|---|---|
 | **Starter** | 3 | 5 commands, no dashboard overload | Getting your first results |
 | **Business** | 8 | Templates, ROI, scheduling | Daily business automation |
-| **Power** | 39 | Everything — full dashboard, all skills | Advanced users |
+| **Power** | 56 | Everything — full dashboard, all skills | Advanced users |
 
 Change mode any time: `ai-employee mode business`
 
@@ -269,7 +274,7 @@ Change mode any time: `ai-employee mode business`
 
 ## 🆕 New Agent Divisions (inspired by [agency-agents](https://github.com/msitarzewski/agency-agents))
 
-Four new specialist divisions have been added, bringing the total to **39 agents**:
+Four new specialist divisions have been added, bringing the engineering/design/QA/media total to **43 agents**:
 
 ### 💻 Engineering Division
 | Agent | Commands | What it does |
@@ -361,13 +366,27 @@ The dashboard is your primary control center. Use it for full control over tasks
 | 💬 Chat | Send tasks, view chat history |
 | 🚀 Tasks | Build & launch multi-agent tasks |
 | 🐝 Swarm | All agents — status, workload (filterable by category) |
+| 🏢 Live Office | Real-time view of active agents and running jobs |
 | 📅 Scheduler | Create & manage scheduled tasks |
-| 👷 Workers | Start/stop individual agents |
+| 👷 Agents | Start/stop individual agents |
 | 📈 ROI | Tasks done, leads, hours saved, €€ saved |
 | 📋 Templates | Deploy goal-based templates in one click |
 | 🔒 Guardrails | Approval queue, safety logs |
 | 🧠 Memory | Client CRM, interaction history |
 | 🔌 Integrations | Gmail, Sheets, Telegram, Slack, OpenAI |
+| 📜 Commands | Full WhatsApp commands reference — searchable, click to copy |
+| 💡 Improvements | Review and approve/reject skill proposals |
+| 🛠️ Skills | Browse and search 147 business skills |
+| 🕐 History | Full task and chat history log |
+| ⚙️ Options | Dashboard settings and preferences |
+| ⚡ BLACKLIGHT | Autonomous darknet & blockchain intelligence — start/stop/logs |
+| 🔥 ASCEND FORGE | Self-improving UI engine — scan, patch, auto-refactor interfaces |
+| 💰 Budget | Per-agent monthly cost tracking and enforcement |
+| 🏢 Org Chart | Visual agent hierarchy and team structure |
+| 🎯 Goals | Company mission → project goals → task context injection |
+| 🎫 Tickets | Immutable task tracking with audit trail |
+| 🛡️ Boardroom | Board-level approval gates for high-impact agent actions |
+| 🏗️ Companies | Multi-company / multi-client workspace management |
 
 ---
 
@@ -580,7 +599,7 @@ Invoke-WebRequest https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/in
 .\install-windows.ps1
 ```
 Or use the one-click batch file: download and run `quick-install-windows.bat`.
-No WSL or Git Bash required — installs Python, Git, Ollama, and all 35 agents natively.
+No WSL or Git Bash required — installs Python, Git, Ollama, and all 56 agents natively.
 
 Everything is installed into **`~/.ai-employee/`** (Linux/macOS) or **`%USERPROFILE%\.ai-employee\`** (Windows).
 
@@ -858,7 +877,7 @@ The full dashboard runs at **http://127.0.0.1:8787** and has 9 tabs:
 | 📊 **Dashboard** | Live bot status, system info, WhatsApp quick-commands panel |
 | 💬 **Chat** | Send tasks (same as WhatsApp), view chat history |
 | 🚀 **Tasks** | **Task agent selection** — describe goal → auto-select agents → launch |
-| 🐝 **Swarm** | All 20 agents: capabilities, status, workload |
+| 🐝 **Swarm** | All agents: capabilities, status, workload |
 | 📜 **Commands** | Full WhatsApp commands reference — searchable, click to copy |
 | 📅 **Scheduler** | Create/edit/delete scheduled tasks |
 | 👷 **Workers** | Start/stop/toggle individual agents |
@@ -974,7 +993,141 @@ The problem-solver automatically routes tasks to the right specialist agent:
 
 ---
 
-## Skills Library (147 Skills)
+## 🧠 AI Intelligence Layer
+
+Six new deep-capability agents powering the AI core.
+
+### Agent overview
+
+| Agent | Command prefix | What it does |
+|---|---|---|
+| **Turbo Quant** | `turbo` | Quantitative trading engine — signal generation, backtesting, risk scoring, portfolio optimisation (MONEY/POWER/AUTO modes) |
+| **ASCEND FORGE** | `ascend` | Self-improving UI engine — scans interfaces with vision AI, generates refactor patches, applies and rolls back changes automatically |
+| **BLACKLIGHT** | `blacklight` | Autonomous darknet & blockchain intelligence — monitors hidden markets, tracks token movements, detects emerging threats 24/7 |
+| **Hermes Agent** | `hermes` | Multi-channel messaging orchestrator — routes messages across WhatsApp, Telegram, Discord, SMS, and email with unified conversation context |
+| **Gemma Agent** | (model backend) | Google Gemma open-source model chat interface — local Ollama (`gemma4`) or free Google AI Studio API. Web UI at `http://127.0.0.1:8793` |
+| **Obsidian Memory** | `obsidian` | Persistent knowledge graph — creates Obsidian-compatible notes, builds relationship maps, enables semantic search across stored knowledge |
+
+### AI Router — 3-layer free routing
+
+The AI Router now uses three free layers before ever touching a paid API:
+
+```
+Layer 1a — Ollama (local, private, any model)
+Layer 1b — Gemma via Ollama (gemma4) or Google AI Studio (free tier)
+Layer 1c — NVIDIA NIM (free-tier cloud: Nemotron / Qwen Coder / Llama 8B)
+──────────────────────────────────────────────────────
+Layer 2  — Anthropic Claude  (paid, fallback)
+Layer 3  — OpenAI GPT-4o     (paid, fallback)
+```
+
+Task-based routing:
+
+| Task category | Free model used |
+|---|---|
+| reasoning / orchestration | NVIDIA Nemotron-49B |
+| coding / code review | NVIDIA Qwen 2.5 Coder 32B |
+| creative / general | Gemma 4 (local or cloud) |
+| bulk / high-volume | NVIDIA Llama 3.1 8B |
+| default | Ollama (local model) |
+
+Set `LOCAL_AI_FIRST=0` in `.env` to skip local layers and go straight to cloud.
+
+### NVIDIA NIM Integration
+
+| Model slot | Default model | Purpose |
+|---|---|---|
+| `NIM_REASONING_MODEL` | `nvidia/llama-3.3-nemotron-super-49b-v1` | Complex reasoning |
+| `NIM_CODING_MODEL` | `qwen/qwen2.5-coder-32b-instruct` | Code generation |
+| `NIM_BULK_MODEL` | `meta/llama-3.1-8b-instruct` | High-volume tasks |
+| `NIM_EMBED_MODEL` | `nvidia/nv-embed-v2` | 4096-dim embeddings |
+| `NIM_RERANK_MODEL` | `nvidia/nv-rerankqa-mistral-4b-v3` | Passage reranking |
+
+Set `NVIDIA_API_KEY` in `.env` to enable (free account at build.nvidia.com).
+
+### ASCEND FORGE — UI Self-Improvement
+
+The ASCEND FORGE is a vision-powered self-improvement loop for your web interfaces:
+
+```bash
+# Access via dashboard → 🔥 ASCEND FORGE tab
+# Or via CLI:
+ai-employee start ascend-forge
+ai-employee logs ascend-forge
+```
+
+The loop: **Scan** (screenshot + component parse) → **Analyse** (vision AI detects issues) → **Optimise** (brain generates patches) → **Apply** (patch applier rewrites code) → **Repeat**
+
+Modes: `GENERAL` (manual approval), `MONEY` (revenue-focused auto-apply), `AUTO` (fully autonomous).
+
+### BLACKLIGHT — Autonomous Intelligence
+
+BLACKLIGHT runs a continuous goal→analyse→plan→execute→evaluate→improve loop:
+
+```bash
+# From the dashboard ⚡ BLACKLIGHT tab — or CLI:
+ai-employee start blacklight
+ai-employee stop  blacklight
+ai-employee logs  blacklight
+```
+
+State: `~/.ai-employee/state/blacklight.state.json`  
+Log: `~/.ai-employee/logs/blacklight.log.jsonl`
+
+---
+
+## 🏭 New Business Automation Specialists
+
+17 new agents added covering content creation, e-commerce, finance, and community.
+
+### Agent overview
+
+| Agent | Command prefix | What it does |
+|---|---|---|
+| **Brand Strategist** | `brand` | Brand naming (15 ideas), positioning maps, visual identity briefs, voice guidelines, competitive analysis |
+| **Course Creator** | `course` | End-to-end online course automation — outlines, lessons (~1000 words), quizzes, pricing tiers, 5-email launch sequences, sales copy |
+| **Creator Agency** | `creator` | Creator personal brand automation — 30-day content calendars, DM funnels, upsell scripts, captions, comment replies, brand kits |
+| **E-commerce Agent** | `ecom` | Product research, Shopify/Etsy listing generation, email flows (welcome/cart/win-back), ad copy |
+| **Faceless Video** | `video` | YouTube/TikTok production pipeline — scripts, scene extraction, voiceover, Midjourney prompts, SEO, 30-day upload schedules |
+| **Finance Wizard** | `finance` | Financial modelling — 3-year P&L, unit economics (CAC/LTV), runway/burn, cap table, valuation, investor pitch financials |
+| **Memecoin Creator** | `memecoin` | Crypto token launch — name generation, tokenomics, whitepaper, community strategy, viral launch campaign, smart contract parameters |
+| **Newsletter Bot** | `newsletter` | Automated email newsletters — RSS curation, subscriber segments, HTML/text output, SMTP/Mailchimp delivery |
+| **Offer Agent** | `offer` | Personalised sales pitches from CRM leads — niche/pain analysis, WhatsApp + email versions, pricing anchors |
+| **Print-on-Demand** | `pod` | Merch automation (Printful/Teespring/Redbubble) — niche research, Midjourney prompts, SEO listings, Facebook/Google ad copy |
+| **Signal Community** | `signals` | Trading signal community management — aggregates polymarket + MiroFish signals, formats for Telegram/Discord, tracks performance |
+| **Web Researcher** | `research` | Autonomous web research — DuckDuckGo/Wikipedia/Tavily/SerpAPI search with source citations and cross-bot IPC |
+| **Chatbot Builder** | `chatbot` | Niche-specific chatbot generator — persona, system prompts, FAQ library, conversation flows, SaaS pricing tiers |
+| **Appointment Setter** | `setter` | Sales funnel orchestrator — prospect discovery, 5-touch outreach, pipeline tracking (prospect→appointment→closed), follow-ups |
+| **Arbitrage Bot** | `arb` | E-commerce price arbitrage — scans Amazon/eBay/Walmart/StockX for ROI ≥ 20% margins, watchlist, trend detection |
+| **Financial DeepSearch** | `deepsearch` | Financial intelligence — Yahoo Finance + SEC EDGAR + DuckDuckGo, company deep-dives, earnings quality, sector analysis |
+| **Lead Intelligence** | `leadiq` | 4-agent lead pipeline: hunter (discover) → scorer (rank) → matcher (deal fit) → outreach (sequences) |
+
+### Usage examples
+
+```bash
+# Content & Media
+ai-employee do "Create a 30-day faceless YouTube channel for productivity"
+ai-employee do "Build a course on dropshipping with 5 modules"
+ai-employee do "Design a brand identity for my SaaS startup"
+ai-employee do "Write a newsletter about AI trends for 500 subscribers"
+
+# Finance & Trading
+ai-employee do "Build 3-year financial model for my SaaS startup"
+ai-employee do "Show turbo quant signals for BTC/ETH"
+ai-employee do "Deep research on NVDA stock with SEC filings"
+
+# E-commerce & Products
+ai-employee do "Find arbitrage opportunities on Amazon vs eBay"
+ai-employee do "Create a print-on-demand design for the fitness niche"
+ai-employee do "Research trending products for my Shopify store"
+
+# Lead Generation & Sales
+ai-employee do "Set 5 appointments for my web design agency this week"
+ai-employee do "Create personalised offers for my top 3 CRM leads"
+ai-employee do "Score and rank my 20 leads by ICP fit"
+```
+
+
 
 AI Employee includes a library of **147 reusable skills** across 13 categories. Skills are the building blocks for creating custom specialised agents.
 
@@ -1117,9 +1270,18 @@ The hourly WhatsApp status report now includes a MiroFish research summary line.
 │   └── ai-employee      Multi-bot CLI runner
 ├── agents/              Agent code (overwritten on update)
 │   ├── problem-solver/     Watchdog — keeps other agents alive
-│   ├── problem-solver-ui/  Full dashboard (FastAPI)
+│   ├── problem-solver-ui/  Full dashboard (FastAPI, port 8787)
+│   ├── ai-router/          3-layer free AI routing (Ollama→Gemma→NIM→cloud)
 │   ├── polymarket-trader/  Trading bot with inline MiroFish predictor
 │   ├── mirofish-researcher/ MiroFish deep market research agent
+│   ├── turbo-quant/        Quantitative trading engine (MONEY/POWER/AUTO)
+│   ├── ascend-forge/       Self-improving UI engine with vision AI
+│   ├── blacklight/         Autonomous darknet & blockchain intelligence
+│   ├── hermes-agent/       Multi-channel messaging orchestrator
+│   ├── obsidian-memory/    Persistent Obsidian-compatible knowledge graph
+│   ├── financial-deepsearch/ Yahoo Finance + SEC EDGAR intelligence
+│   ├── lead-intelligence/  4-agent lead pipeline (hunt→score→match→outreach)
+│   ├── nvidia-nim/         NVIDIA NIM client (embeddings, reranking, LLMs)
 │   ├── status-reporter/    Hourly WhatsApp status
 │   ├── scheduler-runner/   Task scheduler
 │   └── discovery/          Skill & market discovery
@@ -1348,7 +1510,7 @@ ai-employee do "deploy template get-10-leads-24h"
 ai-employee mode                  # Show current mode
 ai-employee mode starter          # 3 agents — no overwhelm
 ai-employee mode business         # 8 agents — recommended
-ai-employee mode power            # All 20 agents, full dashboard
+ai-employee mode power            # All 56 agents, full dashboard
 ```
 
 ### Logs & Debugging
