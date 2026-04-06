@@ -708,6 +708,178 @@
       "expected_results": {
         "estimated_monthly_revenue": "3x ROAS target"
       }
+    },
+    {
+      "id": "optimize-sales-emails",
+      "name": "Optimize My Sales Emails",
+      "icon": "\u2709\ufe0f",
+      "category": "Sales",
+      "mode": [
+        "starter",
+        "business",
+        "power"
+      ],
+      "description": "Audit, rewrite and A/B test your sales email sequences for higher open rates and replies. Get subject line variants, body rewrites and a send-time strategy.",
+      "agents": [
+        "cold-outreach-assassin",
+        "offer-agent",
+        "conversion-rate-optimizer"
+      ],
+      "task_description": "Analyze and optimize my sales email sequence. Rewrite subject lines for 50%+ open rates, improve body copy for higher reply rates, suggest A/B test variants, and recommend optimal send times. Output 3 revised email versions per template.",
+      "schedule": "manual",
+      "kpis": [
+        "open_rate",
+        "reply_rate",
+        "conversion_rate"
+      ],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Paste your current email sequence (or describe your offer)",
+        "Specify your target audience and pain points",
+        "Set your goal: more replies, calls booked, or demos"
+      ],
+      "expected_results": {
+        "estimated_open_rate_improvement": "+25\u201340%",
+        "estimated_reply_rate_improvement": "+15\u201330%",
+        "estimated_monthly_value": "\u20ac500\u2013\u20ac2,000 extra pipeline"
+      }
+    },
+    {
+      "id": "7-day-social-campaign",
+      "name": "7-Day Social Media Campaign",
+      "icon": "\ud83d\udcf1",
+      "category": "Marketing",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Launch a full 7-day social media content campaign across LinkedIn, Twitter/X and Instagram. Includes post copy, hashtags, visuals brief, and a publish schedule.",
+      "agents": [
+        "social-media-manager",
+        "brand-strategist",
+        "content-master"
+      ],
+      "task_description": "Create a complete 7-day social media campaign. Generate 2 posts per day across LinkedIn and Twitter/X. Each post needs: hook, main content, CTA, hashtags, and a visual brief. Focus on driving engagement and brand awareness. Include optimal posting times for each platform.",
+      "schedule": "weekly",
+      "kpis": [
+        "impressions",
+        "engagement_rate",
+        "follower_growth"
+      ],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Define campaign goal (brand awareness, leads, product launch)",
+        "Specify brand voice and target audience",
+        "Confirm platforms to use (LinkedIn, X, Instagram)"
+      ],
+      "expected_results": {
+        "posts_created": 14,
+        "estimated_reach": "500\u20135,000 people",
+        "estimated_monthly_value": "\u20ac200\u2013\u20ac800 brand value"
+      }
+    },
+    {
+      "id": "weekly-performance-report",
+      "name": "Weekly Performance Report",
+      "icon": "\ud83d\udcca",
+      "category": "Analytics",
+      "mode": [
+        "starter",
+        "business",
+        "power"
+      ],
+      "description": "Auto-generate a weekly performance summary covering leads, revenue, tasks completed, and AI agent activity. Delivered as a formatted report every Monday.",
+      "agents": [
+        "task-orchestrator",
+        "finance-wizard",
+        "data-analyst"
+      ],
+      "task_description": "Generate a comprehensive weekly performance report. Include: total tasks completed, leads generated, emails sent, revenue pipeline updated, hours saved by AI, top performing agents, and 3 action items for next week. Format as a clean executive summary.",
+      "schedule": "weekly",
+      "kpis": [
+        "tasks_completed",
+        "leads_generated",
+        "revenue_pipeline"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Confirm report delivery method (dashboard, email, or WhatsApp)",
+        "Set your KPI targets for the week",
+        "Schedule for Monday morning (08:00 UTC)"
+      ],
+      "expected_results": {
+        "reports_per_month": 4,
+        "hours_saved": "3\u20135 hours reporting time",
+        "estimated_monthly_value": "\u20ac150\u2013\u20ac500 in saved analysis time"
+      }
+    },
+    {
+      "id": "automate-lead-followup",
+      "name": "Automate Lead Follow-Up (30 Days)",
+      "icon": "\ud83d\udd04",
+      "category": "Sales",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Set up a 30-day automated lead nurturing sequence. Prospects receive personalised follow-ups at days 1, 3, 7, 14 and 30 based on their behaviour and engagement.",
+      "agents": [
+        "follow-up-agent",
+        "cold-outreach-assassin",
+        "offer-agent"
+      ],
+      "task_description": "Design and schedule a 30-day lead follow-up automation sequence. Create 5 personalized follow-up messages at day 1, 3, 7, 14, and 30 post-first contact. Each message should reference the lead's company, adapt to whether they opened/replied, and include a soft CTA. Export as a ready-to-activate sequence.",
+      "schedule": "daily",
+      "kpis": [
+        "follow_up_rate",
+        "reply_rate",
+        "conversion_rate"
+      ],
+      "guardrail_level": "medium",
+      "setup_steps": [
+        "Import your existing lead list (or generate new ones first)",
+        "Define your offer and key benefits",
+        "Set lead qualification criteria for moving to 'hot' stage"
+      ],
+      "expected_results": {
+        "follow_ups_automated": "100% of leads",
+        "estimated_reply_rate": "8\u201315%",
+        "estimated_monthly_value": "\u20ac1,000\u2013\u20ac5,000 recovered pipeline"
+      }
+    },
+    {
+      "id": "build-seo-content-strategy",
+      "name": "Build SEO Content Strategy",
+      "icon": "\ud83d\udd0d",
+      "category": "Marketing",
+      "mode": [
+        "business",
+        "power"
+      ],
+      "description": "Research keywords, analyze competitors and create a 3-month SEO content plan with target articles, search intent mapping, and estimated traffic uplift.",
+      "agents": [
+        "web-researcher",
+        "growth-hacker",
+        "content-master"
+      ],
+      "task_description": "Build a 3-month SEO content strategy for my business. Research 20 high-value keywords with low competition, analyze top 3 competitors' content gaps, create a content calendar with 12 article titles and outlines, map search intent for each keyword, and estimate traffic potential. Output as an actionable plan.",
+      "schedule": "monthly",
+      "kpis": [
+        "keyword_rankings",
+        "organic_traffic",
+        "content_published"
+      ],
+      "guardrail_level": "low",
+      "setup_steps": [
+        "Describe your product/service and target audience",
+        "Share your current domain (for competitor analysis)",
+        "Confirm target countries/regions for SEO"
+      ],
+      "expected_results": {
+        "keywords_researched": 20,
+        "articles_planned": 12,
+        "estimated_monthly_value": "\u20ac300\u2013\u20ac2,000 organic traffic value"
+      }
     }
   ]
 }
