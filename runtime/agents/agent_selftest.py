@@ -363,6 +363,50 @@ def check_turbo_quant() -> None:
         _fail("turbo_quant API", f"self-check failed: {exc}")
 
 
+def check_ui_engine() -> None:
+    """AscendForge UI-Engine modules must be importable and config files present."""
+    engine_dir = AI_HOME / "agents" / "ascend-forge" / "ui-engine"
+
+    # Config files
+    for cfg_name in ("design_system.json", "modes.json"):
+        cfg_path = engine_dir / "config" / cfg_name
+        if cfg_path.exists():
+            try:
+                import json as _json
+                data = _json.loads(cfg_path.read_text())
+                _ok(f"ui-engine config/{cfg_name}", f"{len(data)} top-level keys ✓")
+            except Exception as exc:
+                _fail(f"ui-engine config/{cfg_name}", f"JSON parse error: {exc}")
+        else:
+            _fail(f"ui-engine config/{cfg_name}", f"not found at {cfg_path}")
+
+    # Python modules
+    modules = {
+        "scanner":  ("component_parser", "style_analyzer"),
+        "vision":   ("vision_runner",),
+        "brain":    ("ui_optimizer",),
+        "refactor": ("patch_generator", "applier"),
+        "loop":     ("auto_loop",),
+    }
+    for subdir, mod_names in modules.items():
+        pkg_dir = engine_dir / subdir
+        if str(pkg_dir) not in sys.path:
+            sys.path.insert(0, str(pkg_dir))
+        for mod_name in mod_names:
+            try:
+                importlib.import_module(mod_name)
+                _ok(f"ui-engine {subdir}/{mod_name}", "importable ✓")
+            except ImportError as exc:
+                _fail(f"ui-engine {subdir}/{mod_name}", f"import failed: {exc}")
+
+    # Screenshotter (JS — just check file exists)
+    ss_path = engine_dir / "vision" / "screenshotter.js"
+    if ss_path.exists():
+        _ok("ui-engine vision/screenshotter.js", "present ✓")
+    else:
+        _fail("ui-engine vision/screenshotter.js", f"not found at {ss_path}")
+
+
 def check_ui_designer() -> None:
     """ui_designer module must be importable and its run.sh executable."""
     _check_bot_module("ui-designer", "ui_designer")
@@ -548,6 +592,9 @@ def main() -> None:
 
     _section("Integrations")
     check_whatsapp_config()
+
+    _section("AscendForge UI-Engine")
+    check_ui_engine()
 
     _section("Bot Modules")
     check_ai_router()
