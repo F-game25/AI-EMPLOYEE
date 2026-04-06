@@ -3677,7 +3677,7 @@ INDEX_HTML = r"""<!doctype html>
 
       <!-- Accent colour -->
       <div>
-        <div style="font-size:.78em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Accent Colour</div>
+        <div style="font-size:.78em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Accent Color</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="theme-accent-btn" onclick="setAccentColor('#D4AF37','#B8960C')" title="Gold (default)"
             style="width:34px;height:34px;border-radius:50%;background:#D4AF37;border:2px solid rgba(255,255,255,.3);cursor:pointer;transition:transform .15s" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform=''"></button>
@@ -6676,7 +6676,7 @@ async function loadIntegrations() {
   setT('intg-stat-total', total || '–');
   setT('intg-stat-connected', connected || '–');
   setT('intg-stat-pending', (total - connected) || '–');
-  setT('intg-stat-pct', total ? Math.round(connected/total*100)+'%' : '–%');
+  setT('intg-stat-pct', total ? Math.round((connected/total)*100)+'%' : '–%');
   if (!integrations.length) {
     el.innerHTML = '<div class="empty"><div class="icon">🔌</div><p>No integrations configured.</p></div>';
     return;
