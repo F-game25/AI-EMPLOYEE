@@ -3,66 +3,79 @@ import { useAppStore } from '../store/appStore'
 
 const WS_URL = `ws://${window.location.hostname}:3001/ws`
 
-export function useWebSocket() {
-  const { setWs, setWsConnected, addHeartbeatLog, setAgents, setSystemStatus, addChatMessage } = useAppStore()
-  const wsRef = useRef(null)
-  const reconnectTimer = useRef(null)
+// Module-level singleton to prevent duplicate connections
+let _wsInstance = null
+let _reconnectTimer = null
+let _initialized = false
 
-  const connect = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
+function getStore() {
+  return useAppStore.getState()
+}
 
-    const ws = new WebSocket(WS_URL)
-    wsRef.current = ws
+function connectSingleton() {
+  if (_wsInstance?.readyState === WebSocket.OPEN || _wsInstance?.readyState === WebSocket.CONNECTING) return
 
-    ws.onopen = () => {
-      setWsConnected(true)
-      setWs(ws)
-      addHeartbeatLog({ text: '[SYSTEM] WebSocket connected', level: 'success', ts: Date.now() })
-    }
+  const ws = new WebSocket(WS_URL)
+  _wsInstance = ws
 
-    ws.onmessage = (evt) => {
-      try {
-        const { event, data } = JSON.parse(evt.data)
-        switch (event) {
-          case 'heartbeat':
-            addHeartbeatLog({ text: data.message, level: data.level || 'info', ts: Date.now() })
-            break
-          case 'agent:update':
-            if (data.agents) setAgents(data.agents)
-            break
-          case 'system:status':
-            setSystemStatus(data)
-            break
-          case 'orchestrator:message':
-            addChatMessage({ role: 'ai', content: data.message, ts: Date.now() })
-            break
-        }
-      } catch (e) { /* ignore */ }
-    }
-
-    ws.onclose = () => {
-      setWsConnected(false)
-      setWs(null)
-      addHeartbeatLog({ text: '[SYSTEM] Connection lost — reconnecting...', level: 'warning', ts: Date.now() })
-      reconnectTimer.current = setTimeout(connect, 3000)
-    }
-
-    ws.onerror = () => {
-      ws.close()
-    }
+  ws.onopen = () => {
+    const store = getStore()
+    store.setWsConnected(true)
+    store.setWs(ws)
+    store.addHeartbeatLog({ text: '[SYSTEM] WebSocket connected', level: 'success', ts: Date.now() })
   }
 
+  ws.onmessage = (evt) => {
+    try {
+      const { event, data } = JSON.parse(evt.data)
+      const store = getStore()
+      switch (event) {
+        case 'heartbeat':
+          store.addHeartbeatLog({ text: data.message, level: data.level || 'info', ts: Date.now() })
+          break
+        case 'agent:update':
+          if (data.agents) store.setAgents(data.agents)
+          break
+        case 'system:status':
+          store.setSystemStatus(data)
+          break
+        case 'orchestrator:message':
+          store.addChatMessage({ role: 'ai', content: data.message, ts: Date.now() })
+          break
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  ws.onclose = () => {
+    const store = getStore()
+    store.setWsConnected(false)
+    store.setWs(null)
+    store.addHeartbeatLog({ text: '[SYSTEM] Connection lost — reconnecting...', level: 'warning', ts: Date.now() })
+    _wsInstance = null
+    _reconnectTimer = setTimeout(connectSingleton, 3000)
+  }
+
+  ws.onerror = () => {
+    ws.close()
+  }
+}
+
+export function useWebSocket() {
   useEffect(() => {
-    connect()
+    if (!_initialized) {
+      _initialized = true
+      connectSingleton()
+    }
     return () => {
-      clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
+      // Module-level singleton intentionally persists for app lifetime.
+      // Clear any pending reconnect timer if all consumers unmount.
+      clearTimeout(_reconnectTimer)
     }
   }, [])
 
   const sendMessage = (message) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'chat', message }))
+    if (_wsInstance?.readyState === WebSocket.OPEN) {
+      _wsInstance.send(JSON.stringify({ type: 'chat', message }))
     }
   }
 

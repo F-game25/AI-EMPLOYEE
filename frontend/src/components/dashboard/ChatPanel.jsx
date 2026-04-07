@@ -6,15 +6,9 @@ import { useWebSocket } from '../../hooks/useWebSocket'
 export default function ChatPanel() {
   const messages = useAppStore(s => s.chatMessages)
   const [input, setInput] = useState('')
-  const [cursor, setCursor] = useState(true)
   const messagesEndRef = useRef(null)
   const addChatMessage = useAppStore(s => s.addChatMessage)
   const { sendMessage } = useWebSocket()
-
-  useEffect(() => {
-    const t = setInterval(() => setCursor(c => !c), 530)
-    return () => clearInterval(t)
-  }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
