@@ -337,6 +337,11 @@ AGENTS_BY_MODE = {
     "meeting-intelligence",
     "ceo-briefing",
     "financial-tools",
+    # Business-tier feature agents
+    "crm-pipeline",
+    "email-marketing",
+    "invoicing",
+    "customer-support",
   ],
   "power": [
     "task-orchestrator",
@@ -408,6 +413,21 @@ AGENTS_BY_MODE = {
     "financial-tools",
     "competitor-watch",
     "content-calendar",
+    # New feature agents (Power mode)
+    "crm-pipeline",
+    "email-marketing",
+    "meeting-intelligence",
+    "ceo-briefing",
+    "invoicing",
+    "analytics-bi",
+    "workflow-builder",
+    "team-management",
+    "customer-support",
+    "website-builder",
+    "competitor-watch",
+    "personal-brand",
+    "health-check",
+    "export-backup",
   ],
 }
 
@@ -931,6 +951,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# ── Feature modules ───────────────────────────────────────────────────────────
+import sys as _sys
+_FEATURES_DIR = str(Path(__file__).parent)
+if _FEATURES_DIR not in _sys.path:
+    _sys.path.insert(0, _FEATURES_DIR)
+
+try:
+    from features import ALL_ROUTERS as _FEATURE_ROUTERS
+    for _router in _FEATURE_ROUTERS:
+        app.include_router(_router)
+    logger.info("✅ Feature modules loaded: %d routers", len(_FEATURE_ROUTERS))
+except Exception as _feat_err:
+    logger.warning("⚠️  Feature modules failed to load: %s", _feat_err)
 
 # ── Security headers middleware (openclaw-2) ──────────────────────────────────
 @app.middleware("http")
@@ -1895,6 +1929,20 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('financial',this)">💳 Financial</button>
   <button onclick="switchTab('competitors',this)">🕵️ Competitors</button>
   <button onclick="switchTab('content-calendar',this)">🗃️ Content Cal</button>
+  <button onclick="switchTab('email-mkt',this)">📧 Email</button>
+  <button onclick="switchTab('meetings',this)">🎙️ Meetings</button>
+  <button onclick="switchTab('social',this)">📱 Social</button>
+  <button onclick="switchTab('briefing',this)">☀️ Briefing</button>
+  <button onclick="switchTab('invoicing',this)">🧾 Finance</button>
+  <button onclick="switchTab('analytics-bi',this)">📊 Analytics</button>
+  <button onclick="switchTab('workflows',this)">⚙️ Workflows</button>
+  <button onclick="switchTab('team',this)">👥 Team</button>
+  <button onclick="switchTab('support-desk',this)">🎧 Support</button>
+  <button onclick="switchTab('website-builder',this)">🌐 Website</button>
+  <button onclick="switchTab('competitors',this)">🔍 Competitors</button>
+  <button onclick="switchTab('brand',this)">✨ Brand</button>
+  <button onclick="switchTab('health',this)">❤️ Health</button>
+  <button onclick="switchTab('export',this)">💾 Export</button>
 </nav>
   <button class="nav-scroll-btn right" id="nav-scroll-right" onclick="navScroll(1)" title="Scroll right">›</button>
 </div>
@@ -3008,6 +3056,634 @@ INDEX_HTML = r"""<!doctype html>
           <div id="ses-detail-body"><div class="empty"><p>Click a session to view details and checkpoints.</p></div></div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     NEW FEATURE TABS
+     ══════════════════════════════════════════════════════════════════════════ -->
+
+<!-- ── CRM Pipeline ── -->
+<div id="tab-crm" class="tab-content">
+  <div class="page-header" style="border-left-color:#f59e0b">
+    <div class="page-header-icon">🎯</div>
+    <div><div class="page-header-title">CRM Pipeline</div><div class="page-header-desc">Manage leads, track deal stages, score prospects, and run automated follow-up sequences.</div></div>
+    <span class="page-header-badge" style="color:#f59e0b">Sales Pipeline</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon yellow">👥</div><div class="stat-body"><div class="val" id="crm-total">–</div><div class="lbl">Total Leads</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">🏆</div><div class="stat-body"><div class="val" id="crm-won">–</div><div class="lbl">Won Deals</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">💰</div><div class="stat-body"><div class="val" id="crm-pipeline-val">–</div><div class="lbl">Pipeline Value</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📈</div><div class="stat-body"><div class="val" id="crm-conv">–</div><div class="lbl">Conversion %</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🎯</span> Leads</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadCRM()">↻</button>
+      </div>
+      <div id="crm-leads-list"><div class="empty"><div class="icon">🎯</div><p>No leads yet. Add your first lead.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Lead</div></div>
+      <div class="form-group"><label>Name</label><input id="crm-name" placeholder="John Smith"/></div>
+      <div class="form-group"><label>Company</label><input id="crm-company" placeholder="Acme Corp"/></div>
+      <div class="form-group"><label>Email</label><input id="crm-email" placeholder="john@acme.com"/></div>
+      <div class="form-group"><label>Phone</label><input id="crm-phone" placeholder="+1 555 000"/></div>
+      <div class="form-group"><label>Deal Value ($)</label><input id="crm-value" type="number" placeholder="5000"/></div>
+      <div class="form-group"><label>Stage</label>
+        <select id="crm-stage" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="lead">Lead</option><option value="contacted">Contacted</option>
+          <option value="qualified">Qualified</option><option value="proposal">Proposal</option>
+          <option value="negotiation">Negotiation</option><option value="won">Won</option><option value="lost">Lost</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Notes</label><input id="crm-notes" placeholder="Any notes…"/></div>
+      <button class="btn btn-primary" onclick="addLead()">➕ Add Lead</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Email Marketing ── -->
+<div id="tab-email-mkt" class="tab-content">
+  <div class="page-header" style="border-left-color:#06b6d4">
+    <div class="page-header-icon">📧</div>
+    <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create campaigns, set up drip sequences, and track open/click rates.</div></div>
+    <span class="page-header-badge" style="color:#06b6d4">Automation</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon cyan">📧</div><div class="stat-body"><div class="val" id="em-campaigns">–</div><div class="lbl">Campaigns</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">📤</div><div class="stat-body"><div class="val" id="em-sent">–</div><div class="lbl">Emails Sent</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">👁️</div><div class="stat-body"><div class="val" id="em-open-rate">–</div><div class="lbl">Open Rate</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">🖱️</div><div class="stat-body"><div class="val" id="em-click-rate">–</div><div class="lbl">Click Rate</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📧</span> Campaigns</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadEmailCampaigns()">↻</button>
+      </div>
+      <div id="em-campaign-list"><div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Campaign</div></div>
+      <div class="form-group"><label>Campaign Name</label><input id="em-name" placeholder="Q1 Cold Outreach"/></div>
+      <div class="form-group"><label>Subject Line</label><input id="em-subject" placeholder="Quick question about your business…"/></div>
+      <div class="form-group"><label>Email Body</label>
+        <textarea id="em-body" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Hi {{name}},…"></textarea>
+      </div>
+      <div class="form-group"><label>Recipients (comma-separated emails)</label><input id="em-recipients" placeholder="a@co.com, b@co.com"/></div>
+      <button class="btn btn-primary" onclick="createEmailCampaign()">➕ Create Campaign</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Meeting Intelligence ── -->
+<div id="tab-meetings" class="tab-content">
+  <div class="page-header" style="border-left-color:#8b5cf6">
+    <div class="page-header-icon">🎙️</div>
+    <div><div class="page-header-title">Meeting Intelligence</div><div class="page-header-desc">Paste meeting transcripts to get AI summaries, action items, and auto-drafted follow-up emails.</div></div>
+    <span class="page-header-badge" style="color:#8b5cf6">AI Analysis</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon purple">🎙️</div><div class="stat-body"><div class="val" id="mt-total">–</div><div class="lbl">Total Meetings</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="mt-analyzed">–</div><div class="lbl">Analyzed</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="mt-pending">–</div><div class="lbl">Pending</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">⏱️</div><div class="stat-body"><div class="val" id="mt-duration">–</div><div class="lbl">Total Mins</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🎙️</span> Meetings</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadMeetings()">↻</button>
+      </div>
+      <div id="meetings-list"><div class="empty"><div class="icon">🎙️</div><p>No meetings yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Meeting</div></div>
+      <div class="form-group"><label>Title</label><input id="mt-title" placeholder="Sales call with Acme Corp"/></div>
+      <div class="form-group"><label>Platform</label>
+        <select id="mt-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="zoom">Zoom</option><option value="google_meet">Google Meet</option>
+          <option value="teams">Microsoft Teams</option><option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Duration (mins)</label><input id="mt-duration" type="number" placeholder="45"/></div>
+      <div class="form-group"><label>Transcript (paste here)</label>
+        <textarea id="mt-transcript" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Paste meeting transcript…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="addMeeting()">🎙️ Add &amp; Analyze</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px;display:none" id="mt-result-card">
+    <div class="card-header"><div class="card-title"><span class="icon">🤖</span> AI Analysis</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('mt-result-card').style.display='none'">✕</button>
+    </div>
+    <div id="mt-result-body" style="white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
+  </div>
+</div>
+
+<!-- ── Social Media ── -->
+<div id="tab-social" class="tab-content">
+  <div class="page-header" style="border-left-color:#ec4899">
+    <div class="page-header-icon">📱</div>
+    <div><div class="page-header-title">Social Media Manager</div><div class="page-header-desc">Schedule posts, generate AI content, and track engagement across LinkedIn, Instagram, X, and more.</div></div>
+    <span class="page-header-badge" style="color:#ec4899">Content</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon pink">📱</div><div class="stat-body"><div class="val" id="sm-total">–</div><div class="lbl">Total Posts</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="sm-published">–</div><div class="lbl">Published</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">📅</div><div class="stat-body"><div class="val" id="sm-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">❤️</div><div class="stat-body"><div class="val" id="sm-likes">–</div><div class="lbl">Total Likes</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📱</span> Posts</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadSocialPosts()">↻</button>
+      </div>
+      <div id="sm-posts-list"><div class="empty"><div class="icon">📱</div><p>No posts yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">✨</span> Create Post</div></div>
+      <div class="form-group"><label>Topic (for AI generation)</label><input id="sm-topic" placeholder="AI trends in 2025…"/></div>
+      <div class="form-group"><label>Platform</label>
+        <select id="sm-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="linkedin">LinkedIn</option><option value="instagram">Instagram</option>
+          <option value="twitter">X / Twitter</option><option value="facebook">Facebook</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Tone</label>
+        <select id="sm-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="professional">Professional</option><option value="casual">Casual</option>
+          <option value="inspirational">Inspirational</option><option value="educational">Educational</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="generateSocialPost()" style="flex:1">✨ AI Generate</button>
+        <button class="btn btn-primary" onclick="saveSocialPost()" style="flex:1">💾 Save Draft</button>
+      </div>
+      <div class="form-group" style="margin-top:12px"><label>Content (edit after generation)</label>
+        <textarea id="sm-content" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Post content…"></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── CEO Briefing ── -->
+<div id="tab-briefing" class="tab-content">
+  <div class="page-header" style="border-left-color:#fbbf24">
+    <div class="page-header-icon">☀️</div>
+    <div><div class="page-header-title">Daily CEO Briefing</div><div class="page-header-desc">Your AI-generated morning summary — yesterday's wins, today's priorities, and key metrics all in one place.</div></div>
+    <span class="page-header-badge" style="color:#fbbf24">Daily Report</span>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="generateBriefing()">☀️ Generate Today's Briefing</button>
+    <button class="btn btn-ghost" onclick="loadBriefingHistory()">📅 View History</button>
+  </div>
+  <div class="card" id="briefing-card">
+    <div class="card-header"><div class="card-title"><span class="icon">☀️</span> Latest Briefing</div>
+      <span id="briefing-date" style="font-size:.8em;color:var(--text-muted)"></span>
+    </div>
+    <div id="briefing-content" style="white-space:pre-wrap;line-height:1.7;color:var(--text);font-size:.9em">
+      <div class="empty"><div class="icon">☀️</div><p>Click "Generate Today's Briefing" to get your morning summary.</p></div>
+    </div>
+  </div>
+  <div id="briefing-history" style="margin-top:16px"></div>
+</div>
+
+<!-- ── Finance / Invoicing ── -->
+<div id="tab-invoicing" class="tab-content">
+  <div class="page-header" style="border-left-color:#10b981">
+    <div class="page-header-icon">🧾</div>
+    <div><div class="page-header-title">Finance & Invoicing</div><div class="page-header-desc">Create invoices, track expenses, and view your live P&amp;L report.</div></div>
+    <span class="page-header-badge" style="color:#10b981">Finance</span>
+  </div>
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    <button class="fi-tab-btn btn btn-primary btn-sm active" onclick="switchFinanceTab('invoices',this)">🧾 Invoices</button>
+    <button class="fi-tab-btn btn btn-ghost btn-sm" onclick="switchFinanceTab('expenses',this)">💸 Expenses</button>
+    <button class="fi-tab-btn btn btn-ghost btn-sm" onclick="switchFinanceTab('pl',this)">📊 P&amp;L</button>
+  </div>
+
+  <!-- Invoices -->
+  <div id="fi-invoices-panel">
+    <div class="grid-stat" style="margin-bottom:16px">
+      <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="fi-revenue">–</div><div class="lbl">Revenue</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="fi-pending">–</div><div class="lbl">Pending</div></div></div>
+      <div class="stat-card"><div class="stat-icon blue">🧾</div><div class="stat-body"><div class="val" id="fi-total-inv">–</div><div class="lbl">Invoices</div></div></div>
+      <div class="stat-card"><div class="stat-icon red">⚠️</div><div class="stat-body"><div class="val" id="fi-overdue">–</div><div class="lbl">Overdue</div></div></div>
+    </div>
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">🧾</span> Invoices</div><button class="btn btn-ghost btn-sm" onclick="loadInvoices()">↻</button></div>
+        <div id="fi-invoice-list"><div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Invoice</div></div>
+        <div class="form-group"><label>Client Name</label><input id="fi-client" placeholder="Acme Corp"/></div>
+        <div class="form-group"><label>Client Email</label><input id="fi-client-email" placeholder="billing@acme.com"/></div>
+        <div class="form-group"><label>Subtotal ($)</label><input id="fi-subtotal" type="number" placeholder="2500"/></div>
+        <div class="form-group"><label>Tax Rate (%)</label><input id="fi-tax" type="number" placeholder="10"/></div>
+        <div class="form-group"><label>Due Date</label><input id="fi-due" type="date"/></div>
+        <div class="form-group"><label>Notes</label><input id="fi-notes" placeholder="Payment terms…"/></div>
+        <button class="btn btn-primary" onclick="createInvoice()">🧾 Create Invoice</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Expenses -->
+  <div id="fi-expenses-panel" style="display:none">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">💸</span> Expenses</div><button class="btn btn-ghost btn-sm" onclick="loadExpenses()">↻</button></div>
+        <div id="fi-expense-list"><div class="empty"><div class="icon">💸</div><p>No expenses yet.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Log Expense</div></div>
+        <div class="form-group"><label>Description</label><input id="fi-exp-desc" placeholder="SaaS subscription…"/></div>
+        <div class="form-group"><label>Amount ($)</label><input id="fi-exp-amount" type="number" placeholder="99"/></div>
+        <div class="form-group"><label>Category</label>
+          <select id="fi-exp-cat" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="software">Software</option><option value="marketing">Marketing</option>
+            <option value="payroll">Payroll</option><option value="office">Office</option>
+            <option value="travel">Travel</option><option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Date</label><input id="fi-exp-date" type="date"/></div>
+        <button class="btn btn-primary" onclick="logExpense()">💸 Log Expense</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- P&L -->
+  <div id="fi-pl-panel" style="display:none">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📊</span> Profit &amp; Loss Report</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadPL()">↻ Refresh</button>
+      </div>
+      <div id="fi-pl-body"><div class="empty"><p>Click Refresh to generate your P&amp;L report.</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Analytics ── -->
+<div id="tab-analytics-bi" class="tab-content">
+  <div class="page-header" style="border-left-color:#6366f1">
+    <div class="page-header-icon">📊</div>
+    <div><div class="page-header-title">Analytics &amp; Insights</div><div class="page-header-desc">Business intelligence dashboard — unified KPIs, AI recommendations, and trends across all modules.</div></div>
+    <span class="page-header-badge" style="color:#6366f1">Intelligence</span>
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="loadAnalyticsOverview()">↻ Refresh Overview</button>
+    <button class="btn btn-ghost" onclick="loadRecommendations()">💡 Get Recommendations</button>
+  </div>
+  <div class="grid-stat" id="analytics-stats" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon blue">👥</div><div class="stat-body"><div class="val" id="an-leads">–</div><div class="lbl">Total Leads</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="an-revenue">–</div><div class="lbl">Revenue</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📧</div><div class="stat-body"><div class="val" id="an-open-rate">–</div><div class="lbl">Email Open Rate</div></div></div>
+    <div class="stat-card"><div class="stat-icon pink">📱</div><div class="stat-body"><div class="val" id="an-posts">–</div><div class="lbl">Published Posts</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">💡</span> AI Recommendations</div></div>
+      <div id="an-recommendations"><div class="empty"><p>Click "Get Recommendations" to see AI-powered insights.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📈</span> Module Breakdown</div></div>
+      <div id="an-breakdown"><div class="empty"><p>Click "Refresh Overview" to load data.</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Workflow Builder ── -->
+<div id="tab-workflows" class="tab-content">
+  <div class="page-header" style="border-left-color:#f97316">
+    <div class="page-header-icon">⚙️</div>
+    <div><div class="page-header-title">Workflow Builder</div><div class="page-header-desc">No-code automation editor — create trigger → condition → action workflows that run automatically.</div></div>
+    <span class="page-header-badge" style="color:#f97316">Automation</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">⚙️</span> Workflows</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadWorkflows()">↻</button>
+      </div>
+      <div id="wf-list"><div class="empty"><div class="icon">⚙️</div><p>No workflows yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Workflow</div></div>
+      <div class="form-group"><label>Workflow Name</label><input id="wf-name" placeholder="Welcome new leads"/></div>
+      <div class="form-group"><label>Description</label><input id="wf-desc" placeholder="Auto-send welcome email when new lead added"/></div>
+      <div class="form-group"><label>Trigger</label>
+        <select id="wf-trigger" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="manual">Manual</option><option value="new_lead">New Lead Added</option>
+          <option value="email_opened">Email Opened</option><option value="deal_stage_change">Deal Stage Change</option>
+          <option value="invoice_paid">Invoice Paid</option><option value="schedule">Schedule</option>
+          <option value="webhook">Webhook</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Actions (one per line)</label>
+        <textarea id="wf-steps" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="send_email: Welcome email&#10;wait: 1 day&#10;create_task: Follow up call"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="createWorkflow()">⚙️ Create Workflow</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header"><div class="card-title"><span class="icon">📋</span> Recent Runs</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadWorkflowRuns()">↻</button>
+    </div>
+    <div id="wf-runs-list"><div class="empty"><p>No runs yet.</p></div></div>
+  </div>
+</div>
+
+<!-- ── Team Management ── -->
+<div id="tab-team" class="tab-content">
+  <div class="page-header" style="border-left-color:#0ea5e9">
+    <div class="page-header-icon">👥</div>
+    <div><div class="page-header-title">Team Management</div><div class="page-header-desc">Invite team members, assign roles, and manage access permissions across your AI Employee workspace.</div></div>
+    <span class="page-header-badge" style="color:#0ea5e9">Multi-User</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">👥</span> Team Members</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadTeamMembers()">↻</button>
+      </div>
+      <div id="team-members-list"><div class="empty"><div class="icon">👥</div><p>No team members yet. Invite someone below.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">✉️</span> Invite Member</div></div>
+      <div class="form-group"><label>Email Address</label><input id="team-email" placeholder="colleague@company.com"/></div>
+      <div class="form-group"><label>Role</label>
+        <select id="team-role" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="admin">Admin — Full access</option>
+          <option value="manager">Manager — Manage agents</option>
+          <option value="member" selected>Member — Read &amp; Write</option>
+          <option value="viewer">Viewer — Read only</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="inviteTeamMember()">✉️ Send Invitation</button>
+      <div id="team-invite-result" style="margin-top:10px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Customer Support ── -->
+<div id="tab-support-desk" class="tab-content">
+  <div class="page-header" style="border-left-color:#14b8a6">
+    <div class="page-header-icon">🎧</div>
+    <div><div class="page-header-title">Customer Support</div><div class="page-header-desc">24/7 helpdesk with smart ticket routing, AI reply suggestions, and a searchable knowledge base.</div></div>
+    <span class="page-header-badge" style="color:#14b8a6">Helpdesk</span>
+  </div>
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    <button class="sup-tab-btn btn btn-primary btn-sm active" onclick="switchSupportTab('tickets',this)">🎫 Tickets</button>
+    <button class="sup-tab-btn btn btn-ghost btn-sm" onclick="switchSupportTab('kb',this)">📚 Knowledge Base</button>
+  </div>
+
+  <!-- Tickets -->
+  <div id="sup-tickets-panel">
+    <div class="grid-stat" style="margin-bottom:16px">
+      <div class="stat-card"><div class="stat-icon red">🔴</div><div class="stat-body"><div class="val" id="sup-open">–</div><div class="lbl">Open</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow">🟡</div><div class="stat-body"><div class="val" id="sup-progress">–</div><div class="lbl">In Progress</div></div></div>
+      <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="sup-resolved">–</div><div class="lbl">Resolved</div></div></div>
+      <div class="stat-card"><div class="stat-icon blue">📚</div><div class="stat-body"><div class="val" id="sup-kb">–</div><div class="lbl">KB Articles</div></div></div>
+    </div>
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">🎫</span> Tickets</div><button class="btn btn-ghost btn-sm" onclick="loadTickets()">↻</button></div>
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <select id="sup-f-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadTickets()">
+            <option value="">All</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option>
+          </select>
+        </div>
+        <div id="sup-ticket-list"><div class="empty"><div class="icon">🎫</div><p>No tickets yet.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Ticket</div></div>
+        <div class="form-group"><label>Subject</label><input id="sup-subject" placeholder="Issue with billing…"/></div>
+        <div class="form-group"><label>Customer Email</label><input id="sup-cust-email" placeholder="customer@example.com"/></div>
+        <div class="form-group"><label>Customer Name</label><input id="sup-cust-name" placeholder="Jane Doe"/></div>
+        <div class="form-group"><label>Priority</label>
+          <select id="sup-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="low">Low</option><option value="medium" selected>Medium</option>
+            <option value="high">High</option><option value="urgent">Urgent</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Category</label>
+          <select id="sup-cat" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="general">General</option><option value="billing">Billing</option>
+            <option value="technical">Technical</option><option value="feature_request">Feature Request</option><option value="bug">Bug</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Description</label>
+          <textarea id="sup-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Describe the issue…"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="createTicket()">🎫 Submit Ticket</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Knowledge Base -->
+  <div id="sup-kb-panel" style="display:none">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">📚</span> KB Articles</div><button class="btn btn-ghost btn-sm" onclick="loadKBArticles()">↻</button></div>
+        <div id="sup-kb-list"><div class="empty"><div class="icon">📚</div><p>No articles yet.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Article</div></div>
+        <div class="form-group"><label>Title</label><input id="kb-title" placeholder="How to reset your password"/></div>
+        <div class="form-group"><label>Category</label>
+          <select id="kb-cat" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="general">General</option><option value="billing">Billing</option>
+            <option value="technical">Technical</option><option value="feature_request">Features</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Content</label>
+          <textarea id="kb-content" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Write the article content…"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="createKBArticle()">📚 Save Article</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Website Builder ── -->
+<div id="tab-website-builder" class="tab-content">
+  <div class="page-header" style="border-left-color:#3b82f6">
+    <div class="page-header-icon">🌐</div>
+    <div><div class="page-header-title">Website Builder</div><div class="page-header-desc">Generate complete landing page HTML from a business description using AI. Edit and export instantly.</div></div>
+    <span class="page-header-badge" style="color:#3b82f6">AI Builder</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">🌐</span> Generated Pages</div><button class="btn btn-ghost btn-sm" onclick="loadPages()">↻</button></div>
+      <div id="wb-pages-list"><div class="empty"><div class="icon">🌐</div><p>No pages yet. Generate one →</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">✨</span> Generate Page</div></div>
+      <div class="form-group"><label>Business Name</label><input id="wb-biz" placeholder="Acme SaaS"/></div>
+      <div class="form-group"><label>Industry</label><input id="wb-industry" placeholder="B2B Software"/></div>
+      <div class="form-group"><label>Page Type</label>
+        <select id="wb-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="landing">Landing Page</option><option value="sales">Sales Page</option>
+          <option value="portfolio">Portfolio</option><option value="product">Product Page</option>
+          <option value="coming_soon">Coming Soon</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Description</label>
+        <textarea id="wb-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="We help B2B companies automate their sales process…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="generateWebPage()">🌐 Generate Page</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Competitor Watch ── -->
+<div id="tab-competitors" class="tab-content">
+  <div class="page-header" style="border-left-color:#ef4444">
+    <div class="page-header-icon">🔍</div>
+    <div><div class="page-header-title">Competitor Watch</div><div class="page-header-desc">Track competitors, run AI analysis, and get counter-strategy recommendations.</div></div>
+    <span class="page-header-badge" style="color:#ef4444">Intelligence</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">🔍</span> Competitors</div><button class="btn btn-ghost btn-sm" onclick="loadCompetitors()">↻</button></div>
+      <div id="comp-list"><div class="empty"><div class="icon">🔍</div><p>No competitors tracked yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Competitor</div></div>
+      <div class="form-group"><label>Company Name</label><input id="comp-name" placeholder="Competitor Inc"/></div>
+      <div class="form-group"><label>Website</label><input id="comp-website" placeholder="https://competitor.com"/></div>
+      <div class="form-group"><label>Description</label>
+        <textarea id="comp-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="What they do and who they target…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="addCompetitor()">➕ Add &amp; Watch</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px;display:none" id="comp-analysis-card">
+    <div class="card-header"><div class="card-title"><span class="icon">🤖</span> AI Analysis</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('comp-analysis-card').style.display='none'">✕</button>
+    </div>
+    <div id="comp-analysis-body" style="white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
+  </div>
+</div>
+
+<!-- ── Personal Brand ── -->
+<div id="tab-brand" class="tab-content">
+  <div class="page-header" style="border-left-color:#a855f7">
+    <div class="page-header-icon">✨</div>
+    <div><div class="page-header-title">Personal Brand Agent</div><div class="page-header-desc">Build your thought leadership — AI content generation, topic ideas, and brand voice consistency.</div></div>
+    <span class="page-header-badge" style="color:#a855f7">Brand</span>
+  </div>
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    <button class="br-tab-btn btn btn-primary btn-sm active" onclick="switchBrandTab('generate',this)">✍️ Generate</button>
+    <button class="br-tab-btn btn btn-ghost btn-sm" onclick="switchBrandTab('profile',this)">👤 Profile</button>
+    <button class="br-tab-btn btn btn-ghost btn-sm" onclick="switchBrandTab('library',this)">📁 Library</button>
+  </div>
+
+  <div id="br-generate-panel">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">💡</span> Topic Ideas</div>
+          <button class="btn btn-ghost btn-sm" onclick="suggestBrandTopics()">✨ AI Suggest</button>
+        </div>
+        <div id="br-topics-list"><div class="empty"><p>Click "AI Suggest" to get 10 topic ideas based on your profile.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">✍️</span> Generate Content</div></div>
+        <div class="form-group"><label>Topic</label><input id="br-topic" placeholder="Why AI is transforming sales…"/></div>
+        <div class="form-group"><label>Content Type</label>
+          <select id="br-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="linkedin_post">LinkedIn Post</option><option value="twitter_thread">Twitter/X Thread</option>
+            <option value="newsletter">Newsletter Section</option><option value="blog_intro">Blog Intro</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="generateBrandContent()">✨ Generate</button>
+        <div id="br-generated" style="margin-top:12px;white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="br-profile-panel" style="display:none">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">👤</span> Brand Profile</div></div>
+      <div class="grid2">
+        <div>
+          <div class="form-group"><label>Your Name</label><input id="br-p-name" placeholder="Jane Smith"/></div>
+          <div class="form-group"><label>Title / Role</label><input id="br-p-title" placeholder="CEO & Founder"/></div>
+          <div class="form-group"><label>Industry</label><input id="br-p-industry" placeholder="B2B SaaS"/></div>
+        </div>
+        <div>
+          <div class="form-group"><label>Target Audience</label><input id="br-p-audience" placeholder="Sales leaders at mid-market companies"/></div>
+          <div class="form-group"><label>Tone</label>
+            <select id="br-p-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+              <option value="professional">Professional</option><option value="casual">Casual</option>
+              <option value="inspirational">Inspirational</option><option value="educational">Educational</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="saveBrandProfile()">💾 Save Profile</button>
+    </div>
+  </div>
+
+  <div id="br-library-panel" style="display:none">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📁</span> Content Library</div><button class="btn btn-ghost btn-sm" onclick="loadBrandContent()">↻</button></div>
+      <div id="br-content-list"><div class="empty"><div class="icon">📁</div><p>No content saved yet.</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Health Check ── -->
+<div id="tab-health" class="tab-content">
+  <div class="page-header" style="border-left-color:#f43f5e">
+    <div class="page-header-icon">❤️</div>
+    <div><div class="page-header-title">Business Health Check</div><div class="page-header-desc">One-click audit of your entire business — graded A to D with issues identified and fixes recommended.</div></div>
+    <span class="page-header-badge" style="color:#f43f5e">Audit</span>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="runHealthCheck()">❤️ Run Health Check</button>
+    <button class="btn btn-ghost" onclick="loadHealthHistory()">📅 History</button>
+  </div>
+  <div id="hc-report-card" class="card" style="display:none">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">❤️</span> Health Report</div>
+      <span id="hc-grade" style="font-size:2em;font-weight:900;color:var(--gold)"></span>
+    </div>
+    <div id="hc-report-body"></div>
+  </div>
+  <div id="hc-latest-msg" class="card">
+    <div class="card-header"><div class="card-title"><span class="icon">💡</span> Business Health</div></div>
+    <div class="empty"><div class="icon">❤️</div><p>Click "Run Health Check" to audit your business across all modules.</p></div>
+  </div>
+  <div id="hc-history" style="margin-top:16px"></div>
+</div>
+
+<!-- ── Export & Backup ── -->
+<div id="tab-export" class="tab-content">
+  <div class="page-header" style="border-left-color:#64748b">
+    <div class="page-header-icon">💾</div>
+    <div><div class="page-header-title">Export &amp; Backup</div><div class="page-header-desc">Export any module as JSON or CSV, create full ZIP backups of all your AI Employee data.</div></div>
+    <span class="page-header-badge" style="color:#64748b">Data</span>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="createBackup()">🗜️ Create Full Backup</button>
+    <button class="btn btn-ghost" onclick="loadExportModules()">↻ Refresh</button>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📦</span> Export Modules</div></div>
+      <p style="font-size:.84em;color:var(--text-muted);margin-bottom:12px">Click a module to export all its data as JSON.</p>
+      <div id="export-modules-list"><div class="empty"><p>Loading modules…</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">🗜️</span> Backups</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadBackupsList()">↻</button>
+      </div>
+      <div id="export-backups-list"><div class="empty"><div class="icon">🗜️</div><p>No backups yet. Create one to get started.</p></div></div>
     </div>
   </div>
 </div>
@@ -9969,6 +10645,766 @@ setInterval(() => {
   if (currentTab === 'competitors') { loadCompetitors(); loadCompetitorAlerts(); }
   if (currentTab === 'content-calendar') loadContentCalendar();
 }, 30000);
+// ══════════════════════════════════════════════════════════════════
+//  FEATURE MODULE JAVASCRIPT
+// ══════════════════════════════════════════════════════════════════
+
+// ── CRM ──────────────────────────────────────────────────────────
+async function loadCRM() {
+  try {
+    const [leads, stats] = await Promise.all([api('/api/crm/leads'), api('/api/crm/stats')]);
+    document.getElementById('crm-total').textContent = stats.total_leads || 0;
+    document.getElementById('crm-won').textContent = stats.by_stage?.won || 0;
+    document.getElementById('crm-pipeline-val').textContent = '$' + (stats.pipeline_value || 0).toLocaleString();
+    document.getElementById('crm-conv').textContent = (stats.conversion_rate || 0) + '%';
+    const el = document.getElementById('crm-leads-list');
+    if (!leads.length) { el.innerHTML = '<div class="empty"><div class="icon">🎯</div><p>No leads yet.</p></div>'; return; }
+    el.innerHTML = leads.map(l => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${l.name}</strong> <span style="font-size:.75em;color:var(--text-muted)">${l.company}</span>
+        <br><span style="font-size:.8em;color:var(--text-muted)">${l.email}</span>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px;margin-left:6px">${l.stage}</span>
+        <span style="font-size:.75em;color:var(--gold);margin-left:6px">Score: ${l.score}</span></div>
+      <div style="text-align:right">
+        <div style="font-size:.9em;font-weight:700;color:var(--green)">$${(l.value||0).toLocaleString()}</div>
+        <button class="btn btn-ghost btn-sm" onclick="deleteLead('${l.id}')" style="font-size:.7em;margin-top:4px">🗑</button>
+      </div></div>`).join('');
+  } catch(e) { console.error('CRM load error', e); }
+}
+async function addLead() {
+  const payload = {
+    name: document.getElementById('crm-name').value,
+    company: document.getElementById('crm-company').value,
+    email: document.getElementById('crm-email').value,
+    phone: document.getElementById('crm-phone').value,
+    value: parseFloat(document.getElementById('crm-value').value) || 0,
+    stage: document.getElementById('crm-stage').value,
+    notes: document.getElementById('crm-notes').value,
+  };
+  if (!payload.name) return showToast('Name is required', 'error');
+  await api('/api/crm/leads', 'POST', payload);
+  ['crm-name','crm-company','crm-email','crm-phone','crm-value','crm-notes'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  showToast('Lead added!');
+  loadCRM();
+}
+async function deleteLead(id) {
+  if (!confirm('Delete this lead?')) return;
+  await api(`/api/crm/leads/${id}`, 'DELETE');
+  showToast('Lead deleted');
+  loadCRM();
+}
+
+// ── Email Marketing ───────────────────────────────────────────────
+async function loadEmailCampaigns() {
+  try {
+    const [campaigns, stats] = await Promise.all([api('/api/email-mkt/campaigns'), api('/api/email-mkt/stats')]);
+    document.getElementById('em-campaigns').textContent = stats.total_campaigns || 0;
+    document.getElementById('em-sent').textContent = stats.total_sent || 0;
+    document.getElementById('em-open-rate').textContent = (stats.open_rate || 0) + '%';
+    document.getElementById('em-click-rate').textContent = (stats.click_rate || 0) + '%';
+    const el = document.getElementById('em-campaign-list');
+    if (!campaigns.length) { el.innerHTML = '<div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div>'; return; }
+    el.innerHTML = campaigns.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between"><strong>${c.name}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${c.status}</span></div>
+      <div style="font-size:.8em;color:var(--text-muted);margin-top:2px">${c.subject}</div>
+      <div style="display:flex;gap:10px;margin-top:6px;font-size:.8em">
+        <span>Sent: ${c.sent}</span><span>Opened: ${c.opened}</span><span>Clicked: ${c.clicked}</span>
+        ${c.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendCampaign('${c.id}')" style="font-size:.75em;padding:2px 8px">📤 Send</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Email load error', e); }
+}
+async function createEmailCampaign() {
+  const recipients = (document.getElementById('em-recipients').value || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const payload = {
+    name: document.getElementById('em-name').value,
+    subject: document.getElementById('em-subject').value,
+    body: document.getElementById('em-body').value,
+    recipients,
+  };
+  if (!payload.name) return showToast('Campaign name required', 'error');
+  await api('/api/email-mkt/campaigns', 'POST', payload);
+  ['em-name','em-subject','em-body','em-recipients'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Campaign created!');
+  loadEmailCampaigns();
+}
+async function sendCampaign(id) {
+  if (!confirm('Send this campaign now?')) return;
+  await api(`/api/email-mkt/campaigns/${id}/send`, 'POST', {});
+  showToast('Campaign sent!');
+  loadEmailCampaigns();
+}
+
+// ── Meetings ─────────────────────────────────────────────────────
+async function loadMeetings() {
+  try {
+    const [meetings, stats] = await Promise.all([api('/api/meetings/'), api('/api/meetings/stats')]);
+    document.getElementById('mt-total').textContent = stats.total || 0;
+    document.getElementById('mt-analyzed').textContent = stats.analyzed || 0;
+    document.getElementById('mt-pending').textContent = stats.pending || 0;
+    document.getElementById('mt-duration').textContent = stats.total_duration_mins || 0;
+    const el = document.getElementById('meetings-list');
+    if (!meetings.length) { el.innerHTML = '<div class="empty"><div class="icon">🎙️</div><p>No meetings yet.</p></div>'; return; }
+    el.innerHTML = meetings.map(m => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between"><strong>${m.title}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${m.status}</span></div>
+      <div style="font-size:.8em;color:var(--text-muted)">${m.date} · ${m.platform} · ${m.duration_mins}min</div>
+      ${m.summary?`<div style="font-size:.8em;margin-top:6px;color:var(--text)">${m.summary.substring(0,120)}…</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:6px">
+        ${m.status!=='analyzed'?`<button class="btn btn-ghost btn-sm" onclick="showMeetingAnalysis('${m.id}')" style="font-size:.75em">🤖 Show Analysis</button>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="deleteMeeting('${m.id}')" style="font-size:.75em">🗑</button>
+      </div></div>`).join('');
+  } catch(e) { console.error('Meetings load error', e); }
+}
+async function addMeeting() {
+  const transcript = document.getElementById('mt-transcript').value;
+  const payload = {
+    title: document.getElementById('mt-title').value,
+    platform: document.getElementById('mt-platform').value,
+    duration_mins: parseInt(document.getElementById('mt-duration').value) || 0,
+    transcript,
+  };
+  if (!payload.title) return showToast('Title required', 'error');
+  const meeting = await api('/api/meetings/', 'POST', payload);
+  showToast('Meeting added. Analyzing…');
+  const result = await api(`/api/meetings/${meeting.id}/analyze`, 'POST', {transcript});
+  document.getElementById('mt-result-card').style.display = '';
+  document.getElementById('mt-result-body').textContent = result.follow_up_email || result.summary || 'Analysis complete.';
+  ['mt-title','mt-transcript','mt-duration'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  loadMeetings();
+}
+async function showMeetingAnalysis(id) {
+  const data = await api(`/api/meetings/${id}/analyze`, 'POST', {});
+  document.getElementById('mt-result-card').style.display = '';
+  document.getElementById('mt-result-body').textContent = data.follow_up_email || data.summary || 'No analysis.';
+}
+async function deleteMeeting(id) {
+  await api(`/api/meetings/${id}`, 'DELETE');
+  showToast('Meeting deleted');
+  loadMeetings();
+}
+
+// ── Social Media ──────────────────────────────────────────────────
+async function loadSocialPosts() {
+  try {
+    const [posts, stats] = await Promise.all([api('/api/social/posts'), api('/api/social/stats')]);
+    document.getElementById('sm-total').textContent = stats.total_posts || 0;
+    document.getElementById('sm-published').textContent = stats.published || 0;
+    document.getElementById('sm-scheduled').textContent = stats.scheduled || 0;
+    document.getElementById('sm-likes').textContent = stats.total_likes || 0;
+    const el = document.getElementById('sm-posts-list');
+    if (!posts.length) { el.innerHTML = '<div class="empty"><div class="icon">📱</div><p>No posts yet.</p></div>'; return; }
+    el.innerHTML = posts.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div style="flex:1">
+          <div style="font-size:.85em">${p.content.substring(0,120)}${p.content.length>120?'…':''}</div>
+          <div style="display:flex;gap:8px;margin-top:4px;font-size:.75em;color:var(--text-muted)">
+            ${(p.platforms||[]).map(pl=>`<span>${pl}</span>`).join('')}
+            <span style="background:var(--surface3);padding:1px 6px;border-radius:4px">${p.status}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;margin-left:8px">
+          ${p.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="publishPost('${p.id}')" style="font-size:.7em">📤</button>`:''}
+          <button class="btn btn-ghost btn-sm" onclick="deletePost('${p.id}')" style="font-size:.7em">🗑</button>
+        </div>
+      </div></div>`).join('');
+  } catch(e) { console.error('Social load error', e); }
+}
+async function generateSocialPost() {
+  const topic = document.getElementById('sm-topic').value;
+  if (!topic) return showToast('Enter a topic first', 'error');
+  showToast('Generating post…');
+  const data = await api('/api/social/generate', 'POST', {
+    topic, platform: document.getElementById('sm-platform').value,
+    tone: document.getElementById('sm-tone').value,
+  });
+  document.getElementById('sm-content').value = data.content || '';
+}
+async function saveSocialPost() {
+  const content = document.getElementById('sm-content').value;
+  if (!content) return showToast('Content required', 'error');
+  await api('/api/social/posts', 'POST', {
+    content, platforms: [document.getElementById('sm-platform').value],
+  });
+  document.getElementById('sm-content').value = '';
+  document.getElementById('sm-topic').value = '';
+  showToast('Post saved!');
+  loadSocialPosts();
+}
+async function publishPost(id) {
+  await api(`/api/social/posts/${id}/publish`, 'POST', {});
+  showToast('Post published!');
+  loadSocialPosts();
+}
+async function deletePost(id) {
+  await api(`/api/social/posts/${id}`, 'DELETE');
+  showToast('Post deleted');
+  loadSocialPosts();
+}
+
+// ── CEO Briefing ──────────────────────────────────────────────────
+async function generateBriefing() {
+  showToast('Generating briefing…');
+  const data = await api('/api/briefing/generate', 'POST', {});
+  document.getElementById('briefing-content').textContent = data.content || 'Error generating briefing.';
+  document.getElementById('briefing-date').textContent = data.date || '';
+  document.getElementById('briefing-card').style.display = '';
+  document.getElementById('hc-latest-msg') && (document.getElementById('hc-latest-msg').style.display = 'none');
+}
+async function loadBriefingHistory() {
+  const data = await api('/api/briefing/history');
+  const el = document.getElementById('briefing-history');
+  if (!data.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📅 Past Briefings</div></div>' +
+    data.slice(-10).reverse().map(b =>
+      `<div style="padding:10px;border-bottom:1px solid var(--border)"><strong>${b.date}</strong>
+       <div style="font-size:.8em;color:var(--text-muted);margin-top:4px">${(b.content||'').substring(0,200)}…</div></div>`
+    ).join('') + '</div>';
+}
+
+// ── Finance / Invoicing ───────────────────────────────────────────
+function switchFinanceTab(tab, btn) {
+  document.querySelectorAll('.fi-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['invoices','expenses','pl'].forEach(t => {
+    const el = document.getElementById(`fi-${t}-panel`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'invoices') loadInvoices();
+  if (tab === 'expenses') loadExpenses();
+  if (tab === 'pl') loadPL();
+}
+async function loadInvoices() {
+  try {
+    const [invs, pl] = await Promise.all([api('/api/finance/invoices'), api('/api/finance/pl-report')]);
+    document.getElementById('fi-revenue').textContent = '$' + (pl.revenue||0).toLocaleString();
+    document.getElementById('fi-pending').textContent = '$' + (pl.pending_revenue||0).toLocaleString();
+    document.getElementById('fi-total-inv').textContent = pl.total_invoices || 0;
+    document.getElementById('fi-overdue').textContent = pl.overdue_invoices || 0;
+    const el = document.getElementById('fi-invoice-list');
+    if (!invs.length) { el.innerHTML = '<div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div>'; return; }
+    el.innerHTML = invs.map(i => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${i.number}</strong> — ${i.client}
+        <div style="font-size:.8em;color:var(--text-muted)">Due: ${i.due_date || 'N/A'}</div></div>
+      <div style="text-align:right">
+        <div style="font-weight:700;color:var(--green)">$${(i.total||0).toLocaleString()}</div>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${i.status}</span>
+        ${i.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendInvoice('${i.id}')" style="font-size:.7em;display:block;margin-top:4px">📤 Send</button>`:''}
+        ${i.status==='sent'?`<button class="btn btn-ghost btn-sm" onclick="markPaid('${i.id}')" style="font-size:.7em;display:block;margin-top:4px">✅ Paid</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Invoice load error', e); }
+}
+async function createInvoice() {
+  const payload = {
+    client: document.getElementById('fi-client').value,
+    client_email: document.getElementById('fi-client-email').value,
+    subtotal: parseFloat(document.getElementById('fi-subtotal').value) || 0,
+    tax_rate: parseFloat(document.getElementById('fi-tax').value) || 0,
+    due_date: document.getElementById('fi-due').value,
+    notes: document.getElementById('fi-notes').value,
+  };
+  if (!payload.client) return showToast('Client name required', 'error');
+  await api('/api/finance/invoices', 'POST', payload);
+  ['fi-client','fi-client-email','fi-subtotal','fi-tax','fi-due','fi-notes'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Invoice created!');
+  loadInvoices();
+}
+async function sendInvoice(id) {
+  await api(`/api/finance/invoices/${id}/send`, 'POST', {});
+  showToast('Invoice sent!');
+  loadInvoices();
+}
+async function markPaid(id) {
+  await api(`/api/finance/invoices/${id}/mark-paid`, 'POST', {});
+  showToast('Invoice marked as paid!');
+  loadInvoices();
+}
+async function loadExpenses() {
+  const expenses = await api('/api/finance/expenses');
+  const el = document.getElementById('fi-expense-list');
+  if (!expenses.length) { el.innerHTML = '<div class="empty"><div class="icon">💸</div><p>No expenses yet.</p></div>'; return; }
+  el.innerHTML = expenses.map(e => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+    <div><strong>${e.description}</strong><div style="font-size:.8em;color:var(--text-muted)">${e.category} · ${e.date}</div></div>
+    <div style="font-weight:700;color:#ef4444">-$${(e.amount||0).toLocaleString()}</div></div>`).join('');
+}
+async function logExpense() {
+  const payload = {
+    description: document.getElementById('fi-exp-desc').value,
+    amount: parseFloat(document.getElementById('fi-exp-amount').value) || 0,
+    category: document.getElementById('fi-exp-cat').value,
+    date: document.getElementById('fi-exp-date').value || new Date().toISOString().split('T')[0],
+  };
+  if (!payload.description) return showToast('Description required', 'error');
+  await api('/api/finance/expenses', 'POST', payload);
+  ['fi-exp-desc','fi-exp-amount'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Expense logged!');
+  loadExpenses();
+}
+async function loadPL() {
+  const pl = await api('/api/finance/pl-report');
+  const el = document.getElementById('fi-pl-body');
+  const rows = [
+    ['Revenue (Paid)', `$${(pl.revenue||0).toLocaleString()}`, 'var(--green)'],
+    ['Pending Revenue', `$${(pl.pending_revenue||0).toLocaleString()}`, 'var(--gold)'],
+    ['Total Expenses', `-$${(pl.total_expenses||0).toLocaleString()}`, '#ef4444'],
+    ['Gross Profit', `$${(pl.gross_profit||0).toLocaleString()}`, pl.gross_profit>=0?'var(--green)':'#ef4444'],
+    ['Profit Margin', `${pl.profit_margin||0}%`, 'var(--text-muted)'],
+  ];
+  el.innerHTML = `<div style="display:grid;gap:8px">${rows.map(([label,val,color])=>
+    `<div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface2);border-radius:6px">
+       <span>${label}</span><strong style="color:${color}">${val}</strong></div>`
+  ).join('')}
+  ${pl.expenses_by_category && Object.keys(pl.expenses_by_category).length?
+    `<div style="margin-top:8px"><strong style="font-size:.9em">Expenses by Category</strong>
+     ${Object.entries(pl.expenses_by_category).map(([k,v])=>
+       `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:.85em">
+         <span>${k}</span><span>$${(v||0).toLocaleString()}</span></div>`
+     ).join('')}</div>`:''}</div>`;
+}
+
+// ── Analytics ─────────────────────────────────────────────────────
+async function loadAnalyticsOverview() {
+  const data = await api('/api/analytics/overview');
+  document.getElementById('an-leads').textContent = data.crm?.total_leads || 0;
+  document.getElementById('an-revenue').textContent = '$' + (data.finance?.revenue||0).toLocaleString();
+  document.getElementById('an-open-rate').textContent = (data.email?.open_rate||0) + '%';
+  document.getElementById('an-posts').textContent = data.social?.posts || 0;
+  const el = document.getElementById('an-breakdown');
+  el.innerHTML = `<div style="display:grid;gap:8px;font-size:.88em">
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>🎯 CRM</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Pipeline: <strong>$${(data.crm?.pipeline_value||0).toLocaleString()}</strong></div>
+        <div>Won Deals: <strong>${data.crm?.won_deals||0}</strong></div>
+        <div>Conversion: <strong>${data.crm?.conversion_rate||0}%</strong></div>
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>📧 Email</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Campaigns: <strong>${data.email?.campaigns||0}</strong></div>
+        <div>Sent: <strong>${data.email?.sent||0}</strong></div>
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>🎙️ Meetings</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Total: <strong>${data.meetings?.total||0}</strong></div>
+        <div>Analyzed: <strong>${data.meetings?.analyzed||0}</strong></div>
+      </div>
+    </div></div>`;
+}
+async function loadRecommendations() {
+  const data = await api('/api/analytics/recommendations');
+  const recs = data.recommendations || [];
+  const el = document.getElementById('an-recommendations');
+  if (!recs.length) { el.innerHTML = '<div class="empty"><p>No recommendations at this time.</p></div>'; return; }
+  const colors = {high:'#ef4444', medium:'#f59e0b', low:'#10b981', critical:'#ef4444'};
+  el.innerHTML = recs.map(r => `<div style="padding:10px;border-left:3px solid ${colors[r.priority]||'var(--border)'};margin-bottom:8px;background:var(--surface2);border-radius:0 6px 6px 0">
+    <div style="font-size:.75em;color:${colors[r.priority]||'var(--text-muted)'};text-transform:uppercase;font-weight:700">${r.type} · ${r.priority}</div>
+    <div style="font-size:.88em;margin-top:4px">${r.text}</div>
+    ${r.action?`<div style="font-size:.78em;color:var(--text-muted);margin-top:4px">→ ${r.action}</div>`:''}</div>`
+  ).join('');
+}
+
+// ── Workflows ─────────────────────────────────────────────────────
+async function loadWorkflows() {
+  const wfs = await api('/api/workflows/');
+  const el = document.getElementById('wf-list');
+  if (!wfs.length) { el.innerHTML = '<div class="empty"><div class="icon">⚙️</div><p>No workflows yet.</p></div>'; return; }
+  el.innerHTML = wfs.map(w => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${w.name}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${w.description||''} · Trigger: ${w.trigger?.type||w.trigger}</div>
+      <div style="font-size:.78em;color:var(--text-muted)">Steps: ${(w.steps||[]).length} · Runs: ${w.runs||0}</div>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="runWorkflow('${w.id}')" style="font-size:.75em">▶ Run</button>
+      <button class="btn btn-ghost btn-sm" onclick="deleteWorkflow('${w.id}')" style="font-size:.75em">🗑</button>
+    </div></div>`).join('');
+}
+async function createWorkflow() {
+  const stepsRaw = document.getElementById('wf-steps').value;
+  const steps = stepsRaw.split('\n').map(l=>l.trim()).filter(Boolean).map(l => {
+    const [action, ...desc] = l.split(':');
+    return {type: action.trim(), config: desc.join(':').trim()};
+  });
+  const payload = {
+    name: document.getElementById('wf-name').value,
+    description: document.getElementById('wf-desc').value,
+    trigger: {type: document.getElementById('wf-trigger').value},
+    steps,
+  };
+  if (!payload.name) return showToast('Workflow name required', 'error');
+  await api('/api/workflows/', 'POST', payload);
+  ['wf-name','wf-desc','wf-steps'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Workflow created!');
+  loadWorkflows();
+}
+async function runWorkflow(id) {
+  await api(`/api/workflows/${id}/run`, 'POST', {});
+  showToast('Workflow executed!');
+  loadWorkflows();
+  loadWorkflowRuns();
+}
+async function deleteWorkflow(id) {
+  await api(`/api/workflows/${id}`, 'DELETE');
+  showToast('Workflow deleted');
+  loadWorkflows();
+}
+async function loadWorkflowRuns() {
+  const runs = await api('/api/workflows/runs');
+  const el = document.getElementById('wf-runs-list');
+  if (!runs.length) { el.innerHTML = '<div class="empty"><p>No runs yet.</p></div>'; return; }
+  el.innerHTML = runs.slice(-10).reverse().map(r => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:.85em">
+    <div><strong>${r.workflow_name}</strong> <span style="color:var(--text-muted)">· ${r.trigger}</span></div>
+    <div><span style="color:var(--green)">${r.status}</span> <span style="color:var(--text-muted);font-size:.8em">${r.started_at}</span></div>
+  </div>`).join('');
+}
+
+// ── Team ──────────────────────────────────────────────────────────
+async function loadTeamMembers() {
+  const members = await api('/api/team/members');
+  const el = document.getElementById('team-members-list');
+  if (!members.length) { el.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No members yet. Invite someone!</p></div>'; return; }
+  el.innerHTML = members.map(m => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${m.name||m.email}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${m.email}</div></div>
+    <div style="text-align:right">
+      <span style="font-size:.78em;background:var(--surface3);padding:2px 8px;border-radius:4px">${m.role}</span>
+      <span style="font-size:.75em;color:var(--text-muted);display:block;margin-top:2px">${m.status}</span>
+    </div></div>`).join('');
+}
+async function inviteTeamMember() {
+  const email = document.getElementById('team-email').value;
+  const role = document.getElementById('team-role').value;
+  if (!email) return showToast('Email required', 'error');
+  const data = await api('/api/team/members/invite', 'POST', {email, role});
+  if (data.error) return showToast(data.error, 'error');
+  document.getElementById('team-invite-result').innerHTML =
+    `<div style="padding:10px;background:var(--surface2);border-radius:6px;font-size:.85em">
+     ✅ Invitation sent! Share this token: <code style="color:var(--gold)">${data.token}</code></div>`;
+  document.getElementById('team-email').value = '';
+  loadTeamMembers();
+}
+
+// ── Support ───────────────────────────────────────────────────────
+function switchSupportTab(tab, btn) {
+  document.querySelectorAll('.sup-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('sup-tickets-panel').style.display = tab === 'tickets' ? '' : 'none';
+  document.getElementById('sup-kb-panel').style.display = tab === 'kb' ? '' : 'none';
+  if (tab === 'tickets') loadTickets();
+  if (tab === 'kb') loadKBArticles();
+}
+async function loadTickets() {
+  try {
+    const [tickets, stats] = await Promise.all([
+      api('/api/support/tickets' + (document.getElementById('sup-f-status')?.value ? '?status=' + document.getElementById('sup-f-status').value : '')),
+      api('/api/support/stats')
+    ]);
+    document.getElementById('sup-open').textContent = stats.open || 0;
+    document.getElementById('sup-progress').textContent = stats.in_progress || 0;
+    document.getElementById('sup-resolved').textContent = stats.resolved || 0;
+    document.getElementById('sup-kb').textContent = stats.kb_articles || 0;
+    const el = document.getElementById('sup-ticket-list');
+    if (!tickets.length) { el.innerHTML = '<div class="empty"><div class="icon">🎫</div><p>No tickets.</p></div>'; return; }
+    const prioColors = {urgent:'#ef4444',high:'#f59e0b',medium:'#6366f1',low:'#10b981'};
+    el.innerHTML = tickets.map(t => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between">
+        <strong>${t.number}: ${t.subject}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${t.status}</span>
+      </div>
+      <div style="font-size:.8em;color:var(--text-muted)">${t.customer_name||''} · ${t.customer_email||''}</div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <span style="font-size:.75em;color:${prioColors[t.priority]||'var(--text-muted)'}">${t.priority}</span>
+        <span style="font-size:.75em;color:var(--text-muted)">${t.category}</span>
+        <button class="btn btn-ghost btn-sm" onclick="aiSuggestReply('${t.id}')" style="font-size:.7em">🤖 AI Reply</button>
+        ${t.status!=='resolved'?`<button class="btn btn-ghost btn-sm" onclick="resolveTicket('${t.id}')" style="font-size:.7em">✅ Resolve</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Support load error', e); }
+}
+async function createTicket() {
+  const payload = {
+    subject: document.getElementById('sup-subject').value,
+    customer_email: document.getElementById('sup-cust-email').value,
+    customer_name: document.getElementById('sup-cust-name').value,
+    priority: document.getElementById('sup-priority').value,
+    category: document.getElementById('sup-cat').value,
+    description: document.getElementById('sup-desc').value,
+  };
+  if (!payload.subject) return showToast('Subject required', 'error');
+  await api('/api/support/tickets', 'POST', payload);
+  ['sup-subject','sup-cust-email','sup-cust-name','sup-desc'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Ticket created!');
+  loadTickets();
+}
+async function aiSuggestReply(id) {
+  showToast('Generating AI reply…');
+  const data = await api(`/api/support/tickets/${id}/ai-suggest`, 'POST', {});
+  alert('AI Suggested Reply:\n\n' + (data.suggestion || 'No suggestion.'));
+}
+async function resolveTicket(id) {
+  await api(`/api/support/tickets/${id}`, 'PATCH', {status: 'resolved'});
+  showToast('Ticket resolved!');
+  loadTickets();
+}
+async function loadKBArticles() {
+  const articles = await api('/api/support/kb');
+  const el = document.getElementById('sup-kb-list');
+  if (!articles.length) { el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>No articles yet.</p></div>'; return; }
+  el.innerHTML = articles.map(a => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <strong>${a.title}</strong>
+    <div style="font-size:.8em;color:var(--text-muted)">${a.category} · Views: ${a.views}</div>
+    <div style="font-size:.82em;margin-top:4px">${a.content.substring(0,120)}…</div>
+  </div>`).join('');
+}
+async function createKBArticle() {
+  const payload = {
+    title: document.getElementById('kb-title').value,
+    content: document.getElementById('kb-content').value,
+    category: document.getElementById('kb-cat').value,
+  };
+  if (!payload.title) return showToast('Title required', 'error');
+  await api('/api/support/kb', 'POST', payload);
+  ['kb-title','kb-content'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Article saved!');
+  loadKBArticles();
+}
+
+// ── Website Builder ───────────────────────────────────────────────
+async function loadPages() {
+  const pages = await api('/api/website-builder/pages');
+  const el = document.getElementById('wb-pages-list');
+  if (!pages.length) { el.innerHTML = '<div class="empty"><div class="icon">🌐</div><p>No pages yet.</p></div>'; return; }
+  el.innerHTML = pages.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${p.name}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${p.type} · ${p.business_name}</div></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="previewPage('${p.id}')" style="font-size:.75em">👁 Preview</button>
+      <button class="btn btn-ghost btn-sm" onclick="deletePage('${p.id}')" style="font-size:.75em">🗑</button>
+    </div></div>`).join('');
+}
+async function generateWebPage() {
+  const payload = {
+    business_name: document.getElementById('wb-biz').value,
+    industry: document.getElementById('wb-industry').value,
+    page_type: document.getElementById('wb-type').value,
+    description: document.getElementById('wb-desc').value,
+  };
+  if (!payload.business_name) return showToast('Business name required', 'error');
+  showToast('Generating page with AI…');
+  await api('/api/website-builder/generate', 'POST', payload);
+  showToast('Page generated!');
+  loadPages();
+}
+async function previewPage(id) {
+  const page = await api(`/api/website-builder/pages/${id}`);
+  const w = window.open('', '_blank');
+  w.document.write(page.html_content || '<p>No content.</p>');
+}
+async function deletePage(id) {
+  await api(`/api/website-builder/pages/${id}`, 'DELETE');
+  showToast('Page deleted');
+  loadPages();
+}
+
+// ── Competitors ───────────────────────────────────────────────────
+async function loadCompetitors() {
+  const comps = await api('/api/competitors/');
+  const el = document.getElementById('comp-list');
+  if (!comps.length) { el.innerHTML = '<div class="empty"><div class="icon">🔍</div><p>No competitors tracked yet.</p></div>'; return; }
+  el.innerHTML = comps.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${c.name}</strong>
+        ${c.website?`<a href="${c.website}" target="_blank" style="font-size:.78em;color:var(--accent);margin-left:8px">${c.website}</a>`:''}
+        <div style="font-size:.82em;color:var(--text-muted);margin-top:2px">${c.description||''}</div>
+        ${c.last_checked?`<div style="font-size:.75em;color:var(--text-muted)">Last analyzed: ${c.last_checked}</div>`:''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="analyzeCompetitor('${c.id}')" style="font-size:.75em">🤖 Analyze</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteCompetitor('${c.id}')" style="font-size:.75em">🗑</button>
+      </div>
+    </div></div>`).join('');
+}
+async function addCompetitor() {
+  const payload = {
+    name: document.getElementById('comp-name').value,
+    website: document.getElementById('comp-website').value,
+    description: document.getElementById('comp-desc').value,
+  };
+  if (!payload.name) return showToast('Name required', 'error');
+  await api('/api/competitors/', 'POST', payload);
+  ['comp-name','comp-website','comp-desc'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Competitor added!');
+  loadCompetitors();
+}
+async function analyzeCompetitor(id) {
+  showToast('Analyzing competitor with AI…');
+  const data = await api(`/api/competitors/${id}/analyze`, 'POST', {});
+  document.getElementById('comp-analysis-card').style.display = '';
+  document.getElementById('comp-analysis-body').textContent = data.analysis || 'No analysis.';
+  loadCompetitors();
+}
+async function deleteCompetitor(id) {
+  await api(`/api/competitors/${id}`, 'DELETE');
+  showToast('Competitor removed');
+  loadCompetitors();
+}
+
+// ── Personal Brand ────────────────────────────────────────────────
+function switchBrandTab(tab, btn) {
+  document.querySelectorAll('.br-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['generate','profile','library'].forEach(t => {
+    const el = document.getElementById(`br-${t}-panel`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'library') loadBrandContent();
+}
+async function generateBrandContent() {
+  const topic = document.getElementById('br-topic').value;
+  if (!topic) return showToast('Topic required', 'error');
+  showToast('Generating content…');
+  const data = await api('/api/brand/generate-content', 'POST', {
+    topic, content_type: document.getElementById('br-type').value,
+  });
+  document.getElementById('br-generated').textContent = data.content || '';
+}
+async function suggestBrandTopics() {
+  showToast('Generating topic ideas…');
+  const data = await api('/api/brand/topics', 'POST', {});
+  const el = document.getElementById('br-topics-list');
+  el.innerHTML = (data.topics||[]).map((t,i)=>
+    `<div style="padding:6px;border-bottom:1px solid var(--border);font-size:.85em;cursor:pointer"
+      onclick="document.getElementById('br-topic').value='${t.replace(/'/g,"\\'")}'">${i+1}. ${t}</div>`
+  ).join('');
+}
+async function saveBrandProfile() {
+  const payload = {
+    name: document.getElementById('br-p-name').value,
+    title: document.getElementById('br-p-title').value,
+    industry: document.getElementById('br-p-industry').value,
+    target_audience: document.getElementById('br-p-audience').value,
+    tone: document.getElementById('br-p-tone').value,
+  };
+  await api('/api/brand/profile', 'POST', payload);
+  showToast('Profile saved!');
+}
+async function loadBrandContent() {
+  const pieces = await api('/api/brand/content');
+  const el = document.getElementById('br-content-list');
+  if (!pieces.length) { el.innerHTML = '<div class="empty"><div class="icon">📁</div><p>No content saved yet.</p></div>'; return; }
+  el.innerHTML = pieces.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between">
+      <span style="font-size:.78em;background:var(--surface3);padding:2px 6px;border-radius:4px">${p.type}</span>
+      <span style="font-size:.75em;color:var(--text-muted)">${p.created_at?.split('T')[0]||''}</span>
+    </div>
+    <div style="font-size:.85em;margin-top:6px"><strong>${p.topic}</strong></div>
+    <div style="font-size:.82em;color:var(--text-muted);margin-top:4px">${p.content.substring(0,150)}…</div>
+    <button class="btn btn-ghost btn-sm" onclick="deleteBrandContent('${p.id}')" style="font-size:.7em;margin-top:6px">🗑 Delete</button>
+  </div>`).join('');
+}
+async function deleteBrandContent(id) {
+  await api(`/api/brand/content/${id}`, 'DELETE');
+  showToast('Content deleted');
+  loadBrandContent();
+}
+
+// ── Health Check ──────────────────────────────────────────────────
+async function runHealthCheck() {
+  showToast('Running health check…');
+  const data = await api('/api/health-check/run', 'POST', {});
+  document.getElementById('hc-report-card').style.display = '';
+  document.getElementById('hc-latest-msg').style.display = 'none';
+  const gradeColors = {A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'};
+  document.getElementById('hc-grade').textContent = data.grade;
+  document.getElementById('hc-grade').style.color = gradeColors[data.grade]||'var(--text)';
+  const el = document.getElementById('hc-report-body');
+  el.innerHTML = `<div style="margin-bottom:16px">
+    <div style="font-size:.9em;font-weight:700;margin-bottom:8px">Overall: ${data.overall_score}/100 (Grade ${data.grade})</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${Object.entries(data.scores||{}).map(([k,v])=>
+      `<div style="padding:6px 12px;background:var(--surface2);border-radius:6px;font-size:.82em">${k}: <strong>${v}</strong></div>`
+    ).join('')}</div></div>
+  ${data.issues?.length?`<div style="margin-bottom:16px"><strong style="font-size:.9em">⚠️ Issues Found</strong>
+    ${data.issues.map(i=>`<div style="padding:8px;margin-top:6px;border-left:3px solid ${i.severity==='critical'?'#ef4444':'#f59e0b'};background:var(--surface2);border-radius:0 6px 6px 0;font-size:.84em">
+      <div><strong>${i.area}:</strong> ${i.issue}</div>
+      <div style="color:var(--text-muted);margin-top:2px">→ ${i.suggestion}</div></div>`).join('')}</div>`:''}
+  ${data.strengths?.length?`<div><strong style="font-size:.9em">✅ Strengths</strong>
+    ${data.strengths.map(s=>`<div style="padding:6px 0;font-size:.84em;color:var(--green)">✓ ${s}</div>`).join('')}</div>`:''}`;
+}
+async function loadHealthHistory() {
+  const reports = await api('/api/health-check/history');
+  const el = document.getElementById('hc-history');
+  if (!reports.length) { el.innerHTML = ''; return; }
+  const colors = {A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'};
+  el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📅 Health History</div></div>' +
+    reports.slice(-12).reverse().map(r=>
+      `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+        <div><strong>${r.date}</strong> <span style="font-size:.82em;color:var(--text-muted)">${r.overall_score}/100</span></div>
+        <span style="font-size:1.2em;font-weight:900;color:${colors[r.grade]||'var(--text)'}">${r.grade}</span>
+      </div>`
+    ).join('') + '</div>';
+}
+
+// ── Export & Backup ───────────────────────────────────────────────
+async function loadExportModules() {
+  const modules = await api('/api/export/modules');
+  const el = document.getElementById('export-modules-list');
+  el.innerHTML = modules.map(m => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${m.key}</strong>
+      <span style="font-size:.75em;color:var(--text-muted);margin-left:8px">${m.exists?(m.size_bytes/1024).toFixed(1)+'KB':'no data'}</span></div>
+    <div style="display:flex;gap:6px">
+      ${m.exists?`<a href="/api/export/json/${m.key}" download class="btn btn-ghost btn-sm" style="font-size:.75em">⬇ JSON</a>`:'<span style="font-size:.75em;color:var(--text-muted)">no data</span>'}
+    </div></div>`).join('');
+}
+async function createBackup() {
+  showToast('Creating backup…');
+  const data = await api('/api/export/backup', 'POST', {});
+  showToast(`Backup created: ${data.backup_file} (${(data.size_bytes/1024).toFixed(0)}KB)`);
+  loadBackupsList();
+}
+async function loadBackupsList() {
+  const backups = await api('/api/export/backups');
+  const el = document.getElementById('export-backups-list');
+  if (!backups.length) { el.innerHTML = '<div class="empty"><div class="icon">🗜️</div><p>No backups yet.</p></div>'; return; }
+  el.innerHTML = backups.map(b => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><div style="font-size:.85em">${b.name}</div>
+      <div style="font-size:.75em;color:var(--text-muted)">${(b.size_bytes/1024).toFixed(0)}KB · ${b.created_at}</div></div>
+    <a href="/api/export/download-backup/${b.name}" download class="btn btn-ghost btn-sm" style="font-size:.75em">⬇ Download</a>
+  </div>`).join('');
+}
+
+// ── Auto-load on tab switch (extend existing switchTab) ───────────
+const _origSwitchTab = switchTab;
+function switchTab(tab, btn) {
+  _origSwitchTab(tab, btn);
+  const loaders = {
+    'crm': loadCRM,
+    'email-mkt': loadEmailCampaigns,
+    'meetings': loadMeetings,
+    'social': loadSocialPosts,
+    'briefing': () => api('/api/briefing/latest').then(d => {
+      if (d.content) { document.getElementById('briefing-content').textContent = d.content; document.getElementById('briefing-date').textContent = d.date||''; }
+    }),
+    'invoicing': loadInvoices,
+    'analytics-bi': () => { loadAnalyticsOverview(); loadRecommendations(); },
+    'workflows': () => { loadWorkflows(); loadWorkflowRuns(); },
+    'team': loadTeamMembers,
+    'support-desk': loadTickets,
+    'website-builder': loadPages,
+    'competitors': loadCompetitors,
+    'brand': () => api('/api/brand/profile').then(p => {
+      if (p.name) { document.getElementById('br-p-name').value=p.name||''; document.getElementById('br-p-title').value=p.title||''; document.getElementById('br-p-industry').value=p.industry||''; document.getElementById('br-p-audience').value=p.target_audience||''; }
+    }),
+    'health': () => api('/api/health-check/latest').then(d => {
+      if (d.grade) { document.getElementById('hc-report-card').style.display=''; document.getElementById('hc-latest-msg').style.display='none'; runHealthCheck && null; }
+    }),
+    'export': () => { loadExportModules(); loadBackupsList(); },
+  };
+  if (loaders[tab]) { try { loaders[tab](); } catch(e) {} }
+}
+</script>
+</body>
+</html>"""
 
 // ═══════════════════════════════════════════════════════════════════
 // CRM
