@@ -415,9 +415,6 @@ AGENTS_BY_MODE = {
     "content-calendar",
     # New feature agents (Power mode)
     "crm-pipeline",
-    "email-marketing",
-    "meeting-intelligence",
-    "ceo-briefing",
     "invoicing",
     "analytics-bi",
     "workflow-builder",
@@ -12392,6 +12389,764 @@ window.switchTab = function(tab, btn) {
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(loadCEOBriefing, 1500);
 });
+
+// ══════════════════════════════════════════════════════════════════
+//  FEATURE MODULE JAVASCRIPT
+// ══════════════════════════════════════════════════════════════════
+
+// ── CRM ──────────────────────────────────────────────────────────
+async function loadCRM() {
+  try {
+    const [leads, stats] = await Promise.all([api('/api/crm/leads'), api('/api/crm/stats')]);
+    document.getElementById('crm-total').textContent = stats.total_leads || 0;
+    document.getElementById('crm-won').textContent = stats.by_stage?.won || 0;
+    document.getElementById('crm-pipeline-val').textContent = '$' + (stats.pipeline_value || 0).toLocaleString();
+    document.getElementById('crm-conv').textContent = (stats.conversion_rate || 0) + '%';
+    const el = document.getElementById('crm-leads-list');
+    if (!leads.length) { el.innerHTML = '<div class="empty"><div class="icon">🎯</div><p>No leads yet.</p></div>'; return; }
+    el.innerHTML = leads.map(l => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${l.name}</strong> <span style="font-size:.75em;color:var(--text-muted)">${l.company}</span>
+        <br><span style="font-size:.8em;color:var(--text-muted)">${l.email}</span>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px;margin-left:6px">${l.stage}</span>
+        <span style="font-size:.75em;color:var(--gold);margin-left:6px">Score: ${l.score}</span></div>
+      <div style="text-align:right">
+        <div style="font-size:.9em;font-weight:700;color:var(--green)">$${(l.value||0).toLocaleString()}</div>
+        <button class="btn btn-ghost btn-sm" onclick="deleteLead('${l.id}')" style="font-size:.7em;margin-top:4px">🗑</button>
+      </div></div>`).join('');
+  } catch(e) { console.error('CRM load error', e); }
+}
+async function addLead() {
+  const payload = {
+    name: document.getElementById('crm-name').value,
+    company: document.getElementById('crm-company').value,
+    email: document.getElementById('crm-email').value,
+    phone: document.getElementById('crm-phone').value,
+    value: parseFloat(document.getElementById('crm-value').value) || 0,
+    stage: document.getElementById('crm-stage').value,
+    notes: document.getElementById('crm-notes').value,
+  };
+  if (!payload.name) return showToast('Name is required', 'error');
+  await api('/api/crm/leads', 'POST', payload);
+  ['crm-name','crm-company','crm-email','crm-phone','crm-value','crm-notes'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  showToast('Lead added!');
+  loadCRM();
+}
+async function deleteLead(id) {
+  if (!confirm('Delete this lead?')) return;
+  await api(`/api/crm/leads/${id}`, 'DELETE');
+  showToast('Lead deleted');
+  loadCRM();
+}
+
+// ── Email Marketing ───────────────────────────────────────────────
+async function loadEmailCampaigns() {
+  try {
+    const [campaigns, stats] = await Promise.all([api('/api/email-mkt/campaigns'), api('/api/email-mkt/stats')]);
+    document.getElementById('em-campaigns').textContent = stats.total_campaigns || 0;
+    document.getElementById('em-sent').textContent = stats.total_sent || 0;
+    document.getElementById('em-open-rate').textContent = (stats.open_rate || 0) + '%';
+    document.getElementById('em-click-rate').textContent = (stats.click_rate || 0) + '%';
+    const el = document.getElementById('em-campaign-list');
+    if (!campaigns.length) { el.innerHTML = '<div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div>'; return; }
+    el.innerHTML = campaigns.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between"><strong>${c.name}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${c.status}</span></div>
+      <div style="font-size:.8em;color:var(--text-muted);margin-top:2px">${c.subject}</div>
+      <div style="display:flex;gap:10px;margin-top:6px;font-size:.8em">
+        <span>Sent: ${c.sent}</span><span>Opened: ${c.opened}</span><span>Clicked: ${c.clicked}</span>
+        ${c.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendCampaign('${c.id}')" style="font-size:.75em;padding:2px 8px">📤 Send</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Email load error', e); }
+}
+async function createEmailCampaign() {
+  const recipients = (document.getElementById('em-recipients').value || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const payload = {
+    name: document.getElementById('em-name').value,
+    subject: document.getElementById('em-subject').value,
+    body: document.getElementById('em-body').value,
+    recipients,
+  };
+  if (!payload.name) return showToast('Campaign name required', 'error');
+  await api('/api/email-mkt/campaigns', 'POST', payload);
+  ['em-name','em-subject','em-body','em-recipients'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Campaign created!');
+  loadEmailCampaigns();
+}
+async function sendCampaign(id) {
+  if (!confirm('Send this campaign now?')) return;
+  await api(`/api/email-mkt/campaigns/${id}/send`, 'POST', {});
+  showToast('Campaign sent!');
+  loadEmailCampaigns();
+}
+
+// ── Meetings ─────────────────────────────────────────────────────
+async function loadMeetings() {
+  try {
+    const [meetings, stats] = await Promise.all([api('/api/meetings/'), api('/api/meetings/stats')]);
+    document.getElementById('mt-total').textContent = stats.total || 0;
+    document.getElementById('mt-analyzed').textContent = stats.analyzed || 0;
+    document.getElementById('mt-pending').textContent = stats.pending || 0;
+    document.getElementById('mt-duration').textContent = stats.total_duration_mins || 0;
+    const el = document.getElementById('meetings-list');
+    if (!meetings.length) { el.innerHTML = '<div class="empty"><div class="icon">🎙️</div><p>No meetings yet.</p></div>'; return; }
+    el.innerHTML = meetings.map(m => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between"><strong>${m.title}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${m.status}</span></div>
+      <div style="font-size:.8em;color:var(--text-muted)">${m.date} · ${m.platform} · ${m.duration_mins}min</div>
+      ${m.summary?`<div style="font-size:.8em;margin-top:6px;color:var(--text)">${m.summary.substring(0,120)}…</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:6px">
+        ${m.status!=='analyzed'?`<button class="btn btn-ghost btn-sm" onclick="showMeetingAnalysis('${m.id}')" style="font-size:.75em">🤖 Show Analysis</button>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="deleteMeeting('${m.id}')" style="font-size:.75em">🗑</button>
+      </div></div>`).join('');
+  } catch(e) { console.error('Meetings load error', e); }
+}
+async function addMeeting() {
+  const transcript = document.getElementById('mt-transcript').value;
+  const payload = {
+    title: document.getElementById('mt-title').value,
+    platform: document.getElementById('mt-platform').value,
+    duration_mins: parseInt(document.getElementById('mt-duration').value) || 0,
+    transcript,
+  };
+  if (!payload.title) return showToast('Title required', 'error');
+  const meeting = await api('/api/meetings/', 'POST', payload);
+  showToast('Meeting added. Analyzing…');
+  const result = await api(`/api/meetings/${meeting.id}/analyze`, 'POST', {transcript});
+  document.getElementById('mt-result-card').style.display = '';
+  document.getElementById('mt-result-body').textContent = result.follow_up_email || result.summary || 'Analysis complete.';
+  ['mt-title','mt-transcript','mt-duration'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  loadMeetings();
+}
+async function showMeetingAnalysis(id) {
+  const data = await api(`/api/meetings/${id}/analyze`, 'POST', {});
+  document.getElementById('mt-result-card').style.display = '';
+  document.getElementById('mt-result-body').textContent = data.follow_up_email || data.summary || 'No analysis.';
+}
+async function deleteMeeting(id) {
+  await api(`/api/meetings/${id}`, 'DELETE');
+  showToast('Meeting deleted');
+  loadMeetings();
+}
+
+// ── Social Media ──────────────────────────────────────────────────
+async function loadSocialPosts() {
+  try {
+    const [posts, stats] = await Promise.all([api('/api/social/posts'), api('/api/social/stats')]);
+    document.getElementById('sm-total').textContent = stats.total_posts || 0;
+    document.getElementById('sm-published').textContent = stats.published || 0;
+    document.getElementById('sm-scheduled').textContent = stats.scheduled || 0;
+    document.getElementById('sm-likes').textContent = stats.total_likes || 0;
+    const el = document.getElementById('sm-posts-list');
+    if (!posts.length) { el.innerHTML = '<div class="empty"><div class="icon">📱</div><p>No posts yet.</p></div>'; return; }
+    el.innerHTML = posts.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div style="flex:1">
+          <div style="font-size:.85em">${p.content.substring(0,120)}${p.content.length>120?'…':''}</div>
+          <div style="display:flex;gap:8px;margin-top:4px;font-size:.75em;color:var(--text-muted)">
+            ${(p.platforms||[]).map(pl=>`<span>${pl}</span>`).join('')}
+            <span style="background:var(--surface3);padding:1px 6px;border-radius:4px">${p.status}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;margin-left:8px">
+          ${p.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="publishPost('${p.id}')" style="font-size:.7em">📤</button>`:''}
+          <button class="btn btn-ghost btn-sm" onclick="deletePost('${p.id}')" style="font-size:.7em">🗑</button>
+        </div>
+      </div></div>`).join('');
+  } catch(e) { console.error('Social load error', e); }
+}
+async function generateSocialPost() {
+  const topic = document.getElementById('sm-topic').value;
+  if (!topic) return showToast('Enter a topic first', 'error');
+  showToast('Generating post…');
+  const data = await api('/api/social/generate', 'POST', {
+    topic, platform: document.getElementById('sm-platform').value,
+    tone: document.getElementById('sm-tone').value,
+  });
+  document.getElementById('sm-content').value = data.content || '';
+}
+async function saveSocialPost() {
+  const content = document.getElementById('sm-content').value;
+  if (!content) return showToast('Content required', 'error');
+  await api('/api/social/posts', 'POST', {
+    content, platforms: [document.getElementById('sm-platform').value],
+  });
+  document.getElementById('sm-content').value = '';
+  document.getElementById('sm-topic').value = '';
+  showToast('Post saved!');
+  loadSocialPosts();
+}
+async function publishPost(id) {
+  await api(`/api/social/posts/${id}/publish`, 'POST', {});
+  showToast('Post published!');
+  loadSocialPosts();
+}
+async function deletePost(id) {
+  await api(`/api/social/posts/${id}`, 'DELETE');
+  showToast('Post deleted');
+  loadSocialPosts();
+}
+
+// ── CEO Briefing ──────────────────────────────────────────────────
+async function generateBriefing() {
+  showToast('Generating briefing…');
+  const data = await api('/api/briefing/generate', 'POST', {});
+  document.getElementById('briefing-content').textContent = data.content || 'Error generating briefing.';
+  document.getElementById('briefing-date').textContent = data.date || '';
+  document.getElementById('briefing-card').style.display = '';
+  document.getElementById('hc-latest-msg') && (document.getElementById('hc-latest-msg').style.display = 'none');
+}
+async function loadBriefingHistory() {
+  const data = await api('/api/briefing/history');
+  const el = document.getElementById('briefing-history');
+  if (!data.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📅 Past Briefings</div></div>' +
+    data.slice(-10).reverse().map(b =>
+      `<div style="padding:10px;border-bottom:1px solid var(--border)"><strong>${b.date}</strong>
+       <div style="font-size:.8em;color:var(--text-muted);margin-top:4px">${(b.content||'').substring(0,200)}…</div></div>`
+    ).join('') + '</div>';
+}
+
+// ── Finance / Invoicing ───────────────────────────────────────────
+function switchFinanceTab(tab, btn) {
+  document.querySelectorAll('.fi-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['invoices','expenses','pl'].forEach(t => {
+    const el = document.getElementById(`fi-${t}-panel`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'invoices') loadInvoices();
+  if (tab === 'expenses') loadExpenses();
+  if (tab === 'pl') loadPL();
+}
+async function loadInvoices() {
+  try {
+    const [invs, pl] = await Promise.all([api('/api/finance/invoices'), api('/api/finance/pl-report')]);
+    document.getElementById('fi-revenue').textContent = '$' + (pl.revenue||0).toLocaleString();
+    document.getElementById('fi-pending').textContent = '$' + (pl.pending_revenue||0).toLocaleString();
+    document.getElementById('fi-total-inv').textContent = pl.total_invoices || 0;
+    document.getElementById('fi-overdue').textContent = pl.overdue_invoices || 0;
+    const el = document.getElementById('fi-invoice-list');
+    if (!invs.length) { el.innerHTML = '<div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div>'; return; }
+    el.innerHTML = invs.map(i => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${i.number}</strong> — ${i.client}
+        <div style="font-size:.8em;color:var(--text-muted)">Due: ${i.due_date || 'N/A'}</div></div>
+      <div style="text-align:right">
+        <div style="font-weight:700;color:var(--green)">$${(i.total||0).toLocaleString()}</div>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${i.status}</span>
+        ${i.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendInvoice('${i.id}')" style="font-size:.7em;display:block;margin-top:4px">📤 Send</button>`:''}
+        ${i.status==='sent'?`<button class="btn btn-ghost btn-sm" onclick="markPaid('${i.id}')" style="font-size:.7em;display:block;margin-top:4px">✅ Paid</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Invoice load error', e); }
+}
+async function createInvoice() {
+  const payload = {
+    client: document.getElementById('fi-client').value,
+    client_email: document.getElementById('fi-client-email').value,
+    subtotal: parseFloat(document.getElementById('fi-subtotal').value) || 0,
+    tax_rate: parseFloat(document.getElementById('fi-tax').value) || 0,
+    due_date: document.getElementById('fi-due').value,
+    notes: document.getElementById('fi-notes').value,
+  };
+  if (!payload.client) return showToast('Client name required', 'error');
+  await api('/api/finance/invoices', 'POST', payload);
+  ['fi-client','fi-client-email','fi-subtotal','fi-tax','fi-due','fi-notes'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Invoice created!');
+  loadInvoices();
+}
+async function sendInvoice(id) {
+  await api(`/api/finance/invoices/${id}/send`, 'POST', {});
+  showToast('Invoice sent!');
+  loadInvoices();
+}
+async function markPaid(id) {
+  await api(`/api/finance/invoices/${id}/mark-paid`, 'POST', {});
+  showToast('Invoice marked as paid!');
+  loadInvoices();
+}
+async function loadExpenses() {
+  const expenses = await api('/api/finance/expenses');
+  const el = document.getElementById('fi-expense-list');
+  if (!expenses.length) { el.innerHTML = '<div class="empty"><div class="icon">💸</div><p>No expenses yet.</p></div>'; return; }
+  el.innerHTML = expenses.map(e => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+    <div><strong>${e.description}</strong><div style="font-size:.8em;color:var(--text-muted)">${e.category} · ${e.date}</div></div>
+    <div style="font-weight:700;color:#ef4444">-$${(e.amount||0).toLocaleString()}</div></div>`).join('');
+}
+async function logExpense() {
+  const payload = {
+    description: document.getElementById('fi-exp-desc').value,
+    amount: parseFloat(document.getElementById('fi-exp-amount').value) || 0,
+    category: document.getElementById('fi-exp-cat').value,
+    date: document.getElementById('fi-exp-date').value || new Date().toISOString().split('T')[0],
+  };
+  if (!payload.description) return showToast('Description required', 'error');
+  await api('/api/finance/expenses', 'POST', payload);
+  ['fi-exp-desc','fi-exp-amount'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Expense logged!');
+  loadExpenses();
+}
+async function loadPL() {
+  const pl = await api('/api/finance/pl-report');
+  const el = document.getElementById('fi-pl-body');
+  const rows = [
+    ['Revenue (Paid)', `$${(pl.revenue||0).toLocaleString()}`, 'var(--green)'],
+    ['Pending Revenue', `$${(pl.pending_revenue||0).toLocaleString()}`, 'var(--gold)'],
+    ['Total Expenses', `-$${(pl.total_expenses||0).toLocaleString()}`, '#ef4444'],
+    ['Gross Profit', `$${(pl.gross_profit||0).toLocaleString()}`, pl.gross_profit>=0?'var(--green)':'#ef4444'],
+    ['Profit Margin', `${pl.profit_margin||0}%`, 'var(--text-muted)'],
+  ];
+  el.innerHTML = `<div style="display:grid;gap:8px">${rows.map(([label,val,color])=>
+    `<div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface2);border-radius:6px">
+       <span>${label}</span><strong style="color:${color}">${val}</strong></div>`
+  ).join('')}
+  ${pl.expenses_by_category && Object.keys(pl.expenses_by_category).length?
+    `<div style="margin-top:8px"><strong style="font-size:.9em">Expenses by Category</strong>
+     ${Object.entries(pl.expenses_by_category).map(([k,v])=>
+       `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:.85em">
+         <span>${k}</span><span>$${(v||0).toLocaleString()}</span></div>`
+     ).join('')}</div>`:''}</div>`;
+}
+
+// ── Analytics ─────────────────────────────────────────────────────
+async function loadAnalyticsOverview() {
+  const data = await api('/api/analytics/overview');
+  document.getElementById('an-leads').textContent = data.crm?.total_leads || 0;
+  document.getElementById('an-revenue').textContent = '$' + (data.finance?.revenue||0).toLocaleString();
+  document.getElementById('an-open-rate').textContent = (data.email?.open_rate||0) + '%';
+  document.getElementById('an-posts').textContent = data.social?.posts || 0;
+  const el = document.getElementById('an-breakdown');
+  el.innerHTML = `<div style="display:grid;gap:8px;font-size:.88em">
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>🎯 CRM</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Pipeline: <strong>$${(data.crm?.pipeline_value||0).toLocaleString()}</strong></div>
+        <div>Won Deals: <strong>${data.crm?.won_deals||0}</strong></div>
+        <div>Conversion: <strong>${data.crm?.conversion_rate||0}%</strong></div>
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>📧 Email</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Campaigns: <strong>${data.email?.campaigns||0}</strong></div>
+        <div>Sent: <strong>${data.email?.sent||0}</strong></div>
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>🎙️ Meetings</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Total: <strong>${data.meetings?.total||0}</strong></div>
+        <div>Analyzed: <strong>${data.meetings?.analyzed||0}</strong></div>
+      </div>
+    </div></div>`;
+}
+async function loadRecommendations() {
+  const data = await api('/api/analytics/recommendations');
+  const recs = data.recommendations || [];
+  const el = document.getElementById('an-recommendations');
+  if (!recs.length) { el.innerHTML = '<div class="empty"><p>No recommendations at this time.</p></div>'; return; }
+  const colors = {high:'#ef4444', medium:'#f59e0b', low:'#10b981', critical:'#ef4444'};
+  el.innerHTML = recs.map(r => `<div style="padding:10px;border-left:3px solid ${colors[r.priority]||'var(--border)'};margin-bottom:8px;background:var(--surface2);border-radius:0 6px 6px 0">
+    <div style="font-size:.75em;color:${colors[r.priority]||'var(--text-muted)'};text-transform:uppercase;font-weight:700">${r.type} · ${r.priority}</div>
+    <div style="font-size:.88em;margin-top:4px">${r.text}</div>
+    ${r.action?`<div style="font-size:.78em;color:var(--text-muted);margin-top:4px">→ ${r.action}</div>`:''}</div>`
+  ).join('');
+}
+
+// ── Workflows ─────────────────────────────────────────────────────
+async function loadWorkflows() {
+  const wfs = await api('/api/workflows/');
+  const el = document.getElementById('wf-list');
+  if (!wfs.length) { el.innerHTML = '<div class="empty"><div class="icon">⚙️</div><p>No workflows yet.</p></div>'; return; }
+  el.innerHTML = wfs.map(w => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${w.name}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${w.description||''} · Trigger: ${w.trigger?.type||w.trigger}</div>
+      <div style="font-size:.78em;color:var(--text-muted)">Steps: ${(w.steps||[]).length} · Runs: ${w.runs||0}</div>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="runWorkflow('${w.id}')" style="font-size:.75em">▶ Run</button>
+      <button class="btn btn-ghost btn-sm" onclick="deleteWorkflow('${w.id}')" style="font-size:.75em">🗑</button>
+    </div></div>`).join('');
+}
+async function createWorkflow() {
+  const stepsRaw = document.getElementById('wf-steps').value;
+  const steps = stepsRaw.split('\n').map(l=>l.trim()).filter(Boolean).map(l => {
+    const [action, ...desc] = l.split(':');
+    return {type: action.trim(), config: desc.join(':').trim()};
+  });
+  const payload = {
+    name: document.getElementById('wf-name').value,
+    description: document.getElementById('wf-desc').value,
+    trigger: {type: document.getElementById('wf-trigger').value},
+    steps,
+  };
+  if (!payload.name) return showToast('Workflow name required', 'error');
+  await api('/api/workflows/', 'POST', payload);
+  ['wf-name','wf-desc','wf-steps'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Workflow created!');
+  loadWorkflows();
+}
+async function runWorkflow(id) {
+  await api(`/api/workflows/${id}/run`, 'POST', {});
+  showToast('Workflow executed!');
+  loadWorkflows();
+  loadWorkflowRuns();
+}
+async function deleteWorkflow(id) {
+  await api(`/api/workflows/${id}`, 'DELETE');
+  showToast('Workflow deleted');
+  loadWorkflows();
+}
+async function loadWorkflowRuns() {
+  const runs = await api('/api/workflows/runs');
+  const el = document.getElementById('wf-runs-list');
+  if (!runs.length) { el.innerHTML = '<div class="empty"><p>No runs yet.</p></div>'; return; }
+  el.innerHTML = runs.slice(-10).reverse().map(r => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:.85em">
+    <div><strong>${r.workflow_name}</strong> <span style="color:var(--text-muted)">· ${r.trigger}</span></div>
+    <div><span style="color:var(--green)">${r.status}</span> <span style="color:var(--text-muted);font-size:.8em">${r.started_at}</span></div>
+  </div>`).join('');
+}
+
+// ── Team ──────────────────────────────────────────────────────────
+async function loadTeamMembers() {
+  const members = await api('/api/team/members');
+  const el = document.getElementById('team-members-list');
+  if (!members.length) { el.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No members yet. Invite someone!</p></div>'; return; }
+  el.innerHTML = members.map(m => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${m.name||m.email}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${m.email}</div></div>
+    <div style="text-align:right">
+      <span style="font-size:.78em;background:var(--surface3);padding:2px 8px;border-radius:4px">${m.role}</span>
+      <span style="font-size:.75em;color:var(--text-muted);display:block;margin-top:2px">${m.status}</span>
+    </div></div>`).join('');
+}
+async function inviteTeamMember() {
+  const email = document.getElementById('team-email').value;
+  const role = document.getElementById('team-role').value;
+  if (!email) return showToast('Email required', 'error');
+  const data = await api('/api/team/members/invite', 'POST', {email, role});
+  if (data.error) return showToast(data.error, 'error');
+  document.getElementById('team-invite-result').innerHTML =
+    `<div style="padding:10px;background:var(--surface2);border-radius:6px;font-size:.85em">
+     ✅ Invitation sent! Share this token: <code style="color:var(--gold)">${data.token}</code></div>`;
+  document.getElementById('team-email').value = '';
+  loadTeamMembers();
+}
+
+// ── Support ───────────────────────────────────────────────────────
+function switchSupportTab(tab, btn) {
+  document.querySelectorAll('.sup-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('sup-tickets-panel').style.display = tab === 'tickets' ? '' : 'none';
+  document.getElementById('sup-kb-panel').style.display = tab === 'kb' ? '' : 'none';
+  if (tab === 'tickets') loadTickets();
+  if (tab === 'kb') loadKBArticles();
+}
+async function loadTickets() {
+  try {
+    const [tickets, stats] = await Promise.all([
+      api('/api/support/tickets' + (document.getElementById('sup-f-status')?.value ? '?status=' + document.getElementById('sup-f-status').value : '')),
+      api('/api/support/stats')
+    ]);
+    document.getElementById('sup-open').textContent = stats.open || 0;
+    document.getElementById('sup-progress').textContent = stats.in_progress || 0;
+    document.getElementById('sup-resolved').textContent = stats.resolved || 0;
+    document.getElementById('sup-kb').textContent = stats.kb_articles || 0;
+    const el = document.getElementById('sup-ticket-list');
+    if (!tickets.length) { el.innerHTML = '<div class="empty"><div class="icon">🎫</div><p>No tickets.</p></div>'; return; }
+    const prioColors = {urgent:'#ef4444',high:'#f59e0b',medium:'#6366f1',low:'#10b981'};
+    el.innerHTML = tickets.map(t => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between">
+        <strong>${t.number}: ${t.subject}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${t.status}</span>
+      </div>
+      <div style="font-size:.8em;color:var(--text-muted)">${t.customer_name||''} · ${t.customer_email||''}</div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <span style="font-size:.75em;color:${prioColors[t.priority]||'var(--text-muted)'}">${t.priority}</span>
+        <span style="font-size:.75em;color:var(--text-muted)">${t.category}</span>
+        <button class="btn btn-ghost btn-sm" onclick="aiSuggestReply('${t.id}')" style="font-size:.7em">🤖 AI Reply</button>
+        ${t.status!=='resolved'?`<button class="btn btn-ghost btn-sm" onclick="resolveTicket('${t.id}')" style="font-size:.7em">✅ Resolve</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Support load error', e); }
+}
+async function createTicket() {
+  const payload = {
+    subject: document.getElementById('sup-subject').value,
+    customer_email: document.getElementById('sup-cust-email').value,
+    customer_name: document.getElementById('sup-cust-name').value,
+    priority: document.getElementById('sup-priority').value,
+    category: document.getElementById('sup-cat').value,
+    description: document.getElementById('sup-desc').value,
+  };
+  if (!payload.subject) return showToast('Subject required', 'error');
+  await api('/api/support/tickets', 'POST', payload);
+  ['sup-subject','sup-cust-email','sup-cust-name','sup-desc'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Ticket created!');
+  loadTickets();
+}
+async function aiSuggestReply(id) {
+  showToast('Generating AI reply…');
+  const data = await api(`/api/support/tickets/${id}/ai-suggest`, 'POST', {});
+  alert('AI Suggested Reply:\n\n' + (data.suggestion || 'No suggestion.'));
+}
+async function resolveTicket(id) {
+  await api(`/api/support/tickets/${id}`, 'PATCH', {status: 'resolved'});
+  showToast('Ticket resolved!');
+  loadTickets();
+}
+async function loadKBArticles() {
+  const articles = await api('/api/support/kb');
+  const el = document.getElementById('sup-kb-list');
+  if (!articles.length) { el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>No articles yet.</p></div>'; return; }
+  el.innerHTML = articles.map(a => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <strong>${a.title}</strong>
+    <div style="font-size:.8em;color:var(--text-muted)">${a.category} · Views: ${a.views}</div>
+    <div style="font-size:.82em;margin-top:4px">${a.content.substring(0,120)}…</div>
+  </div>`).join('');
+}
+async function createKBArticle() {
+  const payload = {
+    title: document.getElementById('kb-title').value,
+    content: document.getElementById('kb-content').value,
+    category: document.getElementById('kb-cat').value,
+  };
+  if (!payload.title) return showToast('Title required', 'error');
+  await api('/api/support/kb', 'POST', payload);
+  ['kb-title','kb-content'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Article saved!');
+  loadKBArticles();
+}
+
+// ── Website Builder ───────────────────────────────────────────────
+async function loadPages() {
+  const pages = await api('/api/website-builder/pages');
+  const el = document.getElementById('wb-pages-list');
+  if (!pages.length) { el.innerHTML = '<div class="empty"><div class="icon">🌐</div><p>No pages yet.</p></div>'; return; }
+  el.innerHTML = pages.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${p.name}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${p.type} · ${p.business_name}</div></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="previewPage('${p.id}')" style="font-size:.75em">👁 Preview</button>
+      <button class="btn btn-ghost btn-sm" onclick="deletePage('${p.id}')" style="font-size:.75em">🗑</button>
+    </div></div>`).join('');
+}
+async function generateWebPage() {
+  const payload = {
+    business_name: document.getElementById('wb-biz').value,
+    industry: document.getElementById('wb-industry').value,
+    page_type: document.getElementById('wb-type').value,
+    description: document.getElementById('wb-desc').value,
+  };
+  if (!payload.business_name) return showToast('Business name required', 'error');
+  showToast('Generating page with AI…');
+  await api('/api/website-builder/generate', 'POST', payload);
+  showToast('Page generated!');
+  loadPages();
+}
+async function previewPage(id) {
+  const page = await api(`/api/website-builder/pages/${id}`);
+  const w = window.open('', '_blank');
+  w.document.write(page.html_content || '<p>No content.</p>');
+}
+async function deletePage(id) {
+  await api(`/api/website-builder/pages/${id}`, 'DELETE');
+  showToast('Page deleted');
+  loadPages();
+}
+
+// ── Competitors ───────────────────────────────────────────────────
+async function loadCompetitors() {
+  const comps = await api('/api/competitors/');
+  const el = document.getElementById('comp-list');
+  if (!comps.length) { el.innerHTML = '<div class="empty"><div class="icon">🔍</div><p>No competitors tracked yet.</p></div>'; return; }
+  el.innerHTML = comps.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${c.name}</strong>
+        ${c.website?`<a href="${c.website}" target="_blank" style="font-size:.78em;color:var(--accent);margin-left:8px">${c.website}</a>`:''}
+        <div style="font-size:.82em;color:var(--text-muted);margin-top:2px">${c.description||''}</div>
+        ${c.last_checked?`<div style="font-size:.75em;color:var(--text-muted)">Last analyzed: ${c.last_checked}</div>`:''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="analyzeCompetitor('${c.id}')" style="font-size:.75em">🤖 Analyze</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteCompetitor('${c.id}')" style="font-size:.75em">🗑</button>
+      </div>
+    </div></div>`).join('');
+}
+async function addCompetitor() {
+  const payload = {
+    name: document.getElementById('comp-name').value,
+    website: document.getElementById('comp-website').value,
+    description: document.getElementById('comp-desc').value,
+  };
+  if (!payload.name) return showToast('Name required', 'error');
+  await api('/api/competitors/', 'POST', payload);
+  ['comp-name','comp-website','comp-desc'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Competitor added!');
+  loadCompetitors();
+}
+async function analyzeCompetitor(id) {
+  showToast('Analyzing competitor with AI…');
+  const data = await api(`/api/competitors/${id}/analyze`, 'POST', {});
+  document.getElementById('comp-analysis-card').style.display = '';
+  document.getElementById('comp-analysis-body').textContent = data.analysis || 'No analysis.';
+  loadCompetitors();
+}
+async function deleteCompetitor(id) {
+  await api(`/api/competitors/${id}`, 'DELETE');
+  showToast('Competitor removed');
+  loadCompetitors();
+}
+
+// ── Personal Brand ────────────────────────────────────────────────
+function switchBrandTab(tab, btn) {
+  document.querySelectorAll('.br-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['generate','profile','library'].forEach(t => {
+    const el = document.getElementById(`br-${t}-panel`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'library') loadBrandContent();
+}
+async function generateBrandContent() {
+  const topic = document.getElementById('br-topic').value;
+  if (!topic) return showToast('Topic required', 'error');
+  showToast('Generating content…');
+  const data = await api('/api/brand/generate-content', 'POST', {
+    topic, content_type: document.getElementById('br-type').value,
+  });
+  document.getElementById('br-generated').textContent = data.content || '';
+}
+async function suggestBrandTopics() {
+  showToast('Generating topic ideas…');
+  const data = await api('/api/brand/topics', 'POST', {});
+  const el = document.getElementById('br-topics-list');
+  el.innerHTML = (data.topics||[]).map((t,i)=>
+    `<div style="padding:6px;border-bottom:1px solid var(--border);font-size:.85em;cursor:pointer"
+      onclick="document.getElementById('br-topic').value='${t.replace(/'/g,"\\'")}'">${i+1}. ${t}</div>`
+  ).join('');
+}
+async function saveBrandProfile() {
+  const payload = {
+    name: document.getElementById('br-p-name').value,
+    title: document.getElementById('br-p-title').value,
+    industry: document.getElementById('br-p-industry').value,
+    target_audience: document.getElementById('br-p-audience').value,
+    tone: document.getElementById('br-p-tone').value,
+  };
+  await api('/api/brand/profile', 'POST', payload);
+  showToast('Profile saved!');
+}
+async function loadBrandContent() {
+  const pieces = await api('/api/brand/content');
+  const el = document.getElementById('br-content-list');
+  if (!pieces.length) { el.innerHTML = '<div class="empty"><div class="icon">📁</div><p>No content saved yet.</p></div>'; return; }
+  el.innerHTML = pieces.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between">
+      <span style="font-size:.78em;background:var(--surface3);padding:2px 6px;border-radius:4px">${p.type}</span>
+      <span style="font-size:.75em;color:var(--text-muted)">${p.created_at?.split('T')[0]||''}</span>
+    </div>
+    <div style="font-size:.85em;margin-top:6px"><strong>${p.topic}</strong></div>
+    <div style="font-size:.82em;color:var(--text-muted);margin-top:4px">${p.content.substring(0,150)}…</div>
+    <button class="btn btn-ghost btn-sm" onclick="deleteBrandContent('${p.id}')" style="font-size:.7em;margin-top:6px">🗑 Delete</button>
+  </div>`).join('');
+}
+async function deleteBrandContent(id) {
+  await api(`/api/brand/content/${id}`, 'DELETE');
+  showToast('Content deleted');
+  loadBrandContent();
+}
+
+// ── Health Check ──────────────────────────────────────────────────
+async function runHealthCheck() {
+  showToast('Running health check…');
+  const data = await api('/api/health-check/run', 'POST', {});
+  document.getElementById('hc-report-card').style.display = '';
+  document.getElementById('hc-latest-msg').style.display = 'none';
+  const gradeColors = {A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'};
+  document.getElementById('hc-grade').textContent = data.grade;
+  document.getElementById('hc-grade').style.color = gradeColors[data.grade]||'var(--text)';
+  const el = document.getElementById('hc-report-body');
+  el.innerHTML = `<div style="margin-bottom:16px">
+    <div style="font-size:.9em;font-weight:700;margin-bottom:8px">Overall: ${data.overall_score}/100 (Grade ${data.grade})</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${Object.entries(data.scores||{}).map(([k,v])=>
+      `<div style="padding:6px 12px;background:var(--surface2);border-radius:6px;font-size:.82em">${k}: <strong>${v}</strong></div>`
+    ).join('')}</div></div>
+  ${data.issues?.length?`<div style="margin-bottom:16px"><strong style="font-size:.9em">⚠️ Issues Found</strong>
+    ${data.issues.map(i=>`<div style="padding:8px;margin-top:6px;border-left:3px solid ${i.severity==='critical'?'#ef4444':'#f59e0b'};background:var(--surface2);border-radius:0 6px 6px 0;font-size:.84em">
+      <div><strong>${i.area}:</strong> ${i.issue}</div>
+      <div style="color:var(--text-muted);margin-top:2px">→ ${i.suggestion}</div></div>`).join('')}</div>`:''}
+  ${data.strengths?.length?`<div><strong style="font-size:.9em">✅ Strengths</strong>
+    ${data.strengths.map(s=>`<div style="padding:6px 0;font-size:.84em;color:var(--green)">✓ ${s}</div>`).join('')}</div>`:''}`;
+}
+async function loadHealthHistory() {
+  const reports = await api('/api/health-check/history');
+  const el = document.getElementById('hc-history');
+  if (!reports.length) { el.innerHTML = ''; return; }
+  const colors = {A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'};
+  el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📅 Health History</div></div>' +
+    reports.slice(-12).reverse().map(r=>
+      `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+        <div><strong>${r.date}</strong> <span style="font-size:.82em;color:var(--text-muted)">${r.overall_score}/100</span></div>
+        <span style="font-size:1.2em;font-weight:900;color:${colors[r.grade]||'var(--text)'}">${r.grade}</span>
+      </div>`
+    ).join('') + '</div>';
+}
+
+// ── Export & Backup ───────────────────────────────────────────────
+async function loadExportModules() {
+  const modules = await api('/api/export/modules');
+  const el = document.getElementById('export-modules-list');
+  el.innerHTML = modules.map(m => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${m.key}</strong>
+      <span style="font-size:.75em;color:var(--text-muted);margin-left:8px">${m.exists?(m.size_bytes/1024).toFixed(1)+'KB':'no data'}</span></div>
+    <div style="display:flex;gap:6px">
+      ${m.exists?`<a href="/api/export/json/${m.key}" download class="btn btn-ghost btn-sm" style="font-size:.75em">⬇ JSON</a>`:'<span style="font-size:.75em;color:var(--text-muted)">no data</span>'}
+    </div></div>`).join('');
+}
+async function createBackup() {
+  showToast('Creating backup…');
+  const data = await api('/api/export/backup', 'POST', {});
+  showToast(`Backup created: ${data.backup_file} (${(data.size_bytes/1024).toFixed(0)}KB)`);
+  loadBackupsList();
+}
+async function loadBackupsList() {
+  const backups = await api('/api/export/backups');
+  const el = document.getElementById('export-backups-list');
+  if (!backups.length) { el.innerHTML = '<div class="empty"><div class="icon">🗜️</div><p>No backups yet.</p></div>'; return; }
+  el.innerHTML = backups.map(b => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><div style="font-size:.85em">${b.name}</div>
+      <div style="font-size:.75em;color:var(--text-muted)">${(b.size_bytes/1024).toFixed(0)}KB · ${b.created_at}</div></div>
+    <a href="/api/export/download-backup/${b.name}" download class="btn btn-ghost btn-sm" style="font-size:.75em">⬇ Download</a>
+  </div>`).join('');
+}
+
+// ── Auto-load on tab switch (extend existing switchTab) ───────────
+const _origSwitchTab = switchTab;
+function switchTab(tab, btn) {
+  _origSwitchTab(tab, btn);
+  const loaders = {
+    'crm': loadCRM,
+    'email-mkt': loadEmailCampaigns,
+    'meetings': loadMeetings,
+    'social': loadSocialPosts,
+    'briefing': () => api('/api/briefing/latest').then(d => {
+      if (d.content) { document.getElementById('briefing-content').textContent = d.content; document.getElementById('briefing-date').textContent = d.date||''; }
+    }),
+    'invoicing': loadInvoices,
+    'analytics-bi': () => { loadAnalyticsOverview(); loadRecommendations(); },
+    'workflows': () => { loadWorkflows(); loadWorkflowRuns(); },
+    'team': loadTeamMembers,
+    'support-desk': loadTickets,
+    'website-builder': loadPages,
+    'competitors': loadCompetitors,
+    'brand': () => api('/api/brand/profile').then(p => {
+      if (p.name) { document.getElementById('br-p-name').value=p.name||''; document.getElementById('br-p-title').value=p.title||''; document.getElementById('br-p-industry').value=p.industry||''; document.getElementById('br-p-audience').value=p.target_audience||''; }
+    }),
+    'health': () => api('/api/health-check/latest').then(d => {
+      if (d.grade) { document.getElementById('hc-report-card').style.display=''; document.getElementById('hc-latest-msg').style.display='none'; runHealthCheck && null; }
+    }),
+    'export': () => { loadExportModules(); loadBackupsList(); },
+  };
+  if (loaders[tab]) { try { loaders[tab](); } catch(e) {} }
+}
 </script>
 </body>
 </html>"""
@@ -17355,6 +18110,7 @@ def _crm():
     return lead_crm
 
 
+
 @app.get("/api/crm/leads")
 async def crm_list_leads(stage: Optional[str] = None, search: Optional[str] = None):
     try:
@@ -17393,18 +18149,8 @@ async def crm_get_lead(lead_id: str):
     return JSONResponse(lead)
 
 
-@app.patch("/api/crm/leads/{lead_id}")
-async def crm_update_lead(lead_id: str, payload: dict):
-    updated = await run_in_threadpool(_crm().update_lead, lead_id, payload)
-    if not updated:
-        raise HTTPException(404, "Lead not found")
-    return JSONResponse(updated)
 
 
-@app.delete("/api/crm/leads/{lead_id}")
-async def crm_delete_lead(lead_id: str):
-    deleted = await run_in_threadpool(_crm().delete_lead, lead_id)
-    return JSONResponse({"deleted": deleted})
 
 
 @app.post("/api/crm/leads/{lead_id}/stage")
@@ -17609,18 +18355,8 @@ async def meetings_get(meeting_id: str):
     return JSONResponse(m)
 
 
-@app.patch("/api/meetings/{meeting_id}")
-async def meetings_update(meeting_id: str, payload: dict):
-    updated = await run_in_threadpool(_meetings().update_meeting, meeting_id, payload)
-    if not updated:
-        raise HTTPException(404, "Meeting not found")
-    return JSONResponse(updated)
 
 
-@app.delete("/api/meetings/{meeting_id}")
-async def meetings_delete(meeting_id: str):
-    deleted = await run_in_threadpool(_meetings().delete_meeting, meeting_id)
-    return JSONResponse({"deleted": deleted})
 
 
 @app.post("/api/meetings/{meeting_id}/summarize")
@@ -17699,26 +18435,10 @@ async def social_get_post(post_id: str):
     return JSONResponse(post)
 
 
-@app.patch("/api/social/posts/{post_id}")
-async def social_update_post(post_id: str, payload: dict):
-    updated = await run_in_threadpool(_social_sched().update_post, post_id, payload)
-    if not updated:
-        raise HTTPException(404, "Post not found")
-    return JSONResponse(updated)
 
 
-@app.delete("/api/social/posts/{post_id}")
-async def social_delete_post(post_id: str):
-    deleted = await run_in_threadpool(_social_sched().delete_post, post_id)
-    return JSONResponse({"deleted": deleted})
 
 
-@app.post("/api/social/posts/{post_id}/publish")
-async def social_publish_post(post_id: str):
-    updated = await run_in_threadpool(_social_sched().publish_post, post_id)
-    if not updated:
-        raise HTTPException(404, "Post not found")
-    return JSONResponse(updated)
 
 
 @app.post("/api/social/generate")
@@ -18027,18 +18747,8 @@ async def comp_get(competitor_id: str):
     return JSONResponse(comp)
 
 
-@app.patch("/api/competitors/{competitor_id}")
-async def comp_update(competitor_id: str, payload: dict):
-    updated = await run_in_threadpool(_comp_watch().update_competitor, competitor_id, payload)
-    if not updated:
-        raise HTTPException(404, "Competitor not found")
-    return JSONResponse(updated)
 
 
-@app.delete("/api/competitors/{competitor_id}")
-async def comp_delete(competitor_id: str):
-    deleted = await run_in_threadpool(_comp_watch().delete_competitor, competitor_id)
-    return JSONResponse({"deleted": deleted})
 
 
 @app.post("/api/competitors/{competitor_id}/analyze")
