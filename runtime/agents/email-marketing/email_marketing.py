@@ -211,15 +211,21 @@ def send_campaign(campaign_id: str) -> Optional[dict]:
     if not recipients:
         recipients = ["demo@example.com"]
 
+    # Simulated industry-average engagement rates (mock data — no real email sending):
+    # 42% open rate, 28% click-through (of openers), 9% reply rate (of openers)
+    _OPEN_RATE = 0.42
+    _CTR = 0.28
+    _REPLY_RATE = 0.09
+
     import random
     for recipient in recipients:
         _append_event(campaign_id, "sent", step=0, recipient=recipient)
-        opened = random.random() < 0.42
+        opened = random.random() < _OPEN_RATE
         if opened:
             _append_event(campaign_id, "open", step=0, recipient=recipient)
-        if opened and random.random() < 0.28:
+        if opened and random.random() < _CTR:
             _append_event(campaign_id, "click", step=0, recipient=recipient)
-        if opened and random.random() < 0.09:
+        if opened and random.random() < _REPLY_RATE:
             _append_event(campaign_id, "reply", step=0, recipient=recipient)
 
         for step_idx, step in enumerate(campaign.get("sequence_steps", []), 1):
