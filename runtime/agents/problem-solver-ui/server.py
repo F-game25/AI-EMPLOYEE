@@ -12605,9 +12605,6 @@ function switchTab(tab, btn) {
   };
   if (loaders[tab]) { try { loaders[tab](); } catch(e) {} }
 }
-</script>
-</body>
-</html>"""
 
 function rerunTaskFromHistory(description) {
   const taskInput = document.getElementById('task-input');
@@ -13595,23 +13592,6 @@ async function submitPendingAction() {
   } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Tab init hooks
-// ═══════════════════════════════════════════════════════════════════
-const _origSwitchTab = switchTab;
-window.switchTab = function(tab, btn) {
-  _origSwitchTab(tab, btn);
-  if (tab === 'crm') loadCRM();
-  else if (tab === 'email-marketing') loadEmailCampaigns();
-  else if (tab === 'meetings') loadMeetings();
-  else if (tab === 'social') loadSocialPosts();
-  else if (tab === 'briefing') { loadFullBriefing(); loadBriefingHistory(); }
-  else if (tab === 'financial') loadInvoices();
-  else if (tab === 'competitors') { loadCompetitors(); loadCompetitorAlerts(); }
-  else if (tab === 'content-calendar') loadContentCalendar();
-  else if (tab === 'guardrails') loadPendingActions();
-};
-
 // Load CEO briefing in dashboard on startup
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(loadCEOBriefing, 1500);
@@ -14345,35 +14325,125 @@ async function loadBackupsList() {
   </div>`).join('');
 }
 
-// ── Auto-load on tab switch (extend existing switchTab) ───────────
-const _origSwitchTab = switchTab;
-function switchTab(tab, btn) {
-  _origSwitchTab(tab, btn);
-  const loaders = {
-    'crm': loadCRM,
-    'email-mkt': loadEmailCampaigns,
-    'meetings': loadMeetings,
-    'social': loadSocialPosts,
-    'briefing': () => api('/api/briefing/latest').then(d => {
-      if (d.content) { document.getElementById('briefing-content').textContent = d.content; document.getElementById('briefing-date').textContent = d.date||''; }
-    }),
-    'invoicing': loadInvoices,
-    'analytics-bi': () => { loadAnalyticsOverview(); loadRecommendations(); },
-    'workflows': () => { loadWorkflows(); loadWorkflowRuns(); },
-    'team': loadTeamMembers,
-    'support-desk': loadTickets,
-    'website-builder': loadPages,
-    'competitors': loadCompetitors,
-    'brand': () => api('/api/brand/profile').then(p => {
-      if (p.name) { document.getElementById('br-p-name').value=p.name||''; document.getElementById('br-p-title').value=p.title||''; document.getElementById('br-p-industry').value=p.industry||''; document.getElementById('br-p-audience').value=p.target_audience||''; }
-    }),
-    'health': () => api('/api/health-check/latest').then(d => {
-      if (d.grade) { document.getElementById('hc-report-card').style.display=''; document.getElementById('hc-latest-msg').style.display='none'; runHealthCheck && null; }
-    }),
-    'export': () => { loadExportModules(); loadBackupsList(); },
-  };
-  if (loaders[tab]) { try { loaders[tab](); } catch(e) {} }
-}
+/* ══════════════════════════════════════════════════
+   BOOT SEQUENCE
+══════════════════════════════════════════════════ */
+(function runBootSequence() {
+  const overlay = document.getElementById('boot-overlay');
+  const terminal = document.getElementById('boot-terminal');
+  const bar = document.getElementById('boot-bar');
+  const pct = document.getElementById('boot-pct');
+  if (!overlay) return;
+
+  const lines = [
+    '> INITIALIZING AI EMPLOYEE v4.0\u2026',
+    '> Loading neural subsystems\u2026',
+    '> Mounting agent registry\u2026',
+    '> Establishing secure channel\u2026',
+    '> Calibrating gold resonance matrix\u2026',
+    '> All systems nominal. Welcome.',
+  ];
+  let lineIdx = 0;
+  let progress = 0;
+
+  function addLine() {
+    if (lineIdx >= lines.length) return;
+    const span = document.createElement('span');
+    span.className = 'boot-terminal-line';
+    span.style.animationDelay = '0s';
+    span.textContent = lines[lineIdx++];
+    terminal.appendChild(span);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  const lineTimer = setInterval(() => {
+    addLine();
+    if (lineIdx >= lines.length) clearInterval(lineTimer);
+  }, 280);
+
+  const barTimer = setInterval(() => {
+    progress += Math.random() * 12 + 4;
+    if (progress >= 100) { progress = 100; clearInterval(barTimer); }
+    bar.style.width = progress + '%';
+    pct.textContent = Math.round(progress) + '%';
+    if (progress >= 100) {
+      setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => { overlay.style.display = 'none'; }, 850);
+      }, 300);
+    }
+  }, 120);
+})();
+
+/* ══════════════════════════════════════════════════
+   PARTICLE SYSTEM
+══════════════════════════════════════════════════ */
+(function initParticles() {
+  const canvas = document.getElementById('particles-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let W, H;
+  const particles = [];
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize, {passive:true});
+
+  const GOLD = 'rgba(212,175,55,';
+  for (let i = 0; i < 55; i++) {
+    particles.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 1.5 + 0.3,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      a: Math.random() * 0.5 + 0.1,
+      da: (Math.random() - 0.5) * 0.003,
+    });
+  }
+
+  function frame() {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of particles) {
+      p.x += p.vx; p.y += p.vy;
+      p.a += p.da;
+      if (p.a < 0.05) p.da = Math.abs(p.da);
+      if (p.a > 0.6) p.da = -Math.abs(p.da);
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
+      ctx.fill();
+    }
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 90) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+
+/* init nav active state */
+document.addEventListener('DOMContentLoaded', () => {
+  const overviewBtn = document.querySelector('.nav-group-btn[data-group="overview"]');
+  if (overviewBtn) overviewBtn.classList.add('active');
+});
 </script>
 </body>
 </html>"""
@@ -15317,242 +15387,6 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
                 return f"{len(pending)} pending proposals:\n" + "\n".join(lines) + "\nGo to UI > Improvements to approve."
         return "No pending improvements."
 
-// Auto-refresh new tabs every 30s when active
-setInterval(() => {
-  if (currentTab === 'budget') loadBudget();
-  if (currentTab === 'boardroom') loadBoardroom();
-  if (currentTab === 'tickets') loadTickets();
-  if (currentTab === 'artifacts') loadSessions();
-}, 30000);
-
-/* ══════════════════════════════════════════════════
-   BOOT SEQUENCE
-══════════════════════════════════════════════════ */
-const BOOT_LINES = [
-  'BIOS v4.2.1 POST OK','CPU CORES: 8 @ 3.8GHz','MEM: 32GB DDR5 OK',
-  'STORAGE: 2TB NVMe OK','NET: LINK ESTABLISHED','FIREWALL: ACTIVE',
-  'AI RUNTIME: LOADING…','AGENT MATRIX: INIT','LOADING MODELS…',
-  'TASK ORCHESTRATOR: UP','LEAD GENERATOR: UP','BRAND STRATEGIST: UP',
-  'FINANCE WIZARD: UP','SECURITY: VERIFIED','JWT TOKENS: VALID',
-  'API ENDPOINTS: BOUND','WEBSOCKET: READY','DASHBOARD: COMPILED',
-  'BLACKLIGHT: STANDBY','ASCEND FORGE: STANDBY','ALL SYSTEMS NOMINAL',
-];
-(async function runBootSequence() {
-  const bootLog = document.getElementById('boot-log');
-  const bootCenter = document.getElementById('boot-center');
-  const bootBarFill = document.getElementById('boot-bar-fill');
-  const bootStatusText = document.getElementById('boot-status-text');
-  if (!bootLog) return;
-  function addBootLine(line, idx) {
-    const span = document.createElement('div');
-    span.style.cssText = `color:rgba(245,196,0,${0.2 + (idx/BOOT_LINES.length)*0.5});font-size:11px;`;
-    span.textContent = `[${String(idx).padStart(3,'0')}] ${line}`;
-    bootLog.appendChild(span);
-    if (bootLog.children.length > 30) bootLog.removeChild(bootLog.firstChild);
-  }
-  function _delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-  for (let i = 0; i < BOOT_LINES.length; i++) {
-    await _delay(60 + Math.random()*80);
-    addBootLine(BOOT_LINES[i], i);
-    if (bootBarFill) bootBarFill.style.width = ((i+1)/BOOT_LINES.length*60) + '%';
-  }
-  await _delay(200);
-  if (bootCenter) bootCenter.classList.add('show');
-  await _delay(100);
-  const phases = ['AUTHENTICATING…','LOADING AGENTS…','PREPARING INTERFACE…','READY'];
-  for (let p of phases) {
-    if (bootStatusText) bootStatusText.textContent = p;
-    if (bootBarFill) bootBarFill.style.width = (60 + phases.indexOf(p) * 10) + '%';
-    await _delay(300);
-  }
-  if (bootBarFill) bootBarFill.style.width = '100%';
-  await _delay(400);
-  const bootEl = document.getElementById('boot');
-  if (bootEl) { bootEl.style.transition = 'opacity .4s'; bootEl.style.opacity = '0'; }
-  await _delay(400);
-  if (bootEl) bootEl.style.display = 'none';
-  _showLogin();
-})();
-
-function _showLogin() {
-  const login = document.getElementById('login');
-  if (!login) { _initMainApp(); return; }
-  login.style.display = 'flex';
-  setTimeout(() => { const vkb = document.getElementById('vkb'); if(vkb) vkb.classList.add('show'); }, 600);
-  setTimeout(() => { const f = document.getElementById('login-user'); if(f){f.focus();f.select();} }, 100);
-  const nameEl = document.getElementById('login-name');
-  if (nameEl) {
-    const name = 'OPERATOR';
-    nameEl.textContent = '';
-    let ni = 0;
-    const t = setInterval(() => {
-      nameEl.textContent = name.slice(0,++ni) + (ni<name.length?'█':'');
-      if (ni >= name.length) clearInterval(t);
-    }, 80);
-  }
-}
-
-let _vkTarget = null;
-document.querySelectorAll('.login-field').forEach(f => f.addEventListener('focus', () => _vkTarget = f));
-function vkType(char) {
-  if (!_vkTarget) _vkTarget = document.getElementById('login-user');
-  const pos = _vkTarget.selectionStart;
-  const val = _vkTarget.value;
-  _vkTarget.value = val.slice(0,pos)+char+val.slice(pos);
-  _vkTarget.setSelectionRange(pos+1,pos+1);
-  _vkTarget.focus();
-}
-function vkBackspace() {
-  if (!_vkTarget) return;
-  const pos = _vkTarget.selectionStart;
-  if (pos>0) { _vkTarget.value = _vkTarget.value.slice(0,pos-1)+_vkTarget.value.slice(pos); _vkTarget.setSelectionRange(pos-1,pos-1); }
-  _vkTarget.focus();
-}
-async function doLogin() {
-  const login = document.getElementById('login');
-  if (login) { login.style.transition='opacity .3s'; login.style.opacity='0'; await new Promise(r=>setTimeout(r,300)); login.style.display='none'; }
-  const appEl = document.querySelector('.app');
-  if (appEl) { appEl.style.opacity='0'; appEl.style.transition='opacity .4s'; setTimeout(()=>appEl.style.opacity='1',50); }
-  _initMainApp();
-}
-function _initMainApp() {
-  _startClock();
-  _loadAgentStatusPanel();
-  loadChatLog();
-  setInterval(loadChatLog, 15000);
-  setInterval(_loadAgentStatusPanel, 30000);
-  sysLog('// SESSION INITIALIZED','ok');
-  sysLog('// CHAT INTERFACE READY');
-}
-function _startClock() {
-  const els = [document.getElementById('tb-clock'), document.getElementById('hdr-clock')].filter(Boolean);
-  if (!els.length) return;
-  setInterval(() => { const t=new Date().toTimeString().slice(0,8); els.forEach(e=>e.textContent=t); }, 1000);
-}
-
-/* ── SYSTEM LOG (mini-term in right panel) ── */
-function sysLog(msg, cls='') {
-  const term = document.getElementById('mini-term');
-  if (!term) return;
-  const line = document.createElement('span');
-  line.className = 'term-line' + (cls ? ' '+cls : '');
-  line.textContent = msg;
-  term.appendChild(line);
-  term.scrollTop = term.scrollHeight;
-  if (term.children.length > 80) term.removeChild(term.firstChild);
-}
-
-/* ── AGENT STATUS PANEL ── */
-async function _loadAgentStatusPanel() {
-  try {
-    const r = await fetch('/api/status');
-    if (!r.ok) return;
-    const d = await r.json();
-    const agents = (d.agents||[]).slice(0,14);
-    const running = agents.filter(a=>a.running).length;
-    const cnt = document.getElementById('tb-agent-count');
-    if (cnt) cnt.textContent = running + ' AGENTS';
-    const list = document.getElementById('agent-status-list');
-    if (!list) return;
-    if (!agents.length) { list.innerHTML = '<div class="agent-item" style="color:var(--text-muted)">No agents</div>'; return; }
-    list.innerHTML = agents.map(a => `
-      <div class="agent-item">
-        <div class="agent-dot ${a.running?'on':'off'}"></div>
-        <div class="agent-name" style="color:${a.running?'var(--text)':'var(--text-dim)'}">${escHtml(a.agent||a.name||'?')}</div>
-        <div class="agent-status">${a.running?'ON':'–'}</div>
-      </div>`).join('');
-  } catch(e) {}
-}
-
-/* ══════════════════════════════════════════════════
-   HEADER CLOCK (legacy — kept for compatibility)
-══════════════════════════════════════════════════ */
-(function initHeaderClock() {
-  const el = document.getElementById('hdr-clock');
-  if (!el) return;
-  function tick() {
-    const now = new Date();
-    const h = String(now.getHours()).padStart(2,'0');
-    const m = String(now.getMinutes()).padStart(2,'0');
-    const s = String(now.getSeconds()).padStart(2,'0');
-    el.textContent = h + ':' + m + ':' + s;
-  }
-  tick();
-  setInterval(tick, 1000);
-})();
-
-/* ══════════════════════════════════════════════════
-   PARTICLE SYSTEM
-══════════════════════════════════════════════════ */
-(function initParticles() {
-  const canvas = document.getElementById('particles-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  let W, H;
-  const particles = [];
-
-  function resize() {
-    W = canvas.width = window.innerWidth;
-    H = canvas.height = window.innerHeight;
-  }
-  resize();
-  window.addEventListener('resize', resize, {passive:true});
-
-  const GOLD = 'rgba(245,196,0,';
-  for (let i = 0; i < 55; i++) {
-    particles.push({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      r: Math.random() * 1.5 + 0.3,
-      vx: (Math.random() - 0.5) * 0.3,
-      vy: (Math.random() - 0.5) * 0.3,
-      a: Math.random() * 0.5 + 0.1,
-      da: (Math.random() - 0.5) * 0.003,
-    });
-  }
-
-  function frame() {
-    ctx.clearRect(0, 0, W, H);
-    for (const p of particles) {
-      p.x += p.vx; p.y += p.vy;
-      p.a += p.da;
-      if (p.a < 0.05) p.da = Math.abs(p.da);
-      if (p.a > 0.6) p.da = -Math.abs(p.da);
-      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
-      ctx.fill();
-    }
-    for (let i = 0; i < particles.length; i++) {
-      for (let j = i + 1; j < particles.length; j++) {
-        const dx = particles[i].x - particles[j].x;
-        const dy = particles[i].y - particles[j].y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 90) {
-          ctx.beginPath();
-          ctx.moveTo(particles[i].x, particles[i].y);
-          ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
-        }
-      }
-    }
-    requestAnimationFrame(frame);
-  }
-  frame();
-})();
-
-/* init nav active state */
-document.addEventListener('DOMContentLoaded', () => {
-  const overviewBtn = document.querySelector('.nav-group-btn[data-group="overview"]');
-  if (overviewBtn) overviewBtn.classList.add('active');
-});
-</script>
-</body>
-</html>"""
     # ── Skills commands (pass-through; skills-manager processes these) ──
     if (msg_lower.startswith("skills") or msg_lower.startswith("agents")
             or msg_lower.startswith("agent ") or msg_lower.startswith("create agent")
