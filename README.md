@@ -45,25 +45,60 @@
 
 ## ✨ Key Features
 
+### 🧠 Core AI Platform
 | Feature | Description |
 |---|---|
 | 🤖 **56 Specialist Agents** | A full team of AI agents — each expert in a specific business domain |
 | 🛠️ **147 Reusable Skills** | Modular skill library you can compose into custom agents |
 | 🖥️ **Web Dashboard** | Full control panel at `http://127.0.0.1:8787` — no terminal needed |
-| 🗂️ **Three Modes** | Start with 3 agents (Starter), grow to 8 (Business), or unleash all 56 (Power) |
-| 📋 **Goal Templates** | One-click business templates: 10 leads in 24h, close €1k deal, automate support |
-| 🧠 **AI Router** | 3-layer routing: local Ollama → Gemma (local/cloud) → NVIDIA NIM → paid APIs. Zero cost by default. |
-| 📊 **ROI Tracking** | Tracks leads generated, deals closed, hours saved, and € value created |
+| 🗂️ **Three Modes** | Start with 3 agents (Starter), grow to 8 (Business), or unleash all 70+ (Power) |
+| 🧠 **AI Router** | 3-layer routing: local Ollama → Gemma → NVIDIA NIM → paid APIs. Zero cost by default. |
 | 🔒 **Guardrails** | Human-in-the-loop approval queue for high-risk actions (bulk email, purchases) |
-| 📱 **WhatsApp + Discord** | Get notified and send commands from your phone or Discord server |
 | 🆓 **Works Locally** | Fully operational without any paid API — uses Ollama for free local AI |
-| 🔄 **Memory & CRM** | Built-in lead CRM with follow-up tracking and per-lead memory |
-| ⏱️ **Scheduler** | Schedule recurring tasks (daily lead generation, weekly reports, etc.) |
 | 🔥 **ASCEND FORGE** | Self-improving UI engine — scans, patches, and auto-refactors your web interfaces |
 | ⚡ **BLACKLIGHT** | Autonomous darknet & blockchain intelligence agent running 24/7 |
+
+### 🎯 Sales & CRM
+| Feature | Description |
+|---|---|
+| 🎯 **CRM Pipeline** | Full lead pipeline with deal stages (Lead → Won), lead scoring, and kanban-style view |
+| 📧 **Email Marketing** | Write + send cold email campaigns, drip sequences, and track open/click rates |
+| 📋 **Goal Templates** | One-click business templates: 10 leads in 24h, close €1k deal, automate support |
+| 📊 **ROI Tracking** | Tracks leads generated, deals closed, hours saved, and € value created |
+
+### 🤝 Communication & Meetings
+| Feature | Description |
+|---|---|
+| 🎙️ **Meeting Intelligence** | Transcribe Zoom/Google Meet calls — get AI summaries, action items + follow-up emails |
+| 📱 **Social Media Manager** | Auto-post + engagement replies on LinkedIn, Instagram, X with AI content generation |
+| 📱 **WhatsApp + Discord** | Get notified and send commands from your phone or Discord server |
+| ☀️ **Daily CEO Briefing** | Morning summary with yesterday's wins, today's priorities, and key metrics |
+
+### 💰 Finance & Operations
+| Feature | Description |
+|---|---|
+| 🧾 **Financial Invoicing** | Create invoices, track expenses, and view a live P&L report |
+| 📊 **Analytics Dashboard** | Cross-module BI dashboard with AI-powered recommendations and trend charts |
+| ⚙️ **Workflow Builder** | No-code automation editor — build trigger → action workflows that run automatically |
+| ⏱️ **Scheduler** | Schedule recurring tasks (daily lead generation, weekly reports, etc.) |
+
+### 👥 Team & Support
+| Feature | Description |
+|---|---|
+| 👥 **Multi-User / Team** | Invite team members with roles: Owner, Admin, Manager, Member, Viewer |
+| 🎧 **Customer Support Agent** | 24/7 helpdesk with knowledge base, AI reply suggestions, and smart ticket routing |
+
+### 🛠️ Growth Tools
+| Feature | Description |
+|---|---|
+| 🌐 **Website Builder** | AI-generates complete landing page HTML from a business description |
+| 🔍 **Competitor Watch** | Monitor competitors with AI analysis and counter-strategy recommendations |
+| ✨ **Personal Brand Agent** | Thought leadership content: LinkedIn posts, threads, newsletter sections |
+| ❤️ **Business Health Check** | One-click audit graded A–D with issues identified and fixes recommended |
+| 💾 **Export & Backup** | JSON/CSV export per module, full ZIP backups of all data |
 | 📈 **Turbo Quant** | Quantitative trading engine with backtesting, signal generation, and portfolio management |
 
----
+
 
 ## Who is this for?
 
