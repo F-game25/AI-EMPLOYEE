@@ -57,6 +57,14 @@
 | 🔒 **Guardrails** | Human-in-the-loop approval queue for high-risk actions (bulk email, purchases) |
 | 📱 **WhatsApp + Discord** | Get notified and send commands from your phone or Discord server |
 | 🆓 **Works Locally** | Fully operational without any paid API — uses Ollama for free local AI |
+| 🎯 **Lead CRM** | Full sales pipeline (new→qualified→proposal→negotiation→won/lost), AI lead scoring, follow-up scheduling |
+| 📧 **Email Marketing** | Campaign builder with multi-step sequences, send simulation, open/click tracking, AI copy generation |
+| 🗓️ **Meeting Intelligence** | Record meetings, AI-summarize transcripts, extract action items, auto-generate follow-up emails |
+| 📱 **Social Scheduler** | Schedule posts across 6 platforms, auto-publish simulation, AI content generation |
+| 📰 **CEO Daily Briefing** | AI-generated executive briefings with pipeline, revenue, tasks, and risk summaries |
+| 💳 **Financial Tools** | Invoice & quote management, expense tracking, P&L dashboard, payment reminders |
+| 🕵️ **Competitor Watch** | Track competitors, AI-powered SWOT analysis, competitive intelligence alerts |
+| 🗃️ **Content Calendar** | Multi-platform content planning, AI 30-day calendar generation, status tracking |
 | 🔄 **Memory & CRM** | Built-in lead CRM with follow-up tracking and per-lead memory |
 | ⏱️ **Scheduler** | Schedule recurring tasks (daily lead generation, weekly reports, etc.) |
 | 🔥 **ASCEND FORGE** | Self-improving UI engine — scans, patches, and auto-refactors your web interfaces |
@@ -73,8 +81,25 @@ You run a business. You don't have time to manage 56 agents and 147 skills. You 
 - 10 qualified leads today
 - A sales email in your inbox
 - Your customer support running on autopilot
+- Your invoices created and tracked automatically
+- Your competitors analyzed weekly
+- Your content calendar planned for the next 30 days
 
 That's exactly what AI Employee does. One AI employee that handles your tasks — powered by specialist AI agents working behind the scenes.
+
+### 🆕 New Business Features (v2.0)
+
+| Module | What it does |
+|---|---|
+| 🎯 **Lead CRM** | Kanban pipeline with 6 stages, AI lead scoring (0-100), follow-up scheduler |
+| 📧 **Email Marketing** | Multi-step email sequences, send simulation, open/click tracking, AI copy writer |
+| 🗓️ **Meeting Intelligence** | Transcript → AI summary → action items → follow-up email, all automated |
+| 📱 **Social Scheduler** | Schedule posts across Twitter/Instagram/LinkedIn/TikTok, AI content generator |
+| 📰 **CEO Briefing** | Daily AI-generated executive briefing with pipeline, revenue & risk overview |
+| 💳 **Financial Tools** | Invoices, quotes, expense tracking, P&L dashboard, overdue reminders |
+| 🕵️ **Competitor Watch** | Add competitors, run AI SWOT analysis, get competitive intelligence alerts |
+| 🗃️ **Content Calendar** | Plan content across platforms, AI generates full 30-day calendars by niche |
+| ⚠️ **Pending Actions** | High-risk AI actions now go through human-review queue before execution |
 
 ---
 
