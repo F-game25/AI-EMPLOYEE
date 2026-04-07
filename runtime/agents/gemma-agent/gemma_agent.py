@@ -277,7 +277,7 @@ def ask(payload: dict) -> JSONResponse:
                 {
                     "error": (
                         "No Gemma backend configured. "
-                        "Either start Ollama and run `ollama pull gemma3`, "
+                        f"Either start Ollama and run `ollama pull {GEMMA_MODEL}`, "
                         "or set GOOGLE_API_KEY in ~/.ai-employee/.env"
                     )
                 },
