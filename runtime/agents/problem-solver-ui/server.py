@@ -87,7 +87,7 @@ def _ensure_jwt_secret() -> str:
     _ENV_FILE_MAX_BYTES = 65536  # 64 KiB — guard against maliciously large files
     if env_file.exists():
         try:
-            raw = env_file.read_bytes()[:_ENV_FILE_MAX_BYTES].decode("utf-8", errors="replace")
+            raw = env_file.read_bytes()[:_ENV_FILE_MAX_BYTES].decode("utf-8", errors="strict")
             for raw_line in raw.splitlines():
                 line = raw_line.strip()
                 if line.startswith("JWT_SECRET_KEY="):
@@ -97,7 +97,7 @@ def _ensure_jwt_secret() -> str:
                             and len(stored) >= 32):
                         os.environ["JWT_SECRET_KEY"] = stored
                         return stored
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             pass
 
     # Auto-generate a strong secret
@@ -110,8 +110,11 @@ def _ensure_jwt_secret() -> str:
         env_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         existing = ""
         if env_file.exists():
-            raw = env_file.read_bytes()[:_ENV_FILE_MAX_BYTES].decode("utf-8", errors="replace")
-            existing = raw
+            try:
+                raw = env_file.read_bytes()[:_ENV_FILE_MAX_BYTES].decode("utf-8", errors="strict")
+                existing = raw
+            except (OSError, UnicodeDecodeError):
+                existing = ""
         new_lines = []
         replaced = False
         for line in existing.splitlines():
@@ -19462,13 +19465,14 @@ if __name__ == "__main__":
 
     # ── Startup banner ────────────────────────────────────────────────────────
     _url = f"http://{HOST}:{PORT}"
-    _url_col = _url[:40]  # truncate to fit fixed-width banner column
+    _BANNER_URL_MAX_LEN = 40  # fixed-width banner column width
+    _url_col = _url[:_BANNER_URL_MAX_LEN]  # truncate to fit
     print(
         "\n"
         "╔══════════════════════════════════════════════════════╗\n"
         "║        🤖  AI EMPLOYEE  —  Dashboard Server          ║\n"
         "╠══════════════════════════════════════════════════════╣\n"
-        f"║  Dashboard → {_url_col:<40}║\n"
+        f"║  Dashboard → {_url_col:<{_BANNER_URL_MAX_LEN}}║\n"
         "║  Press Ctrl+C to stop                                ║\n"
         "╚══════════════════════════════════════════════════════╝\n",
         flush=True,
