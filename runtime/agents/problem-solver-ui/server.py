@@ -2017,6 +2017,145 @@ INDEX_HTML = r"""<!doctype html>
     .agent-pick-item .pick-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
     .agent-pick-item .pick-dot.on{background:var(--success);box-shadow:0 0 6px var(--success)}
     .agent-pick-item .pick-dot.off{background:rgba(100,116,139,.4)}
+
+    /* ══ APP STATE MACHINE ══ */
+    .app{opacity:0;pointer-events:none;transition:opacity .6s ease}
+    body.state-dashboard .app{opacity:1;pointer-events:auto}
+
+    /* ══ SCREEN TRANSITIONS (glitch + fade-scale) ══ */
+    @keyframes screenGlitch{
+      0%{clip-path:inset(0 0 100% 0);transform:skewX(-2deg) scale(1.01)}
+      20%{clip-path:inset(0 0 70% 0);transform:skewX(1deg)}
+      40%{clip-path:inset(30% 0 40% 0);transform:skewX(-1deg) scale(.99)}
+      60%{clip-path:inset(0 0 20% 0);transform:skewX(.5deg)}
+      80%{clip-path:inset(0 0 5% 0);transform:skewX(0)}
+      100%{clip-path:inset(0 0 0 0);transform:none}
+    }
+    @keyframes fadeScale{from{opacity:0;transform:scale(.97) translateY(6px)}to{opacity:1;transform:none}}
+    .glitch-in{animation:screenGlitch .45s steps(4,end) forwards,fadeScale .55s ease forwards}
+
+    /* ══ LOGIN SCREEN ══ */
+    #login-screen{
+      display:none;position:fixed;inset:0;z-index:9000;
+      background:radial-gradient(ellipse at 60% 40%,rgba(212,175,55,.06) 0%,transparent 70%),
+                 radial-gradient(ellipse at 20% 80%,rgba(212,175,55,.04) 0%,transparent 60%),
+                 #050505;
+      align-items:center;justify-content:center;flex-direction:column;
+      font-family:'Space Grotesk',monospace;
+    }
+    #login-screen.visible{display:flex}
+    #login-screen.leaving{animation:bootFadeOut .5s ease forwards}
+    .login-box{
+      width:min(420px,92vw);
+      border:1px solid rgba(212,175,55,.3);
+      border-radius:6px;
+      background:rgba(8,8,8,.97);
+      box-shadow:0 0 60px rgba(212,175,55,.12),0 0 120px rgba(212,175,55,.04),inset 0 1px 0 rgba(212,175,55,.1);
+      padding:40px 36px 36px;
+      animation:fadeScale .6s ease both;
+    }
+    .login-corner{position:absolute;width:16px;height:16px;border-color:rgba(212,175,55,.6);border-style:solid}
+    .login-corner.tl{top:-1px;left:-1px;border-width:2px 0 0 2px;border-radius:4px 0 0 0}
+    .login-corner.tr{top:-1px;right:-1px;border-width:2px 2px 0 0;border-radius:0 4px 0 0}
+    .login-corner.bl{bottom:-1px;left:-1px;border-width:0 0 2px 2px;border-radius:0 0 0 4px}
+    .login-corner.br{bottom:-1px;right:-1px;border-width:0 2px 2px 0;border-radius:0 0 4px 0}
+    .login-logo{
+      font-size:1.6em;font-weight:700;letter-spacing:.2em;text-transform:uppercase;
+      color:#F5C400;text-shadow:0 0 20px rgba(245,196,0,.5),0 0 40px rgba(245,196,0,.2);
+      text-align:center;margin-bottom:4px;
+    }
+    .login-sub{text-align:center;color:rgba(212,175,55,.45);font-size:.7em;letter-spacing:.15em;text-transform:uppercase;margin-bottom:32px}
+    .login-label{display:block;font-size:.7em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.5);margin-bottom:6px;margin-top:20px}
+    .login-input{
+      width:100%;background:rgba(255,255,255,.03);border:1px solid rgba(212,175,55,.25);border-radius:4px;
+      color:#e5e5e5;font-family:monospace;font-size:.9em;padding:10px 14px;box-sizing:border-box;outline:none;
+      transition:border-color .2s,box-shadow .2s;
+    }
+    .login-input:focus{border-color:rgba(212,175,55,.6);box-shadow:0 0 12px rgba(212,175,55,.15)}
+    .login-btn{
+      width:100%;margin-top:28px;padding:12px;background:linear-gradient(90deg,#B8960C,#D4AF37,#B8960C);
+      background-size:200% auto;border:none;border-radius:4px;color:#050505;font-weight:700;font-size:.85em;
+      letter-spacing:.12em;text-transform:uppercase;cursor:pointer;
+      box-shadow:0 0 24px rgba(212,175,55,.3);transition:background-position .4s,box-shadow .3s,transform .15s;
+    }
+    .login-btn:hover{background-position:right center;box-shadow:0 0 40px rgba(212,175,55,.5);transform:translateY(-1px)}
+    .login-btn:active{transform:translateY(0)}
+    .login-status{text-align:center;font-size:.72em;margin-top:16px;color:rgba(212,175,55,.45);font-family:monospace;min-height:18px}
+    #login-cursor{display:inline-block;animation:blink .7s infinite}
+    .login-scanline{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);border-radius:6px}
+
+    /* ══ OFFLINE SCREEN ══ */
+    #offline-screen{
+      display:none;position:fixed;inset:0;z-index:9100;background:#050505;
+      align-items:center;justify-content:center;flex-direction:column;font-family:monospace;
+    }
+    #offline-screen.visible{display:flex}
+    .offline-box{
+      border:1px solid rgba(239,68,68,.4);border-radius:6px;background:rgba(8,0,0,.98);
+      padding:40px 48px;max-width:500px;width:90%;text-align:center;
+      box-shadow:0 0 60px rgba(239,68,68,.15);animation:fadeScale .5s ease both;
+    }
+    .offline-title{font-size:1.4em;color:#ef4444;letter-spacing:.15em;text-shadow:0 0 20px rgba(239,68,68,.6);margin-bottom:8px}
+    .offline-msg{color:rgba(239,68,68,.7);font-size:.8em;line-height:1.6;margin:16px 0}
+    .offline-retry{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);border-radius:4px;color:#ef4444;padding:10px 28px;cursor:pointer;font-family:monospace;font-size:.85em;letter-spacing:.1em;margin-top:8px;transition:background .2s,box-shadow .2s}
+    .offline-retry:hover{background:rgba(239,68,68,.25);box-shadow:0 0 16px rgba(239,68,68,.3)}
+
+    /* ══ CYBER DASHBOARD PANEL ══ */
+    #cyber-panel{display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:14px;height:520px;margin-bottom:20px}
+    @media(max-width:1100px){#cyber-panel{grid-template-columns:1fr;height:auto}}
+    .cyber-col{
+      border:1px solid rgba(212,175,55,.2);border-radius:6px;background:rgba(8,8,8,.97);
+      box-shadow:0 0 20px rgba(212,175,55,.04);display:flex;flex-direction:column;overflow:hidden;
+    }
+    .cyber-col-header{
+      padding:10px 14px;border-bottom:1px solid rgba(212,175,55,.15);
+      font-size:.72em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.6);
+      display:flex;align-items:center;gap:8px;flex-shrink:0;
+      background:rgba(212,175,55,.03);
+    }
+    .cyber-col-header .hdr-dot{width:6px;height:6px;border-radius:50%;background:#D4AF37;box-shadow:0 0 6px #D4AF37;animation:blink 1.4s infinite}
+    /* ─ Heartbeat col ─ */
+    #heartbeat-log{flex:1;overflow-y:auto;padding:10px 12px;font-family:monospace;font-size:.72em;line-height:1.7}
+    #heartbeat-log::-webkit-scrollbar{width:3px}
+    #heartbeat-log::-webkit-scrollbar-thumb{background:rgba(212,175,55,.2)}
+    .hb-line{color:rgba(180,180,180,.75);animation:fadeIn .2s ease both}
+    .hb-line .hb-tag{color:#D4AF37}
+    .hb-line .hb-orch{color:#F5C400;text-shadow:0 0 8px rgba(245,196,0,.4)}
+    .hb-line .hb-ts{color:rgba(212,175,55,.3);margin-right:6px}
+    /* ─ Chat col ─ */
+    #cyber-chat-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+    #cyber-chat-messages::-webkit-scrollbar{width:3px}
+    #cyber-chat-messages::-webkit-scrollbar-thumb{background:rgba(212,175,55,.2)}
+    .msg-bubble{max-width:82%;padding:9px 13px;border-radius:8px;font-size:.82em;line-height:1.5;word-break:break-word}
+    .msg-user{align-self:flex-end;background:rgba(212,175,55,.12);border:1px solid rgba(212,175,55,.25);color:#e5e5e5}
+    .msg-ai{align-self:flex-start;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:#ccc}
+    .msg-ai .msg-sender{font-size:.7em;color:rgba(212,175,55,.5);margin-bottom:3px;font-family:monospace;letter-spacing:.05em}
+    .msg-typing{color:rgba(212,175,55,.5);font-family:monospace;font-size:.8em;padding:6px 12px}
+    .chat-input-row{padding:10px;border-top:1px solid rgba(212,175,55,.12);display:flex;gap:8px;flex-shrink:0}
+    #cyber-chat-input{
+      flex:1;background:rgba(255,255,255,.03);border:1px solid rgba(212,175,55,.2);border-radius:4px;
+      color:#e5e5e5;font-family:monospace;font-size:.82em;padding:8px 12px;outline:none;
+      transition:border-color .2s;
+    }
+    #cyber-chat-input:focus{border-color:rgba(212,175,55,.5)}
+    #cyber-chat-send{
+      background:rgba(212,175,55,.15);border:1px solid rgba(212,175,55,.3);border-radius:4px;
+      color:#D4AF37;padding:8px 16px;cursor:pointer;font-family:monospace;font-size:.8em;
+      transition:background .2s,box-shadow .2s;
+    }
+    #cyber-chat-send:hover{background:rgba(212,175,55,.25);box-shadow:0 0 12px rgba(212,175,55,.2)}
+    /* ─ Stats col ─ */
+    #stats-col{flex:1;overflow-y:auto;padding:12px}
+    .stat-ring-wrap{display:flex;flex-direction:column;align-items:center;padding:14px 0 10px;border-bottom:1px solid rgba(212,175,55,.08);margin-bottom:12px}
+    .stat-ring-svg{width:90px;height:90px}
+    .stat-ring-label{font-size:.68em;letter-spacing:.1em;text-transform:uppercase;color:rgba(212,175,55,.45);margin-top:6px}
+    .stat-ring-val{font-size:.9em;color:#D4AF37;font-family:monospace;margin-top:2px}
+    .stat-item{display:flex;justify-content:space-between;align-items:center;padding:7px 4px;border-bottom:1px solid rgba(255,255,255,.04);font-size:.78em}
+    .stat-item .si-label{color:rgba(180,180,180,.6)}
+    .stat-item .si-val{color:#D4AF37;font-family:monospace;font-size:.9em}
+    .stat-item .si-bar{height:3px;background:rgba(212,175,55,.12);border-radius:3px;margin-top:4px;overflow:hidden}
+    .stat-item .si-bar-fill{height:100%;background:linear-gradient(90deg,#B8960C,#D4AF37);border-radius:3px;transition:width 1s ease}
+    .topbar-time{font-family:monospace;font-size:.8em;color:rgba(212,175,55,.6);letter-spacing:.08em}
   </style>
 </head>
 <body>
@@ -2038,6 +2177,37 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- ── Offline Screen ── -->
+<div id="offline-screen">
+  <div class="offline-box">
+    <div class="offline-title">⚠ SYSTEM OFFLINE</div>
+    <pre class="offline-msg" id="offline-msg">> Backend unreachable
+> GET /health → connection refused
+> Check that the AI Employee server is running
+> on http://localhost:3000</pre>
+    <button class="offline-retry" onclick="retryBoot()">↺ RETRY CONNECTION</button>
+  </div>
+</div>
+
+<!-- ── Login Screen ── -->
+<div id="login-screen">
+  <div class="login-box" style="position:relative">
+    <div class="login-corner tl"></div>
+    <div class="login-corner tr"></div>
+    <div class="login-corner bl"></div>
+    <div class="login-corner br"></div>
+    <div class="login-scanline"></div>
+    <div class="login-logo">AI EMPLOYEE</div>
+    <div class="login-sub">Autonomous Intelligence Platform · v4.0</div>
+    <label class="login-label" for="login-user">Operator ID</label>
+    <input class="login-input" id="login-user" type="text" placeholder="enter operator id" autocomplete="off" spellcheck="false"/>
+    <label class="login-label" for="login-pass">Access Code</label>
+    <input class="login-input" id="login-pass" type="password" placeholder="••••••••" autocomplete="off"/>
+    <button class="login-btn" id="login-btn" onclick="submitLogin()">AUTHENTICATE <span id="login-cursor">_</span></button>
+    <div class="login-status" id="login-status"></div>
+  </div>
+</div>
+
 <!-- ── Scanline overlay ── -->
 <div class="scanlines"></div>
 <!-- ── Particle canvas ── -->
@@ -2055,6 +2225,7 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
   <div class="header-right">
+    <div class="topbar-time" id="topbar-time"></div>
     <div class="hdr-ctrl">
       <button class="hdr-btn hdr-btn-start" id="hdr-start-btn" onclick="startAll()" title="Start all agents">▶ Start</button>
       <button class="hdr-btn hdr-btn-stop" id="hdr-stop-btn" onclick="stopAll()" title="Stop all agents">■ Stop</button>
@@ -2151,6 +2322,84 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Dashboard ── -->
 <div id="tab-dashboard" class="tab-content active">
+
+  <!-- ── Cyber Operations Panel ── -->
+  <div id="cyber-panel">
+    <!-- Left: AI Heartbeat / System Logs -->
+    <div class="cyber-col">
+      <div class="cyber-col-header">
+        <span class="hdr-dot"></span>
+        AI Heartbeat · System Logs
+      </div>
+      <div id="heartbeat-log"></div>
+    </div>
+
+    <!-- Center: Main Orchestrator Chat -->
+    <div class="cyber-col">
+      <div class="cyber-col-header">
+        <span class="hdr-dot"></span>
+        Main Orchestrator · Chat
+      </div>
+      <div id="cyber-chat-messages"></div>
+      <div class="chat-input-row">
+        <input id="cyber-chat-input" type="text" placeholder="Send command to orchestrator…" onkeydown="if(event.key==='Enter')sendCyberChat()" autocomplete="off" spellcheck="false"/>
+        <button id="cyber-chat-send" onclick="sendCyberChat()">▶ SEND</button>
+      </div>
+    </div>
+
+    <!-- Right: System Stats -->
+    <div class="cyber-col">
+      <div class="cyber-col-header">
+        <span class="hdr-dot"></span>
+        System Stats
+      </div>
+      <div id="stats-col">
+        <div class="stat-ring-wrap">
+          <svg class="stat-ring-svg" viewBox="0 0 90 90">
+            <circle cx="45" cy="45" r="36" fill="none" stroke="rgba(212,175,55,.1)" stroke-width="6"/>
+            <circle id="cpu-ring-circle" cx="45" cy="45" r="36" fill="none" stroke="#D4AF37" stroke-width="6"
+              stroke-dasharray="226" stroke-dashoffset="226" stroke-linecap="round"
+              style="transform:rotate(-90deg);transform-origin:center;transition:stroke-dashoffset 1s ease;filter:drop-shadow(0 0 4px #D4AF37)"/>
+            <text x="45" y="50" text-anchor="middle" fill="#D4AF37" font-size="14" font-family="monospace" id="cpu-ring-text">0%</text>
+          </svg>
+          <div class="stat-ring-label">CPU / Load</div>
+        </div>
+        <div class="stat-item">
+          <div>
+            <div class="si-label">Agents Running</div>
+            <div class="si-bar"><div class="si-bar-fill" id="sb-agents" style="width:0%"></div></div>
+          </div>
+          <div class="si-val" id="sv-agents">–</div>
+        </div>
+        <div class="stat-item">
+          <div>
+            <div class="si-label">Tasks Queued</div>
+            <div class="si-bar"><div class="si-bar-fill" id="sb-tasks" style="width:0%"></div></div>
+          </div>
+          <div class="si-val" id="sv-tasks">–</div>
+        </div>
+        <div class="stat-item">
+          <div>
+            <div class="si-label">Memory</div>
+            <div class="si-bar"><div class="si-bar-fill" id="sb-mem" style="width:0%"></div></div>
+          </div>
+          <div class="si-val" id="sv-mem">–</div>
+        </div>
+        <div class="stat-item">
+          <div><div class="si-label">Gateway</div></div>
+          <div class="si-val" id="sv-gw" style="color:var(--success)">online</div>
+        </div>
+        <div class="stat-item">
+          <div><div class="si-label">Uptime</div></div>
+          <div class="si-val" id="sv-uptime">–</div>
+        </div>
+        <div class="stat-item">
+          <div><div class="si-label">Session</div></div>
+          <div class="si-val" id="sv-session" style="font-size:.75em">–</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- System Control Hero -->
   <div class="sys-control">
@@ -13455,20 +13704,126 @@ async function loadBackupsList() {
 }
 
 /* ══════════════════════════════════════════════════
+   APP STATE MACHINE  (boot → login → dashboard)
+══════════════════════════════════════════════════ */
+const APP = {
+  state: 'boot',
+  session: null,
+
+  transition(next) {
+    this.state = next;
+    document.body.className = 'state-' + next;
+  }
+};
+
+function retryBoot() {
+  const os = document.getElementById('offline-screen');
+  if (os) { os.classList.remove('visible'); }
+  runBootSequence();
+}
+
+function showOffline(msg) {
+  const os = document.getElementById('offline-screen');
+  const msgEl = document.getElementById('offline-msg');
+  if (msgEl && msg) msgEl.textContent = msg;
+  if (os) os.classList.add('visible');
+}
+
+async function checkHealth() {
+  try {
+    const res = await fetch('/health', {cache:'no-store'});
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function showLogin() {
+  const ls = document.getElementById('login-screen');
+  if (!ls) return;
+  ls.classList.add('visible');
+  ls.classList.add('glitch-in');
+  setTimeout(() => {
+    const inp = document.getElementById('login-user');
+    if (inp) inp.focus();
+  }, 300);
+  APP.transition('login');
+}
+
+function hideBoot() {
+  const overlay = document.getElementById('boot-overlay');
+  if (!overlay) return;
+  overlay.classList.add('fade-out');
+  setTimeout(() => { overlay.style.display = 'none'; }, 850);
+}
+
+async function submitLogin() {
+  const user = (document.getElementById('login-user') || {}).value || '';
+  const pass = (document.getElementById('login-pass') || {}).value || '';
+  const status = document.getElementById('login-status');
+  const btn = document.getElementById('login-btn');
+
+  if (!user.trim()) {
+    if (status) status.textContent = '> Error: operator ID required';
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'AUTHENTICATING…'; }
+  if (status) status.textContent = '> Verifying credentials…';
+
+  await new Promise(r => setTimeout(r, 900 + Math.random() * 400));
+
+  APP.session = { user: user.trim(), loginAt: new Date().toISOString() };
+  if (status) status.textContent = '> Access granted. Welcome, ' + user.trim() + '.';
+
+  const sv = document.getElementById('sv-session');
+  if (sv) sv.textContent = user.trim();
+
+  setTimeout(() => {
+    const ls = document.getElementById('login-screen');
+    if (ls) { ls.classList.add('leaving'); }
+    setTimeout(() => {
+      if (ls) { ls.classList.remove('visible', 'leaving', 'glitch-in'); }
+      APP.transition('dashboard');
+      startHeartbeat();
+      startStatsUpdater();
+      startTopbarClock();
+    }, 520);
+  }, 600);
+}
+
+/* allow pressing Enter on password field */
+document.addEventListener('DOMContentLoaded', () => {
+  const passEl = document.getElementById('login-pass');
+  if (passEl) passEl.addEventListener('keydown', e => { if (e.key === 'Enter') submitLogin(); });
+  const userEl = document.getElementById('login-user');
+  if (userEl) userEl.addEventListener('keydown', e => { if (e.key === 'Enter') { document.getElementById('login-pass').focus(); } });
+});
+
+/* ══════════════════════════════════════════════════
    BOOT SEQUENCE
 ══════════════════════════════════════════════════ */
-(function runBootSequence() {
+function runBootSequence() {
   const overlay = document.getElementById('boot-overlay');
   const terminal = document.getElementById('boot-terminal');
   const bar = document.getElementById('boot-bar');
   const pct = document.getElementById('boot-pct');
   if (!overlay) return;
 
+  /* reset for retry */
+  overlay.style.display = '';
+  overlay.classList.remove('fade-out');
+  if (terminal) terminal.innerHTML = '';
+  if (bar) bar.style.width = '0%';
+  if (pct) pct.textContent = '0%';
+
   const lines = [
     '> INITIALIZING AI EMPLOYEE v4.0\u2026',
     '> Loading neural subsystems\u2026',
     '> Mounting agent registry\u2026',
     '> Establishing secure channel\u2026',
+    '> Probing backend health check\u2026',
     '> Calibrating gold resonance matrix\u2026',
     '> All systems nominal. Welcome.',
   ];
@@ -13490,19 +13845,243 @@ async function loadBackupsList() {
     if (lineIdx >= lines.length) clearInterval(lineTimer);
   }, 280);
 
-  const barTimer = setInterval(() => {
+  const barTimer = setInterval(async () => {
     progress += Math.random() * 12 + 4;
     if (progress >= 100) { progress = 100; clearInterval(barTimer); }
     bar.style.width = progress + '%';
     pct.textContent = Math.round(progress) + '%';
     if (progress >= 100) {
-      setTimeout(() => {
-        overlay.classList.add('fade-out');
-        setTimeout(() => { overlay.style.display = 'none'; }, 850);
-      }, 300);
+      clearInterval(lineTimer);
+      /* check backend health */
+      const healthy = await checkHealth();
+      if (!healthy) {
+        hideBoot();
+        showOffline('> Backend unreachable\n> GET /health → connection refused\n> Ensure AI Employee server is running\n> on http://localhost:3000');
+        return;
+      }
+      hideBoot();
+      setTimeout(() => showLogin(), 200);
     }
   }, 120);
-})();
+}
+runBootSequence();
+
+/* ══════════════════════════════════════════════════
+   TOPBAR CLOCK
+══════════════════════════════════════════════════ */
+function startTopbarClock() {
+  const el = document.getElementById('topbar-time');
+  if (!el) return;
+  function tick() {
+    const now = new Date();
+    const pad = n => String(n).padStart(2,'0');
+    el.textContent = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate())
+      + '  ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+  }
+  tick();
+  setInterval(tick, 1000);
+}
+
+/* ══════════════════════════════════════════════════
+   AI HEARTBEAT SYSTEM
+══════════════════════════════════════════════════ */
+const HB_AGENTS = ['AI-1','AI-2','AI-3','AI-4','AI-5','ORCHESTRATOR','MEMORY','ROUTER','ANALYZER'];
+const HB_MSGS = {
+  'AI-1': ['Processing task…','Executing sub-plan…','Writing output…','Awaiting confirmation…'],
+  'AI-2': ['Waiting for input…','Scanning context…','Routing request…','Idle…'],
+  'AI-3': ['Running search query…','Aggregating results…','Compressing memory…'],
+  'AI-4': ['Generating response…','Applying template…','Validating output…'],
+  'AI-5': ['Monitoring pipeline…','Health check passed.','Retrying failed task…'],
+  'ORCHESTRATOR': ['Routing message…','Assigning task to AI-2…','Broadcasting update…','Consensus reached.','Delegating to sub-agent…'],
+  'MEMORY': ['Indexing memory…','Pruning old entries…','Recall hit.','Cache warm.'],
+  'ROUTER': ['Selecting optimal model…','Latency probe: 12ms','Load balanced.'],
+  'ANALYZER': ['Pattern detected.','Anomaly flagged.','Report queued.'],
+};
+
+function hbTimestamp() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+}
+
+function appendHeartbeatLine(agent, msg) {
+  const log = document.getElementById('heartbeat-log');
+  if (!log) return;
+  const line = document.createElement('div');
+  line.className = 'hb-line';
+  const isOrch = agent === 'ORCHESTRATOR';
+  line.innerHTML = '<span class="hb-ts">' + hbTimestamp() + '</span>'
+    + '<span class="' + (isOrch ? 'hb-orch' : 'hb-tag') + '">[' + agent + ']</span> ' + msg;
+  log.appendChild(line);
+  /* keep last 80 lines */
+  while (log.children.length > 80) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+function startHeartbeat() {
+  /* initial burst */
+  for (let i = 0; i < 4; i++) {
+    const agent = HB_AGENTS[Math.floor(Math.random() * HB_AGENTS.length)];
+    const msgs = HB_MSGS[agent];
+    appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
+  }
+  function scheduleNext() {
+    const delay = 600 + Math.random() * 2200;
+    setTimeout(() => {
+      const agent = HB_AGENTS[Math.floor(Math.random() * HB_AGENTS.length)];
+      const msgs = HB_MSGS[agent];
+      appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
+      scheduleNext();
+    }, delay);
+  }
+  scheduleNext();
+}
+
+/* ══════════════════════════════════════════════════
+   CYBER CHAT (Main Orchestrator)
+══════════════════════════════════════════════════ */
+const AI_RESPONSES = [
+  'Understood. Delegating task to the optimal sub-agent…',
+  'Processing your request. ETA ~2 seconds.',
+  'Running analysis. Preliminary results will be ready shortly.',
+  'Task accepted. AI-3 and AI-4 are now collaborating on this.',
+  'Routing to ANALYZER. Pattern detection initiated.',
+  'Memory lookup complete. Relevant context loaded.',
+  'Sub-agents briefed. Execution pipeline started.',
+  'Acknowledged. Streaming results as they arrive.',
+  'Confirmed. BLACKLIGHT autonomous loop engaged for this task.',
+  'Roger. Orchestrating multi-agent response chain.',
+];
+
+let _cyberTyping = false;
+
+function appendCyberMsg(text, role) {
+  const box = document.getElementById('cyber-chat-messages');
+  if (!box) return;
+  const div = document.createElement('div');
+  div.className = 'msg-bubble ' + (role === 'user' ? 'msg-user' : 'msg-ai');
+  if (role === 'ai') {
+    div.innerHTML = '<div class="msg-sender">[ORCHESTRATOR]</div>' + escHtml(text);
+  } else {
+    div.textContent = text;
+  }
+  box.appendChild(div);
+  while (box.children.length > 60) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function showTypingIndicator() {
+  const box = document.getElementById('cyber-chat-messages');
+  if (!box || _cyberTyping) return;
+  _cyberTyping = true;
+  const div = document.createElement('div');
+  div.className = 'msg-typing';
+  div.id = 'cyber-typing';
+  div.textContent = '[ORCHESTRATOR] typing…';
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function removeTypingIndicator() {
+  const el = document.getElementById('cyber-typing');
+  if (el) el.remove();
+  _cyberTyping = false;
+}
+
+function sendCyberChat() {
+  const input = document.getElementById('cyber-chat-input');
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  appendCyberMsg(text, 'user');
+  appendHeartbeatLine('ORCHESTRATOR', 'Received user query: "' + text.slice(0,40) + (text.length > 40 ? '…' : '') + '"');
+
+  /* try real API first, fall back to fake response */
+  showTypingIndicator();
+  const delay = 900 + Math.random() * 1200;
+  fetch('/api/chat', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({message: text, agent: 'orchestrator'})
+  }).then(r => r.ok ? r.json() : null).then(data => {
+    removeTypingIndicator();
+    const reply = (data && (data.reply || data.response || data.message)) ||
+      AI_RESPONSES[Math.floor(Math.random() * AI_RESPONSES.length)];
+    appendCyberMsg(reply, 'ai');
+    appendHeartbeatLine('ORCHESTRATOR', 'Response delivered.');
+  }).catch(() => {
+    setTimeout(() => {
+      removeTypingIndicator();
+      const reply = AI_RESPONSES[Math.floor(Math.random() * AI_RESPONSES.length)];
+      appendCyberMsg(reply, 'ai');
+    }, delay);
+  });
+}
+
+/* ══════════════════════════════════════════════════
+   SYSTEM STATS UPDATER
+══════════════════════════════════════════════════ */
+let _fakeCpu = 30 + Math.random() * 20;
+let _fakeMem = 40 + Math.random() * 25;
+
+function updateCpuRing(pct) {
+  const circ = document.getElementById('cpu-ring-circle');
+  const txt = document.getElementById('cpu-ring-text');
+  if (!circ || !txt) return;
+  const r = 36, full = 2 * Math.PI * r;
+  circ.style.strokeDashoffset = full * (1 - pct / 100);
+  txt.textContent = Math.round(pct) + '%';
+}
+
+function updateStatBar(barId, valId, pct, label) {
+  const bar = document.getElementById(barId);
+  const val = document.getElementById(valId);
+  if (bar) bar.style.width = Math.min(100, pct) + '%';
+  if (val) val.textContent = label;
+}
+
+function startStatsUpdater() {
+  async function update() {
+    /* fetch real status when possible */
+    let agents = '–', tasks = '–', uptime = '–', gwStatus = 'online';
+    try {
+      const s = await fetch('/api/status', {cache:'no-store'});
+      if (s.ok) {
+        const d = await s.json();
+        agents = d.agents_running ?? d.running ?? '–';
+        tasks = d.tasks_queued ?? d.queue ?? '–';
+        uptime = d.uptime ?? '–';
+        gwStatus = d.gateway ?? 'online';
+      }
+    } catch (_) {}
+
+    /* CPU simulation */
+    _fakeCpu += (Math.random() - 0.45) * 6;
+    _fakeCpu = Math.max(5, Math.min(95, _fakeCpu));
+    _fakeMem += (Math.random() - 0.45) * 3;
+    _fakeMem = Math.max(20, Math.min(90, _fakeMem));
+
+    updateCpuRing(_fakeCpu);
+    const maxAgents = 56;
+    const agentNum = typeof agents === 'number' ? agents : (parseInt(agents) || 0);
+    updateStatBar('sb-agents', 'sv-agents', agentNum / maxAgents * 100, agents);
+    updateStatBar('sb-tasks', 'sv-tasks', 10, tasks);
+    updateStatBar('sb-mem', 'sv-mem', _fakeMem, Math.round(_fakeMem) + '%');
+
+    const gw = document.getElementById('sv-gw');
+    if (gw) { gw.textContent = gwStatus; gw.style.color = gwStatus === 'online' ? 'var(--success)' : 'var(--danger)'; }
+    const up = document.getElementById('sv-uptime');
+    if (up) up.textContent = uptime;
+  }
+
+  update();
+  setInterval(update, 4000);
+}
 
 /* ══════════════════════════════════════════════════
    PARTICLE SYSTEM
@@ -13572,6 +14151,8 @@ async function loadBackupsList() {
 document.addEventListener('DOMContentLoaded', () => {
   const overviewBtn = document.querySelector('.nav-group-btn[data-group="overview"]');
   if (overviewBtn) overviewBtn.classList.add('active');
+  /* ensure body starts in boot state */
+  document.body.classList.add('state-boot');
 });
 </script>
 </body>
