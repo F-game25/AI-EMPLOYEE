@@ -1137,51 +1137,54 @@ INDEX_HTML = r"""<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>AI Employee Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg:#060608;
-      --surface:rgba(10,10,14,0.98);
-      --surface2:rgba(14,14,20,0.97);
-      --glass:rgba(255,255,255,0.02);
-      --border:rgba(255,255,255,0.07);
+      --gold:#F5C400;
+      --gold2:#FFCC00;
+      --gold-dim:rgba(245,196,0,0.15);
+      --gold-glow:rgba(245,196,0,0.35);
+      --gold-border:rgba(245,196,0,0.4);
+      --bg:#050508;
+      --bg2:#08080d;
+      --bg3:#0c0c14;
+      --panel:rgba(10,10,18,0.95);
+      --panel2:rgba(14,14,24,0.92);
+      --surface:rgba(10,10,18,0.95);
+      --surface2:rgba(14,14,24,0.92);
+      --border:rgba(245,196,0,0.12);
       --primary:#F5C400;
       --primary-dark:#B8960C;
       --primary-light:#FFDD55;
       --accent:#FFCC00;
       --accent2:#FFE566;
-      --gold:#F5C400;
       --gold-light:#FFDD55;
       --gold-dark:#B8960C;
-      --gold-dim:rgba(245,196,0,.18);
-      --gold-glow:rgba(245,196,0,.55);
-      --gold-border:rgba(245,196,0,.35);
-      --success:#22c55e;
-      --danger:#ef4444;
+      --text:#e8e0c8;
+      --text-secondary:#7a7060;
+      --text-dim:#7a7060;
+      --text-muted:#3a3428;
+      --success:#00ff88;
+      --danger:#ff3344;
       --warning:#f59e0b;
-      --text:#e8e8e8;
-      --text-secondary:#a0a0a8;
-      --text-muted:#505060;
-      --radius:12px;
-      --radius-sm:8px;
+      --cyan:#00d4ff;
+      --radius:4px;
+      --radius-sm:2px;
       --shadow:0 8px 40px rgba(0,0,0,.98);
-      --glow-primary:0 0 32px rgba(245,196,0,.45);
-      --glow-gold:0 0 20px rgba(245,196,0,.5),0 0 60px rgba(245,196,0,.2);
-      --glow-success:0 0 28px rgba(34,197,94,.35);
-      --glow-danger:0 0 28px rgba(239,68,68,.35);
-      --sidebar-w:220px;
-      --mono:'JetBrains Mono','Share Tech Mono','Courier New',monospace;
-      --sans:'Inter','Space Grotesk',system-ui,sans-serif;
+      --glow-primary:0 0 20px rgba(245,196,0,0.3);
+      --glow-gold:0 0 20px rgba(245,196,0,0.4);
+      --glow-success:0 0 20px rgba(0,255,136,0.3);
+      --glow-danger:0 0 20px rgba(255,51,68,0.3);
+      --sidebar-w:56px;
+      --mono:'Share Tech Mono','JetBrains Mono',monospace;
+      --ui:'Rajdhani',sans-serif;
+      --display:'Orbitron',sans-serif;
+      --sans:'Rajdhani','Inter',sans-serif;
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth}
-    body{
-      font-family:var(--sans);
-      background:var(--bg);
-      color:var(--text);min-height:100vh;line-height:1.6;
-      overflow-x:hidden;
-    }
+    html,body{background:var(--bg);color:var(--text);overflow-x:hidden;}
+    body{font-family:var(--ui);min-height:100vh;line-height:1.6;}
     /* Animated background blobs */
     body::before,body::after{
       content:'';position:fixed;border-radius:50%;pointer-events:none;z-index:0;filter:blur(80px);
@@ -2376,39 +2379,486 @@ INDEX_HTML = r"""<!doctype html>
     .agent-pick-item .pick-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
     .agent-pick-item .pick-dot.on{background:var(--success);box-shadow:0 0 6px var(--success)}
     .agent-pick-item .pick-dot.off{background:rgba(100,116,139,.4)}
+
+    /* ======== CYBERPUNK REFERENCE CSS ======== */
+
+    /* ── SCANLINES ── */
+    body::after{
+      content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+      background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px);
+    }
+
+    /* ── BOOT SCREEN ── */
+    #boot{
+      position:fixed;inset:0;background:#000;z-index:10000;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      font-family:var(--mono);
+    }
+    #boot-log{
+      position:absolute;top:0;left:0;right:0;
+      font-size:11px;color:rgba(245,196,0,0.5);
+      padding:20px;line-height:1.8;overflow:hidden;height:100%;
+    }
+    #boot-center{
+      position:relative;z-index:2;text-align:center;
+      opacity:0;transform:scale(0.8);
+      transition:opacity 0.8s ease, transform 0.8s ease;
+    }
+    #boot-center.show{opacity:1;transform:scale(1)}
+    .boot-box{
+      border:1px solid var(--gold-border);
+      padding:40px 80px;
+      position:relative;
+      background:rgba(0,0,0,0.8);
+    }
+    .boot-box::before,.boot-box::after{
+      content:'';position:absolute;width:20px;height:20px;border-color:var(--gold);border-style:solid;
+    }
+    .boot-box::before{top:-1px;left:-1px;border-width:2px 0 0 2px}
+    .boot-box::after{bottom:-1px;right:-1px;border-width:0 2px 2px 0}
+    .boot-logo{
+      font-family:var(--display);font-size:2.8em;font-weight:900;
+      color:var(--gold);letter-spacing:.2em;
+      text-shadow:0 0 40px var(--gold-glow),0 0 80px rgba(245,196,0,0.15);
+    }
+    .boot-sub{
+      font-family:var(--ui);font-size:.9em;color:var(--text-dim);
+      letter-spacing:.4em;margin-top:8px;text-transform:uppercase;
+    }
+    .boot-status{
+      margin-top:24px;font-size:.75em;color:var(--gold);
+      letter-spacing:.1em;
+    }
+    .boot-bar{
+      width:100%;height:2px;background:rgba(245,196,0,0.1);
+      margin-top:12px;position:relative;overflow:hidden;
+    }
+    .boot-bar-fill{
+      height:100%;width:0%;background:var(--gold);
+      box-shadow:0 0 12px var(--gold-glow);
+      transition:width 0.05s linear;
+    }
+
+    /* ── LOGIN SCREEN ── */
+    #login{
+      position:fixed;inset:0;background:var(--bg);z-index:9999;
+      display:none;align-items:center;justify-content:center;
+      font-family:var(--ui);flex-direction:column;gap:24px;
+    }
+    .login-panel{
+      border:1px solid var(--gold-border);
+      padding:48px 56px;min-width:420px;
+      background:var(--panel);
+      position:relative;
+      animation:panelIn 0.5s ease;
+    }
+    @keyframes panelIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+    .login-panel::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,var(--gold),transparent);
+    }
+    .login-welcome{
+      font-family:var(--display);font-size:1.1em;color:var(--gold);
+      letter-spacing:.15em;margin-bottom:4px;
+    }
+    .login-name{font-size:1.8em;font-weight:700;color:var(--text);margin-bottom:32px}
+    .login-field{
+      width:100%;background:rgba(245,196,0,0.04);
+      border:1px solid var(--gold-border);
+      color:var(--text);padding:12px 16px;
+      font-family:var(--mono);font-size:.9em;
+      outline:none;margin-bottom:12px;display:block;
+      transition:border-color .2s,box-shadow .2s;
+    }
+    .login-field:focus{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold-glow),inset 0 0 20px rgba(245,196,0,0.03)}
+    .login-btn{
+      width:100%;padding:14px;
+      background:linear-gradient(135deg,#B8960C,var(--gold));
+      border:none;color:#000;font-family:var(--display);
+      font-size:.85em;font-weight:700;letter-spacing:.15em;
+      cursor:pointer;margin-top:8px;
+      transition:opacity .2s,box-shadow .2s;
+    }
+    .login-btn:hover{opacity:.9;box-shadow:0 0 24px var(--gold-glow)}
+    .login-corner{position:absolute;width:16px;height:16px;border-color:var(--gold);border-style:solid}
+    .login-corner.tl{top:-1px;left:-1px;border-width:2px 0 0 2px}
+    .login-corner.tr{top:-1px;right:-1px;border-width:2px 2px 0 0}
+    .login-corner.bl{bottom:-1px;left:-1px;border-width:0 0 2px 2px}
+    .login-corner.br{bottom:-1px;right:-1px;border-width:0 2px 2px 0}
+
+    /* ── VIRTUAL KEYBOARD ── */
+    .vkb{
+      position:fixed;bottom:0;left:50%;transform:translateX(-50%) translateY(100%);
+      background:rgba(5,5,10,0.97);border-top:1px solid var(--gold-border);
+      padding:16px 20px;z-index:9998;width:700px;
+      transition:transform .4s cubic-bezier(.4,0,.2,1);
+    }
+    .vkb.show{transform:translateX(-50%) translateY(0)}
+    .vkb-row{display:flex;gap:4px;justify-content:center;margin-bottom:4px}
+    .vkb-key{
+      padding:8px 12px;min-width:36px;
+      background:rgba(245,196,0,0.05);border:1px solid rgba(245,196,0,0.2);
+      color:var(--gold);font-family:var(--mono);font-size:.78em;
+      cursor:pointer;text-align:center;
+      transition:background .1s,box-shadow .1s;
+      user-select:none;
+    }
+    .vkb-key:hover{background:rgba(245,196,0,0.12);box-shadow:0 0 8px rgba(245,196,0,0.2)}
+    .vkb-key:active{background:rgba(245,196,0,0.2)}
+    .vkb-key.wide{min-width:80px}.vkb-key.wider{min-width:200px}
+
+    /* ── TOPBAR (for indicators in header) ── */
+    .tb-indicator{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:.7em;color:var(--text-dim)}
+    .tb-dot{width:6px;height:6px;border-radius:50%;background:var(--success);box-shadow:0 0 6px var(--success);animation:cpBlink 2s infinite}
+    @keyframes cpBlink{0%,100%{opacity:1}50%{opacity:.3}}
+    .tb-clock{font-family:var(--display);font-size:.8em;color:var(--gold);letter-spacing:.1em}
+
+    /* ── SIDEBAR (inside chat tab) ── */
+    .sidebar{
+      width:56px;background:rgba(5,5,8,0.98);
+      border-right:1px solid rgba(245,196,0,0.1);
+      display:flex;flex-direction:column;align-items:center;
+      padding:16px 0;gap:6px;flex-shrink:0;
+    }
+    .sb-icon{
+      width:40px;height:40px;display:flex;align-items:center;justify-content:center;
+      cursor:pointer;position:relative;
+      color:var(--text-dim);font-size:16px;
+      transition:color .2s;border:1px solid transparent;
+      font-family:var(--mono);
+    }
+    .sb-icon:hover{color:var(--gold);border-color:rgba(245,196,0,0.2);background:rgba(245,196,0,0.04)}
+    .sb-icon.active{color:var(--gold);border-color:rgba(245,196,0,0.3);background:rgba(245,196,0,0.07)}
+    .sb-icon.active::before{
+      content:'';position:absolute;left:-1px;top:25%;bottom:25%;width:2px;
+      background:var(--gold);box-shadow:0 0 8px var(--gold-glow);
+    }
+    .sb-divider{width:24px;height:1px;background:rgba(245,196,0,0.1);margin:4px 0}
+
+    /* ── CHAT PANEL ── */
+    .chat-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative}
+
+    /* ── CHAT HEADER ── */
+    .chat-header{
+      padding:14px 24px;
+      border-bottom:1px solid rgba(245,196,0,0.1);
+      background:rgba(8,8,14,0.95);
+      display:flex;align-items:center;justify-content:space-between;
+      flex-shrink:0;
+    }
+    .ch-left{display:flex;align-items:center;gap:14px}
+    .ch-icon{
+      width:38px;height:38px;border:1px solid var(--gold-border);
+      display:flex;align-items:center;justify-content:center;
+      font-family:var(--display);font-size:.8em;color:var(--gold);
+      position:relative;
+      background:rgba(245,196,0,0.04);
+    }
+    .ch-icon::before,.ch-icon::after{
+      content:'';position:absolute;width:8px;height:8px;
+      border-color:var(--gold);border-style:solid;
+    }
+    .ch-icon::before{top:-1px;left:-1px;border-width:1px 0 0 1px}
+    .ch-icon::after{bottom:-1px;right:-1px;border-width:0 1px 1px 0}
+    .ch-title{font-family:var(--display);font-size:.88em;font-weight:700;color:var(--text);letter-spacing:.08em}
+    .ch-sub{font-family:var(--mono);font-size:.68em;color:var(--text-dim);margin-top:2px}
+    .ch-right{display:flex;align-items:center;gap:10px}
+    .ch-badge{
+      font-family:var(--mono);font-size:.7em;padding:4px 10px;
+      border:1px solid rgba(245,196,0,0.25);color:var(--gold);
+      background:rgba(245,196,0,0.06);
+    }
+    .ch-ctrl{
+      font-family:var(--mono);font-size:.7em;padding:4px 10px;
+      border:1px solid rgba(245,196,0,0.2);color:var(--text-dim);
+      background:transparent;cursor:pointer;
+      transition:all .15s;
+    }
+    .ch-ctrl:hover{color:var(--gold);border-color:rgba(245,196,0,0.4);background:rgba(245,196,0,0.05)}
+
+    /* ── MODEL SELECT ── */
+    .model-select{
+      background:rgba(245,196,0,0.04);border:1px solid rgba(245,196,0,0.2);
+      color:var(--gold);font-family:var(--mono);font-size:.72em;
+      padding:4px 8px;outline:none;cursor:pointer;
+    }
+    .model-select option{background:#08080d;color:var(--text)}
+
+    /* ── CHAT LOG (override for new chat tab) ── */
+    #tab-chat #chat-log{
+      flex:1;overflow-y:auto;padding:24px;
+      display:flex;flex-direction:column;gap:16px;
+      background:unset;
+      scrollbar-width:thin;scrollbar-color:rgba(245,196,0,0.2) transparent;
+    }
+    #tab-chat #chat-log::-webkit-scrollbar{width:3px}
+    #tab-chat #chat-log::-webkit-scrollbar-track{background:transparent}
+    #tab-chat #chat-log::-webkit-scrollbar-thumb{background:rgba(245,196,0,0.2);border-radius:2px}
+    #tab-chat #chat-log::before{display:none}
+
+    /* ── MESSAGES ── */
+    .msg-wrap{display:flex;flex-direction:column;animation:msgIn .25s ease}
+    @keyframes msgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+    .msg-wrap.user{align-items:flex-end}
+    .msg-wrap.agent{align-items:flex-start}
+
+    .msg-meta{
+      font-family:var(--mono);font-size:.65em;color:var(--text-dim);
+      margin-bottom:5px;display:flex;align-items:center;gap:8px;
+    }
+    .msg-wrap.user .msg-meta{flex-direction:row-reverse}
+
+    .msg-avatar{
+      width:20px;height:20px;border:1px solid var(--gold-border);
+      display:flex;align-items:center;justify-content:center;
+      font-size:10px;color:var(--gold);background:rgba(245,196,0,0.06);
+    }
+    .msg-source{color:var(--gold);letter-spacing:.05em}
+    .msg-ts{color:var(--text-muted)}
+
+    .msg-bubble{
+      max-width:72%;padding:14px 18px;
+      font-family:var(--ui);font-size:.9em;line-height:1.65;
+      position:relative;
+    }
+
+    .msg-wrap.user .msg-bubble{
+      background:rgba(245,196,0,0.07);
+      border:1px solid rgba(245,196,0,0.3);
+      border-radius:2px 2px 2px 12px;
+      color:var(--text);
+    }
+    .msg-wrap.user .msg-bubble::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(245,196,0,0.5),transparent);
+    }
+    .msg-wrap.user .msg-bubble::after{
+      content:'';position:absolute;right:-1px;top:10px;
+      width:3px;height:60%;max-height:40px;
+      background:var(--gold);box-shadow:0 0 8px var(--gold-glow);
+    }
+
+    .msg-wrap.agent .msg-bubble{
+      background:rgba(10,10,20,0.9);
+      border:1px solid rgba(245,196,0,0.15);
+      border-radius:2px 12px 12px 2px;
+      color:var(--text);
+    }
+    .msg-wrap.agent .msg-bubble::before{
+      content:'';position:absolute;left:-1px;top:10px;
+      width:3px;height:60%;max-height:40px;
+      background:rgba(245,196,0,0.4);
+    }
+
+    .msg-bubble strong{color:var(--gold);font-weight:600}
+    .msg-bubble em{color:rgba(245,196,0,0.7);font-style:italic}
+    .msg-bubble code{
+      font-family:var(--mono);font-size:.85em;
+      background:rgba(245,196,0,0.08);border:1px solid rgba(245,196,0,0.15);
+      padding:1px 6px;color:var(--gold);
+    }
+
+    /* THINKING bubble */
+    .msg-thinking{
+      display:flex;align-items:center;gap:10px;
+      font-family:var(--mono);font-size:.78em;color:var(--text-dim);
+      padding:10px 16px;border:1px solid rgba(245,196,0,0.12);
+      background:rgba(8,8,14,0.8);border-radius:2px;
+      max-width:220px;
+    }
+    .think-dots{display:flex;gap:4px}
+    .think-dot{
+      width:5px;height:5px;border-radius:50%;
+      background:var(--gold);opacity:.3;
+      animation:thinkPulse 1.2s ease infinite;
+    }
+    .think-dot:nth-child(2){animation-delay:.2s}
+    .think-dot:nth-child(3){animation-delay:.4s}
+    @keyframes thinkPulse{0%,100%{opacity:.3;transform:scale(1)}50%{opacity:1;transform:scale(1.3)}}
+
+    /* ── INPUT BAR ── */
+    .input-bar{
+      padding:16px 24px;
+      border-top:1px solid rgba(245,196,0,0.1);
+      background:rgba(5,5,10,0.98);
+      flex-shrink:0;position:relative;
+    }
+    .input-bar::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(245,196,0,0.25),transparent);
+    }
+    .input-wrap{display:flex;gap:10px;align-items:flex-end;}
+    .input-prefix{
+      font-family:var(--mono);font-size:.9em;color:var(--gold);
+      padding-bottom:11px;opacity:.7;flex-shrink:0;
+    }
+    .input-field{
+      flex:1;background:rgba(245,196,0,0.03);
+      border:1px solid rgba(245,196,0,0.25);
+      color:var(--text);padding:10px 14px;
+      font-family:var(--mono);font-size:.88em;line-height:1.5;
+      outline:none;resize:none;
+      transition:border-color .2s,box-shadow .2s;
+      caret-color:var(--gold);
+    }
+    .input-field:focus{
+      border-color:rgba(245,196,0,0.6);
+      box-shadow:0 0 0 1px rgba(245,196,0,0.15),inset 0 0 30px rgba(245,196,0,0.02);
+    }
+    .input-field::placeholder{color:var(--text-muted)}
+    .send-btn{
+      padding:10px 22px;
+      background:linear-gradient(135deg,#8a6e00,#c9a200,#F5C400);
+      border:none;color:#000;
+      font-family:var(--display);font-size:.72em;font-weight:700;
+      letter-spacing:.12em;cursor:pointer;
+      transition:opacity .15s,box-shadow .15s;
+      flex-shrink:0;align-self:stretch;
+      position:relative;overflow:hidden;
+    }
+    .send-btn:hover{opacity:.9;box-shadow:0 0 20px rgba(245,196,0,0.4)}
+    .send-btn::before{
+      content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent);
+      transition:left .4s;
+    }
+    .send-btn:hover::before{left:100%}
+    .input-hint{
+      font-family:var(--mono);font-size:.65em;color:var(--text-muted);
+      margin-top:7px;display:flex;justify-content:space-between;align-items:center;
+    }
+    .input-hint span{color:rgba(245,196,0,0.5)}
+
+    /* ── RIGHT PANEL ── */
+    .right-panel{
+      width:260px;border-left:1px solid rgba(245,196,0,0.1);
+      background:rgba(5,5,10,0.96);
+      display:flex;flex-direction:column;flex-shrink:0;
+      overflow:hidden;
+    }
+    .rp-section{padding:16px;border-bottom:1px solid rgba(245,196,0,0.08);}
+    .rp-title{
+      font-family:var(--display);font-size:.65em;color:var(--gold);
+      letter-spacing:.2em;text-transform:uppercase;margin-bottom:12px;
+      display:flex;align-items:center;gap:6px;
+    }
+    .rp-title::before{content:'//';color:rgba(245,196,0,0.4);font-family:var(--mono)}
+
+    .agent-item{
+      display:flex;align-items:center;gap:8px;padding:5px 0;
+      font-family:var(--mono);font-size:.72em;color:var(--text-dim);
+      border-bottom:1px solid rgba(245,196,0,0.04);
+    }
+    .agent-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+    .agent-dot.on{background:var(--success);box-shadow:0 0 5px var(--success)}
+    .agent-dot.off{background:rgba(255,255,255,0.1)}
+    .agent-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .agent-status{font-size:.9em;opacity:.6}
+
+    .mini-term{
+      flex:1;overflow-y:auto;padding:12px;
+      font-family:var(--mono);font-size:.68em;line-height:1.9;
+      color:rgba(245,196,0,0.5);
+      scrollbar-width:none;
+    }
+    .mini-term::-webkit-scrollbar{display:none}
+    .mini-term .term-line{display:block}
+    .mini-term .term-line.ok{color:rgba(0,255,136,.5)}
+    .mini-term .term-line.warn{color:rgba(245,196,0,.7)}
+    .mini-term .term-line.err{color:rgba(255,51,68,.6)}
+
+    /* ── EMPTY STATE ── */
+    .chat-empty{
+      flex:1;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;color:var(--text-muted);
+      font-family:var(--mono);font-size:.82em;text-align:center;gap:12px;
+    }
+    .chat-empty .ce-symbol{
+      font-family:var(--display);font-size:2.5em;color:rgba(245,196,0,0.1);
+      letter-spacing:.2em;
+    }
+    .chat-empty .ce-text{color:rgba(245,196,0,0.2);letter-spacing:.1em}
+
+    /* ── GRID BG inside chat panel ── */
+    .chat-panel::before{
+      content:'';position:absolute;inset:0;pointer-events:none;
+      background-image:
+        linear-gradient(rgba(245,196,0,0.015) 1px,transparent 1px),
+        linear-gradient(90deg,rgba(245,196,0,0.015) 1px,transparent 1px);
+      background-size:50px 50px;
+    }
+
+    @keyframes glitch{
+      0%{clip-path:inset(80% 0 0 0);transform:translate(-3px,0)}
+      10%{clip-path:inset(10% 0 85% 0);transform:translate(3px,0)}
+      20%{clip-path:inset(40% 0 43% 0);transform:translate(-2px,0)}
+      30%{clip-path:inset(92% 0 1% 0);transform:translate(2px,0)}
+      40%{clip-path:inset(20% 0 60% 0);transform:translate(-1px,0)}
+      50%{clip-path:inset(0 0 0 0);transform:none}
+      100%{clip-path:inset(0 0 0 0);transform:none}
+    }
+
+    @media(max-width:900px){.right-panel{display:none}}
   </style>
 </head>
 <body>
 
-<!-- ── Boot / Loading Overlay ── -->
-<div id="boot-overlay">
-  <div class="boot-scanline"></div>
-  <div class="boot-glow-h"></div>
-  <div class="boot-corner tl"></div>
-  <div class="boot-corner tr"></div>
-  <div class="boot-corner bl"></div>
-  <div class="boot-corner br"></div>
-  <!-- Phase 1: terminal scroll + logo -->
-  <div id="boot-phase1" style="display:flex;flex-direction:column;align-items:center;position:relative;z-index:5">
-    <div class="boot-logo glitch" data-text="AI EMPLOYEE">AI EMPLOYEE</div>
-    <div class="boot-sub">Autonomous Intelligence Platform</div>
-    <div class="boot-terminal" id="boot-terminal"><div class="boot-terminal-inner" id="boot-terminal-inner"></div></div>
-    <div class="boot-bar-wrap">
-      <div class="boot-bar-label"><span id="boot-stage-label">INITIALIZING</span><span id="boot-pct">0%</span></div>
-      <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar"></div></div>
+<!-- ══ BOOT SCREEN ══ -->
+<div id="boot">
+  <div id="boot-log"></div>
+  <div id="boot-center">
+    <div class="boot-box">
+      <div class="boot-logo">AI EMPLOYEE</div>
+      <div class="boot-sub">Autonomous Workforce Interface v4.0</div>
+      <div class="boot-status" id="boot-status-text">INITIALIZING SYSTEMS...</div>
+      <div class="boot-bar"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
     </div>
   </div>
-  <!-- Phase 2: login screen -->
-  <div id="boot-login">
-    <div class="boot-login-box">
-      <div class="boot-login-welcome">SYSTEM ACCESS GRANTED</div>
-      <div class="boot-login-sub">AI Employee Platform v4.0</div>
-      <div style="font-family:var(--mono);font-size:.9em;color:rgba(245,196,0,.85);letter-spacing:.05em">
-        Welcome back, <span style="color:var(--gold);text-shadow:0 0 12px rgba(245,196,0,.7);font-weight:700">OPERATOR</span><span class="boot-login-cursor"></span>
-      </div>
-      <div style="margin-top:18px;font-family:var(--mono);font-size:.63em;color:rgba(245,196,0,.3);letter-spacing:.12em">
-        [ PRESS ANY KEY TO CONTINUE ]
-      </div>
+</div>
+
+<!-- ══ LOGIN SCREEN ══ -->
+<div id="login">
+  <div class="login-panel">
+    <div class="login-corner tl"></div>
+    <div class="login-corner tr"></div>
+    <div class="login-corner bl"></div>
+    <div class="login-corner br"></div>
+    <div class="login-welcome">WELCOME BACK</div>
+    <div class="login-name" id="login-name">OPERATOR</div>
+    <input class="login-field" type="text" id="login-user" placeholder="IDENTIFIER" value="admin" autocomplete="off"/>
+    <input class="login-field" type="password" id="login-pass" placeholder="ACCESS CODE" value="••••••••"/>
+    <button class="login-btn" onclick="doLogin()">AUTHENTICATE  ›</button>
+  </div>
+  <div class="vkb" id="vkb">
+    <div class="vkb-row">
+      <div class="vkb-key" onclick="vkType('1')">1</div><div class="vkb-key" onclick="vkType('2')">2</div>
+      <div class="vkb-key" onclick="vkType('3')">3</div><div class="vkb-key" onclick="vkType('4')">4</div>
+      <div class="vkb-key" onclick="vkType('5')">5</div><div class="vkb-key" onclick="vkType('6')">6</div>
+      <div class="vkb-key" onclick="vkType('7')">7</div><div class="vkb-key" onclick="vkType('8')">8</div>
+      <div class="vkb-key" onclick="vkType('9')">9</div><div class="vkb-key" onclick="vkType('0')">0</div>
+      <div class="vkb-key wide" onclick="vkBackspace()">⌫ DEL</div>
+    </div>
+    <div class="vkb-row">
+      <div class="vkb-key" onclick="vkType('q')">Q</div><div class="vkb-key" onclick="vkType('w')">W</div>
+      <div class="vkb-key" onclick="vkType('e')">E</div><div class="vkb-key" onclick="vkType('r')">R</div>
+      <div class="vkb-key" onclick="vkType('t')">T</div><div class="vkb-key" onclick="vkType('y')">Y</div>
+      <div class="vkb-key" onclick="vkType('u')">U</div><div class="vkb-key" onclick="vkType('i')">I</div>
+      <div class="vkb-key" onclick="vkType('o')">O</div><div class="vkb-key" onclick="vkType('p')">P</div>
+    </div>
+    <div class="vkb-row">
+      <div class="vkb-key" onclick="vkType('a')">A</div><div class="vkb-key" onclick="vkType('s')">S</div>
+      <div class="vkb-key" onclick="vkType('d')">D</div><div class="vkb-key" onclick="vkType('f')">F</div>
+      <div class="vkb-key" onclick="vkType('g')">G</div><div class="vkb-key" onclick="vkType('h')">H</div>
+      <div class="vkb-key" onclick="vkType('j')">J</div><div class="vkb-key" onclick="vkType('k')">K</div>
+      <div class="vkb-key" onclick="vkType('l')">L</div>
+      <div class="vkb-key wide" onclick="doLogin()">ENTER ↵</div>
+    </div>
+    <div class="vkb-row">
+      <div class="vkb-key" onclick="vkType('z')">Z</div><div class="vkb-key" onclick="vkType('x')">X</div>
+      <div class="vkb-key" onclick="vkType('c')">C</div><div class="vkb-key" onclick="vkType('v')">V</div>
+      <div class="vkb-key" onclick="vkType('b')">B</div><div class="vkb-key" onclick="vkType('n')">N</div>
+      <div class="vkb-key" onclick="vkType('m')">M</div>
+      <div class="vkb-key wider" onclick="vkType(' ')">SPACE</div>
     </div>
   </div>
 </div>
@@ -2430,11 +2880,14 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
   <div class="header-right">
+    <div class="tb-indicator"><span class="tb-dot"></span>SYSTEM ONLINE</div>
+    <div class="tb-indicator" id="tb-agent-count">0 AGENTS</div>
     <div class="hdr-ctrl">
       <button class="hdr-btn hdr-btn-start" id="hdr-start-btn" onclick="startAll()" title="Start all agents">▶ Start</button>
       <button class="hdr-btn hdr-btn-stop" id="hdr-stop-btn" onclick="stopAll()" title="Stop all agents">■ Stop</button>
     </div>
     <div class="hdr-clock" id="hdr-clock">00:00:00</div>
+    <span class="tb-clock" id="tb-clock" style="display:none">00:00:00</span>
     <div class="status-pill"><div class="status-dot"></div><span id="header-status">Running</span></div>
   </div>
 </header>
@@ -2721,53 +3174,77 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Chat ── -->
 <div id="tab-chat" class="tab-content">
-  <div class="chat-terminal-wrap">
-    <!-- HUD header bar -->
-    <div class="chat-hud-bar">
-      <div style="display:flex;align-items:center;gap:14px">
-        <div class="chat-hud-dot"></div>
-        <div class="chat-hud-title">AI Command Center</div>
-        <div id="chat-hermes-status" title="Hermes Agent status" style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:.65em;padding:2px 8px;border:1px solid rgba(245,196,0,.15);color:rgba(245,196,0,.45);letter-spacing:.06em">
-          <span id="chat-hermes-dot" style="width:6px;height:6px;border-radius:50%;background:rgba(245,196,0,.3);display:inline-block;box-shadow:0 0 4px rgba(245,196,0,.3)"></span>
-          <span id="chat-hermes-label">HERMES –</span>
+  <!-- Chat Panel (reference layout) -->
+  <div style="display:flex;height:calc(100vh - 120px)">
+    <!-- Chat Main -->
+    <div class="chat-panel">
+      <!-- Chat Header -->
+      <div class="chat-header">
+        <div class="ch-left">
+          <div class="ch-icon">◈</div>
+          <div>
+            <div class="ch-title">AI COMMAND CENTER</div>
+            <div class="ch-sub">Direct interface → AI workforce</div>
+          </div>
         </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px">
-        <div class="chat-model-select-wrap" style="display:flex;align-items:center;gap:7px">
-          <span style="font-family:var(--mono);font-size:.65em;color:rgba(245,196,0,.35);letter-spacing:.1em">MODEL:</span>
-          <select id="chat-model" onchange="updateChatModelBadge()" style="background:rgba(4,4,6,.98);border:1px solid rgba(245,196,0,.2);color:rgba(245,196,0,.85);font-family:var(--mono);font-size:.75em;font-weight:600;cursor:pointer;outline:none;padding:3px 8px;letter-spacing:.04em">
-            <option value="auto">AUTO</option>
-            <option value="ollama">OLLAMA</option>
-            <option value="gemma">GEMMA</option>
-            <option value="nvidia">NVIDIA NIM</option>
-            <option value="openai">OPENAI</option>
-            <option value="anthropic">CLAUDE</option>
-            <option value="groq">GROQ</option>
-            <option value="external">EXTERNAL</option>
+        <div class="ch-right">
+          <select class="model-select" id="chat-model" onchange="updateChatModelBadge()">
+            <option value="auto">⚡ AUTO</option>
+            <option value="ollama">🦙 OLLAMA</option>
+            <option value="gemma">💎 GEMMA</option>
+            <option value="nvidia">🔷 NVIDIA NIM</option>
+            <option value="openai">◻ OPENAI</option>
+            <option value="anthropic">◈ CLAUDE</option>
+            <option value="groq">⚡ GROQ</option>
+            <option value="external">◉ EXTERNAL</option>
           </select>
+          <div class="ch-badge" id="chat-model-badge">AUTO</div>
+          <div id="chat-hermes-status" style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:.68em;color:var(--text-dim)">
+            <span id="chat-hermes-dot" style="width:5px;height:5px;border-radius:50%;background:#3a3428"></span>
+            <span id="chat-hermes-label">HERMES –</span>
+          </div>
+          <button class="ch-ctrl" onclick="loadChatLog()">⟳ SYNC</button>
+          <button class="ch-ctrl" onclick="clearChatDisplay()">⌫ CLR</button>
         </div>
-        <div id="chat-model-badge" style="font-family:var(--mono);font-size:.65em;padding:2px 8px;border:1px solid rgba(245,196,0,.2);color:rgba(245,196,0,.6);letter-spacing:.08em">AUTO</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadChatLog()" title="Refresh" style="font-family:var(--mono);font-size:.7em;border:1px solid rgba(245,196,0,.15);color:rgba(245,196,0,.4);padding:3px 8px;border-radius:2px">↻ SYNC</button>
+      </div>
+      <!-- Chat Log -->
+      <div id="chat-log">
+        <div class="chat-empty" id="chat-empty">
+          <div class="ce-symbol">◈</div>
+          <div class="ce-text">AWAITING COMMAND INPUT</div>
+          <div style="font-size:.72em;color:rgba(245,196,0,0.15);letter-spacing:.05em">System ready. No active session.</div>
+        </div>
+      </div>
+      <!-- Input Bar -->
+      <div class="input-bar">
+        <div class="input-wrap">
+          <div class="input-prefix">&gt;_</div>
+          <textarea id="chat-input" class="input-field" rows="2"
+            placeholder="Enter command for AI workforce…"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
+          <button class="send-btn" onclick="sendChat()">SEND</button>
+        </div>
+        <div class="input-hint">
+          <span>ENTER to transmit · SHIFT+ENTER new line</span>
+          <span id="chat-agent-indicator">Auto-routing active</span>
+        </div>
       </div>
     </div>
-    <!-- Chat log -->
-    <div id="chat-log">
-      <div class="empty"><div class="icon">◈</div><p>NO MESSAGES // AWAITING INPUT</p></div>
-    </div>
-    <!-- Terminal input bar -->
-    <div class="chat-cmd-bar">
-      <div class="chat-cmd-row">
-        <div class="chat-cmd-prompt">AI&gt;</div>
-        <textarea id="chat-input" placeholder="enter command…" rows="2"
-          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
-        <button class="chat-send-btn" onclick="sendChat()">EXEC ↗</button>
-      </div>
-      <div class="chat-cmd-hint">
-        <div class="chat-cmd-hint-left">
-          <span>ENTER to execute</span>
-          <span>SHIFT+ENTER for newline</span>
+    <!-- Right Panel -->
+    <div class="right-panel">
+      <div class="rp-section">
+        <div class="rp-title">Agents</div>
+        <div id="agent-status-list">
+          <div class="agent-item"><div class="agent-dot off"></div><div class="agent-name" style="color:var(--text-muted)">Loading…</div></div>
         </div>
-        <span id="chat-agent-indicator" style="color:rgba(245,196,0,.4)">AUTO-ROUTING TO BEST AGENT</span>
+      </div>
+      <div class="rp-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;padding-bottom:0">
+        <div class="rp-title">System Log</div>
+        <div class="mini-term" id="mini-term">
+          <span class="term-line ok">// SYSTEM BOOT COMPLETE</span>
+          <span class="term-line">// INTERFACES ONLINE</span>
+          <span class="term-line">// AWAITING INPUT</span>
+        </div>
       </div>
     </div>
   </div>
@@ -6944,69 +7421,54 @@ function renderMarkdown(str) {
 }
 
 async function loadChatLog() {
-  // Refresh Hermes status indicator in the chat header
-  api('/api/workers').then(d => {
-    const agents = Array.isArray(d.agents) ? d.agents : [];
-    _updateChatHermesStatus(_isHermesRunning(agents));
-  }).catch(() => {});
-  const data = await api('/api/chat');
-  const log = document.getElementById('chat-log');
-  const msgs = data.messages || [];
-  if (!msgs.length) {
-    log.innerHTML = '<div class="empty"><div class="icon">💬</div><p>No messages yet.</p></div>';
-    return;
-  }
+  try {
+    if (typeof _updateChatHermesStatus === 'function') _updateChatHermesStatus();
+  } catch(e) {}
+  try {
+    const r = await fetch('/api/chat');
+    if (!r.ok) return;
+    const d = await r.json();
+    const msgs = d.messages || [];
+    const log = document.getElementById('chat-log');
+    if (!log) return;
+    const empty = document.getElementById('chat-empty');
+    if (!msgs.length) { if(empty) empty.style.display='flex'; return; }
+    if (empty) empty.style.display = 'none';
 
-  function sourceFromMessage(m) {
-    if (m.type === 'user') return {avatar: '👤', label: 'You'};
-    const text = String(m.message || '');
-    if (text.includes('Agent: finance-wizard')) return {avatar: '🧮', label: 'Finance Wizard'};
-    if (text.includes('Agent: social-guru')) return {avatar: '📣', label: 'Social Guru'};
-    if (text.includes('Agent: intel-agent')) return {avatar: '🔎', label: 'Intel Agent'};
-    if (text.includes('Agent: email-ninja')) return {avatar: '✉️', label: 'Email Ninja'};
-    if (text.includes('Agent: lead-generator')) return {avatar: '🎯', label: 'Lead Generator'};
-    if (text.includes('Agent:')) return {avatar: '🤖', label: text.split('Agent:')[1].split('\n')[0].trim()};
-    return {avatar: '🤖', label: 'AI Employee'};
-  }
+    function sourceFrom(m) {
+      if (m.type === 'user') return {sym:'\u203a', label:'YOU'};
+      const t = String(m.message||'');
+      if (t.includes('Agent: finance-wizard')) return {sym:'\u25c6',label:'FINANCE'};
+      if (t.includes('Agent: lead-generator')) return {sym:'\u25ce',label:'LEAD-GEN'};
+      if (t.includes('Agent: social-guru')) return {sym:'\u25c9',label:'SOCIAL'};
+      if (t.includes('Agent:')) return {sym:'\u25c8',label:t.split('Agent:')[1].split('\n')[0].trim().toUpperCase().slice(0,12)};
+      return {sym:'\u25c8',label:'AI-SYSTEM'};
+    }
 
-  function modelBadge(routeHint) {
-    const route = routeHint || document.getElementById('chat-model')?.value || 'auto';
-    const ollamaModel = _gwSelectedModel || 'llama3.2';
-    const labels = {
-      auto: '⚡ Auto (Cost-Effective)',
-      ollama: `🦙 Ollama • ${ollamaModel}`,
-      gemma: '💎 Gemma • Free AI',
-      nvidia: '🔷 NVIDIA NIM',
-      openai: '🌐 OpenAI • GPT-4o',
-      anthropic: '🤖 Anthropic • Claude',
-      groq: '⚡ Groq • Fast',
-      external: '🌐 External AI'
-    };
-    const label = labels[route] || 'AI';
-    return `<span style="font-family:var(--mono);background:rgba(245,196,0,.08);border:1px solid rgba(245,196,0,.2);border-radius:2px;padding:1px 7px;font-size:.85em;color:rgba(245,196,0,.7);letter-spacing:.06em">${label}</span>`;
-  }
+    const existingMsgs = log.querySelectorAll('.msg-wrap');
+    existingMsgs.forEach(m => m.remove());
+    if (empty) empty.style.display = 'none';
 
-  log.innerHTML = msgs.slice(-60).map(m => {
-    const type = m.type === 'user' ? 'user' : 'agent';
-    const source = sourceFromMessage(m);
-    const raw = m.message || m.question || JSON.stringify(m);
-    const text = renderMarkdown(raw);
-    const ts = (m.ts||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const promptTag = type === 'user' ? '<span class="chat-msg-prompt">»</span>' : '<span class="chat-msg-prompt">$</span>';
-    return `<div class="chat-msg ${type}">
-      <div class="chat-msg-inner">
-        <div class="chat-msg-header">
-          ${promptTag}
-          <span class="chat-msg-avatar">${source.avatar}</span>
-          <span class="chat-msg-source">${escHtml(source.label)}</span>
-          ${type !== 'user' ? modelBadge(m.model_route) : ''}
+    const frag = document.createDocumentFragment();
+    msgs.slice(-60).forEach(m => {
+      const isUser = m.type === 'user';
+      const {sym, label} = sourceFrom(m);
+      const text = renderMarkdown(m.message || m.question || '');
+      const ts = (m.ts||'').replace('T',' ').slice(0,16);
+      const wrap = document.createElement('div');
+      wrap.className = 'msg-wrap ' + (isUser ? 'user' : 'agent');
+      wrap.innerHTML = `<div class="msg-meta">
+          <div class="msg-avatar">${sym}</div>
+          <span class="msg-source">${escHtml(label)}</span>
+          <span class="msg-ts">${escHtml(ts)}</span>
         </div>
-        <div>${text}</div>
-        <div class="ts">${ts}</div>
-      </div>
-    </div>`;
-  }).join('');
-  log.scrollTop = log.scrollHeight;
+        <div class="msg-bubble">${text}</div>`;
+      frag.appendChild(wrap);
+    });
+    log.appendChild(frag);
+    log.scrollTop = log.scrollHeight;
+    if (typeof sysLog === 'function') sysLog('// CHAT SYNC OK','ok');
+  } catch(e) { if (typeof sysLog === 'function') sysLog('// CHAT SYNC FAIL','err'); }
 }
 
 function updateChatModelBadge() {
@@ -7015,52 +7477,67 @@ function updateChatModelBadge() {
   const indicator = document.getElementById('chat-agent-indicator');
   if (!sel || !badge) return;
   const labels = {auto:'AUTO',ollama:'OLLAMA',gemma:'GEMMA',nvidia:'NVIDIA NIM',openai:'OPENAI',anthropic:'CLAUDE',groq:'GROQ',external:'EXTERNAL'};
-  const hints = {
-    auto:'AUTO-ROUTING: OLLAMA → NVIDIA → GROQ → OPENAI',
-    ollama:'LOCAL OLLAMA // FREE + PRIVATE',
-    gemma:'GEMMA // FREE + OPEN SOURCE',
-    nvidia:'NVIDIA NIM // FAST FREE TIER',
-    openai:'OPENAI GPT-4o',
-    anthropic:'ANTHROPIC CLAUDE',
-    groq:'GROQ // ULTRA-FAST INFERENCE',
-    external:'EXTERNAL AI PROVIDER'
-  };
+  const hints = {auto:'Auto-routing active',ollama:'Local Ollama',gemma:'Google Gemma',nvidia:'NVIDIA NIM',openai:'OpenAI GPT-4o',anthropic:'Anthropic Claude',groq:'Groq fast inference',external:'External provider'};
   badge.textContent = labels[sel.value] || sel.value.toUpperCase();
-  if (indicator) indicator.textContent = hints[sel.value] || 'AUTO-ROUTING TO BEST AGENT';
+  if (indicator) indicator.textContent = hints[sel.value] || 'Auto-routing active';
 }
 
 async function sendChat() {
   const input = document.getElementById('chat-input');
-  const q = input.value.trim();
+  const q = input?.value?.trim();
   if (!q) return;
-  const route = document.getElementById('chat-model')?.value || 'ollama';
+  const route = document.getElementById('chat-model')?.value || 'auto';
   input.value = '';
-  // Optimistically add user message to chat before API response
   const log = document.getElementById('chat-log');
+  const empty = document.getElementById('chat-empty');
+  if (empty) empty.style.display = 'none';
+
   if (log) {
-    const emptyEl = log.querySelector('.empty');
-    if (emptyEl) emptyEl.remove();
-    // Show typing indicator for bot
-    const typingId = 'typing-' + Date.now();
-    log.insertAdjacentHTML('beforeend', `<div class="chat-msg user">
-  <div class="chat-msg-inner">
-    <div class="chat-msg-header"><span class="chat-msg-prompt">»</span><span class="chat-msg-avatar">👤</span><span class="chat-msg-source">You</span></div>
-    <div>${renderMarkdown(q)}</div>
-  </div>
-</div>
-<div class="chat-msg agent" id="${typingId}">
-  <div class="chat-msg-inner">
-    <div class="chat-typing-indicator"><span></span><span></span><span></span>&nbsp;PROCESSING</div>
-  </div>
-</div>`);
-    log.scrollTo({top: log.scrollHeight, behavior: 'smooth'});
-    await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q, model_route: route})});
-    const typingEl = document.getElementById(typingId);
-    if (typingEl) typingEl.remove();
-  } else {
-    await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q, model_route: route})});
+    const userWrap = document.createElement('div');
+    userWrap.className = 'msg-wrap user';
+    userWrap.innerHTML = `<div class="msg-meta">
+        <div class="msg-avatar">\u203a</div>
+        <span class="msg-source">YOU</span>
+        <span class="msg-ts">${new Date().toTimeString().slice(0,8)}</span>
+      </div>
+      <div class="msg-bubble">${renderMarkdown(q)}</div>`;
+    log.appendChild(userWrap);
+    log.scrollTop = log.scrollHeight;
   }
-  loadChatLog();
+
+  if (typeof sysLog === 'function') sysLog(`// CMD: ${q.slice(0,40)}${q.length>40?'\u2026':''}`);
+
+  const thinkId = 'thinking-' + Date.now();
+  if (log) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-wrap agent';
+    wrap.id = thinkId;
+    wrap.innerHTML = `<div class="msg-meta"><div class="msg-avatar">\u25c8</div><span class="msg-source">AI-SYSTEM</span></div>
+      <div class="msg-thinking">
+        <span style="font-family:var(--mono);font-size:.72em;color:rgba(245,196,0,0.4)">PROCESSING</span>
+        <div class="think-dots"><div class="think-dot"></div><div class="think-dot"></div><div class="think-dot"></div></div>
+      </div>`;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  try {
+    await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:q,model_route:route})});
+    document.getElementById(thinkId)?.remove();
+    if (typeof sysLog === 'function') sysLog('// RESPONSE RECEIVED','ok');
+    await loadChatLog();
+  } catch(e) {
+    document.getElementById(thinkId)?.remove();
+    if (typeof sysLog === 'function') sysLog('// TRANSMIT ERROR','err');
+  }
+}
+
+function clearChatDisplay() {
+  const log = document.getElementById('chat-log');
+  const empty = document.getElementById('chat-empty');
+  if (log) log.querySelectorAll('.msg-wrap').forEach(m => m.remove());
+  if (empty) empty.style.display = 'flex';
+  if (typeof sysLog === 'function') sysLog('// DISPLAY CLEARED');
 }
 
 // ── Scheduler ───────────────────────────────────────────────────────────────
@@ -14849,100 +15326,146 @@ setInterval(() => {
 }, 30000);
 
 /* ══════════════════════════════════════════════════
-   BOOT SEQUENCE — Cyberpunk Terminal
+   BOOT SEQUENCE
 ══════════════════════════════════════════════════ */
-(function runBootSequence() {
-  const overlay = document.getElementById('boot-overlay');
-  const termInner = document.getElementById('boot-terminal-inner');
-  const bar = document.getElementById('boot-bar');
-  const pct = document.getElementById('boot-pct');
-  const stageLabel = document.getElementById('boot-stage-label');
-  const phase1 = document.getElementById('boot-phase1');
-  const loginEl = document.getElementById('boot-login');
-  if (!overlay) return;
-
-  const stages = [
-    { label: 'BIOS CHECK', lines: [
-      {t:'dim', txt:'AI-EMPLOYEE BIOS v4.0.1  (C) 2024'},
-      {t:'dim', txt:'CPU: Neural Core × 56  RAM: 128GB  VRAM: 24GB'},
-      {t:'cmd', txt:'> Checking hardware integrity…'},
-      {t:'ok',  txt:'  [OK] All cores online'},
-    ]},
-    { label: 'KERNEL INIT', lines: [
-      {t:'cmd', txt:'> Loading kernel modules…'},
-      {t:'ok',  txt:'  [OK] ai_scheduler.ko loaded'},
-      {t:'ok',  txt:'  [OK] hermes_memory.ko loaded'},
-      {t:'ok',  txt:'  [OK] agent_registry.ko loaded'},
-    ]},
-    { label: 'MOUNTING AGENTS', lines: [
-      {t:'cmd', txt:'> Mounting agent filesystem…'},
-      {t:'ok',  txt:'  [OK] 56 agents registered'},
-      {t:'ok',  txt:'  [OK] Skill library: 147 skills loaded'},
-      {t:'warn',txt:'  [..] Awaiting external AI providers'},
-    ]},
-    { label: 'SECURE CHANNEL', lines: [
-      {t:'cmd', txt:'> Establishing encrypted channel…'},
-      {t:'ok',  txt:'  [OK] JWT auth layer active'},
-      {t:'ok',  txt:'  [OK] CSP headers applied'},
-      {t:'cmd', txt:'> Calibrating gold resonance matrix…'},
-      {t:'ok',  txt:'  [OK] All systems nominal'},
-    ]},
-  ];
-
-  let lineIdx = 0;
-  let stageIdx = 0;
-  let progress = 0;
-  // Flatten all lines with stage info
-  const allLines = [];
-  stages.forEach((s, si) => s.lines.forEach(l => allLines.push({...l, stage: s.label, stageIdx: si})));
-
-  function addLine() {
-    if (lineIdx >= allLines.length) return;
-    const item = allLines[lineIdx++];
-    const span = document.createElement('span');
-    span.className = 'boot-terminal-line ' + item.t;
-    span.textContent = item.txt;
-    termInner.appendChild(span);
-    termInner.scrollTop = termInner.scrollHeight;
-    if (stageLabel && item.stage) stageLabel.textContent = item.stage;
+const BOOT_LINES = [
+  'BIOS v4.2.1 POST OK','CPU CORES: 8 @ 3.8GHz','MEM: 32GB DDR5 OK',
+  'STORAGE: 2TB NVMe OK','NET: LINK ESTABLISHED','FIREWALL: ACTIVE',
+  'AI RUNTIME: LOADING…','AGENT MATRIX: INIT','LOADING MODELS…',
+  'TASK ORCHESTRATOR: UP','LEAD GENERATOR: UP','BRAND STRATEGIST: UP',
+  'FINANCE WIZARD: UP','SECURITY: VERIFIED','JWT TOKENS: VALID',
+  'API ENDPOINTS: BOUND','WEBSOCKET: READY','DASHBOARD: COMPILED',
+  'BLACKLIGHT: STANDBY','ASCEND FORGE: STANDBY','ALL SYSTEMS NOMINAL',
+];
+(async function runBootSequence() {
+  const bootLog = document.getElementById('boot-log');
+  const bootCenter = document.getElementById('boot-center');
+  const bootBarFill = document.getElementById('boot-bar-fill');
+  const bootStatusText = document.getElementById('boot-status-text');
+  if (!bootLog) return;
+  function addBootLine(line, idx) {
+    const span = document.createElement('div');
+    span.style.cssText = `color:rgba(245,196,0,${0.2 + (idx/BOOT_LINES.length)*0.5});font-size:11px;`;
+    span.textContent = `[${String(idx).padStart(3,'0')}] ${line}`;
+    bootLog.appendChild(span);
+    if (bootLog.children.length > 30) bootLog.removeChild(bootLog.firstChild);
   }
-
-  // Phase 1: scroll lines + fill bar
-  const lineTimer = setInterval(() => {
-    addLine();
-    if (lineIdx >= allLines.length) clearInterval(lineTimer);
-  }, 140);
-
-  const barTimer = setInterval(() => {
-    progress += Math.random() * 8 + 3;
-    if (progress >= 100) { progress = 100; clearInterval(barTimer); }
-    bar.style.width = progress + '%';
-    pct.textContent = Math.round(progress) + '%';
-    if (progress >= 100) {
-      // Phase 2: show login screen briefly
-      setTimeout(() => {
-        if (phase1) phase1.style.transition = 'opacity .4s';
-        if (phase1) { phase1.style.opacity = '0'; setTimeout(() => { phase1.style.display = 'none'; }, 420); }
-        setTimeout(() => {
-          if (loginEl) loginEl.classList.add('visible');
-          // Then dismiss on keypress or after 1.8s
-          const dismiss = () => {
-            overlay.classList.add('fade-out');
-            setTimeout(() => { overlay.style.display = 'none'; }, 1050);
-            document.removeEventListener('keydown', dismiss);
-            overlay.removeEventListener('click', dismiss);
-          };
-          document.addEventListener('keydown', dismiss, {once: true});
-          overlay.addEventListener('click', dismiss, {once: true});
-          setTimeout(dismiss, 1800);
-        }, 500);
-      }, 300);
-    }
-  }, 95);
+  function _delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+  for (let i = 0; i < BOOT_LINES.length; i++) {
+    await _delay(60 + Math.random()*80);
+    addBootLine(BOOT_LINES[i], i);
+    if (bootBarFill) bootBarFill.style.width = ((i+1)/BOOT_LINES.length*60) + '%';
+  }
+  await _delay(200);
+  if (bootCenter) bootCenter.classList.add('show');
+  await _delay(100);
+  const phases = ['AUTHENTICATING…','LOADING AGENTS…','PREPARING INTERFACE…','READY'];
+  for (let p of phases) {
+    if (bootStatusText) bootStatusText.textContent = p;
+    if (bootBarFill) bootBarFill.style.width = (60 + phases.indexOf(p) * 10) + '%';
+    await _delay(300);
+  }
+  if (bootBarFill) bootBarFill.style.width = '100%';
+  await _delay(400);
+  const bootEl = document.getElementById('boot');
+  if (bootEl) { bootEl.style.transition = 'opacity .4s'; bootEl.style.opacity = '0'; }
+  await _delay(400);
+  if (bootEl) bootEl.style.display = 'none';
+  _showLogin();
 })();
 
+function _showLogin() {
+  const login = document.getElementById('login');
+  if (!login) { _initMainApp(); return; }
+  login.style.display = 'flex';
+  setTimeout(() => { const vkb = document.getElementById('vkb'); if(vkb) vkb.classList.add('show'); }, 600);
+  setTimeout(() => { const f = document.getElementById('login-user'); if(f){f.focus();f.select();} }, 100);
+  const nameEl = document.getElementById('login-name');
+  if (nameEl) {
+    const name = 'OPERATOR';
+    nameEl.textContent = '';
+    let ni = 0;
+    const t = setInterval(() => {
+      nameEl.textContent = name.slice(0,++ni) + (ni<name.length?'█':'');
+      if (ni >= name.length) clearInterval(t);
+    }, 80);
+  }
+}
+
+let _vkTarget = null;
+document.querySelectorAll('.login-field').forEach(f => f.addEventListener('focus', () => _vkTarget = f));
+function vkType(char) {
+  if (!_vkTarget) _vkTarget = document.getElementById('login-user');
+  const pos = _vkTarget.selectionStart;
+  const val = _vkTarget.value;
+  _vkTarget.value = val.slice(0,pos)+char+val.slice(pos);
+  _vkTarget.setSelectionRange(pos+1,pos+1);
+  _vkTarget.focus();
+}
+function vkBackspace() {
+  if (!_vkTarget) return;
+  const pos = _vkTarget.selectionStart;
+  if (pos>0) { _vkTarget.value = _vkTarget.value.slice(0,pos-1)+_vkTarget.value.slice(pos); _vkTarget.setSelectionRange(pos-1,pos-1); }
+  _vkTarget.focus();
+}
+async function doLogin() {
+  const login = document.getElementById('login');
+  if (login) { login.style.transition='opacity .3s'; login.style.opacity='0'; await new Promise(r=>setTimeout(r,300)); login.style.display='none'; }
+  const appEl = document.querySelector('.app');
+  if (appEl) { appEl.style.opacity='0'; appEl.style.transition='opacity .4s'; setTimeout(()=>appEl.style.opacity='1',50); }
+  _initMainApp();
+}
+function _initMainApp() {
+  _startClock();
+  _loadAgentStatusPanel();
+  loadChatLog();
+  setInterval(loadChatLog, 15000);
+  setInterval(_loadAgentStatusPanel, 30000);
+  sysLog('// SESSION INITIALIZED','ok');
+  sysLog('// CHAT INTERFACE READY');
+}
+function _startClock() {
+  const els = [document.getElementById('tb-clock'), document.getElementById('hdr-clock')].filter(Boolean);
+  if (!els.length) return;
+  setInterval(() => { const t=new Date().toTimeString().slice(0,8); els.forEach(e=>e.textContent=t); }, 1000);
+}
+
+/* ── SYSTEM LOG (mini-term in right panel) ── */
+function sysLog(msg, cls='') {
+  const term = document.getElementById('mini-term');
+  if (!term) return;
+  const line = document.createElement('span');
+  line.className = 'term-line' + (cls ? ' '+cls : '');
+  line.textContent = msg;
+  term.appendChild(line);
+  term.scrollTop = term.scrollHeight;
+  if (term.children.length > 80) term.removeChild(term.firstChild);
+}
+
+/* ── AGENT STATUS PANEL ── */
+async function _loadAgentStatusPanel() {
+  try {
+    const r = await fetch('/api/status');
+    if (!r.ok) return;
+    const d = await r.json();
+    const agents = (d.agents||[]).slice(0,14);
+    const running = agents.filter(a=>a.running).length;
+    const cnt = document.getElementById('tb-agent-count');
+    if (cnt) cnt.textContent = running + ' AGENTS';
+    const list = document.getElementById('agent-status-list');
+    if (!list) return;
+    if (!agents.length) { list.innerHTML = '<div class="agent-item" style="color:var(--text-muted)">No agents</div>'; return; }
+    list.innerHTML = agents.map(a => `
+      <div class="agent-item">
+        <div class="agent-dot ${a.running?'on':'off'}"></div>
+        <div class="agent-name" style="color:${a.running?'var(--text)':'var(--text-dim)'}">${escHtml(a.agent||a.name||'?')}</div>
+        <div class="agent-status">${a.running?'ON':'–'}</div>
+      </div>`).join('');
+  } catch(e) {}
+}
+
 /* ══════════════════════════════════════════════════
-   HEADER CLOCK
+   HEADER CLOCK (legacy — kept for compatibility)
 ══════════════════════════════════════════════════ */
 (function initHeaderClock() {
   const el = document.getElementById('hdr-clock');
