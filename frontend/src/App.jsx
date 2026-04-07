@@ -14,7 +14,7 @@ function AppContent() {
   }
 
   return (
-    <AnimatePresence mode="wait">
+    <AnimatePresence mode="sync">
       {appState === 'boot' && (
         <BootSequence key="boot" onComplete={handleBootComplete} />
       )}

@@ -88,8 +88,10 @@ export default function BootSequence({ onComplete }) {
     <motion.div
       className="fixed inset-0 flex flex-col items-center justify-center"
       style={{ background: '#050505' }}
-      exit={{ opacity: 0, filter: 'blur(8px)', scale: 1.04 }}
-      transition={{ duration: 0.5 }}
+      initial={{ opacity: 1 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.4 }}
     >
       {/* Subtle radial background pulse */}
       <motion.div
@@ -114,7 +116,7 @@ export default function BootSequence({ onComplete }) {
               style={{
                 color: line.includes('COMPLETE') || line.includes('OK') || line.includes('CLEAR')
                   ? '#F5C400'
-                  : '#444',
+                  : '#888',
               }}
             >
               {line}
@@ -132,6 +134,7 @@ export default function BootSequence({ onComplete }) {
           }}
         >
           <motion.div
+            initial={{ width: '0%' }}
             style={{
               height: '100%',
               background: 'linear-gradient(90deg, rgba(245,196,0,0.4), #F5C400)',
