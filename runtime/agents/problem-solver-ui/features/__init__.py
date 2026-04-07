@@ -1,0 +1,36 @@
+"""Feature modules for AI Employee Dashboard."""
+from . import (
+    crm,
+    email_marketing,
+    meeting_intelligence,
+    social_media,
+    ceo_briefing,
+    invoicing,
+    analytics,
+    workflow_builder,
+    team_management,
+    customer_support,
+    website_builder,
+    competitor_watch,
+    personal_brand,
+    health_check,
+    export_backup,
+)
+
+ALL_ROUTERS = [
+    crm.router,
+    email_marketing.router,
+    meeting_intelligence.router,
+    social_media.router,
+    ceo_briefing.router,
+    invoicing.router,
+    analytics.router,
+    workflow_builder.router,
+    team_management.router,
+    customer_support.router,
+    website_builder.router,
+    competitor_watch.router,
+    personal_brand.router,
+    health_check.router,
+    export_backup.router,
+]
