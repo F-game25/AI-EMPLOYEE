@@ -334,6 +334,9 @@ AGENTS_BY_MODE = {
     "finance-wizard",
     "growth-hacker",
     "project-manager",
+    "meeting-intelligence",
+    "ceo-briefing",
+    "financial-tools",
     # Business-tier feature agents
     "crm-pipeline",
     "email-marketing",
@@ -401,6 +404,15 @@ AGENTS_BY_MODE = {
     "session-manager",
     "ticket-system",
     "discord-bot",
+    # New business intelligence agents
+    "lead-crm",
+    "email-marketing",
+    "meeting-intelligence",
+    "social-scheduler",
+    "ceo-briefing",
+    "financial-tools",
+    "competitor-watch",
+    "content-calendar",
     # New feature agents (Power mode)
     "crm-pipeline",
     "email-marketing",
@@ -500,7 +512,15 @@ def _agent_allowed_in_mode(agent_id: str, mode: Optional[str] = None) -> bool:
 
 
 def _agent_dir_exists(agent_id: str) -> bool:
-  return (BOTS_DIR / agent_id / "run.sh").exists()
+  if not _BOT_NAME_RE.match(agent_id):
+    return False
+  agent_path = (BOTS_DIR / agent_id).resolve()
+  # Ensure the resolved path stays within BOTS_DIR (prevent path traversal)
+  try:
+    agent_path.relative_to(BOTS_DIR.resolve())
+  except ValueError:
+    return False
+  return (agent_path / "run.sh").exists()
 
 
 def _resolve_agent_target(agent_id: str) -> Optional[str]:
@@ -1902,6 +1922,13 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('companies',this)">🏗️ Companies</button>
   <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
   <button onclick="switchTab('crm',this)">🎯 CRM</button>
+  <button onclick="switchTab('email-marketing',this)">📧 Email Mktg</button>
+  <button onclick="switchTab('meetings',this)">🗓️ Meetings</button>
+  <button onclick="switchTab('social',this)">📱 Social</button>
+  <button onclick="switchTab('briefing',this)">📰 CEO Brief</button>
+  <button onclick="switchTab('financial',this)">💳 Financial</button>
+  <button onclick="switchTab('competitors',this)">🕵️ Competitors</button>
+  <button onclick="switchTab('content-calendar',this)">🗃️ Content Cal</button>
   <button onclick="switchTab('email-mkt',this)">📧 Email</button>
   <button onclick="switchTab('meetings',this)">🎙️ Meetings</button>
   <button onclick="switchTab('social',this)">📱 Social</button>
@@ -2081,6 +2108,21 @@ INDEX_HTML = r"""<!doctype html>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">workers</code><span style="font-size:.78em;color:var(--text-muted)">List active agents</span></div>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">schedule</code><span style="font-size:.78em;color:var(--text-muted)">List scheduled tasks</span></div>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">help</code><span style="font-size:.78em;color:var(--text-muted)">Show all commands</span></div>
+    </div>
+  </div>
+
+  <!-- CEO Daily Briefing Widget -->
+  <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#818cf8">📰</span> CEO Daily Briefing</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="loadCEOBriefing()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="forceRegenerateBriefing()">⚡ Regenerate</button>
+        <button class="btn btn-ghost btn-sm" onclick="switchTab('briefing',document.querySelector('nav button[onclick*=briefing]'))">Full View →</button>
+      </div>
+    </div>
+    <div id="dash-ceo-briefing">
+      <div class="empty"><div class="icon">📰</div><p>Loading today's briefing…</p></div>
     </div>
   </div>
 
@@ -4254,6 +4296,54 @@ INDEX_HTML = r"""<!doctype html>
       </div>
     </div>
   </div>
+
+  <!-- High-Risk Action Review -->
+  <div class="card" style="border:1px solid rgba(239,68,68,.3);background:linear-gradient(135deg,rgba(239,68,68,.04),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#ef4444">⚠️</span> High-Risk Action Review</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="loadPendingActions()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444;border-color:rgba(239,68,68,.3)" onclick="showSubmitActionForm()">+ Submit Action</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+      AI-suggested or system-generated actions that require human approval before execution.
+      <strong style="color:#ef4444">Review carefully — these may have real-world effects.</strong>
+    </p>
+    <div id="pending-actions-list"><div class="empty"><div class="icon">✅</div><p>No pending actions. All clear!</p></div></div>
+
+    <!-- Submit action form (hidden by default) -->
+    <div id="submit-action-form" style="display:none;margin-top:16px;border-top:1px solid rgba(239,68,68,.2);padding-top:16px">
+      <div style="font-size:.84em;font-weight:600;color:var(--text);margin-bottom:10px">Submit Action for Review</div>
+      <div class="form-group"><label>Action Type</label>
+        <select id="pa-action-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="send_email">Send Bulk Email</option>
+          <option value="social_post">Social Media Post</option>
+          <option value="purchase">Make Purchase</option>
+          <option value="delete_data">Delete/Modify Data</option>
+          <option value="api_call">External API Call</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Description *</label><textarea id="pa-description" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Describe exactly what this action will do…"></textarea></div>
+      <div class="form-group"><label>Risk Level</label>
+        <select id="pa-risk-level" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="low">🟢 Low</option>
+          <option value="medium" selected>🟡 Medium</option>
+          <option value="high">🟠 High</option>
+          <option value="critical">🔴 Critical</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Payload (JSON, optional)</label>
+        <textarea id="pa-payload" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='{"recipients": 150, "subject": "..."}'></textarea>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="submitPendingAction()" style="flex:1">⚠️ Submit for Review</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('submit-action-form').style.display='none'">Cancel</button>
+      </div>
+      <div id="pa-submit-result" style="margin-top:8px;font-size:.84em"></div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Memory ── -->
@@ -4891,6 +4981,521 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
+</div>
+
+</div>
+
+<!-- ── CRM ── -->
+<div id="tab-crm" class="tab-content">
+  <div class="page-header" style="border-left-color:#f59e0b">
+    <div class="page-header-icon">🎯</div>
+    <div><div class="page-header-title">Lead CRM</div><div class="page-header-desc">Manage your sales pipeline from first contact to closed deal. Score leads, track stages, and schedule follow-ups.</div></div>
+    <span class="page-header-badge" style="color:#f59e0b">Sales Pipeline</span>
+  </div>
+  <div class="grid-stat" id="crm-pipeline-stats">
+    <div class="stat-card"><div class="stat-icon yellow">🆕</div><div class="stat-body"><div class="val" id="crm-stat-new">–</div><div class="lbl">New Leads</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="crm-stat-qualified">–</div><div class="lbl">Qualified</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📄</div><div class="stat-body"><div class="val" id="crm-stat-proposal">–</div><div class="lbl">Proposal Sent</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">🤝</div><div class="stat-body"><div class="val" id="crm-stat-won">–</div><div class="lbl">Closed Won</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <!-- Pipeline kanban -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🎯</span> Pipeline</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadCRM()">↻ Refresh</button>
+      </div>
+      <div id="crm-pipeline-kanban" style="display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+    <!-- Add lead form + lead list -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card" style="border:1px solid rgba(245,158,11,.3)">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">➕</span> Add Lead</div>
+        </div>
+        <div class="form-group"><label>Name *</label><input id="crm-name" placeholder="Contact name"/></div>
+        <div class="form-group"><label>Company</label><input id="crm-company" placeholder="Company name"/></div>
+        <div class="form-group"><label>Email</label><input id="crm-email" type="email" placeholder="email@example.com"/></div>
+        <div class="form-group"><label>Phone</label><input id="crm-phone" placeholder="+1 555-0000"/></div>
+        <div class="form-group"><label>Deal Value ($)</label><input id="crm-value" type="number" min="0" placeholder="0"/></div>
+        <div class="form-group"><label>Source</label><input id="crm-source" placeholder="LinkedIn, Referral, Website…"/></div>
+        <div class="form-group"><label>Notes</label><textarea id="crm-notes" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Initial notes…"></textarea></div>
+        <button class="btn btn-primary" onclick="addCRMLead()" style="width:100%">➕ Add Lead</button>
+        <div id="crm-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">👥</span> All Leads</div>
+          <input id="crm-search" placeholder="🔍 Search leads…" oninput="loadCRM()" style="font-size:.8em;padding:4px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);width:140px"/>
+        </div>
+        <div id="crm-leads-list"><div class="empty"><div class="icon">🎯</div><p>No leads yet. Add your first lead.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Email Marketing ── -->
+<div id="tab-email-marketing" class="tab-content">
+  <div class="page-header" style="border-left-color:#06b6d4">
+    <div class="page-header-icon">📧</div>
+    <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create and manage email campaigns, multi-step sequences, and track performance metrics.</div></div>
+    <span class="page-header-badge" style="color:#06b6d4">Campaigns</span>
+  </div>
+  <div class="grid-stat">
+    <div class="stat-card"><div class="stat-icon blue">📧</div><div class="stat-body"><div class="val" id="em-stat-total">–</div><div class="lbl">Total Campaigns</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="em-stat-sent">–</div><div class="lbl">Sent</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">📝</div><div class="stat-body"><div class="val" id="em-stat-draft">–</div><div class="lbl">Drafts</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📊</div><div class="stat-body"><div class="val" id="em-stat-open-rate">–</div><div class="lbl">Avg Open Rate</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Campaign list -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📧</span> Campaigns</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadEmailCampaigns()">↻ Refresh</button>
+        </div>
+        <div id="em-campaigns-list"><div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div></div>
+      </div>
+      <!-- Campaign stats panel -->
+      <div class="card" id="em-stats-card" style="display:none">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📊</span> Campaign Stats</div>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('em-stats-card').style.display='none'">✕</button>
+        </div>
+        <div id="em-stats-body"></div>
+      </div>
+      <!-- Deliverability tips -->
+      <div class="card" style="border:1px solid rgba(6,182,212,.2)">
+        <div class="card-header"><div class="card-title"><span class="icon">🛡️</span> Deliverability Tips</div></div>
+        <div id="em-tips-list" style="font-size:.84em"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Create campaign form -->
+      <div class="card" style="border:1px solid rgba(6,182,212,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Campaign</div></div>
+        <div class="form-group"><label>Campaign Name *</label><input id="em-camp-name" placeholder="e.g. Q1 Outreach"/></div>
+        <div class="form-group"><label>From Name</label><input id="em-from-name" placeholder="Your Name / Company"/></div>
+        <div class="form-group"><label>Subject Line *</label><input id="em-subject" placeholder="Email subject line"/></div>
+        <div class="form-group"><label>Email Body *</label><textarea id="em-body" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Email body content…"></textarea></div>
+        <button class="btn btn-primary" onclick="createEmailCampaign()" style="width:100%">📧 Create Campaign</button>
+        <div id="em-create-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <!-- AI Email Writer -->
+      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+        <div class="card-header"><div class="card-title"><span style="color:var(--gold)">◈</span> AI Email Writer</div></div>
+        <div class="form-group"><label>Campaign Goal</label><input id="em-write-goal" placeholder="e.g. Book a discovery call"/></div>
+        <div class="form-group"><label>Tone</label>
+          <select id="em-write-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="professional">Professional</option>
+            <option value="friendly">Friendly</option>
+            <option value="urgent">Urgent</option>
+            <option value="conversational">Conversational</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Target Audience</label><input id="em-write-audience" placeholder="e.g. SaaS founders"/></div>
+        <button class="btn btn-primary" onclick="aiWriteEmail()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4)">◈ Generate Email</button>
+        <div id="em-write-result" style="margin-top:10px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Meetings ── -->
+<div id="tab-meetings" class="tab-content">
+  <div class="page-header" style="border-left-color:#a78bfa">
+    <div class="page-header-icon">🗓️</div>
+    <div><div class="page-header-title">Meeting Intelligence</div><div class="page-header-desc">Record meetings, AI-summarize transcripts, extract action items, and generate follow-up emails automatically.</div></div>
+    <span class="page-header-badge" style="color:#a78bfa">Meetings</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🗓️</span> Meetings</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadMeetings()">↻ Refresh</button>
+        </div>
+        <div id="meetings-list"><div class="empty"><div class="icon">🗓️</div><p>No meetings recorded yet.</p></div></div>
+      </div>
+      <!-- Meeting detail -->
+      <div class="card" id="meeting-detail-card" style="display:none">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📋</span> Meeting Detail</div>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('meeting-detail-card').style.display='none'">✕</button>
+        </div>
+        <div id="meeting-detail-body"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card" style="border:1px solid rgba(167,139,250,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Meeting</div></div>
+        <div class="form-group"><label>Title *</label><input id="mtg-title" placeholder="e.g. Q1 Strategy Review"/></div>
+        <div class="form-group"><label>Date</label><input id="mtg-date" type="datetime-local"/></div>
+        <div class="form-group"><label>Participants (comma-separated)</label><input id="mtg-participants" placeholder="Alice, Bob, Carol"/></div>
+        <div class="form-group"><label>Meeting Type</label>
+          <select id="mtg-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="general">General</option>
+            <option value="sales">Sales</option>
+            <option value="strategy">Strategy</option>
+            <option value="1on1">1-on-1</option>
+            <option value="review">Review</option>
+            <option value="kickoff">Kickoff</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Transcript / Notes</label><textarea id="mtg-transcript" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Paste meeting transcript or notes here…"></textarea></div>
+        <button class="btn btn-primary" onclick="addMeeting()" style="width:100%">🗓️ Save Meeting</button>
+        <div id="mtg-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Social Media Scheduler ── -->
+<div id="tab-social" class="tab-content">
+  <div class="page-header" style="border-left-color:#ec4899">
+    <div class="page-header-icon">📱</div>
+    <div><div class="page-header-title">Social Media Scheduler</div><div class="page-header-desc">Schedule posts across all platforms, generate AI content, and track your publishing activity.</div></div>
+    <span class="page-header-badge" style="color:#ec4899">Social</span>
+  </div>
+  <div class="grid-stat">
+    <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="soc-stat-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="soc-stat-posted">–</div><div class="lbl">Posted</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">📝</div><div class="stat-body"><div class="val" id="soc-stat-draft">–</div><div class="lbl">Drafts</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📊</div><div class="stat-body"><div class="val" id="soc-stat-total">–</div><div class="lbl">Total Posts</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📅</span> Scheduled Posts</div>
+          <div style="display:flex;gap:6px">
+            <select id="soc-filter-platform" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadSocialPosts()">
+              <option value="">All Platforms</option>
+              <option value="twitter">Twitter/X</option>
+              <option value="instagram">Instagram</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="tiktok">TikTok</option>
+              <option value="facebook">Facebook</option>
+              <option value="youtube">YouTube</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="loadSocialPosts()">↻</button>
+            <button class="btn btn-ghost btn-sm" onclick="processScheduledPosts()">▶ Auto-Post</button>
+          </div>
+        </div>
+        <div id="social-posts-list"><div class="empty"><div class="icon">📱</div><p>No posts scheduled yet.</p></div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Schedule post form -->
+      <div class="card" style="border:1px solid rgba(236,72,153,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Schedule Post</div></div>
+        <div class="form-group"><label>Platform *</label>
+          <select id="soc-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="twitter">Twitter/X</option>
+            <option value="instagram">Instagram</option>
+            <option value="linkedin">LinkedIn</option>
+            <option value="tiktok">TikTok</option>
+            <option value="facebook">Facebook</option>
+            <option value="youtube">YouTube</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Content *</label><textarea id="soc-content" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Post content…"></textarea></div>
+        <div class="form-group"><label>Schedule At *</label><input id="soc-schedule-at" type="datetime-local"/></div>
+        <div class="form-group"><label>Campaign (optional)</label><input id="soc-campaign" placeholder="Campaign name"/></div>
+        <button class="btn btn-primary" onclick="schedulePost()" style="width:100%">📅 Schedule Post</button>
+        <div id="soc-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <!-- AI Content Generator -->
+      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+        <div class="card-header"><div class="card-title"><span style="color:var(--gold)">◈</span> AI Content Generator</div></div>
+        <div class="form-group"><label>Topic / Goal</label><input id="soc-gen-topic" placeholder="e.g. Product launch announcement"/></div>
+        <div class="form-group"><label>Platform</label>
+          <select id="soc-gen-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="twitter">Twitter/X</option><option value="instagram">Instagram</option>
+            <option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="generateSocialContent()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4)">◈ Generate Content</button>
+        <div id="soc-gen-result" style="margin-top:10px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── CEO Briefing ── -->
+<div id="tab-briefing" class="tab-content">
+  <div class="page-header" style="border-left-color:#6366f1">
+    <div class="page-header-icon">📰</div>
+    <div><div class="page-header-title">CEO Daily Briefing</div><div class="page-header-desc">AI-generated executive briefings with key metrics, pipeline status, revenue, and action items for the day.</div></div>
+    <span class="page-header-badge" style="color:#6366f1">Executive</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Today's briefing -->
+      <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📰</span> Today's Briefing</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="loadFullBriefing()">↻ Refresh</button>
+            <button class="btn btn-ghost btn-sm" onclick="forceRegenerateBriefing()">⚡ Regenerate</button>
+          </div>
+        </div>
+        <div id="briefing-today-body"><div class="empty"><div class="icon">📰</div><p>Loading briefing…</p></div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Briefing history -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🕐</span> Briefing History</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadBriefingHistory()">↻ Refresh</button>
+        </div>
+        <div id="briefing-history-list"><div class="empty"><div class="icon">📰</div><p>No past briefings.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Financial Tools ── -->
+<div id="tab-financial" class="tab-content">
+  <div class="page-header" style="border-left-color:#10b981">
+    <div class="page-header-icon">💳</div>
+    <div><div class="page-header-title">Financial Tools</div><div class="page-header-desc">Create and manage invoices, quotes, track expenses, and view your P&amp;L in one place.</div></div>
+    <span class="page-header-badge" style="color:#10b981">Finance</span>
+  </div>
+  <!-- Sub-tab nav -->
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    <button class="fin-tab-btn btn btn-primary btn-sm active" onclick="switchFinTab('invoices',this)">🧾 Invoices</button>
+    <button class="fin-tab-btn btn btn-ghost btn-sm" onclick="switchFinTab('quotes',this)">📄 Quotes</button>
+    <button class="fin-tab-btn btn btn-ghost btn-sm" onclick="switchFinTab('expenses',this)">💸 Expenses</button>
+    <button class="fin-tab-btn btn btn-ghost btn-sm" onclick="switchFinTab('pl',this)">📊 P&amp;L</button>
+  </div>
+
+  <!-- Invoices panel -->
+  <div id="fin-panel-invoices">
+    <div class="grid2" style="align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon">🧾</span> Invoices</div>
+            <div style="display:flex;gap:6px">
+              <select id="inv-filter-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadInvoices()">
+                <option value="">All</option><option value="draft">Draft</option>
+                <option value="sent">Sent</option><option value="paid">Paid</option>
+                <option value="overdue">Overdue</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" onclick="loadInvoices()">↻</button>
+              <button class="btn btn-ghost btn-sm" onclick="checkOverdueInvoices()">⚠️ Check Overdue</button>
+            </div>
+          </div>
+          <div id="invoices-list"><div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div></div>
+        </div>
+      </div>
+      <div class="card" style="border:1px solid rgba(16,185,129,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Invoice</div></div>
+        <div class="form-group"><label>Client Name *</label><input id="inv-client" placeholder="Client name"/></div>
+        <div class="form-group"><label>Client Email</label><input id="inv-email" type="email" placeholder="client@example.com"/></div>
+        <div class="form-group"><label>Items (JSON)</label>
+          <textarea id="inv-items" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='[{"description":"Service","qty":1,"unit_price":500}]'></textarea>
+        </div>
+        <div class="form-group"><label>Due Date</label><input id="inv-due" type="date"/></div>
+        <div class="form-group"><label>Notes</label><input id="inv-notes" placeholder="Optional notes"/></div>
+        <button class="btn btn-primary" onclick="createInvoice()" style="width:100%">🧾 Create Invoice</button>
+        <div id="inv-create-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quotes panel -->
+  <div id="fin-panel-quotes" style="display:none">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📄</span> Quotes</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadQuotes()">↻ Refresh</button>
+        </div>
+        <div id="quotes-list"><div class="empty"><div class="icon">📄</div><p>No quotes yet.</p></div></div>
+      </div>
+      <div class="card" style="border:1px solid rgba(16,185,129,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Quote</div></div>
+        <div class="form-group"><label>Client Name *</label><input id="quo-client" placeholder="Client name"/></div>
+        <div class="form-group"><label>Client Email</label><input id="quo-email" type="email" placeholder="client@example.com"/></div>
+        <div class="form-group"><label>Items (JSON)</label>
+          <textarea id="quo-items" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='[{"description":"Consulting","qty":10,"unit_price":150}]'></textarea>
+        </div>
+        <div class="form-group"><label>Valid Until</label><input id="quo-valid" type="date"/></div>
+        <button class="btn btn-primary" onclick="createQuote()" style="width:100%">📄 Create Quote</button>
+        <div id="quo-create-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Expenses panel -->
+  <div id="fin-panel-expenses" style="display:none">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">💸</span> Expenses</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadExpenses()">↻ Refresh</button>
+        </div>
+        <div id="expenses-list"><div class="empty"><div class="icon">💸</div><p>No expenses recorded yet.</p></div></div>
+      </div>
+      <div class="card" style="border:1px solid rgba(16,185,129,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Expense</div></div>
+        <div class="form-group"><label>Description *</label><input id="exp-desc" placeholder="e.g. AWS hosting"/></div>
+        <div class="form-group"><label>Amount ($) *</label><input id="exp-amount" type="number" step="0.01" min="0" placeholder="0.00"/></div>
+        <div class="form-group"><label>Category</label>
+          <select id="exp-category" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="general">General</option><option value="software">Software/SaaS</option>
+            <option value="hosting">Hosting/Infrastructure</option><option value="marketing">Marketing</option>
+            <option value="payroll">Payroll</option><option value="office">Office</option>
+            <option value="travel">Travel</option><option value="equipment">Equipment</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Date</label><input id="exp-date" type="date"/></div>
+        <button class="btn btn-primary" onclick="addExpense()" style="width:100%">💸 Add Expense</button>
+        <div id="exp-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P&L panel -->
+  <div id="fin-panel-pl" style="display:none">
+    <div class="card" style="border:1px solid rgba(16,185,129,.3);background:linear-gradient(135deg,rgba(16,185,129,.05),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📊</span> Profit &amp; Loss</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadPL()">↻ Refresh</button>
+      </div>
+      <div id="pl-body"><div class="empty"><div class="icon">📊</div><p>Loading P&amp;L data…</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Competitors ── -->
+<div id="tab-competitors" class="tab-content">
+  <div class="page-header" style="border-left-color:#f43f5e">
+    <div class="page-header-icon">🕵️</div>
+    <div><div class="page-header-title">Competitor Watch</div><div class="page-header-desc">Track and analyze your competitive landscape. AI-powered SWOT analysis and competitive intelligence alerts.</div></div>
+    <span class="page-header-badge" style="color:#f43f5e">Intelligence</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🕵️</span> Tracked Competitors</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadCompetitors()">↻ Refresh</button>
+        </div>
+        <div id="competitors-list"><div class="empty"><div class="icon">🕵️</div><p>No competitors tracked yet.</p></div></div>
+      </div>
+      <div class="card" style="border:1px solid rgba(244,63,94,.2)">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🚨</span> Alerts</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadCompetitorAlerts()">↻ Refresh</button>
+        </div>
+        <div id="competitor-alerts-list"><div class="empty"><div class="icon">🚨</div><p>No alerts yet.</p></div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card" style="border:1px solid rgba(244,63,94,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Track Competitor</div></div>
+        <div class="form-group"><label>Competitor Name *</label><input id="comp-name" placeholder="Competitor name"/></div>
+        <div class="form-group"><label>Website</label><input id="comp-website" placeholder="https://competitor.com"/></div>
+        <div class="form-group"><label>Their Pricing</label><input id="comp-pricing" placeholder="e.g. $99/mo freemium"/></div>
+        <div class="form-group"><label>Target Market</label><input id="comp-market" placeholder="e.g. SMB SaaS companies"/></div>
+        <div class="form-group"><label>Notes</label><textarea id="comp-notes" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Initial observations…"></textarea></div>
+        <button class="btn btn-primary" onclick="addCompetitor()" style="width:100%">🕵️ Track Competitor</button>
+        <div id="comp-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <!-- Competitor detail -->
+      <div class="card" id="comp-detail-card" style="display:none">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🔍</span> Analysis</div>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('comp-detail-card').style.display='none'">✕</button>
+        </div>
+        <div id="comp-detail-body"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Content Calendar ── -->
+<div id="tab-content-calendar" class="tab-content">
+  <div class="page-header" style="border-left-color:#f97316">
+    <div class="page-header-icon">🗃️</div>
+    <div><div class="page-header-title">Content Calendar</div><div class="page-header-desc">Plan and track your content across all platforms. AI generates complete 30-day content calendars tailored to your niche.</div></div>
+    <span class="page-header-badge" style="color:#f97316">Content</span>
+  </div>
+  <div class="grid-stat">
+    <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="cc-stat-total">–</div><div class="lbl">Total Entries</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">💡</div><div class="stat-body"><div class="val" id="cc-stat-ideas">–</div><div class="lbl">Ideas</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📅</div><div class="stat-body"><div class="val" id="cc-stat-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="cc-stat-published">–</div><div class="lbl">Published</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🗃️</span> Content Calendar</div>
+          <div style="display:flex;gap:6px">
+            <select id="cc-filter-platform" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadContentCalendar()">
+              <option value="">All Platforms</option>
+              <option value="instagram">Instagram</option><option value="twitter">Twitter</option>
+              <option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option>
+              <option value="youtube">YouTube</option><option value="blog">Blog</option>
+            </select>
+            <select id="cc-filter-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadContentCalendar()">
+              <option value="">All Status</option>
+              <option value="idea">Idea</option><option value="draft">Draft</option>
+              <option value="scheduled">Scheduled</option><option value="published">Published</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="loadContentCalendar()">↻</button>
+          </div>
+        </div>
+        <div id="content-calendar-entries"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Add entry form -->
+      <div class="card" style="border:1px solid rgba(249,115,22,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Entry</div></div>
+        <div class="form-group"><label>Date *</label><input id="cc-date" type="date"/></div>
+        <div class="form-group"><label>Platform *</label>
+          <select id="cc-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="instagram">Instagram</option><option value="twitter">Twitter/X</option>
+            <option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option>
+            <option value="youtube">YouTube</option><option value="blog">Blog</option>
+            <option value="email">Email</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Content Type</label>
+          <select id="cc-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="post">Post</option><option value="reel">Reel</option>
+            <option value="story">Story</option><option value="article">Article</option>
+            <option value="video">Video</option><option value="email">Email</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Title *</label><input id="cc-title" placeholder="Content title"/></div>
+        <div class="form-group"><label>Content</label><textarea id="cc-content" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Content text (optional)"></textarea></div>
+        <button class="btn btn-primary" onclick="addCalendarEntry()" style="width:100%">➕ Add Entry</button>
+        <div id="cc-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <!-- AI Calendar Generator -->
+      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+        <div class="card-header"><div class="card-title"><span style="color:var(--gold)">◈</span> AI Calendar Generator</div></div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Let AI generate a full 30-day content calendar tailored to your niche.</p>
+        <div class="form-group"><label>Your Niche / Business</label><input id="cc-gen-niche" placeholder="e.g. SaaS productivity tools"/></div>
+        <div class="form-group"><label>Days to Generate</label>
+          <select id="cc-gen-days" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="7">7 days</option><option value="14">14 days</option>
+            <option value="30" selected>30 days</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="generateContentCalendar()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4)">◈ Generate Calendar</button>
+        <div id="cc-gen-result" style="margin-top:10px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 </main>
@@ -10032,8 +10637,14 @@ setInterval(() => {
   if (currentTab === 'boardroom') loadBoardroom();
   if (currentTab === 'tickets') loadTickets();
   if (currentTab === 'artifacts') loadSessions();
+  if (currentTab === 'crm') loadCRM();
+  if (currentTab === 'email-marketing') loadEmailCampaigns();
+  if (currentTab === 'meetings') loadMeetings();
+  if (currentTab === 'social') loadSocialPosts();
+  if (currentTab === 'financial') { loadInvoices(); loadPL(); }
+  if (currentTab === 'competitors') { loadCompetitors(); loadCompetitorAlerts(); }
+  if (currentTab === 'content-calendar') loadContentCalendar();
 }, 30000);
-
 // ══════════════════════════════════════════════════════════════════
 //  FEATURE MODULE JAVASCRIPT
 // ══════════════════════════════════════════════════════════════════
@@ -10795,6 +11406,977 @@ function switchTab(tab, btn) {
 </body>
 </html>"""
 
+// ═══════════════════════════════════════════════════════════════════
+// CRM
+// ═══════════════════════════════════════════════════════════════════
+const CRM_STAGES = ['new_lead','qualified','proposal_sent','negotiation','closed_won','closed_lost'];
+const CRM_STAGE_LABELS = {new_lead:'🆕 New Lead',qualified:'✅ Qualified',proposal_sent:'📄 Proposal Sent',negotiation:'🤝 Negotiation',closed_won:'🏆 Closed Won',closed_lost:'❌ Closed Lost'};
+const CRM_STAGE_COLORS = {new_lead:'#64748b',qualified:'#3b82f6',proposal_sent:'#8b5cf6',negotiation:'#f59e0b',closed_won:'#10b981',closed_lost:'#ef4444'};
+
+async function loadCRM() {
+  try {
+    const [pipe, leads] = await Promise.all([
+      fetch('/api/crm/pipeline').then(r=>r.json()),
+      fetch('/api/crm/leads?search='+encodeURIComponent(document.getElementById('crm-search')?.value||'')).then(r=>r.json())
+    ]);
+    // Pipeline stats
+    document.getElementById('crm-stat-new').textContent = pipe.new_lead?.count ?? 0;
+    document.getElementById('crm-stat-qualified').textContent = pipe.qualified?.count ?? 0;
+    document.getElementById('crm-stat-proposal').textContent = pipe.proposal_sent?.count ?? 0;
+    document.getElementById('crm-stat-won').textContent = pipe.closed_won?.count ?? 0;
+    // Kanban
+    const kanban = document.getElementById('crm-pipeline-kanban');
+    kanban.innerHTML = CRM_STAGES.map(stage => {
+      const s = pipe[stage] || {count:0,value:0,leads:[]};
+      const color = CRM_STAGE_COLORS[stage];
+      const leadsHtml = s.leads.map(l => `
+        <div style="background:var(--surface);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:.82em">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong style="color:var(--text)">${escHtml(l.name)}</strong>
+            <span style="color:${color};font-size:.75em;font-weight:700">Score: ${l.score||0}</span>
+          </div>
+          ${l.value>0?`<div style="color:#10b981;font-size:.78em">$${Number(l.value).toLocaleString()}</div>`:''}
+          <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">
+            ${CRM_STAGES.filter(ns=>ns!==stage).slice(0,3).map(ns=>`<button class="btn btn-ghost" style="font-size:.7em;padding:2px 6px" onclick="moveCRMStage('${l.id}','${ns}')">→${CRM_STAGE_LABELS[ns].split(' ').pop()}</button>`).join('')}
+            <button class="btn btn-ghost" style="font-size:.7em;padding:2px 6px;color:#f59e0b" onclick="scoreCRMLead('${l.id}')">🎯 Score</button>
+          </div>
+        </div>`).join('') || '<div style="color:var(--text-muted);font-size:.82em;text-align:center;padding:8px">Empty</div>';
+      return `<div style="border-left:3px solid ${color};padding:8px 10px;background:rgba(255,255,255,.02);border-radius:0 6px 6px 0;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:.82em;font-weight:700;color:${color}">${CRM_STAGE_LABELS[stage]}</span>
+          <span style="font-size:.75em;color:var(--text-muted)">${s.count} lead${s.count!==1?'s':''} • $${Number(s.value).toLocaleString()}</span>
+        </div>
+        ${leadsHtml}</div>`;
+    }).join('');
+    // All leads list
+    const listEl = document.getElementById('crm-leads-list');
+    if (!leads.length) { listEl.innerHTML='<div class="empty"><div class="icon">🎯</div><p>No leads found.</p></div>'; return; }
+    listEl.innerHTML = leads.map(l => `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="flex:1">
+          <div style="font-weight:600;color:var(--text)">${escHtml(l.name)} ${l.company?`<span style="color:var(--text-muted);font-weight:400">@ ${escHtml(l.company)}</span>`:''}
+          </div>
+          <div style="color:var(--text-muted);font-size:.78em">${escHtml(l.email||'')} ${l.value>0?`• $${Number(l.value).toLocaleString()}`:''}</div>
+        </div>
+        <span style="font-size:.75em;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.06);color:${CRM_STAGE_COLORS[l.stage]||'#64748b'}">${CRM_STAGE_LABELS[l.stage]||l.stage}</span>
+        <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="deleteCRMLead('${l.id}')">🗑</button>
+      </div>`).join('');
+  } catch(e) { console.error('CRM load error',e); }
+}
+
+async function addCRMLead() {
+  const name = document.getElementById('crm-name').value.trim();
+  if (!name) { showToast('Name is required','error'); return; }
+  const res = document.getElementById('crm-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Adding…</span>';
+  try {
+    const r = await fetch('/api/crm/leads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      name, company:document.getElementById('crm-company').value,
+      email:document.getElementById('crm-email').value,
+      phone:document.getElementById('crm-phone').value,
+      value:parseFloat(document.getElementById('crm-value').value)||0,
+      source:document.getElementById('crm-source').value,
+      notes:document.getElementById('crm-notes').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = `<span style="color:#10b981">✅ Lead added!</span>`;
+    ['crm-name','crm-company','crm-email','crm-phone','crm-value','crm-source','crm-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadCRM();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function moveCRMStage(id, stage) {
+  try {
+    await fetch(`/api/crm/leads/${id}/stage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage})});
+    await loadCRM();
+    showToast(`Moved to ${CRM_STAGE_LABELS[stage]}`);
+  } catch(e) { showToast('Error moving stage','error'); }
+}
+
+async function scoreCRMLead(id) {
+  showToast('Scoring lead with AI…','info');
+  try {
+    const r = await fetch(`/api/crm/score/${id}`,{method:'POST'});
+    const data = await r.json();
+    await loadCRM();
+    showToast(`Score: ${data.score}/100`);
+  } catch(e) { showToast('Scoring failed','error'); }
+}
+
+async function deleteCRMLead(id) {
+  if (!confirm('Delete this lead?')) return;
+  await fetch(`/api/crm/leads/${id}`,{method:'DELETE'});
+  await loadCRM();
+  showToast('Lead deleted');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Email Marketing
+// ═══════════════════════════════════════════════════════════════════
+async function loadEmailCampaigns() {
+  try {
+    const camps = await fetch('/api/email/campaigns').then(r=>r.json());
+    const tips = await fetch('/api/email/deliverability-tips').then(r=>r.json());
+    const el = document.getElementById('em-campaigns-list');
+    const sent = camps.filter(c=>c.status==='sent').length;
+    const draft = camps.filter(c=>c.status==='draft').length;
+    document.getElementById('em-stat-total').textContent = camps.length;
+    document.getElementById('em-stat-sent').textContent = sent;
+    document.getElementById('em-stat-draft').textContent = draft;
+    document.getElementById('em-stat-open-rate').textContent = '—';
+    if (!camps.length) { el.innerHTML='<div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div>'; }
+    else {
+      el.innerHTML = camps.map(c=>`
+        <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <strong style="color:var(--text)">${escHtml(c.name)}</strong>
+            <span style="font-size:.75em;padding:2px 8px;border-radius:10px;background:${c.status==='sent'?'rgba(16,185,129,.15)':c.status==='draft'?'rgba(100,116,139,.15)':'rgba(245,158,11,.15)'};color:${c.status==='sent'?'#10b981':c.status==='draft'?'#94a3b8':'#f59e0b'}">${c.status}</span>
+          </div>
+          <div style="color:var(--text-muted);font-size:.78em">${escHtml(c.subject)}</div>
+          <div style="margin-top:6px;display:flex;gap:6px">
+            ${c.status!=='sent'?`<button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="sendEmailCampaign('${c.id}')">▶ Send</button>`:''}
+            <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="showCampaignStats('${c.id}')">📊 Stats</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteEmailCampaign('${c.id}')">🗑</button>
+          </div>
+        </div>`).join('');
+    }
+    // Tips
+    document.getElementById('em-tips-list').innerHTML = tips.map((t,i)=>`<div style="padding:4px 0;border-bottom:${i<tips.length-1?'1px solid rgba(255,255,255,.04)':'none'}"><span style="color:#06b6d4;margin-right:6px">•</span>${escHtml(t)}</div>`).join('');
+  } catch(e) { console.error('Email load error',e); }
+}
+
+async function createEmailCampaign() {
+  const name = document.getElementById('em-camp-name').value.trim();
+  const subject = document.getElementById('em-subject').value.trim();
+  const body = document.getElementById('em-body').value.trim();
+  if (!name || !subject || !body) { showToast('Name, subject and body required','error'); return; }
+  const res = document.getElementById('em-create-result');
+  res.innerHTML = '<span style="color:var(--gold)">Creating…</span>';
+  try {
+    const r = await fetch('/api/email/campaigns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      name, subject, body, from_name:document.getElementById('em-from-name').value
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Campaign created!</span>';
+    ['em-camp-name','em-from-name','em-subject','em-body'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadEmailCampaigns();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function sendEmailCampaign(id) {
+  showToast('Sending campaign…','info');
+  try {
+    await fetch(`/api/email/campaigns/${id}/send`,{method:'POST'});
+    await loadEmailCampaigns();
+    showToast('Campaign sent!');
+  } catch(e) { showToast('Send failed','error'); }
+}
+
+async function showCampaignStats(id) {
+  const card = document.getElementById('em-stats-card');
+  const body = document.getElementById('em-stats-body');
+  card.style.display = 'block';
+  body.innerHTML = '<span style="color:var(--gold)">Loading stats…</span>';
+  try {
+    const s = await fetch(`/api/email/campaigns/${id}/stats`).then(r=>r.json());
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:.84em">
+        <div style="text-align:center"><div style="font-size:1.4em;font-weight:700;color:#3b82f6">${s.sent}</div><div style="color:var(--text-muted)">Sent</div></div>
+        <div style="text-align:center"><div style="font-size:1.4em;font-weight:700;color:#10b981">${s.opens}</div><div style="color:var(--text-muted)">Opens (${s.open_rate}%)</div></div>
+        <div style="text-align:center"><div style="font-size:1.4em;font-weight:700;color:#f59e0b">${s.clicks}</div><div style="color:var(--text-muted)">Clicks (${s.click_rate}%)</div></div>
+      </div>`;
+  } catch(e) { body.innerHTML='<span style="color:#ef4444">Error loading stats</span>'; }
+}
+
+async function aiWriteEmail() {
+  const goal = document.getElementById('em-write-goal').value.trim();
+  if (!goal) { showToast('Enter a goal first','error'); return; }
+  const res = document.getElementById('em-write-result');
+  res.innerHTML = '<span style="color:var(--gold)">◈ Generating with AI…</span>';
+  try {
+    const r = await fetch('/api/email/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      goal, tone:document.getElementById('em-write-tone').value,
+      audience:document.getElementById('em-write-audience').value
+    })});
+    const data = await r.json();
+    res.innerHTML = `<div style="margin-top:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;font-size:.83em">
+      <div style="font-weight:700;color:var(--gold);margin-bottom:6px">Subject: ${escHtml(data.subject)}</div>
+      <pre style="white-space:pre-wrap;color:var(--text-secondary);font-family:inherit;margin:0">${escHtml(data.body)}</pre>
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" style="font-size:.72em" data-subject="${escHtml(data.subject)}" data-body="${encodeURIComponent(data.body)}" onclick="populateEmailFormFromEl(this)">→ Use in Campaign</button>
+      </div>
+    </div>`;
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+function populateEmailForm(subject, bodyEncoded) {
+  document.getElementById('em-subject').value = subject;
+  document.getElementById('em-body').value = decodeURIComponent(bodyEncoded);
+  showToast('Email content copied to form');
+}
+function populateEmailFormFromEl(btn) {
+  const subject = btn.dataset.subject || '';
+  const bodyEncoded = btn.dataset.body || '';
+  populateEmailForm(subject, bodyEncoded);
+}
+
+async function deleteEmailCampaign(id) {
+  if (!confirm('Delete this campaign?')) return;
+  await fetch(`/api/email/campaigns/${id}`,{method:'DELETE'});
+  await loadEmailCampaigns();
+  showToast('Campaign deleted');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Meetings
+// ═══════════════════════════════════════════════════════════════════
+async function loadMeetings() {
+  try {
+    const meetings = await fetch('/api/meetings').then(r=>r.json());
+    const el = document.getElementById('meetings-list');
+    if (!meetings.length) { el.innerHTML='<div class="empty"><div class="icon">🗓️</div><p>No meetings yet.</p></div>'; return; }
+    el.innerHTML = meetings.map(m=>`
+      <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <strong style="color:var(--text)">${escHtml(m.title)}</strong>
+          <span style="font-size:.75em;color:var(--text-muted)">${m.date?m.date.split('T')[0]:''}</span>
+        </div>
+        ${m.participants?.length?`<div style="color:var(--text-muted);font-size:.78em">👥 ${m.participants.join(', ')}</div>`:''}
+        ${m.summary?`<div style="color:#a78bfa;font-size:.78em;margin-top:3px">${escHtml(m.summary.slice(0,80))}…</div>`:''}
+        <div style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="viewMeeting('${m.id}')">📋 View</button>
+          ${m.transcript?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#a78bfa" onclick="summarizeMeeting('${m.id}')">◈ Summarize</button>`:''}
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#10b981" onclick="generateMeetingFollowup('${m.id}')">📧 Follow-up</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteMeeting('${m.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Meetings load error',e); }
+}
+
+async function addMeeting() {
+  const title = document.getElementById('mtg-title').value.trim();
+  if (!title) { showToast('Title is required','error'); return; }
+  const res = document.getElementById('mtg-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Saving…</span>';
+  const participants = document.getElementById('mtg-participants').value.split(',').map(p=>p.trim()).filter(Boolean);
+  try {
+    const r = await fetch('/api/meetings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      title, date:document.getElementById('mtg-date').value,
+      participants, transcript:document.getElementById('mtg-transcript').value,
+      meeting_type:document.getElementById('mtg-type').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Meeting saved!</span>';
+    ['mtg-title','mtg-date','mtg-participants','mtg-transcript'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadMeetings();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function viewMeeting(id) {
+  const card = document.getElementById('meeting-detail-card');
+  const body = document.getElementById('meeting-detail-body');
+  card.style.display = 'block';
+  body.innerHTML = '<span style="color:var(--gold)">Loading…</span>';
+  try {
+    const m = await fetch(`/api/meetings/${id}`).then(r=>r.json());
+    body.innerHTML = `
+      <div style="font-size:.84em">
+        <div style="font-size:1em;font-weight:700;color:var(--text);margin-bottom:8px">${escHtml(m.title)}</div>
+        <div style="color:var(--text-muted);margin-bottom:8px">${m.date?m.date.replace('T',' ').split('.')[0]:''} • ${m.participants?.join(', ')||'No participants'}</div>
+        ${m.summary?`<div style="background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.3);border-radius:6px;padding:8px;margin-bottom:8px"><strong style="color:#a78bfa">Summary:</strong><br>${escHtml(m.summary)}</div>`:''}
+        ${m.action_items?.length?`<div style="margin-bottom:8px"><strong style="color:var(--gold)">Action Items:</strong><ul style="margin:4px 0 0 16px;color:var(--text-secondary)">${m.action_items.map(a=>`<li>${typeof a==='object'?escHtml(a.item||JSON.stringify(a)):escHtml(a)}</li>`).join('')}</ul></div>`:''}
+        ${m.followup_email?`<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);border-radius:6px;padding:8px"><strong style="color:#10b981">Follow-up Draft:</strong><pre style="white-space:pre-wrap;font-family:inherit;font-size:.9em;margin-top:4px;color:var(--text-secondary)">${escHtml(m.followup_email)}</pre></div>`:''}
+      </div>`;
+  } catch(e) { body.innerHTML='<span style="color:#ef4444">Error loading meeting</span>'; }
+}
+
+async function summarizeMeeting(id) {
+  showToast('AI summarizing…','info');
+  try {
+    await fetch(`/api/meetings/${id}/summarize`,{method:'POST'});
+    await loadMeetings();
+    if (document.getElementById('meeting-detail-card').style.display!=='none') viewMeeting(id);
+    showToast('Meeting summarized!');
+  } catch(e) { showToast('Summarize failed','error'); }
+}
+
+async function generateMeetingFollowup(id) {
+  showToast('Generating follow-up…','info');
+  try {
+    await fetch(`/api/meetings/${id}/followup`,{method:'POST'});
+    await loadMeetings();
+    if (document.getElementById('meeting-detail-card').style.display!=='none') viewMeeting(id);
+    showToast('Follow-up email generated!');
+  } catch(e) { showToast('Generation failed','error'); }
+}
+
+async function deleteMeeting(id) {
+  if (!confirm('Delete this meeting?')) return;
+  await fetch(`/api/meetings/${id}`,{method:'DELETE'});
+  await loadMeetings();
+  showToast('Meeting deleted');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Social Scheduler
+// ═══════════════════════════════════════════════════════════════════
+const PLATFORM_EMOJIS = {twitter:'🐦',instagram:'📷',linkedin:'💼',tiktok:'🎵',facebook:'👤',youtube:'▶️'};
+
+async function loadSocialPosts() {
+  try {
+    const [posts, stats] = await Promise.all([
+      fetch('/api/social/posts?platform='+encodeURIComponent(document.getElementById('soc-filter-platform')?.value||'')).then(r=>r.json()),
+      fetch('/api/social/stats').then(r=>r.json())
+    ]);
+    document.getElementById('soc-stat-scheduled').textContent = stats.scheduled||0;
+    document.getElementById('soc-stat-posted').textContent = stats.posted||0;
+    document.getElementById('soc-stat-draft').textContent = stats.draft||0;
+    document.getElementById('soc-stat-total').textContent = stats.total||0;
+    const el = document.getElementById('social-posts-list');
+    if (!posts.length) { el.innerHTML='<div class="empty"><div class="icon">📱</div><p>No posts scheduled yet.</p></div>'; return; }
+    el.innerHTML = posts.map(p=>{
+      const statusColor = p.status==='posted'?'#10b981':p.status==='scheduled'?'#3b82f6':p.status==='failed'?'#ef4444':'#64748b';
+      return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span>${PLATFORM_EMOJIS[p.platform]||'📱'} <strong style="color:var(--text)">${p.platform}</strong></span>
+          <span style="font-size:.75em;color:${statusColor}">${p.status}</span>
+        </div>
+        <div style="color:var(--text-secondary);font-size:.82em">${escHtml(p.content.slice(0,100))}${p.content.length>100?'…':''}</div>
+        <div style="color:var(--text-muted);font-size:.75em;margin-top:3px">📅 ${p.scheduled_at?p.scheduled_at.replace('T',' ').slice(0,16):''}</div>
+        <div style="margin-top:6px;display:flex;gap:5px">
+          ${p.status==='scheduled'?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#10b981" onclick="publishSocialPost('${p.id}')">✅ Publish</button>`:''}
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteSocialPost('${p.id}')">🗑</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Social load error',e); }
+}
+
+async function schedulePost() {
+  const content = document.getElementById('soc-content').value.trim();
+  const scheduled_at = document.getElementById('soc-schedule-at').value;
+  if (!content || !scheduled_at) { showToast('Content and schedule time required','error'); return; }
+  const res = document.getElementById('soc-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Scheduling…</span>';
+  try {
+    const r = await fetch('/api/social/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      platform:document.getElementById('soc-platform').value,
+      content, scheduled_at:new Date(scheduled_at).toISOString(),
+      campaign:document.getElementById('soc-campaign').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Post scheduled!</span>';
+    ['soc-content','soc-schedule-at','soc-campaign'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadSocialPosts();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function publishSocialPost(id) {
+  await fetch(`/api/social/posts/${id}/publish`,{method:'POST'});
+  await loadSocialPosts();
+  showToast('Post marked as published!');
+}
+
+async function deleteSocialPost(id) {
+  if (!confirm('Delete this post?')) return;
+  await fetch(`/api/social/posts/${id}`,{method:'DELETE'});
+  await loadSocialPosts();
+  showToast('Post deleted');
+}
+
+async function processScheduledPosts() {
+  showToast('Processing due posts…','info');
+  try {
+    const r = await fetch('/api/social/process-due',{method:'POST'}).then(r=>r.json());
+    await loadSocialPosts();
+    showToast(`Auto-posted ${r.count} post${r.count!==1?'s':''}`);
+  } catch(e) { showToast('Error processing posts','error'); }
+}
+
+async function generateSocialContent() {
+  const topic = document.getElementById('soc-gen-topic').value.trim();
+  if (!topic) { showToast('Enter a topic first','error'); return; }
+  const res = document.getElementById('soc-gen-result');
+  res.innerHTML = '<span style="color:var(--gold)">◈ Generating…</span>';
+  try {
+    const r = await fetch('/api/social/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      topic, platform:document.getElementById('soc-gen-platform').value
+    })});
+    const data = await r.json();
+    res.innerHTML = `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:.83em">
+      <div style="color:var(--text-secondary)">${escHtml(data.content)}</div>
+      ${data.hashtags?.length?`<div style="color:#6366f1;margin-top:4px;font-size:.85em">${data.hashtags.map(h=>'#'+h.replace('#','')).join(' ')}</div>`:''}
+      <button class="btn btn-ghost btn-sm" style="margin-top:6px;font-size:.72em" onclick="document.getElementById('soc-content').value='${encodeURIComponent(data.content+' '+data.hashtags.map(h=>'#'+h.replace('#','')).join(' '))}'; showToast('Content copied to form')">→ Use Content</button>
+    </div>`;
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CEO Briefing
+// ═══════════════════════════════════════════════════════════════════
+async function loadCEOBriefing() {
+  try {
+    const b = await fetch('/api/briefing/today').then(r=>r.json());
+    renderBriefingWidget(b, document.getElementById('dash-ceo-briefing'));
+  } catch(e) { console.error('Briefing load error',e); }
+}
+
+async function loadFullBriefing() {
+  try {
+    const b = await fetch('/api/briefing/today').then(r=>r.json());
+    renderBriefingFull(b);
+    loadBriefingHistory();
+  } catch(e) { console.error('Briefing load error',e); }
+}
+
+async function forceRegenerateBriefing() {
+  showToast('Regenerating briefing…','info');
+  try {
+    const b = await fetch('/api/briefing/generate',{method:'POST'}).then(r=>r.json());
+    renderBriefingWidget(b, document.getElementById('dash-ceo-briefing'));
+    if (currentTab==='briefing') renderBriefingFull(b);
+    showToast('Briefing regenerated!');
+  } catch(e) { showToast('Regeneration failed','error'); }
+}
+
+function renderBriefingWidget(b, el) {
+  if (!el) return;
+  const m = b.metrics||{};
+  el.innerHTML = `
+    <div style="padding:4px 0">
+      <div style="font-size:.9em;font-weight:700;color:#818cf8;margin-bottom:6px">${escHtml(b.headline||b.date||'Briefing')}</div>
+      <div style="font-size:.83em;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${escHtml(b.summary||'')}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:.78em;text-align:center;margin-bottom:10px">
+        <div style="background:rgba(16,185,129,.1);border-radius:6px;padding:6px"><div style="font-weight:700;color:#10b981">$${Number(m.revenue_paid||0).toLocaleString()}</div><div style="color:var(--text-muted)">Revenue</div></div>
+        <div style="background:rgba(59,130,246,.1);border-radius:6px;padding:6px"><div style="font-weight:700;color:#3b82f6">${m.leads_total||0}</div><div style="color:var(--text-muted)">Leads</div></div>
+        <div style="background:rgba(245,158,11,.1);border-radius:6px;padding:6px"><div style="font-weight:700;color:#f59e0b">${m.chat_messages_today||0}</div><div style="color:var(--text-muted)">Messages</div></div>
+      </div>
+    </div>`;
+}
+
+function renderBriefingFull(b) {
+  const el = document.getElementById('briefing-today-body');
+  if (!el) return;
+  const m = b.metrics||{};
+  const sec = b.sections||{};
+  el.innerHTML = `
+    <div style="font-size:.84em">
+      <div style="font-size:1.1em;font-weight:700;color:#818cf8;margin-bottom:10px">${escHtml(b.headline||b.date)}</div>
+      <div style="color:var(--text-secondary);line-height:1.6;margin-bottom:16px">${escHtml(b.summary||'')}</div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px">
+        <div style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:1.6em;font-weight:800;color:#10b981">$${Number(m.revenue_paid||0).toLocaleString()}</div><div style="color:var(--text-muted);font-size:.8em">Revenue (Paid)</div></div>
+        <div style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:1.6em;font-weight:800;color:#3b82f6">$${Number(m.pipeline_value||0).toLocaleString()}</div><div style="color:var(--text-muted);font-size:.8em">Pipeline Value</div></div>
+      </div>
+      ${sec.action_items?.length?`<div style="margin-bottom:12px"><div style="font-weight:700;color:var(--gold);margin-bottom:6px">🎯 Action Items</div><ul style="margin:0 0 0 16px;color:var(--text-secondary)">${sec.action_items.map(a=>`<li style="margin-bottom:3px">${escHtml(a)}</li>`).join('')}</ul></div>`:''}
+      ${sec.risks?.length?`<div><div style="font-weight:700;color:#ef4444;margin-bottom:6px">⚠️ Risks &amp; Alerts</div><ul style="margin:0 0 0 16px;color:var(--text-secondary)">${sec.risks.map(r=>`<li style="margin-bottom:3px">${escHtml(r)}</li>`).join('')}</ul></div>`:''}
+      <div style="margin-top:10px;font-size:.75em;color:var(--text-muted)">Generated: ${b.generated_at||b.date} ${b.ai_generated?'• AI-powered':'• Heuristic'}</div>
+    </div>`;
+}
+
+async function loadBriefingHistory() {
+  try {
+    const briefings = await fetch('/api/briefing/history').then(r=>r.json());
+    const el = document.getElementById('briefing-history-list');
+    if (!briefings.length) { el.innerHTML='<div class="empty"><div class="icon">📰</div><p>No past briefings.</p></div>'; return; }
+    el.innerHTML = briefings.slice(0,10).map(b=>`
+      <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em;cursor:pointer" onclick='renderBriefingFull(${JSON.stringify(b)})'>
+        <div style="font-weight:600;color:var(--text)">${escHtml(b.date)} ${b.ai_generated?'<span style="color:#818cf8;font-size:.75em">AI</span>':''}</div>
+        <div style="color:var(--text-muted);font-size:.78em">${escHtml((b.summary||'').slice(0,70))}…</div>
+      </div>`).join('');
+  } catch(e) { console.error('Briefing history error',e); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Financial Tools
+// ═══════════════════════════════════════════════════════════════════
+function switchFinTab(panel, btn) {
+  ['invoices','quotes','expenses','pl'].forEach(p=>{
+    const el = document.getElementById('fin-panel-'+p);
+    if (el) el.style.display = p===panel?'block':'none';
+  });
+  document.querySelectorAll('.fin-tab-btn').forEach(b=>b.classList.remove('active','btn-primary'));
+  document.querySelectorAll('.fin-tab-btn').forEach(b=>b.classList.add('btn-ghost'));
+  btn.classList.remove('btn-ghost');
+  btn.classList.add('active','btn-primary');
+  if (panel==='invoices') loadInvoices();
+  else if (panel==='quotes') loadQuotes();
+  else if (panel==='expenses') loadExpenses();
+  else if (panel==='pl') loadPL();
+}
+
+async function loadInvoices() {
+  try {
+    const status = document.getElementById('inv-filter-status')?.value||'';
+    const invs = await fetch('/api/financial/invoices'+(status?'?status='+status:'')).then(r=>r.json());
+    const el = document.getElementById('invoices-list');
+    if (!invs.length) { el.innerHTML='<div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div>'; return; }
+    const statusColor = s => s==='paid'?'#10b981':s==='sent'?'#3b82f6':s==='overdue'?'#ef4444':s==='draft'?'#64748b':'#f59e0b';
+    el.innerHTML = invs.map(inv=>`
+      <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <strong style="color:var(--text)">${escHtml(inv.invoice_number)}</strong>
+          <span style="color:${statusColor(inv.status)};font-size:.8em;font-weight:700">${inv.status.toUpperCase()}</span>
+        </div>
+        <div style="color:var(--text-secondary)">${escHtml(inv.client_name)} • <strong style="color:#10b981">$${Number(inv.total||0).toLocaleString()}</strong></div>
+        <div style="color:var(--text-muted);font-size:.75em">Due: ${inv.due_date||'—'}</div>
+        <div style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap">
+          ${inv.status==='draft'?`<button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="sendInvoice('${inv.id}')">📧 Send</button>`:''}
+          ${inv.status!=='paid'?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#10b981" onclick="payInvoice('${inv.id}')">✅ Paid</button>`:''}
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteInvoice('${inv.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Invoice load error',e); }
+}
+
+async function createInvoice() {
+  const client = document.getElementById('inv-client').value.trim();
+  if (!client) { showToast('Client name required','error'); return; }
+  let items = [];
+  try { items = JSON.parse(document.getElementById('inv-items').value||'[]'); } catch(e) { showToast('Invalid items JSON','error'); return; }
+  const res = document.getElementById('inv-create-result');
+  res.innerHTML = '<span style="color:var(--gold)">Creating…</span>';
+  try {
+    const r = await fetch('/api/financial/invoices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      client_name:client, client_email:document.getElementById('inv-email').value,
+      items, due_date:document.getElementById('inv-due').value||undefined,
+      notes:document.getElementById('inv-notes').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = `<span style="color:#10b981">✅ Invoice ${escHtml(data.invoice_number)} created!</span>`;
+    ['inv-client','inv-email','inv-items','inv-due','inv-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadInvoices();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function sendInvoice(id) {
+  await fetch(`/api/financial/invoices/${id}/send`,{method:'POST'});
+  await loadInvoices();
+  showToast('Invoice marked as sent');
+}
+
+async function payInvoice(id) {
+  await fetch(`/api/financial/invoices/${id}/pay`,{method:'POST'});
+  await loadInvoices();
+  showToast('Invoice marked as paid!');
+}
+
+async function deleteInvoice(id) {
+  if (!confirm('Delete invoice?')) return;
+  await fetch(`/api/financial/invoices/${id}`,{method:'DELETE'});
+  await loadInvoices();
+  showToast('Invoice deleted');
+}
+
+async function checkOverdueInvoices() {
+  const r = await fetch('/api/financial/reminders').then(r=>r.json());
+  showToast(`${r.newly_marked?.length||0} invoices marked overdue, ${r.all_overdue?.length||0} total overdue`);
+  await loadInvoices();
+}
+
+async function loadQuotes() {
+  try {
+    const quotes = await fetch('/api/financial/quotes').then(r=>r.json());
+    const el = document.getElementById('quotes-list');
+    if (!quotes.length) { el.innerHTML='<div class="empty"><div class="icon">📄</div><p>No quotes yet.</p></div>'; return; }
+    el.innerHTML = quotes.map(q=>`
+      <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <strong style="color:var(--text)">${escHtml(q.quote_number)}</strong>
+          <span style="color:#10b981;font-weight:700">$${Number(q.total||0).toLocaleString()}</span>
+        </div>
+        <div style="color:var(--text-secondary)">${escHtml(q.client_name)}</div>
+        <div style="color:var(--text-muted);font-size:.75em">Valid until: ${q.valid_until||'—'}</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:5px;font-size:.72em;color:#ef4444" onclick="deleteQuote('${q.id}')">🗑 Delete</button>
+      </div>`).join('');
+  } catch(e) { console.error('Quotes load error',e); }
+}
+
+async function createQuote() {
+  const client = document.getElementById('quo-client').value.trim();
+  if (!client) { showToast('Client name required','error'); return; }
+  let items = [];
+  try { items = JSON.parse(document.getElementById('quo-items').value||'[]'); } catch(e) { showToast('Invalid items JSON','error'); return; }
+  const res = document.getElementById('quo-create-result');
+  res.innerHTML = '<span style="color:var(--gold)">Creating…</span>';
+  try {
+    const r = await fetch('/api/financial/quotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      client_name:client, client_email:document.getElementById('quo-email').value,
+      items, valid_until:document.getElementById('quo-valid').value||undefined,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = `<span style="color:#10b981">✅ Quote ${escHtml(data.quote_number)} created!</span>`;
+    await loadQuotes();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function deleteQuote(id) {
+  if (!confirm('Delete quote?')) return;
+  await fetch(`/api/financial/quotes/${id}`,{method:'DELETE'});
+  await loadQuotes();
+  showToast('Quote deleted');
+}
+
+async function loadExpenses() {
+  try {
+    const expenses = await fetch('/api/financial/expenses').then(r=>r.json());
+    const el = document.getElementById('expenses-list');
+    if (!expenses.length) { el.innerHTML='<div class="empty"><div class="icon">💸</div><p>No expenses yet.</p></div>'; return; }
+    const total = expenses.reduce((s,e)=>s+Number(e.amount||0),0);
+    el.innerHTML = `<div style="padding:8px 0;border-bottom:1px solid rgba(16,185,129,.2);margin-bottom:6px;font-size:.84em;font-weight:700;color:#ef4444">Total: $${total.toLocaleString(undefined,{minimumFractionDigits:2})}</div>`+
+    expenses.map(exp=>`
+      <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em;display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-weight:600;color:var(--text)">${escHtml(exp.description)}</div><div style="color:var(--text-muted);font-size:.78em">${escHtml(exp.category)} • ${exp.date}</div></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:#ef4444;font-weight:700">$${Number(exp.amount||0).toLocaleString()}</span>
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteExpense('${exp.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Expenses load error',e); }
+}
+
+async function addExpense() {
+  const desc = document.getElementById('exp-desc').value.trim();
+  const amount = parseFloat(document.getElementById('exp-amount').value||0);
+  if (!desc || !amount) { showToast('Description and amount required','error'); return; }
+  const res = document.getElementById('exp-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Adding…</span>';
+  try {
+    const r = await fetch('/api/financial/expenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      description:desc, amount, category:document.getElementById('exp-category').value,
+      date:document.getElementById('exp-date').value||undefined,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Expense added!</span>';
+    ['exp-desc','exp-amount','exp-date'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadExpenses();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function deleteExpense(id) {
+  if (!confirm('Delete expense?')) return;
+  await fetch(`/api/financial/expenses/${id}`,{method:'DELETE'});
+  await loadExpenses();
+  showToast('Expense deleted');
+}
+
+async function loadPL() {
+  try {
+    const pl = await fetch('/api/financial/pl').then(r=>r.json());
+    const el = document.getElementById('pl-body');
+    const profitColor = pl.profit>=0?'#10b981':'#ef4444';
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;font-size:.84em;margin-bottom:16px">
+        <div style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.2);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:1.8em;font-weight:800;color:#10b981">$${Number(pl.revenue||0).toLocaleString()}</div>
+          <div style="color:var(--text-muted)">Revenue (Paid)</div>
+          <div style="color:var(--text-muted);font-size:.8em">${pl.paid_invoices||0} paid invoices</div>
+        </div>
+        <div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:1.8em;font-weight:800;color:#ef4444">$${Number(pl.expenses||0).toLocaleString()}</div>
+          <div style="color:var(--text-muted)">Expenses</div>
+          <div style="color:var(--text-muted);font-size:.8em">${pl.expense_count||0} entries</div>
+        </div>
+        <div style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:1.8em;font-weight:800;color:${profitColor}">$${Number(pl.profit||0).toLocaleString()}</div>
+          <div style="color:var(--text-muted)">Net Profit</div>
+        </div>
+        <div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:1.8em;font-weight:800;color:#f59e0b">${pl.profit_margin||0}%</div>
+          <div style="color:var(--text-muted)">Profit Margin</div>
+        </div>
+      </div>
+      ${pl.overdue_invoices>0?`<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:12px;font-size:.84em"><span style="color:#ef4444;font-weight:700">⚠️ ${pl.overdue_invoices} overdue invoice${pl.overdue_invoices!==1?'s':''}</span> — <span style="color:var(--text-muted)">pending revenue: $${Number(pl.pending_revenue||0).toLocaleString()}</span></div>`:''}`;
+  } catch(e) { document.getElementById('pl-body').innerHTML='<span style="color:#ef4444">Error loading P&L</span>'; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Competitors
+// ═══════════════════════════════════════════════════════════════════
+async function loadCompetitors() {
+  try {
+    const comps = await fetch('/api/competitors').then(r=>r.json());
+    const el = document.getElementById('competitors-list');
+    if (!comps.length) { el.innerHTML='<div class="empty"><div class="icon">🕵️</div><p>No competitors tracked yet.</p></div>'; return; }
+    el.innerHTML = comps.map(c=>`
+      <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <strong style="color:var(--text)">${escHtml(c.name)}</strong>
+          <span style="font-size:.75em;color:var(--text-muted)">${c.last_analyzed?'Analyzed '+c.last_analyzed.split('T')[0]:'Not analyzed'}</span>
+        </div>
+        ${c.website?`<div style="color:#6366f1;font-size:.78em">${escHtml(c.website)}</div>`:''}
+        ${c.analysis?`<div style="color:var(--text-muted);font-size:.78em;margin-top:3px">${escHtml(c.analysis.slice(0,80))}…</div>`:''}
+        <div style="margin-top:6px;display:flex;gap:5px">
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#818cf8" onclick="analyzeCompetitor('${c.id}')">◈ Analyze</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="viewCompetitorDetail('${c.id}')">🔍 View</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteCompetitor('${c.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Competitors load error',e); }
+}
+
+async function addCompetitor() {
+  const name = document.getElementById('comp-name').value.trim();
+  if (!name) { showToast('Name is required','error'); return; }
+  const res = document.getElementById('comp-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Adding…</span>';
+  try {
+    const r = await fetch('/api/competitors',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      name, website:document.getElementById('comp-website').value,
+      pricing:document.getElementById('comp-pricing').value,
+      target_market:document.getElementById('comp-market').value,
+      notes:document.getElementById('comp-notes').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Competitor added!</span>';
+    ['comp-name','comp-website','comp-pricing','comp-market','comp-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadCompetitors();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function analyzeCompetitor(id) {
+  showToast('AI analyzing competitor…','info');
+  try {
+    await fetch(`/api/competitors/${id}/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+    await loadCompetitors();
+    await loadCompetitorAlerts();
+    showToast('Analysis complete!');
+  } catch(e) { showToast('Analysis failed','error'); }
+}
+
+async function viewCompetitorDetail(id) {
+  const card = document.getElementById('comp-detail-card');
+  const body = document.getElementById('comp-detail-body');
+  card.style.display = 'block';
+  body.innerHTML = '<span style="color:var(--gold)">Loading…</span>';
+  try {
+    const c = await fetch(`/api/competitors/${id}`).then(r=>r.json());
+    body.innerHTML = `
+      <div style="font-size:.84em">
+        <div style="font-weight:700;color:var(--text);font-size:1.05em;margin-bottom:8px">${escHtml(c.name)}</div>
+        ${c.analysis?`<div style="color:var(--text-secondary);margin-bottom:10px">${escHtml(c.analysis)}</div>`:'<div style="color:var(--text-muted);margin-bottom:10px">Not yet analyzed.</div>'}
+        ${c.strengths?.length?`<div style="margin-bottom:6px"><strong style="color:#10b981">Strengths:</strong> ${c.strengths.map(s=>`<span style="font-size:.85em;color:var(--text-secondary)">${escHtml(s)}</span>`).join(', ')}</div>`:''}
+        ${c.weaknesses?.length?`<div style="margin-bottom:6px"><strong style="color:#ef4444">Weaknesses:</strong> ${c.weaknesses.map(w=>`<span style="font-size:.85em;color:var(--text-secondary)">${escHtml(w)}</span>`).join(', ')}</div>`:''}
+        ${c.opportunities?.length?`<div style="margin-bottom:6px"><strong style="color:#f59e0b">Opportunities:</strong> ${c.opportunities.map(o=>`<span style="font-size:.85em;color:var(--text-secondary)">${escHtml(o)}</span>`).join(', ')}</div>`:''}
+        ${c.threats?.length?`<div><strong style="color:#8b5cf6">Threats:</strong> ${c.threats.map(t=>`<span style="font-size:.85em;color:var(--text-secondary)">${escHtml(t)}</span>`).join(', ')}</div>`:''}
+      </div>`;
+  } catch(e) { body.innerHTML='<span style="color:#ef4444">Error loading competitor</span>'; }
+}
+
+async function deleteCompetitor(id) {
+  if (!confirm('Remove this competitor from tracking?')) return;
+  await fetch(`/api/competitors/${id}`,{method:'DELETE'});
+  await loadCompetitors();
+  showToast('Competitor removed');
+}
+
+async function loadCompetitorAlerts() {
+  try {
+    const alerts = await fetch('/api/competitors/alerts').then(r=>r.json());
+    const el = document.getElementById('competitor-alerts-list');
+    if (!alerts.length) { el.innerHTML='<div class="empty"><div class="icon">✅</div><p>No alerts.</p></div>'; return; }
+    el.innerHTML = alerts.slice(0,10).map(a=>`
+      <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <strong style="color:var(--text)">${escHtml(a.competitor_name)}</strong>
+          <span style="font-size:.72em;color:var(--text-muted)">${a.created_at?a.created_at.split('T')[0]:''}</span>
+        </div>
+        <div style="color:var(--text-secondary);font-size:.82em">${escHtml(a.message)}</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:4px;font-size:.7em" onclick="dismissCompetitorAlert('${a.id}')">✓ Dismiss</button>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+async function dismissCompetitorAlert(id) {
+  await fetch(`/api/competitors/alerts/${id}/dismiss`,{method:'POST'});
+  await loadCompetitorAlerts();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Content Calendar
+// ═══════════════════════════════════════════════════════════════════
+async function loadContentCalendar() {
+  try {
+    const platform = document.getElementById('cc-filter-platform')?.value||'';
+    const status = document.getElementById('cc-filter-status')?.value||'';
+    const qs = new URLSearchParams();
+    if (platform) qs.set('platform',platform);
+    if (status) qs.set('status',status);
+    const {entries, stats} = await fetch('/api/content-calendar?'+qs.toString()).then(r=>r.json());
+    document.getElementById('cc-stat-total').textContent = stats.total||0;
+    document.getElementById('cc-stat-ideas').textContent = stats.by_status?.idea||0;
+    document.getElementById('cc-stat-scheduled').textContent = stats.scheduled_upcoming||0;
+    document.getElementById('cc-stat-published').textContent = stats.published_this_month||0;
+    const el = document.getElementById('content-calendar-entries');
+    if (!entries.length) { el.innerHTML='<div class="empty"><div class="icon">🗃️</div><p>No calendar entries. Add one or generate with AI.</p></div>'; return; }
+    // Group by date
+    const byDate = {};
+    entries.forEach(e=>{const d=e.date||'Unknown';(byDate[d]=byDate[d]||[]).push(e);});
+    const statusColors = {idea:'#64748b',draft:'#f59e0b',scheduled:'#3b82f6',published:'#10b981',archived:'#6b7280'};
+    el.innerHTML = Object.entries(byDate).map(([dt,dayEntries])=>`
+      <div style="margin-bottom:12px">
+        <div style="font-size:.8em;font-weight:700;color:var(--gold);padding:4px 0;border-bottom:1px solid rgba(212,175,55,.2);margin-bottom:6px">${dt}</div>
+        ${dayEntries.map(e=>`
+          <div style="background:var(--surface2);border:1px solid rgba(255,255,255,.06);border-left:3px solid ${statusColors[e.status]||'#64748b'};border-radius:4px;padding:8px 10px;margin-bottom:5px;font-size:.83em">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span>${PLATFORM_EMOJIS[e.platform]||'📱'} <strong style="color:var(--text)">${escHtml(e.title)}</strong></span>
+              <div style="display:flex;gap:5px;align-items:center">
+                <span style="font-size:.75em;color:${statusColors[e.status]}">${e.status}</span>
+                <select style="font-size:.72em;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:1px 4px" onchange="updateCalendarStatus('${e.id}',this.value)">
+                  ${['idea','draft','scheduled','published'].map(s=>`<option value="${s}"${s===e.status?' selected':''}>${s}</option>`).join('')}
+                </select>
+                <button class="btn btn-ghost btn-sm" style="font-size:.7em;color:#ef4444" onclick="deleteCalendarEntry('${e.id}')">🗑</button>
+              </div>
+            </div>
+            ${e.content?`<div style="color:var(--text-muted);font-size:.82em;margin-top:3px">${escHtml(e.content.slice(0,80))}${e.content.length>80?'…':''}</div>`:''}
+          </div>`).join('')}
+      </div>`).join('');
+  } catch(e) { console.error('Calendar load error',e); }
+}
+
+async function addCalendarEntry() {
+  const date_str = document.getElementById('cc-date').value;
+  const title = document.getElementById('cc-title').value.trim();
+  if (!date_str || !title) { showToast('Date and title required','error'); return; }
+  const res = document.getElementById('cc-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Adding…</span>';
+  try {
+    const r = await fetch('/api/content-calendar/entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      date:date_str, platform:document.getElementById('cc-platform').value,
+      content_type:document.getElementById('cc-type').value,
+      title, content:document.getElementById('cc-content').value, status:'idea'
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Entry added!</span>';
+    ['cc-date','cc-title','cc-content'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadContentCalendar();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function updateCalendarStatus(id, status) {
+  await fetch(`/api/content-calendar/entries/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  showToast('Status updated');
+}
+
+async function deleteCalendarEntry(id) {
+  if (!confirm('Delete this entry?')) return;
+  await fetch(`/api/content-calendar/entries/${id}`,{method:'DELETE'});
+  await loadContentCalendar();
+  showToast('Entry deleted');
+}
+
+async function generateContentCalendar() {
+  const niche = document.getElementById('cc-gen-niche').value.trim();
+  if (!niche) { showToast('Enter your niche first','error'); return; }
+  const res = document.getElementById('cc-gen-result');
+  res.innerHTML = '<span style="color:var(--gold)">◈ Generating calendar… This may take a moment.</span>';
+  try {
+    const r = await fetch('/api/content-calendar/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      niche, days:parseInt(document.getElementById('cc-gen-days').value||30)
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = `<span style="color:#10b981">✅ Generated ${data.count} content entries!</span>`;
+    await loadContentCalendar();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Guardrails — Pending Actions
+// ═══════════════════════════════════════════════════════════════════
+function showSubmitActionForm() {
+  const f = document.getElementById('submit-action-form');
+  f.style.display = f.style.display==='none'?'block':'none';
+}
+
+async function loadPendingActions() {
+  try {
+    const {actions} = await fetch('/api/guardrails/pending-actions').then(r=>r.json());
+    const el = document.getElementById('pending-actions-list');
+    if (!actions.length) { el.innerHTML='<div class="empty"><div class="icon">✅</div><p>No pending actions. All clear!</p></div>'; return; }
+    const riskColors = {low:'#10b981',medium:'#f59e0b',high:'#f97316',critical:'#ef4444'};
+    el.innerHTML = actions.map(a=>`
+      <div style="border:1px solid rgba(239,68,68,.2);border-left:3px solid ${riskColors[a.risk_level]||'#f59e0b'};border-radius:6px;padding:12px;margin-bottom:10px;font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <strong style="color:var(--text)">${escHtml(a.action_type.replace(/_/g,' ').toUpperCase())}</strong>
+          <span style="font-size:.78em;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.06);color:${riskColors[a.risk_level]||'#f59e0b'};font-weight:700">${(a.risk_level||'medium').toUpperCase()}</span>
+        </div>
+        <div style="color:var(--text-secondary);margin-bottom:8px">${escHtml(a.description)}</div>
+        <div style="color:var(--text-muted);font-size:.75em;margin-bottom:8px">Submitted: ${a.created_at?.split('T')[0]||'—'} by ${escHtml(a.submitted_by||'user')}</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-success btn-sm" style="font-size:.78em" onclick="approveAction('${a.id}')">✅ Approve</button>
+          <button class="btn btn-danger btn-sm" style="font-size:.78em" onclick="rejectAction('${a.id}')">❌ Reject</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Pending actions load error',e); }
+}
+
+async function approveAction(id) {
+  await fetch(`/api/guardrails/pending-actions/${id}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  await loadPendingActions();
+  showToast('Action approved');
+}
+
+async function rejectAction(id) {
+  await fetch(`/api/guardrails/pending-actions/${id}/reject`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  await loadPendingActions();
+  showToast('Action rejected');
+}
+
+async function submitPendingAction() {
+  const desc = document.getElementById('pa-description').value.trim();
+  if (!desc) { showToast('Description is required','error'); return; }
+  let payload = {};
+  try { payload = JSON.parse(document.getElementById('pa-payload').value||'{}'); } catch(e) {}
+  const res = document.getElementById('pa-submit-result');
+  res.innerHTML = '<span style="color:var(--gold)">Submitting…</span>';
+  try {
+    const r = await fetch('/api/guardrails/submit-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      action_type:document.getElementById('pa-action-type').value,
+      description:desc, risk_level:document.getElementById('pa-risk-level').value, payload,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Action submitted for review!</span>';
+    document.getElementById('pa-description').value = '';
+    document.getElementById('pa-payload').value = '';
+    await loadPendingActions();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Tab init hooks
+// ═══════════════════════════════════════════════════════════════════
+const _origSwitchTab = switchTab;
+window.switchTab = function(tab, btn) {
+  _origSwitchTab(tab, btn);
+  if (tab === 'crm') loadCRM();
+  else if (tab === 'email-marketing') loadEmailCampaigns();
+  else if (tab === 'meetings') loadMeetings();
+  else if (tab === 'social') loadSocialPosts();
+  else if (tab === 'briefing') { loadFullBriefing(); loadBriefingHistory(); }
+  else if (tab === 'financial') loadInvoices();
+  else if (tab === 'competitors') { loadCompetitors(); loadCompetitorAlerts(); }
+  else if (tab === 'content-calendar') loadContentCalendar();
+  else if (tab === 'guardrails') loadPendingActions();
+};
+
+// Load CEO briefing in dashboard on startup
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(loadCEOBriefing, 1500);
+});
+</script>
+</body>
+</html>"""
+
 
 # ─── API endpoints ─────────────────────────────────────────────────────────────
 
@@ -11005,6 +12587,8 @@ async def sse_events(request: Request):
                 for agent_name in _mode_agent_targets(mode):
                     if agent_name in INFRA_AGENTS:
                         continue
+                    if not _BOT_NAME_RE.match(agent_name):
+                        continue
                     pid_file = AI_HOME / "run" / f"{agent_name}.pid"
                     if pid_file.exists():
                         try:
@@ -11047,6 +12631,8 @@ def get_status():
   mode = _current_mode()
   for agent_name in _mode_agent_targets(mode):
     if agent_name in INFRA_AGENTS:
+      continue
+    if not _BOT_NAME_RE.match(agent_name):
       continue
     pid_file = AI_HOME / "run" / f"{agent_name}.pid"
     running = False
@@ -12092,7 +13678,8 @@ def delete_schedule(task_id: str):
         tasks = [t for t in tasks if t.get("id") != task_id]
         SCHEDULES_FILE.write_text(json.dumps(tasks, indent=2))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
     return JSONResponse({"ok": True})
 
 
@@ -13470,6 +15057,10 @@ def _save_integrations(integrations: list) -> None:
     # Only save id + enabled + config (not the field definitions)
     slim = [{"id": i["id"], "enabled": i.get("enabled", False), "config": i.get("config", {})} for i in integrations]
     INTEGRATIONS_FILE.write_text(json.dumps(slim, indent=2))
+    try:
+        INTEGRATIONS_FILE.chmod(0o600)  # restrict to owner only — config contains API keys/tokens
+    except OSError:
+        pass
 
 
 @app.get("/api/integrations")
@@ -13513,7 +15104,8 @@ def test_integration(integration_id: str):
             with _req.urlopen(req, timeout=5) as resp:
                 return JSONResponse({"ok": True, "message": f"HTTP {resp.status} — webhook reachable"})
         except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)})
+            logger.warning("Webhook test failed: %s", exc)
+            return JSONResponse({"ok": False, "message": "Webhook unreachable"})
 
     if integration_id in ("openai", "anthropic"):
         key_field = "api_key"
@@ -13536,9 +15128,8 @@ def test_integration(integration_id: str):
                     return JSONResponse({"ok": True, "message": f"Connected as @{name}"})
                 return JSONResponse({"ok": False, "message": "Telegram returned error"})
         except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)})
-
-    # Generic: just check required fields are filled
+            logger.warning("Telegram test failed: %s", exc)
+            return JSONResponse({"ok": False, "message": "Could not connect to Telegram"})
     required_fields = [f["key"] for f in intg.get("fields", []) if not f.get("optional")]
     missing = [k for k in required_fields if not config.get(k, "").strip()]
     if missing:
@@ -13991,7 +15582,8 @@ def clear_history():
         _log_activity("system", "Activity history cleared", source="dashboard")
         return JSONResponse({"ok": True})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 class _NukeRequest(BaseModel):
@@ -14138,7 +15730,8 @@ def updater_check():
         _UPDATER_TRIGGER_FILE.write_text("check")
         return JSONResponse({"ok": True, "message": "Check triggered — results appear in Auto Update card within seconds"})
     except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/updater/update")
@@ -14159,7 +15752,8 @@ def updater_update():
             pass
         return JSONResponse({"ok": True, "message": "Update triggered — agents will restart momentarily if changes are found"})
     except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ─── Compatibility alias endpoints ────────────────────────────────────────────
@@ -14412,7 +16006,8 @@ def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth)):
         af.set_mode(mode)
         return JSONResponse({"ok": True, "mode": mode})
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend set_mode error: %s", exc)
         raise HTTPException(500, "Failed to set mode")
@@ -14449,7 +16044,8 @@ def ascend_approve(patch_id: str, _auth: None = Depends(require_auth)):
         patch = af.approve_patch(patch_id)
         return JSONResponse({"ok": True, "patch": patch})
     except (ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend approve error: %s", exc)
         raise HTTPException(500, "Approval failed")
@@ -14463,7 +16059,8 @@ def ascend_reject(patch_id: str, _auth: None = Depends(require_auth)):
         patch = af.reject_patch(patch_id)
         return JSONResponse({"ok": True, "patch": patch})
     except (ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend reject error: %s", exc)
         raise HTTPException(500, "Rejection failed")
@@ -14477,7 +16074,8 @@ def ascend_rollback(patch_id: str, _auth: None = Depends(require_auth)):
         patch = af.rollback_patch(patch_id)
         return JSONResponse({"ok": True, "patch": patch})
     except (ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend rollback error: %s", exc)
         raise HTTPException(500, "Rollback failed")
@@ -14814,7 +16412,8 @@ def org_upsert_role(payload: dict):
         return JSONResponse(role)
     except Exception as exc:
         logger.error("org upsert_role error: %s", exc)
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/org/roles/{role_id}")
@@ -14823,7 +16422,8 @@ def org_delete_role(role_id: str):
         deleted = _org().delete_role(role_id)
         return JSONResponse({"ok": deleted})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/org/assign")
@@ -14836,9 +16436,11 @@ def org_assign_agent(payload: dict):
     try:
         return JSONResponse(_org().assign_agent_to_role(role_id, agent_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/org/delegate")
@@ -14852,9 +16454,11 @@ def org_delegate_task(payload: dict):
     try:
         return JSONResponse(_org().delegate_task(from_role, to_role, task, payload.get("context")))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/org/adapters")
@@ -14884,9 +16488,11 @@ def org_register_adapter(payload: dict):
             )
         )
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/org/adapters/{adapter_id}")
@@ -14895,7 +16501,8 @@ def org_deregister_adapter(adapter_id: str):
         ok = _org().deregister_adapter(adapter_id)
         return JSONResponse({"ok": ok})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Budget Tracker API ─────────────────────────────────────────────────────────
@@ -14918,7 +16525,8 @@ def budget_agent_status(agent_id: str):
         _budget().auto_reset_all_if_new_month()
         return JSONResponse(_budget().get_agent_status(agent_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/budget/set")
@@ -14931,7 +16539,8 @@ def budget_set(payload: dict):
     try:
         return JSONResponse(_budget().set_budget(agent_id, float(budget)))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/budget/reset/{agent_id}")
@@ -14940,7 +16549,8 @@ def budget_reset(agent_id: str):
     try:
         return JSONResponse(_budget().reset_usage(agent_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/budget/record")
@@ -14961,7 +16571,8 @@ def budget_record_usage(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Goal Alignment API ─────────────────────────────────────────────────────────
@@ -14990,7 +16601,8 @@ def goals_set_company(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/goals/projects")
@@ -15022,7 +16634,8 @@ def goals_upsert_project(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/goals/projects/{project_id}")
@@ -15030,7 +16643,8 @@ def goals_delete_project(project_id: str):
     try:
         return JSONResponse({"ok": _goals().delete_project(project_id)})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/goals/context/{project_id}")
@@ -15041,7 +16655,8 @@ def goals_get_context(project_id: str):
         preamble = _goals().build_goal_preamble(project_id=project_id)
         return JSONResponse({**ctx, "preamble": preamble})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Ticket System API ──────────────────────────────────────────────────────────
@@ -15082,7 +16697,8 @@ def tickets_create(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/tickets/{ticket_id}")
@@ -15095,7 +16711,8 @@ def tickets_get(ticket_id: str):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.patch("/api/tickets/{ticket_id}")
@@ -15114,9 +16731,11 @@ def tickets_update(ticket_id: str, payload: dict):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/tickets/{ticket_id}/comment")
@@ -15135,9 +16754,11 @@ def tickets_add_comment(ticket_id: str, payload: dict):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/tickets/{ticket_id}/audit")
@@ -15146,7 +16767,8 @@ def tickets_audit(ticket_id: str):
     try:
         return JSONResponse(_tickets().get_audit_trail(ticket_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/tickets/audit/log")
@@ -15206,7 +16828,8 @@ def governance_request(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/{action_id}/approve")
@@ -15221,9 +16844,11 @@ def governance_approve(action_id: str, payload: dict = {}):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/{action_id}/reject")
@@ -15238,9 +16863,11 @@ def governance_reject(action_id: str, payload: dict = {}):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/pause/{agent_id}")
@@ -15249,7 +16876,8 @@ def governance_pause(agent_id: str, payload: dict = {}):
     try:
         return JSONResponse(_gov().pause_agent(agent_id, reason=payload.get("reason", "")))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/resume/{agent_id}")
@@ -15258,7 +16886,8 @@ def governance_resume(agent_id: str, payload: dict = {}):
     try:
         return JSONResponse(_gov().resume_agent(agent_id, reason=payload.get("reason", "")))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/terminate/{agent_id}")
@@ -15267,7 +16896,8 @@ def governance_terminate(agent_id: str, payload: dict = {}):
     try:
         return JSONResponse(_gov().terminate_agent(agent_id, reason=payload.get("reason", "")))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/governance/agent/{agent_id}")
@@ -15276,7 +16906,8 @@ def governance_agent_status(agent_id: str):
     try:
         return JSONResponse(_gov().get_agent_gov_status(agent_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/governance/settings")
@@ -15293,7 +16924,8 @@ def governance_update_settings(payload: dict):
     try:
         return JSONResponse(_gov().update_settings(payload))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Company Manager API ────────────────────────────────────────────────────────
@@ -15333,7 +16965,8 @@ def companies_create(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/companies/switch")
@@ -15345,9 +16978,11 @@ def companies_switch(payload: dict):
     try:
         return JSONResponse(_company().switch_company(company_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/companies/{company_id}")
@@ -15356,9 +16991,11 @@ def companies_delete(company_id: str):
         ok = _company().delete_company(company_id)
         return JSONResponse({"ok": ok})
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/companies/{company_id}/export")
@@ -15367,9 +17004,11 @@ def companies_export(company_id: str):
     try:
         return JSONResponse(_company().export_company(company_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/companies/import")
@@ -15385,7 +17024,8 @@ def companies_import(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Session Manager & Artifacts lazy-loaders ──────────────────────────────────
@@ -15431,7 +17071,8 @@ def sessions_create(payload: dict):
         )
         return JSONResponse(s)
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/sessions/{session_id}")
@@ -15455,9 +17096,11 @@ def sessions_update(session_id: str, payload: dict):
             merge_context=payload.get("merge_context", True),
         ))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/sessions/{session_id}")
@@ -15473,7 +17116,8 @@ def sessions_resume(session_id: str):
     try:
         return JSONResponse(_sessions().resume_session(session_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 @app.post("/api/sessions/{session_id}/checkpoint")
@@ -15486,7 +17130,8 @@ def sessions_save_checkpoint(session_id: str, payload: dict = None):
         cp = _sessions().save_checkpoint(session_id, label=label, snapshot=payload.get("snapshot"))
         return JSONResponse(cp)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 @app.get("/api/sessions/{session_id}/checkpoints")
@@ -15500,7 +17145,8 @@ def sessions_restore_checkpoint(session_id: str, checkpoint_id: str):
     try:
         return JSONResponse(_sessions().restore_checkpoint(session_id, checkpoint_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 # ── Artifacts API ──────────────────────────────────────────────────────────────
@@ -15536,7 +17182,8 @@ def artifacts_create(payload: dict):
             metadata=payload.get("metadata") or {},
         ))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/artifacts/{artifact_id}")
@@ -15560,9 +17207,11 @@ def artifacts_update(artifact_id: str, payload: dict):
             metadata=payload.get("metadata"),
         ))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/artifacts/{artifact_id}")
@@ -15578,7 +17227,8 @@ def artifacts_deploy(artifact_id: str, payload: dict = None):
     try:
         return JSONResponse(_arts().deploy_artifact(artifact_id, deploy_notes=notes))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 @app.get("/api/artifacts/{artifact_id}/versions")
@@ -15672,6 +17322,925 @@ async def ceo_chat(payload: dict):
         "ticket_id": ticket_id,
         "goal_context_injected": bool(goal_preamble),
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Lead CRM
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _crm():
+    _p = AI_HOME / "agents" / "lead-crm"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import lead_crm  # type: ignore
+    return lead_crm
+
+
+@app.get("/api/crm/leads")
+async def crm_list_leads(stage: Optional[str] = None, search: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_crm().list_leads, stage, search))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/crm/leads")
+async def crm_add_lead(payload: dict):
+    try:
+        lead = await run_in_threadpool(
+            lambda: _crm().add_lead(
+                name=payload.get("name", ""),
+                company=payload.get("company", ""),
+                email=payload.get("email", ""),
+                phone=payload.get("phone", ""),
+                source=payload.get("source", ""),
+                notes=payload.get("notes", ""),
+                value=float(payload.get("value", 0)),
+                tags=payload.get("tags", []),
+            )
+        )
+        return JSONResponse(lead)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/crm/leads/{lead_id}")
+async def crm_get_lead(lead_id: str):
+    lead = await run_in_threadpool(_crm().get_lead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    return JSONResponse(lead)
+
+
+@app.patch("/api/crm/leads/{lead_id}")
+async def crm_update_lead(lead_id: str, payload: dict):
+    updated = await run_in_threadpool(_crm().update_lead, lead_id, payload)
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/crm/leads/{lead_id}")
+async def crm_delete_lead(lead_id: str):
+    deleted = await run_in_threadpool(_crm().delete_lead, lead_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/crm/leads/{lead_id}/stage")
+async def crm_move_stage(lead_id: str, payload: dict):
+    stage = payload.get("stage", "")
+    try:
+        updated = await run_in_threadpool(_crm().move_stage, lead_id, stage)
+    except ValueError as e:
+        logger.error("API validation error: %s", e, exc_info=True)
+        raise HTTPException(400, "Bad request")
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    return JSONResponse(updated)
+
+
+@app.post("/api/crm/leads/{lead_id}/followup")
+async def crm_schedule_followup(lead_id: str, payload: dict):
+    followup_at = payload.get("followup_at", "")
+    note = payload.get("note", "")
+    updated = await run_in_threadpool(_crm().schedule_followup, lead_id, followup_at, note)
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    return JSONResponse(updated)
+
+
+@app.get("/api/crm/pipeline")
+async def crm_pipeline():
+    try:
+        return JSONResponse(await run_in_threadpool(_crm().get_pipeline))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/crm/score/{lead_id}")
+async def crm_score_lead(lead_id: str):
+    try:
+        updated = await run_in_threadpool(_crm().score_lead, lead_id)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    return JSONResponse(updated)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Email Marketing
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _email_mktg():
+    _p = AI_HOME / "agents" / "email-marketing"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import email_marketing  # type: ignore
+    return email_marketing
+
+
+@app.get("/api/email/campaigns")
+async def email_list_campaigns(status: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_email_mktg().list_campaigns, status))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/email/campaigns")
+async def email_create_campaign(payload: dict):
+    try:
+        camp = await run_in_threadpool(
+            lambda: _email_mktg().create_campaign(
+                name=payload.get("name", ""),
+                subject=payload.get("subject", ""),
+                body=payload.get("body", ""),
+                from_name=payload.get("from_name", ""),
+                from_email=payload.get("from_email", ""),
+                recipients=payload.get("recipients", []),
+                sequence_steps=payload.get("sequence_steps", []),
+            )
+        )
+        return JSONResponse(camp)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/email/campaigns/{campaign_id}")
+async def email_get_campaign(campaign_id: str):
+    camp = await run_in_threadpool(_email_mktg().get_campaign, campaign_id)
+    if not camp:
+        raise HTTPException(404, "Campaign not found")
+    return JSONResponse(camp)
+
+
+@app.patch("/api/email/campaigns/{campaign_id}")
+async def email_update_campaign(campaign_id: str, payload: dict):
+    updated = await run_in_threadpool(_email_mktg().update_campaign, campaign_id, payload)
+    if not updated:
+        raise HTTPException(404, "Campaign not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/email/campaigns/{campaign_id}")
+async def email_delete_campaign(campaign_id: str):
+    deleted = await run_in_threadpool(_email_mktg().delete_campaign, campaign_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/email/campaigns/{campaign_id}/send")
+async def email_send_campaign(campaign_id: str):
+    try:
+        updated = await run_in_threadpool(_email_mktg().send_campaign, campaign_id)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Campaign not found")
+    return JSONResponse(updated)
+
+
+@app.get("/api/email/campaigns/{campaign_id}/stats")
+async def email_campaign_stats(campaign_id: str):
+    try:
+        stats = await run_in_threadpool(_email_mktg().get_campaign_stats, campaign_id)
+        return JSONResponse(stats)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/email/write")
+async def email_write_copy(payload: dict):
+    try:
+        result = await run_in_threadpool(
+            lambda: _email_mktg().write_email_copy(
+                goal=payload.get("goal", ""),
+                tone=payload.get("tone", "professional"),
+                audience=payload.get("audience", ""),
+            )
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/email/deliverability-tips")
+async def email_deliverability_tips():
+    try:
+        return JSONResponse(await run_in_threadpool(_email_mktg().get_deliverability_tips))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Meeting Intelligence
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _meetings():
+    _p = AI_HOME / "agents" / "meeting-intelligence"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import meeting_intelligence  # type: ignore
+    return meeting_intelligence
+
+
+@app.get("/api/meetings")
+async def meetings_list(search: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_meetings().list_meetings, search))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/meetings")
+async def meetings_add(payload: dict):
+    try:
+        meeting = await run_in_threadpool(
+            lambda: _meetings().add_meeting(
+                title=payload.get("title", ""),
+                date=payload.get("date", ""),
+                participants=payload.get("participants", []),
+                transcript=payload.get("transcript", ""),
+                notes=payload.get("notes", ""),
+                meeting_type=payload.get("meeting_type", "general"),
+            )
+        )
+        return JSONResponse(meeting)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/meetings/{meeting_id}")
+async def meetings_get(meeting_id: str):
+    m = await run_in_threadpool(_meetings().get_meeting, meeting_id)
+    if not m:
+        raise HTTPException(404, "Meeting not found")
+    return JSONResponse(m)
+
+
+@app.patch("/api/meetings/{meeting_id}")
+async def meetings_update(meeting_id: str, payload: dict):
+    updated = await run_in_threadpool(_meetings().update_meeting, meeting_id, payload)
+    if not updated:
+        raise HTTPException(404, "Meeting not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/meetings/{meeting_id}")
+async def meetings_delete(meeting_id: str):
+    deleted = await run_in_threadpool(_meetings().delete_meeting, meeting_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/meetings/{meeting_id}/summarize")
+async def meetings_summarize(meeting_id: str):
+    try:
+        updated = await run_in_threadpool(_meetings().summarize_meeting, meeting_id)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Meeting not found")
+    return JSONResponse(updated)
+
+
+@app.post("/api/meetings/{meeting_id}/followup")
+async def meetings_followup(meeting_id: str):
+    try:
+        updated = await run_in_threadpool(_meetings().generate_followup_email, meeting_id)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Meeting not found")
+    return JSONResponse(updated)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Social Media Scheduler
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _social_sched():
+    _p = AI_HOME / "agents" / "social-media-manager"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import social_scheduler  # type: ignore
+    return social_scheduler
+
+
+@app.get("/api/social/posts")
+async def social_list_posts(
+    platform: Optional[str] = None,
+    status: Optional[str] = None,
+):
+    try:
+        return JSONResponse(await run_in_threadpool(_social_sched().list_posts, platform, status))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/social/posts")
+async def social_schedule_post(payload: dict):
+    try:
+        post = await run_in_threadpool(
+            lambda: _social_sched().schedule_post(
+                platform=payload.get("platform", "twitter"),
+                content=payload.get("content", ""),
+                scheduled_at=payload.get("scheduled_at", ""),
+                media_urls=payload.get("media_urls", []),
+                hashtags=payload.get("hashtags", []),
+                campaign=payload.get("campaign", ""),
+                status=payload.get("status", "scheduled"),
+            )
+        )
+        return JSONResponse(post)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/social/posts/{post_id}")
+async def social_get_post(post_id: str):
+    post = await run_in_threadpool(_social_sched().get_post, post_id)
+    if not post:
+        raise HTTPException(404, "Post not found")
+    return JSONResponse(post)
+
+
+@app.patch("/api/social/posts/{post_id}")
+async def social_update_post(post_id: str, payload: dict):
+    updated = await run_in_threadpool(_social_sched().update_post, post_id, payload)
+    if not updated:
+        raise HTTPException(404, "Post not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/social/posts/{post_id}")
+async def social_delete_post(post_id: str):
+    deleted = await run_in_threadpool(_social_sched().delete_post, post_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/social/posts/{post_id}/publish")
+async def social_publish_post(post_id: str):
+    updated = await run_in_threadpool(_social_sched().publish_post, post_id)
+    if not updated:
+        raise HTTPException(404, "Post not found")
+    return JSONResponse(updated)
+
+
+@app.post("/api/social/generate")
+async def social_generate_content(payload: dict):
+    try:
+        result = await run_in_threadpool(
+            lambda: _social_sched().generate_post_content(
+                platform=payload.get("platform", "twitter"),
+                topic=payload.get("topic", ""),
+                tone=payload.get("tone", "engaging"),
+                include_hashtags=payload.get("include_hashtags", True),
+            )
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/social/process-due")
+async def social_process_due():
+    try:
+        published = await run_in_threadpool(_social_sched().process_due_posts)
+        return JSONResponse({"published": published, "count": len(published)})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/social/stats")
+async def social_stats():
+    try:
+        return JSONResponse(await run_in_threadpool(_social_sched().get_schedule_stats))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: CEO Briefing
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _ceo_briefing():
+    _p = AI_HOME / "agents" / "ceo-briefing"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import ceo_briefing  # type: ignore
+    return ceo_briefing
+
+
+@app.get("/api/briefing/today")
+async def briefing_today():
+    try:
+        return JSONResponse(await run_in_threadpool(_ceo_briefing().get_today_briefing))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/briefing/generate")
+async def briefing_generate():
+    try:
+        return JSONResponse(await run_in_threadpool(_ceo_briefing().force_regenerate))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/briefing/history")
+async def briefing_history():
+    try:
+        return JSONResponse(await run_in_threadpool(_ceo_briefing().list_briefings))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Financial Tools
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _fin_tools():
+    _p = AI_HOME / "agents" / "financial-tools"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import financial_tools  # type: ignore
+    return financial_tools
+
+
+@app.get("/api/financial/invoices")
+async def fin_list_invoices(status: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_fin_tools().list_invoices, status))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/financial/invoices")
+async def fin_create_invoice(payload: dict):
+    try:
+        inv = await run_in_threadpool(
+            lambda: _fin_tools().create_invoice(
+                client_name=payload.get("client_name", ""),
+                client_email=payload.get("client_email", ""),
+                items=payload.get("items", []),
+                due_date=payload.get("due_date"),
+                notes=payload.get("notes", ""),
+                currency=payload.get("currency", "USD"),
+                tax_rate=float(payload.get("tax_rate", 0)),
+            )
+        )
+        return JSONResponse(inv)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/financial/invoices/{invoice_id}")
+async def fin_get_invoice(invoice_id: str):
+    inv = await run_in_threadpool(_fin_tools().get_invoice, invoice_id)
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+    return JSONResponse(inv)
+
+
+@app.patch("/api/financial/invoices/{invoice_id}")
+async def fin_update_invoice(invoice_id: str, payload: dict):
+    updated = await run_in_threadpool(_fin_tools().update_invoice, invoice_id, payload)
+    if not updated:
+        raise HTTPException(404, "Invoice not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/financial/invoices/{invoice_id}")
+async def fin_delete_invoice(invoice_id: str):
+    deleted = await run_in_threadpool(_fin_tools().delete_invoice, invoice_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/financial/invoices/{invoice_id}/send")
+async def fin_send_invoice(invoice_id: str):
+    updated = await run_in_threadpool(_fin_tools().send_invoice, invoice_id)
+    if not updated:
+        raise HTTPException(404, "Invoice not found")
+    return JSONResponse(updated)
+
+
+@app.post("/api/financial/invoices/{invoice_id}/pay")
+async def fin_pay_invoice(invoice_id: str):
+    updated = await run_in_threadpool(_fin_tools().pay_invoice, invoice_id)
+    if not updated:
+        raise HTTPException(404, "Invoice not found")
+    return JSONResponse(updated)
+
+
+@app.get("/api/financial/quotes")
+async def fin_list_quotes(status: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_fin_tools().list_quotes, status))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/financial/quotes")
+async def fin_create_quote(payload: dict):
+    try:
+        q = await run_in_threadpool(
+            lambda: _fin_tools().create_quote(
+                client_name=payload.get("client_name", ""),
+                client_email=payload.get("client_email", ""),
+                items=payload.get("items", []),
+                valid_until=payload.get("valid_until"),
+                notes=payload.get("notes", ""),
+                currency=payload.get("currency", "USD"),
+            )
+        )
+        return JSONResponse(q)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.patch("/api/financial/quotes/{quote_id}")
+async def fin_update_quote(quote_id: str, payload: dict):
+    updated = await run_in_threadpool(_fin_tools().update_quote, quote_id, payload)
+    if not updated:
+        raise HTTPException(404, "Quote not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/financial/quotes/{quote_id}")
+async def fin_delete_quote(quote_id: str):
+    deleted = await run_in_threadpool(_fin_tools().delete_quote, quote_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.get("/api/financial/pl")
+async def fin_pl():
+    try:
+        return JSONResponse(await run_in_threadpool(_fin_tools().get_pl))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/financial/reminders")
+async def fin_reminders():
+    try:
+        overdue = await run_in_threadpool(_fin_tools().check_overdue)
+        all_overdue = await run_in_threadpool(_fin_tools().get_overdue_invoices)
+        return JSONResponse({"newly_marked": overdue, "all_overdue": all_overdue})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/financial/expenses")
+async def fin_list_expenses(category: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_fin_tools().list_expenses, category))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/financial/expenses")
+async def fin_add_expense(payload: dict):
+    try:
+        exp = await run_in_threadpool(
+            lambda: _fin_tools().add_expense(
+                description=payload.get("description", ""),
+                amount=float(payload.get("amount", 0)),
+                category=payload.get("category", "general"),
+                expense_date=payload.get("date"),
+                notes=payload.get("notes", ""),
+            )
+        )
+        return JSONResponse(exp)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.delete("/api/financial/expenses/{expense_id}")
+async def fin_delete_expense(expense_id: str):
+    deleted = await run_in_threadpool(_fin_tools().delete_expense, expense_id)
+    return JSONResponse({"deleted": deleted})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Competitor Watch
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _comp_watch():
+    _p = AI_HOME / "agents" / "competitor-watch"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import competitor_watch  # type: ignore
+    return competitor_watch
+
+
+@app.get("/api/competitors")
+async def comp_list(search: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_comp_watch().list_competitors, search))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/competitors")
+async def comp_add(payload: dict):
+    try:
+        comp = await run_in_threadpool(
+            lambda: _comp_watch().add_competitor(
+                name=payload.get("name", ""),
+                website=payload.get("website", ""),
+                notes=payload.get("notes", ""),
+                tags=payload.get("tags", []),
+                pricing=payload.get("pricing", ""),
+                target_market=payload.get("target_market", ""),
+            )
+        )
+        return JSONResponse(comp)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/competitors/alerts")
+async def comp_alerts(dismissed: bool = False):
+    try:
+        return JSONResponse(await run_in_threadpool(_comp_watch().get_alerts, None, dismissed))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/competitors/{competitor_id}")
+async def comp_get(competitor_id: str):
+    comp = await run_in_threadpool(_comp_watch().get_competitor, competitor_id)
+    if not comp:
+        raise HTTPException(404, "Competitor not found")
+    return JSONResponse(comp)
+
+
+@app.patch("/api/competitors/{competitor_id}")
+async def comp_update(competitor_id: str, payload: dict):
+    updated = await run_in_threadpool(_comp_watch().update_competitor, competitor_id, payload)
+    if not updated:
+        raise HTTPException(404, "Competitor not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/competitors/{competitor_id}")
+async def comp_delete(competitor_id: str):
+    deleted = await run_in_threadpool(_comp_watch().delete_competitor, competitor_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/competitors/{competitor_id}/analyze")
+async def comp_analyze(competitor_id: str, payload: dict = {}):
+    try:
+        updated = await run_in_threadpool(
+            lambda: _comp_watch().analyze_competitor(
+                competitor_id,
+                payload.get("your_product", ""),
+            )
+        )
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Competitor not found")
+    return JSONResponse(updated)
+
+
+@app.post("/api/competitors/alerts/{alert_id}/dismiss")
+async def comp_dismiss_alert(alert_id: str):
+    result = await run_in_threadpool(_comp_watch().dismiss_alert, alert_id)
+    return JSONResponse({"dismissed": result})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Content Calendar
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _content_cal():
+    _p = AI_HOME / "agents" / "content-calendar"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import content_calendar  # type: ignore
+    return content_calendar
+
+
+@app.get("/api/content-calendar")
+async def cal_list(
+    platform: Optional[str] = None,
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    try:
+        entries = await run_in_threadpool(
+            lambda: _content_cal().list_entries(
+                platform=platform,
+                status=status,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        )
+        stats = await run_in_threadpool(_content_cal().get_calendar_stats)
+        return JSONResponse({"entries": entries, "stats": stats})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/content-calendar/entries")
+async def cal_add_entry(payload: dict):
+    try:
+        entry = await run_in_threadpool(
+            lambda: _content_cal().add_entry(
+                date_str=payload.get("date", ""),
+                platform=payload.get("platform", "instagram"),
+                content_type=payload.get("content_type", "post"),
+                title=payload.get("title", ""),
+                content=payload.get("content", ""),
+                status=payload.get("status", "idea"),
+                tags=payload.get("tags", []),
+                notes=payload.get("notes", ""),
+            )
+        )
+        return JSONResponse(entry)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/content-calendar/entries/{entry_id}")
+async def cal_get_entry(entry_id: str):
+    entry = await run_in_threadpool(_content_cal().get_entry, entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    return JSONResponse(entry)
+
+
+@app.patch("/api/content-calendar/entries/{entry_id}")
+async def cal_update_entry(entry_id: str, payload: dict):
+    updated = await run_in_threadpool(_content_cal().update_entry, entry_id, payload)
+    if not updated:
+        raise HTTPException(404, "Entry not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/content-calendar/entries/{entry_id}")
+async def cal_delete_entry(entry_id: str):
+    deleted = await run_in_threadpool(_content_cal().delete_entry, entry_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/content-calendar/generate")
+async def cal_generate(payload: dict):
+    try:
+        entries = await run_in_threadpool(
+            lambda: _content_cal().generate_calendar(
+                niche=payload.get("niche", "business"),
+                days=int(payload.get("days", 30)),
+                platforms=payload.get("platforms"),
+                tone=payload.get("tone", "engaging"),
+            )
+        )
+        return JSONResponse({"entries": entries, "count": len(entries)})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Guardrails — Pending Actions
+# ═══════════════════════════════════════════════════════════════════════════
+
+_PENDING_ACTIONS_FILE = AI_HOME / "state" / "pending-actions.json"
+
+
+def _load_pending_actions() -> dict:
+    if not _PENDING_ACTIONS_FILE.exists():
+        return {"actions": []}
+    try:
+        return json.loads(_PENDING_ACTIONS_FILE.read_text())
+    except Exception:
+        return {"actions": []}
+
+
+def _save_pending_actions(data: dict) -> None:
+    _PENDING_ACTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PENDING_ACTIONS_FILE.write_text(json.dumps(data, indent=2))
+
+
+@app.get("/api/guardrails/pending-actions")
+async def guardrails_pending_actions():
+    try:
+        data = await run_in_threadpool(_load_pending_actions)
+        actions = [a for a in data.get("actions", []) if a.get("status") == "pending"]
+        return JSONResponse({"actions": actions, "count": len(actions)})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/guardrails/submit-action")
+async def guardrails_submit_action(payload: dict):
+    import uuid as _uuid
+    action = {
+        "id": str(_uuid.uuid4()),
+        "action_type": payload.get("action_type", "other"),
+        "description": payload.get("description", ""),
+        "risk_level": payload.get("risk_level", "medium"),
+        "payload": payload.get("payload", {}),
+        "submitted_by": payload.get("submitted_by", "user"),
+        "status": "pending",
+        "decision": None,
+        "decision_note": "",
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "decided_at": None,
+    }
+
+    def _append():
+        data = _load_pending_actions()
+        data["actions"].append(action)
+        _save_pending_actions(data)
+        return action
+
+    try:
+        result = await run_in_threadpool(_append)
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/guardrails/pending-actions/{action_id}/approve")
+async def guardrails_approve_action(action_id: str, payload: dict = {}):
+    def _approve():
+        data = _load_pending_actions()
+        for i, action in enumerate(data["actions"]):
+            if action["id"] == action_id:
+                data["actions"][i]["status"] = "approved"
+                data["actions"][i]["decision"] = "approved"
+                data["actions"][i]["decision_note"] = payload.get("note", "")
+                data["actions"][i]["decided_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                _save_pending_actions(data)
+                return data["actions"][i]
+        return None
+
+    result = await run_in_threadpool(_approve)
+    if not result:
+        raise HTTPException(404, "Action not found")
+    return JSONResponse(result)
+
+
+@app.post("/api/guardrails/pending-actions/{action_id}/reject")
+async def guardrails_reject_action(action_id: str, payload: dict = {}):
+    def _reject():
+        data = _load_pending_actions()
+        for i, action in enumerate(data["actions"]):
+            if action["id"] == action_id:
+                data["actions"][i]["status"] = "rejected"
+                data["actions"][i]["decision"] = "rejected"
+                data["actions"][i]["decision_note"] = payload.get("note", "")
+                data["actions"][i]["decided_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                _save_pending_actions(data)
+                return data["actions"][i]
+        return None
+
+    result = await run_in_threadpool(_reject)
+    if not result:
+        raise HTTPException(404, "Action not found")
+    return JSONResponse(result)
 
 
 if __name__ == "__main__":
