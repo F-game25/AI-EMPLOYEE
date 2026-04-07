@@ -26,7 +26,7 @@ function GlitchText({ children, style, className }) {
       {children}
       {glitch && (
         <span
-          aria-hidden
+          aria-hidden="true"
           style={{
             position: 'absolute',
             inset: 0,
@@ -41,7 +41,7 @@ function GlitchText({ children, style, className }) {
       )}
       {glitch && (
         <span
-          aria-hidden
+          aria-hidden="true"
           style={{
             position: 'absolute',
             inset: 0,
