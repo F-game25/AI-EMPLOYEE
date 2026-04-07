@@ -492,7 +492,15 @@ def _agent_allowed_in_mode(agent_id: str, mode: Optional[str] = None) -> bool:
 
 
 def _agent_dir_exists(agent_id: str) -> bool:
-  return (BOTS_DIR / agent_id / "run.sh").exists()
+  if not _BOT_NAME_RE.match(agent_id):
+    return False
+  agent_path = (BOTS_DIR / agent_id).resolve()
+  # Ensure the resolved path stays within BOTS_DIR (prevent path traversal)
+  try:
+    agent_path.relative_to(BOTS_DIR.resolve())
+  except ValueError:
+    return False
+  return (agent_path / "run.sh").exists()
 
 
 def _resolve_agent_target(agent_id: str) -> Optional[str]:
@@ -11143,6 +11151,8 @@ async def sse_events(request: Request):
                 for agent_name in _mode_agent_targets(mode):
                     if agent_name in INFRA_AGENTS:
                         continue
+                    if not _BOT_NAME_RE.match(agent_name):
+                        continue
                     pid_file = AI_HOME / "run" / f"{agent_name}.pid"
                     if pid_file.exists():
                         try:
@@ -11185,6 +11195,8 @@ def get_status():
   mode = _current_mode()
   for agent_name in _mode_agent_targets(mode):
     if agent_name in INFRA_AGENTS:
+      continue
+    if not _BOT_NAME_RE.match(agent_name):
       continue
     pid_file = AI_HOME / "run" / f"{agent_name}.pid"
     running = False
@@ -12230,7 +12242,8 @@ def delete_schedule(task_id: str):
         tasks = [t for t in tasks if t.get("id") != task_id]
         SCHEDULES_FILE.write_text(json.dumps(tasks, indent=2))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
     return JSONResponse({"ok": True})
 
 
@@ -13608,6 +13621,10 @@ def _save_integrations(integrations: list) -> None:
     # Only save id + enabled + config (not the field definitions)
     slim = [{"id": i["id"], "enabled": i.get("enabled", False), "config": i.get("config", {})} for i in integrations]
     INTEGRATIONS_FILE.write_text(json.dumps(slim, indent=2))
+    try:
+        INTEGRATIONS_FILE.chmod(0o600)  # restrict to owner only — config contains API keys/tokens
+    except OSError:
+        pass
 
 
 @app.get("/api/integrations")
@@ -13651,7 +13668,8 @@ def test_integration(integration_id: str):
             with _req.urlopen(req, timeout=5) as resp:
                 return JSONResponse({"ok": True, "message": f"HTTP {resp.status} — webhook reachable"})
         except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)})
+            logger.warning("Webhook test failed: %s", exc)
+            return JSONResponse({"ok": False, "message": "Webhook unreachable"})
 
     if integration_id in ("openai", "anthropic"):
         key_field = "api_key"
@@ -13674,9 +13692,8 @@ def test_integration(integration_id: str):
                     return JSONResponse({"ok": True, "message": f"Connected as @{name}"})
                 return JSONResponse({"ok": False, "message": "Telegram returned error"})
         except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)})
-
-    # Generic: just check required fields are filled
+            logger.warning("Telegram test failed: %s", exc)
+            return JSONResponse({"ok": False, "message": "Could not connect to Telegram"})
     required_fields = [f["key"] for f in intg.get("fields", []) if not f.get("optional")]
     missing = [k for k in required_fields if not config.get(k, "").strip()]
     if missing:
@@ -14129,7 +14146,8 @@ def clear_history():
         _log_activity("system", "Activity history cleared", source="dashboard")
         return JSONResponse({"ok": True})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 class _NukeRequest(BaseModel):
@@ -14276,7 +14294,8 @@ def updater_check():
         _UPDATER_TRIGGER_FILE.write_text("check")
         return JSONResponse({"ok": True, "message": "Check triggered — results appear in Auto Update card within seconds"})
     except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/updater/update")
@@ -14297,7 +14316,8 @@ def updater_update():
             pass
         return JSONResponse({"ok": True, "message": "Update triggered — agents will restart momentarily if changes are found"})
     except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ─── Compatibility alias endpoints ────────────────────────────────────────────
@@ -14550,7 +14570,8 @@ def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth)):
         af.set_mode(mode)
         return JSONResponse({"ok": True, "mode": mode})
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend set_mode error: %s", exc)
         raise HTTPException(500, "Failed to set mode")
@@ -14587,7 +14608,8 @@ def ascend_approve(patch_id: str, _auth: None = Depends(require_auth)):
         patch = af.approve_patch(patch_id)
         return JSONResponse({"ok": True, "patch": patch})
     except (ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend approve error: %s", exc)
         raise HTTPException(500, "Approval failed")
@@ -14601,7 +14623,8 @@ def ascend_reject(patch_id: str, _auth: None = Depends(require_auth)):
         patch = af.reject_patch(patch_id)
         return JSONResponse({"ok": True, "patch": patch})
     except (ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend reject error: %s", exc)
         raise HTTPException(500, "Rejection failed")
@@ -14615,7 +14638,8 @@ def ascend_rollback(patch_id: str, _auth: None = Depends(require_auth)):
         patch = af.rollback_patch(patch_id)
         return JSONResponse({"ok": True, "patch": patch})
     except (ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend rollback error: %s", exc)
         raise HTTPException(500, "Rollback failed")
@@ -14952,7 +14976,8 @@ def org_upsert_role(payload: dict):
         return JSONResponse(role)
     except Exception as exc:
         logger.error("org upsert_role error: %s", exc)
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/org/roles/{role_id}")
@@ -14961,7 +14986,8 @@ def org_delete_role(role_id: str):
         deleted = _org().delete_role(role_id)
         return JSONResponse({"ok": deleted})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/org/assign")
@@ -14974,9 +15000,11 @@ def org_assign_agent(payload: dict):
     try:
         return JSONResponse(_org().assign_agent_to_role(role_id, agent_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/org/delegate")
@@ -14990,9 +15018,11 @@ def org_delegate_task(payload: dict):
     try:
         return JSONResponse(_org().delegate_task(from_role, to_role, task, payload.get("context")))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/org/adapters")
@@ -15022,9 +15052,11 @@ def org_register_adapter(payload: dict):
             )
         )
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/org/adapters/{adapter_id}")
@@ -15033,7 +15065,8 @@ def org_deregister_adapter(adapter_id: str):
         ok = _org().deregister_adapter(adapter_id)
         return JSONResponse({"ok": ok})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Budget Tracker API ─────────────────────────────────────────────────────────
@@ -15056,7 +15089,8 @@ def budget_agent_status(agent_id: str):
         _budget().auto_reset_all_if_new_month()
         return JSONResponse(_budget().get_agent_status(agent_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/budget/set")
@@ -15069,7 +15103,8 @@ def budget_set(payload: dict):
     try:
         return JSONResponse(_budget().set_budget(agent_id, float(budget)))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/budget/reset/{agent_id}")
@@ -15078,7 +15113,8 @@ def budget_reset(agent_id: str):
     try:
         return JSONResponse(_budget().reset_usage(agent_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/budget/record")
@@ -15099,7 +15135,8 @@ def budget_record_usage(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Goal Alignment API ─────────────────────────────────────────────────────────
@@ -15128,7 +15165,8 @@ def goals_set_company(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/goals/projects")
@@ -15160,7 +15198,8 @@ def goals_upsert_project(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/goals/projects/{project_id}")
@@ -15168,7 +15207,8 @@ def goals_delete_project(project_id: str):
     try:
         return JSONResponse({"ok": _goals().delete_project(project_id)})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/goals/context/{project_id}")
@@ -15179,7 +15219,8 @@ def goals_get_context(project_id: str):
         preamble = _goals().build_goal_preamble(project_id=project_id)
         return JSONResponse({**ctx, "preamble": preamble})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Ticket System API ──────────────────────────────────────────────────────────
@@ -15220,7 +15261,8 @@ def tickets_create(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/tickets/{ticket_id}")
@@ -15233,7 +15275,8 @@ def tickets_get(ticket_id: str):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.patch("/api/tickets/{ticket_id}")
@@ -15252,9 +15295,11 @@ def tickets_update(ticket_id: str, payload: dict):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/tickets/{ticket_id}/comment")
@@ -15273,9 +15318,11 @@ def tickets_add_comment(ticket_id: str, payload: dict):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/tickets/{ticket_id}/audit")
@@ -15284,7 +15331,8 @@ def tickets_audit(ticket_id: str):
     try:
         return JSONResponse(_tickets().get_audit_trail(ticket_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/tickets/audit/log")
@@ -15344,7 +15392,8 @@ def governance_request(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/{action_id}/approve")
@@ -15359,9 +15408,11 @@ def governance_approve(action_id: str, payload: dict = {}):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/{action_id}/reject")
@@ -15376,9 +15427,11 @@ def governance_reject(action_id: str, payload: dict = {}):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/pause/{agent_id}")
@@ -15387,7 +15440,8 @@ def governance_pause(agent_id: str, payload: dict = {}):
     try:
         return JSONResponse(_gov().pause_agent(agent_id, reason=payload.get("reason", "")))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/resume/{agent_id}")
@@ -15396,7 +15450,8 @@ def governance_resume(agent_id: str, payload: dict = {}):
     try:
         return JSONResponse(_gov().resume_agent(agent_id, reason=payload.get("reason", "")))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/terminate/{agent_id}")
@@ -15405,7 +15460,8 @@ def governance_terminate(agent_id: str, payload: dict = {}):
     try:
         return JSONResponse(_gov().terminate_agent(agent_id, reason=payload.get("reason", "")))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/governance/agent/{agent_id}")
@@ -15414,7 +15470,8 @@ def governance_agent_status(agent_id: str):
     try:
         return JSONResponse(_gov().get_agent_gov_status(agent_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/governance/settings")
@@ -15431,7 +15488,8 @@ def governance_update_settings(payload: dict):
     try:
         return JSONResponse(_gov().update_settings(payload))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Company Manager API ────────────────────────────────────────────────────────
@@ -15471,7 +15529,8 @@ def companies_create(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/companies/switch")
@@ -15483,9 +15542,11 @@ def companies_switch(payload: dict):
     try:
         return JSONResponse(_company().switch_company(company_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/companies/{company_id}")
@@ -15494,9 +15555,11 @@ def companies_delete(company_id: str):
         ok = _company().delete_company(company_id)
         return JSONResponse({"ok": ok})
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/companies/{company_id}/export")
@@ -15505,9 +15568,11 @@ def companies_export(company_id: str):
     try:
         return JSONResponse(_company().export_company(company_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/companies/import")
@@ -15523,7 +15588,8 @@ def companies_import(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Session Manager & Artifacts lazy-loaders ──────────────────────────────────
@@ -15569,7 +15635,8 @@ def sessions_create(payload: dict):
         )
         return JSONResponse(s)
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/sessions/{session_id}")
@@ -15593,9 +15660,11 @@ def sessions_update(session_id: str, payload: dict):
             merge_context=payload.get("merge_context", True),
         ))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/sessions/{session_id}")
@@ -15611,7 +15680,8 @@ def sessions_resume(session_id: str):
     try:
         return JSONResponse(_sessions().resume_session(session_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 @app.post("/api/sessions/{session_id}/checkpoint")
@@ -15624,7 +15694,8 @@ def sessions_save_checkpoint(session_id: str, payload: dict = None):
         cp = _sessions().save_checkpoint(session_id, label=label, snapshot=payload.get("snapshot"))
         return JSONResponse(cp)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 @app.get("/api/sessions/{session_id}/checkpoints")
@@ -15638,7 +15709,8 @@ def sessions_restore_checkpoint(session_id: str, checkpoint_id: str):
     try:
         return JSONResponse(_sessions().restore_checkpoint(session_id, checkpoint_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 # ── Artifacts API ──────────────────────────────────────────────────────────────
@@ -15674,7 +15746,8 @@ def artifacts_create(payload: dict):
             metadata=payload.get("metadata") or {},
         ))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/artifacts/{artifact_id}")
@@ -15698,9 +15771,11 @@ def artifacts_update(artifact_id: str, payload: dict):
             metadata=payload.get("metadata"),
         ))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/artifacts/{artifact_id}")
@@ -15716,7 +15791,8 @@ def artifacts_deploy(artifact_id: str, payload: dict = None):
     try:
         return JSONResponse(_arts().deploy_artifact(artifact_id, deploy_notes=notes))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 @app.get("/api/artifacts/{artifact_id}/versions")
@@ -15829,7 +15905,8 @@ async def crm_list_leads(stage: Optional[str] = None, search: Optional[str] = No
     try:
         return JSONResponse(await run_in_threadpool(_crm().list_leads, stage, search))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/crm/leads")
@@ -15849,7 +15926,8 @@ async def crm_add_lead(payload: dict):
         )
         return JSONResponse(lead)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/crm/leads/{lead_id}")
@@ -15880,7 +15958,8 @@ async def crm_move_stage(lead_id: str, payload: dict):
     try:
         updated = await run_in_threadpool(_crm().move_stage, lead_id, stage)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        logger.error("API validation error: %s", e, exc_info=True)
+        raise HTTPException(400, "Bad request")
     if not updated:
         raise HTTPException(404, "Lead not found")
     return JSONResponse(updated)
@@ -15901,7 +15980,8 @@ async def crm_pipeline():
     try:
         return JSONResponse(await run_in_threadpool(_crm().get_pipeline))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/crm/score/{lead_id}")
@@ -15909,7 +15989,8 @@ async def crm_score_lead(lead_id: str):
     try:
         updated = await run_in_threadpool(_crm().score_lead, lead_id)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
     if not updated:
         raise HTTPException(404, "Lead not found")
     return JSONResponse(updated)
@@ -15932,7 +16013,8 @@ async def email_list_campaigns(status: Optional[str] = None):
     try:
         return JSONResponse(await run_in_threadpool(_email_mktg().list_campaigns, status))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/email/campaigns")
@@ -15951,7 +16033,8 @@ async def email_create_campaign(payload: dict):
         )
         return JSONResponse(camp)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/email/campaigns/{campaign_id}")
@@ -15981,7 +16064,8 @@ async def email_send_campaign(campaign_id: str):
     try:
         updated = await run_in_threadpool(_email_mktg().send_campaign, campaign_id)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
     if not updated:
         raise HTTPException(404, "Campaign not found")
     return JSONResponse(updated)
@@ -15993,7 +16077,8 @@ async def email_campaign_stats(campaign_id: str):
         stats = await run_in_threadpool(_email_mktg().get_campaign_stats, campaign_id)
         return JSONResponse(stats)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/email/write")
@@ -16008,7 +16093,8 @@ async def email_write_copy(payload: dict):
         )
         return JSONResponse(result)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/email/deliverability-tips")
@@ -16016,7 +16102,8 @@ async def email_deliverability_tips():
     try:
         return JSONResponse(await run_in_threadpool(_email_mktg().get_deliverability_tips))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -16036,7 +16123,8 @@ async def meetings_list(search: Optional[str] = None):
     try:
         return JSONResponse(await run_in_threadpool(_meetings().list_meetings, search))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/meetings")
@@ -16054,7 +16142,8 @@ async def meetings_add(payload: dict):
         )
         return JSONResponse(meeting)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/meetings/{meeting_id}")
@@ -16084,7 +16173,8 @@ async def meetings_summarize(meeting_id: str):
     try:
         updated = await run_in_threadpool(_meetings().summarize_meeting, meeting_id)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
     if not updated:
         raise HTTPException(404, "Meeting not found")
     return JSONResponse(updated)
@@ -16095,7 +16185,8 @@ async def meetings_followup(meeting_id: str):
     try:
         updated = await run_in_threadpool(_meetings().generate_followup_email, meeting_id)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
     if not updated:
         raise HTTPException(404, "Meeting not found")
     return JSONResponse(updated)
@@ -16121,7 +16212,8 @@ async def social_list_posts(
     try:
         return JSONResponse(await run_in_threadpool(_social_sched().list_posts, platform, status))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/social/posts")
@@ -16140,7 +16232,8 @@ async def social_schedule_post(payload: dict):
         )
         return JSONResponse(post)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/social/posts/{post_id}")
@@ -16186,7 +16279,8 @@ async def social_generate_content(payload: dict):
         )
         return JSONResponse(result)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/social/process-due")
@@ -16195,7 +16289,8 @@ async def social_process_due():
         published = await run_in_threadpool(_social_sched().process_due_posts)
         return JSONResponse({"published": published, "count": len(published)})
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/social/stats")
@@ -16203,7 +16298,8 @@ async def social_stats():
     try:
         return JSONResponse(await run_in_threadpool(_social_sched().get_schedule_stats))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -16223,7 +16319,8 @@ async def briefing_today():
     try:
         return JSONResponse(await run_in_threadpool(_ceo_briefing().get_today_briefing))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/briefing/generate")
@@ -16231,7 +16328,8 @@ async def briefing_generate():
     try:
         return JSONResponse(await run_in_threadpool(_ceo_briefing().force_regenerate))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/briefing/history")
@@ -16239,7 +16337,8 @@ async def briefing_history():
     try:
         return JSONResponse(await run_in_threadpool(_ceo_briefing().list_briefings))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -16259,7 +16358,8 @@ async def fin_list_invoices(status: Optional[str] = None):
     try:
         return JSONResponse(await run_in_threadpool(_fin_tools().list_invoices, status))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/financial/invoices")
@@ -16278,7 +16378,8 @@ async def fin_create_invoice(payload: dict):
         )
         return JSONResponse(inv)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/financial/invoices/{invoice_id}")
@@ -16324,7 +16425,8 @@ async def fin_list_quotes(status: Optional[str] = None):
     try:
         return JSONResponse(await run_in_threadpool(_fin_tools().list_quotes, status))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/financial/quotes")
@@ -16342,7 +16444,8 @@ async def fin_create_quote(payload: dict):
         )
         return JSONResponse(q)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.patch("/api/financial/quotes/{quote_id}")
@@ -16364,7 +16467,8 @@ async def fin_pl():
     try:
         return JSONResponse(await run_in_threadpool(_fin_tools().get_pl))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/financial/reminders")
@@ -16374,7 +16478,8 @@ async def fin_reminders():
         all_overdue = await run_in_threadpool(_fin_tools().get_overdue_invoices)
         return JSONResponse({"newly_marked": overdue, "all_overdue": all_overdue})
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/financial/expenses")
@@ -16382,7 +16487,8 @@ async def fin_list_expenses(category: Optional[str] = None):
     try:
         return JSONResponse(await run_in_threadpool(_fin_tools().list_expenses, category))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/financial/expenses")
@@ -16399,7 +16505,8 @@ async def fin_add_expense(payload: dict):
         )
         return JSONResponse(exp)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/financial/expenses/{expense_id}")
@@ -16425,7 +16532,8 @@ async def comp_list(search: Optional[str] = None):
     try:
         return JSONResponse(await run_in_threadpool(_comp_watch().list_competitors, search))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/competitors")
@@ -16443,7 +16551,8 @@ async def comp_add(payload: dict):
         )
         return JSONResponse(comp)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/competitors/alerts")
@@ -16451,7 +16560,8 @@ async def comp_alerts(dismissed: bool = False):
     try:
         return JSONResponse(await run_in_threadpool(_comp_watch().get_alerts, None, dismissed))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/competitors/{competitor_id}")
@@ -16486,7 +16596,8 @@ async def comp_analyze(competitor_id: str, payload: dict = {}):
             )
         )
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
     if not updated:
         raise HTTPException(404, "Competitor not found")
     return JSONResponse(updated)
@@ -16529,7 +16640,8 @@ async def cal_list(
         stats = await run_in_threadpool(_content_cal().get_calendar_stats)
         return JSONResponse({"entries": entries, "stats": stats})
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/content-calendar/entries")
@@ -16549,7 +16661,8 @@ async def cal_add_entry(payload: dict):
         )
         return JSONResponse(entry)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/content-calendar/entries/{entry_id}")
@@ -16587,7 +16700,8 @@ async def cal_generate(payload: dict):
         )
         return JSONResponse({"entries": entries, "count": len(entries)})
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -16618,7 +16732,8 @@ async def guardrails_pending_actions():
         actions = [a for a in data.get("actions", []) if a.get("status") == "pending"]
         return JSONResponse({"actions": actions, "count": len(actions)})
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/guardrails/submit-action")
@@ -16648,7 +16763,8 @@ async def guardrails_submit_action(payload: dict):
         result = await run_in_threadpool(_append)
         return JSONResponse(result)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/guardrails/pending-actions/{action_id}/approve")
