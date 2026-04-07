@@ -219,8 +219,12 @@ def generate_briefing(briefing_date: Optional[str] = None) -> dict:
             pass
 
     # Fallback: structured briefing without AI
-    won = metrics["leads_by_stage"].get("closed_won", 0)
-    active_pipeline = metrics["leads_total"] - metrics["leads_by_stage"].get("closed_lost", 0) - won
+    # Active pipeline = leads not in terminal states (closed_won / closed_lost / unknown stages)
+    terminal_stages = {"closed_won", "closed_lost"}
+    active_pipeline = sum(
+        count for stage, count in metrics["leads_by_stage"].items()
+        if stage not in terminal_stages
+    )
     briefing = {
         "id": str(uuid.uuid4()),
         "date": target_date,

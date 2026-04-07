@@ -10161,7 +10161,7 @@ async function aiWriteEmail() {
       <div style="font-weight:700;color:var(--gold);margin-bottom:6px">Subject: ${escHtml(data.subject)}</div>
       <pre style="white-space:pre-wrap;color:var(--text-secondary);font-family:inherit;margin:0">${escHtml(data.body)}</pre>
       <div style="margin-top:8px;display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="populateEmailForm('${escHtml(data.subject).replace(/'/g,'&apos;')}','${encodeURIComponent(data.body)}')">→ Use in Campaign</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:.72em" data-subject="${escHtml(data.subject)}" data-body="${encodeURIComponent(data.body)}" onclick="populateEmailFormFromEl(this)">→ Use in Campaign</button>
       </div>
     </div>`;
   } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
@@ -10171,6 +10171,11 @@ function populateEmailForm(subject, bodyEncoded) {
   document.getElementById('em-subject').value = subject;
   document.getElementById('em-body').value = decodeURIComponent(bodyEncoded);
   showToast('Email content copied to form');
+}
+function populateEmailFormFromEl(btn) {
+  const subject = btn.dataset.subject || '';
+  const bodyEncoded = btn.dataset.body || '';
+  populateEmailForm(subject, bodyEncoded);
 }
 
 async function deleteEmailCampaign(id) {

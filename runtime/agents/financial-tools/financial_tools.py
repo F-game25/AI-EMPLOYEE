@@ -149,7 +149,7 @@ def create_invoice(
     tax = round(subtotal * tax_rate / 100, 2)
     total = round(subtotal + tax, 2)
 
-    invoice_number = f"INV-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
+    invoice_number = f"INV-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
     data = _load_invoices()
     invoice = {
         "id": str(uuid.uuid4()),
