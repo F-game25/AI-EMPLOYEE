@@ -1138,40 +1138,46 @@ INDEX_HTML = r"""<!doctype html>
   <title>AI Employee Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg:#0a0a0a;
-      --surface:rgba(15,15,15,0.98);
-      --surface2:rgba(22,22,22,0.96);
+      --bg:#060608;
+      --surface:rgba(10,10,14,0.98);
+      --surface2:rgba(14,14,20,0.97);
       --glass:rgba(255,255,255,0.02);
-      --border:rgba(255,255,255,0.08);
-      --primary:#D4AF37;
+      --border:rgba(255,255,255,0.07);
+      --primary:#F5C400;
       --primary-dark:#B8960C;
-      --primary-light:#F0D060;
-      --accent:#C9A227;
-      --accent2:#E8C84A;
-      --gold:#D4AF37;
-      --gold-light:#F0D060;
+      --primary-light:#FFDD55;
+      --accent:#FFCC00;
+      --accent2:#FFE566;
+      --gold:#F5C400;
+      --gold-light:#FFDD55;
       --gold-dark:#B8960C;
+      --gold-dim:rgba(245,196,0,.18);
+      --gold-glow:rgba(245,196,0,.55);
+      --gold-border:rgba(245,196,0,.35);
       --success:#22c55e;
       --danger:#ef4444;
       --warning:#f59e0b;
-      --text:#e5e5e5;
-      --text-secondary:#a0a0a0;
-      --text-muted:#606060;
+      --text:#e8e8e8;
+      --text-secondary:#a0a0a8;
+      --text-muted:#505060;
       --radius:12px;
       --radius-sm:8px;
-      --shadow:0 8px 40px rgba(0,0,0,.95);
-      --glow-primary:0 0 32px rgba(212,175,55,.4);
+      --shadow:0 8px 40px rgba(0,0,0,.98);
+      --glow-primary:0 0 32px rgba(245,196,0,.45);
+      --glow-gold:0 0 20px rgba(245,196,0,.5),0 0 60px rgba(245,196,0,.2);
       --glow-success:0 0 28px rgba(34,197,94,.35);
       --glow-danger:0 0 28px rgba(239,68,68,.35);
       --sidebar-w:220px;
+      --mono:'JetBrains Mono','Share Tech Mono','Courier New',monospace;
+      --sans:'Inter','Space Grotesk',system-ui,sans-serif;
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth}
     body{
-      font-family:'Inter','Space Grotesk',system-ui,sans-serif;
+      font-family:var(--sans);
       background:var(--bg);
       color:var(--text);min-height:100vh;line-height:1.6;
       overflow-x:hidden;
@@ -1350,73 +1356,163 @@ INDEX_HTML = r"""<!doctype html>
       position:fixed;inset:0;z-index:9999;
       background:#000;
       display:flex;flex-direction:column;align-items:center;justify-content:center;
-      font-family:'Courier New',monospace;
+      font-family:var(--mono);
       overflow:hidden;
     }
-    #boot-overlay.fade-out{
-      animation:bootFadeOut .8s ease forwards;
+    #boot-overlay.fade-out{animation:bootFadeOut 1s cubic-bezier(.4,0,.2,1) forwards}
+    @keyframes bootFadeOut{
+      0%{opacity:1;filter:none}
+      60%{opacity:1;filter:brightness(1.2) saturate(1.5)}
+      100%{opacity:0;filter:brightness(2) blur(8px);pointer-events:none}
     }
-    @keyframes bootFadeOut{0%{opacity:1}100%{opacity:0;pointer-events:none}}
     .boot-scanline{
       position:absolute;inset:0;pointer-events:none;
-      background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.15) 2px,rgba(0,0,0,.15) 4px);
-      z-index:2;animation:scanMove 8s linear infinite;
+      background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.18) 2px,rgba(0,0,0,.18) 4px);
+      z-index:2;animation:scanMove 6s linear infinite;
     }
-    @keyframes scanMove{0%{background-position:0 0}100%{background-position:0 100%}}
+    @keyframes scanMove{0%{background-position:0 0}100%{background-position:0 200px}}
     .boot-glow-h{
-      position:absolute;height:2px;width:100%;
-      background:linear-gradient(90deg,transparent,rgba(212,175,55,.8),transparent);
-      animation:bootScanH 3s ease-in-out infinite;
+      position:absolute;height:1px;width:100%;
+      background:linear-gradient(90deg,transparent 0%,rgba(245,196,0,.05) 20%,rgba(245,196,0,.9) 50%,rgba(245,196,0,.05) 80%,transparent 100%);
+      box-shadow:0 0 20px 4px rgba(245,196,0,.3);
+      animation:bootScanH 2.8s ease-in-out infinite;
       z-index:3;
     }
-    @keyframes bootScanH{0%{top:-2px;opacity:0}10%{opacity:1}90%{opacity:.6}100%{top:100%;opacity:0}}
+    @keyframes bootScanH{0%{top:-2px;opacity:0}8%{opacity:1}92%{opacity:.7}100%{top:100%;opacity:0}}
+    /* CRT vignette */
+    #boot-overlay::before{
+      content:'';position:absolute;inset:0;z-index:1;pointer-events:none;
+      background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.85) 100%);
+    }
+    /* Chromatic aberration line effect */
+    #boot-overlay::after{
+      content:'';position:absolute;inset:0;z-index:2;pointer-events:none;
+      background:repeating-linear-gradient(0deg,transparent,transparent 1px,rgba(245,196,0,.012) 1px,rgba(245,196,0,.012) 2px);
+      animation:crtFlicker 0.15s steps(1) infinite;
+    }
+    @keyframes crtFlicker{0%,100%{opacity:1}50%{opacity:.97}}
     .boot-corner{
-      position:absolute;width:80px;height:80px;
-      border:2px solid rgba(212,175,55,.5);
+      position:absolute;width:100px;height:100px;
+      border:1.5px solid rgba(245,196,0,.4);
     }
-    .boot-corner.tl{top:20px;left:20px;border-right:none;border-bottom:none;animation:cornerGlow 2s ease-in-out infinite alternate}
-    .boot-corner.tr{top:20px;right:20px;border-left:none;border-bottom:none;animation:cornerGlow 2s ease-in-out .5s infinite alternate}
-    .boot-corner.bl{bottom:20px;left:20px;border-right:none;border-top:none;animation:cornerGlow 2s ease-in-out 1s infinite alternate}
-    .boot-corner.br{bottom:20px;right:20px;border-left:none;border-top:none;animation:cornerGlow 2s ease-in-out 1.5s infinite alternate}
-    @keyframes cornerGlow{0%{border-color:rgba(212,175,55,.2)}100%{border-color:rgba(212,175,55,.9);box-shadow:0 0 16px rgba(212,175,55,.5)}}
+    .boot-corner.tl{top:24px;left:24px;border-right:none;border-bottom:none;animation:cornerGlow 1.8s ease-in-out infinite alternate}
+    .boot-corner.tr{top:24px;right:24px;border-left:none;border-bottom:none;animation:cornerGlow 1.8s ease-in-out .45s infinite alternate}
+    .boot-corner.bl{bottom:24px;left:24px;border-right:none;border-top:none;animation:cornerGlow 1.8s ease-in-out .9s infinite alternate}
+    .boot-corner.br{bottom:24px;right:24px;border-left:none;border-top:none;animation:cornerGlow 1.8s ease-in-out 1.35s infinite alternate}
+    .boot-corner::before,.boot-corner::after{
+      content:'';position:absolute;width:6px;height:1.5px;background:var(--gold);
+    }
+    .boot-corner.tl::before{top:-1.5px;right:-1px}
+    .boot-corner.tl::after{bottom:-1px;left:-1.5px;width:1.5px;height:6px}
+    @keyframes cornerGlow{0%{border-color:rgba(245,196,0,.15)}100%{border-color:rgba(245,196,0,1);box-shadow:0 0 18px rgba(245,196,0,.6),inset 0 0 8px rgba(245,196,0,.1)}}
+    /* Glitch logo */
     .boot-logo{
-      font-size:2.8em;font-weight:900;letter-spacing:.2em;text-transform:uppercase;
-      color:var(--gold);text-shadow:0 0 30px rgba(212,175,55,.8),0 0 60px rgba(212,175,55,.4);
-      margin-bottom:8px;opacity:0;
-      animation:bootLogoReveal .6s ease .5s forwards;
+      font-family:var(--mono);
+      font-size:3em;font-weight:700;letter-spacing:.25em;text-transform:uppercase;
+      color:var(--gold);
+      text-shadow:0 0 20px rgba(245,196,0,.9),0 0 50px rgba(245,196,0,.5),0 0 100px rgba(245,196,0,.2);
+      margin-bottom:6px;opacity:0;position:relative;z-index:5;
+      animation:bootLogoReveal .7s cubic-bezier(.23,1,.32,1) .4s forwards;
     }
-    @keyframes bootLogoReveal{0%{opacity:0;transform:scaleX(0.3) translateY(10px);letter-spacing:.05em}100%{opacity:1;transform:none;letter-spacing:.2em}}
+    @keyframes bootLogoReveal{
+      0%{opacity:0;transform:scaleX(0.1) translateY(6px);letter-spacing:.02em;filter:blur(10px)}
+      60%{filter:blur(2px)}
+      100%{opacity:1;transform:none;letter-spacing:.25em;filter:none}
+    }
+    .boot-logo::before{
+      content:attr(data-text);position:absolute;left:0;top:0;width:100%;height:100%;
+      color:rgba(255,80,80,.7);text-shadow:none;clip-path:inset(30% 0 30% 0);
+      transform:translateX(-2px);
+      animation:glitchR 4s steps(1) 1.5s infinite;
+    }
+    .boot-logo::after{
+      content:attr(data-text);position:absolute;left:0;top:0;width:100%;height:100%;
+      color:rgba(80,80,255,.7);text-shadow:none;clip-path:inset(60% 0 10% 0);
+      transform:translateX(2px);
+      animation:glitchB 4s steps(1) 1.8s infinite;
+    }
+    @keyframes glitchR{0%,88%,92%,100%{opacity:0}89%{opacity:1;clip-path:inset(20% 0 40% 0);transform:translateX(-3px)}91%{clip-path:inset(55% 0 5% 0);transform:translateX(2px)}}
+    @keyframes glitchB{0%,88%,92%,100%{opacity:0}89%{opacity:1;clip-path:inset(60% 0 15% 0);transform:translateX(3px)}91%{clip-path:inset(10% 0 65% 0);transform:translateX(-2px)}}
     .boot-sub{
-      font-size:.72em;letter-spacing:.5em;color:rgba(212,175,55,.6);
-      text-transform:uppercase;margin-bottom:40px;
-      opacity:0;animation:fadeIn .5s ease 1s forwards;
+      font-family:var(--mono);
+      font-size:.68em;letter-spacing:.55em;color:rgba(245,196,0,.55);
+      text-transform:uppercase;margin-bottom:36px;z-index:5;position:relative;
+      opacity:0;animation:fadeIn .5s ease .95s forwards;
     }
     .boot-terminal{
-      width:min(520px,90vw);height:130px;overflow:hidden;
-      border:1px solid rgba(212,175,55,.2);border-radius:6px;
-      background:rgba(0,0,0,.8);padding:14px 16px;
-      font-size:.72em;line-height:1.7;color:rgba(212,175,55,.75);
-      position:relative;z-index:4;
+      width:min(580px,92vw);height:150px;overflow:hidden;
+      border:1px solid rgba(245,196,0,.18);border-radius:4px;
+      background:rgba(0,0,0,.88);padding:14px 18px;
+      font-size:.71em;line-height:1.75;color:rgba(245,196,0,.7);
+      position:relative;z-index:5;
+      box-shadow:0 0 24px rgba(245,196,0,.08),inset 0 0 40px rgba(0,0,0,.6);
     }
-    .boot-terminal-line{display:block;opacity:0;animation:termLine .1s ease forwards}
+    .boot-terminal::before{
+      content:'SYSTEM LOG';position:absolute;top:0;left:0;right:0;
+      background:rgba(245,196,0,.06);border-bottom:1px solid rgba(245,196,0,.1);
+      padding:3px 12px;font-size:.85em;letter-spacing:.12em;color:rgba(245,196,0,.4);
+    }
+    .boot-terminal-inner{padding-top:20px;height:100%;overflow:hidden}
+    .boot-terminal-line{display:block;opacity:0;animation:termLine .08s ease forwards;white-space:pre}
+    .boot-terminal-line.cmd{color:rgba(245,196,0,.9)}
+    .boot-terminal-line.ok{color:rgba(34,197,94,.8)}
+    .boot-terminal-line.warn{color:rgba(255,165,0,.75)}
+    .boot-terminal-line.dim{color:rgba(245,196,0,.35)}
     @keyframes termLine{to{opacity:1}}
-    .boot-bar-wrap{margin-top:22px;width:min(320px,80vw);z-index:4;position:relative}
-    .boot-bar-label{display:flex;justify-content:space-between;font-size:.68em;color:rgba(212,175,55,.5);margin-bottom:6px;letter-spacing:.06em}
-    .boot-bar-track{height:3px;background:rgba(212,175,55,.1);border-radius:10px;overflow:hidden}
+    .boot-bar-wrap{margin-top:24px;width:min(380px,82vw);z-index:5;position:relative}
+    .boot-bar-label{display:flex;justify-content:space-between;font-size:.67em;color:rgba(245,196,0,.5);margin-bottom:7px;letter-spacing:.08em;font-family:var(--mono)}
+    .boot-bar-track{height:2px;background:rgba(245,196,0,.08);border-radius:0;overflow:visible;position:relative}
+    .boot-bar-track::after{content:'';position:absolute;inset:-1px -1px;border:1px solid rgba(245,196,0,.12)}
     .boot-bar-fill{
-      height:100%;width:0%;border-radius:10px;
-      background:linear-gradient(90deg,#B8960C,#FFD700,#FFAA00);
-      box-shadow:0 0 12px rgba(212,175,55,.7);
-      transition:width .12s linear;
+      height:100%;width:0%;
+      background:linear-gradient(90deg,#7A6000,#F5C400,#FFE566,#F5C400);
+      background-size:200% 100%;
+      box-shadow:0 0 8px 2px rgba(245,196,0,.6),0 0 24px rgba(245,196,0,.3);
+      transition:width .1s linear;
+      animation:barShimmer 1.5s linear infinite;
+      position:relative;
+    }
+    .boot-bar-fill::after{
+      content:'';position:absolute;right:0;top:-3px;bottom:-3px;width:3px;
+      background:#fff;box-shadow:0 0 8px 4px rgba(245,196,0,.9);
+      animation:barPulse .4s ease-in-out infinite alternate;
+    }
+    @keyframes barShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+    @keyframes barPulse{0%{opacity:.6}100%{opacity:1}}
+    /* Login screen phase */
+    #boot-login{
+      display:none;flex-direction:column;align-items:center;justify-content:center;
+      z-index:5;position:relative;
+    }
+    #boot-login.visible{display:flex;animation:fadeIn .6s ease forwards}
+    .boot-login-box{
+      border:1px solid rgba(245,196,0,.4);border-radius:6px;
+      padding:36px 48px;text-align:center;
+      background:rgba(0,0,0,.7);
+      box-shadow:0 0 40px rgba(245,196,0,.12),0 0 1px rgba(245,196,0,.6),inset 0 0 40px rgba(0,0,0,.8);
+      backdrop-filter:blur(16px);
+    }
+    .boot-login-welcome{
+      font-family:var(--mono);font-size:1.05em;font-weight:700;
+      color:var(--gold);letter-spacing:.18em;
+      text-shadow:0 0 20px rgba(245,196,0,.8);
+      margin-bottom:6px;
+    }
+    .boot-login-sub{font-size:.7em;color:rgba(245,196,0,.45);letter-spacing:.35em;text-transform:uppercase;margin-bottom:22px}
+    .boot-login-cursor{
+      display:inline-block;width:10px;height:1.2em;background:var(--gold);
+      vertical-align:text-bottom;margin-left:3px;
+      box-shadow:0 0 10px rgba(245,196,0,.8);
+      animation:blink .9s step-end infinite;
     }
 
     /* ── Scanline overlay on main UI ── */
     .scanlines{
       position:fixed;inset:0;z-index:998;pointer-events:none;
-      background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.04) 3px,rgba(0,0,0,.04) 4px);
+      background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.04) 2px,rgba(0,0,0,.04) 3px);
     }
     /* ── Particle canvas ── */
-    #particles-canvas{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5}
+    #particles-canvas{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.45}
 
     /* ── Glitch animation (used on logo/title) ── */
     @keyframes glitch1{
@@ -1426,6 +1522,204 @@ INDEX_HTML = r"""<!doctype html>
       96%{clip-path:inset(40% 0 50% 0);transform:translateX(-2px)}
     }
     .glitch{animation:glitch1 5s infinite}
+
+    /* ── Cyberpunk chat terminal container ── */
+    #tab-chat .chat-terminal-wrap{
+      display:flex;flex-direction:column;height:calc(100vh - 120px);
+      background:rgba(4,4,6,0.99);
+      border:1px solid rgba(245,196,0,.28);
+      border-radius:4px;overflow:hidden;position:relative;
+      box-shadow:0 0 40px rgba(245,196,0,.06),0 0 1px rgba(245,196,0,.5),inset 0 0 80px rgba(0,0,0,.8);
+    }
+    /* Corner HUD decorations */
+    #tab-chat .chat-terminal-wrap::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent 0%,rgba(245,196,0,.6) 20%,rgba(245,196,0,.9) 50%,rgba(245,196,0,.6) 80%,transparent 100%);
+      box-shadow:0 0 12px rgba(245,196,0,.4);
+      z-index:5;
+    }
+    #tab-chat .chat-terminal-wrap::after{
+      content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(245,196,0,.4),transparent);
+      z-index:5;
+    }
+    /* Chat header HUD bar */
+    .chat-hud-bar{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:10px 18px;
+      border-bottom:1px solid rgba(245,196,0,.12);
+      background:rgba(6,6,10,0.98);
+      flex-shrink:0;position:relative;z-index:2;
+    }
+    .chat-hud-bar::after{
+      content:'';position:absolute;bottom:-1px;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(245,196,0,.25),transparent);
+    }
+    .chat-hud-title{
+      font-family:var(--mono);font-size:.75em;font-weight:700;
+      color:var(--gold);letter-spacing:.18em;text-transform:uppercase;
+      text-shadow:0 0 10px rgba(245,196,0,.5);
+      display:flex;align-items:center;gap:10px;
+    }
+    .chat-hud-title::before{content:'[ ';opacity:.5}
+    .chat-hud-title::after{content:' ]';opacity:.5}
+    .chat-hud-dot{
+      width:7px;height:7px;border-radius:50%;
+      background:var(--gold);
+      box-shadow:0 0 8px rgba(245,196,0,.8);
+      animation:blink 2s step-end infinite;
+      flex-shrink:0;
+    }
+    .chat-hud-stats{
+      display:flex;align-items:center;gap:14px;
+      font-family:var(--mono);font-size:.67em;color:rgba(245,196,0,.45);
+      letter-spacing:.06em;
+    }
+    .chat-hud-stat{display:flex;align-items:center;gap:5px}
+    .chat-hud-stat-label{color:rgba(245,196,0,.3);text-transform:uppercase}
+    .chat-hud-stat-val{color:rgba(245,196,0,.7)}
+    /* Chat log area */
+    #chat-log{
+      flex:1;overflow-y:auto;padding:20px 22px;
+      display:flex;flex-direction:column;gap:0;
+      background:
+        radial-gradient(ellipse at 20% 30%,rgba(245,196,0,.025) 0%,transparent 55%),
+        radial-gradient(ellipse at 80% 70%,rgba(245,196,0,.02) 0%,transparent 55%),
+        rgba(4,4,6,0.99);
+      position:relative;
+    }
+    /* Grid background pattern */
+    #chat-log::before{
+      content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+      background-image:
+        linear-gradient(rgba(245,196,0,.025) 1px,transparent 1px),
+        linear-gradient(90deg,rgba(245,196,0,.025) 1px,transparent 1px);
+      background-size:40px 40px;
+    }
+    #chat-log > *{position:relative;z-index:1}
+    /* Terminal-style input bar */
+    .chat-cmd-bar{
+      padding:12px 18px;
+      border-top:1px solid rgba(245,196,0,.15);
+      background:rgba(4,4,6,0.99);
+      flex-shrink:0;position:relative;z-index:2;
+    }
+    .chat-cmd-row{
+      display:flex;align-items:flex-end;gap:0;
+      border:1px solid rgba(245,196,0,.35);
+      background:rgba(2,2,4,0.98);
+      position:relative;
+      box-shadow:0 0 20px rgba(245,196,0,.08),0 0 1px rgba(245,196,0,.4);
+    }
+    .chat-cmd-row:focus-within{
+      border-color:rgba(245,196,0,.7);
+      box-shadow:0 0 24px rgba(245,196,0,.18),0 0 1px rgba(245,196,0,.8),inset 0 0 20px rgba(245,196,0,.03);
+    }
+    .chat-cmd-prompt{
+      padding:11px 12px 11px 14px;
+      font-family:var(--mono);font-size:.88em;
+      color:rgba(245,196,0,.8);
+      white-space:nowrap;flex-shrink:0;
+      text-shadow:0 0 8px rgba(245,196,0,.5);
+      border-right:1px solid rgba(245,196,0,.15);
+      background:rgba(245,196,0,.03);
+      user-select:none;
+    }
+    #chat-input{
+      flex:1;
+      background:transparent;border:none;outline:none;
+      color:var(--text);padding:11px 14px;
+      font-family:var(--mono);font-size:.9em;line-height:1.5;
+      resize:none;caret-color:var(--gold);
+      letter-spacing:.02em;
+    }
+    #chat-input::placeholder{color:rgba(245,196,0,.2);font-style:normal}
+    .chat-send-btn{
+      flex-shrink:0;padding:0 18px;
+      background:rgba(245,196,0,.08);border:none;border-left:1px solid rgba(245,196,0,.2);
+      color:var(--gold);font-family:var(--mono);font-size:.8em;font-weight:700;
+      cursor:pointer;height:100%;min-height:44px;
+      letter-spacing:.12em;text-transform:uppercase;
+      transition:all .2s;
+      text-shadow:0 0 8px rgba(245,196,0,.4);
+    }
+    .chat-send-btn:hover{
+      background:rgba(245,196,0,.18);
+      box-shadow:0 0 20px rgba(245,196,0,.15),inset 0 0 10px rgba(245,196,0,.05);
+      color:#fff;
+    }
+    .chat-send-btn:active{background:rgba(245,196,0,.25)}
+    .chat-cmd-hint{
+      font-family:var(--mono);font-size:.63em;color:rgba(245,196,0,.25);
+      margin-top:7px;letter-spacing:.06em;
+      display:flex;align-items:center;justify-content:space-between;
+    }
+    .chat-cmd-hint-left{display:flex;align-items:center;gap:12px}
+    /* Empty state */
+    #chat-log .empty{
+      text-align:center;margin:auto;
+      font-family:var(--mono);font-size:.8em;
+      color:rgba(245,196,0,.25);letter-spacing:.1em;
+    }
+    #chat-log .empty .icon{font-size:2em;margin-bottom:12px;filter:drop-shadow(0 0 8px rgba(245,196,0,.3))}
+    /* Header system clock */
+    .hdr-clock{
+      font-family:var(--mono);font-size:.72em;
+      color:rgba(245,196,0,.6);letter-spacing:.1em;
+      padding:4px 10px;
+      border:1px solid rgba(245,196,0,.15);
+      border-radius:3px;
+      background:rgba(245,196,0,.04);
+      text-shadow:0 0 8px rgba(245,196,0,.3);
+    }
+    /* Enhanced header */
+    header{
+      background:linear-gradient(100deg,rgba(4,4,8,0.99) 0%,rgba(8,8,14,0.99) 60%,rgba(4,4,8,0.99) 100%) !important;
+      border-bottom:1px solid rgba(245,196,0,.2) !important;
+    }
+    header::after{
+      background:linear-gradient(90deg,transparent,rgba(245,196,0,.7),rgba(255,220,0,.9),rgba(245,196,0,.7),transparent) !important;
+      box-shadow:0 0 16px rgba(245,196,0,.4) !important;
+    }
+    /* Logo enhanced */
+    .logo{
+      background:linear-gradient(135deg,rgba(245,196,0,.12),rgba(245,196,0,.06)) !important;
+      border:1px solid rgba(245,196,0,.4) !important;
+      border-radius:4px !important;
+      box-shadow:0 0 16px rgba(245,196,0,.25),inset 0 0 12px rgba(245,196,0,.06) !important;
+    }
+    /* Enhanced nav */
+    nav#main-nav{
+      background:rgba(4,4,6,0.99) !important;
+      border-bottom:1px solid rgba(245,196,0,.15) !important;
+    }
+    .nav-group-btn.active{
+      text-shadow:0 0 16px rgba(245,196,0,.7) !important;
+    }
+    .nav-group-btn.active::after{
+      background:linear-gradient(90deg,transparent,var(--gold),transparent) !important;
+      box-shadow:0 0 12px rgba(245,196,0,.5) !important;
+    }
+    /* Chat model select dropdown dark */
+    .chat-model-select-wrap select{
+      background:rgba(4,4,6,.98);
+      border:1px solid rgba(245,196,0,.2);
+      border-radius:3px;
+      color:rgba(245,196,0,.9);
+      font-family:var(--mono);font-size:.8em;
+      padding:5px 10px;outline:none;cursor:pointer;
+    }
+    .chat-model-select-wrap select:focus{border-color:rgba(245,196,0,.5)}
+    /* Markdown code blocks in chat */
+    .chat-msg pre,.chat-msg code{
+      font-family:var(--mono);
+      background:rgba(0,0,0,.6);
+      border:1px solid rgba(245,196,0,.12);
+      color:rgba(245,196,0,.85);
+    }
+    .chat-msg pre{padding:10px 14px;margin:8px 0;border-radius:2px;overflow-x:auto;
+      border-left:2px solid rgba(245,196,0,.4)}
+    .chat-msg code{padding:1px 5px;border-radius:2px;font-size:.9em}
 
     /* ── Enhanced tab content transitions ── */
     .tab-content{display:none;width:100%;box-sizing:border-box}
@@ -1740,29 +2034,94 @@ INDEX_HTML = r"""<!doctype html>
       margin-bottom:14px;
       backdrop-filter:blur(8px);
     }
-    .chat-msg{padding:12px 16px;border-radius:14px;margin-bottom:10px;max-width:86%;
-      word-break:break-word;animation:slideInUp .22s ease}
+    /* ── Cyberpunk Chat Messages ── */
+    .chat-msg{
+      padding:0;border-radius:0;margin-bottom:14px;max-width:88%;
+      word-break:break-word;animation:msgReveal .28s cubic-bezier(.23,1,.32,1);
+      position:relative;
+    }
+    @keyframes msgReveal{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+    .chat-msg-inner{
+      padding:12px 16px;position:relative;
+    }
     .chat-msg.user{
-      background:linear-gradient(135deg,#B8960C,#D4AF37,#F0D060);
-      margin-left:auto;color:#fff;
-      box-shadow:0 3px 14px rgba(99,102,241,.35),inset 0 1px 0 rgba(255,255,255,.12);
-      border-radius:18px 18px 4px 18px;
-      font-size:.92em;line-height:1.65;
+      margin-left:auto;
     }
-    .chat-msg.bot,.chat-msg.agent{
-      background:rgba(18,18,18,0.95);
-      border:1px solid rgba(148,163,184,.1);color:var(--text);
-      border-radius:14px 14px 14px 4px;
-      backdrop-filter:blur(6px);
-      font-size:.92em;line-height:1.65;
+    .chat-msg.user .chat-msg-inner{
+      background:rgba(8,8,10,0.96);
+      border:1px solid rgba(245,196,0,.5);
+      border-right-width:3px;
+      color:var(--text);
+      font-size:.91em;line-height:1.7;
+      box-shadow:0 0 20px rgba(245,196,0,.12),0 0 1px rgba(245,196,0,.6),inset 0 0 30px rgba(245,196,0,.03);
+      clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%);
     }
-    .chat-msg-header{display:flex;align-items:center;gap:8px;font-size:.72em;margin-bottom:6px;opacity:.85}
-    .chat-msg-avatar{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08)}
-    .chat-msg-source{font-weight:600;letter-spacing:.01em}
+    .chat-msg.user .chat-msg-inner::before{
+      content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
+      background:linear-gradient(180deg,transparent,rgba(245,196,0,.7),transparent);
+    }
+    .chat-msg.bot .chat-msg-inner,.chat-msg.agent .chat-msg-inner{
+      background:rgba(5,5,8,0.97);
+      border:1px solid rgba(245,196,0,.2);
+      border-left-width:2px;
+      color:var(--text);
+      font-size:.91em;line-height:1.7;
+      box-shadow:0 0 14px rgba(245,196,0,.06),inset 0 0 30px rgba(0,0,0,.4);
+      clip-path:polygon(0 0,100% 0,100% 100%,10px 100%,0 calc(100% - 10px));
+    }
+    .chat-msg.bot .chat-msg-inner::before,.chat-msg.agent .chat-msg-inner::before{
+      content:'';position:absolute;right:0;top:0;bottom:0;width:1px;
+      background:linear-gradient(180deg,transparent,rgba(245,196,0,.3),transparent);
+    }
+    /* Terminal corner accent */
+    .chat-msg.user .chat-msg-inner::after{
+      content:'';position:absolute;bottom:0;right:0;
+      width:10px;height:10px;
+      border-right:2px solid rgba(245,196,0,.7);
+      border-bottom:2px solid rgba(245,196,0,.7);
+    }
+    .chat-msg-header{
+      display:flex;align-items:center;gap:8px;
+      font-size:.68em;margin-bottom:8px;
+      font-family:var(--mono);letter-spacing:.08em;
+      color:rgba(245,196,0,.6);
+    }
+    .chat-msg.user .chat-msg-header{color:rgba(245,196,0,.8)}
+    .chat-msg-avatar{
+      width:20px;height:20px;border-radius:2px;
+      display:inline-flex;align-items:center;justify-content:center;
+      background:rgba(245,196,0,.08);
+      border:1px solid rgba(245,196,0,.25);
+      font-size:.85em;
+    }
+    .chat-msg-source{
+      font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:.9em;
+    }
+    .chat-msg-source::before{content:'// ';opacity:.45}
+    .chat-msg-prompt{color:rgba(245,196,0,.35);font-size:.9em;margin-right:4px}
     .chat-model-row{display:flex;gap:10px;align-items:center;margin-bottom:10px}
     .chat-model-row select{max-width:240px}
-    .chat-msg .ts{font-size:.72em;opacity:.55;margin-top:4px}
+    .chat-msg .ts{
+      font-size:.65em;opacity:.45;margin-top:8px;
+      font-family:var(--mono);letter-spacing:.06em;
+      color:rgba(245,196,0,.4);
+    }
     .chat-input-row{display:flex;gap:8px;align-items:flex-end}
+    /* Typing indicator */
+    .chat-typing-indicator{
+      display:inline-flex;align-items:center;gap:4px;
+      padding:10px 16px;font-family:var(--mono);font-size:.78em;
+      color:rgba(245,196,0,.6);letter-spacing:.12em;
+    }
+    .chat-typing-indicator span{
+      display:inline-block;width:6px;height:6px;
+      background:var(--gold);border-radius:50%;
+      box-shadow:0 0 6px rgba(245,196,0,.6);
+      animation:typingDot .9s ease-in-out infinite;
+    }
+    .chat-typing-indicator span:nth-child(2){animation-delay:.15s}
+    .chat-typing-indicator span:nth-child(3){animation-delay:.3s}
+    @keyframes typingDot{0%,80%,100%{transform:scale(.6);opacity:.3}40%{transform:scale(1);opacity:1}}
 
     /* ── Live Office ── */
     .office-wrap{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;min-height:420px;
@@ -2029,12 +2388,28 @@ INDEX_HTML = r"""<!doctype html>
   <div class="boot-corner tr"></div>
   <div class="boot-corner bl"></div>
   <div class="boot-corner br"></div>
-  <div class="boot-logo glitch">AI EMPLOYEE</div>
-  <div class="boot-sub">Autonomous Intelligence Platform</div>
-  <div class="boot-terminal" id="boot-terminal"></div>
-  <div class="boot-bar-wrap">
-    <div class="boot-bar-label"><span>INITIALIZING</span><span id="boot-pct">0%</span></div>
-    <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar"></div></div>
+  <!-- Phase 1: terminal scroll + logo -->
+  <div id="boot-phase1" style="display:flex;flex-direction:column;align-items:center;position:relative;z-index:5">
+    <div class="boot-logo glitch" data-text="AI EMPLOYEE">AI EMPLOYEE</div>
+    <div class="boot-sub">Autonomous Intelligence Platform</div>
+    <div class="boot-terminal" id="boot-terminal"><div class="boot-terminal-inner" id="boot-terminal-inner"></div></div>
+    <div class="boot-bar-wrap">
+      <div class="boot-bar-label"><span id="boot-stage-label">INITIALIZING</span><span id="boot-pct">0%</span></div>
+      <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar"></div></div>
+    </div>
+  </div>
+  <!-- Phase 2: login screen -->
+  <div id="boot-login">
+    <div class="boot-login-box">
+      <div class="boot-login-welcome">SYSTEM ACCESS GRANTED</div>
+      <div class="boot-login-sub">AI Employee Platform v4.0</div>
+      <div style="font-family:var(--mono);font-size:.9em;color:rgba(245,196,0,.85);letter-spacing:.05em">
+        Welcome back, <span style="color:var(--gold);text-shadow:0 0 12px rgba(245,196,0,.7);font-weight:700">OPERATOR</span><span class="boot-login-cursor"></span>
+      </div>
+      <div style="margin-top:18px;font-family:var(--mono);font-size:.63em;color:rgba(245,196,0,.3);letter-spacing:.12em">
+        [ PRESS ANY KEY TO CONTINUE ]
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2059,6 +2434,7 @@ INDEX_HTML = r"""<!doctype html>
       <button class="hdr-btn hdr-btn-start" id="hdr-start-btn" onclick="startAll()" title="Start all agents">▶ Start</button>
       <button class="hdr-btn hdr-btn-stop" id="hdr-stop-btn" onclick="stopAll()" title="Stop all agents">■ Stop</button>
     </div>
+    <div class="hdr-clock" id="hdr-clock">00:00:00</div>
     <div class="status-pill"><div class="status-dot"></div><span id="header-status">Running</span></div>
   </div>
 </header>
@@ -2345,52 +2721,54 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Chat ── -->
 <div id="tab-chat" class="tab-content">
-  <div style="display:flex;flex-direction:column;height:calc(100vh - 115px);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
-    <!-- Chat header bar -->
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
-      <div style="display:flex;align-items:center;gap:12px">
-        <div style="width:36px;height:36px;background:linear-gradient(135deg,#B8960C,#D4AF37);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1em">◈</div>
-        <div>
-          <div style="font-weight:700;font-size:.95em;color:var(--text)">AI Command Center</div>
-          <div style="font-size:.74em;color:var(--text-muted)">Direct interface to your AI workforce</div>
+  <div class="chat-terminal-wrap">
+    <!-- HUD header bar -->
+    <div class="chat-hud-bar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="chat-hud-dot"></div>
+        <div class="chat-hud-title">AI Command Center</div>
+        <div id="chat-hermes-status" title="Hermes Agent status" style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:.65em;padding:2px 8px;border:1px solid rgba(245,196,0,.15);color:rgba(245,196,0,.45);letter-spacing:.06em">
+          <span id="chat-hermes-dot" style="width:6px;height:6px;border-radius:50%;background:rgba(245,196,0,.3);display:inline-block;box-shadow:0 0 4px rgba(245,196,0,.3)"></span>
+          <span id="chat-hermes-label">HERMES –</span>
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.04);border:1px solid rgba(212,175,55,.2);border-radius:8px;padding:6px 12px">
-          <span style="font-size:.78em;color:var(--text-muted);white-space:nowrap">Model:</span>
-          <select id="chat-model" onchange="updateChatModelBadge()" style="background:transparent;border:none;color:var(--gold-light);font-size:.82em;font-weight:600;cursor:pointer;outline:none;font-family:inherit">
-            <option value="auto">⚡ Auto (Cost-Effective)</option>
-            <option value="ollama">🦙 Ollama • Local AI</option>
-            <option value="gemma">💎 Gemma • Free &amp; Open Source</option>
-            <option value="nvidia">🔷 NVIDIA NIM</option>
-            <option value="openai">🌐 OpenAI</option>
-            <option value="anthropic">🤖 Anthropic Claude</option>
-            <option value="groq">⚡ Groq • Fast</option>
-            <option value="external">🌐 External AI</option>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="chat-model-select-wrap" style="display:flex;align-items:center;gap:7px">
+          <span style="font-family:var(--mono);font-size:.65em;color:rgba(245,196,0,.35);letter-spacing:.1em">MODEL:</span>
+          <select id="chat-model" onchange="updateChatModelBadge()" style="background:rgba(4,4,6,.98);border:1px solid rgba(245,196,0,.2);color:rgba(245,196,0,.85);font-family:var(--mono);font-size:.75em;font-weight:600;cursor:pointer;outline:none;padding:3px 8px;letter-spacing:.04em">
+            <option value="auto">AUTO</option>
+            <option value="ollama">OLLAMA</option>
+            <option value="gemma">GEMMA</option>
+            <option value="nvidia">NVIDIA NIM</option>
+            <option value="openai">OPENAI</option>
+            <option value="anthropic">CLAUDE</option>
+            <option value="groq">GROQ</option>
+            <option value="external">EXTERNAL</option>
           </select>
         </div>
-        <div id="chat-hermes-status" title="Hermes Agent status" style="display:flex;align-items:center;gap:5px;font-size:.73em;padding:3px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.2);color:var(--text-muted)">
-          <span id="chat-hermes-dot" style="width:7px;height:7px;border-radius:50%;background:#6b7280;display:inline-block"></span>
-          <span id="chat-hermes-label">Hermes –</span>
-        </div>
-        <div id="chat-model-badge" style="font-size:.73em;padding:3px 10px;border-radius:12px;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.25);color:var(--gold)">Auto</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadChatLog()" title="Refresh">↻</button>
+        <div id="chat-model-badge" style="font-family:var(--mono);font-size:.65em;padding:2px 8px;border:1px solid rgba(245,196,0,.2);color:rgba(245,196,0,.6);letter-spacing:.08em">AUTO</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadChatLog()" title="Refresh" style="font-family:var(--mono);font-size:.7em;border:1px solid rgba(245,196,0,.15);color:rgba(245,196,0,.4);padding:3px 8px;border-radius:2px">↻ SYNC</button>
       </div>
     </div>
     <!-- Chat log -->
-    <div id="chat-log" style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px">
-      <div class="empty"><div class="icon">◈</div><p>No messages yet. Send your first command below.</p></div>
+    <div id="chat-log">
+      <div class="empty"><div class="icon">◈</div><p>NO MESSAGES // AWAITING INPUT</p></div>
     </div>
-    <!-- Input bar -->
-    <div style="padding:14px 20px;border-top:1px solid rgba(212,175,55,.12);background:var(--surface2);flex-shrink:0">
-      <div style="display:flex;gap:10px;align-items:flex-end">
-        <textarea id="chat-input" placeholder="Command your AI workforce…" rows="2"
-          style="flex:1;background:rgba(255,255,255,.04);border:1px solid rgba(212,175,55,.2);border-radius:10px;color:var(--text);padding:10px 14px;font-family:inherit;resize:none;font-size:.9em;line-height:1.5;outline:none;transition:border-color .2s"
-          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
-          onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'"></textarea>
-        <button class="btn btn-primary" onclick="sendChat()" style="height:44px;padding:0 20px;background:linear-gradient(135deg,#B8960C,#D4AF37);border:none;color:#000;font-weight:700;border-radius:10px">Send ↗</button>
+    <!-- Terminal input bar -->
+    <div class="chat-cmd-bar">
+      <div class="chat-cmd-row">
+        <div class="chat-cmd-prompt">AI&gt;</div>
+        <textarea id="chat-input" placeholder="enter command…" rows="2"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
+        <button class="chat-send-btn" onclick="sendChat()">EXEC ↗</button>
       </div>
-      <div style="font-size:.72em;color:var(--text-muted);margin-top:6px">Enter to send · Shift+Enter for new line · <span id="chat-agent-indicator" style="color:var(--gold)">Auto-routing to best agent</span></div>
+      <div class="chat-cmd-hint">
+        <div class="chat-cmd-hint-left">
+          <span>ENTER to execute</span>
+          <span>SHIFT+ENTER for newline</span>
+        </div>
+        <span id="chat-agent-indicator" style="color:rgba(245,196,0,.4)">AUTO-ROUTING TO BEST AGENT</span>
+      </div>
     </div>
   </div>
 </div>
@@ -2399,9 +2777,9 @@ INDEX_HTML = r"""<!doctype html>
 <div id="tab-live-office" class="tab-content">
   <div style="height:calc(100vh - 115px);display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
     <!-- Office header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid rgba(212,175,55,.15);background:var(--surface2);flex-shrink:0">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid rgba(245,196,0,.15);background:var(--surface2);flex-shrink:0">
       <div style="display:flex;align-items:center;gap:10px">
-        <div style="width:32px;height:32px;background:linear-gradient(135deg,#B8960C,#D4AF37);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1em">🏢</div>
+        <div style="width:32px;height:32px;background:linear-gradient(135deg,#B8960C,#F5C400);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1em">🏢</div>
         <div>
           <div style="font-weight:700;font-size:.92em">Live Office</div>
           <div id="office-agent-count" style="font-size:.72em;color:var(--text-muted)">Loading agents…</div>
@@ -6604,8 +6982,8 @@ async function loadChatLog() {
       groq: '⚡ Groq • Fast',
       external: '🌐 External AI'
     };
-    const label = labels[route] || '🤖 AI';
-    return `<span style="background:rgba(212,175,55,.12);border:1px solid rgba(212,175,55,.25);border-radius:6px;padding:1px 7px;font-size:.88em;color:var(--gold-light)">${label}</span>`;
+    const label = labels[route] || 'AI';
+    return `<span style="font-family:var(--mono);background:rgba(245,196,0,.08);border:1px solid rgba(245,196,0,.2);border-radius:2px;padding:1px 7px;font-size:.85em;color:rgba(245,196,0,.7);letter-spacing:.06em">${label}</span>`;
   }
 
   log.innerHTML = msgs.slice(-60).map(m => {
@@ -6614,15 +6992,18 @@ async function loadChatLog() {
     const raw = m.message || m.question || JSON.stringify(m);
     const text = renderMarkdown(raw);
     const ts = (m.ts||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const promptTag = type === 'user' ? '<span class="chat-msg-prompt">»</span>' : '<span class="chat-msg-prompt">$</span>';
     return `<div class="chat-msg ${type}">
-      <div class="chat-msg-header">
-        <span class="chat-msg-avatar">${source.avatar}</span>
-        <span class="chat-msg-source">${escHtml(source.label)}</span>
-        <span style="opacity:.6">•</span>
-        ${type === 'user' ? '<span style="opacity:.7">You</span>' : modelBadge(m.model_route)}
+      <div class="chat-msg-inner">
+        <div class="chat-msg-header">
+          ${promptTag}
+          <span class="chat-msg-avatar">${source.avatar}</span>
+          <span class="chat-msg-source">${escHtml(source.label)}</span>
+          ${type !== 'user' ? modelBadge(m.model_route) : ''}
+        </div>
+        <div>${text}</div>
+        <div class="ts">${ts}</div>
       </div>
-      <div>${text}</div>
-      <div class="ts">${ts}</div>
     </div>`;
   }).join('');
   log.scrollTop = log.scrollHeight;
@@ -6633,19 +7014,19 @@ function updateChatModelBadge() {
   const badge = document.getElementById('chat-model-badge');
   const indicator = document.getElementById('chat-agent-indicator');
   if (!sel || !badge) return;
-  const labels = {auto:'Auto',ollama:'Ollama',gemma:'Gemma',nvidia:'NVIDIA NIM',openai:'OpenAI',anthropic:'Claude',groq:'Groq',external:'External'};
+  const labels = {auto:'AUTO',ollama:'OLLAMA',gemma:'GEMMA',nvidia:'NVIDIA NIM',openai:'OPENAI',anthropic:'CLAUDE',groq:'GROQ',external:'EXTERNAL'};
   const hints = {
-    auto:'Auto-routing: Ollama → NVIDIA → Groq → OpenAI (cost-effective)',
-    ollama:'Using local Ollama (free, private)',
-    gemma:'Using Google Gemma (free, open-source — run: ollama pull gemma4)',
-    nvidia:'Using NVIDIA NIM (fast, free tier)',
-    openai:'Using OpenAI GPT-4o',
-    anthropic:'Using Anthropic Claude',
-    groq:'Using Groq (ultra-fast inference)',
-    external:'Using external AI provider'
+    auto:'AUTO-ROUTING: OLLAMA → NVIDIA → GROQ → OPENAI',
+    ollama:'LOCAL OLLAMA // FREE + PRIVATE',
+    gemma:'GEMMA // FREE + OPEN SOURCE',
+    nvidia:'NVIDIA NIM // FAST FREE TIER',
+    openai:'OPENAI GPT-4o',
+    anthropic:'ANTHROPIC CLAUDE',
+    groq:'GROQ // ULTRA-FAST INFERENCE',
+    external:'EXTERNAL AI PROVIDER'
   };
-  badge.textContent = labels[sel.value] || sel.value;
-  if (indicator) indicator.textContent = hints[sel.value] || 'Routing to best agent';
+  badge.textContent = labels[sel.value] || sel.value.toUpperCase();
+  if (indicator) indicator.textContent = hints[sel.value] || 'AUTO-ROUTING TO BEST AGENT';
 }
 
 async function sendChat() {
@@ -6659,13 +7040,26 @@ async function sendChat() {
   if (log) {
     const emptyEl = log.querySelector('.empty');
     if (emptyEl) emptyEl.remove();
+    // Show typing indicator for bot
+    const typingId = 'typing-' + Date.now();
     log.insertAdjacentHTML('beforeend', `<div class="chat-msg user">
-  <div class="chat-msg-header"><span class="chat-msg-avatar">👤</span><span class="chat-msg-source">You</span></div>
-  <div>${renderMarkdown(q)}</div>
+  <div class="chat-msg-inner">
+    <div class="chat-msg-header"><span class="chat-msg-prompt">»</span><span class="chat-msg-avatar">👤</span><span class="chat-msg-source">You</span></div>
+    <div>${renderMarkdown(q)}</div>
+  </div>
+</div>
+<div class="chat-msg agent" id="${typingId}">
+  <div class="chat-msg-inner">
+    <div class="chat-typing-indicator"><span></span><span></span><span></span>&nbsp;PROCESSING</div>
+  </div>
 </div>`);
     log.scrollTo({top: log.scrollHeight, behavior: 'smooth'});
+    await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q, model_route: route})});
+    const typingEl = document.getElementById(typingId);
+    if (typingEl) typingEl.remove();
+  } else {
+    await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q, model_route: route})});
   }
-  await api('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: q, model_route: route})});
   loadChatLog();
 }
 
@@ -14455,53 +14849,113 @@ setInterval(() => {
 }, 30000);
 
 /* ══════════════════════════════════════════════════
-   BOOT SEQUENCE
+   BOOT SEQUENCE — Cyberpunk Terminal
 ══════════════════════════════════════════════════ */
 (function runBootSequence() {
   const overlay = document.getElementById('boot-overlay');
-  const terminal = document.getElementById('boot-terminal');
+  const termInner = document.getElementById('boot-terminal-inner');
   const bar = document.getElementById('boot-bar');
   const pct = document.getElementById('boot-pct');
+  const stageLabel = document.getElementById('boot-stage-label');
+  const phase1 = document.getElementById('boot-phase1');
+  const loginEl = document.getElementById('boot-login');
   if (!overlay) return;
 
-  const lines = [
-    '> INITIALIZING AI EMPLOYEE v4.0\u2026',
-    '> Loading neural subsystems\u2026',
-    '> Mounting agent registry\u2026',
-    '> Establishing secure channel\u2026',
-    '> Calibrating gold resonance matrix\u2026',
-    '> All systems nominal. Welcome.',
+  const stages = [
+    { label: 'BIOS CHECK', lines: [
+      {t:'dim', txt:'AI-EMPLOYEE BIOS v4.0.1  (C) 2024'},
+      {t:'dim', txt:'CPU: Neural Core × 56  RAM: 128GB  VRAM: 24GB'},
+      {t:'cmd', txt:'> Checking hardware integrity…'},
+      {t:'ok',  txt:'  [OK] All cores online'},
+    ]},
+    { label: 'KERNEL INIT', lines: [
+      {t:'cmd', txt:'> Loading kernel modules…'},
+      {t:'ok',  txt:'  [OK] ai_scheduler.ko loaded'},
+      {t:'ok',  txt:'  [OK] hermes_memory.ko loaded'},
+      {t:'ok',  txt:'  [OK] agent_registry.ko loaded'},
+    ]},
+    { label: 'MOUNTING AGENTS', lines: [
+      {t:'cmd', txt:'> Mounting agent filesystem…'},
+      {t:'ok',  txt:'  [OK] 56 agents registered'},
+      {t:'ok',  txt:'  [OK] Skill library: 147 skills loaded'},
+      {t:'warn',txt:'  [..] Awaiting external AI providers'},
+    ]},
+    { label: 'SECURE CHANNEL', lines: [
+      {t:'cmd', txt:'> Establishing encrypted channel…'},
+      {t:'ok',  txt:'  [OK] JWT auth layer active'},
+      {t:'ok',  txt:'  [OK] CSP headers applied'},
+      {t:'cmd', txt:'> Calibrating gold resonance matrix…'},
+      {t:'ok',  txt:'  [OK] All systems nominal'},
+    ]},
   ];
+
   let lineIdx = 0;
+  let stageIdx = 0;
   let progress = 0;
+  // Flatten all lines with stage info
+  const allLines = [];
+  stages.forEach((s, si) => s.lines.forEach(l => allLines.push({...l, stage: s.label, stageIdx: si})));
 
   function addLine() {
-    if (lineIdx >= lines.length) return;
+    if (lineIdx >= allLines.length) return;
+    const item = allLines[lineIdx++];
     const span = document.createElement('span');
-    span.className = 'boot-terminal-line';
-    span.style.animationDelay = '0s';
-    span.textContent = lines[lineIdx++];
-    terminal.appendChild(span);
-    terminal.scrollTop = terminal.scrollHeight;
+    span.className = 'boot-terminal-line ' + item.t;
+    span.textContent = item.txt;
+    termInner.appendChild(span);
+    termInner.scrollTop = termInner.scrollHeight;
+    if (stageLabel && item.stage) stageLabel.textContent = item.stage;
   }
 
+  // Phase 1: scroll lines + fill bar
   const lineTimer = setInterval(() => {
     addLine();
-    if (lineIdx >= lines.length) clearInterval(lineTimer);
-  }, 280);
+    if (lineIdx >= allLines.length) clearInterval(lineTimer);
+  }, 140);
 
   const barTimer = setInterval(() => {
-    progress += Math.random() * 12 + 4;
+    progress += Math.random() * 8 + 3;
     if (progress >= 100) { progress = 100; clearInterval(barTimer); }
     bar.style.width = progress + '%';
     pct.textContent = Math.round(progress) + '%';
     if (progress >= 100) {
+      // Phase 2: show login screen briefly
       setTimeout(() => {
-        overlay.classList.add('fade-out');
-        setTimeout(() => { overlay.style.display = 'none'; }, 850);
+        if (phase1) phase1.style.transition = 'opacity .4s';
+        if (phase1) { phase1.style.opacity = '0'; setTimeout(() => { phase1.style.display = 'none'; }, 420); }
+        setTimeout(() => {
+          if (loginEl) loginEl.classList.add('visible');
+          // Then dismiss on keypress or after 1.8s
+          const dismiss = () => {
+            overlay.classList.add('fade-out');
+            setTimeout(() => { overlay.style.display = 'none'; }, 1050);
+            document.removeEventListener('keydown', dismiss);
+            overlay.removeEventListener('click', dismiss);
+          };
+          document.addEventListener('keydown', dismiss, {once: true});
+          overlay.addEventListener('click', dismiss, {once: true});
+          setTimeout(dismiss, 1800);
+        }, 500);
       }, 300);
     }
-  }, 120);
+  }, 95);
+})();
+
+/* ══════════════════════════════════════════════════
+   HEADER CLOCK
+══════════════════════════════════════════════════ */
+(function initHeaderClock() {
+  const el = document.getElementById('hdr-clock');
+  if (!el) return;
+  function tick() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2,'0');
+    const m = String(now.getMinutes()).padStart(2,'0');
+    const s = String(now.getSeconds()).padStart(2,'0');
+    el.textContent = h + ':' + m + ':' + s;
+  }
+  tick();
+  setInterval(tick, 1000);
 })();
 
 /* ══════════════════════════════════════════════════
@@ -14521,7 +14975,7 @@ setInterval(() => {
   resize();
   window.addEventListener('resize', resize, {passive:true});
 
-  const GOLD = 'rgba(212,175,55,';
+  const GOLD = 'rgba(245,196,0,';
   for (let i = 0; i < 55; i++) {
     particles.push({
       x: Math.random() * W,
