@@ -334,6 +334,14 @@ AGENTS_BY_MODE = {
     "finance-wizard",
     "growth-hacker",
     "project-manager",
+    "meeting-intelligence",
+    "ceo-briefing",
+    "financial-tools",
+    # Business-tier feature agents
+    "crm-pipeline",
+    "email-marketing",
+    "invoicing",
+    "customer-support",
   ],
   "power": [
     "task-orchestrator",
@@ -396,6 +404,27 @@ AGENTS_BY_MODE = {
     "session-manager",
     "ticket-system",
     "discord-bot",
+    # New business intelligence agents
+    "lead-crm",
+    "email-marketing",
+    "meeting-intelligence",
+    "social-scheduler",
+    "ceo-briefing",
+    "financial-tools",
+    "competitor-watch",
+    "content-calendar",
+    # New feature agents (Power mode)
+    "crm-pipeline",
+    "invoicing",
+    "analytics-bi",
+    "workflow-builder",
+    "team-management",
+    "customer-support",
+    "website-builder",
+    "competitor-watch",
+    "personal-brand",
+    "health-check",
+    "export-backup",
   ],
 }
 
@@ -479,8 +508,22 @@ def _agent_allowed_in_mode(agent_id: str, mode: Optional[str] = None) -> bool:
   return False
 
 
+_SAFE_AGENT_ID_PAT = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+
+
 def _agent_dir_exists(agent_id: str) -> bool:
+  if not isinstance(agent_id, str) or not _SAFE_AGENT_ID_PAT.match(agent_id):
+    return False
   return (BOTS_DIR / agent_id / "run.sh").exists()
+  if not _BOT_NAME_RE.match(agent_id):
+    return False
+  agent_path = (BOTS_DIR / agent_id).resolve()
+  # Ensure the resolved path stays within BOTS_DIR (prevent path traversal)
+  try:
+    agent_path.relative_to(BOTS_DIR.resolve())
+  except ValueError:
+    return False
+  return (agent_path / "run.sh").exists()
 
 
 def _resolve_agent_target(agent_id: str) -> Optional[str]:
@@ -767,6 +810,18 @@ def _generate_llm_response(message: str, routed_agent: str, mode: str, model_rou
 
   return f"Agent: {routed_agent}\n\n{answer}"
 
+_SENSITIVE_DETAIL_PAT = re.compile(
+    r'(?i)(key|secret|token|password|passwd|pass|auth|credential|api_key)')
+
+
+def _redact_sensitive_details(details: dict) -> dict:
+    """Return a copy of details with values for sensitive-named keys redacted."""
+    return {
+        k: "***" if _SENSITIVE_DETAIL_PAT.search(str(k)) else v
+        for k, v in details.items()
+    }
+
+
 def _log_activity(
     event_type: str,
     description: str,
@@ -781,7 +836,7 @@ def _log_activity(
         "source": source,
     }
     if details:
-        entry["details"] = details
+        entry["details"] = _redact_sensitive_details(details)
     try:
         ACTIVITY_LOG.parent.mkdir(parents=True, exist_ok=True)
         with _ACTIVITY_LOCK:
@@ -911,6 +966,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# ── Feature modules ───────────────────────────────────────────────────────────
+import sys as _sys
+_FEATURES_DIR = str(Path(__file__).parent)
+if _FEATURES_DIR not in _sys.path:
+    _sys.path.insert(0, _FEATURES_DIR)
+
+try:
+    from features import ALL_ROUTERS as _FEATURE_ROUTERS
+    for _router in _FEATURE_ROUTERS:
+        app.include_router(_router)
+    logger.info("✅ Feature modules loaded: %d routers", len(_FEATURE_ROUTERS))
+except Exception as _feat_err:
+    logger.warning("⚠️  Feature modules failed to load: %s", _feat_err)
 
 # ── Security headers middleware (openclaw-2) ──────────────────────────────────
 @app.middleware("http")
@@ -1055,7 +1124,8 @@ def ai_employee(*args: str) -> tuple:
         )
         return p.returncode, p.stdout + p.stderr
     except Exception as e:
-        return 1, str(e)
+        logger.warning("ai_employee command error: %s", e)
+        return 1, "Command execution failed."
 
 
 # ─── HTML Dashboard ────────────────────────────────────────────────────────────
@@ -2050,6 +2120,31 @@ INDEX_HTML = r"""<!doctype html>
 <div class="sub-nav" id="subnav-power">
   <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn">⚡ BLACKLIGHT</button>
   <button onclick="switchTab('ascend',this)" id="nav-ascend-btn">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
+  <button onclick="switchTab('crm',this)">🎯 CRM</button>
+  <button onclick="switchTab('email-marketing',this)">📧 Email Mktg</button>
+  <button onclick="switchTab('meetings',this)">🗓️ Meetings</button>
+  <button onclick="switchTab('social',this)">📱 Social</button>
+  <button onclick="switchTab('briefing',this)">📰 CEO Brief</button>
+  <button onclick="switchTab('financial',this)">💳 Financial</button>
+  <button onclick="switchTab('competitors',this)">🕵️ Competitors</button>
+  <button onclick="switchTab('content-calendar',this)">🗃️ Content Cal</button>
+  <button onclick="switchTab('email-mkt',this)">📧 Email</button>
+  <button onclick="switchTab('meetings',this)">🎙️ Meetings</button>
+  <button onclick="switchTab('social',this)">📱 Social</button>
+  <button onclick="switchTab('briefing',this)">☀️ Briefing</button>
+  <button onclick="switchTab('invoicing',this)">🧾 Finance</button>
+  <button onclick="switchTab('analytics-bi',this)">📊 Analytics</button>
+  <button onclick="switchTab('workflows',this)">⚙️ Workflows</button>
+  <button onclick="switchTab('team',this)">👥 Team</button>
+  <button onclick="switchTab('support-desk',this)">🎧 Support</button>
+  <button onclick="switchTab('website-builder',this)">🌐 Website</button>
+  <button onclick="switchTab('competitors',this)">🔍 Competitors</button>
+  <button onclick="switchTab('brand',this)">✨ Brand</button>
+  <button onclick="switchTab('health',this)">❤️ Health</button>
+  <button onclick="switchTab('export',this)">💾 Export</button>
+</nav>
+  <button class="nav-scroll-btn right" id="nav-scroll-right" onclick="navScroll(1)" title="Scroll right">›</button>
 </div>
 
 <main>
@@ -2213,6 +2308,21 @@ INDEX_HTML = r"""<!doctype html>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">workers</code><span style="font-size:.78em;color:var(--text-muted)">List active agents</span></div>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">schedule</code><span style="font-size:.78em;color:var(--text-muted)">List scheduled tasks</span></div>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">help</code><span style="font-size:.78em;color:var(--text-muted)">Show all commands</span></div>
+    </div>
+  </div>
+
+  <!-- CEO Daily Briefing Widget -->
+  <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#818cf8">📰</span> CEO Daily Briefing</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="loadCEOBriefing()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="forceRegenerateBriefing()">⚡ Regenerate</button>
+        <button class="btn btn-ghost btn-sm" onclick="switchTab('briefing',document.querySelector('nav button[onclick*=briefing]'))">Full View →</button>
+      </div>
+    </div>
+    <div id="dash-ceo-briefing">
+      <div class="empty"><div class="icon">📰</div><p>Loading today's briefing…</p></div>
     </div>
   </div>
 
@@ -3150,6 +3260,634 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- ══════════════════════════════════════════════════════════════════════════
+     NEW FEATURE TABS
+     ══════════════════════════════════════════════════════════════════════════ -->
+
+<!-- ── CRM Pipeline ── -->
+<div id="tab-crm" class="tab-content">
+  <div class="page-header" style="border-left-color:#f59e0b">
+    <div class="page-header-icon">🎯</div>
+    <div><div class="page-header-title">CRM Pipeline</div><div class="page-header-desc">Manage leads, track deal stages, score prospects, and run automated follow-up sequences.</div></div>
+    <span class="page-header-badge" style="color:#f59e0b">Sales Pipeline</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon yellow">👥</div><div class="stat-body"><div class="val" id="crm-total">–</div><div class="lbl">Total Leads</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">🏆</div><div class="stat-body"><div class="val" id="crm-won">–</div><div class="lbl">Won Deals</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">💰</div><div class="stat-body"><div class="val" id="crm-pipeline-val">–</div><div class="lbl">Pipeline Value</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📈</div><div class="stat-body"><div class="val" id="crm-conv">–</div><div class="lbl">Conversion %</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🎯</span> Leads</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadCRM()">↻</button>
+      </div>
+      <div id="crm-leads-list"><div class="empty"><div class="icon">🎯</div><p>No leads yet. Add your first lead.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Lead</div></div>
+      <div class="form-group"><label>Name</label><input id="crm-name" placeholder="John Smith"/></div>
+      <div class="form-group"><label>Company</label><input id="crm-company" placeholder="Acme Corp"/></div>
+      <div class="form-group"><label>Email</label><input id="crm-email" placeholder="john@acme.com"/></div>
+      <div class="form-group"><label>Phone</label><input id="crm-phone" placeholder="+1 555 000"/></div>
+      <div class="form-group"><label>Deal Value ($)</label><input id="crm-value" type="number" placeholder="5000"/></div>
+      <div class="form-group"><label>Stage</label>
+        <select id="crm-stage" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="lead">Lead</option><option value="contacted">Contacted</option>
+          <option value="qualified">Qualified</option><option value="proposal">Proposal</option>
+          <option value="negotiation">Negotiation</option><option value="won">Won</option><option value="lost">Lost</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Notes</label><input id="crm-notes" placeholder="Any notes…"/></div>
+      <button class="btn btn-primary" onclick="addLead()">➕ Add Lead</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Email Marketing ── -->
+<div id="tab-email-mkt" class="tab-content">
+  <div class="page-header" style="border-left-color:#06b6d4">
+    <div class="page-header-icon">📧</div>
+    <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create campaigns, set up drip sequences, and track open/click rates.</div></div>
+    <span class="page-header-badge" style="color:#06b6d4">Automation</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon cyan">📧</div><div class="stat-body"><div class="val" id="em-campaigns">–</div><div class="lbl">Campaigns</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">📤</div><div class="stat-body"><div class="val" id="em-sent">–</div><div class="lbl">Emails Sent</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">👁️</div><div class="stat-body"><div class="val" id="em-open-rate">–</div><div class="lbl">Open Rate</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">🖱️</div><div class="stat-body"><div class="val" id="em-click-rate">–</div><div class="lbl">Click Rate</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📧</span> Campaigns</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadEmailCampaigns()">↻</button>
+      </div>
+      <div id="em-campaign-list"><div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Campaign</div></div>
+      <div class="form-group"><label>Campaign Name</label><input id="em-name" placeholder="Q1 Cold Outreach"/></div>
+      <div class="form-group"><label>Subject Line</label><input id="em-subject" placeholder="Quick question about your business…"/></div>
+      <div class="form-group"><label>Email Body</label>
+        <textarea id="em-body" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Hi {{name}},…"></textarea>
+      </div>
+      <div class="form-group"><label>Recipients (comma-separated emails)</label><input id="em-recipients" placeholder="a@co.com, b@co.com"/></div>
+      <button class="btn btn-primary" onclick="createEmailCampaign()">➕ Create Campaign</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Meeting Intelligence ── -->
+<div id="tab-meetings" class="tab-content">
+  <div class="page-header" style="border-left-color:#8b5cf6">
+    <div class="page-header-icon">🎙️</div>
+    <div><div class="page-header-title">Meeting Intelligence</div><div class="page-header-desc">Paste meeting transcripts to get AI summaries, action items, and auto-drafted follow-up emails.</div></div>
+    <span class="page-header-badge" style="color:#8b5cf6">AI Analysis</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon purple">🎙️</div><div class="stat-body"><div class="val" id="mt-total">–</div><div class="lbl">Total Meetings</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="mt-analyzed">–</div><div class="lbl">Analyzed</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="mt-pending">–</div><div class="lbl">Pending</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">⏱️</div><div class="stat-body"><div class="val" id="mt-duration">–</div><div class="lbl">Total Mins</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🎙️</span> Meetings</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadMeetings()">↻</button>
+      </div>
+      <div id="meetings-list"><div class="empty"><div class="icon">🎙️</div><p>No meetings yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Meeting</div></div>
+      <div class="form-group"><label>Title</label><input id="mt-title" placeholder="Sales call with Acme Corp"/></div>
+      <div class="form-group"><label>Platform</label>
+        <select id="mt-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="zoom">Zoom</option><option value="google_meet">Google Meet</option>
+          <option value="teams">Microsoft Teams</option><option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Duration (mins)</label><input id="mt-duration" type="number" placeholder="45"/></div>
+      <div class="form-group"><label>Transcript (paste here)</label>
+        <textarea id="mt-transcript" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Paste meeting transcript…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="addMeeting()">🎙️ Add &amp; Analyze</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px;display:none" id="mt-result-card">
+    <div class="card-header"><div class="card-title"><span class="icon">🤖</span> AI Analysis</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('mt-result-card').style.display='none'">✕</button>
+    </div>
+    <div id="mt-result-body" style="white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
+  </div>
+</div>
+
+<!-- ── Social Media ── -->
+<div id="tab-social" class="tab-content">
+  <div class="page-header" style="border-left-color:#ec4899">
+    <div class="page-header-icon">📱</div>
+    <div><div class="page-header-title">Social Media Manager</div><div class="page-header-desc">Schedule posts, generate AI content, and track engagement across LinkedIn, Instagram, X, and more.</div></div>
+    <span class="page-header-badge" style="color:#ec4899">Content</span>
+  </div>
+  <div class="grid-stat" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon pink">📱</div><div class="stat-body"><div class="val" id="sm-total">–</div><div class="lbl">Total Posts</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="sm-published">–</div><div class="lbl">Published</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">📅</div><div class="stat-body"><div class="val" id="sm-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">❤️</div><div class="stat-body"><div class="val" id="sm-likes">–</div><div class="lbl">Total Likes</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📱</span> Posts</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadSocialPosts()">↻</button>
+      </div>
+      <div id="sm-posts-list"><div class="empty"><div class="icon">📱</div><p>No posts yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">✨</span> Create Post</div></div>
+      <div class="form-group"><label>Topic (for AI generation)</label><input id="sm-topic" placeholder="AI trends in 2025…"/></div>
+      <div class="form-group"><label>Platform</label>
+        <select id="sm-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="linkedin">LinkedIn</option><option value="instagram">Instagram</option>
+          <option value="twitter">X / Twitter</option><option value="facebook">Facebook</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Tone</label>
+        <select id="sm-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="professional">Professional</option><option value="casual">Casual</option>
+          <option value="inspirational">Inspirational</option><option value="educational">Educational</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="generateSocialPost()" style="flex:1">✨ AI Generate</button>
+        <button class="btn btn-primary" onclick="saveSocialPost()" style="flex:1">💾 Save Draft</button>
+      </div>
+      <div class="form-group" style="margin-top:12px"><label>Content (edit after generation)</label>
+        <textarea id="sm-content" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Post content…"></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── CEO Briefing ── -->
+<div id="tab-briefing" class="tab-content">
+  <div class="page-header" style="border-left-color:#fbbf24">
+    <div class="page-header-icon">☀️</div>
+    <div><div class="page-header-title">Daily CEO Briefing</div><div class="page-header-desc">Your AI-generated morning summary — yesterday's wins, today's priorities, and key metrics all in one place.</div></div>
+    <span class="page-header-badge" style="color:#fbbf24">Daily Report</span>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="generateBriefing()">☀️ Generate Today's Briefing</button>
+    <button class="btn btn-ghost" onclick="loadBriefingHistory()">📅 View History</button>
+  </div>
+  <div class="card" id="briefing-card">
+    <div class="card-header"><div class="card-title"><span class="icon">☀️</span> Latest Briefing</div>
+      <span id="briefing-date" style="font-size:.8em;color:var(--text-muted)"></span>
+    </div>
+    <div id="briefing-content" style="white-space:pre-wrap;line-height:1.7;color:var(--text);font-size:.9em">
+      <div class="empty"><div class="icon">☀️</div><p>Click "Generate Today's Briefing" to get your morning summary.</p></div>
+    </div>
+  </div>
+  <div id="briefing-history" style="margin-top:16px"></div>
+</div>
+
+<!-- ── Finance / Invoicing ── -->
+<div id="tab-invoicing" class="tab-content">
+  <div class="page-header" style="border-left-color:#10b981">
+    <div class="page-header-icon">🧾</div>
+    <div><div class="page-header-title">Finance & Invoicing</div><div class="page-header-desc">Create invoices, track expenses, and view your live P&amp;L report.</div></div>
+    <span class="page-header-badge" style="color:#10b981">Finance</span>
+  </div>
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    <button class="fi-tab-btn btn btn-primary btn-sm active" onclick="switchFinanceTab('invoices',this)">🧾 Invoices</button>
+    <button class="fi-tab-btn btn btn-ghost btn-sm" onclick="switchFinanceTab('expenses',this)">💸 Expenses</button>
+    <button class="fi-tab-btn btn btn-ghost btn-sm" onclick="switchFinanceTab('pl',this)">📊 P&amp;L</button>
+  </div>
+
+  <!-- Invoices -->
+  <div id="fi-invoices-panel">
+    <div class="grid-stat" style="margin-bottom:16px">
+      <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="fi-revenue">–</div><div class="lbl">Revenue</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="fi-pending">–</div><div class="lbl">Pending</div></div></div>
+      <div class="stat-card"><div class="stat-icon blue">🧾</div><div class="stat-body"><div class="val" id="fi-total-inv">–</div><div class="lbl">Invoices</div></div></div>
+      <div class="stat-card"><div class="stat-icon red">⚠️</div><div class="stat-body"><div class="val" id="fi-overdue">–</div><div class="lbl">Overdue</div></div></div>
+    </div>
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">🧾</span> Invoices</div><button class="btn btn-ghost btn-sm" onclick="loadInvoices()">↻</button></div>
+        <div id="fi-invoice-list"><div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Invoice</div></div>
+        <div class="form-group"><label>Client Name</label><input id="fi-client" placeholder="Acme Corp"/></div>
+        <div class="form-group"><label>Client Email</label><input id="fi-client-email" placeholder="billing@acme.com"/></div>
+        <div class="form-group"><label>Subtotal ($)</label><input id="fi-subtotal" type="number" placeholder="2500"/></div>
+        <div class="form-group"><label>Tax Rate (%)</label><input id="fi-tax" type="number" placeholder="10"/></div>
+        <div class="form-group"><label>Due Date</label><input id="fi-due" type="date"/></div>
+        <div class="form-group"><label>Notes</label><input id="fi-notes" placeholder="Payment terms…"/></div>
+        <button class="btn btn-primary" onclick="createInvoice()">🧾 Create Invoice</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Expenses -->
+  <div id="fi-expenses-panel" style="display:none">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">💸</span> Expenses</div><button class="btn btn-ghost btn-sm" onclick="loadExpenses()">↻</button></div>
+        <div id="fi-expense-list"><div class="empty"><div class="icon">💸</div><p>No expenses yet.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Log Expense</div></div>
+        <div class="form-group"><label>Description</label><input id="fi-exp-desc" placeholder="SaaS subscription…"/></div>
+        <div class="form-group"><label>Amount ($)</label><input id="fi-exp-amount" type="number" placeholder="99"/></div>
+        <div class="form-group"><label>Category</label>
+          <select id="fi-exp-cat" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="software">Software</option><option value="marketing">Marketing</option>
+            <option value="payroll">Payroll</option><option value="office">Office</option>
+            <option value="travel">Travel</option><option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Date</label><input id="fi-exp-date" type="date"/></div>
+        <button class="btn btn-primary" onclick="logExpense()">💸 Log Expense</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- P&L -->
+  <div id="fi-pl-panel" style="display:none">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📊</span> Profit &amp; Loss Report</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadPL()">↻ Refresh</button>
+      </div>
+      <div id="fi-pl-body"><div class="empty"><p>Click Refresh to generate your P&amp;L report.</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Analytics ── -->
+<div id="tab-analytics-bi" class="tab-content">
+  <div class="page-header" style="border-left-color:#6366f1">
+    <div class="page-header-icon">📊</div>
+    <div><div class="page-header-title">Analytics &amp; Insights</div><div class="page-header-desc">Business intelligence dashboard — unified KPIs, AI recommendations, and trends across all modules.</div></div>
+    <span class="page-header-badge" style="color:#6366f1">Intelligence</span>
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="loadAnalyticsOverview()">↻ Refresh Overview</button>
+    <button class="btn btn-ghost" onclick="loadRecommendations()">💡 Get Recommendations</button>
+  </div>
+  <div class="grid-stat" id="analytics-stats" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon blue">👥</div><div class="stat-body"><div class="val" id="an-leads">–</div><div class="lbl">Total Leads</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="an-revenue">–</div><div class="lbl">Revenue</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📧</div><div class="stat-body"><div class="val" id="an-open-rate">–</div><div class="lbl">Email Open Rate</div></div></div>
+    <div class="stat-card"><div class="stat-icon pink">📱</div><div class="stat-body"><div class="val" id="an-posts">–</div><div class="lbl">Published Posts</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">💡</span> AI Recommendations</div></div>
+      <div id="an-recommendations"><div class="empty"><p>Click "Get Recommendations" to see AI-powered insights.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📈</span> Module Breakdown</div></div>
+      <div id="an-breakdown"><div class="empty"><p>Click "Refresh Overview" to load data.</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Workflow Builder ── -->
+<div id="tab-workflows" class="tab-content">
+  <div class="page-header" style="border-left-color:#f97316">
+    <div class="page-header-icon">⚙️</div>
+    <div><div class="page-header-title">Workflow Builder</div><div class="page-header-desc">No-code automation editor — create trigger → condition → action workflows that run automatically.</div></div>
+    <span class="page-header-badge" style="color:#f97316">Automation</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">⚙️</span> Workflows</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadWorkflows()">↻</button>
+      </div>
+      <div id="wf-list"><div class="empty"><div class="icon">⚙️</div><p>No workflows yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Workflow</div></div>
+      <div class="form-group"><label>Workflow Name</label><input id="wf-name" placeholder="Welcome new leads"/></div>
+      <div class="form-group"><label>Description</label><input id="wf-desc" placeholder="Auto-send welcome email when new lead added"/></div>
+      <div class="form-group"><label>Trigger</label>
+        <select id="wf-trigger" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="manual">Manual</option><option value="new_lead">New Lead Added</option>
+          <option value="email_opened">Email Opened</option><option value="deal_stage_change">Deal Stage Change</option>
+          <option value="invoice_paid">Invoice Paid</option><option value="schedule">Schedule</option>
+          <option value="webhook">Webhook</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Actions (one per line)</label>
+        <textarea id="wf-steps" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="send_email: Welcome email&#10;wait: 1 day&#10;create_task: Follow up call"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="createWorkflow()">⚙️ Create Workflow</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header"><div class="card-title"><span class="icon">📋</span> Recent Runs</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadWorkflowRuns()">↻</button>
+    </div>
+    <div id="wf-runs-list"><div class="empty"><p>No runs yet.</p></div></div>
+  </div>
+</div>
+
+<!-- ── Team Management ── -->
+<div id="tab-team" class="tab-content">
+  <div class="page-header" style="border-left-color:#0ea5e9">
+    <div class="page-header-icon">👥</div>
+    <div><div class="page-header-title">Team Management</div><div class="page-header-desc">Invite team members, assign roles, and manage access permissions across your AI Employee workspace.</div></div>
+    <span class="page-header-badge" style="color:#0ea5e9">Multi-User</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">👥</span> Team Members</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadTeamMembers()">↻</button>
+      </div>
+      <div id="team-members-list"><div class="empty"><div class="icon">👥</div><p>No team members yet. Invite someone below.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">✉️</span> Invite Member</div></div>
+      <div class="form-group"><label>Email Address</label><input id="team-email" placeholder="colleague@company.com"/></div>
+      <div class="form-group"><label>Role</label>
+        <select id="team-role" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="admin">Admin — Full access</option>
+          <option value="manager">Manager — Manage agents</option>
+          <option value="member" selected>Member — Read &amp; Write</option>
+          <option value="viewer">Viewer — Read only</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="inviteTeamMember()">✉️ Send Invitation</button>
+      <div id="team-invite-result" style="margin-top:10px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Customer Support ── -->
+<div id="tab-support-desk" class="tab-content">
+  <div class="page-header" style="border-left-color:#14b8a6">
+    <div class="page-header-icon">🎧</div>
+    <div><div class="page-header-title">Customer Support</div><div class="page-header-desc">24/7 helpdesk with smart ticket routing, AI reply suggestions, and a searchable knowledge base.</div></div>
+    <span class="page-header-badge" style="color:#14b8a6">Helpdesk</span>
+  </div>
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    <button class="sup-tab-btn btn btn-primary btn-sm active" onclick="switchSupportTab('tickets',this)">🎫 Tickets</button>
+    <button class="sup-tab-btn btn btn-ghost btn-sm" onclick="switchSupportTab('kb',this)">📚 Knowledge Base</button>
+  </div>
+
+  <!-- Tickets -->
+  <div id="sup-tickets-panel">
+    <div class="grid-stat" style="margin-bottom:16px">
+      <div class="stat-card"><div class="stat-icon red">🔴</div><div class="stat-body"><div class="val" id="sup-open">–</div><div class="lbl">Open</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow">🟡</div><div class="stat-body"><div class="val" id="sup-progress">–</div><div class="lbl">In Progress</div></div></div>
+      <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="sup-resolved">–</div><div class="lbl">Resolved</div></div></div>
+      <div class="stat-card"><div class="stat-icon blue">📚</div><div class="stat-body"><div class="val" id="sup-kb">–</div><div class="lbl">KB Articles</div></div></div>
+    </div>
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">🎫</span> Tickets</div><button class="btn btn-ghost btn-sm" onclick="loadTickets()">↻</button></div>
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <select id="sup-f-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadTickets()">
+            <option value="">All</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option>
+          </select>
+        </div>
+        <div id="sup-ticket-list"><div class="empty"><div class="icon">🎫</div><p>No tickets yet.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Ticket</div></div>
+        <div class="form-group"><label>Subject</label><input id="sup-subject" placeholder="Issue with billing…"/></div>
+        <div class="form-group"><label>Customer Email</label><input id="sup-cust-email" placeholder="customer@example.com"/></div>
+        <div class="form-group"><label>Customer Name</label><input id="sup-cust-name" placeholder="Jane Doe"/></div>
+        <div class="form-group"><label>Priority</label>
+          <select id="sup-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="low">Low</option><option value="medium" selected>Medium</option>
+            <option value="high">High</option><option value="urgent">Urgent</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Category</label>
+          <select id="sup-cat" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="general">General</option><option value="billing">Billing</option>
+            <option value="technical">Technical</option><option value="feature_request">Feature Request</option><option value="bug">Bug</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Description</label>
+          <textarea id="sup-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Describe the issue…"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="createTicket()">🎫 Submit Ticket</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Knowledge Base -->
+  <div id="sup-kb-panel" style="display:none">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">📚</span> KB Articles</div><button class="btn btn-ghost btn-sm" onclick="loadKBArticles()">↻</button></div>
+        <div id="sup-kb-list"><div class="empty"><div class="icon">📚</div><p>No articles yet.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Article</div></div>
+        <div class="form-group"><label>Title</label><input id="kb-title" placeholder="How to reset your password"/></div>
+        <div class="form-group"><label>Category</label>
+          <select id="kb-cat" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="general">General</option><option value="billing">Billing</option>
+            <option value="technical">Technical</option><option value="feature_request">Features</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Content</label>
+          <textarea id="kb-content" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Write the article content…"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="createKBArticle()">📚 Save Article</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Website Builder ── -->
+<div id="tab-website-builder" class="tab-content">
+  <div class="page-header" style="border-left-color:#3b82f6">
+    <div class="page-header-icon">🌐</div>
+    <div><div class="page-header-title">Website Builder</div><div class="page-header-desc">Generate complete landing page HTML from a business description using AI. Edit and export instantly.</div></div>
+    <span class="page-header-badge" style="color:#3b82f6">AI Builder</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">🌐</span> Generated Pages</div><button class="btn btn-ghost btn-sm" onclick="loadPages()">↻</button></div>
+      <div id="wb-pages-list"><div class="empty"><div class="icon">🌐</div><p>No pages yet. Generate one →</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">✨</span> Generate Page</div></div>
+      <div class="form-group"><label>Business Name</label><input id="wb-biz" placeholder="Acme SaaS"/></div>
+      <div class="form-group"><label>Industry</label><input id="wb-industry" placeholder="B2B Software"/></div>
+      <div class="form-group"><label>Page Type</label>
+        <select id="wb-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="landing">Landing Page</option><option value="sales">Sales Page</option>
+          <option value="portfolio">Portfolio</option><option value="product">Product Page</option>
+          <option value="coming_soon">Coming Soon</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Description</label>
+        <textarea id="wb-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="We help B2B companies automate their sales process…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="generateWebPage()">🌐 Generate Page</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Competitor Watch ── -->
+<div id="tab-competitors" class="tab-content">
+  <div class="page-header" style="border-left-color:#ef4444">
+    <div class="page-header-icon">🔍</div>
+    <div><div class="page-header-title">Competitor Watch</div><div class="page-header-desc">Track competitors, run AI analysis, and get counter-strategy recommendations.</div></div>
+    <span class="page-header-badge" style="color:#ef4444">Intelligence</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">🔍</span> Competitors</div><button class="btn btn-ghost btn-sm" onclick="loadCompetitors()">↻</button></div>
+      <div id="comp-list"><div class="empty"><div class="icon">🔍</div><p>No competitors tracked yet.</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Competitor</div></div>
+      <div class="form-group"><label>Company Name</label><input id="comp-name" placeholder="Competitor Inc"/></div>
+      <div class="form-group"><label>Website</label><input id="comp-website" placeholder="https://competitor.com"/></div>
+      <div class="form-group"><label>Description</label>
+        <textarea id="comp-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="What they do and who they target…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="addCompetitor()">➕ Add &amp; Watch</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px;display:none" id="comp-analysis-card">
+    <div class="card-header"><div class="card-title"><span class="icon">🤖</span> AI Analysis</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('comp-analysis-card').style.display='none'">✕</button>
+    </div>
+    <div id="comp-analysis-body" style="white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
+  </div>
+</div>
+
+<!-- ── Personal Brand ── -->
+<div id="tab-brand" class="tab-content">
+  <div class="page-header" style="border-left-color:#a855f7">
+    <div class="page-header-icon">✨</div>
+    <div><div class="page-header-title">Personal Brand Agent</div><div class="page-header-desc">Build your thought leadership — AI content generation, topic ideas, and brand voice consistency.</div></div>
+    <span class="page-header-badge" style="color:#a855f7">Brand</span>
+  </div>
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    <button class="br-tab-btn btn btn-primary btn-sm active" onclick="switchBrandTab('generate',this)">✍️ Generate</button>
+    <button class="br-tab-btn btn btn-ghost btn-sm" onclick="switchBrandTab('profile',this)">👤 Profile</button>
+    <button class="br-tab-btn btn btn-ghost btn-sm" onclick="switchBrandTab('library',this)">📁 Library</button>
+  </div>
+
+  <div id="br-generate-panel">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">💡</span> Topic Ideas</div>
+          <button class="btn btn-ghost btn-sm" onclick="suggestBrandTopics()">✨ AI Suggest</button>
+        </div>
+        <div id="br-topics-list"><div class="empty"><p>Click "AI Suggest" to get 10 topic ideas based on your profile.</p></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">✍️</span> Generate Content</div></div>
+        <div class="form-group"><label>Topic</label><input id="br-topic" placeholder="Why AI is transforming sales…"/></div>
+        <div class="form-group"><label>Content Type</label>
+          <select id="br-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="linkedin_post">LinkedIn Post</option><option value="twitter_thread">Twitter/X Thread</option>
+            <option value="newsletter">Newsletter Section</option><option value="blog_intro">Blog Intro</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="generateBrandContent()">✨ Generate</button>
+        <div id="br-generated" style="margin-top:12px;white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="br-profile-panel" style="display:none">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">👤</span> Brand Profile</div></div>
+      <div class="grid2">
+        <div>
+          <div class="form-group"><label>Your Name</label><input id="br-p-name" placeholder="Jane Smith"/></div>
+          <div class="form-group"><label>Title / Role</label><input id="br-p-title" placeholder="CEO & Founder"/></div>
+          <div class="form-group"><label>Industry</label><input id="br-p-industry" placeholder="B2B SaaS"/></div>
+        </div>
+        <div>
+          <div class="form-group"><label>Target Audience</label><input id="br-p-audience" placeholder="Sales leaders at mid-market companies"/></div>
+          <div class="form-group"><label>Tone</label>
+            <select id="br-p-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+              <option value="professional">Professional</option><option value="casual">Casual</option>
+              <option value="inspirational">Inspirational</option><option value="educational">Educational</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="saveBrandProfile()">💾 Save Profile</button>
+    </div>
+  </div>
+
+  <div id="br-library-panel" style="display:none">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📁</span> Content Library</div><button class="btn btn-ghost btn-sm" onclick="loadBrandContent()">↻</button></div>
+      <div id="br-content-list"><div class="empty"><div class="icon">📁</div><p>No content saved yet.</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Health Check ── -->
+<div id="tab-health" class="tab-content">
+  <div class="page-header" style="border-left-color:#f43f5e">
+    <div class="page-header-icon">❤️</div>
+    <div><div class="page-header-title">Business Health Check</div><div class="page-header-desc">One-click audit of your entire business — graded A to D with issues identified and fixes recommended.</div></div>
+    <span class="page-header-badge" style="color:#f43f5e">Audit</span>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="runHealthCheck()">❤️ Run Health Check</button>
+    <button class="btn btn-ghost" onclick="loadHealthHistory()">📅 History</button>
+  </div>
+  <div id="hc-report-card" class="card" style="display:none">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">❤️</span> Health Report</div>
+      <span id="hc-grade" style="font-size:2em;font-weight:900;color:var(--gold)"></span>
+    </div>
+    <div id="hc-report-body"></div>
+  </div>
+  <div id="hc-latest-msg" class="card">
+    <div class="card-header"><div class="card-title"><span class="icon">💡</span> Business Health</div></div>
+    <div class="empty"><div class="icon">❤️</div><p>Click "Run Health Check" to audit your business across all modules.</p></div>
+  </div>
+  <div id="hc-history" style="margin-top:16px"></div>
+</div>
+
+<!-- ── Export & Backup ── -->
+<div id="tab-export" class="tab-content">
+  <div class="page-header" style="border-left-color:#64748b">
+    <div class="page-header-icon">💾</div>
+    <div><div class="page-header-title">Export &amp; Backup</div><div class="page-header-desc">Export any module as JSON or CSV, create full ZIP backups of all your AI Employee data.</div></div>
+    <span class="page-header-badge" style="color:#64748b">Data</span>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="createBackup()">🗜️ Create Full Backup</button>
+    <button class="btn btn-ghost" onclick="loadExportModules()">↻ Refresh</button>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">📦</span> Export Modules</div></div>
+      <p style="font-size:.84em;color:var(--text-muted);margin-bottom:12px">Click a module to export all its data as JSON.</p>
+      <div id="export-modules-list"><div class="empty"><p>Loading modules…</p></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title"><span class="icon">🗜️</span> Backups</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadBackupsList()">↻</button>
+      </div>
+      <div id="export-backups-list"><div class="empty"><div class="icon">🗜️</div><p>No backups yet. Create one to get started.</p></div></div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Skills ── -->
 <div id="tab-skills" class="tab-content">
   <div class="page-header" style="border-left-color:#22d3ee">
@@ -3758,6 +4496,54 @@ INDEX_HTML = r"""<!doctype html>
       </div>
     </div>
   </div>
+
+  <!-- High-Risk Action Review -->
+  <div class="card" style="border:1px solid rgba(239,68,68,.3);background:linear-gradient(135deg,rgba(239,68,68,.04),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:#ef4444">⚠️</span> High-Risk Action Review</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="loadPendingActions()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444;border-color:rgba(239,68,68,.3)" onclick="showSubmitActionForm()">+ Submit Action</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">
+      AI-suggested or system-generated actions that require human approval before execution.
+      <strong style="color:#ef4444">Review carefully — these may have real-world effects.</strong>
+    </p>
+    <div id="pending-actions-list"><div class="empty"><div class="icon">✅</div><p>No pending actions. All clear!</p></div></div>
+
+    <!-- Submit action form (hidden by default) -->
+    <div id="submit-action-form" style="display:none;margin-top:16px;border-top:1px solid rgba(239,68,68,.2);padding-top:16px">
+      <div style="font-size:.84em;font-weight:600;color:var(--text);margin-bottom:10px">Submit Action for Review</div>
+      <div class="form-group"><label>Action Type</label>
+        <select id="pa-action-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="send_email">Send Bulk Email</option>
+          <option value="social_post">Social Media Post</option>
+          <option value="purchase">Make Purchase</option>
+          <option value="delete_data">Delete/Modify Data</option>
+          <option value="api_call">External API Call</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Description *</label><textarea id="pa-description" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Describe exactly what this action will do…"></textarea></div>
+      <div class="form-group"><label>Risk Level</label>
+        <select id="pa-risk-level" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <option value="low">🟢 Low</option>
+          <option value="medium" selected>🟡 Medium</option>
+          <option value="high">🟠 High</option>
+          <option value="critical">🔴 Critical</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Payload (JSON, optional)</label>
+        <textarea id="pa-payload" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='{"recipients": 150, "subject": "..."}'></textarea>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="submitPendingAction()" style="flex:1">⚠️ Submit for Review</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('submit-action-form').style.display='none'">Cancel</button>
+      </div>
+      <div id="pa-submit-result" style="margin-top:8px;font-size:.84em"></div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Memory ── -->
@@ -3869,6 +4655,101 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+// ── Nav scroll arrows ──
+/* ── Group ↔ Tab navigation ── */
+const _TAB_TO_GROUP = {
+  dashboard:'overview',
+  chat:'intel', history:'intel',
+  tasks:'operations', swarm:'operations', 'live-office':'operations', scheduler:'operations',
+  workers:'forces', skills:'forces', improvements:'forces', commands:'forces',
+  metrics:'analytics', budget:'analytics',
+  templates:'library', artifacts:'library', memory:'library',
+  guardrails:'systems', integrations:'systems', options:'systems', org:'systems',
+  goals:'systems', tickets:'systems', boardroom:'systems', companies:'systems',
+  blacklight:'power', ascend:'power'
+};
+
+function switchGroup(group, btn) {
+  // Update primary nav active state
+  document.querySelectorAll('.nav-group-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // Show corresponding sub-nav
+  document.querySelectorAll('.sub-nav').forEach(s => s.classList.remove('active'));
+  const subNav = document.getElementById('subnav-' + group);
+  if (subNav) subNav.classList.add('active');
+  // If overview, go directly to dashboard
+  if (group === 'overview') {
+    switchTab('dashboard', btn);
+  } else {
+    // Activate the first sub-tab of this group
+    const firstBtn = subNav && subNav.querySelector('button');
+    if (firstBtn) firstBtn.click();
+  }
+}
+
+function navScroll(dir) {
+  /* legacy — no-op with new grouped nav */
+}
+function _updateNavArrows() { /* legacy — no-op */ }
+document.addEventListener('DOMContentLoaded', function() {
+  /* grouped nav needs no scroll arrows */
+});
+
+function switchTab(tab, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  const tabEl = document.getElementById('tab-' + tab);
+  if (tabEl) tabEl.classList.add('active');
+  // Sub-nav active state — find the right button automatically if not provided
+  document.querySelectorAll('.sub-nav button').forEach(b => b.classList.remove('active'));
+  if (btn && btn.classList && !btn.classList.contains('nav-group-btn')) {
+    btn.classList.add('active');
+  } else {
+    // Auto-find sub-nav button for this tab
+    const group = _TAB_TO_GROUP[tab] || 'overview';
+    const subNav = document.getElementById('subnav-' + group);
+    if (subNav) {
+      const safeTab = Object.keys(_TAB_TO_GROUP).includes(tab) ? tab : '';
+      const subBtn = safeTab ? subNav.querySelector(`button[onclick*="${safeTab}"]`) : null;
+      if (subBtn) subBtn.classList.add('active');
+    }
+  }
+  // Ensure correct group is highlighted
+  const group = _TAB_TO_GROUP[tab] || 'overview';
+  document.querySelectorAll('.nav-group-btn').forEach(b => b.classList.remove('active'));
+  const groupBtn = document.querySelector(`.nav-group-btn[data-group="${group}"]`);
+  if (groupBtn) groupBtn.classList.add('active');
+  // Ensure correct sub-nav is visible
+  document.querySelectorAll('.sub-nav').forEach(s => s.classList.remove('active'));
+  const subNav = document.getElementById('subnav-' + group);
+  if (subNav) subNav.classList.add('active');
+  currentTab = tab;
+  if (tab === 'dashboard') loadDashboard();
+  if (tab === 'chat') loadChatLog();
+  if (tab === 'scheduler') loadSchedules();
+  if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm().then(renderSwarmAgentGrid); else renderSwarmAgentGrid(); }
+  if (tab === 'improvements') loadImprovements();
+  if (tab === 'skills') loadSkills();
+  if (tab === 'tasks') loadTasks();
+  if (tab === 'swarm') { loadSwarm(); swarmTheaterRefresh(); }
+  if (tab === 'live-office') loadLiveOffice();
+  if (tab === 'commands') loadCommandsTab();
+  if (tab === 'metrics') loadMetrics();
+  if (tab === 'templates') loadTemplates();
+  if (tab === 'guardrails') loadGuardrails();
+  if (tab === 'memory') loadMemory();
+  if (tab === 'integrations') loadIntegrations();
+  if (tab === 'history') loadHistory();
+  if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
+  if (tab === 'blacklight') { blRefresh(); blLoadLogs(); }
+  if (tab === 'ascend') { afRefresh(); afLoadPatches(); afLoadChangelog(); }
+  if (tab === 'budget') loadBudget();
+  if (tab === 'org') { loadOrg(); loadOrgAdapters(); }
+  if (tab === 'goals') loadGoals();
+  if (tab === 'tickets') { loadTickets(); loadTicketAudit(); }
+  if (tab === 'boardroom') loadBoardroom();
+  if (tab === 'companies') loadCompanies();
+  if (tab === 'artifacts') { loadArtifacts(); loadSessions(); }
+}
 <!-- ── History ── -->
 <div id="tab-history" class="tab-content">
   <div class="page-header" style="border-left-color:#7dd3fc">
@@ -4279,6 +5160,43 @@ INDEX_HTML = r"""<!doctype html>
   @media(prefers-reduced-motion:reduce){.af-mode-btn{transition:none}.af-stat-card{transition:none}}
   </style>
 
+function _renderDashAgentMap(agents, statusData) {
+  const el = document.getElementById('dash-agent-map');
+  if (!el) return;
+  const activeAgents = new Set(statusData?.active_agents || []);
+  if (!agents.length) {
+    el.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="icon">🤖</div><p style="font-size:.84em">No agents loaded. Start agents from the button above.</p></div>';
+    return;
+  }
+  const agentEmoji = {
+    'task-orchestrator':'🎯','lead-generator':'🎯','lead-hunter':'🎯','offer-agent':'📧',
+    'company-builder':'🏢','brand-strategist':'🎨','finance-wizard':'💰','growth-hacker':'📈',
+    'social-media-manager':'📱','paid-media-specialist':'📣','qualification-agent':'🔍',
+    'follow-up-agent':'🔄','appointment-setter':'📅','ui-designer':'🎨','web-researcher':'🌐',
+    'engineering-assistant':'💻','ecom-agent':'🛒','chatbot-builder':'🤖','creator-agency':'✍️',
+    'recruiter':'👔','hr-manager':'👔','project-manager':'📋','finance':'💰',
+    'newsletter-bot':'📰','faceless-video':'🎬','course-creator':'📚',
+  };
+  const taskLabels = {
+    'task-orchestrator':'Routing tasks','lead-generator':'Finding leads','offer-agent':'Writing outreach',
+    'company-builder':'Building strategy','brand-strategist':'Crafting brand','finance-wizard':'Analyzing finances',
+    'growth-hacker':'Growing traffic','social-media-manager':'Posting content','paid-media-specialist':'Optimizing ads',
+    'web-researcher':'Researching web','engineering-assistant':'Writing code','ecom-agent':'Managing store',
+    'follow-up-agent':'Following up leads','project-manager':'Managing tasks',
+  };
+  el.innerHTML = agents.map(a => {
+    const isRunning = a.running;
+    const isActive = activeAgents.has(a.id);
+    const emoji = agentEmoji[a.id] || '🤖';
+    const task = isActive ? (taskLabels[a.id] || 'Working on task') : (isRunning ? 'Ready — standing by' : 'Stopped');
+    const dotColor = isActive ? 'var(--gold)' : (isRunning ? 'var(--success)' : 'rgba(148,163,184,.3)');
+    const cardBg = isActive ? 'rgba(212,175,55,.07)' : (isRunning ? 'rgba(16,185,129,.04)' : 'transparent');
+    const cardBorder = isActive ? 'rgba(212,175,55,.4)' : (isRunning ? 'rgba(16,185,129,.2)' : 'rgba(148,163,184,.12)');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid ${cardBorder};background:${cardBg};transition:all .2s;cursor:pointer" title="${a.id}" onclick="switchTab('live-office',null)">
+      <div style="font-size:1.2em;flex-shrink:0">${emoji}</div>
+      <div style="min-width:0;flex:1">
+        <div style="font-size:.8em;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.id)}</div>
+        <div style="font-size:.7em;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(task)}</div>
   <!-- ── Ascend Forge Task Composer ── -->
   <div class="card" style="margin-bottom:18px;border:2px solid rgba(251,191,36,.35);background:linear-gradient(135deg,rgba(120,53,15,.18),rgba(10,5,0,.95));box-shadow:0 0 40px rgba(217,119,6,.12)">
     <div class="card-header">
@@ -4397,6 +5315,521 @@ INDEX_HTML = r"""<!doctype html>
 
 </div>
 
+</div>
+
+<!-- ── CRM ── -->
+<div id="tab-crm" class="tab-content">
+  <div class="page-header" style="border-left-color:#f59e0b">
+    <div class="page-header-icon">🎯</div>
+    <div><div class="page-header-title">Lead CRM</div><div class="page-header-desc">Manage your sales pipeline from first contact to closed deal. Score leads, track stages, and schedule follow-ups.</div></div>
+    <span class="page-header-badge" style="color:#f59e0b">Sales Pipeline</span>
+  </div>
+  <div class="grid-stat" id="crm-pipeline-stats">
+    <div class="stat-card"><div class="stat-icon yellow">🆕</div><div class="stat-body"><div class="val" id="crm-stat-new">–</div><div class="lbl">New Leads</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">✅</div><div class="stat-body"><div class="val" id="crm-stat-qualified">–</div><div class="lbl">Qualified</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📄</div><div class="stat-body"><div class="val" id="crm-stat-proposal">–</div><div class="lbl">Proposal Sent</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">🤝</div><div class="stat-body"><div class="val" id="crm-stat-won">–</div><div class="lbl">Closed Won</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <!-- Pipeline kanban -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🎯</span> Pipeline</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadCRM()">↻ Refresh</button>
+      </div>
+      <div id="crm-pipeline-kanban" style="display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+    <!-- Add lead form + lead list -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card" style="border:1px solid rgba(245,158,11,.3)">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">➕</span> Add Lead</div>
+        </div>
+        <div class="form-group"><label>Name *</label><input id="crm-name" placeholder="Contact name"/></div>
+        <div class="form-group"><label>Company</label><input id="crm-company" placeholder="Company name"/></div>
+        <div class="form-group"><label>Email</label><input id="crm-email" type="email" placeholder="email@example.com"/></div>
+        <div class="form-group"><label>Phone</label><input id="crm-phone" placeholder="+1 555-0000"/></div>
+        <div class="form-group"><label>Deal Value ($)</label><input id="crm-value" type="number" min="0" placeholder="0"/></div>
+        <div class="form-group"><label>Source</label><input id="crm-source" placeholder="LinkedIn, Referral, Website…"/></div>
+        <div class="form-group"><label>Notes</label><textarea id="crm-notes" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Initial notes…"></textarea></div>
+        <button class="btn btn-primary" onclick="addCRMLead()" style="width:100%">➕ Add Lead</button>
+        <div id="crm-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">👥</span> All Leads</div>
+          <input id="crm-search" placeholder="🔍 Search leads…" oninput="loadCRM()" style="font-size:.8em;padding:4px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);width:140px"/>
+        </div>
+        <div id="crm-leads-list"><div class="empty"><div class="icon">🎯</div><p>No leads yet. Add your first lead.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Email Marketing ── -->
+<div id="tab-email-marketing" class="tab-content">
+  <div class="page-header" style="border-left-color:#06b6d4">
+    <div class="page-header-icon">📧</div>
+    <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create and manage email campaigns, multi-step sequences, and track performance metrics.</div></div>
+    <span class="page-header-badge" style="color:#06b6d4">Campaigns</span>
+  </div>
+  <div class="grid-stat">
+    <div class="stat-card"><div class="stat-icon blue">📧</div><div class="stat-body"><div class="val" id="em-stat-total">–</div><div class="lbl">Total Campaigns</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="em-stat-sent">–</div><div class="lbl">Sent</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">📝</div><div class="stat-body"><div class="val" id="em-stat-draft">–</div><div class="lbl">Drafts</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📊</div><div class="stat-body"><div class="val" id="em-stat-open-rate">–</div><div class="lbl">Avg Open Rate</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Campaign list -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📧</span> Campaigns</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadEmailCampaigns()">↻ Refresh</button>
+        </div>
+        <div id="em-campaigns-list"><div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div></div>
+      </div>
+      <!-- Campaign stats panel -->
+      <div class="card" id="em-stats-card" style="display:none">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📊</span> Campaign Stats</div>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('em-stats-card').style.display='none'">✕</button>
+        </div>
+        <div id="em-stats-body"></div>
+      </div>
+      <!-- Deliverability tips -->
+      <div class="card" style="border:1px solid rgba(6,182,212,.2)">
+        <div class="card-header"><div class="card-title"><span class="icon">🛡️</span> Deliverability Tips</div></div>
+        <div id="em-tips-list" style="font-size:.84em"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Create campaign form -->
+      <div class="card" style="border:1px solid rgba(6,182,212,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Campaign</div></div>
+        <div class="form-group"><label>Campaign Name *</label><input id="em-camp-name" placeholder="e.g. Q1 Outreach"/></div>
+        <div class="form-group"><label>From Name</label><input id="em-from-name" placeholder="Your Name / Company"/></div>
+        <div class="form-group"><label>Subject Line *</label><input id="em-subject" placeholder="Email subject line"/></div>
+        <div class="form-group"><label>Email Body *</label><textarea id="em-body" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Email body content…"></textarea></div>
+        <button class="btn btn-primary" onclick="createEmailCampaign()" style="width:100%">📧 Create Campaign</button>
+        <div id="em-create-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <!-- AI Email Writer -->
+      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+        <div class="card-header"><div class="card-title"><span style="color:var(--gold)">◈</span> AI Email Writer</div></div>
+        <div class="form-group"><label>Campaign Goal</label><input id="em-write-goal" placeholder="e.g. Book a discovery call"/></div>
+        <div class="form-group"><label>Tone</label>
+          <select id="em-write-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="professional">Professional</option>
+            <option value="friendly">Friendly</option>
+            <option value="urgent">Urgent</option>
+            <option value="conversational">Conversational</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Target Audience</label><input id="em-write-audience" placeholder="e.g. SaaS founders"/></div>
+        <button class="btn btn-primary" onclick="aiWriteEmail()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4)">◈ Generate Email</button>
+        <div id="em-write-result" style="margin-top:10px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Meetings ── -->
+<div id="tab-meetings" class="tab-content">
+  <div class="page-header" style="border-left-color:#a78bfa">
+    <div class="page-header-icon">🗓️</div>
+    <div><div class="page-header-title">Meeting Intelligence</div><div class="page-header-desc">Record meetings, AI-summarize transcripts, extract action items, and generate follow-up emails automatically.</div></div>
+    <span class="page-header-badge" style="color:#a78bfa">Meetings</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🗓️</span> Meetings</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadMeetings()">↻ Refresh</button>
+        </div>
+        <div id="meetings-list"><div class="empty"><div class="icon">🗓️</div><p>No meetings recorded yet.</p></div></div>
+      </div>
+      <!-- Meeting detail -->
+      <div class="card" id="meeting-detail-card" style="display:none">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📋</span> Meeting Detail</div>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('meeting-detail-card').style.display='none'">✕</button>
+        </div>
+        <div id="meeting-detail-body"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card" style="border:1px solid rgba(167,139,250,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Meeting</div></div>
+        <div class="form-group"><label>Title *</label><input id="mtg-title" placeholder="e.g. Q1 Strategy Review"/></div>
+        <div class="form-group"><label>Date</label><input id="mtg-date" type="datetime-local"/></div>
+        <div class="form-group"><label>Participants (comma-separated)</label><input id="mtg-participants" placeholder="Alice, Bob, Carol"/></div>
+        <div class="form-group"><label>Meeting Type</label>
+          <select id="mtg-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="general">General</option>
+            <option value="sales">Sales</option>
+            <option value="strategy">Strategy</option>
+            <option value="1on1">1-on-1</option>
+            <option value="review">Review</option>
+            <option value="kickoff">Kickoff</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Transcript / Notes</label><textarea id="mtg-transcript" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Paste meeting transcript or notes here…"></textarea></div>
+        <button class="btn btn-primary" onclick="addMeeting()" style="width:100%">🗓️ Save Meeting</button>
+        <div id="mtg-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Social Media Scheduler ── -->
+<div id="tab-social" class="tab-content">
+  <div class="page-header" style="border-left-color:#ec4899">
+    <div class="page-header-icon">📱</div>
+    <div><div class="page-header-title">Social Media Scheduler</div><div class="page-header-desc">Schedule posts across all platforms, generate AI content, and track your publishing activity.</div></div>
+    <span class="page-header-badge" style="color:#ec4899">Social</span>
+  </div>
+  <div class="grid-stat">
+    <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="soc-stat-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="soc-stat-posted">–</div><div class="lbl">Posted</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">📝</div><div class="stat-body"><div class="val" id="soc-stat-draft">–</div><div class="lbl">Drafts</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📊</div><div class="stat-body"><div class="val" id="soc-stat-total">–</div><div class="lbl">Total Posts</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📅</span> Scheduled Posts</div>
+          <div style="display:flex;gap:6px">
+            <select id="soc-filter-platform" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadSocialPosts()">
+              <option value="">All Platforms</option>
+              <option value="twitter">Twitter/X</option>
+              <option value="instagram">Instagram</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="tiktok">TikTok</option>
+              <option value="facebook">Facebook</option>
+              <option value="youtube">YouTube</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="loadSocialPosts()">↻</button>
+            <button class="btn btn-ghost btn-sm" onclick="processScheduledPosts()">▶ Auto-Post</button>
+          </div>
+        </div>
+        <div id="social-posts-list"><div class="empty"><div class="icon">📱</div><p>No posts scheduled yet.</p></div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Schedule post form -->
+      <div class="card" style="border:1px solid rgba(236,72,153,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Schedule Post</div></div>
+        <div class="form-group"><label>Platform *</label>
+          <select id="soc-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="twitter">Twitter/X</option>
+            <option value="instagram">Instagram</option>
+            <option value="linkedin">LinkedIn</option>
+            <option value="tiktok">TikTok</option>
+            <option value="facebook">Facebook</option>
+            <option value="youtube">YouTube</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Content *</label><textarea id="soc-content" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Post content…"></textarea></div>
+        <div class="form-group"><label>Schedule At *</label><input id="soc-schedule-at" type="datetime-local"/></div>
+        <div class="form-group"><label>Campaign (optional)</label><input id="soc-campaign" placeholder="Campaign name"/></div>
+        <button class="btn btn-primary" onclick="schedulePost()" style="width:100%">📅 Schedule Post</button>
+        <div id="soc-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <!-- AI Content Generator -->
+      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+        <div class="card-header"><div class="card-title"><span style="color:var(--gold)">◈</span> AI Content Generator</div></div>
+        <div class="form-group"><label>Topic / Goal</label><input id="soc-gen-topic" placeholder="e.g. Product launch announcement"/></div>
+        <div class="form-group"><label>Platform</label>
+          <select id="soc-gen-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="twitter">Twitter/X</option><option value="instagram">Instagram</option>
+            <option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="generateSocialContent()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4)">◈ Generate Content</button>
+        <div id="soc-gen-result" style="margin-top:10px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── CEO Briefing ── -->
+<div id="tab-briefing" class="tab-content">
+  <div class="page-header" style="border-left-color:#6366f1">
+    <div class="page-header-icon">📰</div>
+    <div><div class="page-header-title">CEO Daily Briefing</div><div class="page-header-desc">AI-generated executive briefings with key metrics, pipeline status, revenue, and action items for the day.</div></div>
+    <span class="page-header-badge" style="color:#6366f1">Executive</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Today's briefing -->
+      <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📰</span> Today's Briefing</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="loadFullBriefing()">↻ Refresh</button>
+            <button class="btn btn-ghost btn-sm" onclick="forceRegenerateBriefing()">⚡ Regenerate</button>
+          </div>
+        </div>
+        <div id="briefing-today-body"><div class="empty"><div class="icon">📰</div><p>Loading briefing…</p></div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Briefing history -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🕐</span> Briefing History</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadBriefingHistory()">↻ Refresh</button>
+        </div>
+        <div id="briefing-history-list"><div class="empty"><div class="icon">📰</div><p>No past briefings.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Financial Tools ── -->
+<div id="tab-financial" class="tab-content">
+  <div class="page-header" style="border-left-color:#10b981">
+    <div class="page-header-icon">💳</div>
+    <div><div class="page-header-title">Financial Tools</div><div class="page-header-desc">Create and manage invoices, quotes, track expenses, and view your P&amp;L in one place.</div></div>
+    <span class="page-header-badge" style="color:#10b981">Finance</span>
+  </div>
+  <!-- Sub-tab nav -->
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    <button class="fin-tab-btn btn btn-primary btn-sm active" onclick="switchFinTab('invoices',this)">🧾 Invoices</button>
+    <button class="fin-tab-btn btn btn-ghost btn-sm" onclick="switchFinTab('quotes',this)">📄 Quotes</button>
+    <button class="fin-tab-btn btn btn-ghost btn-sm" onclick="switchFinTab('expenses',this)">💸 Expenses</button>
+    <button class="fin-tab-btn btn btn-ghost btn-sm" onclick="switchFinTab('pl',this)">📊 P&amp;L</button>
+  </div>
+
+  <!-- Invoices panel -->
+  <div id="fin-panel-invoices">
+    <div class="grid2" style="align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon">🧾</span> Invoices</div>
+            <div style="display:flex;gap:6px">
+              <select id="inv-filter-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadInvoices()">
+                <option value="">All</option><option value="draft">Draft</option>
+                <option value="sent">Sent</option><option value="paid">Paid</option>
+                <option value="overdue">Overdue</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" onclick="loadInvoices()">↻</button>
+              <button class="btn btn-ghost btn-sm" onclick="checkOverdueInvoices()">⚠️ Check Overdue</button>
+            </div>
+          </div>
+          <div id="invoices-list"><div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div></div>
+        </div>
+      </div>
+      <div class="card" style="border:1px solid rgba(16,185,129,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Invoice</div></div>
+        <div class="form-group"><label>Client Name *</label><input id="inv-client" placeholder="Client name"/></div>
+        <div class="form-group"><label>Client Email</label><input id="inv-email" type="email" placeholder="client@example.com"/></div>
+        <div class="form-group"><label>Items (JSON)</label>
+          <textarea id="inv-items" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='[{"description":"Service","qty":1,"unit_price":500}]'></textarea>
+        </div>
+        <div class="form-group"><label>Due Date</label><input id="inv-due" type="date"/></div>
+        <div class="form-group"><label>Notes</label><input id="inv-notes" placeholder="Optional notes"/></div>
+        <button class="btn btn-primary" onclick="createInvoice()" style="width:100%">🧾 Create Invoice</button>
+        <div id="inv-create-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quotes panel -->
+  <div id="fin-panel-quotes" style="display:none">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📄</span> Quotes</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadQuotes()">↻ Refresh</button>
+        </div>
+        <div id="quotes-list"><div class="empty"><div class="icon">📄</div><p>No quotes yet.</p></div></div>
+      </div>
+      <div class="card" style="border:1px solid rgba(16,185,129,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Quote</div></div>
+        <div class="form-group"><label>Client Name *</label><input id="quo-client" placeholder="Client name"/></div>
+        <div class="form-group"><label>Client Email</label><input id="quo-email" type="email" placeholder="client@example.com"/></div>
+        <div class="form-group"><label>Items (JSON)</label>
+          <textarea id="quo-items" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='[{"description":"Consulting","qty":10,"unit_price":150}]'></textarea>
+        </div>
+        <div class="form-group"><label>Valid Until</label><input id="quo-valid" type="date"/></div>
+        <button class="btn btn-primary" onclick="createQuote()" style="width:100%">📄 Create Quote</button>
+        <div id="quo-create-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Expenses panel -->
+  <div id="fin-panel-expenses" style="display:none">
+    <div class="grid2" style="align-items:start">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">💸</span> Expenses</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadExpenses()">↻ Refresh</button>
+        </div>
+        <div id="expenses-list"><div class="empty"><div class="icon">💸</div><p>No expenses recorded yet.</p></div></div>
+      </div>
+      <div class="card" style="border:1px solid rgba(16,185,129,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Expense</div></div>
+        <div class="form-group"><label>Description *</label><input id="exp-desc" placeholder="e.g. AWS hosting"/></div>
+        <div class="form-group"><label>Amount ($) *</label><input id="exp-amount" type="number" step="0.01" min="0" placeholder="0.00"/></div>
+        <div class="form-group"><label>Category</label>
+          <select id="exp-category" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="general">General</option><option value="software">Software/SaaS</option>
+            <option value="hosting">Hosting/Infrastructure</option><option value="marketing">Marketing</option>
+            <option value="payroll">Payroll</option><option value="office">Office</option>
+            <option value="travel">Travel</option><option value="equipment">Equipment</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Date</label><input id="exp-date" type="date"/></div>
+        <button class="btn btn-primary" onclick="addExpense()" style="width:100%">💸 Add Expense</button>
+        <div id="exp-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P&L panel -->
+  <div id="fin-panel-pl" style="display:none">
+    <div class="card" style="border:1px solid rgba(16,185,129,.3);background:linear-gradient(135deg,rgba(16,185,129,.05),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📊</span> Profit &amp; Loss</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadPL()">↻ Refresh</button>
+      </div>
+      <div id="pl-body"><div class="empty"><div class="icon">📊</div><p>Loading P&amp;L data…</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Competitors ── -->
+<div id="tab-competitors" class="tab-content">
+  <div class="page-header" style="border-left-color:#f43f5e">
+    <div class="page-header-icon">🕵️</div>
+    <div><div class="page-header-title">Competitor Watch</div><div class="page-header-desc">Track and analyze your competitive landscape. AI-powered SWOT analysis and competitive intelligence alerts.</div></div>
+    <span class="page-header-badge" style="color:#f43f5e">Intelligence</span>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🕵️</span> Tracked Competitors</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadCompetitors()">↻ Refresh</button>
+        </div>
+        <div id="competitors-list"><div class="empty"><div class="icon">🕵️</div><p>No competitors tracked yet.</p></div></div>
+      </div>
+      <div class="card" style="border:1px solid rgba(244,63,94,.2)">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🚨</span> Alerts</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadCompetitorAlerts()">↻ Refresh</button>
+        </div>
+        <div id="competitor-alerts-list"><div class="empty"><div class="icon">🚨</div><p>No alerts yet.</p></div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card" style="border:1px solid rgba(244,63,94,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Track Competitor</div></div>
+        <div class="form-group"><label>Competitor Name *</label><input id="comp-name" placeholder="Competitor name"/></div>
+        <div class="form-group"><label>Website</label><input id="comp-website" placeholder="https://competitor.com"/></div>
+        <div class="form-group"><label>Their Pricing</label><input id="comp-pricing" placeholder="e.g. $99/mo freemium"/></div>
+        <div class="form-group"><label>Target Market</label><input id="comp-market" placeholder="e.g. SMB SaaS companies"/></div>
+        <div class="form-group"><label>Notes</label><textarea id="comp-notes" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Initial observations…"></textarea></div>
+        <button class="btn btn-primary" onclick="addCompetitor()" style="width:100%">🕵️ Track Competitor</button>
+        <div id="comp-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <!-- Competitor detail -->
+      <div class="card" id="comp-detail-card" style="display:none">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🔍</span> Analysis</div>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('comp-detail-card').style.display='none'">✕</button>
+        </div>
+        <div id="comp-detail-body"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Content Calendar ── -->
+<div id="tab-content-calendar" class="tab-content">
+  <div class="page-header" style="border-left-color:#f97316">
+    <div class="page-header-icon">🗃️</div>
+    <div><div class="page-header-title">Content Calendar</div><div class="page-header-desc">Plan and track your content across all platforms. AI generates complete 30-day content calendars tailored to your niche.</div></div>
+    <span class="page-header-badge" style="color:#f97316">Content</span>
+  </div>
+  <div class="grid-stat">
+    <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="cc-stat-total">–</div><div class="lbl">Total Entries</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">💡</div><div class="stat-body"><div class="val" id="cc-stat-ideas">–</div><div class="lbl">Ideas</div></div></div>
+    <div class="stat-card"><div class="stat-icon cyan">📅</div><div class="stat-body"><div class="val" id="cc-stat-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="cc-stat-published">–</div><div class="lbl">Published</div></div></div>
+  </div>
+  <div class="grid2" style="align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🗃️</span> Content Calendar</div>
+          <div style="display:flex;gap:6px">
+            <select id="cc-filter-platform" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadContentCalendar()">
+              <option value="">All Platforms</option>
+              <option value="instagram">Instagram</option><option value="twitter">Twitter</option>
+              <option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option>
+              <option value="youtube">YouTube</option><option value="blog">Blog</option>
+            </select>
+            <select id="cc-filter-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadContentCalendar()">
+              <option value="">All Status</option>
+              <option value="idea">Idea</option><option value="draft">Draft</option>
+              <option value="scheduled">Scheduled</option><option value="published">Published</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="loadContentCalendar()">↻</button>
+          </div>
+        </div>
+        <div id="content-calendar-entries"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Add entry form -->
+      <div class="card" style="border:1px solid rgba(249,115,22,.3)">
+        <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Entry</div></div>
+        <div class="form-group"><label>Date *</label><input id="cc-date" type="date"/></div>
+        <div class="form-group"><label>Platform *</label>
+          <select id="cc-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="instagram">Instagram</option><option value="twitter">Twitter/X</option>
+            <option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option>
+            <option value="youtube">YouTube</option><option value="blog">Blog</option>
+            <option value="email">Email</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Content Type</label>
+          <select id="cc-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="post">Post</option><option value="reel">Reel</option>
+            <option value="story">Story</option><option value="article">Article</option>
+            <option value="video">Video</option><option value="email">Email</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Title *</label><input id="cc-title" placeholder="Content title"/></div>
+        <div class="form-group"><label>Content</label><textarea id="cc-content" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Content text (optional)"></textarea></div>
+        <button class="btn btn-primary" onclick="addCalendarEntry()" style="width:100%">➕ Add Entry</button>
+        <div id="cc-add-result" style="margin-top:8px;font-size:.84em"></div>
+      </div>
+      <!-- AI Calendar Generator -->
+      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+        <div class="card-header"><div class="card-title"><span style="color:var(--gold)">◈</span> AI Calendar Generator</div></div>
+        <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Let AI generate a full 30-day content calendar tailored to your niche.</p>
+        <div class="form-group"><label>Your Niche / Business</label><input id="cc-gen-niche" placeholder="e.g. SaaS productivity tools"/></div>
+        <div class="form-group"><label>Days to Generate</label>
+          <select id="cc-gen-days" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <option value="7">7 days</option><option value="14">14 days</option>
+            <option value="30" selected>30 days</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="generateContentCalendar()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4)">◈ Generate Calendar</button>
+        <div id="cc-gen-result" style="margin-top:10px;font-size:.84em"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </main>
 
 <div id="toast"></div>
@@ -4411,72 +5844,37 @@ function switchToChatTab() {
 }
 
 // ── Nav scroll arrows ──
-/* ── Group ↔ Tab navigation ── */
-const _TAB_TO_GROUP = {
-  dashboard:'overview',
-  chat:'intel', history:'intel',
-  tasks:'operations', swarm:'operations', 'live-office':'operations', scheduler:'operations',
-  workers:'forces', skills:'forces', improvements:'forces', commands:'forces',
-  metrics:'analytics', budget:'analytics',
-  templates:'library', artifacts:'library', memory:'library',
-  guardrails:'systems', integrations:'systems', options:'systems', org:'systems',
-  goals:'systems', tickets:'systems', boardroom:'systems', companies:'systems',
-  blacklight:'power', ascend:'power'
-};
-
-function switchGroup(group, btn) {
-  // Update primary nav active state
-  document.querySelectorAll('.nav-group-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  // Show corresponding sub-nav
-  document.querySelectorAll('.sub-nav').forEach(s => s.classList.remove('active'));
-  const subNav = document.getElementById('subnav-' + group);
-  if (subNav) subNav.classList.add('active');
-  // If overview, go directly to dashboard
-  if (group === 'overview') {
-    switchTab('dashboard', btn);
-  } else {
-    // Activate the first sub-tab of this group
-    const firstBtn = subNav && subNav.querySelector('button');
-    if (firstBtn) firstBtn.click();
-  }
-}
-
 function navScroll(dir) {
-  /* legacy — no-op with new grouped nav */
+  const nav = document.getElementById('main-nav');
+  nav.scrollBy({left: dir * 220, behavior: 'smooth'});
 }
-function _updateNavArrows() { /* legacy — no-op */ }
+function _updateNavArrows() {
+  const nav = document.getElementById('main-nav');
+  if (!nav) return;
+  const btnL = document.getElementById('nav-scroll-left');
+  const btnR = document.getElementById('nav-scroll-right');
+  const atStart = nav.scrollLeft <= 4;
+  const atEnd = nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 4;
+  btnL.classList.toggle('hidden', atStart);
+  btnR.classList.toggle('hidden', atEnd);
+}
 document.addEventListener('DOMContentLoaded', function() {
-  /* grouped nav needs no scroll arrows */
+  const nav = document.getElementById('main-nav');
+  if (nav) {
+    nav.addEventListener('scroll', _updateNavArrows, {passive:true});
+    _updateNavArrows();
+    // Update arrows on window resize
+    window.addEventListener('resize', _updateNavArrows, {passive:true});
+  }
 });
 
 function switchTab(tab, btn) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  const tabEl = document.getElementById('tab-' + tab);
-  if (tabEl) tabEl.classList.add('active');
-  // Sub-nav active state — find the right button automatically if not provided
-  document.querySelectorAll('.sub-nav button').forEach(b => b.classList.remove('active'));
-  if (btn && btn.classList && !btn.classList.contains('nav-group-btn')) {
-    btn.classList.add('active');
-  } else {
-    // Auto-find sub-nav button for this tab
-    const group = _TAB_TO_GROUP[tab] || 'overview';
-    const subNav = document.getElementById('subnav-' + group);
-    if (subNav) {
-      const safeTab = Object.keys(_TAB_TO_GROUP).includes(tab) ? tab : '';
-      const subBtn = safeTab ? subNav.querySelector(`button[onclick*="${safeTab}"]`) : null;
-      if (subBtn) subBtn.classList.add('active');
-    }
-  }
-  // Ensure correct group is highlighted
-  const group = _TAB_TO_GROUP[tab] || 'overview';
-  document.querySelectorAll('.nav-group-btn').forEach(b => b.classList.remove('active'));
-  const groupBtn = document.querySelector(`.nav-group-btn[data-group="${group}"]`);
-  if (groupBtn) groupBtn.classList.add('active');
-  // Ensure correct sub-nav is visible
-  document.querySelectorAll('.sub-nav').forEach(s => s.classList.remove('active'));
-  const subNav = document.getElementById('subnav-' + group);
-  if (subNav) subNav.classList.add('active');
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  btn.classList.add('active');
+  // Scroll active tab into view
+  btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
   currentTab = tab;
   if (tab === 'dashboard') loadDashboard();
   if (tab === 'chat') loadChatLog();
@@ -4497,6 +5895,7 @@ function switchTab(tab, btn) {
   if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
   if (tab === 'blacklight') { blRefresh(); blLoadLogs(); }
   if (tab === 'ascend') { afRefresh(); afLoadPatches(); afLoadChangelog(); }
+  // New Paperclip-parity tabs
   if (tab === 'budget') loadBudget();
   if (tab === 'org') { loadOrg(); loadOrgAdapters(); }
   if (tab === 'goals') loadGoals();
@@ -4853,7 +6252,7 @@ function _renderDashAgentMap(agents, statusData) {
     const dotColor = isActive ? 'var(--gold)' : (isRunning ? 'var(--success)' : 'rgba(148,163,184,.3)');
     const cardBg = isActive ? 'rgba(212,175,55,.07)' : (isRunning ? 'rgba(16,185,129,.04)' : 'transparent');
     const cardBorder = isActive ? 'rgba(212,175,55,.4)' : (isRunning ? 'rgba(16,185,129,.2)' : 'rgba(148,163,184,.12)');
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid ${cardBorder};background:${cardBg};transition:all .2s;cursor:pointer" title="${a.id}" onclick="switchTab('live-office',null)">
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid ${cardBorder};background:${cardBg};transition:all .2s;cursor:pointer" title="${a.id}" onclick="switchTab('live-office',document.querySelector('nav button[onclick*=\\'live-office\\']'))">
       <div style="font-size:1.2em;flex-shrink:0">${emoji}</div>
       <div style="min-width:0;flex:1">
         <div style="font-size:.8em;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.id)}</div>
@@ -7939,7 +9338,8 @@ function exportHistory() {
 function rerunTaskFromHistory(description) {
   const taskInput = document.getElementById('task-input');
   if (taskInput) { taskInput.value = description; }
-  switchTab('tasks', null);
+  const tasksBtn = document.querySelector('nav button[onclick*="\'tasks\'"]');
+  if (tasksBtn) switchTab('tasks', tasksBtn);
   setTimeout(() => {
     const el = document.getElementById('task-input');
     if (el) { el.focus(); el.scrollIntoView({behavior:'smooth', block:'nearest'}); }
@@ -7952,14 +9352,16 @@ async function viewTaskById(taskId) {
   if (!r.ok) { toast('Could not load tasks', 'error'); return; }
   const plan = (r.plans || []).find(p => p.id === taskId);
   if (plan) {
-    switchTab('tasks', null);
+    const tasksBtn = document.querySelector('nav button[onclick*="\'tasks\'"]');
+    if (tasksBtn) switchTab('tasks', tasksBtn);
     setTimeout(() => {
       _taskStore.set(taskId, plan);
       openTaskDetail(taskId);
     }, 200);
   } else {
     toast('Task not found in recent history — it may have been pruned', 'info');
-    switchTab('tasks', null);
+    const tasksBtn = document.querySelector('nav button[onclick*="\'tasks\'"]');
+    if (tasksBtn) switchTab('tasks', tasksBtn);
   }
 }
 
@@ -8136,7 +9538,8 @@ function autoSchedId() {
 
 // ── Assign task to agent from swarm ──────────────────────────────────────────
 function assignTaskToAgent(agentId) {
-  switchTab('tasks', null);
+  const tasksBtn = document.querySelector('nav button[onclick*="tasks"]');
+  if (tasksBtn) tasksBtn.click();
   setTimeout(() => {
     const taskInput = document.getElementById('task-input');
     if (taskInput) {
@@ -9566,127 +10969,2540 @@ setInterval(() => {
   if (currentTab === 'boardroom') loadBoardroom();
   if (currentTab === 'tickets') loadTickets();
   if (currentTab === 'artifacts') loadSessions();
+  if (currentTab === 'crm') loadCRM();
+  if (currentTab === 'email-marketing') loadEmailCampaigns();
+  if (currentTab === 'meetings') loadMeetings();
+  if (currentTab === 'social') loadSocialPosts();
+  if (currentTab === 'financial') { loadInvoices(); loadPL(); }
+  if (currentTab === 'competitors') { loadCompetitors(); loadCompetitorAlerts(); }
+  if (currentTab === 'content-calendar') loadContentCalendar();
 }, 30000);
+// ══════════════════════════════════════════════════════════════════
+//  FEATURE MODULE JAVASCRIPT
+// ══════════════════════════════════════════════════════════════════
 
-/* ══════════════════════════════════════════════════
-   BOOT SEQUENCE
-══════════════════════════════════════════════════ */
-(function runBootSequence() {
-  const overlay = document.getElementById('boot-overlay');
-  const terminal = document.getElementById('boot-terminal');
-  const bar = document.getElementById('boot-bar');
-  const pct = document.getElementById('boot-pct');
-  if (!overlay) return;
+// ── CRM ──────────────────────────────────────────────────────────
+async function loadCRM() {
+  try {
+    const [leads, stats] = await Promise.all([api('/api/crm/leads'), api('/api/crm/stats')]);
+    document.getElementById('crm-total').textContent = stats.total_leads || 0;
+    document.getElementById('crm-won').textContent = stats.by_stage?.won || 0;
+    document.getElementById('crm-pipeline-val').textContent = '$' + (stats.pipeline_value || 0).toLocaleString();
+    document.getElementById('crm-conv').textContent = (stats.conversion_rate || 0) + '%';
+    const el = document.getElementById('crm-leads-list');
+    if (!leads.length) { el.innerHTML = '<div class="empty"><div class="icon">🎯</div><p>No leads yet.</p></div>'; return; }
+    el.innerHTML = leads.map(l => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${l.name}</strong> <span style="font-size:.75em;color:var(--text-muted)">${l.company}</span>
+        <br><span style="font-size:.8em;color:var(--text-muted)">${l.email}</span>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px;margin-left:6px">${l.stage}</span>
+        <span style="font-size:.75em;color:var(--gold);margin-left:6px">Score: ${l.score}</span></div>
+      <div style="text-align:right">
+        <div style="font-size:.9em;font-weight:700;color:var(--green)">$${(l.value||0).toLocaleString()}</div>
+        <button class="btn btn-ghost btn-sm" onclick="deleteLead('${l.id}')" style="font-size:.7em;margin-top:4px">🗑</button>
+      </div></div>`).join('');
+  } catch(e) { console.error('CRM load error', e); }
+}
+async function addLead() {
+  const payload = {
+    name: document.getElementById('crm-name').value,
+    company: document.getElementById('crm-company').value,
+    email: document.getElementById('crm-email').value,
+    phone: document.getElementById('crm-phone').value,
+    value: parseFloat(document.getElementById('crm-value').value) || 0,
+    stage: document.getElementById('crm-stage').value,
+    notes: document.getElementById('crm-notes').value,
+  };
+  if (!payload.name) return showToast('Name is required', 'error');
+  await api('/api/crm/leads', 'POST', payload);
+  ['crm-name','crm-company','crm-email','crm-phone','crm-value','crm-notes'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  showToast('Lead added!');
+  loadCRM();
+}
+async function deleteLead(id) {
+  if (!confirm('Delete this lead?')) return;
+  await api(`/api/crm/leads/${id}`, 'DELETE');
+  showToast('Lead deleted');
+  loadCRM();
+}
 
-  const lines = [
-    '> INITIALIZING AI EMPLOYEE v4.0\u2026',
-    '> Loading neural subsystems\u2026',
-    '> Mounting agent registry\u2026',
-    '> Establishing secure channel\u2026',
-    '> Calibrating gold resonance matrix\u2026',
-    '> All systems nominal. Welcome.',
+// ── Email Marketing ───────────────────────────────────────────────
+async function loadEmailCampaigns() {
+  try {
+    const [campaigns, stats] = await Promise.all([api('/api/email-mkt/campaigns'), api('/api/email-mkt/stats')]);
+    document.getElementById('em-campaigns').textContent = stats.total_campaigns || 0;
+    document.getElementById('em-sent').textContent = stats.total_sent || 0;
+    document.getElementById('em-open-rate').textContent = (stats.open_rate || 0) + '%';
+    document.getElementById('em-click-rate').textContent = (stats.click_rate || 0) + '%';
+    const el = document.getElementById('em-campaign-list');
+    if (!campaigns.length) { el.innerHTML = '<div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div>'; return; }
+    el.innerHTML = campaigns.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between"><strong>${c.name}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${c.status}</span></div>
+      <div style="font-size:.8em;color:var(--text-muted);margin-top:2px">${c.subject}</div>
+      <div style="display:flex;gap:10px;margin-top:6px;font-size:.8em">
+        <span>Sent: ${c.sent}</span><span>Opened: ${c.opened}</span><span>Clicked: ${c.clicked}</span>
+        ${c.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendCampaign('${c.id}')" style="font-size:.75em;padding:2px 8px">📤 Send</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Email load error', e); }
+}
+async function createEmailCampaign() {
+  const recipients = (document.getElementById('em-recipients').value || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const payload = {
+    name: document.getElementById('em-name').value,
+    subject: document.getElementById('em-subject').value,
+    body: document.getElementById('em-body').value,
+    recipients,
+  };
+  if (!payload.name) return showToast('Campaign name required', 'error');
+  await api('/api/email-mkt/campaigns', 'POST', payload);
+  ['em-name','em-subject','em-body','em-recipients'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Campaign created!');
+  loadEmailCampaigns();
+}
+async function sendCampaign(id) {
+  if (!confirm('Send this campaign now?')) return;
+  await api(`/api/email-mkt/campaigns/${id}/send`, 'POST', {});
+  showToast('Campaign sent!');
+  loadEmailCampaigns();
+}
+
+// ── Meetings ─────────────────────────────────────────────────────
+async function loadMeetings() {
+  try {
+    const [meetings, stats] = await Promise.all([api('/api/meetings/'), api('/api/meetings/stats')]);
+    document.getElementById('mt-total').textContent = stats.total || 0;
+    document.getElementById('mt-analyzed').textContent = stats.analyzed || 0;
+    document.getElementById('mt-pending').textContent = stats.pending || 0;
+    document.getElementById('mt-duration').textContent = stats.total_duration_mins || 0;
+    const el = document.getElementById('meetings-list');
+    if (!meetings.length) { el.innerHTML = '<div class="empty"><div class="icon">🎙️</div><p>No meetings yet.</p></div>'; return; }
+    el.innerHTML = meetings.map(m => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between"><strong>${m.title}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${m.status}</span></div>
+      <div style="font-size:.8em;color:var(--text-muted)">${m.date} · ${m.platform} · ${m.duration_mins}min</div>
+      ${m.summary?`<div style="font-size:.8em;margin-top:6px;color:var(--text)">${m.summary.substring(0,120)}…</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:6px">
+        ${m.status!=='analyzed'?`<button class="btn btn-ghost btn-sm" onclick="showMeetingAnalysis('${m.id}')" style="font-size:.75em">🤖 Show Analysis</button>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="deleteMeeting('${m.id}')" style="font-size:.75em">🗑</button>
+      </div></div>`).join('');
+  } catch(e) { console.error('Meetings load error', e); }
+}
+async function addMeeting() {
+  const transcript = document.getElementById('mt-transcript').value;
+  const payload = {
+    title: document.getElementById('mt-title').value,
+    platform: document.getElementById('mt-platform').value,
+    duration_mins: parseInt(document.getElementById('mt-duration').value) || 0,
+    transcript,
+  };
+  if (!payload.title) return showToast('Title required', 'error');
+  const meeting = await api('/api/meetings/', 'POST', payload);
+  showToast('Meeting added. Analyzing…');
+  const result = await api(`/api/meetings/${meeting.id}/analyze`, 'POST', {transcript});
+  document.getElementById('mt-result-card').style.display = '';
+  document.getElementById('mt-result-body').textContent = result.follow_up_email || result.summary || 'Analysis complete.';
+  ['mt-title','mt-transcript','mt-duration'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  loadMeetings();
+}
+async function showMeetingAnalysis(id) {
+  const data = await api(`/api/meetings/${id}/analyze`, 'POST', {});
+  document.getElementById('mt-result-card').style.display = '';
+  document.getElementById('mt-result-body').textContent = data.follow_up_email || data.summary || 'No analysis.';
+}
+async function deleteMeeting(id) {
+  await api(`/api/meetings/${id}`, 'DELETE');
+  showToast('Meeting deleted');
+  loadMeetings();
+}
+
+// ── Social Media ──────────────────────────────────────────────────
+async function loadSocialPosts() {
+  try {
+    const [posts, stats] = await Promise.all([api('/api/social/posts'), api('/api/social/stats')]);
+    document.getElementById('sm-total').textContent = stats.total_posts || 0;
+    document.getElementById('sm-published').textContent = stats.published || 0;
+    document.getElementById('sm-scheduled').textContent = stats.scheduled || 0;
+    document.getElementById('sm-likes').textContent = stats.total_likes || 0;
+    const el = document.getElementById('sm-posts-list');
+    if (!posts.length) { el.innerHTML = '<div class="empty"><div class="icon">📱</div><p>No posts yet.</p></div>'; return; }
+    el.innerHTML = posts.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div style="flex:1">
+          <div style="font-size:.85em">${p.content.substring(0,120)}${p.content.length>120?'…':''}</div>
+          <div style="display:flex;gap:8px;margin-top:4px;font-size:.75em;color:var(--text-muted)">
+            ${(p.platforms||[]).map(pl=>`<span>${pl}</span>`).join('')}
+            <span style="background:var(--surface3);padding:1px 6px;border-radius:4px">${p.status}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;margin-left:8px">
+          ${p.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="publishPost('${p.id}')" style="font-size:.7em">📤</button>`:''}
+          <button class="btn btn-ghost btn-sm" onclick="deletePost('${p.id}')" style="font-size:.7em">🗑</button>
+        </div>
+      </div></div>`).join('');
+  } catch(e) { console.error('Social load error', e); }
+}
+async function generateSocialPost() {
+  const topic = document.getElementById('sm-topic').value;
+  if (!topic) return showToast('Enter a topic first', 'error');
+  showToast('Generating post…');
+  const data = await api('/api/social/generate', 'POST', {
+    topic, platform: document.getElementById('sm-platform').value,
+    tone: document.getElementById('sm-tone').value,
+  });
+  document.getElementById('sm-content').value = data.content || '';
+}
+async function saveSocialPost() {
+  const content = document.getElementById('sm-content').value;
+  if (!content) return showToast('Content required', 'error');
+  await api('/api/social/posts', 'POST', {
+    content, platforms: [document.getElementById('sm-platform').value],
+  });
+  document.getElementById('sm-content').value = '';
+  document.getElementById('sm-topic').value = '';
+  showToast('Post saved!');
+  loadSocialPosts();
+}
+async function publishPost(id) {
+  await api(`/api/social/posts/${id}/publish`, 'POST', {});
+  showToast('Post published!');
+  loadSocialPosts();
+}
+async function deletePost(id) {
+  await api(`/api/social/posts/${id}`, 'DELETE');
+  showToast('Post deleted');
+  loadSocialPosts();
+}
+
+// ── CEO Briefing ──────────────────────────────────────────────────
+async function generateBriefing() {
+  showToast('Generating briefing…');
+  const data = await api('/api/briefing/generate', 'POST', {});
+  document.getElementById('briefing-content').textContent = data.content || 'Error generating briefing.';
+  document.getElementById('briefing-date').textContent = data.date || '';
+  document.getElementById('briefing-card').style.display = '';
+  document.getElementById('hc-latest-msg') && (document.getElementById('hc-latest-msg').style.display = 'none');
+}
+async function loadBriefingHistory() {
+  const data = await api('/api/briefing/history');
+  const el = document.getElementById('briefing-history');
+  if (!data.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📅 Past Briefings</div></div>' +
+    data.slice(-10).reverse().map(b =>
+      `<div style="padding:10px;border-bottom:1px solid var(--border)"><strong>${b.date}</strong>
+       <div style="font-size:.8em;color:var(--text-muted);margin-top:4px">${(b.content||'').substring(0,200)}…</div></div>`
+    ).join('') + '</div>';
+}
+
+// ── Finance / Invoicing ───────────────────────────────────────────
+function switchFinanceTab(tab, btn) {
+  document.querySelectorAll('.fi-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['invoices','expenses','pl'].forEach(t => {
+    const el = document.getElementById(`fi-${t}-panel`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'invoices') loadInvoices();
+  if (tab === 'expenses') loadExpenses();
+  if (tab === 'pl') loadPL();
+}
+async function loadInvoices() {
+  try {
+    const [invs, pl] = await Promise.all([api('/api/finance/invoices'), api('/api/finance/pl-report')]);
+    document.getElementById('fi-revenue').textContent = '$' + (pl.revenue||0).toLocaleString();
+    document.getElementById('fi-pending').textContent = '$' + (pl.pending_revenue||0).toLocaleString();
+    document.getElementById('fi-total-inv').textContent = pl.total_invoices || 0;
+    document.getElementById('fi-overdue').textContent = pl.overdue_invoices || 0;
+    const el = document.getElementById('fi-invoice-list');
+    if (!invs.length) { el.innerHTML = '<div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div>'; return; }
+    el.innerHTML = invs.map(i => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${i.number}</strong> — ${i.client}
+        <div style="font-size:.8em;color:var(--text-muted)">Due: ${i.due_date || 'N/A'}</div></div>
+      <div style="text-align:right">
+        <div style="font-weight:700;color:var(--green)">$${(i.total||0).toLocaleString()}</div>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${i.status}</span>
+        ${i.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendInvoice('${i.id}')" style="font-size:.7em;display:block;margin-top:4px">📤 Send</button>`:''}
+        ${i.status==='sent'?`<button class="btn btn-ghost btn-sm" onclick="markPaid('${i.id}')" style="font-size:.7em;display:block;margin-top:4px">✅ Paid</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Invoice load error', e); }
+}
+async function createInvoice() {
+  const payload = {
+    client: document.getElementById('fi-client').value,
+    client_email: document.getElementById('fi-client-email').value,
+    subtotal: parseFloat(document.getElementById('fi-subtotal').value) || 0,
+    tax_rate: parseFloat(document.getElementById('fi-tax').value) || 0,
+    due_date: document.getElementById('fi-due').value,
+    notes: document.getElementById('fi-notes').value,
+  };
+  if (!payload.client) return showToast('Client name required', 'error');
+  await api('/api/finance/invoices', 'POST', payload);
+  ['fi-client','fi-client-email','fi-subtotal','fi-tax','fi-due','fi-notes'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Invoice created!');
+  loadInvoices();
+}
+async function sendInvoice(id) {
+  await api(`/api/finance/invoices/${id}/send`, 'POST', {});
+  showToast('Invoice sent!');
+  loadInvoices();
+}
+async function markPaid(id) {
+  await api(`/api/finance/invoices/${id}/mark-paid`, 'POST', {});
+  showToast('Invoice marked as paid!');
+  loadInvoices();
+}
+async function loadExpenses() {
+  const expenses = await api('/api/finance/expenses');
+  const el = document.getElementById('fi-expense-list');
+  if (!expenses.length) { el.innerHTML = '<div class="empty"><div class="icon">💸</div><p>No expenses yet.</p></div>'; return; }
+  el.innerHTML = expenses.map(e => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+    <div><strong>${e.description}</strong><div style="font-size:.8em;color:var(--text-muted)">${e.category} · ${e.date}</div></div>
+    <div style="font-weight:700;color:#ef4444">-$${(e.amount||0).toLocaleString()}</div></div>`).join('');
+}
+async function logExpense() {
+  const payload = {
+    description: document.getElementById('fi-exp-desc').value,
+    amount: parseFloat(document.getElementById('fi-exp-amount').value) || 0,
+    category: document.getElementById('fi-exp-cat').value,
+    date: document.getElementById('fi-exp-date').value || new Date().toISOString().split('T')[0],
+  };
+  if (!payload.description) return showToast('Description required', 'error');
+  await api('/api/finance/expenses', 'POST', payload);
+  ['fi-exp-desc','fi-exp-amount'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Expense logged!');
+  loadExpenses();
+}
+async function loadPL() {
+  const pl = await api('/api/finance/pl-report');
+  const el = document.getElementById('fi-pl-body');
+  const rows = [
+    ['Revenue (Paid)', `$${(pl.revenue||0).toLocaleString()}`, 'var(--green)'],
+    ['Pending Revenue', `$${(pl.pending_revenue||0).toLocaleString()}`, 'var(--gold)'],
+    ['Total Expenses', `-$${(pl.total_expenses||0).toLocaleString()}`, '#ef4444'],
+    ['Gross Profit', `$${(pl.gross_profit||0).toLocaleString()}`, pl.gross_profit>=0?'var(--green)':'#ef4444'],
+    ['Profit Margin', `${pl.profit_margin||0}%`, 'var(--text-muted)'],
   ];
-  let lineIdx = 0;
-  let progress = 0;
+  el.innerHTML = `<div style="display:grid;gap:8px">${rows.map(([label,val,color])=>
+    `<div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface2);border-radius:6px">
+       <span>${label}</span><strong style="color:${color}">${val}</strong></div>`
+  ).join('')}
+  ${pl.expenses_by_category && Object.keys(pl.expenses_by_category).length?
+    `<div style="margin-top:8px"><strong style="font-size:.9em">Expenses by Category</strong>
+     ${Object.entries(pl.expenses_by_category).map(([k,v])=>
+       `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:.85em">
+         <span>${k}</span><span>$${(v||0).toLocaleString()}</span></div>`
+     ).join('')}</div>`:''}</div>`;
+}
 
-  function addLine() {
-    if (lineIdx >= lines.length) return;
-    const span = document.createElement('span');
-    span.className = 'boot-terminal-line';
-    span.style.animationDelay = '0s';
-    span.textContent = lines[lineIdx++];
-    terminal.appendChild(span);
-    terminal.scrollTop = terminal.scrollHeight;
+// ── Analytics ─────────────────────────────────────────────────────
+async function loadAnalyticsOverview() {
+  const data = await api('/api/analytics/overview');
+  document.getElementById('an-leads').textContent = data.crm?.total_leads || 0;
+  document.getElementById('an-revenue').textContent = '$' + (data.finance?.revenue||0).toLocaleString();
+  document.getElementById('an-open-rate').textContent = (data.email?.open_rate||0) + '%';
+  document.getElementById('an-posts').textContent = data.social?.posts || 0;
+  const el = document.getElementById('an-breakdown');
+  el.innerHTML = `<div style="display:grid;gap:8px;font-size:.88em">
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>🎯 CRM</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Pipeline: <strong>$${(data.crm?.pipeline_value||0).toLocaleString()}</strong></div>
+        <div>Won Deals: <strong>${data.crm?.won_deals||0}</strong></div>
+        <div>Conversion: <strong>${data.crm?.conversion_rate||0}%</strong></div>
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>📧 Email</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Campaigns: <strong>${data.email?.campaigns||0}</strong></div>
+        <div>Sent: <strong>${data.email?.sent||0}</strong></div>
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>🎙️ Meetings</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Total: <strong>${data.meetings?.total||0}</strong></div>
+        <div>Analyzed: <strong>${data.meetings?.analyzed||0}</strong></div>
+      </div>
+    </div></div>`;
+}
+async function loadRecommendations() {
+  const data = await api('/api/analytics/recommendations');
+  const recs = data.recommendations || [];
+  const el = document.getElementById('an-recommendations');
+  if (!recs.length) { el.innerHTML = '<div class="empty"><p>No recommendations at this time.</p></div>'; return; }
+  const colors = {high:'#ef4444', medium:'#f59e0b', low:'#10b981', critical:'#ef4444'};
+  el.innerHTML = recs.map(r => `<div style="padding:10px;border-left:3px solid ${colors[r.priority]||'var(--border)'};margin-bottom:8px;background:var(--surface2);border-radius:0 6px 6px 0">
+    <div style="font-size:.75em;color:${colors[r.priority]||'var(--text-muted)'};text-transform:uppercase;font-weight:700">${r.type} · ${r.priority}</div>
+    <div style="font-size:.88em;margin-top:4px">${r.text}</div>
+    ${r.action?`<div style="font-size:.78em;color:var(--text-muted);margin-top:4px">→ ${r.action}</div>`:''}</div>`
+  ).join('');
+}
+
+// ── Workflows ─────────────────────────────────────────────────────
+async function loadWorkflows() {
+  const wfs = await api('/api/workflows/');
+  const el = document.getElementById('wf-list');
+  if (!wfs.length) { el.innerHTML = '<div class="empty"><div class="icon">⚙️</div><p>No workflows yet.</p></div>'; return; }
+  el.innerHTML = wfs.map(w => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${w.name}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${w.description||''} · Trigger: ${w.trigger?.type||w.trigger}</div>
+      <div style="font-size:.78em;color:var(--text-muted)">Steps: ${(w.steps||[]).length} · Runs: ${w.runs||0}</div>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="runWorkflow('${w.id}')" style="font-size:.75em">▶ Run</button>
+      <button class="btn btn-ghost btn-sm" onclick="deleteWorkflow('${w.id}')" style="font-size:.75em">🗑</button>
+    </div></div>`).join('');
+}
+async function createWorkflow() {
+  const stepsRaw = document.getElementById('wf-steps').value;
+  const steps = stepsRaw.split('\n').map(l=>l.trim()).filter(Boolean).map(l => {
+    const [action, ...desc] = l.split(':');
+    return {type: action.trim(), config: desc.join(':').trim()};
+  });
+  const payload = {
+    name: document.getElementById('wf-name').value,
+    description: document.getElementById('wf-desc').value,
+    trigger: {type: document.getElementById('wf-trigger').value},
+    steps,
+  };
+  if (!payload.name) return showToast('Workflow name required', 'error');
+  await api('/api/workflows/', 'POST', payload);
+  ['wf-name','wf-desc','wf-steps'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Workflow created!');
+  loadWorkflows();
+}
+async function runWorkflow(id) {
+  await api(`/api/workflows/${id}/run`, 'POST', {});
+  showToast('Workflow executed!');
+  loadWorkflows();
+  loadWorkflowRuns();
+}
+async function deleteWorkflow(id) {
+  await api(`/api/workflows/${id}`, 'DELETE');
+  showToast('Workflow deleted');
+  loadWorkflows();
+}
+async function loadWorkflowRuns() {
+  const runs = await api('/api/workflows/runs');
+  const el = document.getElementById('wf-runs-list');
+  if (!runs.length) { el.innerHTML = '<div class="empty"><p>No runs yet.</p></div>'; return; }
+  el.innerHTML = runs.slice(-10).reverse().map(r => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:.85em">
+    <div><strong>${r.workflow_name}</strong> <span style="color:var(--text-muted)">· ${r.trigger}</span></div>
+    <div><span style="color:var(--green)">${r.status}</span> <span style="color:var(--text-muted);font-size:.8em">${r.started_at}</span></div>
+  </div>`).join('');
+}
+
+// ── Team ──────────────────────────────────────────────────────────
+async function loadTeamMembers() {
+  const members = await api('/api/team/members');
+  const el = document.getElementById('team-members-list');
+  if (!members.length) { el.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No members yet. Invite someone!</p></div>'; return; }
+  el.innerHTML = members.map(m => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${m.name||m.email}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${m.email}</div></div>
+    <div style="text-align:right">
+      <span style="font-size:.78em;background:var(--surface3);padding:2px 8px;border-radius:4px">${m.role}</span>
+      <span style="font-size:.75em;color:var(--text-muted);display:block;margin-top:2px">${m.status}</span>
+    </div></div>`).join('');
+}
+async function inviteTeamMember() {
+  const email = document.getElementById('team-email').value;
+  const role = document.getElementById('team-role').value;
+  if (!email) return showToast('Email required', 'error');
+  const data = await api('/api/team/members/invite', 'POST', {email, role});
+  if (data.error) return showToast(data.error, 'error');
+  document.getElementById('team-invite-result').innerHTML =
+    `<div style="padding:10px;background:var(--surface2);border-radius:6px;font-size:.85em">
+     ✅ Invitation sent! Share this token: <code style="color:var(--gold)">${data.token}</code></div>`;
+  document.getElementById('team-email').value = '';
+  loadTeamMembers();
+}
+
+// ── Support ───────────────────────────────────────────────────────
+function switchSupportTab(tab, btn) {
+  document.querySelectorAll('.sup-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('sup-tickets-panel').style.display = tab === 'tickets' ? '' : 'none';
+  document.getElementById('sup-kb-panel').style.display = tab === 'kb' ? '' : 'none';
+  if (tab === 'tickets') loadTickets();
+  if (tab === 'kb') loadKBArticles();
+}
+async function loadTickets() {
+  try {
+    const [tickets, stats] = await Promise.all([
+      api('/api/support/tickets' + (document.getElementById('sup-f-status')?.value ? '?status=' + document.getElementById('sup-f-status').value : '')),
+      api('/api/support/stats')
+    ]);
+    document.getElementById('sup-open').textContent = stats.open || 0;
+    document.getElementById('sup-progress').textContent = stats.in_progress || 0;
+    document.getElementById('sup-resolved').textContent = stats.resolved || 0;
+    document.getElementById('sup-kb').textContent = stats.kb_articles || 0;
+    const el = document.getElementById('sup-ticket-list');
+    if (!tickets.length) { el.innerHTML = '<div class="empty"><div class="icon">🎫</div><p>No tickets.</p></div>'; return; }
+    const prioColors = {urgent:'#ef4444',high:'#f59e0b',medium:'#6366f1',low:'#10b981'};
+    el.innerHTML = tickets.map(t => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between">
+        <strong>${t.number}: ${t.subject}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${t.status}</span>
+      </div>
+      <div style="font-size:.8em;color:var(--text-muted)">${t.customer_name||''} · ${t.customer_email||''}</div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <span style="font-size:.75em;color:${prioColors[t.priority]||'var(--text-muted)'}">${t.priority}</span>
+        <span style="font-size:.75em;color:var(--text-muted)">${t.category}</span>
+        <button class="btn btn-ghost btn-sm" onclick="aiSuggestReply('${t.id}')" style="font-size:.7em">🤖 AI Reply</button>
+        ${t.status!=='resolved'?`<button class="btn btn-ghost btn-sm" onclick="resolveTicket('${t.id}')" style="font-size:.7em">✅ Resolve</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Support load error', e); }
+}
+async function createTicket() {
+  const payload = {
+    subject: document.getElementById('sup-subject').value,
+    customer_email: document.getElementById('sup-cust-email').value,
+    customer_name: document.getElementById('sup-cust-name').value,
+    priority: document.getElementById('sup-priority').value,
+    category: document.getElementById('sup-cat').value,
+    description: document.getElementById('sup-desc').value,
+  };
+  if (!payload.subject) return showToast('Subject required', 'error');
+  await api('/api/support/tickets', 'POST', payload);
+  ['sup-subject','sup-cust-email','sup-cust-name','sup-desc'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Ticket created!');
+  loadTickets();
+}
+async function aiSuggestReply(id) {
+  showToast('Generating AI reply…');
+  const data = await api(`/api/support/tickets/${id}/ai-suggest`, 'POST', {});
+  alert('AI Suggested Reply:\n\n' + (data.suggestion || 'No suggestion.'));
+}
+async function resolveTicket(id) {
+  await api(`/api/support/tickets/${id}`, 'PATCH', {status: 'resolved'});
+  showToast('Ticket resolved!');
+  loadTickets();
+}
+async function loadKBArticles() {
+  const articles = await api('/api/support/kb');
+  const el = document.getElementById('sup-kb-list');
+  if (!articles.length) { el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>No articles yet.</p></div>'; return; }
+  el.innerHTML = articles.map(a => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <strong>${a.title}</strong>
+    <div style="font-size:.8em;color:var(--text-muted)">${a.category} · Views: ${a.views}</div>
+    <div style="font-size:.82em;margin-top:4px">${a.content.substring(0,120)}…</div>
+  </div>`).join('');
+}
+async function createKBArticle() {
+  const payload = {
+    title: document.getElementById('kb-title').value,
+    content: document.getElementById('kb-content').value,
+    category: document.getElementById('kb-cat').value,
+  };
+  if (!payload.title) return showToast('Title required', 'error');
+  await api('/api/support/kb', 'POST', payload);
+  ['kb-title','kb-content'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Article saved!');
+  loadKBArticles();
+}
+
+// ── Website Builder ───────────────────────────────────────────────
+async function loadPages() {
+  const pages = await api('/api/website-builder/pages');
+  const el = document.getElementById('wb-pages-list');
+  if (!pages.length) { el.innerHTML = '<div class="empty"><div class="icon">🌐</div><p>No pages yet.</p></div>'; return; }
+  el.innerHTML = pages.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${p.name}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${p.type} · ${p.business_name}</div></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="previewPage('${p.id}')" style="font-size:.75em">👁 Preview</button>
+      <button class="btn btn-ghost btn-sm" onclick="deletePage('${p.id}')" style="font-size:.75em">🗑</button>
+    </div></div>`).join('');
+}
+async function generateWebPage() {
+  const payload = {
+    business_name: document.getElementById('wb-biz').value,
+    industry: document.getElementById('wb-industry').value,
+    page_type: document.getElementById('wb-type').value,
+    description: document.getElementById('wb-desc').value,
+  };
+  if (!payload.business_name) return showToast('Business name required', 'error');
+  showToast('Generating page with AI…');
+  await api('/api/website-builder/generate', 'POST', payload);
+  showToast('Page generated!');
+  loadPages();
+}
+async function previewPage(id) {
+  const page = await api(`/api/website-builder/pages/${id}`);
+  const w = window.open('', '_blank');
+  w.document.write(page.html_content || '<p>No content.</p>');
+}
+async function deletePage(id) {
+  await api(`/api/website-builder/pages/${id}`, 'DELETE');
+  showToast('Page deleted');
+  loadPages();
+}
+
+// ── Competitors ───────────────────────────────────────────────────
+async function loadCompetitors() {
+  const comps = await api('/api/competitors/');
+  const el = document.getElementById('comp-list');
+  if (!comps.length) { el.innerHTML = '<div class="empty"><div class="icon">🔍</div><p>No competitors tracked yet.</p></div>'; return; }
+  el.innerHTML = comps.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${c.name}</strong>
+        ${c.website?`<a href="${c.website}" target="_blank" style="font-size:.78em;color:var(--accent);margin-left:8px">${c.website}</a>`:''}
+        <div style="font-size:.82em;color:var(--text-muted);margin-top:2px">${c.description||''}</div>
+        ${c.last_checked?`<div style="font-size:.75em;color:var(--text-muted)">Last analyzed: ${c.last_checked}</div>`:''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="analyzeCompetitor('${c.id}')" style="font-size:.75em">🤖 Analyze</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteCompetitor('${c.id}')" style="font-size:.75em">🗑</button>
+      </div>
+    </div></div>`).join('');
+}
+async function addCompetitor() {
+  const payload = {
+    name: document.getElementById('comp-name').value,
+    website: document.getElementById('comp-website').value,
+    description: document.getElementById('comp-desc').value,
+  };
+  if (!payload.name) return showToast('Name required', 'error');
+  await api('/api/competitors/', 'POST', payload);
+  ['comp-name','comp-website','comp-desc'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Competitor added!');
+  loadCompetitors();
+}
+async function analyzeCompetitor(id) {
+  showToast('Analyzing competitor with AI…');
+  const data = await api(`/api/competitors/${id}/analyze`, 'POST', {});
+  document.getElementById('comp-analysis-card').style.display = '';
+  document.getElementById('comp-analysis-body').textContent = data.analysis || 'No analysis.';
+  loadCompetitors();
+}
+async function deleteCompetitor(id) {
+  await api(`/api/competitors/${id}`, 'DELETE');
+  showToast('Competitor removed');
+  loadCompetitors();
+}
+
+// ── Personal Brand ────────────────────────────────────────────────
+function switchBrandTab(tab, btn) {
+  document.querySelectorAll('.br-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['generate','profile','library'].forEach(t => {
+    const el = document.getElementById(`br-${t}-panel`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'library') loadBrandContent();
+}
+async function generateBrandContent() {
+  const topic = document.getElementById('br-topic').value;
+  if (!topic) return showToast('Topic required', 'error');
+  showToast('Generating content…');
+  const data = await api('/api/brand/generate-content', 'POST', {
+    topic, content_type: document.getElementById('br-type').value,
+  });
+  document.getElementById('br-generated').textContent = data.content || '';
+}
+async function suggestBrandTopics() {
+  showToast('Generating topic ideas…');
+  const data = await api('/api/brand/topics', 'POST', {});
+  const el = document.getElementById('br-topics-list');
+  el.innerHTML = (data.topics||[]).map((t,i)=>
+    `<div style="padding:6px;border-bottom:1px solid var(--border);font-size:.85em;cursor:pointer"
+      onclick="document.getElementById('br-topic').value='${t.replace(/'/g,"\\'")}'">${i+1}. ${t}</div>`
+  ).join('');
+}
+async function saveBrandProfile() {
+  const payload = {
+    name: document.getElementById('br-p-name').value,
+    title: document.getElementById('br-p-title').value,
+    industry: document.getElementById('br-p-industry').value,
+    target_audience: document.getElementById('br-p-audience').value,
+    tone: document.getElementById('br-p-tone').value,
+  };
+  await api('/api/brand/profile', 'POST', payload);
+  showToast('Profile saved!');
+}
+async function loadBrandContent() {
+  const pieces = await api('/api/brand/content');
+  const el = document.getElementById('br-content-list');
+  if (!pieces.length) { el.innerHTML = '<div class="empty"><div class="icon">📁</div><p>No content saved yet.</p></div>'; return; }
+  el.innerHTML = pieces.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between">
+      <span style="font-size:.78em;background:var(--surface3);padding:2px 6px;border-radius:4px">${p.type}</span>
+      <span style="font-size:.75em;color:var(--text-muted)">${p.created_at?.split('T')[0]||''}</span>
+    </div>
+    <div style="font-size:.85em;margin-top:6px"><strong>${p.topic}</strong></div>
+    <div style="font-size:.82em;color:var(--text-muted);margin-top:4px">${p.content.substring(0,150)}…</div>
+    <button class="btn btn-ghost btn-sm" onclick="deleteBrandContent('${p.id}')" style="font-size:.7em;margin-top:6px">🗑 Delete</button>
+  </div>`).join('');
+}
+async function deleteBrandContent(id) {
+  await api(`/api/brand/content/${id}`, 'DELETE');
+  showToast('Content deleted');
+  loadBrandContent();
+}
+
+// ── Health Check ──────────────────────────────────────────────────
+async function runHealthCheck() {
+  showToast('Running health check…');
+  const data = await api('/api/health-check/run', 'POST', {});
+  document.getElementById('hc-report-card').style.display = '';
+  document.getElementById('hc-latest-msg').style.display = 'none';
+  const gradeColors = {A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'};
+  document.getElementById('hc-grade').textContent = data.grade;
+  document.getElementById('hc-grade').style.color = gradeColors[data.grade]||'var(--text)';
+  const el = document.getElementById('hc-report-body');
+  el.innerHTML = `<div style="margin-bottom:16px">
+    <div style="font-size:.9em;font-weight:700;margin-bottom:8px">Overall: ${data.overall_score}/100 (Grade ${data.grade})</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${Object.entries(data.scores||{}).map(([k,v])=>
+      `<div style="padding:6px 12px;background:var(--surface2);border-radius:6px;font-size:.82em">${k}: <strong>${v}</strong></div>`
+    ).join('')}</div></div>
+  ${data.issues?.length?`<div style="margin-bottom:16px"><strong style="font-size:.9em">⚠️ Issues Found</strong>
+    ${data.issues.map(i=>`<div style="padding:8px;margin-top:6px;border-left:3px solid ${i.severity==='critical'?'#ef4444':'#f59e0b'};background:var(--surface2);border-radius:0 6px 6px 0;font-size:.84em">
+      <div><strong>${i.area}:</strong> ${i.issue}</div>
+      <div style="color:var(--text-muted);margin-top:2px">→ ${i.suggestion}</div></div>`).join('')}</div>`:''}
+  ${data.strengths?.length?`<div><strong style="font-size:.9em">✅ Strengths</strong>
+    ${data.strengths.map(s=>`<div style="padding:6px 0;font-size:.84em;color:var(--green)">✓ ${s}</div>`).join('')}</div>`:''}`;
+}
+async function loadHealthHistory() {
+  const reports = await api('/api/health-check/history');
+  const el = document.getElementById('hc-history');
+  if (!reports.length) { el.innerHTML = ''; return; }
+  const colors = {A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'};
+  el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📅 Health History</div></div>' +
+    reports.slice(-12).reverse().map(r=>
+      `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+        <div><strong>${r.date}</strong> <span style="font-size:.82em;color:var(--text-muted)">${r.overall_score}/100</span></div>
+        <span style="font-size:1.2em;font-weight:900;color:${colors[r.grade]||'var(--text)'}">${r.grade}</span>
+      </div>`
+    ).join('') + '</div>';
+}
+
+// ── Export & Backup ───────────────────────────────────────────────
+async function loadExportModules() {
+  const modules = await api('/api/export/modules');
+  const el = document.getElementById('export-modules-list');
+  el.innerHTML = modules.map(m => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${m.key}</strong>
+      <span style="font-size:.75em;color:var(--text-muted);margin-left:8px">${m.exists?(m.size_bytes/1024).toFixed(1)+'KB':'no data'}</span></div>
+    <div style="display:flex;gap:6px">
+      ${m.exists?`<a href="/api/export/json/${m.key}" download class="btn btn-ghost btn-sm" style="font-size:.75em">⬇ JSON</a>`:'<span style="font-size:.75em;color:var(--text-muted)">no data</span>'}
+    </div></div>`).join('');
+}
+async function createBackup() {
+  showToast('Creating backup…');
+  const data = await api('/api/export/backup', 'POST', {});
+  showToast(`Backup created: ${data.backup_file} (${(data.size_bytes/1024).toFixed(0)}KB)`);
+  loadBackupsList();
+}
+async function loadBackupsList() {
+  const backups = await api('/api/export/backups');
+  const el = document.getElementById('export-backups-list');
+  if (!backups.length) { el.innerHTML = '<div class="empty"><div class="icon">🗜️</div><p>No backups yet.</p></div>'; return; }
+  el.innerHTML = backups.map(b => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><div style="font-size:.85em">${b.name}</div>
+      <div style="font-size:.75em;color:var(--text-muted)">${(b.size_bytes/1024).toFixed(0)}KB · ${b.created_at}</div></div>
+    <a href="/api/export/download-backup/${b.name}" download class="btn btn-ghost btn-sm" style="font-size:.75em">⬇ Download</a>
+  </div>`).join('');
+}
+
+// ── Auto-load on tab switch (extend existing switchTab) ───────────
+const _origSwitchTab = switchTab;
+function switchTab(tab, btn) {
+  _origSwitchTab(tab, btn);
+  const loaders = {
+    'crm': loadCRM,
+    'email-mkt': loadEmailCampaigns,
+    'meetings': loadMeetings,
+    'social': loadSocialPosts,
+    'briefing': () => api('/api/briefing/latest').then(d => {
+      if (d.content) { document.getElementById('briefing-content').textContent = d.content; document.getElementById('briefing-date').textContent = d.date||''; }
+    }),
+    'invoicing': loadInvoices,
+    'analytics-bi': () => { loadAnalyticsOverview(); loadRecommendations(); },
+    'workflows': () => { loadWorkflows(); loadWorkflowRuns(); },
+    'team': loadTeamMembers,
+    'support-desk': loadTickets,
+    'website-builder': loadPages,
+    'competitors': loadCompetitors,
+    'brand': () => api('/api/brand/profile').then(p => {
+      if (p.name) { document.getElementById('br-p-name').value=p.name||''; document.getElementById('br-p-title').value=p.title||''; document.getElementById('br-p-industry').value=p.industry||''; document.getElementById('br-p-audience').value=p.target_audience||''; }
+    }),
+    'health': () => api('/api/health-check/latest').then(d => {
+      if (d.grade) { document.getElementById('hc-report-card').style.display=''; document.getElementById('hc-latest-msg').style.display='none'; runHealthCheck && null; }
+    }),
+    'export': () => { loadExportModules(); loadBackupsList(); },
+  };
+  if (loaders[tab]) { try { loaders[tab](); } catch(e) {} }
+}
+</script>
+</body>
+</html>"""
+
+function rerunTaskFromHistory(description) {
+  const taskInput = document.getElementById('task-input');
+  if (taskInput) { taskInput.value = description; }
+  switchTab('tasks', null);
+  setTimeout(() => {
+    const el = document.getElementById('task-input');
+    if (el) { el.focus(); el.scrollIntoView({behavior:'smooth', block:'nearest'}); }
+  }, 150);
+  toast('Task pre-filled — review and click Launch ↗', 'info');
+}
+
+async function viewTaskById(taskId) {
+  const r = await api('/api/task/list');
+  if (!r.ok) { toast('Could not load tasks', 'error'); return; }
+  const plan = (r.plans || []).find(p => p.id === taskId);
+  if (plan) {
+    switchTab('tasks', null);
+    setTimeout(() => {
+      _taskStore.set(taskId, plan);
+      openTaskDetail(taskId);
+    }, 200);
+  } else {
+    toast('Task not found in recent history — it may have been pruned', 'info');
+    switchTab('tasks', null);
   }
+// ═══════════════════════════════════════════════════════════════════
+// CRM
+// ═══════════════════════════════════════════════════════════════════
+const CRM_STAGES = ['new_lead','qualified','proposal_sent','negotiation','closed_won','closed_lost'];
+const CRM_STAGE_LABELS = {new_lead:'🆕 New Lead',qualified:'✅ Qualified',proposal_sent:'📄 Proposal Sent',negotiation:'🤝 Negotiation',closed_won:'🏆 Closed Won',closed_lost:'❌ Closed Lost'};
+const CRM_STAGE_COLORS = {new_lead:'#64748b',qualified:'#3b82f6',proposal_sent:'#8b5cf6',negotiation:'#f59e0b',closed_won:'#10b981',closed_lost:'#ef4444'};
 
-  const lineTimer = setInterval(() => {
-    addLine();
-    if (lineIdx >= lines.length) clearInterval(lineTimer);
-  }, 280);
+async function loadCRM() {
+  try {
+    const [pipe, leads] = await Promise.all([
+      fetch('/api/crm/pipeline').then(r=>r.json()),
+      fetch('/api/crm/leads?search='+encodeURIComponent(document.getElementById('crm-search')?.value||'')).then(r=>r.json())
+    ]);
+    // Pipeline stats
+    document.getElementById('crm-stat-new').textContent = pipe.new_lead?.count ?? 0;
+    document.getElementById('crm-stat-qualified').textContent = pipe.qualified?.count ?? 0;
+    document.getElementById('crm-stat-proposal').textContent = pipe.proposal_sent?.count ?? 0;
+    document.getElementById('crm-stat-won').textContent = pipe.closed_won?.count ?? 0;
+    // Kanban
+    const kanban = document.getElementById('crm-pipeline-kanban');
+    kanban.innerHTML = CRM_STAGES.map(stage => {
+      const s = pipe[stage] || {count:0,value:0,leads:[]};
+      const color = CRM_STAGE_COLORS[stage];
+      const leadsHtml = s.leads.map(l => `
+        <div style="background:var(--surface);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:.82em">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong style="color:var(--text)">${escHtml(l.name)}</strong>
+            <span style="color:${color};font-size:.75em;font-weight:700">Score: ${l.score||0}</span>
+          </div>
+          ${l.value>0?`<div style="color:#10b981;font-size:.78em">$${Number(l.value).toLocaleString()}</div>`:''}
+          <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">
+            ${CRM_STAGES.filter(ns=>ns!==stage).slice(0,3).map(ns=>`<button class="btn btn-ghost" style="font-size:.7em;padding:2px 6px" onclick="moveCRMStage('${l.id}','${ns}')">→${CRM_STAGE_LABELS[ns].split(' ').pop()}</button>`).join('')}
+            <button class="btn btn-ghost" style="font-size:.7em;padding:2px 6px;color:#f59e0b" onclick="scoreCRMLead('${l.id}')">🎯 Score</button>
+          </div>
+        </div>`).join('') || '<div style="color:var(--text-muted);font-size:.82em;text-align:center;padding:8px">Empty</div>';
+      return `<div style="border-left:3px solid ${color};padding:8px 10px;background:rgba(255,255,255,.02);border-radius:0 6px 6px 0;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:.82em;font-weight:700;color:${color}">${CRM_STAGE_LABELS[stage]}</span>
+          <span style="font-size:.75em;color:var(--text-muted)">${s.count} lead${s.count!==1?'s':''} • $${Number(s.value).toLocaleString()}</span>
+        </div>
+        ${leadsHtml}</div>`;
+    }).join('');
+    // All leads list
+    const listEl = document.getElementById('crm-leads-list');
+    if (!leads.length) { listEl.innerHTML='<div class="empty"><div class="icon">🎯</div><p>No leads found.</p></div>'; return; }
+    listEl.innerHTML = leads.map(l => `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="flex:1">
+          <div style="font-weight:600;color:var(--text)">${escHtml(l.name)} ${l.company?`<span style="color:var(--text-muted);font-weight:400">@ ${escHtml(l.company)}</span>`:''}
+          </div>
+          <div style="color:var(--text-muted);font-size:.78em">${escHtml(l.email||'')} ${l.value>0?`• $${Number(l.value).toLocaleString()}`:''}</div>
+        </div>
+        <span style="font-size:.75em;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.06);color:${CRM_STAGE_COLORS[l.stage]||'#64748b'}">${CRM_STAGE_LABELS[l.stage]||l.stage}</span>
+        <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="deleteCRMLead('${l.id}')">🗑</button>
+      </div>`).join('');
+  } catch(e) { console.error('CRM load error',e); }
+}
 
-  const barTimer = setInterval(() => {
-    progress += Math.random() * 12 + 4;
-    if (progress >= 100) { progress = 100; clearInterval(barTimer); }
-    bar.style.width = progress + '%';
-    pct.textContent = Math.round(progress) + '%';
-    if (progress >= 100) {
-      setTimeout(() => {
-        overlay.classList.add('fade-out');
-        setTimeout(() => { overlay.style.display = 'none'; }, 850);
-      }, 300);
+async function addCRMLead() {
+  const name = document.getElementById('crm-name').value.trim();
+  if (!name) { showToast('Name is required','error'); return; }
+  const res = document.getElementById('crm-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Adding…</span>';
+  try {
+    const r = await fetch('/api/crm/leads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      name, company:document.getElementById('crm-company').value,
+      email:document.getElementById('crm-email').value,
+      phone:document.getElementById('crm-phone').value,
+      value:parseFloat(document.getElementById('crm-value').value)||0,
+      source:document.getElementById('crm-source').value,
+      notes:document.getElementById('crm-notes').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = `<span style="color:#10b981">✅ Lead added!</span>`;
+    ['crm-name','crm-company','crm-email','crm-phone','crm-value','crm-source','crm-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadCRM();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function moveCRMStage(id, stage) {
+  try {
+    await fetch(`/api/crm/leads/${id}/stage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage})});
+    await loadCRM();
+    showToast(`Moved to ${CRM_STAGE_LABELS[stage]}`);
+  } catch(e) { showToast('Error moving stage','error'); }
+}
+
+async function scoreCRMLead(id) {
+  showToast('Scoring lead with AI…','info');
+  try {
+    const r = await fetch(`/api/crm/score/${id}`,{method:'POST'});
+    const data = await r.json();
+    await loadCRM();
+    showToast(`Score: ${data.score}/100`);
+  } catch(e) { showToast('Scoring failed','error'); }
+}
+
+async function deleteCRMLead(id) {
+  if (!confirm('Delete this lead?')) return;
+  await fetch(`/api/crm/leads/${id}`,{method:'DELETE'});
+  await loadCRM();
+  showToast('Lead deleted');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Email Marketing
+// ═══════════════════════════════════════════════════════════════════
+async function loadEmailCampaigns() {
+  try {
+    const camps = await fetch('/api/email/campaigns').then(r=>r.json());
+    const tips = await fetch('/api/email/deliverability-tips').then(r=>r.json());
+    const el = document.getElementById('em-campaigns-list');
+    const sent = camps.filter(c=>c.status==='sent').length;
+    const draft = camps.filter(c=>c.status==='draft').length;
+    document.getElementById('em-stat-total').textContent = camps.length;
+    document.getElementById('em-stat-sent').textContent = sent;
+    document.getElementById('em-stat-draft').textContent = draft;
+    document.getElementById('em-stat-open-rate').textContent = '—';
+    if (!camps.length) { el.innerHTML='<div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div>'; }
+    else {
+      el.innerHTML = camps.map(c=>`
+        <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <strong style="color:var(--text)">${escHtml(c.name)}</strong>
+            <span style="font-size:.75em;padding:2px 8px;border-radius:10px;background:${c.status==='sent'?'rgba(16,185,129,.15)':c.status==='draft'?'rgba(100,116,139,.15)':'rgba(245,158,11,.15)'};color:${c.status==='sent'?'#10b981':c.status==='draft'?'#94a3b8':'#f59e0b'}">${c.status}</span>
+          </div>
+          <div style="color:var(--text-muted);font-size:.78em">${escHtml(c.subject)}</div>
+          <div style="margin-top:6px;display:flex;gap:6px">
+            ${c.status!=='sent'?`<button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="sendEmailCampaign('${c.id}')">▶ Send</button>`:''}
+            <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="showCampaignStats('${c.id}')">📊 Stats</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteEmailCampaign('${c.id}')">🗑</button>
+          </div>
+        </div>`).join('');
     }
-  }, 120);
-})();
+    // Tips
+    document.getElementById('em-tips-list').innerHTML = tips.map((t,i)=>`<div style="padding:4px 0;border-bottom:${i<tips.length-1?'1px solid rgba(255,255,255,.04)':'none'}"><span style="color:#06b6d4;margin-right:6px">•</span>${escHtml(t)}</div>`).join('');
+  } catch(e) { console.error('Email load error',e); }
+}
 
-/* ══════════════════════════════════════════════════
-   PARTICLE SYSTEM
-══════════════════════════════════════════════════ */
-(function initParticles() {
-  const canvas = document.getElementById('particles-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  let W, H;
-  const particles = [];
+async function createEmailCampaign() {
+  const name = document.getElementById('em-camp-name').value.trim();
+  const subject = document.getElementById('em-subject').value.trim();
+  const body = document.getElementById('em-body').value.trim();
+  if (!name || !subject || !body) { showToast('Name, subject and body required','error'); return; }
+  const res = document.getElementById('em-create-result');
+  res.innerHTML = '<span style="color:var(--gold)">Creating…</span>';
+  try {
+    const r = await fetch('/api/email/campaigns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      name, subject, body, from_name:document.getElementById('em-from-name').value
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Campaign created!</span>';
+    ['em-camp-name','em-from-name','em-subject','em-body'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadEmailCampaigns();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
 
-  function resize() {
-    W = canvas.width = window.innerWidth;
-    H = canvas.height = window.innerHeight;
-  }
-  resize();
-  window.addEventListener('resize', resize, {passive:true});
+async function sendEmailCampaign(id) {
+  showToast('Sending campaign…','info');
+  try {
+    await fetch(`/api/email/campaigns/${id}/send`,{method:'POST'});
+    await loadEmailCampaigns();
+    showToast('Campaign sent!');
+  } catch(e) { showToast('Send failed','error'); }
+}
 
-  const GOLD = 'rgba(212,175,55,';
-  for (let i = 0; i < 55; i++) {
-    particles.push({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      r: Math.random() * 1.5 + 0.3,
-      vx: (Math.random() - 0.5) * 0.3,
-      vy: (Math.random() - 0.5) * 0.3,
-      a: Math.random() * 0.5 + 0.1,
-      da: (Math.random() - 0.5) * 0.003,
-    });
-  }
+async function showCampaignStats(id) {
+  const card = document.getElementById('em-stats-card');
+  const body = document.getElementById('em-stats-body');
+  card.style.display = 'block';
+  body.innerHTML = '<span style="color:var(--gold)">Loading stats…</span>';
+  try {
+    const s = await fetch(`/api/email/campaigns/${id}/stats`).then(r=>r.json());
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:.84em">
+        <div style="text-align:center"><div style="font-size:1.4em;font-weight:700;color:#3b82f6">${s.sent}</div><div style="color:var(--text-muted)">Sent</div></div>
+        <div style="text-align:center"><div style="font-size:1.4em;font-weight:700;color:#10b981">${s.opens}</div><div style="color:var(--text-muted)">Opens (${s.open_rate}%)</div></div>
+        <div style="text-align:center"><div style="font-size:1.4em;font-weight:700;color:#f59e0b">${s.clicks}</div><div style="color:var(--text-muted)">Clicks (${s.click_rate}%)</div></div>
+      </div>`;
+  } catch(e) { body.innerHTML='<span style="color:#ef4444">Error loading stats</span>'; }
+}
 
-  function frame() {
-    ctx.clearRect(0, 0, W, H);
-    for (const p of particles) {
-      p.x += p.vx; p.y += p.vy;
-      p.a += p.da;
-      if (p.a < 0.05) p.da = Math.abs(p.da);
-      if (p.a > 0.6) p.da = -Math.abs(p.da);
-      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
-      ctx.fill();
+async function aiWriteEmail() {
+  const goal = document.getElementById('em-write-goal').value.trim();
+  if (!goal) { showToast('Enter a goal first','error'); return; }
+  const res = document.getElementById('em-write-result');
+  res.innerHTML = '<span style="color:var(--gold)">◈ Generating with AI…</span>';
+  try {
+    const r = await fetch('/api/email/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      goal, tone:document.getElementById('em-write-tone').value,
+      audience:document.getElementById('em-write-audience').value
+    })});
+    const data = await r.json();
+    res.innerHTML = `<div style="margin-top:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;font-size:.83em">
+      <div style="font-weight:700;color:var(--gold);margin-bottom:6px">Subject: ${escHtml(data.subject)}</div>
+      <pre style="white-space:pre-wrap;color:var(--text-secondary);font-family:inherit;margin:0">${escHtml(data.body)}</pre>
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" style="font-size:.72em" data-subject="${escHtml(data.subject)}" data-body="${encodeURIComponent(data.body)}" onclick="populateEmailFormFromEl(this)">→ Use in Campaign</button>
+      </div>
+    </div>`;
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+function populateEmailForm(subject, bodyEncoded) {
+  document.getElementById('em-subject').value = subject;
+  document.getElementById('em-body').value = decodeURIComponent(bodyEncoded);
+  showToast('Email content copied to form');
+}
+function populateEmailFormFromEl(btn) {
+  const subject = btn.dataset.subject || '';
+  const bodyEncoded = btn.dataset.body || '';
+  populateEmailForm(subject, bodyEncoded);
+}
+
+async function deleteEmailCampaign(id) {
+  if (!confirm('Delete this campaign?')) return;
+  await fetch(`/api/email/campaigns/${id}`,{method:'DELETE'});
+  await loadEmailCampaigns();
+  showToast('Campaign deleted');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Meetings
+// ═══════════════════════════════════════════════════════════════════
+async function loadMeetings() {
+  try {
+    const meetings = await fetch('/api/meetings').then(r=>r.json());
+    const el = document.getElementById('meetings-list');
+    if (!meetings.length) { el.innerHTML='<div class="empty"><div class="icon">🗓️</div><p>No meetings yet.</p></div>'; return; }
+    el.innerHTML = meetings.map(m=>`
+      <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <strong style="color:var(--text)">${escHtml(m.title)}</strong>
+          <span style="font-size:.75em;color:var(--text-muted)">${m.date?m.date.split('T')[0]:''}</span>
+        </div>
+        ${m.participants?.length?`<div style="color:var(--text-muted);font-size:.78em">👥 ${m.participants.join(', ')}</div>`:''}
+        ${m.summary?`<div style="color:#a78bfa;font-size:.78em;margin-top:3px">${escHtml(m.summary.slice(0,80))}…</div>`:''}
+        <div style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="viewMeeting('${m.id}')">📋 View</button>
+          ${m.transcript?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#a78bfa" onclick="summarizeMeeting('${m.id}')">◈ Summarize</button>`:''}
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#10b981" onclick="generateMeetingFollowup('${m.id}')">📧 Follow-up</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteMeeting('${m.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Meetings load error',e); }
+}
+
+async function addMeeting() {
+  const title = document.getElementById('mtg-title').value.trim();
+  if (!title) { showToast('Title is required','error'); return; }
+  const res = document.getElementById('mtg-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Saving…</span>';
+  const participants = document.getElementById('mtg-participants').value.split(',').map(p=>p.trim()).filter(Boolean);
+  try {
+    const r = await fetch('/api/meetings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      title, date:document.getElementById('mtg-date').value,
+      participants, transcript:document.getElementById('mtg-transcript').value,
+      meeting_type:document.getElementById('mtg-type').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Meeting saved!</span>';
+    ['mtg-title','mtg-date','mtg-participants','mtg-transcript'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadMeetings();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function viewMeeting(id) {
+  const card = document.getElementById('meeting-detail-card');
+  const body = document.getElementById('meeting-detail-body');
+  card.style.display = 'block';
+  body.innerHTML = '<span style="color:var(--gold)">Loading…</span>';
+  try {
+    const m = await fetch(`/api/meetings/${id}`).then(r=>r.json());
+    body.innerHTML = `
+      <div style="font-size:.84em">
+        <div style="font-size:1em;font-weight:700;color:var(--text);margin-bottom:8px">${escHtml(m.title)}</div>
+        <div style="color:var(--text-muted);margin-bottom:8px">${m.date?m.date.replace('T',' ').split('.')[0]:''} • ${m.participants?.join(', ')||'No participants'}</div>
+        ${m.summary?`<div style="background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.3);border-radius:6px;padding:8px;margin-bottom:8px"><strong style="color:#a78bfa">Summary:</strong><br>${escHtml(m.summary)}</div>`:''}
+        ${m.action_items?.length?`<div style="margin-bottom:8px"><strong style="color:var(--gold)">Action Items:</strong><ul style="margin:4px 0 0 16px;color:var(--text-secondary)">${m.action_items.map(a=>`<li>${typeof a==='object'?escHtml(a.item||JSON.stringify(a)):escHtml(a)}</li>`).join('')}</ul></div>`:''}
+        ${m.followup_email?`<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);border-radius:6px;padding:8px"><strong style="color:#10b981">Follow-up Draft:</strong><pre style="white-space:pre-wrap;font-family:inherit;font-size:.9em;margin-top:4px;color:var(--text-secondary)">${escHtml(m.followup_email)}</pre></div>`:''}
+      </div>`;
+  } catch(e) { body.innerHTML='<span style="color:#ef4444">Error loading meeting</span>'; }
+}
+
+async function summarizeMeeting(id) {
+  showToast('AI summarizing…','info');
+  try {
+    await fetch(`/api/meetings/${id}/summarize`,{method:'POST'});
+    await loadMeetings();
+    if (document.getElementById('meeting-detail-card').style.display!=='none') viewMeeting(id);
+    showToast('Meeting summarized!');
+  } catch(e) { showToast('Summarize failed','error'); }
+}
+
+async function generateMeetingFollowup(id) {
+  showToast('Generating follow-up…','info');
+  try {
+    await fetch(`/api/meetings/${id}/followup`,{method:'POST'});
+    await loadMeetings();
+    if (document.getElementById('meeting-detail-card').style.display!=='none') viewMeeting(id);
+    showToast('Follow-up email generated!');
+  } catch(e) { showToast('Generation failed','error'); }
+}
+
+async function deleteMeeting(id) {
+  if (!confirm('Delete this meeting?')) return;
+  await fetch(`/api/meetings/${id}`,{method:'DELETE'});
+  await loadMeetings();
+  showToast('Meeting deleted');
+}
+
+// ── Assign task to agent from swarm ──────────────────────────────────────────
+function assignTaskToAgent(agentId) {
+  switchTab('tasks', null);
+  setTimeout(() => {
+    const taskInput = document.getElementById('task-input');
+    if (taskInput) {
+      taskInput.focus();
+      taskInput.placeholder = `Describe what you want ${agentId} to do…`;
     }
-    for (let i = 0; i < particles.length; i++) {
-      for (let j = i + 1; j < particles.length; j++) {
-        const dx = particles[i].x - particles[j].x;
-        const dy = particles[i].y - particles[j].y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 90) {
-          ctx.beginPath();
-          ctx.moveTo(particles[i].x, particles[i].y);
-          ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
-        }
-      }
-    }
-    requestAnimationFrame(frame);
-  }
-  frame();
-})();
+    if (typeof showManualAgentPicker === 'function') showManualAgentPicker();
+    setTimeout(() => {
+      const checkbox = document.querySelector(`[data-agent-id="${agentId}"]`);
+      if (checkbox) checkbox.click();
+    }, 300);
+  }, 200);
+// ═══════════════════════════════════════════════════════════════════
+// Social Scheduler
+// ═══════════════════════════════════════════════════════════════════
+const PLATFORM_EMOJIS = {twitter:'🐦',instagram:'📷',linkedin:'💼',tiktok:'🎵',facebook:'👤',youtube:'▶️'};
 
-/* init nav active state */
+async function loadSocialPosts() {
+  try {
+    const [posts, stats] = await Promise.all([
+      fetch('/api/social/posts?platform='+encodeURIComponent(document.getElementById('soc-filter-platform')?.value||'')).then(r=>r.json()),
+      fetch('/api/social/stats').then(r=>r.json())
+    ]);
+    document.getElementById('soc-stat-scheduled').textContent = stats.scheduled||0;
+    document.getElementById('soc-stat-posted').textContent = stats.posted||0;
+    document.getElementById('soc-stat-draft').textContent = stats.draft||0;
+    document.getElementById('soc-stat-total').textContent = stats.total||0;
+    const el = document.getElementById('social-posts-list');
+    if (!posts.length) { el.innerHTML='<div class="empty"><div class="icon">📱</div><p>No posts scheduled yet.</p></div>'; return; }
+    el.innerHTML = posts.map(p=>{
+      const statusColor = p.status==='posted'?'#10b981':p.status==='scheduled'?'#3b82f6':p.status==='failed'?'#ef4444':'#64748b';
+      return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span>${PLATFORM_EMOJIS[p.platform]||'📱'} <strong style="color:var(--text)">${p.platform}</strong></span>
+          <span style="font-size:.75em;color:${statusColor}">${p.status}</span>
+        </div>
+        <div style="color:var(--text-secondary);font-size:.82em">${escHtml(p.content.slice(0,100))}${p.content.length>100?'…':''}</div>
+        <div style="color:var(--text-muted);font-size:.75em;margin-top:3px">📅 ${p.scheduled_at?p.scheduled_at.replace('T',' ').slice(0,16):''}</div>
+        <div style="margin-top:6px;display:flex;gap:5px">
+          ${p.status==='scheduled'?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#10b981" onclick="publishSocialPost('${p.id}')">✅ Publish</button>`:''}
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteSocialPost('${p.id}')">🗑</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Social load error',e); }
+}
+
+async function schedulePost() {
+  const content = document.getElementById('soc-content').value.trim();
+  const scheduled_at = document.getElementById('soc-schedule-at').value;
+  if (!content || !scheduled_at) { showToast('Content and schedule time required','error'); return; }
+  const res = document.getElementById('soc-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Scheduling…</span>';
+  try {
+    const r = await fetch('/api/social/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      platform:document.getElementById('soc-platform').value,
+      content, scheduled_at:new Date(scheduled_at).toISOString(),
+      campaign:document.getElementById('soc-campaign').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Post scheduled!</span>';
+    ['soc-content','soc-schedule-at','soc-campaign'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadSocialPosts();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function publishSocialPost(id) {
+  await fetch(`/api/social/posts/${id}/publish`,{method:'POST'});
+  await loadSocialPosts();
+  showToast('Post marked as published!');
+}
+
+async function deleteSocialPost(id) {
+  if (!confirm('Delete this post?')) return;
+  await fetch(`/api/social/posts/${id}`,{method:'DELETE'});
+  await loadSocialPosts();
+  showToast('Post deleted');
+}
+
+async function processScheduledPosts() {
+  showToast('Processing due posts…','info');
+  try {
+    const r = await fetch('/api/social/process-due',{method:'POST'}).then(r=>r.json());
+    await loadSocialPosts();
+    showToast(`Auto-posted ${r.count} post${r.count!==1?'s':''}`);
+  } catch(e) { showToast('Error processing posts','error'); }
+}
+
+async function generateSocialContent() {
+  const topic = document.getElementById('soc-gen-topic').value.trim();
+  if (!topic) { showToast('Enter a topic first','error'); return; }
+  const res = document.getElementById('soc-gen-result');
+  res.innerHTML = '<span style="color:var(--gold)">◈ Generating…</span>';
+  try {
+    const r = await fetch('/api/social/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      topic, platform:document.getElementById('soc-gen-platform').value
+    })});
+    const data = await r.json();
+    res.innerHTML = `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:.83em">
+      <div style="color:var(--text-secondary)">${escHtml(data.content)}</div>
+      ${data.hashtags?.length?`<div style="color:#6366f1;margin-top:4px;font-size:.85em">${data.hashtags.map(h=>'#'+h.replace('#','')).join(' ')}</div>`:''}
+      <button class="btn btn-ghost btn-sm" style="margin-top:6px;font-size:.72em" onclick="document.getElementById('soc-content').value='${encodeURIComponent(data.content+' '+data.hashtags.map(h=>'#'+h.replace('#','')).join(' '))}'; showToast('Content copied to form')">→ Use Content</button>
+    </div>`;
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CEO Briefing
+// ═══════════════════════════════════════════════════════════════════
+async function loadCEOBriefing() {
+  try {
+    const b = await fetch('/api/briefing/today').then(r=>r.json());
+    renderBriefingWidget(b, document.getElementById('dash-ceo-briefing'));
+  } catch(e) { console.error('Briefing load error',e); }
+}
+
+async function loadFullBriefing() {
+  try {
+    const b = await fetch('/api/briefing/today').then(r=>r.json());
+    renderBriefingFull(b);
+    loadBriefingHistory();
+  } catch(e) { console.error('Briefing load error',e); }
+}
+
+async function forceRegenerateBriefing() {
+  showToast('Regenerating briefing…','info');
+  try {
+    const b = await fetch('/api/briefing/generate',{method:'POST'}).then(r=>r.json());
+    renderBriefingWidget(b, document.getElementById('dash-ceo-briefing'));
+    if (currentTab==='briefing') renderBriefingFull(b);
+    showToast('Briefing regenerated!');
+  } catch(e) { showToast('Regeneration failed','error'); }
+}
+
+function renderBriefingWidget(b, el) {
+  if (!el) return;
+  const m = b.metrics||{};
+  el.innerHTML = `
+    <div style="padding:4px 0">
+      <div style="font-size:.9em;font-weight:700;color:#818cf8;margin-bottom:6px">${escHtml(b.headline||b.date||'Briefing')}</div>
+      <div style="font-size:.83em;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${escHtml(b.summary||'')}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:.78em;text-align:center;margin-bottom:10px">
+        <div style="background:rgba(16,185,129,.1);border-radius:6px;padding:6px"><div style="font-weight:700;color:#10b981">$${Number(m.revenue_paid||0).toLocaleString()}</div><div style="color:var(--text-muted)">Revenue</div></div>
+        <div style="background:rgba(59,130,246,.1);border-radius:6px;padding:6px"><div style="font-weight:700;color:#3b82f6">${m.leads_total||0}</div><div style="color:var(--text-muted)">Leads</div></div>
+        <div style="background:rgba(245,158,11,.1);border-radius:6px;padding:6px"><div style="font-weight:700;color:#f59e0b">${m.chat_messages_today||0}</div><div style="color:var(--text-muted)">Messages</div></div>
+      </div>
+    </div>`;
+}
+
+function renderBriefingFull(b) {
+  const el = document.getElementById('briefing-today-body');
+  if (!el) return;
+  const m = b.metrics||{};
+  const sec = b.sections||{};
+  el.innerHTML = `
+    <div style="font-size:.84em">
+      <div style="font-size:1.1em;font-weight:700;color:#818cf8;margin-bottom:10px">${escHtml(b.headline||b.date)}</div>
+      <div style="color:var(--text-secondary);line-height:1.6;margin-bottom:16px">${escHtml(b.summary||'')}</div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px">
+        <div style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:1.6em;font-weight:800;color:#10b981">$${Number(m.revenue_paid||0).toLocaleString()}</div><div style="color:var(--text-muted);font-size:.8em">Revenue (Paid)</div></div>
+        <div style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:1.6em;font-weight:800;color:#3b82f6">$${Number(m.pipeline_value||0).toLocaleString()}</div><div style="color:var(--text-muted);font-size:.8em">Pipeline Value</div></div>
+      </div>
+      ${sec.action_items?.length?`<div style="margin-bottom:12px"><div style="font-weight:700;color:var(--gold);margin-bottom:6px">🎯 Action Items</div><ul style="margin:0 0 0 16px;color:var(--text-secondary)">${sec.action_items.map(a=>`<li style="margin-bottom:3px">${escHtml(a)}</li>`).join('')}</ul></div>`:''}
+      ${sec.risks?.length?`<div><div style="font-weight:700;color:#ef4444;margin-bottom:6px">⚠️ Risks &amp; Alerts</div><ul style="margin:0 0 0 16px;color:var(--text-secondary)">${sec.risks.map(r=>`<li style="margin-bottom:3px">${escHtml(r)}</li>`).join('')}</ul></div>`:''}
+      <div style="margin-top:10px;font-size:.75em;color:var(--text-muted)">Generated: ${b.generated_at||b.date} ${b.ai_generated?'• AI-powered':'• Heuristic'}</div>
+    </div>`;
+}
+
+async function loadBriefingHistory() {
+  try {
+    const briefings = await fetch('/api/briefing/history').then(r=>r.json());
+    const el = document.getElementById('briefing-history-list');
+    if (!briefings.length) { el.innerHTML='<div class="empty"><div class="icon">📰</div><p>No past briefings.</p></div>'; return; }
+    el.innerHTML = briefings.slice(0,10).map(b=>`
+      <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em;cursor:pointer" onclick='renderBriefingFull(${JSON.stringify(b)})'>
+        <div style="font-weight:600;color:var(--text)">${escHtml(b.date)} ${b.ai_generated?'<span style="color:#818cf8;font-size:.75em">AI</span>':''}</div>
+        <div style="color:var(--text-muted);font-size:.78em">${escHtml((b.summary||'').slice(0,70))}…</div>
+      </div>`).join('');
+  } catch(e) { console.error('Briefing history error',e); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Financial Tools
+// ═══════════════════════════════════════════════════════════════════
+function switchFinTab(panel, btn) {
+  ['invoices','quotes','expenses','pl'].forEach(p=>{
+    const el = document.getElementById('fin-panel-'+p);
+    if (el) el.style.display = p===panel?'block':'none';
+  });
+  document.querySelectorAll('.fin-tab-btn').forEach(b=>b.classList.remove('active','btn-primary'));
+  document.querySelectorAll('.fin-tab-btn').forEach(b=>b.classList.add('btn-ghost'));
+  btn.classList.remove('btn-ghost');
+  btn.classList.add('active','btn-primary');
+  if (panel==='invoices') loadInvoices();
+  else if (panel==='quotes') loadQuotes();
+  else if (panel==='expenses') loadExpenses();
+  else if (panel==='pl') loadPL();
+}
+
+async function loadInvoices() {
+  try {
+    const status = document.getElementById('inv-filter-status')?.value||'';
+    const invs = await fetch('/api/financial/invoices'+(status?'?status='+status:'')).then(r=>r.json());
+    const el = document.getElementById('invoices-list');
+    if (!invs.length) { el.innerHTML='<div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div>'; return; }
+    const statusColor = s => s==='paid'?'#10b981':s==='sent'?'#3b82f6':s==='overdue'?'#ef4444':s==='draft'?'#64748b':'#f59e0b';
+    el.innerHTML = invs.map(inv=>`
+      <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <strong style="color:var(--text)">${escHtml(inv.invoice_number)}</strong>
+          <span style="color:${statusColor(inv.status)};font-size:.8em;font-weight:700">${inv.status.toUpperCase()}</span>
+        </div>
+        <div style="color:var(--text-secondary)">${escHtml(inv.client_name)} • <strong style="color:#10b981">$${Number(inv.total||0).toLocaleString()}</strong></div>
+        <div style="color:var(--text-muted);font-size:.75em">Due: ${inv.due_date||'—'}</div>
+        <div style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap">
+          ${inv.status==='draft'?`<button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="sendInvoice('${inv.id}')">📧 Send</button>`:''}
+          ${inv.status!=='paid'?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#10b981" onclick="payInvoice('${inv.id}')">✅ Paid</button>`:''}
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteInvoice('${inv.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Invoice load error',e); }
+}
+
+async function createInvoice() {
+  const client = document.getElementById('inv-client').value.trim();
+  if (!client) { showToast('Client name required','error'); return; }
+  let items = [];
+  try { items = JSON.parse(document.getElementById('inv-items').value||'[]'); } catch(e) { showToast('Invalid items JSON','error'); return; }
+  const res = document.getElementById('inv-create-result');
+  res.innerHTML = '<span style="color:var(--gold)">Creating…</span>';
+  try {
+    const r = await fetch('/api/financial/invoices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      client_name:client, client_email:document.getElementById('inv-email').value,
+      items, due_date:document.getElementById('inv-due').value||undefined,
+      notes:document.getElementById('inv-notes').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = `<span style="color:#10b981">✅ Invoice ${escHtml(data.invoice_number)} created!</span>`;
+    ['inv-client','inv-email','inv-items','inv-due','inv-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadInvoices();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function sendInvoice(id) {
+  await fetch(`/api/financial/invoices/${id}/send`,{method:'POST'});
+  await loadInvoices();
+  showToast('Invoice marked as sent');
+}
+
+async function payInvoice(id) {
+  await fetch(`/api/financial/invoices/${id}/pay`,{method:'POST'});
+  await loadInvoices();
+  showToast('Invoice marked as paid!');
+}
+
+async function deleteInvoice(id) {
+  if (!confirm('Delete invoice?')) return;
+  await fetch(`/api/financial/invoices/${id}`,{method:'DELETE'});
+  await loadInvoices();
+  showToast('Invoice deleted');
+}
+
+async function checkOverdueInvoices() {
+  const r = await fetch('/api/financial/reminders').then(r=>r.json());
+  showToast(`${r.newly_marked?.length||0} invoices marked overdue, ${r.all_overdue?.length||0} total overdue`);
+  await loadInvoices();
+}
+
+async function loadQuotes() {
+  try {
+    const quotes = await fetch('/api/financial/quotes').then(r=>r.json());
+    const el = document.getElementById('quotes-list');
+    if (!quotes.length) { el.innerHTML='<div class="empty"><div class="icon">📄</div><p>No quotes yet.</p></div>'; return; }
+    el.innerHTML = quotes.map(q=>`
+      <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <strong style="color:var(--text)">${escHtml(q.quote_number)}</strong>
+          <span style="color:#10b981;font-weight:700">$${Number(q.total||0).toLocaleString()}</span>
+        </div>
+        <div style="color:var(--text-secondary)">${escHtml(q.client_name)}</div>
+        <div style="color:var(--text-muted);font-size:.75em">Valid until: ${q.valid_until||'—'}</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:5px;font-size:.72em;color:#ef4444" onclick="deleteQuote('${q.id}')">🗑 Delete</button>
+      </div>`).join('');
+  } catch(e) { console.error('Quotes load error',e); }
+}
+
+async function createQuote() {
+  const client = document.getElementById('quo-client').value.trim();
+  if (!client) { showToast('Client name required','error'); return; }
+  let items = [];
+  try { items = JSON.parse(document.getElementById('quo-items').value||'[]'); } catch(e) { showToast('Invalid items JSON','error'); return; }
+  const res = document.getElementById('quo-create-result');
+  res.innerHTML = '<span style="color:var(--gold)">Creating…</span>';
+  try {
+    const r = await fetch('/api/financial/quotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      client_name:client, client_email:document.getElementById('quo-email').value,
+      items, valid_until:document.getElementById('quo-valid').value||undefined,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = `<span style="color:#10b981">✅ Quote ${escHtml(data.quote_number)} created!</span>`;
+    await loadQuotes();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function deleteQuote(id) {
+  if (!confirm('Delete quote?')) return;
+  await fetch(`/api/financial/quotes/${id}`,{method:'DELETE'});
+  await loadQuotes();
+  showToast('Quote deleted');
+}
+
+async function loadExpenses() {
+  try {
+    const expenses = await fetch('/api/financial/expenses').then(r=>r.json());
+    const el = document.getElementById('expenses-list');
+    if (!expenses.length) { el.innerHTML='<div class="empty"><div class="icon">💸</div><p>No expenses yet.</p></div>'; return; }
+    const total = expenses.reduce((s,e)=>s+Number(e.amount||0),0);
+    el.innerHTML = `<div style="padding:8px 0;border-bottom:1px solid rgba(16,185,129,.2);margin-bottom:6px;font-size:.84em;font-weight:700;color:#ef4444">Total: $${total.toLocaleString(undefined,{minimumFractionDigits:2})}</div>`+
+    expenses.map(exp=>`
+      <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em;display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-weight:600;color:var(--text)">${escHtml(exp.description)}</div><div style="color:var(--text-muted);font-size:.78em">${escHtml(exp.category)} • ${exp.date}</div></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:#ef4444;font-weight:700">$${Number(exp.amount||0).toLocaleString()}</span>
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteExpense('${exp.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Expenses load error',e); }
+}
+
+async function addExpense() {
+  const desc = document.getElementById('exp-desc').value.trim();
+  const amount = parseFloat(document.getElementById('exp-amount').value||0);
+  if (!desc || !amount) { showToast('Description and amount required','error'); return; }
+  const res = document.getElementById('exp-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Adding…</span>';
+  try {
+    const r = await fetch('/api/financial/expenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      description:desc, amount, category:document.getElementById('exp-category').value,
+      date:document.getElementById('exp-date').value||undefined,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Expense added!</span>';
+    ['exp-desc','exp-amount','exp-date'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadExpenses();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function deleteExpense(id) {
+  if (!confirm('Delete expense?')) return;
+  await fetch(`/api/financial/expenses/${id}`,{method:'DELETE'});
+  await loadExpenses();
+  showToast('Expense deleted');
+}
+
+async function loadPL() {
+  try {
+    const pl = await fetch('/api/financial/pl').then(r=>r.json());
+    const el = document.getElementById('pl-body');
+    const profitColor = pl.profit>=0?'#10b981':'#ef4444';
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;font-size:.84em;margin-bottom:16px">
+        <div style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.2);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:1.8em;font-weight:800;color:#10b981">$${Number(pl.revenue||0).toLocaleString()}</div>
+          <div style="color:var(--text-muted)">Revenue (Paid)</div>
+          <div style="color:var(--text-muted);font-size:.8em">${pl.paid_invoices||0} paid invoices</div>
+        </div>
+        <div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:1.8em;font-weight:800;color:#ef4444">$${Number(pl.expenses||0).toLocaleString()}</div>
+          <div style="color:var(--text-muted)">Expenses</div>
+          <div style="color:var(--text-muted);font-size:.8em">${pl.expense_count||0} entries</div>
+        </div>
+        <div style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:1.8em;font-weight:800;color:${profitColor}">$${Number(pl.profit||0).toLocaleString()}</div>
+          <div style="color:var(--text-muted)">Net Profit</div>
+        </div>
+        <div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:1.8em;font-weight:800;color:#f59e0b">${pl.profit_margin||0}%</div>
+          <div style="color:var(--text-muted)">Profit Margin</div>
+        </div>
+      </div>
+      ${pl.overdue_invoices>0?`<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:12px;font-size:.84em"><span style="color:#ef4444;font-weight:700">⚠️ ${pl.overdue_invoices} overdue invoice${pl.overdue_invoices!==1?'s':''}</span> — <span style="color:var(--text-muted)">pending revenue: $${Number(pl.pending_revenue||0).toLocaleString()}</span></div>`:''}`;
+  } catch(e) { document.getElementById('pl-body').innerHTML='<span style="color:#ef4444">Error loading P&L</span>'; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Competitors
+// ═══════════════════════════════════════════════════════════════════
+async function loadCompetitors() {
+  try {
+    const comps = await fetch('/api/competitors').then(r=>r.json());
+    const el = document.getElementById('competitors-list');
+    if (!comps.length) { el.innerHTML='<div class="empty"><div class="icon">🕵️</div><p>No competitors tracked yet.</p></div>'; return; }
+    el.innerHTML = comps.map(c=>`
+      <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <strong style="color:var(--text)">${escHtml(c.name)}</strong>
+          <span style="font-size:.75em;color:var(--text-muted)">${c.last_analyzed?'Analyzed '+c.last_analyzed.split('T')[0]:'Not analyzed'}</span>
+        </div>
+        ${c.website?`<div style="color:#6366f1;font-size:.78em">${escHtml(c.website)}</div>`:''}
+        ${c.analysis?`<div style="color:var(--text-muted);font-size:.78em;margin-top:3px">${escHtml(c.analysis.slice(0,80))}…</div>`:''}
+        <div style="margin-top:6px;display:flex;gap:5px">
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#818cf8" onclick="analyzeCompetitor('${c.id}')">◈ Analyze</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="viewCompetitorDetail('${c.id}')">🔍 View</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteCompetitor('${c.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Competitors load error',e); }
+}
+
+async function addCompetitor() {
+  const name = document.getElementById('comp-name').value.trim();
+  if (!name) { showToast('Name is required','error'); return; }
+  const res = document.getElementById('comp-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Adding…</span>';
+  try {
+    const r = await fetch('/api/competitors',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      name, website:document.getElementById('comp-website').value,
+      pricing:document.getElementById('comp-pricing').value,
+      target_market:document.getElementById('comp-market').value,
+      notes:document.getElementById('comp-notes').value,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Competitor added!</span>';
+    ['comp-name','comp-website','comp-pricing','comp-market','comp-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadCompetitors();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function analyzeCompetitor(id) {
+  showToast('AI analyzing competitor…','info');
+  try {
+    await fetch(`/api/competitors/${id}/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+    await loadCompetitors();
+    await loadCompetitorAlerts();
+    showToast('Analysis complete!');
+  } catch(e) { showToast('Analysis failed','error'); }
+}
+
+async function viewCompetitorDetail(id) {
+  const card = document.getElementById('comp-detail-card');
+  const body = document.getElementById('comp-detail-body');
+  card.style.display = 'block';
+  body.innerHTML = '<span style="color:var(--gold)">Loading…</span>';
+  try {
+    const c = await fetch(`/api/competitors/${id}`).then(r=>r.json());
+    body.innerHTML = `
+      <div style="font-size:.84em">
+        <div style="font-weight:700;color:var(--text);font-size:1.05em;margin-bottom:8px">${escHtml(c.name)}</div>
+        ${c.analysis?`<div style="color:var(--text-secondary);margin-bottom:10px">${escHtml(c.analysis)}</div>`:'<div style="color:var(--text-muted);margin-bottom:10px">Not yet analyzed.</div>'}
+        ${c.strengths?.length?`<div style="margin-bottom:6px"><strong style="color:#10b981">Strengths:</strong> ${c.strengths.map(s=>`<span style="font-size:.85em;color:var(--text-secondary)">${escHtml(s)}</span>`).join(', ')}</div>`:''}
+        ${c.weaknesses?.length?`<div style="margin-bottom:6px"><strong style="color:#ef4444">Weaknesses:</strong> ${c.weaknesses.map(w=>`<span style="font-size:.85em;color:var(--text-secondary)">${escHtml(w)}</span>`).join(', ')}</div>`:''}
+        ${c.opportunities?.length?`<div style="margin-bottom:6px"><strong style="color:#f59e0b">Opportunities:</strong> ${c.opportunities.map(o=>`<span style="font-size:.85em;color:var(--text-secondary)">${escHtml(o)}</span>`).join(', ')}</div>`:''}
+        ${c.threats?.length?`<div><strong style="color:#8b5cf6">Threats:</strong> ${c.threats.map(t=>`<span style="font-size:.85em;color:var(--text-secondary)">${escHtml(t)}</span>`).join(', ')}</div>`:''}
+      </div>`;
+  } catch(e) { body.innerHTML='<span style="color:#ef4444">Error loading competitor</span>'; }
+}
+
+async function deleteCompetitor(id) {
+  if (!confirm('Remove this competitor from tracking?')) return;
+  await fetch(`/api/competitors/${id}`,{method:'DELETE'});
+  await loadCompetitors();
+  showToast('Competitor removed');
+}
+
+async function loadCompetitorAlerts() {
+  try {
+    const alerts = await fetch('/api/competitors/alerts').then(r=>r.json());
+    const el = document.getElementById('competitor-alerts-list');
+    if (!alerts.length) { el.innerHTML='<div class="empty"><div class="icon">✅</div><p>No alerts.</p></div>'; return; }
+    el.innerHTML = alerts.slice(0,10).map(a=>`
+      <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <strong style="color:var(--text)">${escHtml(a.competitor_name)}</strong>
+          <span style="font-size:.72em;color:var(--text-muted)">${a.created_at?a.created_at.split('T')[0]:''}</span>
+        </div>
+        <div style="color:var(--text-secondary);font-size:.82em">${escHtml(a.message)}</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:4px;font-size:.7em" onclick="dismissCompetitorAlert('${a.id}')">✓ Dismiss</button>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+async function dismissCompetitorAlert(id) {
+  await fetch(`/api/competitors/alerts/${id}/dismiss`,{method:'POST'});
+  await loadCompetitorAlerts();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Content Calendar
+// ═══════════════════════════════════════════════════════════════════
+async function loadContentCalendar() {
+  try {
+    const platform = document.getElementById('cc-filter-platform')?.value||'';
+    const status = document.getElementById('cc-filter-status')?.value||'';
+    const qs = new URLSearchParams();
+    if (platform) qs.set('platform',platform);
+    if (status) qs.set('status',status);
+    const {entries, stats} = await fetch('/api/content-calendar?'+qs.toString()).then(r=>r.json());
+    document.getElementById('cc-stat-total').textContent = stats.total||0;
+    document.getElementById('cc-stat-ideas').textContent = stats.by_status?.idea||0;
+    document.getElementById('cc-stat-scheduled').textContent = stats.scheduled_upcoming||0;
+    document.getElementById('cc-stat-published').textContent = stats.published_this_month||0;
+    const el = document.getElementById('content-calendar-entries');
+    if (!entries.length) { el.innerHTML='<div class="empty"><div class="icon">🗃️</div><p>No calendar entries. Add one or generate with AI.</p></div>'; return; }
+    // Group by date
+    const byDate = {};
+    entries.forEach(e=>{const d=e.date||'Unknown';(byDate[d]=byDate[d]||[]).push(e);});
+    const statusColors = {idea:'#64748b',draft:'#f59e0b',scheduled:'#3b82f6',published:'#10b981',archived:'#6b7280'};
+    el.innerHTML = Object.entries(byDate).map(([dt,dayEntries])=>`
+      <div style="margin-bottom:12px">
+        <div style="font-size:.8em;font-weight:700;color:var(--gold);padding:4px 0;border-bottom:1px solid rgba(212,175,55,.2);margin-bottom:6px">${dt}</div>
+        ${dayEntries.map(e=>`
+          <div style="background:var(--surface2);border:1px solid rgba(255,255,255,.06);border-left:3px solid ${statusColors[e.status]||'#64748b'};border-radius:4px;padding:8px 10px;margin-bottom:5px;font-size:.83em">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span>${PLATFORM_EMOJIS[e.platform]||'📱'} <strong style="color:var(--text)">${escHtml(e.title)}</strong></span>
+              <div style="display:flex;gap:5px;align-items:center">
+                <span style="font-size:.75em;color:${statusColors[e.status]}">${e.status}</span>
+                <select style="font-size:.72em;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:1px 4px" onchange="updateCalendarStatus('${e.id}',this.value)">
+                  ${['idea','draft','scheduled','published'].map(s=>`<option value="${s}"${s===e.status?' selected':''}>${s}</option>`).join('')}
+                </select>
+                <button class="btn btn-ghost btn-sm" style="font-size:.7em;color:#ef4444" onclick="deleteCalendarEntry('${e.id}')">🗑</button>
+              </div>
+            </div>
+            ${e.content?`<div style="color:var(--text-muted);font-size:.82em;margin-top:3px">${escHtml(e.content.slice(0,80))}${e.content.length>80?'…':''}</div>`:''}
+          </div>`).join('')}
+      </div>`).join('');
+  } catch(e) { console.error('Calendar load error',e); }
+}
+
+async function addCalendarEntry() {
+  const date_str = document.getElementById('cc-date').value;
+  const title = document.getElementById('cc-title').value.trim();
+  if (!date_str || !title) { showToast('Date and title required','error'); return; }
+  const res = document.getElementById('cc-add-result');
+  res.innerHTML = '<span style="color:var(--gold)">Adding…</span>';
+  try {
+    const r = await fetch('/api/content-calendar/entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      date:date_str, platform:document.getElementById('cc-platform').value,
+      content_type:document.getElementById('cc-type').value,
+      title, content:document.getElementById('cc-content').value, status:'idea'
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Entry added!</span>';
+    ['cc-date','cc-title','cc-content'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadContentCalendar();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+async function updateCalendarStatus(id, status) {
+  await fetch(`/api/content-calendar/entries/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  showToast('Status updated');
+}
+
+async function deleteCalendarEntry(id) {
+  if (!confirm('Delete this entry?')) return;
+  await fetch(`/api/content-calendar/entries/${id}`,{method:'DELETE'});
+  await loadContentCalendar();
+  showToast('Entry deleted');
+}
+
+async function generateContentCalendar() {
+  const niche = document.getElementById('cc-gen-niche').value.trim();
+  if (!niche) { showToast('Enter your niche first','error'); return; }
+  const res = document.getElementById('cc-gen-result');
+  res.innerHTML = '<span style="color:var(--gold)">◈ Generating calendar… This may take a moment.</span>';
+  try {
+    const r = await fetch('/api/content-calendar/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      niche, days:parseInt(document.getElementById('cc-gen-days').value||30)
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = `<span style="color:#10b981">✅ Generated ${data.count} content entries!</span>`;
+    await loadContentCalendar();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Guardrails — Pending Actions
+// ═══════════════════════════════════════════════════════════════════
+function showSubmitActionForm() {
+  const f = document.getElementById('submit-action-form');
+  f.style.display = f.style.display==='none'?'block':'none';
+}
+
+async function loadPendingActions() {
+  try {
+    const {actions} = await fetch('/api/guardrails/pending-actions').then(r=>r.json());
+    const el = document.getElementById('pending-actions-list');
+    if (!actions.length) { el.innerHTML='<div class="empty"><div class="icon">✅</div><p>No pending actions. All clear!</p></div>'; return; }
+    const riskColors = {low:'#10b981',medium:'#f59e0b',high:'#f97316',critical:'#ef4444'};
+    el.innerHTML = actions.map(a=>`
+      <div style="border:1px solid rgba(239,68,68,.2);border-left:3px solid ${riskColors[a.risk_level]||'#f59e0b'};border-radius:6px;padding:12px;margin-bottom:10px;font-size:.84em">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <strong style="color:var(--text)">${escHtml(a.action_type.replace(/_/g,' ').toUpperCase())}</strong>
+          <span style="font-size:.78em;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.06);color:${riskColors[a.risk_level]||'#f59e0b'};font-weight:700">${(a.risk_level||'medium').toUpperCase()}</span>
+        </div>
+        <div style="color:var(--text-secondary);margin-bottom:8px">${escHtml(a.description)}</div>
+        <div style="color:var(--text-muted);font-size:.75em;margin-bottom:8px">Submitted: ${a.created_at?.split('T')[0]||'—'} by ${escHtml(a.submitted_by||'user')}</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-success btn-sm" style="font-size:.78em" onclick="approveAction('${a.id}')">✅ Approve</button>
+          <button class="btn btn-danger btn-sm" style="font-size:.78em" onclick="rejectAction('${a.id}')">❌ Reject</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error('Pending actions load error',e); }
+}
+
+async function approveAction(id) {
+  await fetch(`/api/guardrails/pending-actions/${id}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  await loadPendingActions();
+  showToast('Action approved');
+}
+
+async function rejectAction(id) {
+  await fetch(`/api/guardrails/pending-actions/${id}/reject`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  await loadPendingActions();
+  showToast('Action rejected');
+}
+
+async function submitPendingAction() {
+  const desc = document.getElementById('pa-description').value.trim();
+  if (!desc) { showToast('Description is required','error'); return; }
+  let payload = {};
+  try { payload = JSON.parse(document.getElementById('pa-payload').value||'{}'); } catch(e) {}
+  const res = document.getElementById('pa-submit-result');
+  res.innerHTML = '<span style="color:var(--gold)">Submitting…</span>';
+  try {
+    const r = await fetch('/api/guardrails/submit-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      action_type:document.getElementById('pa-action-type').value,
+      description:desc, risk_level:document.getElementById('pa-risk-level').value, payload,
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'Error');
+    res.innerHTML = '<span style="color:#10b981">✅ Action submitted for review!</span>';
+    document.getElementById('pa-description').value = '';
+    document.getElementById('pa-payload').value = '';
+    await loadPendingActions();
+  } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Tab init hooks
+// ═══════════════════════════════════════════════════════════════════
+const _origSwitchTab = switchTab;
+window.switchTab = function(tab, btn) {
+  _origSwitchTab(tab, btn);
+  if (tab === 'crm') loadCRM();
+  else if (tab === 'email-marketing') loadEmailCampaigns();
+  else if (tab === 'meetings') loadMeetings();
+  else if (tab === 'social') loadSocialPosts();
+  else if (tab === 'briefing') { loadFullBriefing(); loadBriefingHistory(); }
+  else if (tab === 'financial') loadInvoices();
+  else if (tab === 'competitors') { loadCompetitors(); loadCompetitorAlerts(); }
+  else if (tab === 'content-calendar') loadContentCalendar();
+  else if (tab === 'guardrails') loadPendingActions();
+};
+
+// Load CEO briefing in dashboard on startup
 document.addEventListener('DOMContentLoaded', () => {
-  const overviewBtn = document.querySelector('.nav-group-btn[data-group="overview"]');
-  if (overviewBtn) overviewBtn.classList.add('active');
+  setTimeout(loadCEOBriefing, 1500);
 });
+
+// ══════════════════════════════════════════════════════════════════
+//  FEATURE MODULE JAVASCRIPT
+// ══════════════════════════════════════════════════════════════════
+
+// ── CRM ──────────────────────────────────────────────────────────
+async function loadCRM() {
+  try {
+    const [leads, stats] = await Promise.all([api('/api/crm/leads'), api('/api/crm/stats')]);
+    document.getElementById('crm-total').textContent = stats.total_leads || 0;
+    document.getElementById('crm-won').textContent = stats.by_stage?.won || 0;
+    document.getElementById('crm-pipeline-val').textContent = '$' + (stats.pipeline_value || 0).toLocaleString();
+    document.getElementById('crm-conv').textContent = (stats.conversion_rate || 0) + '%';
+    const el = document.getElementById('crm-leads-list');
+    if (!leads.length) { el.innerHTML = '<div class="empty"><div class="icon">🎯</div><p>No leads yet.</p></div>'; return; }
+    el.innerHTML = leads.map(l => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${l.name}</strong> <span style="font-size:.75em;color:var(--text-muted)">${l.company}</span>
+        <br><span style="font-size:.8em;color:var(--text-muted)">${l.email}</span>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px;margin-left:6px">${l.stage}</span>
+        <span style="font-size:.75em;color:var(--gold);margin-left:6px">Score: ${l.score}</span></div>
+      <div style="text-align:right">
+        <div style="font-size:.9em;font-weight:700;color:var(--green)">$${(l.value||0).toLocaleString()}</div>
+        <button class="btn btn-ghost btn-sm" onclick="deleteLead('${l.id}')" style="font-size:.7em;margin-top:4px">🗑</button>
+      </div></div>`).join('');
+  } catch(e) { console.error('CRM load error', e); }
+}
+async function addLead() {
+  const payload = {
+    name: document.getElementById('crm-name').value,
+    company: document.getElementById('crm-company').value,
+    email: document.getElementById('crm-email').value,
+    phone: document.getElementById('crm-phone').value,
+    value: parseFloat(document.getElementById('crm-value').value) || 0,
+    stage: document.getElementById('crm-stage').value,
+    notes: document.getElementById('crm-notes').value,
+  };
+  if (!payload.name) return showToast('Name is required', 'error');
+  await api('/api/crm/leads', 'POST', payload);
+  ['crm-name','crm-company','crm-email','crm-phone','crm-value','crm-notes'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  showToast('Lead added!');
+  loadCRM();
+}
+async function deleteLead(id) {
+  if (!confirm('Delete this lead?')) return;
+  await api(`/api/crm/leads/${id}`, 'DELETE');
+  showToast('Lead deleted');
+  loadCRM();
+}
+
+// ── Email Marketing ───────────────────────────────────────────────
+async function loadEmailCampaigns() {
+  try {
+    const [campaigns, stats] = await Promise.all([api('/api/email-mkt/campaigns'), api('/api/email-mkt/stats')]);
+    document.getElementById('em-campaigns').textContent = stats.total_campaigns || 0;
+    document.getElementById('em-sent').textContent = stats.total_sent || 0;
+    document.getElementById('em-open-rate').textContent = (stats.open_rate || 0) + '%';
+    document.getElementById('em-click-rate').textContent = (stats.click_rate || 0) + '%';
+    const el = document.getElementById('em-campaign-list');
+    if (!campaigns.length) { el.innerHTML = '<div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div>'; return; }
+    el.innerHTML = campaigns.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between"><strong>${c.name}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${c.status}</span></div>
+      <div style="font-size:.8em;color:var(--text-muted);margin-top:2px">${c.subject}</div>
+      <div style="display:flex;gap:10px;margin-top:6px;font-size:.8em">
+        <span>Sent: ${c.sent}</span><span>Opened: ${c.opened}</span><span>Clicked: ${c.clicked}</span>
+        ${c.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendCampaign('${c.id}')" style="font-size:.75em;padding:2px 8px">📤 Send</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Email load error', e); }
+}
+async function createEmailCampaign() {
+  const recipients = (document.getElementById('em-recipients').value || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const payload = {
+    name: document.getElementById('em-name').value,
+    subject: document.getElementById('em-subject').value,
+    body: document.getElementById('em-body').value,
+    recipients,
+  };
+  if (!payload.name) return showToast('Campaign name required', 'error');
+  await api('/api/email-mkt/campaigns', 'POST', payload);
+  ['em-name','em-subject','em-body','em-recipients'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Campaign created!');
+  loadEmailCampaigns();
+}
+async function sendCampaign(id) {
+  if (!confirm('Send this campaign now?')) return;
+  await api(`/api/email-mkt/campaigns/${id}/send`, 'POST', {});
+  showToast('Campaign sent!');
+  loadEmailCampaigns();
+}
+
+// ── Meetings ─────────────────────────────────────────────────────
+async function loadMeetings() {
+  try {
+    const [meetings, stats] = await Promise.all([api('/api/meetings/'), api('/api/meetings/stats')]);
+    document.getElementById('mt-total').textContent = stats.total || 0;
+    document.getElementById('mt-analyzed').textContent = stats.analyzed || 0;
+    document.getElementById('mt-pending').textContent = stats.pending || 0;
+    document.getElementById('mt-duration').textContent = stats.total_duration_mins || 0;
+    const el = document.getElementById('meetings-list');
+    if (!meetings.length) { el.innerHTML = '<div class="empty"><div class="icon">🎙️</div><p>No meetings yet.</p></div>'; return; }
+    el.innerHTML = meetings.map(m => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between"><strong>${m.title}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${m.status}</span></div>
+      <div style="font-size:.8em;color:var(--text-muted)">${m.date} · ${m.platform} · ${m.duration_mins}min</div>
+      ${m.summary?`<div style="font-size:.8em;margin-top:6px;color:var(--text)">${m.summary.substring(0,120)}…</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:6px">
+        ${m.status!=='analyzed'?`<button class="btn btn-ghost btn-sm" onclick="showMeetingAnalysis('${m.id}')" style="font-size:.75em">🤖 Show Analysis</button>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="deleteMeeting('${m.id}')" style="font-size:.75em">🗑</button>
+      </div></div>`).join('');
+  } catch(e) { console.error('Meetings load error', e); }
+}
+async function addMeeting() {
+  const transcript = document.getElementById('mt-transcript').value;
+  const payload = {
+    title: document.getElementById('mt-title').value,
+    platform: document.getElementById('mt-platform').value,
+    duration_mins: parseInt(document.getElementById('mt-duration').value) || 0,
+    transcript,
+  };
+  if (!payload.title) return showToast('Title required', 'error');
+  const meeting = await api('/api/meetings/', 'POST', payload);
+  showToast('Meeting added. Analyzing…');
+  const result = await api(`/api/meetings/${meeting.id}/analyze`, 'POST', {transcript});
+  document.getElementById('mt-result-card').style.display = '';
+  document.getElementById('mt-result-body').textContent = result.follow_up_email || result.summary || 'Analysis complete.';
+  ['mt-title','mt-transcript','mt-duration'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  loadMeetings();
+}
+async function showMeetingAnalysis(id) {
+  const data = await api(`/api/meetings/${id}/analyze`, 'POST', {});
+  document.getElementById('mt-result-card').style.display = '';
+  document.getElementById('mt-result-body').textContent = data.follow_up_email || data.summary || 'No analysis.';
+}
+async function deleteMeeting(id) {
+  await api(`/api/meetings/${id}`, 'DELETE');
+  showToast('Meeting deleted');
+  loadMeetings();
+}
+
+// ── Social Media ──────────────────────────────────────────────────
+async function loadSocialPosts() {
+  try {
+    const [posts, stats] = await Promise.all([api('/api/social/posts'), api('/api/social/stats')]);
+    document.getElementById('sm-total').textContent = stats.total_posts || 0;
+    document.getElementById('sm-published').textContent = stats.published || 0;
+    document.getElementById('sm-scheduled').textContent = stats.scheduled || 0;
+    document.getElementById('sm-likes').textContent = stats.total_likes || 0;
+    const el = document.getElementById('sm-posts-list');
+    if (!posts.length) { el.innerHTML = '<div class="empty"><div class="icon">📱</div><p>No posts yet.</p></div>'; return; }
+    el.innerHTML = posts.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div style="flex:1">
+          <div style="font-size:.85em">${p.content.substring(0,120)}${p.content.length>120?'…':''}</div>
+          <div style="display:flex;gap:8px;margin-top:4px;font-size:.75em;color:var(--text-muted)">
+            ${(p.platforms||[]).map(pl=>`<span>${pl}</span>`).join('')}
+            <span style="background:var(--surface3);padding:1px 6px;border-radius:4px">${p.status}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;margin-left:8px">
+          ${p.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="publishPost('${p.id}')" style="font-size:.7em">📤</button>`:''}
+          <button class="btn btn-ghost btn-sm" onclick="deletePost('${p.id}')" style="font-size:.7em">🗑</button>
+        </div>
+      </div></div>`).join('');
+  } catch(e) { console.error('Social load error', e); }
+}
+async function generateSocialPost() {
+  const topic = document.getElementById('sm-topic').value;
+  if (!topic) return showToast('Enter a topic first', 'error');
+  showToast('Generating post…');
+  const data = await api('/api/social/generate', 'POST', {
+    topic, platform: document.getElementById('sm-platform').value,
+    tone: document.getElementById('sm-tone').value,
+  });
+  document.getElementById('sm-content').value = data.content || '';
+}
+async function saveSocialPost() {
+  const content = document.getElementById('sm-content').value;
+  if (!content) return showToast('Content required', 'error');
+  await api('/api/social/posts', 'POST', {
+    content, platforms: [document.getElementById('sm-platform').value],
+  });
+  document.getElementById('sm-content').value = '';
+  document.getElementById('sm-topic').value = '';
+  showToast('Post saved!');
+  loadSocialPosts();
+}
+async function publishPost(id) {
+  await api(`/api/social/posts/${id}/publish`, 'POST', {});
+  showToast('Post published!');
+  loadSocialPosts();
+}
+async function deletePost(id) {
+  await api(`/api/social/posts/${id}`, 'DELETE');
+  showToast('Post deleted');
+  loadSocialPosts();
+}
+
+// ── CEO Briefing ──────────────────────────────────────────────────
+async function generateBriefing() {
+  showToast('Generating briefing…');
+  const data = await api('/api/briefing/generate', 'POST', {});
+  document.getElementById('briefing-content').textContent = data.content || 'Error generating briefing.';
+  document.getElementById('briefing-date').textContent = data.date || '';
+  document.getElementById('briefing-card').style.display = '';
+  document.getElementById('hc-latest-msg') && (document.getElementById('hc-latest-msg').style.display = 'none');
+}
+async function loadBriefingHistory() {
+  const data = await api('/api/briefing/history');
+  const el = document.getElementById('briefing-history');
+  if (!data.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📅 Past Briefings</div></div>' +
+    data.slice(-10).reverse().map(b =>
+      `<div style="padding:10px;border-bottom:1px solid var(--border)"><strong>${b.date}</strong>
+       <div style="font-size:.8em;color:var(--text-muted);margin-top:4px">${(b.content||'').substring(0,200)}…</div></div>`
+    ).join('') + '</div>';
+}
+
+// ── Finance / Invoicing ───────────────────────────────────────────
+function switchFinanceTab(tab, btn) {
+  document.querySelectorAll('.fi-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['invoices','expenses','pl'].forEach(t => {
+    const el = document.getElementById(`fi-${t}-panel`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'invoices') loadInvoices();
+  if (tab === 'expenses') loadExpenses();
+  if (tab === 'pl') loadPL();
+}
+async function loadInvoices() {
+  try {
+    const [invs, pl] = await Promise.all([api('/api/finance/invoices'), api('/api/finance/pl-report')]);
+    document.getElementById('fi-revenue').textContent = '$' + (pl.revenue||0).toLocaleString();
+    document.getElementById('fi-pending').textContent = '$' + (pl.pending_revenue||0).toLocaleString();
+    document.getElementById('fi-total-inv').textContent = pl.total_invoices || 0;
+    document.getElementById('fi-overdue').textContent = pl.overdue_invoices || 0;
+    const el = document.getElementById('fi-invoice-list');
+    if (!invs.length) { el.innerHTML = '<div class="empty"><div class="icon">🧾</div><p>No invoices yet.</p></div>'; return; }
+    el.innerHTML = invs.map(i => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${i.number}</strong> — ${i.client}
+        <div style="font-size:.8em;color:var(--text-muted)">Due: ${i.due_date || 'N/A'}</div></div>
+      <div style="text-align:right">
+        <div style="font-weight:700;color:var(--green)">$${(i.total||0).toLocaleString()}</div>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${i.status}</span>
+        ${i.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendInvoice('${i.id}')" style="font-size:.7em;display:block;margin-top:4px">📤 Send</button>`:''}
+        ${i.status==='sent'?`<button class="btn btn-ghost btn-sm" onclick="markPaid('${i.id}')" style="font-size:.7em;display:block;margin-top:4px">✅ Paid</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Invoice load error', e); }
+}
+async function createInvoice() {
+  const payload = {
+    client: document.getElementById('fi-client').value,
+    client_email: document.getElementById('fi-client-email').value,
+    subtotal: parseFloat(document.getElementById('fi-subtotal').value) || 0,
+    tax_rate: parseFloat(document.getElementById('fi-tax').value) || 0,
+    due_date: document.getElementById('fi-due').value,
+    notes: document.getElementById('fi-notes').value,
+  };
+  if (!payload.client) return showToast('Client name required', 'error');
+  await api('/api/finance/invoices', 'POST', payload);
+  ['fi-client','fi-client-email','fi-subtotal','fi-tax','fi-due','fi-notes'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Invoice created!');
+  loadInvoices();
+}
+async function sendInvoice(id) {
+  await api(`/api/finance/invoices/${id}/send`, 'POST', {});
+  showToast('Invoice sent!');
+  loadInvoices();
+}
+async function markPaid(id) {
+  await api(`/api/finance/invoices/${id}/mark-paid`, 'POST', {});
+  showToast('Invoice marked as paid!');
+  loadInvoices();
+}
+async function loadExpenses() {
+  const expenses = await api('/api/finance/expenses');
+  const el = document.getElementById('fi-expense-list');
+  if (!expenses.length) { el.innerHTML = '<div class="empty"><div class="icon">💸</div><p>No expenses yet.</p></div>'; return; }
+  el.innerHTML = expenses.map(e => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+    <div><strong>${e.description}</strong><div style="font-size:.8em;color:var(--text-muted)">${e.category} · ${e.date}</div></div>
+    <div style="font-weight:700;color:#ef4444">-$${(e.amount||0).toLocaleString()}</div></div>`).join('');
+}
+async function logExpense() {
+  const payload = {
+    description: document.getElementById('fi-exp-desc').value,
+    amount: parseFloat(document.getElementById('fi-exp-amount').value) || 0,
+    category: document.getElementById('fi-exp-cat').value,
+    date: document.getElementById('fi-exp-date').value || new Date().toISOString().split('T')[0],
+  };
+  if (!payload.description) return showToast('Description required', 'error');
+  await api('/api/finance/expenses', 'POST', payload);
+  ['fi-exp-desc','fi-exp-amount'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Expense logged!');
+  loadExpenses();
+}
+async function loadPL() {
+  const pl = await api('/api/finance/pl-report');
+  const el = document.getElementById('fi-pl-body');
+  const rows = [
+    ['Revenue (Paid)', `$${(pl.revenue||0).toLocaleString()}`, 'var(--green)'],
+    ['Pending Revenue', `$${(pl.pending_revenue||0).toLocaleString()}`, 'var(--gold)'],
+    ['Total Expenses', `-$${(pl.total_expenses||0).toLocaleString()}`, '#ef4444'],
+    ['Gross Profit', `$${(pl.gross_profit||0).toLocaleString()}`, pl.gross_profit>=0?'var(--green)':'#ef4444'],
+    ['Profit Margin', `${pl.profit_margin||0}%`, 'var(--text-muted)'],
+  ];
+  el.innerHTML = `<div style="display:grid;gap:8px">${rows.map(([label,val,color])=>
+    `<div style="display:flex;justify-content:space-between;padding:8px;background:var(--surface2);border-radius:6px">
+       <span>${label}</span><strong style="color:${color}">${val}</strong></div>`
+  ).join('')}
+  ${pl.expenses_by_category && Object.keys(pl.expenses_by_category).length?
+    `<div style="margin-top:8px"><strong style="font-size:.9em">Expenses by Category</strong>
+     ${Object.entries(pl.expenses_by_category).map(([k,v])=>
+       `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:.85em">
+         <span>${k}</span><span>$${(v||0).toLocaleString()}</span></div>`
+     ).join('')}</div>`:''}</div>`;
+}
+
+// ── Analytics ─────────────────────────────────────────────────────
+async function loadAnalyticsOverview() {
+  const data = await api('/api/analytics/overview');
+  document.getElementById('an-leads').textContent = data.crm?.total_leads || 0;
+  document.getElementById('an-revenue').textContent = '$' + (data.finance?.revenue||0).toLocaleString();
+  document.getElementById('an-open-rate').textContent = (data.email?.open_rate||0) + '%';
+  document.getElementById('an-posts').textContent = data.social?.posts || 0;
+  const el = document.getElementById('an-breakdown');
+  el.innerHTML = `<div style="display:grid;gap:8px;font-size:.88em">
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>🎯 CRM</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Pipeline: <strong>$${(data.crm?.pipeline_value||0).toLocaleString()}</strong></div>
+        <div>Won Deals: <strong>${data.crm?.won_deals||0}</strong></div>
+        <div>Conversion: <strong>${data.crm?.conversion_rate||0}%</strong></div>
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>📧 Email</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Campaigns: <strong>${data.email?.campaigns||0}</strong></div>
+        <div>Sent: <strong>${data.email?.sent||0}</strong></div>
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--surface2);border-radius:6px">
+      <strong>🎙️ Meetings</strong>
+      <div style="margin-top:6px;display:grid;gap:2px">
+        <div>Total: <strong>${data.meetings?.total||0}</strong></div>
+        <div>Analyzed: <strong>${data.meetings?.analyzed||0}</strong></div>
+      </div>
+    </div></div>`;
+}
+async function loadRecommendations() {
+  const data = await api('/api/analytics/recommendations');
+  const recs = data.recommendations || [];
+  const el = document.getElementById('an-recommendations');
+  if (!recs.length) { el.innerHTML = '<div class="empty"><p>No recommendations at this time.</p></div>'; return; }
+  const colors = {high:'#ef4444', medium:'#f59e0b', low:'#10b981', critical:'#ef4444'};
+  el.innerHTML = recs.map(r => `<div style="padding:10px;border-left:3px solid ${colors[r.priority]||'var(--border)'};margin-bottom:8px;background:var(--surface2);border-radius:0 6px 6px 0">
+    <div style="font-size:.75em;color:${colors[r.priority]||'var(--text-muted)'};text-transform:uppercase;font-weight:700">${r.type} · ${r.priority}</div>
+    <div style="font-size:.88em;margin-top:4px">${r.text}</div>
+    ${r.action?`<div style="font-size:.78em;color:var(--text-muted);margin-top:4px">→ ${r.action}</div>`:''}</div>`
+  ).join('');
+}
+
+// ── Workflows ─────────────────────────────────────────────────────
+async function loadWorkflows() {
+  const wfs = await api('/api/workflows/');
+  const el = document.getElementById('wf-list');
+  if (!wfs.length) { el.innerHTML = '<div class="empty"><div class="icon">⚙️</div><p>No workflows yet.</p></div>'; return; }
+  el.innerHTML = wfs.map(w => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${w.name}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${w.description||''} · Trigger: ${w.trigger?.type||w.trigger}</div>
+      <div style="font-size:.78em;color:var(--text-muted)">Steps: ${(w.steps||[]).length} · Runs: ${w.runs||0}</div>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="runWorkflow('${w.id}')" style="font-size:.75em">▶ Run</button>
+      <button class="btn btn-ghost btn-sm" onclick="deleteWorkflow('${w.id}')" style="font-size:.75em">🗑</button>
+    </div></div>`).join('');
+}
+async function createWorkflow() {
+  const stepsRaw = document.getElementById('wf-steps').value;
+  const steps = stepsRaw.split('\n').map(l=>l.trim()).filter(Boolean).map(l => {
+    const [action, ...desc] = l.split(':');
+    return {type: action.trim(), config: desc.join(':').trim()};
+  });
+  const payload = {
+    name: document.getElementById('wf-name').value,
+    description: document.getElementById('wf-desc').value,
+    trigger: {type: document.getElementById('wf-trigger').value},
+    steps,
+  };
+  if (!payload.name) return showToast('Workflow name required', 'error');
+  await api('/api/workflows/', 'POST', payload);
+  ['wf-name','wf-desc','wf-steps'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Workflow created!');
+  loadWorkflows();
+}
+async function runWorkflow(id) {
+  await api(`/api/workflows/${id}/run`, 'POST', {});
+  showToast('Workflow executed!');
+  loadWorkflows();
+  loadWorkflowRuns();
+}
+async function deleteWorkflow(id) {
+  await api(`/api/workflows/${id}`, 'DELETE');
+  showToast('Workflow deleted');
+  loadWorkflows();
+}
+async function loadWorkflowRuns() {
+  const runs = await api('/api/workflows/runs');
+  const el = document.getElementById('wf-runs-list');
+  if (!runs.length) { el.innerHTML = '<div class="empty"><p>No runs yet.</p></div>'; return; }
+  el.innerHTML = runs.slice(-10).reverse().map(r => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:.85em">
+    <div><strong>${r.workflow_name}</strong> <span style="color:var(--text-muted)">· ${r.trigger}</span></div>
+    <div><span style="color:var(--green)">${r.status}</span> <span style="color:var(--text-muted);font-size:.8em">${r.started_at}</span></div>
+  </div>`).join('');
+}
+
+// ── Team ──────────────────────────────────────────────────────────
+async function loadTeamMembers() {
+  const members = await api('/api/team/members');
+  const el = document.getElementById('team-members-list');
+  if (!members.length) { el.innerHTML = '<div class="empty"><div class="icon">👥</div><p>No members yet. Invite someone!</p></div>'; return; }
+  el.innerHTML = members.map(m => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${m.name||m.email}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${m.email}</div></div>
+    <div style="text-align:right">
+      <span style="font-size:.78em;background:var(--surface3);padding:2px 8px;border-radius:4px">${m.role}</span>
+      <span style="font-size:.75em;color:var(--text-muted);display:block;margin-top:2px">${m.status}</span>
+    </div></div>`).join('');
+}
+async function inviteTeamMember() {
+  const email = document.getElementById('team-email').value;
+  const role = document.getElementById('team-role').value;
+  if (!email) return showToast('Email required', 'error');
+  const data = await api('/api/team/members/invite', 'POST', {email, role});
+  if (data.error) return showToast(data.error, 'error');
+  document.getElementById('team-invite-result').innerHTML =
+    `<div style="padding:10px;background:var(--surface2);border-radius:6px;font-size:.85em">
+     ✅ Invitation sent! Share this token: <code style="color:var(--gold)">${data.token}</code></div>`;
+  document.getElementById('team-email').value = '';
+  loadTeamMembers();
+}
+
+// ── Support ───────────────────────────────────────────────────────
+function switchSupportTab(tab, btn) {
+  document.querySelectorAll('.sup-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('sup-tickets-panel').style.display = tab === 'tickets' ? '' : 'none';
+  document.getElementById('sup-kb-panel').style.display = tab === 'kb' ? '' : 'none';
+  if (tab === 'tickets') loadTickets();
+  if (tab === 'kb') loadKBArticles();
+}
+async function loadTickets() {
+  try {
+    const [tickets, stats] = await Promise.all([
+      api('/api/support/tickets' + (document.getElementById('sup-f-status')?.value ? '?status=' + document.getElementById('sup-f-status').value : '')),
+      api('/api/support/stats')
+    ]);
+    document.getElementById('sup-open').textContent = stats.open || 0;
+    document.getElementById('sup-progress').textContent = stats.in_progress || 0;
+    document.getElementById('sup-resolved').textContent = stats.resolved || 0;
+    document.getElementById('sup-kb').textContent = stats.kb_articles || 0;
+    const el = document.getElementById('sup-ticket-list');
+    if (!tickets.length) { el.innerHTML = '<div class="empty"><div class="icon">🎫</div><p>No tickets.</p></div>'; return; }
+    const prioColors = {urgent:'#ef4444',high:'#f59e0b',medium:'#6366f1',low:'#10b981'};
+    el.innerHTML = tickets.map(t => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between">
+        <strong>${t.number}: ${t.subject}</strong>
+        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${t.status}</span>
+      </div>
+      <div style="font-size:.8em;color:var(--text-muted)">${t.customer_name||''} · ${t.customer_email||''}</div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <span style="font-size:.75em;color:${prioColors[t.priority]||'var(--text-muted)'}">${t.priority}</span>
+        <span style="font-size:.75em;color:var(--text-muted)">${t.category}</span>
+        <button class="btn btn-ghost btn-sm" onclick="aiSuggestReply('${t.id}')" style="font-size:.7em">🤖 AI Reply</button>
+        ${t.status!=='resolved'?`<button class="btn btn-ghost btn-sm" onclick="resolveTicket('${t.id}')" style="font-size:.7em">✅ Resolve</button>`:''}
+      </div></div>`).join('');
+  } catch(e) { console.error('Support load error', e); }
+}
+async function createTicket() {
+  const payload = {
+    subject: document.getElementById('sup-subject').value,
+    customer_email: document.getElementById('sup-cust-email').value,
+    customer_name: document.getElementById('sup-cust-name').value,
+    priority: document.getElementById('sup-priority').value,
+    category: document.getElementById('sup-cat').value,
+    description: document.getElementById('sup-desc').value,
+  };
+  if (!payload.subject) return showToast('Subject required', 'error');
+  await api('/api/support/tickets', 'POST', payload);
+  ['sup-subject','sup-cust-email','sup-cust-name','sup-desc'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Ticket created!');
+  loadTickets();
+}
+async function aiSuggestReply(id) {
+  showToast('Generating AI reply…');
+  const data = await api(`/api/support/tickets/${id}/ai-suggest`, 'POST', {});
+  alert('AI Suggested Reply:\n\n' + (data.suggestion || 'No suggestion.'));
+}
+async function resolveTicket(id) {
+  await api(`/api/support/tickets/${id}`, 'PATCH', {status: 'resolved'});
+  showToast('Ticket resolved!');
+  loadTickets();
+}
+async function loadKBArticles() {
+  const articles = await api('/api/support/kb');
+  const el = document.getElementById('sup-kb-list');
+  if (!articles.length) { el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>No articles yet.</p></div>'; return; }
+  el.innerHTML = articles.map(a => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <strong>${a.title}</strong>
+    <div style="font-size:.8em;color:var(--text-muted)">${a.category} · Views: ${a.views}</div>
+    <div style="font-size:.82em;margin-top:4px">${a.content.substring(0,120)}…</div>
+  </div>`).join('');
+}
+async function createKBArticle() {
+  const payload = {
+    title: document.getElementById('kb-title').value,
+    content: document.getElementById('kb-content').value,
+    category: document.getElementById('kb-cat').value,
+  };
+  if (!payload.title) return showToast('Title required', 'error');
+  await api('/api/support/kb', 'POST', payload);
+  ['kb-title','kb-content'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Article saved!');
+  loadKBArticles();
+}
+
+// ── Website Builder ───────────────────────────────────────────────
+async function loadPages() {
+  const pages = await api('/api/website-builder/pages');
+  const el = document.getElementById('wb-pages-list');
+  if (!pages.length) { el.innerHTML = '<div class="empty"><div class="icon">🌐</div><p>No pages yet.</p></div>'; return; }
+  el.innerHTML = pages.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${p.name}</strong>
+      <div style="font-size:.8em;color:var(--text-muted)">${p.type} · ${p.business_name}</div></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="previewPage('${p.id}')" style="font-size:.75em">👁 Preview</button>
+      <button class="btn btn-ghost btn-sm" onclick="deletePage('${p.id}')" style="font-size:.75em">🗑</button>
+    </div></div>`).join('');
+}
+async function generateWebPage() {
+  const payload = {
+    business_name: document.getElementById('wb-biz').value,
+    industry: document.getElementById('wb-industry').value,
+    page_type: document.getElementById('wb-type').value,
+    description: document.getElementById('wb-desc').value,
+  };
+  if (!payload.business_name) return showToast('Business name required', 'error');
+  showToast('Generating page with AI…');
+  await api('/api/website-builder/generate', 'POST', payload);
+  showToast('Page generated!');
+  loadPages();
+}
+async function previewPage(id) {
+  const page = await api(`/api/website-builder/pages/${id}`);
+  const w = window.open('', '_blank');
+  w.document.write(page.html_content || '<p>No content.</p>');
+}
+async function deletePage(id) {
+  await api(`/api/website-builder/pages/${id}`, 'DELETE');
+  showToast('Page deleted');
+  loadPages();
+}
+
+// ── Competitors ───────────────────────────────────────────────────
+async function loadCompetitors() {
+  const comps = await api('/api/competitors/');
+  const el = document.getElementById('comp-list');
+  if (!comps.length) { el.innerHTML = '<div class="empty"><div class="icon">🔍</div><p>No competitors tracked yet.</p></div>'; return; }
+  el.innerHTML = comps.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${c.name}</strong>
+        ${c.website?`<a href="${c.website}" target="_blank" style="font-size:.78em;color:var(--accent);margin-left:8px">${c.website}</a>`:''}
+        <div style="font-size:.82em;color:var(--text-muted);margin-top:2px">${c.description||''}</div>
+        ${c.last_checked?`<div style="font-size:.75em;color:var(--text-muted)">Last analyzed: ${c.last_checked}</div>`:''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="analyzeCompetitor('${c.id}')" style="font-size:.75em">🤖 Analyze</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteCompetitor('${c.id}')" style="font-size:.75em">🗑</button>
+      </div>
+    </div></div>`).join('');
+}
+async function addCompetitor() {
+  const payload = {
+    name: document.getElementById('comp-name').value,
+    website: document.getElementById('comp-website').value,
+    description: document.getElementById('comp-desc').value,
+  };
+  if (!payload.name) return showToast('Name required', 'error');
+  await api('/api/competitors/', 'POST', payload);
+  ['comp-name','comp-website','comp-desc'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  showToast('Competitor added!');
+  loadCompetitors();
+}
+async function analyzeCompetitor(id) {
+  showToast('Analyzing competitor with AI…');
+  const data = await api(`/api/competitors/${id}/analyze`, 'POST', {});
+  document.getElementById('comp-analysis-card').style.display = '';
+  document.getElementById('comp-analysis-body').textContent = data.analysis || 'No analysis.';
+  loadCompetitors();
+}
+async function deleteCompetitor(id) {
+  await api(`/api/competitors/${id}`, 'DELETE');
+  showToast('Competitor removed');
+  loadCompetitors();
+}
+
+// ── Personal Brand ────────────────────────────────────────────────
+function switchBrandTab(tab, btn) {
+  document.querySelectorAll('.br-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['generate','profile','library'].forEach(t => {
+    const el = document.getElementById(`br-${t}-panel`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  if (tab === 'library') loadBrandContent();
+}
+async function generateBrandContent() {
+  const topic = document.getElementById('br-topic').value;
+  if (!topic) return showToast('Topic required', 'error');
+  showToast('Generating content…');
+  const data = await api('/api/brand/generate-content', 'POST', {
+    topic, content_type: document.getElementById('br-type').value,
+  });
+  document.getElementById('br-generated').textContent = data.content || '';
+}
+async function suggestBrandTopics() {
+  showToast('Generating topic ideas…');
+  const data = await api('/api/brand/topics', 'POST', {});
+  const el = document.getElementById('br-topics-list');
+  el.innerHTML = (data.topics||[]).map((t,i)=>
+    `<div style="padding:6px;border-bottom:1px solid var(--border);font-size:.85em;cursor:pointer"
+      onclick="document.getElementById('br-topic').value='${t.replace(/'/g,"\\'")}'">${i+1}. ${t}</div>`
+  ).join('');
+}
+async function saveBrandProfile() {
+  const payload = {
+    name: document.getElementById('br-p-name').value,
+    title: document.getElementById('br-p-title').value,
+    industry: document.getElementById('br-p-industry').value,
+    target_audience: document.getElementById('br-p-audience').value,
+    tone: document.getElementById('br-p-tone').value,
+  };
+  await api('/api/brand/profile', 'POST', payload);
+  showToast('Profile saved!');
+}
+async function loadBrandContent() {
+  const pieces = await api('/api/brand/content');
+  const el = document.getElementById('br-content-list');
+  if (!pieces.length) { el.innerHTML = '<div class="empty"><div class="icon">📁</div><p>No content saved yet.</p></div>'; return; }
+  el.innerHTML = pieces.map(p => `<div style="padding:10px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between">
+      <span style="font-size:.78em;background:var(--surface3);padding:2px 6px;border-radius:4px">${p.type}</span>
+      <span style="font-size:.75em;color:var(--text-muted)">${p.created_at?.split('T')[0]||''}</span>
+    </div>
+    <div style="font-size:.85em;margin-top:6px"><strong>${p.topic}</strong></div>
+    <div style="font-size:.82em;color:var(--text-muted);margin-top:4px">${p.content.substring(0,150)}…</div>
+    <button class="btn btn-ghost btn-sm" onclick="deleteBrandContent('${p.id}')" style="font-size:.7em;margin-top:6px">🗑 Delete</button>
+  </div>`).join('');
+}
+async function deleteBrandContent(id) {
+  await api(`/api/brand/content/${id}`, 'DELETE');
+  showToast('Content deleted');
+  loadBrandContent();
+}
+
+// ── Health Check ──────────────────────────────────────────────────
+async function runHealthCheck() {
+  showToast('Running health check…');
+  const data = await api('/api/health-check/run', 'POST', {});
+  document.getElementById('hc-report-card').style.display = '';
+  document.getElementById('hc-latest-msg').style.display = 'none';
+  const gradeColors = {A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'};
+  document.getElementById('hc-grade').textContent = data.grade;
+  document.getElementById('hc-grade').style.color = gradeColors[data.grade]||'var(--text)';
+  const el = document.getElementById('hc-report-body');
+  el.innerHTML = `<div style="margin-bottom:16px">
+    <div style="font-size:.9em;font-weight:700;margin-bottom:8px">Overall: ${data.overall_score}/100 (Grade ${data.grade})</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${Object.entries(data.scores||{}).map(([k,v])=>
+      `<div style="padding:6px 12px;background:var(--surface2);border-radius:6px;font-size:.82em">${k}: <strong>${v}</strong></div>`
+    ).join('')}</div></div>
+  ${data.issues?.length?`<div style="margin-bottom:16px"><strong style="font-size:.9em">⚠️ Issues Found</strong>
+    ${data.issues.map(i=>`<div style="padding:8px;margin-top:6px;border-left:3px solid ${i.severity==='critical'?'#ef4444':'#f59e0b'};background:var(--surface2);border-radius:0 6px 6px 0;font-size:.84em">
+      <div><strong>${i.area}:</strong> ${i.issue}</div>
+      <div style="color:var(--text-muted);margin-top:2px">→ ${i.suggestion}</div></div>`).join('')}</div>`:''}
+  ${data.strengths?.length?`<div><strong style="font-size:.9em">✅ Strengths</strong>
+    ${data.strengths.map(s=>`<div style="padding:6px 0;font-size:.84em;color:var(--green)">✓ ${s}</div>`).join('')}</div>`:''}`;
+}
+async function loadHealthHistory() {
+  const reports = await api('/api/health-check/history');
+  const el = document.getElementById('hc-history');
+  if (!reports.length) { el.innerHTML = ''; return; }
+  const colors = {A:'#10b981',B:'#6366f1',C:'#f59e0b',D:'#ef4444'};
+  el.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📅 Health History</div></div>' +
+    reports.slice(-12).reverse().map(r=>
+      `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+        <div><strong>${r.date}</strong> <span style="font-size:.82em;color:var(--text-muted)">${r.overall_score}/100</span></div>
+        <span style="font-size:1.2em;font-weight:900;color:${colors[r.grade]||'var(--text)'}">${r.grade}</span>
+      </div>`
+    ).join('') + '</div>';
+}
+
+// ── Export & Backup ───────────────────────────────────────────────
+async function loadExportModules() {
+  const modules = await api('/api/export/modules');
+  const el = document.getElementById('export-modules-list');
+  el.innerHTML = modules.map(m => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><strong>${m.key}</strong>
+      <span style="font-size:.75em;color:var(--text-muted);margin-left:8px">${m.exists?(m.size_bytes/1024).toFixed(1)+'KB':'no data'}</span></div>
+    <div style="display:flex;gap:6px">
+      ${m.exists?`<a href="/api/export/json/${m.key}" download class="btn btn-ghost btn-sm" style="font-size:.75em">⬇ JSON</a>`:'<span style="font-size:.75em;color:var(--text-muted)">no data</span>'}
+    </div></div>`).join('');
+}
+async function createBackup() {
+  showToast('Creating backup…');
+  const data = await api('/api/export/backup', 'POST', {});
+  showToast(`Backup created: ${data.backup_file} (${(data.size_bytes/1024).toFixed(0)}KB)`);
+  loadBackupsList();
+}
+async function loadBackupsList() {
+  const backups = await api('/api/export/backups');
+  const el = document.getElementById('export-backups-list');
+  if (!backups.length) { el.innerHTML = '<div class="empty"><div class="icon">🗜️</div><p>No backups yet.</p></div>'; return; }
+  el.innerHTML = backups.map(b => `<div style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div><div style="font-size:.85em">${b.name}</div>
+      <div style="font-size:.75em;color:var(--text-muted)">${(b.size_bytes/1024).toFixed(0)}KB · ${b.created_at}</div></div>
+    <a href="/api/export/download-backup/${b.name}" download class="btn btn-ghost btn-sm" style="font-size:.75em">⬇ Download</a>
+  </div>`).join('');
+}
+
+// ── Auto-load on tab switch (extend existing switchTab) ───────────
+const _origSwitchTab = switchTab;
+function switchTab(tab, btn) {
+  _origSwitchTab(tab, btn);
+  const loaders = {
+    'crm': loadCRM,
+    'email-mkt': loadEmailCampaigns,
+    'meetings': loadMeetings,
+    'social': loadSocialPosts,
+    'briefing': () => api('/api/briefing/latest').then(d => {
+      if (d.content) { document.getElementById('briefing-content').textContent = d.content; document.getElementById('briefing-date').textContent = d.date||''; }
+    }),
+    'invoicing': loadInvoices,
+    'analytics-bi': () => { loadAnalyticsOverview(); loadRecommendations(); },
+    'workflows': () => { loadWorkflows(); loadWorkflowRuns(); },
+    'team': loadTeamMembers,
+    'support-desk': loadTickets,
+    'website-builder': loadPages,
+    'competitors': loadCompetitors,
+    'brand': () => api('/api/brand/profile').then(p => {
+      if (p.name) { document.getElementById('br-p-name').value=p.name||''; document.getElementById('br-p-title').value=p.title||''; document.getElementById('br-p-industry').value=p.industry||''; document.getElementById('br-p-audience').value=p.target_audience||''; }
+    }),
+    'health': () => api('/api/health-check/latest').then(d => {
+      if (d.grade) { document.getElementById('hc-report-card').style.display=''; document.getElementById('hc-latest-msg').style.display='none'; runHealthCheck && null; }
+    }),
+    'export': () => { loadExportModules(); loadBackupsList(); },
+  };
+  if (loaders[tab]) { try { loaders[tab](); } catch(e) {} }
+}
 </script>
 </body>
 </html>"""
@@ -9901,6 +13717,8 @@ async def sse_events(request: Request):
                 for agent_name in _mode_agent_targets(mode):
                     if agent_name in INFRA_AGENTS:
                         continue
+                    if not _BOT_NAME_RE.match(agent_name):
+                        continue
                     pid_file = AI_HOME / "run" / f"{agent_name}.pid"
                     if pid_file.exists():
                         try:
@@ -9943,6 +13761,8 @@ def get_status():
   mode = _current_mode()
   for agent_name in _mode_agent_targets(mode):
     if agent_name in INFRA_AGENTS:
+      continue
+    if not _BOT_NAME_RE.match(agent_name):
       continue
     pid_file = AI_HOME / "run" / f"{agent_name}.pid"
     running = False
@@ -10626,6 +14446,136 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
                 return f"{len(pending)} pending proposals:\n" + "\n".join(lines) + "\nGo to UI > Improvements to approve."
         return "No pending improvements."
 
+// Auto-refresh new tabs every 30s when active
+setInterval(() => {
+  if (currentTab === 'budget') loadBudget();
+  if (currentTab === 'boardroom') loadBoardroom();
+  if (currentTab === 'tickets') loadTickets();
+  if (currentTab === 'artifacts') loadSessions();
+}, 30000);
+
+/* ══════════════════════════════════════════════════
+   BOOT SEQUENCE
+══════════════════════════════════════════════════ */
+(function runBootSequence() {
+  const overlay = document.getElementById('boot-overlay');
+  const terminal = document.getElementById('boot-terminal');
+  const bar = document.getElementById('boot-bar');
+  const pct = document.getElementById('boot-pct');
+  if (!overlay) return;
+
+  const lines = [
+    '> INITIALIZING AI EMPLOYEE v4.0\u2026',
+    '> Loading neural subsystems\u2026',
+    '> Mounting agent registry\u2026',
+    '> Establishing secure channel\u2026',
+    '> Calibrating gold resonance matrix\u2026',
+    '> All systems nominal. Welcome.',
+  ];
+  let lineIdx = 0;
+  let progress = 0;
+
+  function addLine() {
+    if (lineIdx >= lines.length) return;
+    const span = document.createElement('span');
+    span.className = 'boot-terminal-line';
+    span.style.animationDelay = '0s';
+    span.textContent = lines[lineIdx++];
+    terminal.appendChild(span);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  const lineTimer = setInterval(() => {
+    addLine();
+    if (lineIdx >= lines.length) clearInterval(lineTimer);
+  }, 280);
+
+  const barTimer = setInterval(() => {
+    progress += Math.random() * 12 + 4;
+    if (progress >= 100) { progress = 100; clearInterval(barTimer); }
+    bar.style.width = progress + '%';
+    pct.textContent = Math.round(progress) + '%';
+    if (progress >= 100) {
+      setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => { overlay.style.display = 'none'; }, 850);
+      }, 300);
+    }
+  }, 120);
+})();
+
+/* ══════════════════════════════════════════════════
+   PARTICLE SYSTEM
+══════════════════════════════════════════════════ */
+(function initParticles() {
+  const canvas = document.getElementById('particles-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let W, H;
+  const particles = [];
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize, {passive:true});
+
+  const GOLD = 'rgba(212,175,55,';
+  for (let i = 0; i < 55; i++) {
+    particles.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 1.5 + 0.3,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      a: Math.random() * 0.5 + 0.1,
+      da: (Math.random() - 0.5) * 0.003,
+    });
+  }
+
+  function frame() {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of particles) {
+      p.x += p.vx; p.y += p.vy;
+      p.a += p.da;
+      if (p.a < 0.05) p.da = Math.abs(p.da);
+      if (p.a > 0.6) p.da = -Math.abs(p.da);
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
+      ctx.fill();
+    }
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 90) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+
+/* init nav active state */
+document.addEventListener('DOMContentLoaded', () => {
+  const overviewBtn = document.querySelector('.nav-group-btn[data-group="overview"]');
+  if (overviewBtn) overviewBtn.classList.add('active');
+});
+</script>
+</body>
+</html>"""
     # ── Skills commands (pass-through; skills-manager processes these) ──
     if (msg_lower.startswith("skills") or msg_lower.startswith("agents")
             or msg_lower.startswith("agent ") or msg_lower.startswith("create agent")
@@ -10988,7 +14938,8 @@ def delete_schedule(task_id: str):
         tasks = [t for t in tasks if t.get("id") != task_id]
         SCHEDULES_FILE.write_text(json.dumps(tasks, indent=2))
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
     return JSONResponse({"ok": True})
 
 
@@ -11401,15 +15352,13 @@ def submit_task(payload: dict):
     _save_task_plans(plans[:50])  # keep last 50
 
     # Auto-start assigned agents if they're not running
-    import re as _re
-    _safe_id_pat = _re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
     if agents:
         for agent_id in agents:
             # Validate agent_id to prevent path traversal
-            if not isinstance(agent_id, str) or not _safe_id_pat.match(agent_id):
+            if not isinstance(agent_id, str) or not _SAFE_AGENT_ID_PAT.match(agent_id):
                 continue
             target = _resolve_agent_target(agent_id)
-            if target and _agent_dir_exists(target):
+            if target and _agent_dir_exists(target) and _SAFE_AGENT_ID_PAT.match(target):
                 pid_file = AI_HOME / "run" / (target + ".pid")
                 already_running = False
                 if pid_file.exists():
@@ -12366,6 +16315,10 @@ def _save_integrations(integrations: list) -> None:
     # Only save id + enabled + config (not the field definitions)
     slim = [{"id": i["id"], "enabled": i.get("enabled", False), "config": i.get("config", {})} for i in integrations]
     INTEGRATIONS_FILE.write_text(json.dumps(slim, indent=2))
+    try:
+        INTEGRATIONS_FILE.chmod(0o600)  # restrict to owner only — config contains API keys/tokens
+    except OSError:
+        pass
 
 
 @app.get("/api/integrations")
@@ -12409,7 +16362,8 @@ def test_integration(integration_id: str):
             with _req.urlopen(req, timeout=5) as resp:
                 return JSONResponse({"ok": True, "message": f"HTTP {resp.status} — webhook reachable"})
         except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)})
+            logger.warning("Webhook test failed: %s", exc)
+            return JSONResponse({"ok": False, "message": "Webhook connection test failed"})
 
     if integration_id in ("openai", "anthropic"):
         key_field = "api_key"
@@ -12432,9 +16386,8 @@ def test_integration(integration_id: str):
                     return JSONResponse({"ok": True, "message": f"Connected as @{name}"})
                 return JSONResponse({"ok": False, "message": "Telegram returned error"})
         except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)})
-
-    # Generic: just check required fields are filled
+            logger.warning("Telegram test failed: %s", exc)
+            return JSONResponse({"ok": False, "message": "Could not connect to Telegram"})
     required_fields = [f["key"] for f in intg.get("fields", []) if not f.get("optional")]
     missing = [k for k in required_fields if not config.get(k, "").strip()]
     if missing:
@@ -12887,7 +16840,8 @@ def clear_history():
         _log_activity("system", "Activity history cleared", source="dashboard")
         return JSONResponse({"ok": True})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 class _NukeRequest(BaseModel):
@@ -12921,7 +16875,8 @@ def nuke_data(body: _NukeRequest):
                 f.unlink()
                 deleted.append(f.name)
         except Exception as exc:
-            errors.append(f"{f.name}: {exc}")
+            logger.warning("Data nuke: failed to delete %s: %s", f.name, exc)
+            errors.append(f"{f.name}: deletion failed")
 
     # Also clear any extra .jsonl chat files
     try:
@@ -12929,7 +16884,8 @@ def nuke_data(body: _NukeRequest):
             jsonl.unlink()
             deleted.append(jsonl.name)
     except Exception as exc:
-        errors.append(str(exc))
+        logger.warning("Data nuke: failed to clear jsonl files: %s", exc)
+        errors.append("Failed to clear some chat history files")
 
     logger.warning("DATA NUKE performed — deleted: %s", deleted)
     return JSONResponse({"ok": True, "deleted": deleted, "errors": errors})
@@ -13034,7 +16990,8 @@ def updater_check():
         _UPDATER_TRIGGER_FILE.write_text("check")
         return JSONResponse({"ok": True, "message": "Check triggered — results appear in Auto Update card within seconds"})
     except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/updater/update")
@@ -13055,7 +17012,8 @@ def updater_update():
             pass
         return JSONResponse({"ok": True, "message": "Update triggered — agents will restart momentarily if changes are found"})
     except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ─── Compatibility alias endpoints ────────────────────────────────────────────
@@ -13308,7 +17266,8 @@ def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth)):
         af.set_mode(mode)
         return JSONResponse({"ok": True, "mode": mode})
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend set_mode error: %s", exc)
         raise HTTPException(500, "Failed to set mode")
@@ -13345,7 +17304,8 @@ def ascend_approve(patch_id: str, _auth: None = Depends(require_auth)):
         patch = af.approve_patch(patch_id)
         return JSONResponse({"ok": True, "patch": patch})
     except (ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend approve error: %s", exc)
         raise HTTPException(500, "Approval failed")
@@ -13359,7 +17319,8 @@ def ascend_reject(patch_id: str, _auth: None = Depends(require_auth)):
         patch = af.reject_patch(patch_id)
         return JSONResponse({"ok": True, "patch": patch})
     except (ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend reject error: %s", exc)
         raise HTTPException(500, "Rejection failed")
@@ -13373,7 +17334,8 @@ def ascend_rollback(patch_id: str, _auth: None = Depends(require_auth)):
         patch = af.rollback_patch(patch_id)
         return JSONResponse({"ok": True, "patch": patch})
     except (ValueError, RuntimeError) as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
         logger.error("ascend rollback error: %s", exc)
         raise HTTPException(500, "Rollback failed")
@@ -13710,7 +17672,8 @@ def org_upsert_role(payload: dict):
         return JSONResponse(role)
     except Exception as exc:
         logger.error("org upsert_role error: %s", exc)
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/org/roles/{role_id}")
@@ -13719,7 +17682,8 @@ def org_delete_role(role_id: str):
         deleted = _org().delete_role(role_id)
         return JSONResponse({"ok": deleted})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/org/assign")
@@ -13732,9 +17696,11 @@ def org_assign_agent(payload: dict):
     try:
         return JSONResponse(_org().assign_agent_to_role(role_id, agent_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/org/delegate")
@@ -13748,9 +17714,11 @@ def org_delegate_task(payload: dict):
     try:
         return JSONResponse(_org().delegate_task(from_role, to_role, task, payload.get("context")))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/org/adapters")
@@ -13780,9 +17748,11 @@ def org_register_adapter(payload: dict):
             )
         )
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/org/adapters/{adapter_id}")
@@ -13791,7 +17761,8 @@ def org_deregister_adapter(adapter_id: str):
         ok = _org().deregister_adapter(adapter_id)
         return JSONResponse({"ok": ok})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Budget Tracker API ─────────────────────────────────────────────────────────
@@ -13814,7 +17785,8 @@ def budget_agent_status(agent_id: str):
         _budget().auto_reset_all_if_new_month()
         return JSONResponse(_budget().get_agent_status(agent_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/budget/set")
@@ -13827,7 +17799,8 @@ def budget_set(payload: dict):
     try:
         return JSONResponse(_budget().set_budget(agent_id, float(budget)))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/budget/reset/{agent_id}")
@@ -13836,7 +17809,8 @@ def budget_reset(agent_id: str):
     try:
         return JSONResponse(_budget().reset_usage(agent_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/budget/record")
@@ -13857,7 +17831,8 @@ def budget_record_usage(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Goal Alignment API ─────────────────────────────────────────────────────────
@@ -13886,7 +17861,8 @@ def goals_set_company(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/goals/projects")
@@ -13918,7 +17894,8 @@ def goals_upsert_project(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/goals/projects/{project_id}")
@@ -13926,7 +17903,8 @@ def goals_delete_project(project_id: str):
     try:
         return JSONResponse({"ok": _goals().delete_project(project_id)})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/goals/context/{project_id}")
@@ -13937,7 +17915,8 @@ def goals_get_context(project_id: str):
         preamble = _goals().build_goal_preamble(project_id=project_id)
         return JSONResponse({**ctx, "preamble": preamble})
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Ticket System API ──────────────────────────────────────────────────────────
@@ -13978,7 +17957,8 @@ def tickets_create(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/tickets/{ticket_id}")
@@ -13991,7 +17971,8 @@ def tickets_get(ticket_id: str):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.patch("/api/tickets/{ticket_id}")
@@ -14010,9 +17991,11 @@ def tickets_update(ticket_id: str, payload: dict):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/tickets/{ticket_id}/comment")
@@ -14031,9 +18014,11 @@ def tickets_add_comment(ticket_id: str, payload: dict):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/tickets/{ticket_id}/audit")
@@ -14042,7 +18027,8 @@ def tickets_audit(ticket_id: str):
     try:
         return JSONResponse(_tickets().get_audit_trail(ticket_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/tickets/audit/log")
@@ -14102,7 +18088,8 @@ def governance_request(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/{action_id}/approve")
@@ -14117,9 +18104,11 @@ def governance_approve(action_id: str, payload: dict = {}):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/{action_id}/reject")
@@ -14134,9 +18123,11 @@ def governance_reject(action_id: str, payload: dict = {}):
             )
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/pause/{agent_id}")
@@ -14145,7 +18136,8 @@ def governance_pause(agent_id: str, payload: dict = {}):
     try:
         return JSONResponse(_gov().pause_agent(agent_id, reason=payload.get("reason", "")))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/resume/{agent_id}")
@@ -14154,7 +18146,8 @@ def governance_resume(agent_id: str, payload: dict = {}):
     try:
         return JSONResponse(_gov().resume_agent(agent_id, reason=payload.get("reason", "")))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/governance/terminate/{agent_id}")
@@ -14163,7 +18156,8 @@ def governance_terminate(agent_id: str, payload: dict = {}):
     try:
         return JSONResponse(_gov().terminate_agent(agent_id, reason=payload.get("reason", "")))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/governance/agent/{agent_id}")
@@ -14172,7 +18166,8 @@ def governance_agent_status(agent_id: str):
     try:
         return JSONResponse(_gov().get_agent_gov_status(agent_id))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/governance/settings")
@@ -14189,7 +18184,8 @@ def governance_update_settings(payload: dict):
     try:
         return JSONResponse(_gov().update_settings(payload))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Company Manager API ────────────────────────────────────────────────────────
@@ -14229,7 +18225,8 @@ def companies_create(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/companies/switch")
@@ -14241,9 +18238,11 @@ def companies_switch(payload: dict):
     try:
         return JSONResponse(_company().switch_company(company_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/companies/{company_id}")
@@ -14252,9 +18251,11 @@ def companies_delete(company_id: str):
         ok = _company().delete_company(company_id)
         return JSONResponse({"ok": ok})
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        logger.error("API validation error: %s", exc, exc_info=True)
+        raise HTTPException(400, "Bad request")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/companies/{company_id}/export")
@@ -14263,9 +18264,11 @@ def companies_export(company_id: str):
     try:
         return JSONResponse(_company().export_company(company_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.post("/api/companies/import")
@@ -14281,7 +18284,8 @@ def companies_import(payload: dict):
             )
         )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Session Manager & Artifacts lazy-loaders ──────────────────────────────────
@@ -14327,7 +18331,8 @@ def sessions_create(payload: dict):
         )
         return JSONResponse(s)
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/sessions/{session_id}")
@@ -14351,9 +18356,11 @@ def sessions_update(session_id: str, payload: dict):
             merge_context=payload.get("merge_context", True),
         ))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/sessions/{session_id}")
@@ -14369,7 +18376,8 @@ def sessions_resume(session_id: str):
     try:
         return JSONResponse(_sessions().resume_session(session_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 @app.post("/api/sessions/{session_id}/checkpoint")
@@ -14382,7 +18390,8 @@ def sessions_save_checkpoint(session_id: str, payload: dict = None):
         cp = _sessions().save_checkpoint(session_id, label=label, snapshot=payload.get("snapshot"))
         return JSONResponse(cp)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 @app.get("/api/sessions/{session_id}/checkpoints")
@@ -14396,7 +18405,8 @@ def sessions_restore_checkpoint(session_id: str, checkpoint_id: str):
     try:
         return JSONResponse(_sessions().restore_checkpoint(session_id, checkpoint_id))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 # ── Artifacts API ──────────────────────────────────────────────────────────────
@@ -14432,7 +18442,8 @@ def artifacts_create(payload: dict):
             metadata=payload.get("metadata") or {},
         ))
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.get("/api/artifacts/{artifact_id}")
@@ -14456,9 +18467,11 @@ def artifacts_update(artifact_id: str, payload: dict):
             metadata=payload.get("metadata"),
         ))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        logger.error("API error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
 
 
 @app.delete("/api/artifacts/{artifact_id}")
@@ -14474,7 +18487,8 @@ def artifacts_deploy(artifact_id: str, payload: dict = None):
     try:
         return JSONResponse(_arts().deploy_artifact(artifact_id, deploy_notes=notes))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        logger.error("Not found error: %s", exc, exc_info=True)
+        raise HTTPException(404, "Not found")
 
 
 @app.get("/api/artifacts/{artifact_id}/versions")
@@ -14568,6 +18582,880 @@ async def ceo_chat(payload: dict):
         "ticket_id": ticket_id,
         "goal_context_injected": bool(goal_preamble),
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Lead CRM
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _crm():
+    _p = AI_HOME / "agents" / "lead-crm"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import lead_crm  # type: ignore
+    return lead_crm
+
+
+
+@app.get("/api/crm/leads")
+async def crm_list_leads(stage: Optional[str] = None, search: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_crm().list_leads, stage, search))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/crm/leads")
+async def crm_add_lead(payload: dict):
+    try:
+        lead = await run_in_threadpool(
+            lambda: _crm().add_lead(
+                name=payload.get("name", ""),
+                company=payload.get("company", ""),
+                email=payload.get("email", ""),
+                phone=payload.get("phone", ""),
+                source=payload.get("source", ""),
+                notes=payload.get("notes", ""),
+                value=float(payload.get("value", 0)),
+                tags=payload.get("tags", []),
+            )
+        )
+        return JSONResponse(lead)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/crm/leads/{lead_id}")
+async def crm_get_lead(lead_id: str):
+    lead = await run_in_threadpool(_crm().get_lead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    return JSONResponse(lead)
+
+
+
+
+
+
+@app.post("/api/crm/leads/{lead_id}/stage")
+async def crm_move_stage(lead_id: str, payload: dict):
+    stage = payload.get("stage", "")
+    try:
+        updated = await run_in_threadpool(_crm().move_stage, lead_id, stage)
+    except ValueError as e:
+        logger.error("API validation error: %s", e, exc_info=True)
+        raise HTTPException(400, "Bad request")
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    return JSONResponse(updated)
+
+
+@app.post("/api/crm/leads/{lead_id}/followup")
+async def crm_schedule_followup(lead_id: str, payload: dict):
+    followup_at = payload.get("followup_at", "")
+    note = payload.get("note", "")
+    updated = await run_in_threadpool(_crm().schedule_followup, lead_id, followup_at, note)
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    return JSONResponse(updated)
+
+
+@app.get("/api/crm/pipeline")
+async def crm_pipeline():
+    try:
+        return JSONResponse(await run_in_threadpool(_crm().get_pipeline))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/crm/score/{lead_id}")
+async def crm_score_lead(lead_id: str):
+    try:
+        updated = await run_in_threadpool(_crm().score_lead, lead_id)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    return JSONResponse(updated)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Email Marketing
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _email_mktg():
+    _p = AI_HOME / "agents" / "email-marketing"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import email_marketing  # type: ignore
+    return email_marketing
+
+
+@app.get("/api/email/campaigns")
+async def email_list_campaigns(status: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_email_mktg().list_campaigns, status))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/email/campaigns")
+async def email_create_campaign(payload: dict):
+    try:
+        camp = await run_in_threadpool(
+            lambda: _email_mktg().create_campaign(
+                name=payload.get("name", ""),
+                subject=payload.get("subject", ""),
+                body=payload.get("body", ""),
+                from_name=payload.get("from_name", ""),
+                from_email=payload.get("from_email", ""),
+                recipients=payload.get("recipients", []),
+                sequence_steps=payload.get("sequence_steps", []),
+            )
+        )
+        return JSONResponse(camp)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/email/campaigns/{campaign_id}")
+async def email_get_campaign(campaign_id: str):
+    camp = await run_in_threadpool(_email_mktg().get_campaign, campaign_id)
+    if not camp:
+        raise HTTPException(404, "Campaign not found")
+    return JSONResponse(camp)
+
+
+@app.patch("/api/email/campaigns/{campaign_id}")
+async def email_update_campaign(campaign_id: str, payload: dict):
+    updated = await run_in_threadpool(_email_mktg().update_campaign, campaign_id, payload)
+    if not updated:
+        raise HTTPException(404, "Campaign not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/email/campaigns/{campaign_id}")
+async def email_delete_campaign(campaign_id: str):
+    deleted = await run_in_threadpool(_email_mktg().delete_campaign, campaign_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/email/campaigns/{campaign_id}/send")
+async def email_send_campaign(campaign_id: str):
+    try:
+        updated = await run_in_threadpool(_email_mktg().send_campaign, campaign_id)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Campaign not found")
+    return JSONResponse(updated)
+
+
+@app.get("/api/email/campaigns/{campaign_id}/stats")
+async def email_campaign_stats(campaign_id: str):
+    try:
+        stats = await run_in_threadpool(_email_mktg().get_campaign_stats, campaign_id)
+        return JSONResponse(stats)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/email/write")
+async def email_write_copy(payload: dict):
+    try:
+        result = await run_in_threadpool(
+            lambda: _email_mktg().write_email_copy(
+                goal=payload.get("goal", ""),
+                tone=payload.get("tone", "professional"),
+                audience=payload.get("audience", ""),
+            )
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/email/deliverability-tips")
+async def email_deliverability_tips():
+    try:
+        return JSONResponse(await run_in_threadpool(_email_mktg().get_deliverability_tips))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Meeting Intelligence
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _meetings():
+    _p = AI_HOME / "agents" / "meeting-intelligence"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import meeting_intelligence  # type: ignore
+    return meeting_intelligence
+
+
+@app.get("/api/meetings")
+async def meetings_list(search: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_meetings().list_meetings, search))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/meetings")
+async def meetings_add(payload: dict):
+    try:
+        meeting = await run_in_threadpool(
+            lambda: _meetings().add_meeting(
+                title=payload.get("title", ""),
+                date=payload.get("date", ""),
+                participants=payload.get("participants", []),
+                transcript=payload.get("transcript", ""),
+                notes=payload.get("notes", ""),
+                meeting_type=payload.get("meeting_type", "general"),
+            )
+        )
+        return JSONResponse(meeting)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/meetings/{meeting_id}")
+async def meetings_get(meeting_id: str):
+    m = await run_in_threadpool(_meetings().get_meeting, meeting_id)
+    if not m:
+        raise HTTPException(404, "Meeting not found")
+    return JSONResponse(m)
+
+
+
+
+
+
+@app.post("/api/meetings/{meeting_id}/summarize")
+async def meetings_summarize(meeting_id: str):
+    try:
+        updated = await run_in_threadpool(_meetings().summarize_meeting, meeting_id)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Meeting not found")
+    return JSONResponse(updated)
+
+
+@app.post("/api/meetings/{meeting_id}/followup")
+async def meetings_followup(meeting_id: str):
+    try:
+        updated = await run_in_threadpool(_meetings().generate_followup_email, meeting_id)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Meeting not found")
+    return JSONResponse(updated)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Social Media Scheduler
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _social_sched():
+    _p = AI_HOME / "agents" / "social-media-manager"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import social_scheduler  # type: ignore
+    return social_scheduler
+
+
+@app.get("/api/social/posts")
+async def social_list_posts(
+    platform: Optional[str] = None,
+    status: Optional[str] = None,
+):
+    try:
+        return JSONResponse(await run_in_threadpool(_social_sched().list_posts, platform, status))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/social/posts")
+async def social_schedule_post(payload: dict):
+    try:
+        post = await run_in_threadpool(
+            lambda: _social_sched().schedule_post(
+                platform=payload.get("platform", "twitter"),
+                content=payload.get("content", ""),
+                scheduled_at=payload.get("scheduled_at", ""),
+                media_urls=payload.get("media_urls", []),
+                hashtags=payload.get("hashtags", []),
+                campaign=payload.get("campaign", ""),
+                status=payload.get("status", "scheduled"),
+            )
+        )
+        return JSONResponse(post)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/social/posts/{post_id}")
+async def social_get_post(post_id: str):
+    post = await run_in_threadpool(_social_sched().get_post, post_id)
+    if not post:
+        raise HTTPException(404, "Post not found")
+    return JSONResponse(post)
+
+
+
+
+
+
+
+
+@app.post("/api/social/generate")
+async def social_generate_content(payload: dict):
+    try:
+        result = await run_in_threadpool(
+            lambda: _social_sched().generate_post_content(
+                platform=payload.get("platform", "twitter"),
+                topic=payload.get("topic", ""),
+                tone=payload.get("tone", "engaging"),
+                include_hashtags=payload.get("include_hashtags", True),
+            )
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/social/process-due")
+async def social_process_due():
+    try:
+        published = await run_in_threadpool(_social_sched().process_due_posts)
+        return JSONResponse({"published": published, "count": len(published)})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/social/stats")
+async def social_stats():
+    try:
+        return JSONResponse(await run_in_threadpool(_social_sched().get_schedule_stats))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: CEO Briefing
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _ceo_briefing():
+    _p = AI_HOME / "agents" / "ceo-briefing"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import ceo_briefing  # type: ignore
+    return ceo_briefing
+
+
+@app.get("/api/briefing/today")
+async def briefing_today():
+    try:
+        return JSONResponse(await run_in_threadpool(_ceo_briefing().get_today_briefing))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/briefing/generate")
+async def briefing_generate():
+    try:
+        return JSONResponse(await run_in_threadpool(_ceo_briefing().force_regenerate))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/briefing/history")
+async def briefing_history():
+    try:
+        return JSONResponse(await run_in_threadpool(_ceo_briefing().list_briefings))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Financial Tools
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _fin_tools():
+    _p = AI_HOME / "agents" / "financial-tools"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import financial_tools  # type: ignore
+    return financial_tools
+
+
+@app.get("/api/financial/invoices")
+async def fin_list_invoices(status: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_fin_tools().list_invoices, status))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/financial/invoices")
+async def fin_create_invoice(payload: dict):
+    try:
+        inv = await run_in_threadpool(
+            lambda: _fin_tools().create_invoice(
+                client_name=payload.get("client_name", ""),
+                client_email=payload.get("client_email", ""),
+                items=payload.get("items", []),
+                due_date=payload.get("due_date"),
+                notes=payload.get("notes", ""),
+                currency=payload.get("currency", "USD"),
+                tax_rate=float(payload.get("tax_rate", 0)),
+            )
+        )
+        return JSONResponse(inv)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/financial/invoices/{invoice_id}")
+async def fin_get_invoice(invoice_id: str):
+    inv = await run_in_threadpool(_fin_tools().get_invoice, invoice_id)
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+    return JSONResponse(inv)
+
+
+@app.patch("/api/financial/invoices/{invoice_id}")
+async def fin_update_invoice(invoice_id: str, payload: dict):
+    updated = await run_in_threadpool(_fin_tools().update_invoice, invoice_id, payload)
+    if not updated:
+        raise HTTPException(404, "Invoice not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/financial/invoices/{invoice_id}")
+async def fin_delete_invoice(invoice_id: str):
+    deleted = await run_in_threadpool(_fin_tools().delete_invoice, invoice_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/financial/invoices/{invoice_id}/send")
+async def fin_send_invoice(invoice_id: str):
+    updated = await run_in_threadpool(_fin_tools().send_invoice, invoice_id)
+    if not updated:
+        raise HTTPException(404, "Invoice not found")
+    return JSONResponse(updated)
+
+
+@app.post("/api/financial/invoices/{invoice_id}/pay")
+async def fin_pay_invoice(invoice_id: str):
+    updated = await run_in_threadpool(_fin_tools().pay_invoice, invoice_id)
+    if not updated:
+        raise HTTPException(404, "Invoice not found")
+    return JSONResponse(updated)
+
+
+@app.get("/api/financial/quotes")
+async def fin_list_quotes(status: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_fin_tools().list_quotes, status))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/financial/quotes")
+async def fin_create_quote(payload: dict):
+    try:
+        q = await run_in_threadpool(
+            lambda: _fin_tools().create_quote(
+                client_name=payload.get("client_name", ""),
+                client_email=payload.get("client_email", ""),
+                items=payload.get("items", []),
+                valid_until=payload.get("valid_until"),
+                notes=payload.get("notes", ""),
+                currency=payload.get("currency", "USD"),
+            )
+        )
+        return JSONResponse(q)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.patch("/api/financial/quotes/{quote_id}")
+async def fin_update_quote(quote_id: str, payload: dict):
+    updated = await run_in_threadpool(_fin_tools().update_quote, quote_id, payload)
+    if not updated:
+        raise HTTPException(404, "Quote not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/financial/quotes/{quote_id}")
+async def fin_delete_quote(quote_id: str):
+    deleted = await run_in_threadpool(_fin_tools().delete_quote, quote_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.get("/api/financial/pl")
+async def fin_pl():
+    try:
+        return JSONResponse(await run_in_threadpool(_fin_tools().get_pl))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/financial/reminders")
+async def fin_reminders():
+    try:
+        overdue = await run_in_threadpool(_fin_tools().check_overdue)
+        all_overdue = await run_in_threadpool(_fin_tools().get_overdue_invoices)
+        return JSONResponse({"newly_marked": overdue, "all_overdue": all_overdue})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/financial/expenses")
+async def fin_list_expenses(category: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_fin_tools().list_expenses, category))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/financial/expenses")
+async def fin_add_expense(payload: dict):
+    try:
+        exp = await run_in_threadpool(
+            lambda: _fin_tools().add_expense(
+                description=payload.get("description", ""),
+                amount=float(payload.get("amount", 0)),
+                category=payload.get("category", "general"),
+                expense_date=payload.get("date"),
+                notes=payload.get("notes", ""),
+            )
+        )
+        return JSONResponse(exp)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.delete("/api/financial/expenses/{expense_id}")
+async def fin_delete_expense(expense_id: str):
+    deleted = await run_in_threadpool(_fin_tools().delete_expense, expense_id)
+    return JSONResponse({"deleted": deleted})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Competitor Watch
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _comp_watch():
+    _p = AI_HOME / "agents" / "competitor-watch"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import competitor_watch  # type: ignore
+    return competitor_watch
+
+
+@app.get("/api/competitors")
+async def comp_list(search: Optional[str] = None):
+    try:
+        return JSONResponse(await run_in_threadpool(_comp_watch().list_competitors, search))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/competitors")
+async def comp_add(payload: dict):
+    try:
+        comp = await run_in_threadpool(
+            lambda: _comp_watch().add_competitor(
+                name=payload.get("name", ""),
+                website=payload.get("website", ""),
+                notes=payload.get("notes", ""),
+                tags=payload.get("tags", []),
+                pricing=payload.get("pricing", ""),
+                target_market=payload.get("target_market", ""),
+            )
+        )
+        return JSONResponse(comp)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/competitors/alerts")
+async def comp_alerts(dismissed: bool = False):
+    try:
+        return JSONResponse(await run_in_threadpool(_comp_watch().get_alerts, None, dismissed))
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/competitors/{competitor_id}")
+async def comp_get(competitor_id: str):
+    comp = await run_in_threadpool(_comp_watch().get_competitor, competitor_id)
+    if not comp:
+        raise HTTPException(404, "Competitor not found")
+    return JSONResponse(comp)
+
+
+
+
+
+
+@app.post("/api/competitors/{competitor_id}/analyze")
+async def comp_analyze(competitor_id: str, payload: dict = {}):
+    try:
+        updated = await run_in_threadpool(
+            lambda: _comp_watch().analyze_competitor(
+                competitor_id,
+                payload.get("your_product", ""),
+            )
+        )
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+    if not updated:
+        raise HTTPException(404, "Competitor not found")
+    return JSONResponse(updated)
+
+
+@app.post("/api/competitors/alerts/{alert_id}/dismiss")
+async def comp_dismiss_alert(alert_id: str):
+    result = await run_in_threadpool(_comp_watch().dismiss_alert, alert_id)
+    return JSONResponse({"dismissed": result})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Content Calendar
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _content_cal():
+    _p = AI_HOME / "agents" / "content-calendar"
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+    import content_calendar  # type: ignore
+    return content_calendar
+
+
+@app.get("/api/content-calendar")
+async def cal_list(
+    platform: Optional[str] = None,
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    try:
+        entries = await run_in_threadpool(
+            lambda: _content_cal().list_entries(
+                platform=platform,
+                status=status,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        )
+        stats = await run_in_threadpool(_content_cal().get_calendar_stats)
+        return JSONResponse({"entries": entries, "stats": stats})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/content-calendar/entries")
+async def cal_add_entry(payload: dict):
+    try:
+        entry = await run_in_threadpool(
+            lambda: _content_cal().add_entry(
+                date_str=payload.get("date", ""),
+                platform=payload.get("platform", "instagram"),
+                content_type=payload.get("content_type", "post"),
+                title=payload.get("title", ""),
+                content=payload.get("content", ""),
+                status=payload.get("status", "idea"),
+                tags=payload.get("tags", []),
+                notes=payload.get("notes", ""),
+            )
+        )
+        return JSONResponse(entry)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/api/content-calendar/entries/{entry_id}")
+async def cal_get_entry(entry_id: str):
+    entry = await run_in_threadpool(_content_cal().get_entry, entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    return JSONResponse(entry)
+
+
+@app.patch("/api/content-calendar/entries/{entry_id}")
+async def cal_update_entry(entry_id: str, payload: dict):
+    updated = await run_in_threadpool(_content_cal().update_entry, entry_id, payload)
+    if not updated:
+        raise HTTPException(404, "Entry not found")
+    return JSONResponse(updated)
+
+
+@app.delete("/api/content-calendar/entries/{entry_id}")
+async def cal_delete_entry(entry_id: str):
+    deleted = await run_in_threadpool(_content_cal().delete_entry, entry_id)
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/content-calendar/generate")
+async def cal_generate(payload: dict):
+    try:
+        entries = await run_in_threadpool(
+            lambda: _content_cal().generate_calendar(
+                niche=payload.get("niche", "business"),
+                days=int(payload.get("days", 30)),
+                platforms=payload.get("platforms"),
+                tone=payload.get("tone", "engaging"),
+            )
+        )
+        return JSONResponse({"entries": entries, "count": len(entries)})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Feature: Guardrails — Pending Actions
+# ═══════════════════════════════════════════════════════════════════════════
+
+_PENDING_ACTIONS_FILE = AI_HOME / "state" / "pending-actions.json"
+
+
+def _load_pending_actions() -> dict:
+    if not _PENDING_ACTIONS_FILE.exists():
+        return {"actions": []}
+    try:
+        return json.loads(_PENDING_ACTIONS_FILE.read_text())
+    except Exception:
+        return {"actions": []}
+
+
+def _save_pending_actions(data: dict) -> None:
+    _PENDING_ACTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PENDING_ACTIONS_FILE.write_text(json.dumps(data, indent=2))
+
+
+@app.get("/api/guardrails/pending-actions")
+async def guardrails_pending_actions():
+    try:
+        data = await run_in_threadpool(_load_pending_actions)
+        actions = [a for a in data.get("actions", []) if a.get("status") == "pending"]
+        return JSONResponse({"actions": actions, "count": len(actions)})
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/guardrails/submit-action")
+async def guardrails_submit_action(payload: dict):
+    import uuid as _uuid
+    action = {
+        "id": str(_uuid.uuid4()),
+        "action_type": payload.get("action_type", "other"),
+        "description": payload.get("description", ""),
+        "risk_level": payload.get("risk_level", "medium"),
+        "payload": payload.get("payload", {}),
+        "submitted_by": payload.get("submitted_by", "user"),
+        "status": "pending",
+        "decision": None,
+        "decision_note": "",
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "decided_at": None,
+    }
+
+    def _append():
+        data = _load_pending_actions()
+        data["actions"].append(action)
+        _save_pending_actions(data)
+        return action
+
+    try:
+        result = await run_in_threadpool(_append)
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error("API error: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/api/guardrails/pending-actions/{action_id}/approve")
+async def guardrails_approve_action(action_id: str, payload: dict = {}):
+    def _approve():
+        data = _load_pending_actions()
+        for i, action in enumerate(data["actions"]):
+            if action["id"] == action_id:
+                data["actions"][i]["status"] = "approved"
+                data["actions"][i]["decision"] = "approved"
+                data["actions"][i]["decision_note"] = payload.get("note", "")
+                data["actions"][i]["decided_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                _save_pending_actions(data)
+                return data["actions"][i]
+        return None
+
+    result = await run_in_threadpool(_approve)
+    if not result:
+        raise HTTPException(404, "Action not found")
+    return JSONResponse(result)
+
+
+@app.post("/api/guardrails/pending-actions/{action_id}/reject")
+async def guardrails_reject_action(action_id: str, payload: dict = {}):
+    def _reject():
+        data = _load_pending_actions()
+        for i, action in enumerate(data["actions"]):
+            if action["id"] == action_id:
+                data["actions"][i]["status"] = "rejected"
+                data["actions"][i]["decision"] = "rejected"
+                data["actions"][i]["decision_note"] = payload.get("note", "")
+                data["actions"][i]["decided_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                _save_pending_actions(data)
+                return data["actions"][i]
+        return None
+
+    result = await run_in_threadpool(_reject)
+    if not result:
+        raise HTTPException(404, "Action not found")
+    return JSONResponse(result)
 
 
 if __name__ == "__main__":

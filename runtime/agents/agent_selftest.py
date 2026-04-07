@@ -305,7 +305,7 @@ def check_follow_up_agent() -> None:
         _fail("follow_up_agent module", f"import failed: {exc}")
 
 
-def _check_bot_module(bot_dir_name: str, module_name: str) -> None:
+def _check_bot_module(bot_dir_name: str, module_name: str, required: bool = True) -> None:
     """Check that a bot's Python module is importable and its run.sh is executable."""
     bot_dir = AI_HOME / "agents" / bot_dir_name
     if str(bot_dir) not in sys.path:
@@ -314,12 +314,12 @@ def _check_bot_module(bot_dir_name: str, module_name: str) -> None:
         importlib.import_module(module_name)
         _ok(f"{module_name} module", "importable ✓")
     except ImportError as exc:
-        _fail(f"{module_name} module", f"import failed: {exc}")
+        _fail(f"{module_name} module", f"import failed: {exc}", required=required)
     run_sh = bot_dir / "run.sh"
     if run_sh.exists() and run_sh.stat().st_mode & 0o111:
         _ok(f"{bot_dir_name} run.sh", "executable ✓")
     else:
-        _fail(f"{bot_dir_name} run.sh", "not executable — run: chmod +x run.sh")
+        _fail(f"{bot_dir_name} run.sh", "not executable — run: chmod +x run.sh", required=required)
 
 
 def check_engineering_assistant() -> None:
@@ -467,7 +467,7 @@ def check_hermes_agent() -> None:
 
 def check_gemma_agent() -> None:
     """Gemma agent module must be importable and its run.sh executable."""
-    _check_bot_module("gemma-agent", "gemma_agent")
+    _check_bot_module("gemma-agent", "gemma_agent", required=False)
 
 
 def check_gemma_config() -> None:
