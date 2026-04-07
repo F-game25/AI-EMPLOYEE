@@ -246,9 +246,14 @@ def score_lead(lead_id: str) -> Optional[dict]:
         try:
             result = _query_ai_for_agent("lead-crm", prompt)
             content = result.get("content", result.get("text", ""))
-            parsed = json.loads(content[content.find("{"):content.rfind("}") + 1])
-            score = max(0, min(100, int(parsed.get("score", 50))))
-            reason = parsed.get("reason", "")
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start >= 0 and end > start:
+                parsed = json.loads(content[start:end])
+                score = max(0, min(100, int(parsed.get("score", 50))))
+                reason = parsed.get("reason", "")
+            else:
+                raise ValueError("No JSON found in AI response")
         except Exception:
             score = _heuristic_score(lead)
             reason = "Heuristic scoring (AI unavailable)"

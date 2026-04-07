@@ -116,12 +116,13 @@ def schedule_post(
     status: str = "scheduled",
 ) -> dict:
     """Schedule a new post."""
-    if platform not in SUPPORTED_PLATFORMS:
-        platform = platform.lower().strip()
+    normalized = platform.lower().strip()
+    if normalized not in SUPPORTED_PLATFORMS:
+        raise ValueError(f"Unsupported platform '{platform}'. Must be one of: {SUPPORTED_PLATFORMS}")
     data = _load_schedule()
     post = {
         "id": str(uuid.uuid4()),
-        "platform": platform,
+        "platform": normalized,
         "content": content,
         "scheduled_at": scheduled_at,
         "media_urls": media_urls or [],

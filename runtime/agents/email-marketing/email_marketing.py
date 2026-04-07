@@ -214,17 +214,20 @@ def send_campaign(campaign_id: str) -> Optional[dict]:
     import random
     for recipient in recipients:
         _append_event(campaign_id, "sent", step=0, recipient=recipient)
-        if random.random() < 0.42:
+        opened = random.random() < 0.42
+        if opened:
             _append_event(campaign_id, "open", step=0, recipient=recipient)
-        if random.random() < 0.12:
+        if opened and random.random() < 0.28:
             _append_event(campaign_id, "click", step=0, recipient=recipient)
-        if random.random() < 0.04:
+        if opened and random.random() < 0.09:
             _append_event(campaign_id, "reply", step=0, recipient=recipient)
 
         for step_idx, step in enumerate(campaign.get("sequence_steps", []), 1):
-            if random.random() < 0.30:
+            step_sent = random.random() < 0.30
+            if step_sent:
                 _append_event(campaign_id, "sent", step=step_idx, recipient=recipient)
-            if random.random() < 0.25:
+            step_opened = step_sent and random.random() < 0.25
+            if step_opened:
                 _append_event(campaign_id, "open", step=step_idx, recipient=recipient)
 
     updated = update_campaign(campaign_id, {"status": "sent", "sent_at": _now_iso()})
