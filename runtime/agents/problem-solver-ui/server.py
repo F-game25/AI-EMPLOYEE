@@ -25,6 +25,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
@@ -9335,20 +9336,27 @@ def get_doctor():
 def start_all_agents(_auth: None = Depends(require_auth)):
     mode = _current_mode()
     targets = _mode_agent_targets(mode)
-    outputs = []
-    failures = []
-    for agent_name in targets:
-      if agent_name in INFRA_AGENTS:
-        continue
-      rc, out = ai_employee("start", agent_name)
-      outputs.append(f"[{agent_name}] {out.strip()}")
-      if rc != 0:
-        failures.append(agent_name)
+    agent_targets = [a for a in targets if a not in INFRA_AGENTS]
+    results: dict[str, tuple[int, str]] = {}
+
+    if agent_targets:
+        def _start_one(agent_name: str) -> tuple[str, int, str]:
+            rc, out = ai_employee("start", agent_name)
+            return agent_name, rc, out
+
+        with ThreadPoolExecutor(max_workers=min(10, len(agent_targets))) as pool:
+            futures = {pool.submit(_start_one, a): a for a in agent_targets}
+            for future in as_completed(futures):
+                agent_name, rc, out = future.result()
+                results[agent_name] = (rc, out)
+
+    outputs = [f"[{a}] {results[a][1].strip()}" for a in agent_targets if a in results]
+    failures = [a for a in agent_targets if results.get(a, (1,))[0] != 0]
     return JSONResponse({
       "ok": len(failures) == 0,
       "mode": mode,
       "targets": targets,
-      "started": len(targets) - len(failures),
+      "started": len(agent_targets) - len(failures),
       "failed": failures,
       "output": "\n".join(outputs),
     })
@@ -9358,20 +9366,27 @@ def start_all_agents(_auth: None = Depends(require_auth)):
 def stop_all_agents(_auth: None = Depends(require_auth)):
     mode = _current_mode()
     targets = _mode_agent_targets(mode)
-    outputs = []
-    failures = []
-    for agent_name in targets:
-      if agent_name in INFRA_AGENTS:
-        continue
-      rc, out = ai_employee("stop", agent_name)
-      outputs.append(f"[{agent_name}] {out.strip()}")
-      if rc != 0:
-        failures.append(agent_name)
+    agent_targets = [a for a in targets if a not in INFRA_AGENTS]
+    results: dict[str, tuple[int, str]] = {}
+
+    if agent_targets:
+        def _stop_one(agent_name: str) -> tuple[str, int, str]:
+            rc, out = ai_employee("stop", agent_name)
+            return agent_name, rc, out
+
+        with ThreadPoolExecutor(max_workers=min(10, len(agent_targets))) as pool:
+            futures = {pool.submit(_stop_one, a): a for a in agent_targets}
+            for future in as_completed(futures):
+                agent_name, rc, out = future.result()
+                results[agent_name] = (rc, out)
+
+    outputs = [f"[{a}] {results[a][1].strip()}" for a in agent_targets if a in results]
+    failures = [a for a in agent_targets if results.get(a, (1,))[0] != 0]
     return JSONResponse({
       "ok": len(failures) == 0,
       "mode": mode,
       "targets": targets,
-      "stopped": len(targets) - len(failures),
+      "stopped": len(agent_targets) - len(failures),
       "failed": failures,
       "output": "\n".join(outputs),
     })
