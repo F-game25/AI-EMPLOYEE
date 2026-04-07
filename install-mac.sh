@@ -670,6 +670,7 @@ install_runtime() {
         dl "config/growth-hacker.env"
         dl "config/project-manager.env"
         dl "config/agent_capabilities.json"
+        dl "config/agent_templates.json"
         dl "config/skills_library.json"
         dl "config/task_plans.json"
         dl "config/custom_agents.json"
