@@ -4877,7 +4877,7 @@ async function applyGatewayProvider() {
   }
 }
 
-
+async function startAll() {
   _setStartStopDisabled(true);
   // Update hero button text to show loading state
   const heroBtn = document.getElementById('hero-start-btn');
