@@ -499,7 +499,12 @@ def _agent_allowed_in_mode(agent_id: str, mode: Optional[str] = None) -> bool:
   return False
 
 
+_SAFE_AGENT_ID_PAT = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+
+
 def _agent_dir_exists(agent_id: str) -> bool:
+  if not isinstance(agent_id, str) or not _SAFE_AGENT_ID_PAT.match(agent_id):
+    return False
   return (BOTS_DIR / agent_id / "run.sh").exists()
 
 
@@ -787,6 +792,18 @@ def _generate_llm_response(message: str, routed_agent: str, mode: str, model_rou
 
   return f"Agent: {routed_agent}\n\n{answer}"
 
+_SENSITIVE_DETAIL_PAT = re.compile(
+    r'(?i)(key|secret|token|password|passwd|pass|auth|credential|api_key)')
+
+
+def _redact_sensitive_details(details: dict) -> dict:
+    """Return a copy of details with values for sensitive-named keys redacted."""
+    return {
+        k: "***" if _SENSITIVE_DETAIL_PAT.search(str(k)) else v
+        for k, v in details.items()
+    }
+
+
 def _log_activity(
     event_type: str,
     description: str,
@@ -801,7 +818,7 @@ def _log_activity(
         "source": source,
     }
     if details:
-        entry["details"] = details
+        entry["details"] = _redact_sensitive_details(details)
     try:
         ACTIVITY_LOG.parent.mkdir(parents=True, exist_ok=True)
         with _ACTIVITY_LOCK:
@@ -1089,7 +1106,8 @@ def ai_employee(*args: str) -> tuple:
         )
         return p.returncode, p.stdout + p.stderr
     except Exception as e:
-        return 1, str(e)
+        logger.warning("ai_employee command error: %s", e)
+        return 1, "Command execution failed."
 
 
 # ─── HTML Dashboard ────────────────────────────────────────────────────────────
@@ -12505,15 +12523,13 @@ def submit_task(payload: dict):
     _save_task_plans(plans[:50])  # keep last 50
 
     # Auto-start assigned agents if they're not running
-    import re as _re
-    _safe_id_pat = _re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
     if agents:
         for agent_id in agents:
             # Validate agent_id to prevent path traversal
-            if not isinstance(agent_id, str) or not _safe_id_pat.match(agent_id):
+            if not isinstance(agent_id, str) or not _SAFE_AGENT_ID_PAT.match(agent_id):
                 continue
             target = _resolve_agent_target(agent_id)
-            if target and _agent_dir_exists(target):
+            if target and _agent_dir_exists(target) and _SAFE_AGENT_ID_PAT.match(target):
                 pid_file = AI_HOME / "run" / (target + ".pid")
                 already_running = False
                 if pid_file.exists():
@@ -13513,7 +13529,8 @@ def test_integration(integration_id: str):
             with _req.urlopen(req, timeout=5) as resp:
                 return JSONResponse({"ok": True, "message": f"HTTP {resp.status} — webhook reachable"})
         except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)})
+            logger.warning("Webhook test failed: %s", exc)
+            return JSONResponse({"ok": False, "message": "Webhook connection test failed"})
 
     if integration_id in ("openai", "anthropic"):
         key_field = "api_key"
@@ -13536,7 +13553,8 @@ def test_integration(integration_id: str):
                     return JSONResponse({"ok": True, "message": f"Connected as @{name}"})
                 return JSONResponse({"ok": False, "message": "Telegram returned error"})
         except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)})
+            logger.warning("Telegram test failed: %s", exc)
+            return JSONResponse({"ok": False, "message": "Telegram connection test failed"})
 
     # Generic: just check required fields are filled
     required_fields = [f["key"] for f in intg.get("fields", []) if not f.get("optional")]
@@ -14025,7 +14043,8 @@ def nuke_data(body: _NukeRequest):
                 f.unlink()
                 deleted.append(f.name)
         except Exception as exc:
-            errors.append(f"{f.name}: {exc}")
+            logger.warning("Data nuke: failed to delete %s: %s", f.name, exc)
+            errors.append(f"{f.name}: deletion failed")
 
     # Also clear any extra .jsonl chat files
     try:
@@ -14033,7 +14052,8 @@ def nuke_data(body: _NukeRequest):
             jsonl.unlink()
             deleted.append(jsonl.name)
     except Exception as exc:
-        errors.append(str(exc))
+        logger.warning("Data nuke: failed to clear jsonl files: %s", exc)
+        errors.append("Failed to clear some chat history files")
 
     logger.warning("DATA NUKE performed — deleted: %s", deleted)
     return JSONResponse({"ok": True, "deleted": deleted, "errors": errors})
