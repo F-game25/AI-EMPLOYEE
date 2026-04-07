@@ -1325,9 +1325,10 @@ INDEX_HTML = r"""<!doctype html>
       background:linear-gradient(135deg,rgba(255,255,255,.12) 0%,transparent 50%)}
     .stat-card:hover .stat-icon{transform:scale(1.1) rotate(-5deg);box-shadow:0 0 16px var(--stat-glow,rgba(212,175,55,.4))}
     .stat-icon.green{background:linear-gradient(135deg,rgba(16,185,129,.2),rgba(52,211,153,.08));color:#34d399;--stat-glow:rgba(16,185,129,.45)}
-    .stat-icon.blue{background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.08));color:var(--gold-light);--stat-glow:rgba(212,175,55,.45)}
+    .stat-icon.blue{background:linear-gradient(135deg,rgba(59,130,246,.2),rgba(96,165,250,.08));color:#60a5fa;--stat-glow:rgba(59,130,246,.45)}
     .stat-icon.cyan{background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.05));color:var(--accent2);--stat-glow:rgba(212,175,55,.35)}
     .stat-icon.yellow{background:linear-gradient(135deg,rgba(245,158,11,.2),rgba(251,191,36,.08));color:#fbbf24;--stat-glow:rgba(245,158,11,.45)}
+    .stat-icon.red{background:linear-gradient(135deg,rgba(239,68,68,.2),rgba(239,68,68,.08));color:#f87171;--stat-glow:rgba(239,68,68,.45)}
     .stat-body .val{font-size:1.8em;font-weight:800;color:var(--text);
       animation:countUp .5s ease;letter-spacing:-.04em;line-height:1}
     .stat-body .lbl{font-size:.75em;color:var(--text-muted);margin-top:6px;letter-spacing:.03em;text-transform:uppercase;font-weight:500}
@@ -2859,6 +2860,12 @@ INDEX_HTML = r"""<!doctype html>
     <span class="page-header-badge" style="color:#fde68a">Output Library</span>
   </div>
 
+  <!-- ── Sub-tab navigation (Artifacts / Sessions) ── -->
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    <button class="outputs-tab-btn btn btn-primary btn-sm active" onclick="switchOutputTab('artifacts',this)">📦 Artifacts</button>
+    <button class="outputs-tab-btn btn btn-ghost btn-sm" onclick="switchOutputTab('sessions',this)">💾 Sessions</button>
+  </div>
+
   <!-- ── Artifacts panel ── -->
   <div id="outputs-artifacts-panel">
     <div class="grid-stat" style="margin-bottom:16px">
@@ -2917,7 +2924,7 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <!-- ── Sessions section (integrated into Outputs) ── -->
-  <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:20px">
+  <div id="outputs-sessions-panel" style="margin-top:24px;border-top:1px solid var(--border);padding-top:20px;display:none">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div>
         <h3 style="font-size:1em;font-weight:700;color:var(--text);margin:0 0 2px">💾 AI Sessions</h3>
@@ -3139,7 +3146,7 @@ INDEX_HTML = r"""<!doctype html>
   <div class="page-header" style="border-left-color:#fbbf24">
     <div class="page-header-icon">🐝</div>
     <div><div class="page-header-title">Agent Swarm</div><div class="page-header-desc">All AI agents at a glance — capabilities, status, and current workload. Filter by category or search by skill.</div></div>
-    <span class="page-header-badge" style="color:#fbbf24" id="swarm-header-badge">56 Agents</span>
+    <span class="page-header-badge" style="color:#fbbf24" id="swarm-header-badge">– Agents</span>
   </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap">
     <!-- Left: agent grid -->
@@ -3283,15 +3290,15 @@ INDEX_HTML = r"""<!doctype html>
   <div class="grid-stat" id="roi-stat-cards">
     <div class="stat-card" style="--stat-top:rgba(212,175,55,.3)">
       <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">✓</div>
-      <div class="stat-body"><div class="val" id="m-tasks">–</div><div class="lbl">Tasks Completed</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-tasks-trend"></div></div>
+      <div class="stat-body"><div class="val" id="m-tasks">–</div><div class="lbl">Tasks Completed</div></div>
     </div>
     <div class="stat-card">
       <div class="stat-icon" style="background:linear-gradient(135deg,rgba(34,197,94,.2),rgba(34,197,94,.05));color:var(--success)">⏱</div>
-      <div class="stat-body"><div class="val" id="m-hours">–</div><div class="lbl">AI Hours Worked</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-hours-trend"></div></div>
+      <div class="stat-body"><div class="val" id="m-hours">–</div><div class="lbl">AI Hours Worked</div></div>
     </div>
     <div class="stat-card">
       <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold-light)">👤</div>
-      <div class="stat-body"><div class="val" id="m-human-saved">–</div><div class="lbl">Human Hours Saved</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-human-saved-trend"></div></div>
+      <div class="stat-body"><div class="val" id="m-human-saved">–</div><div class="lbl">Human Hours Saved</div></div>
     </div>
     <div class="stat-card">
       <div class="stat-icon" style="background:linear-gradient(135deg,rgba(34,197,94,.2),rgba(34,197,94,.05));color:var(--success)">€</div>
@@ -3299,7 +3306,7 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <div class="stat-card">
       <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">◆</div>
-      <div class="stat-body"><div class="val" id="m-agents-used">–</div><div class="lbl">Agents Utilized</div><div style="font-size:.7em;color:var(--text-muted);margin-top:2px" id="m-agents-trend"></div></div>
+      <div class="stat-body"><div class="val" id="m-agents-used">–</div><div class="lbl">Agents Utilized</div></div>
     </div>
     <div class="stat-card">
       <div class="stat-icon" style="background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.05));color:var(--gold)">◎</div>
@@ -6155,7 +6162,7 @@ async function loadSwarmActivity() {
   const activeTaskEl = document.getElementById('swarm-active-task');
   const statTasksEl = document.getElementById('swarm-stat-tasks');
 
-  const tasks = r.tasks || r.history || [];
+  const tasks = r.plans || r.tasks || r.history || [];
   if (statTasksEl) statTasksEl.textContent = r.total || tasks.length || 0;
 
   // Active task
@@ -6250,7 +6257,7 @@ async function swarmTheaterRefresh() {
   const el = document.getElementById('swarm-theater');
   if (!el) return;
   const r = await api('/api/tasks?limit=10');
-  const tasks = (r.tasks || r.history || []).filter(t => (t.agents||t.selected_agents||[]).length > 1);
+  const tasks = (r.plans || r.tasks || r.history || []).filter(t => (t.agents||t.selected_agents||[]).length > 1);
   if (!tasks.length) {
     el.innerHTML = '<div class="empty"><div class="icon">🐝</div><p style="font-size:.83em">No multi-agent collaborations recorded yet. Run a task with multiple agents to see messages here.</p></div>';
     return;
@@ -6780,8 +6787,8 @@ async function recordMetric() {
   const agent = document.getElementById('metric-agent').value.trim();
   const value = parseFloat(document.getElementById('metric-value').value) || null;
   const notes = document.getElementById('metric-notes').value.trim();
-  const r = await api('/api/metrics', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({type, agent: agent||null, value, notes: notes||null})});
+  const r = await api('/api/metrics', {method:'POST',
+    body: {type, agent: agent||null, value, notes: notes||null}});
   if (r.ok) {
     toast('Metric recorded!');
     document.getElementById('metric-value').value = '';
@@ -7008,8 +7015,7 @@ async function addCustomGuardrail() {
   }
   const r = await api('/api/guardrails/custom', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({type, rule, severity})
+    body: {type, rule, severity}
   });
   if (r.ok) {
     toast('Custom guardrail added ✅', 'success');
@@ -9240,6 +9246,7 @@ function switchOutputTab(tab, btn) {
   const sesPanel = document.getElementById('outputs-sessions-panel');
   if (artPanel) artPanel.style.display = tab === 'artifacts' ? '' : 'none';
   if (sesPanel) sesPanel.style.display = tab === 'sessions' ? '' : 'none';
+  if (tab === 'sessions') loadSessions();
 }
 
 async function loadSessions() {
@@ -11401,6 +11408,17 @@ def _recalc_summary(events: list) -> dict:
     s["agents_used"] = len(s["by_agent"])
     if s["by_agent"]:
         s["top_bot"] = max(s["by_agent"], key=lambda k: s["by_agent"][k])
+    # Derived KPIs shown in the ROI summary section
+    tasks = s["tasks_completed"]
+    if tasks > 0:
+        # Efficiency: AI hours saved per task vs. a 1-hour baseline, capped at 100 %.
+        # e.g. if the AI saved 0.8 h per task on average → 80 % efficiency.
+        s["efficiency_rate"] = round(min(100.0, s["hours_saved"] / tasks * 100), 1)
+        # Average AI processing time per task, expressed in minutes.
+        s["avg_task_duration"] = f"{round(s['hours_saved'] / tasks * 60, 0):.0f}m"
+    else:
+        s["efficiency_rate"] = None
+        s["avg_task_duration"] = None
     return s
 
 
@@ -12713,7 +12731,7 @@ def updater_update():
 # These thin wrappers expose the URLs used by the CLI, curl tests, and
 # documentation so external callers always get a 2xx response.
 
-@app.get("/api/agents")
+@app.get("/api/workers/list")
 def get_bots_alias():
     """Alias for GET /api/workers — returns list of all agents with running status."""
     return get_workers()
