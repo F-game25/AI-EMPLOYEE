@@ -1192,55 +1192,188 @@ INDEX_HTML = r"""<!doctype html>
     .hdr-btn-stop:hover{background:rgba(244,63,94,.25);box-shadow:0 0 18px rgba(244,63,94,.35);transform:translateY(-1px)}
     .hdr-btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
-    /* ── Navigation (horizontal scrollable tab bar) ── */
-    .nav-wrapper{position:relative;display:flex;align-items:stretch}
-    .nav-scroll-btn{
-      position:absolute;top:0;bottom:0;width:36px;z-index:10;
-      background:rgba(10,10,10,0.96);border:none;cursor:pointer;
-      color:rgba(229,229,229,.5);font-size:1.1em;display:flex;align-items:center;justify-content:center;
-      transition:all .2s;user-select:none;
+    /* ── Navigation (grouped two-tier bar) ── */
+    .nav-wrapper{position:relative;display:flex;flex-direction:column;align-items:stretch}
+    .nav-scroll-btn{display:none} /* hidden — no more horizontal scroll */
+    /* Primary group nav */
+    nav#main-nav{
+      background:rgba(8,8,12,0.97);
+      border-bottom:1px solid rgba(212,175,55,.18);
+      padding:0 20px;display:flex;gap:2px;overflow-x:auto;
+      box-shadow:0 4px 24px rgba(0,0,0,.7),0 1px 0 rgba(212,175,55,.08);
+      backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+      scrollbar-width:none;position:relative;
     }
-    .nav-scroll-btn:hover{color:var(--text);background:rgba(10,10,10,1)}
-    .nav-scroll-btn.left{left:0;border-right:1px solid rgba(255,255,255,.06);box-shadow:4px 0 12px rgba(0,0,0,.4)}
-    .nav-scroll-btn.right{right:0;border-left:1px solid rgba(255,255,255,.06);box-shadow:-4px 0 12px rgba(0,0,0,.4)}
-    .nav-scroll-btn.hidden{opacity:0;pointer-events:none}
-    nav{
-      background:rgba(10,10,10,0.95);
+    nav#main-nav::after{
+      content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.3),rgba(212,175,55,.5),rgba(212,175,55,.3),transparent);
+    }
+    nav#main-nav::-webkit-scrollbar{display:none}
+    /* Group buttons */
+    .nav-group-btn{
+      background:none;border:none;color:rgba(180,180,180,.6);
+      padding:14px 18px 12px;cursor:pointer;font-size:.8em;font-weight:600;
+      border-bottom:2px solid transparent;transition:all .25s cubic-bezier(.4,0,.2,1);
+      white-space:nowrap;display:flex;align-items:center;gap:6px;
+      font-family:inherit;position:relative;letter-spacing:.05em;text-transform:uppercase;
+    }
+    .nav-group-btn .nav-arrow{font-size:.65em;opacity:.5;transition:transform .25s,opacity .25s;margin-left:2px}
+    .nav-group-btn:hover{color:rgba(212,175,55,.9);background:rgba(212,175,55,.04)}
+    .nav-group-btn.active{
+      color:var(--gold);border-bottom-color:var(--gold);
+      background:rgba(212,175,55,.07);
+      text-shadow:0 0 14px rgba(212,175,55,.5);
+    }
+    .nav-group-btn.active .nav-arrow{transform:rotate(180deg);opacity:.8}
+    .nav-group-btn.active::after{
+      content:'';position:absolute;bottom:-1px;left:20%;right:20%;height:2px;
+      background:linear-gradient(90deg,transparent,var(--gold),transparent);
+      filter:blur(1.5px);box-shadow:0 0 10px var(--gold);
+    }
+    /* Power group special styling */
+    .nav-group-btn.power-group{
+      color:var(--gold);border:1px solid rgba(212,175,55,.3)!important;
+      border-bottom-color:transparent!important;
+      text-shadow:0 0 12px rgba(212,175,55,.5);
+      box-shadow:0 0 14px rgba(212,175,55,.15);
+      margin:5px 4px;border-radius:6px;padding:9px 14px 7px;
+      background:rgba(212,175,55,.05);
+    }
+    .nav-group-btn.power-group:hover{background:rgba(212,175,55,.1)!important;box-shadow:0 0 20px rgba(212,175,55,.3)!important}
+    .nav-group-btn.power-group.active{
+      background:rgba(212,175,55,.12)!important;border-color:rgba(212,175,55,.6)!important;
+      box-shadow:0 0 20px rgba(212,175,55,.35),inset 0 0 20px rgba(212,175,55,.05)!important;
+    }
+    /* Sub-nav bar */
+    .sub-nav{
+      background:rgba(6,6,10,0.96);
       border-bottom:1px solid rgba(255,255,255,.06);
-      padding:0 8px;display:flex;gap:0;overflow-x:auto;flex:1;
-      box-shadow:0 4px 20px rgba(0,0,0,.6);
-      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-      scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent;
+      padding:0 24px;display:none;gap:0;overflow-x:auto;
+      animation:slideInDown .2s ease;
+      scrollbar-width:none;
     }
-    nav::-webkit-scrollbar{height:3px}
-    nav::-webkit-scrollbar-track{background:transparent}
-    nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
-    nav button{
-      background:none;border:none;color:rgba(229,229,229,.55);
-      padding:13px 15px;cursor:pointer;font-size:.82em;font-weight:500;
-      border-bottom:2px solid transparent;transition:all .22s;
+    .sub-nav::-webkit-scrollbar{display:none}
+    .sub-nav.active{display:flex}
+    @keyframes slideInDown{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+    .sub-nav button{
+      background:none;border:none;color:rgba(160,160,160,.6);
+      padding:9px 14px;cursor:pointer;font-size:.775em;font-weight:500;
+      border-bottom:2px solid transparent;transition:all .2s;
       white-space:nowrap;display:flex;align-items:center;gap:5px;
       font-family:inherit;position:relative;letter-spacing:.01em;
     }
-    nav button:hover{color:var(--text);background:rgba(31,31,31,.8)}
-    nav button.active{color:var(--gold);border-bottom-color:var(--gold);
-      background:rgba(212,175,55,.08);font-weight:600;text-shadow:0 0 12px rgba(212,175,55,.4);
-      box-shadow:inset 0 -2px 8px rgba(212,175,55,.15);letter-spacing:.02em}
-    nav button.active::after{content:'';position:absolute;bottom:0;left:15%;right:15%;height:2px;
-      background:linear-gradient(90deg,transparent,var(--gold),transparent);
-      border-radius:2px 2px 0 0;filter:blur(2px);box-shadow:0 0 8px var(--gold)}
-    #nav-blacklight-btn{color:#00f0ff;border:1px solid #00f0ff!important;font-weight:700!important;letter-spacing:.04em!important;text-shadow:0 0 10px #00f0ff,0 0 20px rgba(0,240,255,.4);box-shadow:0 0 12px rgba(0,240,255,.2);border-bottom-color:transparent!important}
-    #nav-blacklight-btn:hover{background:rgba(0,240,255,.06)!important;color:#00f0ff!important}
-    #nav-blacklight-btn.active{background:rgba(0,240,255,.08)!important;border-bottom-color:#00f0ff!important;
-      text-shadow:0 0 12px #00f0ff,0 0 24px rgba(0,240,255,.5)!important;
-      box-shadow:inset 0 -2px 12px rgba(0,240,255,.2)!important}
-    #nav-blacklight-btn.active::after{background:linear-gradient(90deg,transparent,#00f0ff,transparent)!important;box-shadow:0 0 10px #00f0ff!important}
-    #nav-ascend-btn{color:#ff9500;border:1px solid #ff9500!important;font-weight:700!important;letter-spacing:.04em!important;text-shadow:0 0 10px #ff9500,0 0 20px rgba(255,149,0,.4);box-shadow:0 0 12px rgba(255,149,0,.2);border-bottom-color:transparent!important}
-    #nav-ascend-btn:hover{background:rgba(255,149,0,.06)!important;color:#ff9500!important}
-    #nav-ascend-btn.active{background:rgba(255,149,0,.08)!important;border-bottom-color:#ff9500!important;
-      text-shadow:0 0 12px #ff9500,0 0 24px rgba(255,149,0,.5)!important;
-      box-shadow:inset 0 -2px 12px rgba(255,149,0,.2)!important}
-    #nav-ascend-btn.active::after{background:linear-gradient(90deg,transparent,#ff9500,transparent)!important;box-shadow:0 0 10px #ff9500!important}
+    .sub-nav button:hover{color:rgba(212,175,55,.85);background:rgba(212,175,55,.04)}
+    .sub-nav button.active{
+      color:var(--gold);border-bottom-color:rgba(212,175,55,.7);
+      background:rgba(212,175,55,.06);font-weight:600;
+    }
+    .sub-nav button.active::after{
+      content:'';position:absolute;bottom:0;left:10%;right:10%;height:2px;
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.8),transparent);
+      filter:blur(1px);
+    }
+    /* Legacy hidden scroll buttons */
+    .nav-scroll-btn.hidden{display:none}
+
+    /* ── Boot/Loading overlay ── */
+    #boot-overlay{
+      position:fixed;inset:0;z-index:9999;
+      background:#000;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      font-family:'Courier New',monospace;
+      overflow:hidden;
+    }
+    #boot-overlay.fade-out{
+      animation:bootFadeOut .8s ease forwards;
+    }
+    @keyframes bootFadeOut{0%{opacity:1}100%{opacity:0;pointer-events:none}}
+    .boot-scanline{
+      position:absolute;inset:0;pointer-events:none;
+      background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.15) 2px,rgba(0,0,0,.15) 4px);
+      z-index:2;animation:scanMove 8s linear infinite;
+    }
+    @keyframes scanMove{0%{background-position:0 0}100%{background-position:0 100%}}
+    .boot-glow-h{
+      position:absolute;height:2px;width:100%;
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.8),transparent);
+      animation:bootScanH 3s ease-in-out infinite;
+      z-index:3;
+    }
+    @keyframes bootScanH{0%{top:-2px;opacity:0}10%{opacity:1}90%{opacity:.6}100%{top:100%;opacity:0}}
+    .boot-corner{
+      position:absolute;width:80px;height:80px;
+      border:2px solid rgba(212,175,55,.5);
+    }
+    .boot-corner.tl{top:20px;left:20px;border-right:none;border-bottom:none;animation:cornerGlow 2s ease-in-out infinite alternate}
+    .boot-corner.tr{top:20px;right:20px;border-left:none;border-bottom:none;animation:cornerGlow 2s ease-in-out .5s infinite alternate}
+    .boot-corner.bl{bottom:20px;left:20px;border-right:none;border-top:none;animation:cornerGlow 2s ease-in-out 1s infinite alternate}
+    .boot-corner.br{bottom:20px;right:20px;border-left:none;border-top:none;animation:cornerGlow 2s ease-in-out 1.5s infinite alternate}
+    @keyframes cornerGlow{0%{border-color:rgba(212,175,55,.2)}100%{border-color:rgba(212,175,55,.9);box-shadow:0 0 16px rgba(212,175,55,.5)}}
+    .boot-logo{
+      font-size:2.8em;font-weight:900;letter-spacing:.2em;text-transform:uppercase;
+      color:var(--gold);text-shadow:0 0 30px rgba(212,175,55,.8),0 0 60px rgba(212,175,55,.4);
+      margin-bottom:8px;opacity:0;
+      animation:bootLogoReveal .6s ease .5s forwards;
+    }
+    @keyframes bootLogoReveal{0%{opacity:0;transform:scaleX(0.3) translateY(10px);letter-spacing:.05em}100%{opacity:1;transform:none;letter-spacing:.2em}}
+    .boot-sub{
+      font-size:.72em;letter-spacing:.5em;color:rgba(212,175,55,.6);
+      text-transform:uppercase;margin-bottom:40px;
+      opacity:0;animation:fadeIn .5s ease 1s forwards;
+    }
+    .boot-terminal{
+      width:min(520px,90vw);height:130px;overflow:hidden;
+      border:1px solid rgba(212,175,55,.2);border-radius:6px;
+      background:rgba(0,0,0,.8);padding:14px 16px;
+      font-size:.72em;line-height:1.7;color:rgba(212,175,55,.75);
+      position:relative;z-index:4;
+    }
+    .boot-terminal-line{display:block;opacity:0;animation:termLine .1s ease forwards}
+    @keyframes termLine{to{opacity:1}}
+    .boot-bar-wrap{margin-top:22px;width:min(320px,80vw);z-index:4;position:relative}
+    .boot-bar-label{display:flex;justify-content:space-between;font-size:.68em;color:rgba(212,175,55,.5);margin-bottom:6px;letter-spacing:.06em}
+    .boot-bar-track{height:3px;background:rgba(212,175,55,.1);border-radius:10px;overflow:hidden}
+    .boot-bar-fill{
+      height:100%;width:0%;border-radius:10px;
+      background:linear-gradient(90deg,#B8960C,#FFD700,#FFAA00);
+      box-shadow:0 0 12px rgba(212,175,55,.7);
+      transition:width .12s linear;
+    }
+
+    /* ── Scanline overlay on main UI ── */
+    .scanlines{
+      position:fixed;inset:0;z-index:998;pointer-events:none;
+      background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.04) 3px,rgba(0,0,0,.04) 4px);
+    }
+    /* ── Particle canvas ── */
+    #particles-canvas{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5}
+
+    /* ── Glitch animation (used on logo/title) ── */
+    @keyframes glitch1{
+      0%,90%,100%{clip-path:none;transform:none}
+      92%{clip-path:inset(20% 0 30% 0);transform:translateX(-3px)}
+      94%{clip-path:inset(60% 0 10% 0);transform:translateX(3px)}
+      96%{clip-path:inset(40% 0 50% 0);transform:translateX(-2px)}
+    }
+    .glitch{animation:glitch1 5s infinite}
+
+    /* ── Enhanced tab content transitions ── */
+    .tab-content{display:none;width:100%;box-sizing:border-box}
+    .tab-content.active{
+      display:block;width:100%;
+      animation:tabReveal .35s cubic-bezier(.4,0,.2,1);
+    }
+    @keyframes tabReveal{
+      0%{opacity:0;transform:translateY(10px) scale(.995)}
+      100%{opacity:1;transform:none}
+    }
+
+    /* ── Gold glow line under header ── */
+    header::after{
+      content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.6),rgba(255,215,0,.8),rgba(212,175,55,.6),transparent);
+      box-shadow:0 0 12px rgba(212,175,55,.4);
+    }
 
     /* ── Main content ── */
     main{flex:1;padding:24px 28px;max-width:100%;margin:0 auto;width:100%;position:relative;z-index:1;box-sizing:border-box}
@@ -1817,12 +1950,35 @@ INDEX_HTML = r"""<!doctype html>
   </style>
 </head>
 <body>
+
+<!-- ── Boot / Loading Overlay ── -->
+<div id="boot-overlay">
+  <div class="boot-scanline"></div>
+  <div class="boot-glow-h"></div>
+  <div class="boot-corner tl"></div>
+  <div class="boot-corner tr"></div>
+  <div class="boot-corner bl"></div>
+  <div class="boot-corner br"></div>
+  <div class="boot-logo glitch">AI EMPLOYEE</div>
+  <div class="boot-sub">Autonomous Intelligence Platform</div>
+  <div class="boot-terminal" id="boot-terminal"></div>
+  <div class="boot-bar-wrap">
+    <div class="boot-bar-label"><span>INITIALIZING</span><span id="boot-pct">0%</span></div>
+    <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar"></div></div>
+  </div>
+</div>
+
+<!-- ── Scanline overlay ── -->
+<div class="scanlines"></div>
+<!-- ── Particle canvas ── -->
+<canvas id="particles-canvas"></canvas>
+
 <div class="app">
 
 <!-- ── Header ── -->
 <header>
   <div class="header-left">
-    <div class="logo">🤖</div>
+    <div class="logo glitch">🤖</div>
     <div class="header-title">
       <h1>AI Employee</h1>
       <div class="sub" id="header-sub">Loading…</div>
@@ -1837,38 +1993,63 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </header>
 
-<!-- ── Navigation ── -->
+<!-- ── Navigation (grouped two-tier) ── -->
 <div class="nav-wrapper">
-  <button class="nav-scroll-btn left hidden" id="nav-scroll-left" onclick="navScroll(-1)" title="Scroll left">‹</button>
-<nav id="main-nav">
-  <button class="active" onclick="switchTab('dashboard',this)">📊 Dashboard</button>
-  <button id="nav-btn-chat" onclick="switchTab('chat',this)">💬 Chat</button>
+  <!-- Hidden legacy scroll buttons for JS compatibility -->
+  <button class="nav-scroll-btn left hidden" id="nav-scroll-left" style="display:none"></button>
+  <!-- Primary group nav -->
+  <nav id="main-nav">
+    <button class="nav-group-btn active" data-group="overview" onclick="switchGroup('overview',this)">◈ Overview</button>
+    <button class="nav-group-btn" data-group="intel" id="nav-btn-chat-group" onclick="switchGroup('intel',this)">◈ Intel <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn" data-group="operations" onclick="switchGroup('operations',this)">◈ Operations <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn" data-group="forces" onclick="switchGroup('forces',this)">◈ Forces <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn" data-group="analytics" onclick="switchGroup('analytics',this)">◈ Analytics <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn" data-group="library" onclick="switchGroup('library',this)">◈ Library <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn" data-group="systems" onclick="switchGroup('systems',this)">◈ Systems <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn power-group" data-group="power" onclick="switchGroup('power',this)">⚡ Power <span class="nav-arrow">▾</span></button>
+  </nav>
+  <button class="nav-scroll-btn right hidden" id="nav-scroll-right" style="display:none"></button>
+</div>
+<!-- Sub-navigation rows (one per group) -->
+<div class="sub-nav" id="subnav-overview"></div>
+<div class="sub-nav" id="subnav-intel">
+  <button class="active" onclick="switchTab('chat',this)" id="nav-btn-chat">💬 Chat</button>
+  <button onclick="switchTab('history',this)">🕐 History</button>
+</div>
+<div class="sub-nav" id="subnav-operations">
   <button onclick="switchTab('tasks',this)">🚀 Tasks</button>
   <button onclick="switchTab('swarm',this)">🐝 Swarm</button>
   <button onclick="switchTab('live-office',this)">🏢 Live Office</button>
-  <button onclick="switchTab('commands',this)">📜 Commands</button>
   <button onclick="switchTab('scheduler',this)">📅 Scheduler</button>
+</div>
+<div class="sub-nav" id="subnav-forces">
   <button onclick="switchTab('workers',this)">👷 Agents</button>
-  <button onclick="switchTab('improvements',this)">💡 Improvements</button>
   <button onclick="switchTab('skills',this)">🛠️ Skills</button>
-  <button onclick="switchTab('metrics',this)">📈 ROI</button>
-  <button onclick="switchTab('templates',this)">📋 Templates</button>
-  <button onclick="switchTab('guardrails',this)" id="nav-btn-guardrails">🔒 Guardrails <span id="guardrail-pending-badge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:1px 6px;font-size:.7em;font-weight:700;margin-left:3px;animation:blink 1.5s infinite"></span></button>
-  <button onclick="switchTab('memory',this)">🧠 Memory</button>
-  <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
-  <button onclick="switchTab('history',this)">🕐 History</button>
-  <button onclick="switchTab('options',this)">⚙️ Options</button>
-  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn">⚡ BLACKLIGHT</button>
-  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('improvements',this)">💡 Improvements</button>
+  <button onclick="switchTab('commands',this)">📜 Commands</button>
+</div>
+<div class="sub-nav" id="subnav-analytics">
+  <button onclick="switchTab('metrics',this)">📈 ROI & Metrics</button>
   <button onclick="switchTab('budget',this)">💰 Budget</button>
+</div>
+<div class="sub-nav" id="subnav-library">
+  <button onclick="switchTab('templates',this)">📋 Templates</button>
+  <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
+  <button onclick="switchTab('memory',this)">🧠 Memory</button>
+</div>
+<div class="sub-nav" id="subnav-systems">
+  <button onclick="switchTab('guardrails',this)" id="nav-btn-guardrails">🔒 Guardrails <span id="guardrail-pending-badge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:1px 6px;font-size:.7em;font-weight:700;margin-left:3px;animation:blink 1.5s infinite"></span></button>
+  <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
+  <button onclick="switchTab('options',this)">⚙️ Options</button>
   <button onclick="switchTab('org',this)">🏢 Org Chart</button>
   <button onclick="switchTab('goals',this)">🎯 Goals</button>
   <button onclick="switchTab('tickets',this)">🎫 Tickets</button>
   <button onclick="switchTab('boardroom',this)">🛡️ Boardroom</button>
   <button onclick="switchTab('companies',this)">🏗️ Companies</button>
-  <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
-</nav>
-  <button class="nav-scroll-btn right" id="nav-scroll-right" onclick="navScroll(1)" title="Scroll right">›</button>
+</div>
+<div class="sub-nav" id="subnav-power">
+  <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn">⚡ BLACKLIGHT</button>
+  <button onclick="switchTab('ascend',this)" id="nav-ascend-btn">🔥 ASCEND FORGE</button>
 </div>
 
 <main>
@@ -2008,7 +2189,7 @@ INDEX_HTML = r"""<!doctype html>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <div id="dash-af-pct-badge" style="font-size:.72em;font-weight:700;color:#fbbf24;padding:2px 7px;border-radius:12px;background:rgba(217,119,6,.15);border:1px solid rgba(217,119,6,.3);display:none">0%</div>
-            <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:.72em;border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="switchTab('ascend',document.querySelector('nav button[onclick*=ascend]'))">Open →</button>
+            <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:.72em;border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="switchTab('ascend',null)">Open →</button>
           </div>
         </div>
         <div id="dash-af-progress-wrap" style="display:none">
@@ -2025,7 +2206,7 @@ INDEX_HTML = r"""<!doctype html>
   <div class="card">
     <div class="card-header">
       <div class="card-title"><span class="icon">💬</span> Quick WhatsApp Commands</div>
-      <a href="#" onclick="event.preventDefault();document.querySelector('nav button[onclick*=commands]').click()" style="font-size:.78em;color:var(--gold);text-decoration:none">View all →</a>
+      <a href="#" onclick="event.preventDefault();switchTab('commands',null)" style="font-size:.78em;color:var(--gold);text-decoration:none">View all →</a>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">status</code><span style="font-size:.78em;color:var(--text-muted)">Get current status report</span></div>
@@ -2042,7 +2223,7 @@ INDEX_HTML = r"""<!doctype html>
       <div style="display:flex;align-items:center;gap:8px">
         <span id="dash-agent-map-status" style="font-size:.73em;padding:2px 8px;border-radius:8px;background:rgba(212,175,55,.1);color:var(--gold);border:1px solid rgba(212,175,55,.2)">● Watching</span>
         <button class="btn btn-ghost btn-sm" onclick="loadDashboard()">↻ Refresh</button>
-        <button class="btn btn-ghost btn-sm" onclick="switchTab('live-office',document.querySelector('nav button[onclick*=live-office]'))">🏢 Full Office View →</button>
+        <button class="btn btn-ghost btn-sm" onclick="switchTab('live-office',null)">🏢 Full Office View →</button>
       </div>
     </div>
     <p style="font-size:.8em;color:var(--text-muted);margin-bottom:12px">Real-time view of all agents and their current task. Click any agent to inspect.</p>
@@ -4230,37 +4411,72 @@ function switchToChatTab() {
 }
 
 // ── Nav scroll arrows ──
-function navScroll(dir) {
-  const nav = document.getElementById('main-nav');
-  nav.scrollBy({left: dir * 220, behavior: 'smooth'});
-}
-function _updateNavArrows() {
-  const nav = document.getElementById('main-nav');
-  if (!nav) return;
-  const btnL = document.getElementById('nav-scroll-left');
-  const btnR = document.getElementById('nav-scroll-right');
-  const atStart = nav.scrollLeft <= 4;
-  const atEnd = nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 4;
-  btnL.classList.toggle('hidden', atStart);
-  btnR.classList.toggle('hidden', atEnd);
-}
-document.addEventListener('DOMContentLoaded', function() {
-  const nav = document.getElementById('main-nav');
-  if (nav) {
-    nav.addEventListener('scroll', _updateNavArrows, {passive:true});
-    _updateNavArrows();
-    // Update arrows on window resize
-    window.addEventListener('resize', _updateNavArrows, {passive:true});
+/* ── Group ↔ Tab navigation ── */
+const _TAB_TO_GROUP = {
+  dashboard:'overview',
+  chat:'intel', history:'intel',
+  tasks:'operations', swarm:'operations', 'live-office':'operations', scheduler:'operations',
+  workers:'forces', skills:'forces', improvements:'forces', commands:'forces',
+  metrics:'analytics', budget:'analytics',
+  templates:'library', artifacts:'library', memory:'library',
+  guardrails:'systems', integrations:'systems', options:'systems', org:'systems',
+  goals:'systems', tickets:'systems', boardroom:'systems', companies:'systems',
+  blacklight:'power', ascend:'power'
+};
+
+function switchGroup(group, btn) {
+  // Update primary nav active state
+  document.querySelectorAll('.nav-group-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // Show corresponding sub-nav
+  document.querySelectorAll('.sub-nav').forEach(s => s.classList.remove('active'));
+  const subNav = document.getElementById('subnav-' + group);
+  if (subNav) subNav.classList.add('active');
+  // If overview, go directly to dashboard
+  if (group === 'overview') {
+    switchTab('dashboard', btn);
+  } else {
+    // Activate the first sub-tab of this group
+    const firstBtn = subNav && subNav.querySelector('button');
+    if (firstBtn) firstBtn.click();
   }
+}
+
+function navScroll(dir) {
+  /* legacy — no-op with new grouped nav */
+}
+function _updateNavArrows() { /* legacy — no-op */ }
+document.addEventListener('DOMContentLoaded', function() {
+  /* grouped nav needs no scroll arrows */
 });
 
 function switchTab(tab, btn) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + tab).classList.add('active');
-  btn.classList.add('active');
-  // Scroll active tab into view
-  btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
+  const tabEl = document.getElementById('tab-' + tab);
+  if (tabEl) tabEl.classList.add('active');
+  // Sub-nav active state — find the right button automatically if not provided
+  document.querySelectorAll('.sub-nav button').forEach(b => b.classList.remove('active'));
+  if (btn && btn.classList && !btn.classList.contains('nav-group-btn')) {
+    btn.classList.add('active');
+  } else {
+    // Auto-find sub-nav button for this tab
+    const group = _TAB_TO_GROUP[tab] || 'overview';
+    const subNav = document.getElementById('subnav-' + group);
+    if (subNav) {
+      const safeTab = Object.keys(_TAB_TO_GROUP).includes(tab) ? tab : '';
+      const subBtn = safeTab ? subNav.querySelector(`button[onclick*="${safeTab}"]`) : null;
+      if (subBtn) subBtn.classList.add('active');
+    }
+  }
+  // Ensure correct group is highlighted
+  const group = _TAB_TO_GROUP[tab] || 'overview';
+  document.querySelectorAll('.nav-group-btn').forEach(b => b.classList.remove('active'));
+  const groupBtn = document.querySelector(`.nav-group-btn[data-group="${group}"]`);
+  if (groupBtn) groupBtn.classList.add('active');
+  // Ensure correct sub-nav is visible
+  document.querySelectorAll('.sub-nav').forEach(s => s.classList.remove('active'));
+  const subNav = document.getElementById('subnav-' + group);
+  if (subNav) subNav.classList.add('active');
   currentTab = tab;
   if (tab === 'dashboard') loadDashboard();
   if (tab === 'chat') loadChatLog();
@@ -4281,7 +4497,6 @@ function switchTab(tab, btn) {
   if (tab === 'options') { loadOptions(); loadUpdaterStatus(); runSecurityCheck(); }
   if (tab === 'blacklight') { blRefresh(); blLoadLogs(); }
   if (tab === 'ascend') { afRefresh(); afLoadPatches(); afLoadChangelog(); }
-  // New Paperclip-parity tabs
   if (tab === 'budget') loadBudget();
   if (tab === 'org') { loadOrg(); loadOrgAdapters(); }
   if (tab === 'goals') loadGoals();
@@ -4638,7 +4853,7 @@ function _renderDashAgentMap(agents, statusData) {
     const dotColor = isActive ? 'var(--gold)' : (isRunning ? 'var(--success)' : 'rgba(148,163,184,.3)');
     const cardBg = isActive ? 'rgba(212,175,55,.07)' : (isRunning ? 'rgba(16,185,129,.04)' : 'transparent');
     const cardBorder = isActive ? 'rgba(212,175,55,.4)' : (isRunning ? 'rgba(16,185,129,.2)' : 'rgba(148,163,184,.12)');
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid ${cardBorder};background:${cardBg};transition:all .2s;cursor:pointer" title="${a.id}" onclick="switchTab('live-office',document.querySelector('nav button[onclick*=\\'live-office\\']'))">
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid ${cardBorder};background:${cardBg};transition:all .2s;cursor:pointer" title="${a.id}" onclick="switchTab('live-office',null)">
       <div style="font-size:1.2em;flex-shrink:0">${emoji}</div>
       <div style="min-width:0;flex:1">
         <div style="font-size:.8em;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.id)}</div>
@@ -7724,8 +7939,7 @@ function exportHistory() {
 function rerunTaskFromHistory(description) {
   const taskInput = document.getElementById('task-input');
   if (taskInput) { taskInput.value = description; }
-  const tasksBtn = document.querySelector('nav button[onclick*="\'tasks\'"]');
-  if (tasksBtn) switchTab('tasks', tasksBtn);
+  switchTab('tasks', null);
   setTimeout(() => {
     const el = document.getElementById('task-input');
     if (el) { el.focus(); el.scrollIntoView({behavior:'smooth', block:'nearest'}); }
@@ -7738,16 +7952,14 @@ async function viewTaskById(taskId) {
   if (!r.ok) { toast('Could not load tasks', 'error'); return; }
   const plan = (r.plans || []).find(p => p.id === taskId);
   if (plan) {
-    const tasksBtn = document.querySelector('nav button[onclick*="\'tasks\'"]');
-    if (tasksBtn) switchTab('tasks', tasksBtn);
+    switchTab('tasks', null);
     setTimeout(() => {
       _taskStore.set(taskId, plan);
       openTaskDetail(taskId);
     }, 200);
   } else {
     toast('Task not found in recent history — it may have been pruned', 'info');
-    const tasksBtn = document.querySelector('nav button[onclick*="\'tasks\'"]');
-    if (tasksBtn) switchTab('tasks', tasksBtn);
+    switchTab('tasks', null);
   }
 }
 
@@ -7924,8 +8136,7 @@ function autoSchedId() {
 
 // ── Assign task to agent from swarm ──────────────────────────────────────────
 function assignTaskToAgent(agentId) {
-  const tasksBtn = document.querySelector('nav button[onclick*="tasks"]');
-  if (tasksBtn) tasksBtn.click();
+  switchTab('tasks', null);
   setTimeout(() => {
     const taskInput = document.getElementById('task-input');
     if (taskInput) {
@@ -9356,6 +9567,126 @@ setInterval(() => {
   if (currentTab === 'tickets') loadTickets();
   if (currentTab === 'artifacts') loadSessions();
 }, 30000);
+
+/* ══════════════════════════════════════════════════
+   BOOT SEQUENCE
+══════════════════════════════════════════════════ */
+(function runBootSequence() {
+  const overlay = document.getElementById('boot-overlay');
+  const terminal = document.getElementById('boot-terminal');
+  const bar = document.getElementById('boot-bar');
+  const pct = document.getElementById('boot-pct');
+  if (!overlay) return;
+
+  const lines = [
+    '> INITIALIZING AI EMPLOYEE v4.0\u2026',
+    '> Loading neural subsystems\u2026',
+    '> Mounting agent registry\u2026',
+    '> Establishing secure channel\u2026',
+    '> Calibrating gold resonance matrix\u2026',
+    '> All systems nominal. Welcome.',
+  ];
+  let lineIdx = 0;
+  let progress = 0;
+
+  function addLine() {
+    if (lineIdx >= lines.length) return;
+    const span = document.createElement('span');
+    span.className = 'boot-terminal-line';
+    span.style.animationDelay = '0s';
+    span.textContent = lines[lineIdx++];
+    terminal.appendChild(span);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  const lineTimer = setInterval(() => {
+    addLine();
+    if (lineIdx >= lines.length) clearInterval(lineTimer);
+  }, 280);
+
+  const barTimer = setInterval(() => {
+    progress += Math.random() * 12 + 4;
+    if (progress >= 100) { progress = 100; clearInterval(barTimer); }
+    bar.style.width = progress + '%';
+    pct.textContent = Math.round(progress) + '%';
+    if (progress >= 100) {
+      setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => { overlay.style.display = 'none'; }, 850);
+      }, 300);
+    }
+  }, 120);
+})();
+
+/* ══════════════════════════════════════════════════
+   PARTICLE SYSTEM
+══════════════════════════════════════════════════ */
+(function initParticles() {
+  const canvas = document.getElementById('particles-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let W, H;
+  const particles = [];
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize, {passive:true});
+
+  const GOLD = 'rgba(212,175,55,';
+  for (let i = 0; i < 55; i++) {
+    particles.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 1.5 + 0.3,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      a: Math.random() * 0.5 + 0.1,
+      da: (Math.random() - 0.5) * 0.003,
+    });
+  }
+
+  function frame() {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of particles) {
+      p.x += p.vx; p.y += p.vy;
+      p.a += p.da;
+      if (p.a < 0.05) p.da = Math.abs(p.da);
+      if (p.a > 0.6) p.da = -Math.abs(p.da);
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
+      ctx.fill();
+    }
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 90) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+
+/* init nav active state */
+document.addEventListener('DOMContentLoaded', () => {
+  const overviewBtn = document.querySelector('.nav-group-btn[data-group="overview"]');
+  if (overviewBtn) overviewBtn.classList.add('active');
+});
 </script>
 </body>
 </html>"""
