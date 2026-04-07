@@ -84,9 +84,11 @@ def _ensure_jwt_secret() -> str:
     # Try to load from ~/.ai-employee/.env before generating a new one
     env_dir = Path.home() / ".ai-employee"
     env_file = env_dir / ".env"
+    _ENV_FILE_MAX_BYTES = 65536  # 64 KiB — guard against maliciously large files
     if env_file.exists():
         try:
-            for raw_line in env_file.read_text().splitlines():
+            raw = env_file.read_bytes()[:_ENV_FILE_MAX_BYTES].decode("utf-8", errors="replace")
+            for raw_line in raw.splitlines():
                 line = raw_line.strip()
                 if line.startswith("JWT_SECRET_KEY="):
                     stored = line.split("=", 1)[1].strip()
@@ -103,21 +105,28 @@ def _ensure_jwt_secret() -> str:
 
     # Persist to ~/.ai-employee/.env
     try:
-        env_dir.mkdir(parents=True, exist_ok=True)
+        # Create directory with owner-only permissions (rwx------) so the
+        # JWT secret stored inside is not readable by other OS users.
+        env_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         existing = ""
         if env_file.exists():
-            existing = env_file.read_text()
+            raw = env_file.read_bytes()[:_ENV_FILE_MAX_BYTES].decode("utf-8", errors="replace")
+            existing = raw
         new_lines = []
         replaced = False
         for line in existing.splitlines():
             if line.startswith("JWT_SECRET_KEY="):
-                new_lines.append(f"JWT_SECRET_KEY={new_secret}")
-                replaced = True
+                if not replaced:
+                    new_lines.append(f"JWT_SECRET_KEY={new_secret}")
+                    replaced = True
+                # Skip duplicate JWT_SECRET_KEY lines
             else:
                 new_lines.append(line)
         if not replaced:
             new_lines.append(f"JWT_SECRET_KEY={new_secret}")
         env_file.write_text("\n".join(new_lines) + "\n")
+        # Restrict .env file permissions to owner-read/write only (rw-------)
+        env_file.chmod(0o600)
         print(
             f"\n🔑  Auto-generated JWT_SECRET_KEY and saved to {env_file}\n"
             "    This secret will be reused on subsequent starts.\n",
@@ -19453,12 +19462,13 @@ if __name__ == "__main__":
 
     # ── Startup banner ────────────────────────────────────────────────────────
     _url = f"http://{HOST}:{PORT}"
+    _url_col = _url[:40]  # truncate to fit fixed-width banner column
     print(
         "\n"
         "╔══════════════════════════════════════════════════════╗\n"
         "║        🤖  AI EMPLOYEE  —  Dashboard Server          ║\n"
         "╠══════════════════════════════════════════════════════╣\n"
-        f"║  Dashboard → {_url:<40}║\n"
+        f"║  Dashboard → {_url_col:<40}║\n"
         "║  Press Ctrl+C to stop                                ║\n"
         "╚══════════════════════════════════════════════════════╝\n",
         flush=True,
