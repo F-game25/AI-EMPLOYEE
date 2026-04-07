@@ -1,0 +1,24 @@
+# Coverage configuration for AI Employee
+# This tells coverage.py which source files to track.
+# AscendForge reads coverage/coverage.json to identify areas for improvement.
+
+[run]
+source =
+    runtime/agents/utils.py
+    runtime/agents/ascend-forge/ascend_forge.py
+    runtime/agents/turbo-quant/turbo_quant.py
+omit =
+    tests/*
+    */site-packages/*
+    runtime/agents/problem-solver-ui/*
+
+[report]
+show_missing = true
+precision = 1
+
+[xml]
+output = coverage/coverage.xml
+
+[json]
+output = coverage/coverage.json
+pretty_print = true
