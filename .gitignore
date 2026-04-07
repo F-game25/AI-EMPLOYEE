@@ -32,3 +32,8 @@ venv/
 
 # Runtime secrets — never commit live state/user data
 state/users.json
+
+# Test coverage artifacts
+.coverage
+coverage/
+.pytest_cache/
