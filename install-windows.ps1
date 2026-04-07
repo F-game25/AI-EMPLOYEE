@@ -275,6 +275,7 @@ while ($true) {
 # Ollama model catalogue
 $OllamaModelNames = @(
     'llama3.2',
+    'gemma4',
     'gemma3',
     'llama3.1',
     'mistral',
@@ -286,7 +287,8 @@ $OllamaModelNames = @(
 )
 $OllamaModelDescs = @(
     'Meta Llama 3.2 3B  — best all-round, fast          (2 GB RAM)',
-    'Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM) * best free model',
+    'Google Gemma 4     — latest Gemma, multimodal      (5 GB RAM) * newest free model',
+    'Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM)',
     'Meta Llama 3.1 8B  — smarter, slower               (5 GB RAM)',
     'Mistral 7B         — great instruction following   (4 GB RAM)',
     'Google Gemma 2 9B  — strong reasoning              (5 GB RAM)',
@@ -444,41 +446,74 @@ try {
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Step "Downloading runtime files from GitHub ($GITHUB_BRANCH branch)..."
 
-# Mapping: bot-folder-name => python-file-name
+# Mapping: agent-folder-name => python-file-name
 $BOT_FILES = [ordered]@{
-    'problem-solver'        = 'problem_solver.py'
-    'problem-solver-ui'     = 'server.py'
-    'polymarket-trader'     = 'trader.py'
-    'status-reporter'       = 'status_reporter.py'
-    'scheduler-runner'      = 'scheduler.py'
-    'discovery'             = 'discovery.py'
-    'skills-manager'        = 'skills_manager.py'
-    'mirofish-researcher'   = 'researcher.py'
-    'ai-router'             = 'ai_router.py'
-    'ollama-agent'          = 'ollama_agent.py'
-    'claude-agent'          = 'claude_agent.py'
-    'web-researcher'        = 'web_researcher.py'
-    'social-media-manager'  = 'social_media_manager.py'
-    'lead-generator'        = 'lead_generator.py'
-    'recruiter'             = 'recruiter.py'
-    'ecom-agent'            = 'ecom_agent.py'
-    'creator-agency'        = 'creator_agency.py'
-    'signal-community'      = 'signal_community.py'
-    'appointment-setter'    = 'appointment_setter.py'
-    'newsletter-bot'        = 'newsletter_bot.py'
-    'chatbot-builder'       = 'chatbot_builder.py'
-    'faceless-video'        = 'faceless_video.py'
-    'print-on-demand'       = 'print_on_demand.py'
-    'course-creator'        = 'course_creator.py'
-    'arbitrage-bot'         = 'arbitrage_bot.py'
-    'task-orchestrator'     = 'task_orchestrator.py'
-    'company-builder'       = 'company_builder.py'
-    'memecoin-creator'      = 'memecoin_creator.py'
-    'hr-manager'            = 'hr_manager.py'
-    'finance-wizard'        = 'finance_wizard.py'
-    'brand-strategist'      = 'brand_strategist.py'
-    'growth-hacker'         = 'growth_hacker.py'
-    'project-manager'       = 'project_manager.py'
+    'problem-solver'            = 'problem_solver.py'
+    'problem-solver-ui'         = 'server.py'
+    'polymarket-trader'         = 'trader.py'
+    'status-reporter'           = 'status_reporter.py'
+    'scheduler-runner'          = 'scheduler.py'
+    'discovery'                 = 'discovery.py'
+    'skills-manager'            = 'skills_manager.py'
+    'mirofish-researcher'       = 'researcher.py'
+    'ai-router'                 = 'ai_router.py'
+    'ollama-agent'              = 'ollama_agent.py'
+    'claude-agent'              = 'claude_agent.py'
+    'gemma-agent'               = 'gemma_agent.py'
+    'hermes-agent'              = 'hermes_agent.py'
+    'web-researcher'            = 'web_researcher.py'
+    'social-media-manager'      = 'social_media_manager.py'
+    'lead-generator'            = 'lead_generator.py'
+    'lead-hunter-elite'         = 'lead_hunter_elite.py'
+    'linkedin-growth-hacker'    = 'linkedin_growth_hacker.py'
+    'cold-outreach-assassin'    = 'cold_outreach_assassin.py'
+    'recruiter'                 = 'recruiter.py'
+    'ecom-agent'                = 'ecom_agent.py'
+    'creator-agency'            = 'creator_agency.py'
+    'signal-community'          = 'signal_community.py'
+    'appointment-setter'        = 'appointment_setter.py'
+    'follow-up-agent'           = 'follow_up_agent.py'
+    'offer-agent'               = 'offer_agent.py'
+    'qualification-agent'       = 'qualification_agent.py'
+    'sales-closer-pro'          = 'sales_closer_pro.py'
+    'newsletter-bot'            = 'newsletter_bot.py'
+    'chatbot-builder'           = 'chatbot_builder.py'
+    'faceless-video'            = 'faceless_video.py'
+    'print-on-demand'           = 'print_on_demand.py'
+    'course-creator'            = 'course_creator.py'
+    'ui-designer'               = 'ui_designer.py'
+    'engineering-assistant'     = 'engineering_assistant.py'
+    'qa-tester'                 = 'qa_tester.py'
+    'arbitrage-bot'             = 'arbitrage_bot.py'
+    'task-orchestrator'         = 'task_orchestrator.py'
+    'company-builder'           = 'company_builder.py'
+    'company-manager'           = 'company_manager.py'
+    'memecoin-creator'          = 'memecoin_creator.py'
+    'hr-manager'                = 'hr_manager.py'
+    'finance-wizard'            = 'finance_wizard.py'
+    'budget-tracker'            = 'budget_tracker.py'
+    'brand-strategist'          = 'brand_strategist.py'
+    'growth-hacker'             = 'growth_hacker.py'
+    'referral-rocket'           = 'referral_rocket.py'
+    'ad-campaign-wizard'        = 'ad_campaign_wizard.py'
+    'paid-media-specialist'     = 'paid_media_specialist.py'
+    'project-manager'           = 'project_manager.py'
+    'partnership-matchmaker'    = 'partnership_matchmaker.py'
+    'org-chart'                 = 'org_chart.py'
+    'ticket-system'             = 'ticket_system.py'
+    'goal-alignment'            = 'goal_alignment.py'
+    'governance'                = 'governance.py'
+    'feedback-loop'             = 'feedback_loop.py'
+    'session-manager'           = 'session_manager.py'
+    'discord-bot'               = 'discord_bot.py'
+    'whatsapp-webhook'          = 'webhook_server.py'
+    'obsidian-memory'           = 'obsidian_memory.py'
+    'financial-deepsearch'      = 'financial_deepsearch.py'
+    'auto-updater'              = 'auto_updater.py'
+    'ascend-forge'              = 'ascend_forge.py'
+    'blacklight'                = 'blacklight.py'
+    'turbo-quant'               = 'turbo_quant.py'
+    'artifacts'                 = 'artifacts.py'
 }
 $BOTS = $BOT_FILES.Keys
 
@@ -521,12 +556,12 @@ foreach ($bot in $BOTS) {
     }
 
     # Main bot Python script (with correct filename)
-    $botUrl  = "$BASE_URL/bagents/$bot/$pyFile"
+    $botUrl  = "$BASE_URL/agents/$bot/$pyFile"
     $botDest = Join-Path $botDir $pyFile
     if (Invoke-Download $botUrl $botDest) { $downloadCount++ } else { $failCount++ }
 
     # requirements.txt (optional)
-    $reqUrl  = "$BASE_URL/bagents/$bot/requirements.txt"
+    $reqUrl  = "$BASE_URL/agents/$bot/requirements.txt"
     $reqDest = Join-Path $botDir 'requirements.txt'
     Invoke-Download $reqUrl $reqDest | Out-Null
 
@@ -540,7 +575,7 @@ foreach ($bot in $BOTS) {
 $configFiles = @(
     'openclaw.template.json', 'schedules.json', 'polymarket_estimates.json',
     'skills_library.json', 'custom_agents.json', 'agent_capabilities.json',
-    'task_plans.json'
+    'task_plans.json', 'agent_templates.json'
 )
 foreach ($cf in $configFiles) {
     $cfUrl   = "$BASE_URL/config/$cf"
@@ -548,7 +583,40 @@ foreach ($cf in $configFiles) {
     Invoke-Download $cfUrl $cfDest | Out-Null
 }
 
-Write-OK "Bot files: $downloadCount downloaded, $failCount not found (placeholders created)."
+Write-OK "Agent files: $downloadCount downloaded, $failCount not found (placeholders created)."
+
+# Download extra files for problem-solver-ui (config_manager, security, features/)
+$uiDir = Join-Path $AI_HOME 'agents\problem-solver-ui'
+$uiFeaturesDir = Join-Path $uiDir 'features'
+if (-not (Test-Path $uiFeaturesDir)) {
+    New-Item -ItemType Directory -Path $uiFeaturesDir -Force | Out-Null
+}
+foreach ($extraFile in @('config_manager.py', 'security.py')) {
+    $url  = "$BASE_URL/agents/problem-solver-ui/$extraFile"
+    $dest = Join-Path $uiDir $extraFile
+    Invoke-Download $url $dest | Out-Null
+}
+$featureFiles = @(
+    '__init__.py', 'analytics.py', 'ceo_briefing.py', 'competitor_watch.py',
+    'crm.py', 'customer_support.py', 'email_marketing.py', 'export_backup.py',
+    'health_check.py', 'invoicing.py', 'meeting_intelligence.py',
+    'personal_brand.py', 'social_media.py', 'team_management.py',
+    'website_builder.py', 'workflow_builder.py'
+)
+foreach ($ff in $featureFiles) {
+    $url  = "$BASE_URL/agents/problem-solver-ui/features/$ff"
+    $dest = Join-Path $uiFeaturesDir $ff
+    Invoke-Download $url $dest | Out-Null
+}
+
+# Download shared agent root files (utils.py, agent_selftest.py)
+foreach ($sharedFile in @('utils.py', 'agent_selftest.py')) {
+    $url  = "$BASE_URL/agents/$sharedFile"
+    $dest = Join-Path $AI_HOME "agents\$sharedFile"
+    Invoke-Download $url $dest | Out-Null
+}
+
+Write-OK "Extra UI and shared files downloaded."
 
 # Ensure every bot directory has at least a placeholder Python script
 foreach ($bot in $BOTS) {
