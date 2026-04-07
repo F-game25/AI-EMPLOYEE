@@ -1,0 +1,71 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+:root {
+  --gold: #F5C400;
+  --gold-bright: #FFCC00;
+  --gold-dim: #a38600;
+  --bg-base: #050505;
+  --bg-panel: #0a0a0a;
+  --bg-panel-2: #0f0f0f;
+  --border-gold: rgba(245, 196, 0, 0.3);
+  --text-primary: #e8e8e8;
+  --text-muted: #666;
+  --success: #00ff88;
+  --error: #ff3366;
+  --warning: #ffaa00;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--gold-dim);
+  border-radius: 2px;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.glow-gold {
+  box-shadow: 0 0 10px rgba(245, 196, 0, 0.3), 0 0 30px rgba(245, 196, 0, 0.1);
+}
+
+.glow-gold-text {
+  text-shadow: 0 0 10px rgba(245, 196, 0, 0.5);
+}
+
+.scanlines::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.08) 2px,
+    rgba(0, 0, 0, 0.08) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
