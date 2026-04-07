@@ -10580,7 +10580,8 @@ async function checkForUpdates() {
   const r = await api('/api/updater/check', {method:'POST'});
   if (r.ok) {
     toast(r.message || 'Check triggered');
-    setTimeout(loadUpdaterStatus, 3000);
+    // Poll at 2 s, 5 s, 15 s, 30 s — the updater wakes within ~1 s via SIGUSR1
+    [2000, 5000, 15000, 30000].forEach(d => setTimeout(loadUpdaterStatus, d));
   } else {
     toast(r.detail || 'Check failed', 'error');
   }
@@ -10592,7 +10593,8 @@ async function triggerUpdate() {
   const r = await api('/api/updater/update', {method:'POST'});
   if (r.ok) {
     toast(r.message || 'Update triggered — affected agents restarting…', 'info');
-    setTimeout(loadUpdaterStatus, 8000);
+    // Poll at 3 s, 8 s, 20 s, 45 s — give agents time to restart
+    [3000, 8000, 20000, 45000].forEach(d => setTimeout(loadUpdaterStatus, d));
   } else {
     toast(r.detail || 'Update failed', 'error');
   }
@@ -18431,6 +18433,16 @@ def updater_check():
     try:
         _UPDATER_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
         _UPDATER_TRIGGER_FILE.write_text("check")
+        # Wake the updater from its sleep so the check happens within seconds
+        try:
+            if _UPDATER_STATE_FILE.exists():
+                state = json.loads(_UPDATER_STATE_FILE.read_text())
+                pid = state.get("pid")
+                if pid:
+                    import signal as _sig
+                    os.kill(int(pid), _sig.SIGUSR1)
+        except Exception:
+            pass
         return JSONResponse({"ok": True, "message": "Check triggered — results appear in Auto Update card within seconds"})
     except Exception as exc:
         logger.error("API error: %s", exc, exc_info=True)
