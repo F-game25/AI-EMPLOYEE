@@ -11734,9 +11734,6 @@ function switchTab(tab, btn) {
   };
   if (loaders[tab]) { try { loaders[tab](); } catch(e) {} }
 }
-</script>
-</body>
-</html>"""
 
 function rerunTaskFromHistory(description) {
   const taskInput = document.getElementById('task-input');
@@ -12724,23 +12721,6 @@ async function submitPendingAction() {
   } catch(e) { res.innerHTML=`<span style="color:#ef4444">Error: ${e.message}</span>`; }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Tab init hooks
-// ═══════════════════════════════════════════════════════════════════
-const _origSwitchTab = switchTab;
-window.switchTab = function(tab, btn) {
-  _origSwitchTab(tab, btn);
-  if (tab === 'crm') loadCRM();
-  else if (tab === 'email-marketing') loadEmailCampaigns();
-  else if (tab === 'meetings') loadMeetings();
-  else if (tab === 'social') loadSocialPosts();
-  else if (tab === 'briefing') { loadFullBriefing(); loadBriefingHistory(); }
-  else if (tab === 'financial') loadInvoices();
-  else if (tab === 'competitors') { loadCompetitors(); loadCompetitorAlerts(); }
-  else if (tab === 'content-calendar') loadContentCalendar();
-  else if (tab === 'guardrails') loadPendingActions();
-};
-
 // Load CEO briefing in dashboard on startup
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(loadCEOBriefing, 1500);
@@ -13474,35 +13454,125 @@ async function loadBackupsList() {
   </div>`).join('');
 }
 
-// ── Auto-load on tab switch (extend existing switchTab) ───────────
-const _origSwitchTab = switchTab;
-function switchTab(tab, btn) {
-  _origSwitchTab(tab, btn);
-  const loaders = {
-    'crm': loadCRM,
-    'email-mkt': loadEmailCampaigns,
-    'meetings': loadMeetings,
-    'social': loadSocialPosts,
-    'briefing': () => api('/api/briefing/latest').then(d => {
-      if (d.content) { document.getElementById('briefing-content').textContent = d.content; document.getElementById('briefing-date').textContent = d.date||''; }
-    }),
-    'invoicing': loadInvoices,
-    'analytics-bi': () => { loadAnalyticsOverview(); loadRecommendations(); },
-    'workflows': () => { loadWorkflows(); loadWorkflowRuns(); },
-    'team': loadTeamMembers,
-    'support-desk': loadTickets,
-    'website-builder': loadPages,
-    'competitors': loadCompetitors,
-    'brand': () => api('/api/brand/profile').then(p => {
-      if (p.name) { document.getElementById('br-p-name').value=p.name||''; document.getElementById('br-p-title').value=p.title||''; document.getElementById('br-p-industry').value=p.industry||''; document.getElementById('br-p-audience').value=p.target_audience||''; }
-    }),
-    'health': () => api('/api/health-check/latest').then(d => {
-      if (d.grade) { document.getElementById('hc-report-card').style.display=''; document.getElementById('hc-latest-msg').style.display='none'; runHealthCheck && null; }
-    }),
-    'export': () => { loadExportModules(); loadBackupsList(); },
-  };
-  if (loaders[tab]) { try { loaders[tab](); } catch(e) {} }
-}
+/* ══════════════════════════════════════════════════
+   BOOT SEQUENCE
+══════════════════════════════════════════════════ */
+(function runBootSequence() {
+  const overlay = document.getElementById('boot-overlay');
+  const terminal = document.getElementById('boot-terminal');
+  const bar = document.getElementById('boot-bar');
+  const pct = document.getElementById('boot-pct');
+  if (!overlay) return;
+
+  const lines = [
+    '> INITIALIZING AI EMPLOYEE v4.0\u2026',
+    '> Loading neural subsystems\u2026',
+    '> Mounting agent registry\u2026',
+    '> Establishing secure channel\u2026',
+    '> Calibrating gold resonance matrix\u2026',
+    '> All systems nominal. Welcome.',
+  ];
+  let lineIdx = 0;
+  let progress = 0;
+
+  function addLine() {
+    if (lineIdx >= lines.length) return;
+    const span = document.createElement('span');
+    span.className = 'boot-terminal-line';
+    span.style.animationDelay = '0s';
+    span.textContent = lines[lineIdx++];
+    terminal.appendChild(span);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  const lineTimer = setInterval(() => {
+    addLine();
+    if (lineIdx >= lines.length) clearInterval(lineTimer);
+  }, 280);
+
+  const barTimer = setInterval(() => {
+    progress += Math.random() * 12 + 4;
+    if (progress >= 100) { progress = 100; clearInterval(barTimer); }
+    bar.style.width = progress + '%';
+    pct.textContent = Math.round(progress) + '%';
+    if (progress >= 100) {
+      setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => { overlay.style.display = 'none'; }, 850);
+      }, 300);
+    }
+  }, 120);
+})();
+
+/* ══════════════════════════════════════════════════
+   PARTICLE SYSTEM
+══════════════════════════════════════════════════ */
+(function initParticles() {
+  const canvas = document.getElementById('particles-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let W, H;
+  const particles = [];
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize, {passive:true});
+
+  const GOLD = 'rgba(212,175,55,';
+  for (let i = 0; i < 55; i++) {
+    particles.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 1.5 + 0.3,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      a: Math.random() * 0.5 + 0.1,
+      da: (Math.random() - 0.5) * 0.003,
+    });
+  }
+
+  function frame() {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of particles) {
+      p.x += p.vx; p.y += p.vy;
+      p.a += p.da;
+      if (p.a < 0.05) p.da = Math.abs(p.da);
+      if (p.a > 0.6) p.da = -Math.abs(p.da);
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
+      ctx.fill();
+    }
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 90) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+
+/* init nav active state */
+document.addEventListener('DOMContentLoaded', () => {
+  const overviewBtn = document.querySelector('.nav-group-btn[data-group="overview"]');
+  if (overviewBtn) overviewBtn.classList.add('active');
+});
 </script>
 </body>
 </html>"""
@@ -14446,136 +14516,6 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
                 return f"{len(pending)} pending proposals:\n" + "\n".join(lines) + "\nGo to UI > Improvements to approve."
         return "No pending improvements."
 
-// Auto-refresh new tabs every 30s when active
-setInterval(() => {
-  if (currentTab === 'budget') loadBudget();
-  if (currentTab === 'boardroom') loadBoardroom();
-  if (currentTab === 'tickets') loadTickets();
-  if (currentTab === 'artifacts') loadSessions();
-}, 30000);
-
-/* ══════════════════════════════════════════════════
-   BOOT SEQUENCE
-══════════════════════════════════════════════════ */
-(function runBootSequence() {
-  const overlay = document.getElementById('boot-overlay');
-  const terminal = document.getElementById('boot-terminal');
-  const bar = document.getElementById('boot-bar');
-  const pct = document.getElementById('boot-pct');
-  if (!overlay) return;
-
-  const lines = [
-    '> INITIALIZING AI EMPLOYEE v4.0\u2026',
-    '> Loading neural subsystems\u2026',
-    '> Mounting agent registry\u2026',
-    '> Establishing secure channel\u2026',
-    '> Calibrating gold resonance matrix\u2026',
-    '> All systems nominal. Welcome.',
-  ];
-  let lineIdx = 0;
-  let progress = 0;
-
-  function addLine() {
-    if (lineIdx >= lines.length) return;
-    const span = document.createElement('span');
-    span.className = 'boot-terminal-line';
-    span.style.animationDelay = '0s';
-    span.textContent = lines[lineIdx++];
-    terminal.appendChild(span);
-    terminal.scrollTop = terminal.scrollHeight;
-  }
-
-  const lineTimer = setInterval(() => {
-    addLine();
-    if (lineIdx >= lines.length) clearInterval(lineTimer);
-  }, 280);
-
-  const barTimer = setInterval(() => {
-    progress += Math.random() * 12 + 4;
-    if (progress >= 100) { progress = 100; clearInterval(barTimer); }
-    bar.style.width = progress + '%';
-    pct.textContent = Math.round(progress) + '%';
-    if (progress >= 100) {
-      setTimeout(() => {
-        overlay.classList.add('fade-out');
-        setTimeout(() => { overlay.style.display = 'none'; }, 850);
-      }, 300);
-    }
-  }, 120);
-})();
-
-/* ══════════════════════════════════════════════════
-   PARTICLE SYSTEM
-══════════════════════════════════════════════════ */
-(function initParticles() {
-  const canvas = document.getElementById('particles-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  let W, H;
-  const particles = [];
-
-  function resize() {
-    W = canvas.width = window.innerWidth;
-    H = canvas.height = window.innerHeight;
-  }
-  resize();
-  window.addEventListener('resize', resize, {passive:true});
-
-  const GOLD = 'rgba(212,175,55,';
-  for (let i = 0; i < 55; i++) {
-    particles.push({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      r: Math.random() * 1.5 + 0.3,
-      vx: (Math.random() - 0.5) * 0.3,
-      vy: (Math.random() - 0.5) * 0.3,
-      a: Math.random() * 0.5 + 0.1,
-      da: (Math.random() - 0.5) * 0.003,
-    });
-  }
-
-  function frame() {
-    ctx.clearRect(0, 0, W, H);
-    for (const p of particles) {
-      p.x += p.vx; p.y += p.vy;
-      p.a += p.da;
-      if (p.a < 0.05) p.da = Math.abs(p.da);
-      if (p.a > 0.6) p.da = -Math.abs(p.da);
-      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
-      ctx.fill();
-    }
-    for (let i = 0; i < particles.length; i++) {
-      for (let j = i + 1; j < particles.length; j++) {
-        const dx = particles[i].x - particles[j].x;
-        const dy = particles[i].y - particles[j].y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 90) {
-          ctx.beginPath();
-          ctx.moveTo(particles[i].x, particles[i].y);
-          ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
-        }
-      }
-    }
-    requestAnimationFrame(frame);
-  }
-  frame();
-})();
-
-/* init nav active state */
-document.addEventListener('DOMContentLoaded', () => {
-  const overviewBtn = document.querySelector('.nav-group-btn[data-group="overview"]');
-  if (overviewBtn) overviewBtn.classList.add('active');
-});
-</script>
-</body>
-</html>"""
     # ── Skills commands (pass-through; skills-manager processes these) ──
     if (msg_lower.startswith("skills") or msg_lower.startswith("agents")
             or msg_lower.startswith("agent ") or msg_lower.startswith("create agent")
