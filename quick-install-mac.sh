@@ -38,7 +38,7 @@ echo "  ║  curl | bash one-liner for Mac                       ║"
 echo "  ╚══════════════════════════════════════════════════════╝"
 echo ""
 
-# ── Download installer + runtime ───────────────────────────────────────────────
+# ── Download installer ─────────────────────────────────────────────────────────
 log "Downloading AI Employee macOS installer..."
 
 TEMP_DIR=$(mktemp -d)
@@ -46,47 +46,11 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 
 cd "$TEMP_DIR"
 
-# Download macOS install script
+# Download macOS install script — the installer downloads all runtime files itself
 curl -fsSL "$BASE_URL/install-mac.sh" -o install-mac.sh || err "Failed to download install-mac.sh"
 chmod +x install-mac.sh
 
-# Download runtime directory structure
-log "Downloading runtime files..."
-mkdir -p runtime/{bin,config,improvements}
-mkdir -p runtime/bagents/{problem-solver,problem-solver-ui,polymarket-trader,status-reporter,scheduler-runner,discovery}
-
-dl() {
-    local rel="$1"
-    curl -fsSL "$BASE_URL/runtime/$rel" -o "runtime/$rel" 2>/dev/null || warn "Could not download runtime/$rel"
-}
-
-dl "bin/ai-employee"
-dl "bagents/problem-solver/run.sh"
-dl "bagents/problem-solver/problem_solver.py"
-dl "bagents/problem-solver-ui/run.sh"
-dl "bagents/problem-solver-ui/server.py"
-dl "bagents/problem-solver-ui/requirements.txt"
-dl "bagents/polymarket-trader/run.sh"
-dl "bagents/polymarket-trader/trader.py"
-dl "bagents/status-reporter/run.sh"
-dl "bagents/status-reporter/status_reporter.py"
-dl "bagents/scheduler-runner/run.sh"
-dl "bagents/scheduler-runner/scheduler.py"
-dl "bagents/discovery/run.sh"
-dl "bagents/discovery/discovery.py"
-dl "config/openclaw.template.json"
-dl "config/problem-solver.env"
-dl "config/problem-solver-ui.env"
-dl "config/status-reporter.env"
-dl "config/scheduler-runner.env"
-dl "config/discovery.env"
-dl "config/polymarket-trader.env"
-dl "config/polymarket_estimates.json"
-dl "config/schedules.json"
-dl "start.sh"
-dl "stop.sh"
-
-ok "Files downloaded"
+ok "Installer downloaded"
 
 # ── Run installer ──────────────────────────────────────────────────────────────
 log "Running macOS installer..."
