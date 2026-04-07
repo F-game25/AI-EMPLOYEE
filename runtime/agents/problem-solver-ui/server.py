@@ -17255,32 +17255,8 @@ def _crm():
     return lead_crm
 
 
-@app.get("/api/crm/leads")
-async def crm_list_leads(stage: Optional[str] = None, search: Optional[str] = None):
-    try:
-        return JSONResponse(await run_in_threadpool(_crm().list_leads, stage, search))
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
-@app.post("/api/crm/leads")
-async def crm_add_lead(payload: dict):
-    try:
-        lead = await run_in_threadpool(
-            lambda: _crm().add_lead(
-                name=payload.get("name", ""),
-                company=payload.get("company", ""),
-                email=payload.get("email", ""),
-                phone=payload.get("phone", ""),
-                source=payload.get("source", ""),
-                notes=payload.get("notes", ""),
-                value=float(payload.get("value", 0)),
-                tags=payload.get("tags", []),
-            )
-        )
-        return JSONResponse(lead)
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 @app.get("/api/crm/leads/{lead_id}")
@@ -17291,18 +17267,8 @@ async def crm_get_lead(lead_id: str):
     return JSONResponse(lead)
 
 
-@app.patch("/api/crm/leads/{lead_id}")
-async def crm_update_lead(lead_id: str, payload: dict):
-    updated = await run_in_threadpool(_crm().update_lead, lead_id, payload)
-    if not updated:
-        raise HTTPException(404, "Lead not found")
-    return JSONResponse(updated)
 
 
-@app.delete("/api/crm/leads/{lead_id}")
-async def crm_delete_lead(lead_id: str):
-    deleted = await run_in_threadpool(_crm().delete_lead, lead_id)
-    return JSONResponse({"deleted": deleted})
 
 
 @app.post("/api/crm/leads/{lead_id}/stage")
@@ -17327,12 +17293,6 @@ async def crm_schedule_followup(lead_id: str, payload: dict):
     return JSONResponse(updated)
 
 
-@app.get("/api/crm/pipeline")
-async def crm_pipeline():
-    try:
-        return JSONResponse(await run_in_threadpool(_crm().get_pipeline))
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 @app.post("/api/crm/score/{lead_id}")
@@ -17462,30 +17422,8 @@ def _meetings():
     return meeting_intelligence
 
 
-@app.get("/api/meetings")
-async def meetings_list(search: Optional[str] = None):
-    try:
-        return JSONResponse(await run_in_threadpool(_meetings().list_meetings, search))
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
-@app.post("/api/meetings")
-async def meetings_add(payload: dict):
-    try:
-        meeting = await run_in_threadpool(
-            lambda: _meetings().add_meeting(
-                title=payload.get("title", ""),
-                date=payload.get("date", ""),
-                participants=payload.get("participants", []),
-                transcript=payload.get("transcript", ""),
-                notes=payload.get("notes", ""),
-                meeting_type=payload.get("meeting_type", "general"),
-            )
-        )
-        return JSONResponse(meeting)
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 @app.get("/api/meetings/{meeting_id}")
@@ -17496,18 +17434,8 @@ async def meetings_get(meeting_id: str):
     return JSONResponse(m)
 
 
-@app.patch("/api/meetings/{meeting_id}")
-async def meetings_update(meeting_id: str, payload: dict):
-    updated = await run_in_threadpool(_meetings().update_meeting, meeting_id, payload)
-    if not updated:
-        raise HTTPException(404, "Meeting not found")
-    return JSONResponse(updated)
 
 
-@app.delete("/api/meetings/{meeting_id}")
-async def meetings_delete(meeting_id: str):
-    deleted = await run_in_threadpool(_meetings().delete_meeting, meeting_id)
-    return JSONResponse({"deleted": deleted})
 
 
 @app.post("/api/meetings/{meeting_id}/summarize")
@@ -17544,34 +17472,8 @@ def _social_sched():
     return social_scheduler
 
 
-@app.get("/api/social/posts")
-async def social_list_posts(
-    platform: Optional[str] = None,
-    status: Optional[str] = None,
-):
-    try:
-        return JSONResponse(await run_in_threadpool(_social_sched().list_posts, platform, status))
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
-@app.post("/api/social/posts")
-async def social_schedule_post(payload: dict):
-    try:
-        post = await run_in_threadpool(
-            lambda: _social_sched().schedule_post(
-                platform=payload.get("platform", "twitter"),
-                content=payload.get("content", ""),
-                scheduled_at=payload.get("scheduled_at", ""),
-                media_urls=payload.get("media_urls", []),
-                hashtags=payload.get("hashtags", []),
-                campaign=payload.get("campaign", ""),
-                status=payload.get("status", "scheduled"),
-            )
-        )
-        return JSONResponse(post)
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 @app.get("/api/social/posts/{post_id}")
@@ -17582,42 +17484,12 @@ async def social_get_post(post_id: str):
     return JSONResponse(post)
 
 
-@app.patch("/api/social/posts/{post_id}")
-async def social_update_post(post_id: str, payload: dict):
-    updated = await run_in_threadpool(_social_sched().update_post, post_id, payload)
-    if not updated:
-        raise HTTPException(404, "Post not found")
-    return JSONResponse(updated)
 
 
-@app.delete("/api/social/posts/{post_id}")
-async def social_delete_post(post_id: str):
-    deleted = await run_in_threadpool(_social_sched().delete_post, post_id)
-    return JSONResponse({"deleted": deleted})
 
 
-@app.post("/api/social/posts/{post_id}/publish")
-async def social_publish_post(post_id: str):
-    updated = await run_in_threadpool(_social_sched().publish_post, post_id)
-    if not updated:
-        raise HTTPException(404, "Post not found")
-    return JSONResponse(updated)
 
 
-@app.post("/api/social/generate")
-async def social_generate_content(payload: dict):
-    try:
-        result = await run_in_threadpool(
-            lambda: _social_sched().generate_post_content(
-                platform=payload.get("platform", "twitter"),
-                topic=payload.get("topic", ""),
-                tone=payload.get("tone", "engaging"),
-                include_hashtags=payload.get("include_hashtags", True),
-            )
-        )
-        return JSONResponse(result)
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 @app.post("/api/social/process-due")
@@ -17629,12 +17501,6 @@ async def social_process_due():
         raise HTTPException(500, str(e))
 
 
-@app.get("/api/social/stats")
-async def social_stats():
-    try:
-        return JSONResponse(await run_in_threadpool(_social_sched().get_schedule_stats))
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -17657,20 +17523,8 @@ async def briefing_today():
         raise HTTPException(500, str(e))
 
 
-@app.post("/api/briefing/generate")
-async def briefing_generate():
-    try:
-        return JSONResponse(await run_in_threadpool(_ceo_briefing().force_regenerate))
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
-@app.get("/api/briefing/history")
-async def briefing_history():
-    try:
-        return JSONResponse(await run_in_threadpool(_ceo_briefing().list_briefings))
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -17851,38 +17705,10 @@ def _comp_watch():
     return competitor_watch
 
 
-@app.get("/api/competitors")
-async def comp_list(search: Optional[str] = None):
-    try:
-        return JSONResponse(await run_in_threadpool(_comp_watch().list_competitors, search))
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
-@app.post("/api/competitors")
-async def comp_add(payload: dict):
-    try:
-        comp = await run_in_threadpool(
-            lambda: _comp_watch().add_competitor(
-                name=payload.get("name", ""),
-                website=payload.get("website", ""),
-                notes=payload.get("notes", ""),
-                tags=payload.get("tags", []),
-                pricing=payload.get("pricing", ""),
-                target_market=payload.get("target_market", ""),
-            )
-        )
-        return JSONResponse(comp)
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
-@app.get("/api/competitors/alerts")
-async def comp_alerts(dismissed: bool = False):
-    try:
-        return JSONResponse(await run_in_threadpool(_comp_watch().get_alerts, None, dismissed))
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 @app.get("/api/competitors/{competitor_id}")
@@ -17893,34 +17719,10 @@ async def comp_get(competitor_id: str):
     return JSONResponse(comp)
 
 
-@app.patch("/api/competitors/{competitor_id}")
-async def comp_update(competitor_id: str, payload: dict):
-    updated = await run_in_threadpool(_comp_watch().update_competitor, competitor_id, payload)
-    if not updated:
-        raise HTTPException(404, "Competitor not found")
-    return JSONResponse(updated)
 
 
-@app.delete("/api/competitors/{competitor_id}")
-async def comp_delete(competitor_id: str):
-    deleted = await run_in_threadpool(_comp_watch().delete_competitor, competitor_id)
-    return JSONResponse({"deleted": deleted})
 
 
-@app.post("/api/competitors/{competitor_id}/analyze")
-async def comp_analyze(competitor_id: str, payload: dict = {}):
-    try:
-        updated = await run_in_threadpool(
-            lambda: _comp_watch().analyze_competitor(
-                competitor_id,
-                payload.get("your_product", ""),
-            )
-        )
-    except Exception as e:
-        raise HTTPException(500, str(e))
-    if not updated:
-        raise HTTPException(404, "Competitor not found")
-    return JSONResponse(updated)
 
 
 @app.post("/api/competitors/alerts/{alert_id}/dismiss")
