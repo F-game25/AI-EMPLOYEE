@@ -193,8 +193,8 @@ def generate_calendar(
             f"Platforms: {', '.join(target_platforms)}\n"
             f"Content tone: {tone}\n"
             f"Start date: {start_date.isoformat()}\n\n"
-            f"Generate {min(days, 20)} varied content entries mixing posts, reels, articles, and stories.\n"
-            f"Spread across different platforms and content types.\n\n"
+            f"Generate exactly {min(days, 30)} varied content entries mixing posts, reels, articles, and stories.\n"
+            f"Spread across different platforms and content types. Use dates starting from {start_date.isoformat()}.\n\n"
             f"Respond ONLY with valid JSON array:\n"
             f'[{{"date": "YYYY-MM-DD", "platform": "instagram", '
             f'"content_type": "post", "title": "...", "content": "...", "tags": ["tag1"]}}]'
