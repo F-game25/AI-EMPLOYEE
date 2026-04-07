@@ -110,11 +110,22 @@ def _download_raw(repo_path: str, dest: Path, retries: int = 3) -> bool:
         except Exception as e:
             if attempt < retries:
                 wait = 2 ** attempt
-                logger.warning("Download failed %s (attempt %d/%d): %s — retrying in %ds",
-                               url, attempt, retries, e, wait)
+                logger.warning(
+                    "Download failed for repo path '%s' (attempt %d/%d): %s — retrying in %ds",
+                    repo_path,
+                    attempt,
+                    retries,
+                    e,
+                    wait,
+                )
                 time.sleep(wait)
             else:
-                logger.warning("Download failed %s after %d attempts: %s", url, retries, e)
+                logger.warning(
+                    "Download failed for repo path '%s' after %d attempts: %s",
+                    repo_path,
+                    retries,
+                    e,
+                )
     return False
 
 # ── State helpers ─────────────────────────────────────────────────────────────
