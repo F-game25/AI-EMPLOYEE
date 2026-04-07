@@ -11411,7 +11411,10 @@ def _recalc_summary(events: list) -> dict:
     # Derived KPIs shown in the ROI summary section
     tasks = s["tasks_completed"]
     if tasks > 0:
-        s["efficiency_rate"] = round(min(100.0, (s["human_hours_saved"] / tasks) * 100 / 3), 1)
+        # Efficiency: AI hours saved per task vs. a 1-hour baseline, capped at 100 %.
+        # e.g. if the AI saved 0.8 h per task on average → 80 % efficiency.
+        s["efficiency_rate"] = round(min(100.0, s["hours_saved"] / tasks * 100), 1)
+        # Average AI processing time per task, expressed in minutes.
         s["avg_task_duration"] = f"{round(s['hours_saved'] / tasks * 60, 0):.0f}m"
     else:
         s["efficiency_rate"] = None
