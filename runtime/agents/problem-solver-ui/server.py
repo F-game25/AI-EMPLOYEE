@@ -58,35 +58,84 @@ _SEC_DIR = Path(__file__).parent
 if str(_SEC_DIR) not in sys.path:
     sys.path.insert(0, str(_SEC_DIR))
 
-# ── JWT secret startup validation ─────────────────────────────────────────────
+# ── JWT secret startup validation / auto-generation ───────────────────────────
 _KNOWN_WEAK_SECRETS = frozenset({
     "", "secret", "changeme", "change-me", "your-secret-here", "default",
     "password", "1234", "12345678", "test", "dev",
     "CHANGE_THIS_IN_SECURITY_LOCAL_YML_OR_SET_JWT_SECRET_KEY_ENV_VAR",
 })
 
-def _validate_jwt_secret_on_startup(secret: str) -> None:
-    """Refuse to start if JWT_SECRET_KEY is missing, too short, or a known default."""
-    # Normalise to lowercase for case-insensitive weak-value detection
-    if secret.lower() in _KNOWN_WEAK_SECRETS:
-        print(
-            "\n❌  STARTUP BLOCKED: JWT_SECRET_KEY is not set or uses a known default.\n"
-            "    Generate a strong secret and export it:\n\n"
-            "        export JWT_SECRET_KEY=$(python3 -c "
-            "\"import secrets; print(secrets.token_hex(32))\")\n\n"
-            "    Or add JWT_SECRET_KEY=<value> to ~/.ai-employee/.env\n"
-        )
-        sys.exit(1)
-    if len(secret) < 32:
-        print(
-            "\n❌  STARTUP BLOCKED: JWT_SECRET_KEY must be at least 32 characters.\n"
-            "    Generate a strong secret:\n\n"
-            "        python3 -c \"import secrets; print(secrets.token_hex(32))\"\n"
-        )
-        sys.exit(1)
 
-_jwt_secret_env = os.environ.get("JWT_SECRET_KEY", "")
-_validate_jwt_secret_on_startup(_jwt_secret_env)
+def _ensure_jwt_secret() -> str:
+    """Return a valid JWT_SECRET_KEY, auto-generating one if needed.
+
+    Priority:
+    1. JWT_SECRET_KEY environment variable (if already set and strong)
+    2. Value stored in ~/.ai-employee/.env (loaded on first use)
+    3. Auto-generate a new cryptographically secure secret, save it, and use it
+
+    The resolved secret is injected into ``os.environ`` so downstream code
+    (security module, etc.) picks it up.
+    """
+    secret = os.environ.get("JWT_SECRET_KEY", "")
+    if secret and secret.lower() not in _KNOWN_WEAK_SECRETS and len(secret) >= 32:
+        return secret  # already valid
+
+    # Try to load from ~/.ai-employee/.env before generating a new one
+    env_dir = Path.home() / ".ai-employee"
+    env_file = env_dir / ".env"
+    if env_file.exists():
+        try:
+            for raw_line in env_file.read_text().splitlines():
+                line = raw_line.strip()
+                if line.startswith("JWT_SECRET_KEY="):
+                    stored = line.split("=", 1)[1].strip()
+                    if (stored
+                            and stored.lower() not in _KNOWN_WEAK_SECRETS
+                            and len(stored) >= 32):
+                        os.environ["JWT_SECRET_KEY"] = stored
+                        return stored
+        except OSError:
+            pass
+
+    # Auto-generate a strong secret
+    new_secret = secrets.token_hex(32)
+
+    # Persist to ~/.ai-employee/.env
+    try:
+        env_dir.mkdir(parents=True, exist_ok=True)
+        existing = ""
+        if env_file.exists():
+            existing = env_file.read_text()
+        new_lines = []
+        replaced = False
+        for line in existing.splitlines():
+            if line.startswith("JWT_SECRET_KEY="):
+                new_lines.append(f"JWT_SECRET_KEY={new_secret}")
+                replaced = True
+            else:
+                new_lines.append(line)
+        if not replaced:
+            new_lines.append(f"JWT_SECRET_KEY={new_secret}")
+        env_file.write_text("\n".join(new_lines) + "\n")
+        print(
+            f"\n🔑  Auto-generated JWT_SECRET_KEY and saved to {env_file}\n"
+            "    This secret will be reused on subsequent starts.\n",
+            flush=True,
+        )
+    except OSError as _e:
+        print(
+            f"\n⚠️   Could not persist JWT_SECRET_KEY to {env_file}: {_e}\n"
+            "    The server will run with a temporary secret (restarts will invalidate tokens).\n",
+            flush=True,
+        )
+
+    # Inject into the running environment so downstream modules see it
+    os.environ["JWT_SECRET_KEY"] = new_secret
+    return new_secret
+
+
+_jwt_secret_env = _ensure_jwt_secret()
 
 # ── Bot name validation ────────────────────────────────────────────────────────
 _BOT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
@@ -108,10 +157,10 @@ try:
         _security_config = load_config()
     except ValueError as _jwt_err:
         # load_config() raises ValueError when JWT_SECRET_KEY is missing/default.
-        # _validate_jwt_secret_on_startup() above already handles the empty-env case;
-        # this catches the case where security.yml still has the placeholder value.
-        print(f"\n❌  STARTUP BLOCKED: {_jwt_err}\n")
-        sys.exit(1)
+        # _ensure_jwt_secret() above already auto-generated a key; log the warning
+        # and continue without the richer config object.
+        print(f"\n⚠️   Security config warning (continuing): {_jwt_err}\n")
+        _security_config = None
     except Exception:
         # Other config errors (YAML parse, etc.) — still start but without
         # the richer config object; JWT is already validated above.
@@ -19402,6 +19451,19 @@ if __name__ == "__main__":
     _trim_jsonl(CHATLOG, 1000)
     _trim_jsonl(ACTIVITY_LOG, 2000)
 
+    # ── Startup banner ────────────────────────────────────────────────────────
+    _url = f"http://{HOST}:{PORT}"
+    print(
+        "\n"
+        "╔══════════════════════════════════════════════════════╗\n"
+        "║        🤖  AI EMPLOYEE  —  Dashboard Server          ║\n"
+        "╠══════════════════════════════════════════════════════╣\n"
+        f"║  Dashboard → {_url:<40}║\n"
+        "║  Press Ctrl+C to stop                                ║\n"
+        "╚══════════════════════════════════════════════════════╝\n",
+        flush=True,
+    )
+
     try:
         import uvloop  # noqa: F401
         _loop = "uvloop"
@@ -19421,6 +19483,7 @@ if __name__ == "__main__":
         workers=1,
         loop=_loop,
         http=_http,
+        log_level="info",
         access_log=False,
         server_header=False,
     )
