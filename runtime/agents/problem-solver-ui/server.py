@@ -13794,11 +13794,21 @@ async function submitLogin() {
 }
 
 /* allow pressing Enter on password field */
+/* named constants */
+const MAX_HEARTBEAT_LINES = 80;
+const MAX_CHAT_MESSAGES = 60;
+const MAX_AGENTS_TOTAL = 56; /* matches AGENTS_BY_MODE power list */
+
 document.addEventListener('DOMContentLoaded', () => {
   const passEl = document.getElementById('login-pass');
   if (passEl) passEl.addEventListener('keydown', e => { if (e.key === 'Enter') submitLogin(); });
   const userEl = document.getElementById('login-user');
-  if (userEl) userEl.addEventListener('keydown', e => { if (e.key === 'Enter') { document.getElementById('login-pass').focus(); } });
+  if (userEl) userEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const p = document.getElementById('login-pass');
+      if (p) p.focus();
+    }
+  });
 });
 
 /* ══════════════════════════════════════════════════
@@ -13913,8 +13923,8 @@ function appendHeartbeatLine(agent, msg) {
   line.innerHTML = '<span class="hb-ts">' + hbTimestamp() + '</span>'
     + '<span class="' + (isOrch ? 'hb-orch' : 'hb-tag') + '">[' + agent + ']</span> ' + msg;
   log.appendChild(line);
-  /* keep last 80 lines */
-  while (log.children.length > 80) log.removeChild(log.firstChild);
+  /* keep last MAX_HEARTBEAT_LINES lines */
+  while (log.children.length > MAX_HEARTBEAT_LINES) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
 }
 
@@ -13966,7 +13976,7 @@ function appendCyberMsg(text, role) {
     div.textContent = text;
   }
   box.appendChild(div);
-  while (box.children.length > 60) box.removeChild(box.firstChild);
+  while (box.children.length > MAX_CHAT_MESSAGES) box.removeChild(box.firstChild);
   box.scrollTop = box.scrollHeight;
 }
 
@@ -14069,7 +14079,7 @@ function startStatsUpdater() {
     updateCpuRing(_fakeCpu);
     const maxAgents = 56;
     const agentNum = typeof agents === 'number' ? agents : (parseInt(agents) || 0);
-    updateStatBar('sb-agents', 'sv-agents', agentNum / maxAgents * 100, agents);
+    updateStatBar('sb-agents', 'sv-agents', agentNum / MAX_AGENTS_TOTAL * 100, agents);
     updateStatBar('sb-tasks', 'sv-tasks', 10, tasks);
     updateStatBar('sb-mem', 'sv-mem', _fakeMem, Math.round(_fakeMem) + '%');
 
