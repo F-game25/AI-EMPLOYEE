@@ -24,10 +24,11 @@ log "Stopping gateway..."
 if [[ -f "$AI_HOME/run/gateway.pid" ]]; then
   pid=$(cat "$AI_HOME/run/gateway.pid" 2>/dev/null || true)
   if [[ -n "$pid" ]]; then
+    kill -- -"$pid" 2>/dev/null || true
     kill "$pid" 2>/dev/null || true
     sleep 1
     # Only force-kill if still running
-    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+    kill -0 "$pid" 2>/dev/null && { kill -9 -- -"$pid" 2>/dev/null || true; kill -9 "$pid" 2>/dev/null || true; } || true
   fi
   rm -f "$AI_HOME/run/gateway.pid"
 fi
@@ -36,12 +37,25 @@ log "Stopping dashboard..."
 if [[ -f "$AI_HOME/run/dashboard.pid" ]]; then
   pid=$(cat "$AI_HOME/run/dashboard.pid" 2>/dev/null || true)
   if [[ -n "$pid" ]]; then
+    kill -- -"$pid" 2>/dev/null || true
     kill "$pid" 2>/dev/null || true
     sleep 1
     # Only force-kill if still running
-    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+    kill -0 "$pid" 2>/dev/null && { kill -9 -- -"$pid" 2>/dev/null || true; kill -9 "$pid" 2>/dev/null || true; } || true
   fi
   rm -f "$AI_HOME/run/dashboard.pid"
 fi
+
+# Final sweep: catch any orphaned processes still running under AI_HOME
+log "Sweeping for orphaned processes..."
+if command -v pkill >/dev/null 2>&1; then
+  pkill -f "$AI_HOME/agents/" 2>/dev/null || true
+  pkill -f "$AI_HOME/bin/ai-employee" 2>/dev/null || true
+  sleep 1
+  pkill -9 -f "$AI_HOME/agents/" 2>/dev/null || true
+fi
+
+# Remove any stale PID files so the next start is clean
+rm -f "$AI_HOME/run/"*.pid
 
 ok "AI Employee stopped."

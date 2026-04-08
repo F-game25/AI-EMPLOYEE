@@ -4,4 +4,4 @@ AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
 AGENT_HOME="$AI_HOME/agents/obsidian-memory"
 if [[ -f "$AI_HOME/.env" ]]; then set -a; source "$AI_HOME/.env"; set +a; fi
 if [[ -f "$AI_HOME/config/obsidian-memory.env" ]]; then set -a; source "$AI_HOME/config/obsidian-memory.env"; set +a; fi
-python3 "$AGENT_HOME/obsidian_memory.py"
+exec python3 "$AGENT_HOME/obsidian_memory.py"

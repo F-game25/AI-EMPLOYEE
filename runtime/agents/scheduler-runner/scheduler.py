@@ -8,7 +8,9 @@ State is written to ~/.ai-employee/state/scheduler-runner.state.json
 """
 import json
 import os
+import signal
 import subprocess
+import threading
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -249,10 +251,21 @@ def write_state(state: dict):
 
 def main():
     print(f"[{now_iso()}] scheduler-runner started; check_interval={CHECK_INTERVAL}s")
+
+    # ── Graceful shutdown on SIGTERM / SIGINT ────────────────────────────────
+    _stop_event = threading.Event()
+
+    def _handle_signal(signum, frame):  # noqa: ARG001
+        print(f"[{now_iso()}] scheduler-runner received signal {signum}, shutting down ...")
+        _stop_event.set()
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
     last_run_map: dict = {}
     tasks_run_total = 0
 
-    while True:
+    while not _stop_event.is_set():
         schedules = load_schedules()
         tasks_run_this_cycle = 0
 
@@ -280,7 +293,11 @@ def main():
             }
         )
 
-        time.sleep(CHECK_INTERVAL)
+        # Use event wait so SIGTERM wakes us immediately instead of after a full sleep
+        _stop_event.wait(CHECK_INTERVAL)
+
+    write_state({"bot": "scheduler-runner", "ts": now_iso(), "status": "stopped"})
+    print(f"[{now_iso()}] scheduler-runner stopped.")
 
 
 if __name__ == "__main__":
