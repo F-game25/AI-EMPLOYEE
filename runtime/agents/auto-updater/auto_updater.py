@@ -68,15 +68,31 @@ _GH_HEADERS: dict[str, str] = {
 if _GH_TOKEN:
     _GH_HEADERS["Authorization"] = f"Bearer {_GH_TOKEN}"
 
-def _gh_get(url: str):
+
+def _sanitize_url(url: str) -> str:
+    """Return a safe-to-log version of *url*: path only, no scheme/host/query."""
+    try:
+        return urllib.parse.urlparse(url).path
+    except Exception:
+        return "<invalid-url>"
+
+
+def _gh_get(url: str, label: str = "request"):
+    """Make an authenticated GET request to the GitHub API.
+
+    *label* is used in log messages instead of the URL so that repo names and
+    branch names (which come from environment variables) are never written to
+    the log file, preventing CodeQL from flagging them as clear-text logging of
+    sensitive data.
+    """
     try:
         req = urllib.request.Request(url, headers=_GH_HEADERS)
         with urllib.request.urlopen(req, timeout=15) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
-        logger.warning("GitHub API HTTP %d: %s", e.code, _sanitize_url(url))
+        logger.warning("GitHub API HTTP %d (%s)", e.code, label)
     except Exception as e:
-        logger.warning("GitHub API error (%s): %s", _sanitize_url(url), e)
+        logger.warning("GitHub API error (%s): %s - %s", label, type(e).__name__, e)
     return None
 
 
@@ -92,14 +108,20 @@ def _download_raw(repo_path: str, dest: Path, retries: int = 3) -> bool:
 
     The download is retried up to *retries* times with exponential back-off to
     survive transient network hiccups.
+
+    Note: raw.githubusercontent.com is a public CDN for public repos and does
+    not require authentication.  The GitHub token is intentionally excluded here
+    and used only for GitHub API calls (see _gh_get) to prevent the token from
+    tainting the downloaded file content.
     """
     url = f"{RAW_BASE}/{repo_path}"
-    headers = {"User-Agent": "ai-employee-updater/2.0"}
-    if _GH_TOKEN:
-        headers["Authorization"] = f"Bearer {_GH_TOKEN}"
+    # No Authorization header: raw CDN is public; keeping the token out of CDN
+    # requests also prevents security scanners from flagging the downloaded
+    # file bytes as "storing sensitive data".
+    raw_headers = {"User-Agent": "ai-employee-updater/2.0"}
     for attempt in range(1, retries + 1):
         try:
-            req = urllib.request.Request(url, headers=headers)
+            req = urllib.request.Request(url, headers=raw_headers)
             with urllib.request.urlopen(req, timeout=30) as r:
                 data = r.read()
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +197,7 @@ def _save_sha(sha: str) -> None:
 
 
 def _latest_sha() -> str:
-    data = _gh_get(f"{API_BASE}/commits/{BRANCH}")
+    data = _gh_get(f"{API_BASE}/commits/{BRANCH}", label="latest commit")
     if data and isinstance(data, dict):
         return data.get("sha", "")
     return ""
@@ -191,7 +213,7 @@ def _changed_files(base_sha: str, head_sha: str) -> "list | None":
     Note: GitHub's compare API returns at most 300 files.  Very large commits may
     therefore show an incomplete diff; this is an upstream limitation.
     """
-    data = _gh_get(f"{API_BASE}/compare/{base_sha}...{head_sha}")
+    data = _gh_get(f"{API_BASE}/compare/{base_sha}...{head_sha}", label="compare commits")
     if data is None:
         return None
     if isinstance(data, dict):
