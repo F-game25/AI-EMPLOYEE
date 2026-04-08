@@ -2855,7 +2855,6 @@ INDEX_HTML = r"""<!doctype html>
     .think-dot:nth-child(2){animation-delay:.2s}
     .think-dot:nth-child(3){animation-delay:.4s}
     @keyframes thinkPulse{0%,100%{opacity:.3;transform:scale(1)}50%{opacity:1;transform:scale(1.3)}}
-    @keyframes ideaPulse{0%,100%{opacity:.6}50%{opacity:1}}
 
     /* ── INPUT BAR ── */
     .input-bar{
@@ -2904,17 +2903,6 @@ INDEX_HTML = r"""<!doctype html>
       transition:left .4s;
     }
     .send-btn:hover::before{left:100%}
-    .idea-btn{
-      padding:10px 14px;
-      background:rgba(245,196,0,0.07);
-      border:1px solid rgba(245,196,0,0.3);
-      color:var(--gold);
-      font-size:1em;cursor:pointer;
-      transition:background .15s,box-shadow .15s;
-      flex-shrink:0;align-self:stretch;
-    }
-    .idea-btn:hover{background:rgba(245,196,0,0.18);box-shadow:0 0 12px rgba(245,196,0,0.2)}
-    .idea-btn.converting{opacity:.6;cursor:not-allowed;animation:ideaPulse 1s infinite}
     .input-hint{
       font-family:var(--mono);font-size:.65em;color:var(--text-muted);
       margin-top:7px;display:flex;justify-content:space-between;align-items:center;
@@ -3555,13 +3543,12 @@ INDEX_HTML = r"""<!doctype html>
         <div class="input-wrap">
           <div class="input-prefix">&gt;_</div>
           <textarea id="chat-input" class="input-field" rows="2"
-            placeholder="Enter command for AI workforce… or type an idea and click 💡"
+            placeholder="Enter command or idea for AI workforce…"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
-          <button class="idea-btn" id="chat-idea-btn" onclick="convertChatIdea()" title="Convert rough idea → professional task prompt">💡</button>
           <button class="send-btn" onclick="sendChat()">SEND</button>
         </div>
         <div class="input-hint">
-          <span>ENTER to transmit · SHIFT+ENTER new line · 💡 to expand an idea</span>
+          <span>ENTER to transmit · SHIFT+ENTER new line</span>
           <span id="chat-agent-indicator">Auto-routing active</span>
         </div>
       </div>
@@ -7820,9 +7807,81 @@ function updateChatModelBadge() {
 
 async function sendChat() {
   const input = document.getElementById('chat-input');
-  const q = input?.value?.trim();
+  let q = input?.value?.trim();
   if (!q) return;
   const route = document.getElementById('chat-model')?.value || 'auto';
+
+  // Auto-detect rough ideas and expand them silently before sending
+  if (_looksLikeIdea(q)) {
+    input.value = '';
+    const log = document.getElementById('chat-log');
+    const empty = document.getElementById('chat-empty');
+    if (empty) empty.style.display = 'none';
+    // Show the original idea as the user bubble
+    if (log) {
+      const userWrap = document.createElement('div');
+      userWrap.className = 'msg-wrap user';
+      userWrap.innerHTML = `<div class="msg-meta">
+          <div class="msg-avatar">\u203a</div>
+          <span class="msg-source">YOU</span>
+          <span class="msg-ts">${new Date().toTimeString().slice(0,8)}</span>
+        </div>
+        <div class="msg-bubble">${renderMarkdown(q)}</div>`;
+      log.appendChild(userWrap);
+      log.scrollTop = log.scrollHeight;
+    }
+    // Show "💡 Expanding idea…" indicator
+    const ideaId = 'idea-expand-' + Date.now();
+    if (log) {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg-wrap agent';
+      wrap.id = ideaId;
+      wrap.innerHTML = `<div class="msg-meta"><div class="msg-avatar">💡</div><span class="msg-source">AI-SYSTEM</span></div>
+        <div class="msg-thinking">
+          <span style="font-family:var(--mono);font-size:.72em;color:rgba(245,196,0,0.4)">EXPANDING IDEA</span>
+          <div class="think-dots"><div class="think-dot"></div><div class="think-dot"></div><div class="think-dot"></div></div>
+        </div>`;
+      log.appendChild(wrap);
+      log.scrollTop = log.scrollHeight;
+    }
+    if (typeof sysLog === 'function') sysLog('// IDEA: auto-expanding…');
+    try {
+      const r = await api('/api/idea/convert', {
+        method: 'POST',
+        body: JSON.stringify({ idea: q })
+      });
+      if (r && r.ok) {
+        q = r.prompt;
+        if (typeof sysLog === 'function') sysLog(`// IDEA: expanded via ${r.provider||'AI'}`, 'ok');
+      }
+    } catch(_) { /* fall through with original q */ }
+    document.getElementById(ideaId)?.remove();
+    // Now dispatch the (possibly expanded) prompt
+    const thinkId2 = 'thinking-' + Date.now();
+    if (log) {
+      const wrap2 = document.createElement('div');
+      wrap2.className = 'msg-wrap agent';
+      wrap2.id = thinkId2;
+      wrap2.innerHTML = `<div class="msg-meta"><div class="msg-avatar">\u25c8</div><span class="msg-source">AI-SYSTEM</span></div>
+        <div class="msg-thinking">
+          <span style="font-family:var(--mono);font-size:.72em;color:rgba(245,196,0,0.4)">PROCESSING</span>
+          <div class="think-dots"><div class="think-dot"></div><div class="think-dot"></div><div class="think-dot"></div></div>
+        </div>`;
+      log.appendChild(wrap2);
+      log.scrollTop = log.scrollHeight;
+    }
+    try {
+      await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:q,model_route:route})});
+      document.getElementById(thinkId2)?.remove();
+      if (typeof sysLog === 'function') sysLog('// RESPONSE RECEIVED','ok');
+      await loadChatLog();
+    } catch(e) {
+      document.getElementById(thinkId2)?.remove();
+      if (typeof sysLog === 'function') sysLog('// TRANSMIT ERROR','err');
+    }
+    return;
+  }
+
   input.value = '';
   const log = document.getElementById('chat-log');
   const empty = document.getElementById('chat-empty');
@@ -8645,36 +8704,33 @@ let _autoSelectedIds = new Set(); // IDs suggested by auto-select
 let _selectedAgentIds = new Set(); // currently selected (user may adjust)
 let _taskMode = 'auto';       // 'auto' | 'parallel' | 'single'
 
-// ── Idea-to-Prompt: convert raw idea in chat input ────────────────────────────
-async function convertChatIdea() {
-  const input = document.getElementById('chat-input');
-  const idea = input?.value?.trim();
-  if (!idea) { if (typeof sysLog==='function') sysLog('// IDEA: no input'); return; }
-  const btn = document.getElementById('chat-idea-btn');
-  btn.classList.add('converting');
-  btn.textContent = '⏳';
-  if (typeof sysLog==='function') sysLog('// IDEA: converting…');
-  try {
-    const r = await api('/api/idea/convert', {
-      method: 'POST',
-      body: JSON.stringify({ idea })
-    });
-    if (r && r.ok) {
-      input.value = r.prompt;
-      if (typeof sysLog==='function') sysLog(`// IDEA: converted via ${r.provider||'AI'}`, 'ok');
-    } else {
-      if (typeof sysLog==='function') sysLog(`// IDEA: ${r?.detail||r?.error||'conversion failed'}`, 'err');
-    }
-  } catch(e) {
-    if (typeof sysLog==='function') sysLog('// IDEA: network error', 'err');
+// ── Idea auto-detect: heuristic to identify raw ideas vs. commands ─────────────
+function _looksLikeIdea(text) {
+  const t = text.trim().toLowerCase();
+  // Short phrases that sound like intentions or wishes
+  const ideaStarters = [
+    /^i (want|need|wish|would like|plan|hope|am trying|am looking) to\b/,
+    /^i (have an? idea|have a concept|have a vision|have a plan|had an idea)\b/,
+    /^help me (build|create|make|start|launch|develop|grow|design)\b/,
+    /^(build|create|make|start|launch|develop|design|grow) (a|an|my)\b/,
+    /^(how (do i|can i|should i)|what('s| is) the best way to)\b/,
+    /^i want\b/,
+    /^(let'?s|we should) (build|create|make|start|launch)\b/,
+  ];
+  if (ideaStarters.some(r => r.test(t))) return true;
+  // No period, colon, numbered list, or URL — looks vague/conversational
+  const wordCount = t.split(/\s+/).length;
+  if (wordCount <= 20 && !/[.:\n]/.test(t) && !/https?:\/\//.test(t) && !/^\d+\./.test(t)) {
+    // Extra signal: at least one of these intent words
+    if (/\b(build|create|sell|launch|start|grow|develop|design|market|automate|improve)\b/.test(t)) return true;
   }
-  btn.classList.remove('converting');
-  btn.textContent = '💡';
+  return false;
 }
 
-// ── Idea Mode ─────────────────────────────────────────────────────────────────
-function toggleIdeaMode() {}    // kept for backward compat — no-op
-function convertIdea() {}       // kept for backward compat — no-op
+// ── Idea Mode (legacy stubs — no-op) ─────────────────────────────────────────
+function toggleIdeaMode() {}
+function convertIdea() {}
+function convertChatIdea() {}
 
 function onTaskInputChange() {
   const v = document.getElementById('task-input').value.trim();
