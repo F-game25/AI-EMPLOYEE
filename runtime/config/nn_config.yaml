@@ -1,0 +1,26 @@
+# Neural Network Agent — Configuration
+# Loaded at startup by NeuralNetworkAgent.__init__()
+
+model:
+  model_path: "runtime/models/ai_employee_nn.pth"
+  input_size: 64          # number of input features
+  hidden_sizes: [128, 64] # hidden layer sizes
+  output_size: 8          # number of action classes
+  dropout: 0.2            # dropout rate for regularisation
+
+training:
+  learning_rate: 0.0003
+  batch_size: 32
+  replay_buffer_size: 10000
+  update_frequency: 10    # run learn() after every N stored experiences
+  gamma: 0.99             # discount factor for future rewards
+  min_buffer_size: 64     # minimum experiences before learning starts
+  max_grad_norm: 1.0      # gradient clipping threshold
+
+device: "auto"            # "auto" | "cpu" | "cuda" | "mps"
+
+ui:
+  update_interval: 3      # seconds between live UI refreshes
+  show_graphs: true
+  reward_window: 50       # rolling window for average-reward display
+  max_log_lines: 200      # max log lines shown in the UI
