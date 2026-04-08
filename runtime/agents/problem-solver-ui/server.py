@@ -2855,6 +2855,7 @@ INDEX_HTML = r"""<!doctype html>
     .think-dot:nth-child(2){animation-delay:.2s}
     .think-dot:nth-child(3){animation-delay:.4s}
     @keyframes thinkPulse{0%,100%{opacity:.3;transform:scale(1)}50%{opacity:1;transform:scale(1.3)}}
+    @keyframes ideaPulse{0%,100%{opacity:.6}50%{opacity:1}}
 
     /* ── INPUT BAR ── */
     .input-bar{
@@ -2903,6 +2904,17 @@ INDEX_HTML = r"""<!doctype html>
       transition:left .4s;
     }
     .send-btn:hover::before{left:100%}
+    .idea-btn{
+      padding:10px 14px;
+      background:rgba(245,196,0,0.07);
+      border:1px solid rgba(245,196,0,0.3);
+      color:var(--gold);
+      font-size:1em;cursor:pointer;
+      transition:background .15s,box-shadow .15s;
+      flex-shrink:0;align-self:stretch;
+    }
+    .idea-btn:hover{background:rgba(245,196,0,0.18);box-shadow:0 0 12px rgba(245,196,0,0.2)}
+    .idea-btn.converting{opacity:.6;cursor:not-allowed;animation:ideaPulse 1s infinite}
     .input-hint{
       font-family:var(--mono);font-size:.65em;color:var(--text-muted);
       margin-top:7px;display:flex;justify-content:space-between;align-items:center;
@@ -3543,12 +3555,13 @@ INDEX_HTML = r"""<!doctype html>
         <div class="input-wrap">
           <div class="input-prefix">&gt;_</div>
           <textarea id="chat-input" class="input-field" rows="2"
-            placeholder="Enter command for AI workforce…"
+            placeholder="Enter command for AI workforce… or type an idea and click 💡"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
+          <button class="idea-btn" id="chat-idea-btn" onclick="convertChatIdea()" title="Convert rough idea → professional task prompt">💡</button>
           <button class="send-btn" onclick="sendChat()">SEND</button>
         </div>
         <div class="input-hint">
-          <span>ENTER to transmit · SHIFT+ENTER new line</span>
+          <span>ENTER to transmit · SHIFT+ENTER new line · 💡 to expand an idea</span>
           <span id="chat-agent-indicator">Auto-routing active</span>
         </div>
       </div>
@@ -5154,27 +5167,11 @@ INDEX_HTML = r"""<!doctype html>
         <!-- Step 1: description -->
         <div id="task-step1">
           <div class="form-group">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-              <label style="margin:0">Task Description</label>
-              <button class="btn btn-ghost btn-sm" id="btn-idea-mode" onclick="toggleIdeaMode()"
-                title="Turn on Idea Mode — describe a rough concept and AI will convert it into a professional task prompt"
-                style="font-size:.78em;border:1px solid rgba(212,175,55,.4);color:var(--gold);padding:3px 9px">
-                💡 Idea Mode
-              </button>
-            </div>
-            <!-- Idea mode notice (shown when active) -->
-            <div id="idea-mode-notice" style="display:none;background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.3);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:8px;font-size:.82em;color:var(--gold)">
-              💡 <strong>Idea Mode active</strong> — type any rough idea and click <em>Convert Idea</em>. AI will turn it into a professional task prompt.
-            </div>
+            <label>Task Description</label>
             <textarea id="task-input" rows="4"
               placeholder="e.g. Build a SaaS company for remote team management — create business plan, brand identity, hiring plan, financial model, and go-to-market strategy"
               style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"
               oninput="onTaskInputChange()"></textarea>
-            <!-- Idea conversion controls (shown in idea mode) -->
-            <div id="idea-convert-row" style="display:none;margin-top:6px">
-              <button class="btn btn-primary" onclick="convertIdea()" id="btn-convert-idea" style="width:100%">✨ Convert Idea → Professional Prompt</button>
-              <div id="idea-convert-status" style="margin-top:6px;font-size:.82em;color:var(--text-muted)"></div>
-            </div>
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-primary" onclick="runAutoSelect()" style="flex:1" id="btn-autoselect" disabled>🤖 Auto-Select Agents</button>
@@ -8647,65 +8644,37 @@ let _allAgents = [];          // full list from /api/agents
 let _autoSelectedIds = new Set(); // IDs suggested by auto-select
 let _selectedAgentIds = new Set(); // currently selected (user may adjust)
 let _taskMode = 'auto';       // 'auto' | 'parallel' | 'single'
-let _ideaModeActive = false;  // whether idea mode is on
 
-// ── Idea Mode ─────────────────────────────────────────────────────────────────
-function toggleIdeaMode() {
-  _ideaModeActive = !_ideaModeActive;
-  const btn = document.getElementById('btn-idea-mode');
-  const notice = document.getElementById('idea-mode-notice');
-  const convertRow = document.getElementById('idea-convert-row');
-  const taskInput = document.getElementById('task-input');
-  if (_ideaModeActive) {
-    btn.style.background = 'rgba(212,175,55,.2)';
-    btn.style.borderColor = 'var(--gold)';
-    btn.textContent = '💡 Idea Mode ON';
-    notice.style.display = 'block';
-    convertRow.style.display = 'block';
-    taskInput.placeholder = 'e.g. I want to start an online business selling handmade jewelry\ne.g. Grow my YouTube channel to 10k subscribers\ne.g. Build an app that helps people track their habits';
-  } else {
-    btn.style.background = '';
-    btn.style.borderColor = 'rgba(212,175,55,.4)';
-    btn.textContent = '💡 Idea Mode';
-    notice.style.display = 'none';
-    convertRow.style.display = 'none';
-    taskInput.placeholder = 'e.g. Build a SaaS company for remote team management — create business plan, brand identity, hiring plan, financial model, and go-to-market strategy';
-    document.getElementById('idea-convert-status').textContent = '';
-  }
-}
-
-async function convertIdea() {
-  const idea = document.getElementById('task-input').value.trim();
-  if (!idea) { toast('Please enter your idea first', 'error'); return; }
-  const statusEl = document.getElementById('idea-convert-status');
-  const btn = document.getElementById('btn-convert-idea');
-  btn.disabled = true;
-  statusEl.innerHTML = '⏳ Converting idea to professional prompt…';
+// ── Idea-to-Prompt: convert raw idea in chat input ────────────────────────────
+async function convertChatIdea() {
+  const input = document.getElementById('chat-input');
+  const idea = input?.value?.trim();
+  if (!idea) { if (typeof sysLog==='function') sysLog('// IDEA: no input'); return; }
+  const btn = document.getElementById('chat-idea-btn');
+  btn.classList.add('converting');
+  btn.textContent = '⏳';
+  if (typeof sysLog==='function') sysLog('// IDEA: converting…');
   try {
     const r = await api('/api/idea/convert', {
       method: 'POST',
       body: JSON.stringify({ idea })
     });
-    if (r.ok) {
-      document.getElementById('task-input').value = r.prompt;
-      onTaskInputChange();
-      statusEl.innerHTML = `<span style="color:var(--success)">✅ Converted! (via ${escHtml(r.provider||'AI')})</span>`;
-      // Auto-disable idea mode so the converted prompt flows normally
-      _ideaModeActive = false;
-      const modeBtn = document.getElementById('btn-idea-mode');
-      modeBtn.style.background = '';
-      modeBtn.style.borderColor = 'rgba(212,175,55,.4)';
-      modeBtn.textContent = '💡 Idea Mode';
-      document.getElementById('idea-mode-notice').style.display = 'none';
-      document.getElementById('idea-convert-row').style.display = 'none';
+    if (r && r.ok) {
+      input.value = r.prompt;
+      if (typeof sysLog==='function') sysLog(`// IDEA: converted via ${r.provider||'AI'}`, 'ok');
     } else {
-      statusEl.innerHTML = `<span style="color:var(--danger)">❌ ${escHtml(r.detail||r.error||'Conversion failed')}</span>`;
+      if (typeof sysLog==='function') sysLog(`// IDEA: ${r?.detail||r?.error||'conversion failed'}`, 'err');
     }
   } catch(e) {
-    statusEl.innerHTML = '<span style="color:var(--danger)">❌ Network error — is the server running?</span>';
+    if (typeof sysLog==='function') sysLog('// IDEA: network error', 'err');
   }
-  btn.disabled = false;
+  btn.classList.remove('converting');
+  btn.textContent = '💡';
 }
+
+// ── Idea Mode ─────────────────────────────────────────────────────────────────
+function toggleIdeaMode() {}    // kept for backward compat — no-op
+function convertIdea() {}       // kept for backward compat — no-op
 
 function onTaskInputChange() {
   const v = document.getElementById('task-input').value.trim();
