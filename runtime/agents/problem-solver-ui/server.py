@@ -6325,70 +6325,39 @@ function switchTab(tab, btn) {
 <!-- ── ASCEND FORGE ── -->
 <div id="tab-ascend" class="tab-content" style="width:100%;box-sizing:border-box">
 
-  <!-- Header banner -->
-  <div style="background:linear-gradient(135deg,#0a1628 0%,#1a0e05 50%,#0f2240 100%);border:1px solid #d97706;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(217,119,6,.12),0 8px 32px rgba(0,0,0,.6)">
-    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(217,119,6,.2) 0%,transparent 60%);pointer-events:none"></div>
-    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(251,191,36,.5),transparent)"></div>
-    <div style="font-size:2.6rem;line-height:1;animation:forgeFire 2s ease-in-out infinite;position:relative;z-index:1">🔥</div>
-    <div style="flex:1;position:relative;z-index:1">
-      <div style="font-size:1.3rem;font-weight:800;color:#fef3c7;letter-spacing:.1em;text-shadow:0 0 20px rgba(251,191,36,.4)">ASCEND FORGE</div>
-      <div style="font-size:.83em;color:#f59e0b;margin-top:3px;font-weight:500">Top-layer self-improver — continuously improves the system safely</div>
-    </div>
-    <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
-      <div id="af-pulse" style="width:12px;height:12px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
-      <span id="af-mode-badge" style="font-size:.78em;font-weight:800;padding:4px 12px;border-radius:20px;background:linear-gradient(135deg,#b45309,#d97706);color:#fff1c6;letter-spacing:.08em;box-shadow:0 0 12px rgba(217,119,6,.4)">AUTO</span>
-    </div>
-  </div>
-
   <style>
   @keyframes afPulse{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.5)}50%{box-shadow:0 0 0 8px rgba(217,119,6,0)}}
   @keyframes forgeFire{0%,100%{filter:drop-shadow(0 0 6px #f59e0b);transform:scale(1)}25%{filter:drop-shadow(0 0 16px #fbbf24);transform:scale(1.05)}50%{filter:drop-shadow(0 0 8px #f97316);transform:scale(.97)}75%{filter:drop-shadow(0 0 20px #f59e0b);transform:scale(1.03)}}
-  .af-mode-btn{padding:8px 18px;border-radius:8px;font-size:.82em;font-weight:700;cursor:pointer;transition:all .2s;font-family:inherit;letter-spacing:.03em}
-  .af-mode-btn.active{background:linear-gradient(135deg,#92400e,#b45309,#d97706);color:#fff;border:1px solid #f59e0b;box-shadow:0 0 16px rgba(217,119,6,.4)}
-  .af-mode-btn:not(.active){background:rgba(217,119,6,.08);color:#f59e0b;border:1px solid rgba(217,119,6,.3)}
-  .af-mode-btn:not(.active):hover{background:rgba(217,119,6,.15);border-color:rgba(217,119,6,.5)}
-  .af-stat-card{background:linear-gradient(135deg,rgba(120,53,15,.2),rgba(217,119,6,.08));border:1px solid rgba(217,119,6,.25);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
-  .af-stat-card:hover{border-color:rgba(251,191,36,.4);box-shadow:0 0 20px rgba(217,119,6,.15)}
-  @media(prefers-reduced-motion:reduce){.af-mode-btn{transition:none}.af-stat-card{transition:none}}
+  .af-mode-btn{padding:8px 20px;border-radius:8px;font-size:.82em;font-weight:700;cursor:pointer;transition:all .25s;font-family:inherit;letter-spacing:.05em;text-transform:uppercase}
+  .af-mode-btn.active{background:linear-gradient(135deg,#92400e,#b45309,#d97706);color:#fff1c6;border:1px solid #f59e0b;box-shadow:0 0 18px rgba(217,119,6,.5),0 4px 12px rgba(0,0,0,.4)}
+  .af-mode-btn:not(.active){background:rgba(217,119,6,.06);color:#d97706;border:1px solid rgba(217,119,6,.25)}
+  .af-mode-btn:not(.active):hover{background:rgba(217,119,6,.14);border-color:rgba(217,119,6,.55);color:#f59e0b;transform:translateY(-1px)}
+  .af-stat-card{background:linear-gradient(135deg,rgba(120,53,15,.18),rgba(10,5,0,.9));border:1px solid rgba(217,119,6,.22);border-radius:var(--radius);padding:18px 20px;display:flex;align-items:center;gap:14px;transition:all .25s;cursor:default}
+  .af-stat-card:hover{border-color:rgba(251,191,36,.45);box-shadow:0 0 24px rgba(217,119,6,.18),0 4px 20px rgba(0,0,0,.4);transform:translateY(-2px)}
+  .af-patch-card{border:1px solid rgba(217,119,6,.2);border-radius:10px;padding:14px 16px;margin-bottom:10px;background:linear-gradient(135deg,rgba(120,53,15,.1),rgba(10,5,0,.85));transition:all .2s}
+  .af-patch-card:hover{border-color:rgba(251,191,36,.4);box-shadow:0 0 16px rgba(217,119,6,.12)}
+  .af-log-card{border:1px solid rgba(30,20,5,.8);border-radius:10px;padding:12px 16px;margin-bottom:8px;background:rgba(10,5,0,.6);transition:all .2s;border-left:3px solid rgba(217,119,6,.3)}
+  .af-log-card:hover{background:rgba(20,10,0,.8);border-left-color:#d97706}
+  .af-risk-badge{display:inline-block;font-size:.68em;font-weight:800;padding:2px 9px;border-radius:12px;letter-spacing:.06em;text-transform:uppercase}
+  @media(prefers-reduced-motion:reduce){.af-mode-btn,.af-stat-card{transition:none}}
   </style>
 
-function _renderDashAgentMap(agents, statusData) {
-  const el = document.getElementById('dash-agent-map');
-  if (!el) return;
-  const activeAgents = new Set(statusData?.active_agents || []);
-  if (!agents.length) {
-    el.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="icon">🤖</div><p style="font-size:.84em">No agents loaded. Start agents from the button above.</p></div>';
-    return;
-  }
-  const agentEmoji = {
-    'task-orchestrator':'🎯','lead-generator':'🎯','lead-hunter':'🎯','offer-agent':'📧',
-    'company-builder':'🏢','brand-strategist':'🎨','finance-wizard':'💰','growth-hacker':'📈',
-    'social-media-manager':'📱','paid-media-specialist':'📣','qualification-agent':'🔍',
-    'follow-up-agent':'🔄','appointment-setter':'📅','ui-designer':'🎨','web-researcher':'🌐',
-    'engineering-assistant':'💻','ecom-agent':'🛒','chatbot-builder':'🤖','creator-agency':'✍️',
-    'recruiter':'👔','hr-manager':'👔','project-manager':'📋','finance':'💰',
-    'newsletter-bot':'📰','faceless-video':'🎬','course-creator':'📚',
-  };
-  const taskLabels = {
-    'task-orchestrator':'Routing tasks','lead-generator':'Finding leads','offer-agent':'Writing outreach',
-    'company-builder':'Building strategy','brand-strategist':'Crafting brand','finance-wizard':'Analyzing finances',
-    'growth-hacker':'Growing traffic','social-media-manager':'Posting content','paid-media-specialist':'Optimizing ads',
-    'web-researcher':'Researching web','engineering-assistant':'Writing code','ecom-agent':'Managing store',
-    'follow-up-agent':'Following up leads','project-manager':'Managing tasks',
-  };
-  el.innerHTML = agents.map(a => {
-    const isRunning = a.running;
-    const isActive = activeAgents.has(a.id);
-    const emoji = agentEmoji[a.id] || '🤖';
-    const task = isActive ? (taskLabels[a.id] || 'Working on task') : (isRunning ? 'Ready — standing by' : 'Stopped');
-    const dotColor = isActive ? 'var(--gold)' : (isRunning ? 'var(--success)' : 'rgba(148,163,184,.3)');
-    const cardBg = isActive ? 'rgba(212,175,55,.07)' : (isRunning ? 'rgba(16,185,129,.04)' : 'transparent');
-    const cardBorder = isActive ? 'rgba(212,175,55,.4)' : (isRunning ? 'rgba(16,185,129,.2)' : 'rgba(148,163,184,.12)');
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid ${cardBorder};background:${cardBg};transition:all .2s;cursor:pointer" title="${a.id}" onclick="switchTab('live-office',null)">
-      <div style="font-size:1.2em;flex-shrink:0">${emoji}</div>
-      <div style="min-width:0;flex:1">
-        <div style="font-size:.8em;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.id)}</div>
-        <div style="font-size:.7em;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(task)}</div>
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#0a0802 0%,#1a0e05 50%,#0d0a00 100%);border:1px solid rgba(217,119,6,.55);border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(217,119,6,.14),0 8px 40px rgba(0,0,0,.7)">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 15% 50%,rgba(217,119,6,.22) 0%,transparent 55%);pointer-events:none"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(251,191,36,.6),transparent)"></div>
+    <div style="font-size:2.8rem;line-height:1;animation:forgeFire 2s ease-in-out infinite;position:relative;z-index:1">🔥</div>
+    <div style="flex:1;position:relative;z-index:1">
+      <div style="font-size:1.45rem;font-weight:800;color:#fef3c7;letter-spacing:.12em;text-shadow:0 0 28px rgba(251,191,36,.5),0 2px 4px rgba(0,0,0,.8);font-family:var(--display)">ASCEND FORGE</div>
+      <div style="font-size:.82em;color:#d97706;margin-top:4px;font-weight:500;letter-spacing:.02em">Top-layer self-improver — continuously improves the system safely</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
+      <div id="af-pulse" style="width:11px;height:11px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
+      <span id="af-mode-badge" style="font-size:.75em;font-weight:800;padding:4px 14px;border-radius:20px;background:linear-gradient(135deg,#92400e,#b45309,#d97706);color:#fff1c6;letter-spacing:.1em;text-transform:uppercase;box-shadow:0 0 14px rgba(217,119,6,.45)">AUTO</span>
+      <button onclick="switchTab('chat',null)" style="padding:6px 14px;background:rgba(245,196,0,.08);border:1px solid rgba(245,196,0,.25);border-radius:8px;color:var(--gold);font-size:.75em;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.04em;transition:all .2s" onmouseenter="this.style.background='rgba(245,196,0,.16)';this.style.borderColor='rgba(245,196,0,.5)'" onmouseleave="this.style.background='rgba(245,196,0,.08)';this.style.borderColor='rgba(245,196,0,.25)'">← Overview</button>
+    </div>
+  </div>
+
   <!-- ── Ascend Forge Task Composer ── -->
   <div class="card" style="margin-bottom:18px;border:2px solid rgba(251,191,36,.35);background:linear-gradient(135deg,rgba(120,53,15,.18),rgba(10,5,0,.95));box-shadow:0 0 40px rgba(217,119,6,.12)">
     <div class="card-header">
@@ -6473,36 +6442,51 @@ function _renderDashAgentMap(agents, statusData) {
   </div>
 
   <!-- Pending patches -->
-  <div class="card" style="margin-bottom:18px">
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(217,119,6,.22);background:linear-gradient(135deg,rgba(120,53,15,.1),var(--surface))">
     <div class="card-header">
-      <div class="card-title"><span class="icon">⏳</span> Pending Patches</div>
-      <button class="btn btn-ghost btn-sm" onclick="afLoadPatches()">↻ Refresh</button>
+      <div class="card-title"><span style="color:#f59e0b">⏳</span> Pending Patches</div>
+      <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#d97706" onclick="afLoadPatches()">↻ Refresh</button>
     </div>
-    <div id="af-patches-list" style="font-size:.84em">
-      <div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>
+    <div id="af-patches-list">
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:12px;opacity:.6">
+        <div style="font-size:2.2em">📋</div>
+        <div style="font-size:.88em;color:var(--text-muted);text-align:center">No pending patches — run a scan to find improvements.</div>
+        <button onclick="afScan()" style="margin-top:4px;padding:7px 18px;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.35);border-radius:8px;color:#d97706;font-size:.8em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(217,119,6,.22)'" onmouseleave="this.style.background='rgba(217,119,6,.12)'">🔍 Run Scan Now</button>
+      </div>
     </div>
   </div>
 
-  <!-- Activity feed -->
-  <div class="card" style="margin-bottom:18px;border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.08),var(--surface2))">
-    <div class="card-header">
-      <div class="card-title"><span style="color:#f59e0b">📡</span> Activity Feed</div>
-      <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
-    </div>
-    <div id="af-activity-log" style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace;font-size:.77em;background:rgba(10,5,0,.9);border:1px solid rgba(217,119,6,.2);border-radius:8px;padding:14px;height:200px;overflow-y:auto;color:#fef3c7;line-height:1.7;box-shadow:inset 0 0 40px rgba(120,53,15,.3)">
-      <span style="color:#6b7280">Waiting for activity…</span>
-    </div>
-  </div>
+  <!-- Two-column bottom section -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:0">
 
-  <!-- Change history -->
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title"><span class="icon">🕐</span> Change History</div>
-      <button class="btn btn-ghost btn-sm" onclick="afLoadChangelog()">↻ Refresh</button>
+    <!-- Activity feed -->
+    <div class="card" style="border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.08),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span style="color:#f59e0b">📡</span> Activity Feed</div>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#d97706" onclick="afRefresh()">↻ Refresh</button>
+      </div>
+      <div id="af-activity-log" style="font-family:var(--mono);font-size:.75em;background:rgba(6,3,0,.92);border:1px solid rgba(217,119,6,.18);border-radius:8px;padding:14px;height:240px;overflow-y:auto;color:#fef3c7;line-height:1.75;box-shadow:inset 0 0 40px rgba(120,53,15,.25)">
+        <div style="display:flex;align-items:center;gap:8px;color:rgba(107,114,128,.7);padding:4px 0">
+          <span style="width:6px;height:6px;border-radius:50%;background:rgba(107,114,128,.4);display:inline-block;flex-shrink:0"></span>
+          Waiting for activity…
+        </div>
+      </div>
     </div>
-    <div id="af-changelog" style="font-size:.84em">
-      <div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>
+
+    <!-- Change history -->
+    <div class="card" style="border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.08),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span style="color:#f59e0b">🕐</span> Change History</div>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#d97706" onclick="afLoadChangelog()">↻ Refresh</button>
+      </div>
+      <div id="af-changelog" style="max-height:240px;overflow-y:auto">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:10px;opacity:.55">
+          <div style="font-size:2em">📚</div>
+          <div style="font-size:.84em;color:var(--text-muted)">No history yet.</div>
+        </div>
+      </div>
     </div>
+
   </div>
 
 </div>
@@ -11050,6 +11034,7 @@ function _updateChatHermesStatus(running) {
 
 // ── ASCEND FORGE JS ───────────────────────────────────────────────────────────
 const RISK_COLORS = {LOW:'#4ade80', MEDIUM:'#fb923c', HIGH:'#ef4444'};
+const RISK_BG    = {LOW:'rgba(74,222,128,.12)', MEDIUM:'rgba(251,146,60,.12)', HIGH:'rgba(239,68,68,.12)'};
 const STATUS_EMOJI = {pending:'⏳', approved:'✅', rejected:'❌', rolled_back:'↩️', failed:'💥'};
 
 async function afRefresh() {
@@ -11064,7 +11049,7 @@ async function afRefresh() {
     set('af-stat-approved', s.patches_approved || 0);
     set('af-stat-rejected', s.patches_rejected || 0);
     set('af-stat-total',    s.total_patches   || 0);
-    // Activity
+    // Activity inline labels
     const act = document.getElementById('af-current-activity');
     if (act) act.textContent = 'Activity: ' + (s.current_activity || 'idle');
     const tgt = document.getElementById('af-current-target');
@@ -11072,23 +11057,25 @@ async function afRefresh() {
     // Highlight active mode button
     ['GENERAL','MONEY','AUTO'].forEach(m => {
       const btn = document.getElementById('af-mode-'+m.toLowerCase());
-      if (btn) {
-        if (s.mode === m) {
-          btn.classList.add('active');
-        } else {
-          btn.classList.remove('active');
-        }
-      }
+      if (btn) { btn.classList.toggle('active', s.mode === m); }
     });
     // Auto-approve toggle
     const aa = document.getElementById('af-auto-approve');
     if (aa) aa.checked = !!s.auto_approve_low;
-    // Activity feed
+    // Activity feed — premium log style
     const logEl = document.getElementById('af-activity-log');
     if (logEl && Array.isArray(s.activity) && s.activity.length) {
+      const levelDot = {warn:'#fb923c', error:'#ef4444', success:'#4ade80'};
+      const levelColor = {warn:'#fb923c', error:'#ef4444', success:'#4ade80'};
       logEl.innerHTML = s.activity.map(e => {
-        const color = e.level==='warn'?'#fb923c':e.level==='error'?'#ef4444':e.level==='success'?'#4ade80':'#c9d1d9';
-        return `<div style="color:${color}">[${(e.ts||'').slice(11,19)}] ${escHtml(e.msg)}</div>`;
+        const dot = levelDot[e.level] || 'rgba(217,119,6,.5)';
+        const col = levelColor[e.level] || '#d4b483';
+        const ts  = (e.ts||'').slice(11,19);
+        return `<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;border-bottom:1px solid rgba(217,119,6,.06)">
+          <span style="width:6px;height:6px;border-radius:50%;background:${dot};margin-top:5px;flex-shrink:0;box-shadow:0 0 5px ${dot}"></span>
+          <span style="color:rgba(217,119,6,.5);flex-shrink:0">${ts}</span>
+          <span style="color:${col};flex:1;word-break:break-word">${escHtml(e.msg)}</span>
+        </div>`;
       }).join('');
       logEl.scrollTop = logEl.scrollHeight;
     }
@@ -11116,24 +11103,31 @@ async function afLoadPatches() {
     const el = document.getElementById('af-patches-list');
     if (!el) return;
     if (!Array.isArray(patches) || !patches.length) {
-      el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>';
+      el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:12px;opacity:.6">
+        <div style="font-size:2.2em">📋</div>
+        <div style="font-size:.88em;color:var(--text-muted);text-align:center">No pending patches — run a scan to find improvements.</div>
+        <button onclick="afScan()" style="margin-top:4px;padding:7px 18px;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.35);border-radius:8px;color:#d97706;font-size:.8em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(217,119,6,.22)'" onmouseleave="this.style.background='rgba(217,119,6,.12)'">🔍 Run Scan Now</button>
+      </div>`;
       return;
     }
-    el.innerHTML = patches.map(p => `
-      <div style="border:1px solid #374151;border-radius:8px;padding:10px 14px;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${RISK_COLORS[p.risk_level]||'#6b7280'};color:#000">${p.risk_level}</span>
-          <span style="font-size:.8em;color:#9ca3af">${p.patch_type}</span>
-          <span style="font-size:.8em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}</span>
+    el.innerHTML = patches.map(p => {
+      const rc = RISK_COLORS[p.risk_level] || '#6b7280';
+      const rb = RISK_BG[p.risk_level]    || 'rgba(107,114,128,.1)';
+      return `<div class="af-patch-card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <span class="af-risk-badge" style="background:${rb};color:${rc};border:1px solid ${rc}40">${escHtml(p.risk_level||'?')}</span>
+          <span style="font-size:.78em;color:#d97706;font-weight:600">${escHtml(p.patch_type||'')}</span>
+          <span style="font-size:.75em;color:rgba(217,119,6,.45);margin-left:auto">${(p.timestamp||'').slice(0,16)}</span>
         </div>
-        <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
-        <div style="font-size:.8em;color:#9ca3af;margin-bottom:6px">${escHtml(p.reason||'')}</div>
-        ${p.diff_preview ? `<details style="margin-bottom:6px"><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-sm" style="background:#15803d;color:#fff" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
-          <button class="btn btn-sm" style="background:#7f1d1d;color:#fff" onclick="afReject('${p.patch_id}')">❌ Reject</button>
+        <div style="font-size:.9em;font-weight:700;color:#fef3c7;margin-bottom:4px">${escHtml(p.description)}</div>
+        <div style="font-size:.79em;color:rgba(217,119,6,.6);margin-bottom:10px;line-height:1.5">${escHtml(p.reason||'')}</div>
+        ${p.diff_preview ? `<details style="margin-bottom:10px"><summary style="font-size:.76em;cursor:pointer;color:rgba(217,119,6,.55);user-select:none">▶ View diff / code changes</summary><pre style="font-size:.73em;background:rgba(6,3,0,.95);border:1px solid rgba(217,119,6,.15);border-radius:6px;padding:10px;overflow-x:auto;color:#c9d1d9;margin-top:6px;line-height:1.5">${escHtml(p.diff_preview)}</pre></details>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button style="padding:6px 16px;background:linear-gradient(135deg,#14532d,#15803d);border:1px solid rgba(74,222,128,.3);border-radius:7px;color:#4ade80;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 12px rgba(74,222,128,.25)'" onmouseleave="this.style.boxShadow=''" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
+          <button style="padding:6px 16px;background:linear-gradient(135deg,#450a0a,#7f1d1d);border:1px solid rgba(239,68,68,.3);border-radius:7px;color:#f87171;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 12px rgba(239,68,68,.2)'" onmouseleave="this.style.boxShadow=''" onclick="afReject('${p.patch_id}')">❌ Reject</button>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } catch(e) { console.warn('afLoadPatches', e); }
 }
 
@@ -11183,26 +11177,29 @@ async function afLoadChangelog() {
     const el = document.getElementById('af-changelog');
     if (!el) return;
     if (!Array.isArray(log) || !log.length) {
-      el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>';
+      el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:10px;opacity:.55">
+        <div style="font-size:2em">📚</div>
+        <div style="font-size:.84em;color:var(--text-muted)">No history yet.</div>
+      </div>`;
       return;
     }
     el.innerHTML = log.map(p => {
       const emoji = STATUS_EMOJI[p.status] || '?';
-      const riskColor = RISK_COLORS[p.risk_level] || '#6b7280';
-      const appliedAt = p.applied_timestamp ? ` → applied ${p.applied_timestamp.slice(0,16)}` : '';
-      return `
-        <div style="border:1px solid #1f2937;border-radius:8px;padding:10px 14px;margin-bottom:8px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
-            <span style="font-size:1em">${emoji}</span>
-            <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${riskColor};color:#000">${p.risk_level}</span>
-            <span style="font-size:.78em;font-weight:600;color:#e5e7eb">${escHtml(p.patch_id)}</span>
-            <span style="font-size:.75em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}${appliedAt}</span>
-          </div>
-          <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
-          <div style="font-size:.8em;color:#9ca3af;margin-bottom:4px">${escHtml(p.reason||'')}</div>
-          ${p.diff_preview ? `<details><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff / code changes</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
-          ${p.status==='approved' ? `<button class="btn btn-sm" style="margin-top:6px;background:#7f1d1d;color:#fff" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
-        </div>`;
+      const rc = RISK_COLORS[p.risk_level] || '#6b7280';
+      const rb = RISK_BG[p.risk_level]    || 'rgba(107,114,128,.08)';
+      const appliedAt = p.applied_timestamp ? `<span style="color:rgba(74,222,128,.6)"> → applied ${p.applied_timestamp.slice(0,16)}</span>` : '';
+      return `<div class="af-log-card">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;flex-wrap:wrap">
+          <span style="font-size:1em;line-height:1">${emoji}</span>
+          <span class="af-risk-badge" style="background:${rb};color:${rc};border:1px solid ${rc}40">${escHtml(p.risk_level||'?')}</span>
+          <span style="font-size:.74em;color:rgba(217,119,6,.55);font-family:var(--mono)">${escHtml((p.patch_id||'').slice(0,14))}</span>
+          <span style="font-size:.73em;color:rgba(217,119,6,.4);margin-left:auto">${(p.timestamp||'').slice(0,16)}${appliedAt}</span>
+        </div>
+        <div style="font-size:.85em;font-weight:700;color:#fef3c7;margin-bottom:3px">${escHtml(p.description)}</div>
+        <div style="font-size:.77em;color:rgba(217,119,6,.55);line-height:1.5;margin-bottom:6px">${escHtml(p.reason||'')}</div>
+        ${p.diff_preview ? `<details style="margin-bottom:6px"><summary style="font-size:.74em;cursor:pointer;color:rgba(217,119,6,.45);user-select:none">▶ View diff</summary><pre style="font-size:.71em;background:rgba(6,3,0,.95);border:1px solid rgba(217,119,6,.12);border-radius:6px;padding:10px;overflow-x:auto;color:#c9d1d9;margin-top:5px;line-height:1.5">${escHtml(p.diff_preview)}</pre></details>` : ''}
+        ${p.status==='approved' ? `<button style="padding:4px 12px;background:rgba(127,29,29,.6);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;font-size:.75em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(127,29,29,.9)'" onmouseleave="this.style.background='rgba(127,29,29,.6)'" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
+      </div>`;
     }).join('');
   } catch(e) { console.warn('afLoadChangelog', e); }
 }
