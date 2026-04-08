@@ -7059,7 +7059,7 @@ function _switchTabBase(tab, btn) {
     btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
   } else {
     // Auto-find the matching sub-nav button when btn is null or a group button
-    const safeTab = Object.prototype.hasOwnProperty.call(_TAB_TO_GROUP, tab) ? tab : '';
+    const safeTab = (tab in _TAB_TO_GROUP) ? CSS.escape(tab) : '';
     const autoBtn = safeTab && subNav ? subNav.querySelector('button[onclick*="' + safeTab + '"]') : null;
     if (autoBtn) autoBtn.classList.add('active');
   }
