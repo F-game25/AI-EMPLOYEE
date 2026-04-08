@@ -3308,13 +3308,13 @@ INDEX_HTML = r"""<!doctype html>
 
   <!-- ── Agent Count Hero Cards ── -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
-    <div class="ov-hero-card ov-hero-running" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('running')" style="cursor:pointer" aria-label="Agents Running – click for details">
+    <div class="ov-hero-card ov-hero-running" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('running')}" style="cursor:pointer" aria-label="Agents Running – click for details">
       <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#34d399;margin-bottom:6px;font-family:var(--mono)">▶ RUNNING</div>
       <div class="val" id="stat-running" style="font-size:2.6em;font-weight:800;color:#34d399;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(52,211,153,.4)">–</div>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Active</div>
       <div style="font-size:.68em;color:#34d399;margin-top:4px" id="stat-running-sub"></div>
     </div>
-    <div class="ov-hero-card ov-hero-total" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('total')" style="cursor:pointer" aria-label="Total Agents – click for details">
+    <div class="ov-hero-card ov-hero-total" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('total')}" style="cursor:pointer" aria-label="Total Agents – click for details">
       <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin-bottom:6px;font-family:var(--mono)">◆ TOTAL</div>
       <div class="val" id="stat-total" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(212,175,55,.4)">–</div>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Registered Agents</div>
@@ -3326,13 +3326,13 @@ INDEX_HTML = r"""<!doctype html>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Stopped</div>
       <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-offline-sub"></div>
     </div>
-    <div class="ov-hero-card ov-hero-gateway" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('gateway')" style="cursor:pointer" aria-label="Gateway – click for details">
+    <div class="ov-hero-card ov-hero-gateway" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('gateway')}" style="cursor:pointer" aria-label="Gateway – click for details">
       <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#38bdf8;margin-bottom:6px;font-family:var(--mono)">◉ GATEWAY</div>
       <div class="val" id="stat-gateway" style="font-size:2.6em;font-weight:800;color:#38bdf8;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(56,189,248,.3)">–</div>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">API Gateway</div>
       <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-gateway-sub"></div>
     </div>
-    <div class="ov-hero-card ov-hero-uptime" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('uptime')" style="cursor:pointer" aria-label="Uptime – click for details">
+    <div class="ov-hero-card ov-hero-uptime" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('uptime')}" style="cursor:pointer" aria-label="Uptime – click for details">
       <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#a78bfa;margin-bottom:6px;font-family:var(--mono)">◎ UPTIME</div>
       <div class="val" id="stat-uptime" style="font-size:2.6em;font-weight:800;color:#a78bfa;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(167,139,250,.3)">–</div>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">System Uptime</div>
@@ -7214,7 +7214,7 @@ async function loadDashboard() {
   const totalSubEl = document.getElementById('stat-total-sub');
   if (totalSubEl && d.mode) totalSubEl.textContent = `${d.mode} mode · ${capacity} max`;
   const offlineSubEl = document.getElementById('stat-offline-sub');
-  if (offlineSubEl) offlineSubEl.textContent = offline > 0 ? `${Math.round(offline/total*100)}% idle` : total > 0 ? 'All running ✓' : '';
+  if (offlineSubEl) offlineSubEl.textContent = total > 0 ? (offline > 0 ? `${Math.round(offline/total*100)}% idle` : 'All running ✓') : '';
   const modeColors = {starter:'#34d399',business:'#D4AF37',power:'#c084fc'};
   const mc = modeColors[d.mode] || 'var(--gold)';
   document.getElementById('header-sub').innerHTML =
