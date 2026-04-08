@@ -491,7 +491,6 @@ AGENTS_BY_MODE = {
     "team-management",
     "customer-support",
     "website-builder",
-    "competitor-watch",
     "personal-brand",
     "health-check",
     "export-backup",
@@ -1335,8 +1334,8 @@ INDEX_HTML = r"""<!doctype html>
       border-radius:20px;cursor:pointer;font-size:.775em;font-weight:600;
       transition:all .2s;font-family:inherit;white-space:nowrap;position:relative;overflow:hidden;
       letter-spacing:.01em}
-    .hdr-btn-start{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3)}
-    .hdr-btn-start:hover{background:rgba(16,185,129,.3);box-shadow:0 0 18px rgba(16,185,129,.4);transform:translateY(-1px)}
+    .hdr-btn-start{background:rgba(212,175,55,.15);color:var(--gold);border:1px solid rgba(212,175,55,.35)}
+    .hdr-btn-start:hover{background:rgba(212,175,55,.28);box-shadow:0 0 18px rgba(212,175,55,.35);transform:translateY(-1px)}
     .hdr-btn-stop{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.28)}
     .hdr-btn-stop:hover{background:rgba(244,63,94,.25);box-shadow:0 0 18px rgba(244,63,94,.35);transform:translateY(-1px)}
     .hdr-btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
@@ -1917,6 +1916,22 @@ INDEX_HTML = r"""<!doctype html>
       animation:countUp .5s ease;letter-spacing:-.04em;line-height:1}
     .stat-body .lbl{font-size:.75em;color:var(--text-muted);margin-top:6px;letter-spacing:.03em;text-transform:uppercase;font-weight:500}
 
+    /* ── Overview hero stat cards ── */
+    .ov-hero-card{
+      background:var(--surface2);
+      border:1px solid rgba(212,175,55,.18);
+      border-radius:10px;
+      padding:18px 20px;
+      position:relative;overflow:hidden;
+      transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+    }
+    .ov-hero-card::before{
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(212,175,55,.04),transparent);
+      pointer-events:none;
+    }
+    .ov-hero-card:hover{transform:translateY(-2px);border-color:rgba(212,175,55,.45);box-shadow:0 8px 32px rgba(0,0,0,.5),0 0 24px rgba(212,175,55,.1)}
+
     /* ── System control hero ── */
     .sys-control{
       background:linear-gradient(135deg,rgba(212,175,55,.08) 0%,rgba(212,175,55,.04) 50%,rgba(212,175,55,.02) 100%);
@@ -2056,8 +2071,8 @@ INDEX_HTML = r"""<!doctype html>
     .btn-primary:hover{transform:translateY(-1px);box-shadow:0 5px 20px rgba(212,175,55,.55),0 0 0 1px rgba(212,175,55,.2);filter:brightness(1.08)}
     .btn-danger{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.22)}
     .btn-danger:hover{background:rgba(244,63,94,.22);box-shadow:0 3px 12px rgba(244,63,94,.28);border-color:rgba(244,63,94,.4)}
-    .btn-success{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(16,185,129,.22)}
-    .btn-success:hover{background:rgba(16,185,129,.24);box-shadow:0 3px 12px rgba(16,185,129,.3);border-color:rgba(16,185,129,.4)}
+    .btn-success{background:rgba(212,175,55,.12);color:var(--gold);border:1px solid rgba(212,175,55,.25)}
+    .btn-success:hover{background:rgba(212,175,55,.24);box-shadow:0 3px 12px rgba(212,175,55,.25);border-color:rgba(212,175,55,.45)}
     .btn-ghost{background:rgba(255,255,255,.04);color:var(--text-secondary);border:1px solid rgba(148,163,184,.12)}
     .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(129,140,248,.3)}
     .btn-sm{padding:5px 12px;font-size:.78em}
@@ -3258,6 +3273,19 @@ INDEX_HTML = r"""<!doctype html>
 <!-- ── Dashboard ── -->
 <div id="tab-dashboard" class="tab-content active">
 
+  <!-- ── SYSTEM ONLINE Status Banner ── -->
+  <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:linear-gradient(90deg,rgba(212,175,55,.06),rgba(212,175,55,.03),rgba(0,0,0,0));border:1px solid rgba(212,175,55,.22);border-radius:8px;margin-bottom:14px;font-family:var(--mono);font-size:.72em;letter-spacing:.08em;overflow:hidden;position:relative" id="ov-system-banner">
+    <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(212,175,55,.04),transparent);pointer-events:none"></div>
+    <div style="width:8px;height:8px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px rgba(212,175,55,.6),0 0 16px rgba(212,175,55,.3);animation:blink 1.2s infinite;flex-shrink:0"></div>
+    <span style="color:var(--gold);font-weight:700;text-transform:uppercase">◈ SYSTEM ONLINE</span>
+    <div style="width:1px;height:14px;background:rgba(255,255,255,.12)"></div>
+    <span style="color:var(--gold);text-transform:uppercase" id="ov-banner-mode">POWER MODE</span>
+    <div style="width:1px;height:14px;background:rgba(255,255,255,.12)"></div>
+    <span style="color:var(--text-secondary)" id="ov-banner-uptime">Uptime: –</span>
+    <div style="flex:1"></div>
+    <span style="color:var(--gold);font-weight:700" id="ov-banner-agents">– / – Agents Active</span>
+  </div>
+
   <!-- ── Overview Page Header ── -->
   <div class="page-header" style="border-left-color:var(--gold);background:linear-gradient(135deg,rgba(212,175,55,.08),rgba(212,175,55,.02));border:1px solid rgba(212,175,55,.2);box-shadow:0 0 30px rgba(212,175,55,.06)">
     <div class="page-header-icon" style="color:var(--gold);filter:drop-shadow(0 0 8px rgba(212,175,55,.5))">◈</div>
@@ -3266,6 +3294,49 @@ INDEX_HTML = r"""<!doctype html>
       <div class="page-header-desc">Real-time operations hub — monitor all agents, launch tasks, and manage your autonomous AI workforce from one place.</div>
     </div>
     <span class="page-header-badge" style="color:var(--gold);background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.3)">Live Operations</span>
+  </div>
+
+  <!-- ── Agent Count Hero Cards ── -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
+    <div class="ov-hero-card ov-hero-running" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('running')}" style="cursor:pointer" aria-label="Agents Running – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">▶ RUNNING</div>
+      <div class="val" id="stat-running" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.35)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Active</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.5);margin-top:4px" id="stat-running-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-total" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('total')}" style="cursor:pointer" aria-label="Total Agents – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◆ TOTAL</div>
+      <div class="val" id="stat-total" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.35)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Registered Agents</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-total-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-offline" aria-label="Offline Agents">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◌ OFFLINE</div>
+      <div class="val" id="stat-offline" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.25)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Stopped</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-offline-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-gateway" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('gateway')}" style="cursor:pointer" aria-label="Gateway – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◉ GATEWAY</div>
+      <div class="val" id="stat-gateway" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.25)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">API Gateway</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-gateway-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-uptime" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('uptime')}" style="cursor:pointer" aria-label="Uptime – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◎ UPTIME</div>
+      <div class="val" id="stat-uptime" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.25)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">System Uptime</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-uptime-sub"></div>
+    </div>
+  </div>
+
+  <!-- Stat detail panel -->
+  <div id="stat-detail-panel" style="display:none;background:var(--surface2);border:1px solid var(--gold);border-radius:var(--radius);padding:16px;margin-bottom:16px;animation:fadeIn .2s ease">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" id="stat-detail-title">Details</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stat-detail-panel').style.display='none'">✕</button>
+    </div>
+    <div id="stat-detail-content" style="font-size:.88em;color:var(--text-secondary)"></div>
   </div>
 
   <!-- ── Cyber Operations Panel ── -->
@@ -3370,33 +3441,6 @@ INDEX_HTML = r"""<!doctype html>
         <span class="btn-icon">■</span> Stop All Agents
       </button>
     </div>
-  </div>
-
-  <div class="grid-stat" id="stat-cards">
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('running')" style="cursor:pointer" aria-label="Agents Running – click for details">
-      <div class="stat-icon green">●</div>
-      <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Agents Running</div><div class="stat-trend" id="stat-running-sub" style="font-size:.7em;color:var(--gold);margin-top:3px"></div></div>
-    </div>
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('total')" style="cursor:pointer" aria-label="Total Agents – click for details">
-      <div class="stat-icon blue">◆</div>
-      <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Agents</div><div class="stat-trend" id="stat-total-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
-    </div>
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('gateway')" style="cursor:pointer" aria-label="Gateway – click for details">
-      <div class="stat-icon cyan">◉</div>
-      <div class="stat-body"><div class="val" id="stat-gateway">–</div><div class="lbl">Gateway</div><div class="stat-trend" id="stat-gateway-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
-    </div>
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('uptime')" style="cursor:pointer" aria-label="Uptime – click for details">
-      <div class="stat-icon yellow">◎</div>
-      <div class="stat-body"><div class="val" id="stat-uptime">–</div><div class="lbl">Uptime</div><div class="stat-trend" id="stat-uptime-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
-    </div>
-  </div>
-  <!-- Stat detail panel -->
-  <div id="stat-detail-panel" style="display:none;background:var(--surface2);border:1px solid var(--gold);border-radius:var(--radius);padding:16px;margin-bottom:16px;animation:fadeIn .2s ease">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div class="card-title" id="stat-detail-title">Details</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stat-detail-panel').style.display='none'">✕</button>
-    </div>
-    <div id="stat-detail-content" style="font-size:.88em;color:var(--text-secondary)"></div>
   </div>
 
   <div class="grid2">
@@ -3857,7 +3901,7 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Click a preset to instantly configure and launch a coordinated agent bundle. Then click <strong style="color:var(--gold)">Send Bundle to Swarm</strong> to deploy.</p>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px">
-      <button onclick="applyAgentPreset('business_automator')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(16,185,129,.06));border:1px solid rgba(16,185,129,.3);border-radius:12px;color:#34d399;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(16,185,129,.6)';this.style.background='linear-gradient(135deg,rgba(16,185,129,.2),rgba(16,185,129,.1))'" onmouseleave="this.style.borderColor='rgba(16,185,129,.3)';this.style.background='linear-gradient(135deg,rgba(16,185,129,.12),rgba(16,185,129,.06))'">
+      <button onclick="applyAgentPreset('business_automator')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🏢</span>
         <span style="font-weight:700;font-size:.9em">Business Automator</span>
         <span style="font-size:.74em;color:var(--text-muted)">Automate ops, admin & scheduling</span>
@@ -3867,32 +3911,32 @@ INDEX_HTML = r"""<!doctype html>
         <span style="font-weight:700;font-size:.9em">Money Printer</span>
         <span style="font-size:.74em;color:var(--text-muted)">Revenue, upsells & monetization</span>
       </button>
-      <button onclick="applyAgentPreset('research_team')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(99,102,241,.06));border:1px solid rgba(99,102,241,.3);border-radius:12px;color:#818cf8;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(99,102,241,.6)';this.style.background='linear-gradient(135deg,rgba(99,102,241,.2),rgba(99,102,241,.1))'" onmouseleave="this.style.borderColor='rgba(99,102,241,.3)';this.style.background='linear-gradient(135deg,rgba(99,102,241,.12),rgba(99,102,241,.06))'">
+      <button onclick="applyAgentPreset('research_team')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🔬</span>
         <span style="font-weight:700;font-size:.9em">Research Team</span>
         <span style="font-size:.74em;color:var(--text-muted)">Deep research & competitive intel</span>
       </button>
-      <button onclick="applyAgentPreset('lead_gen_swarm')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(239,68,68,.12),rgba(239,68,68,.06));border:1px solid rgba(239,68,68,.3);border-radius:12px;color:#f87171;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(239,68,68,.6)';this.style.background='linear-gradient(135deg,rgba(239,68,68,.2),rgba(239,68,68,.1))'" onmouseleave="this.style.borderColor='rgba(239,68,68,.3)';this.style.background='linear-gradient(135deg,rgba(239,68,68,.12),rgba(239,68,68,.06))'">
+      <button onclick="applyAgentPreset('lead_gen_swarm')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🎯</span>
         <span style="font-weight:700;font-size:.9em">Lead Generation Swarm</span>
         <span style="font-size:.74em;color:var(--text-muted)">Hunt, score & convert leads</span>
       </button>
-      <button onclick="applyAgentPreset('content_empire')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(236,72,153,.12),rgba(236,72,153,.06));border:1px solid rgba(236,72,153,.3);border-radius:12px;color:#f472b6;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(236,72,153,.6)';this.style.background='linear-gradient(135deg,rgba(236,72,153,.2),rgba(236,72,153,.1))'" onmouseleave="this.style.borderColor='rgba(236,72,153,.3)';this.style.background='linear-gradient(135deg,rgba(236,72,153,.12),rgba(236,72,153,.06))'">
+      <button onclick="applyAgentPreset('content_empire')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">✍️</span>
         <span style="font-weight:700;font-size:.9em">Content Empire</span>
         <span style="font-size:.74em;color:var(--text-muted)">Content, SEO & brand building</span>
       </button>
-      <button onclick="applyAgentPreset('ecom_powerhouse')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(251,146,60,.12),rgba(251,146,60,.06));border:1px solid rgba(251,146,60,.3);border-radius:12px;color:#fb923c;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(251,146,60,.6)';this.style.background='linear-gradient(135deg,rgba(251,146,60,.2),rgba(251,146,60,.1))'" onmouseleave="this.style.borderColor='rgba(251,146,60,.3)';this.style.background='linear-gradient(135deg,rgba(251,146,60,.12),rgba(251,146,60,.06))'">
+      <button onclick="applyAgentPreset('ecom_powerhouse')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🛒</span>
         <span style="font-weight:700;font-size:.9em">E-com Powerhouse</span>
         <span style="font-size:.74em;color:var(--text-muted)">Orders, inventory & fulfillment</span>
       </button>
-      <button onclick="applyAgentPreset('outreach_machine')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(0,240,255,.12),rgba(0,240,255,.06));border:1px solid rgba(0,240,255,.3);border-radius:12px;color:#00f0ff;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(0,240,255,.6)';this.style.background='linear-gradient(135deg,rgba(0,240,255,.2),rgba(0,240,255,.1))'" onmouseleave="this.style.borderColor='rgba(0,240,255,.3)';this.style.background='linear-gradient(135deg,rgba(0,240,255,.12),rgba(0,240,255,.06))'">
+      <button onclick="applyAgentPreset('outreach_machine')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">📣</span>
         <span style="font-weight:700;font-size:.9em">Outreach Machine</span>
         <span style="font-size:.74em;color:var(--text-muted)">Email, calls & social DMs</span>
       </button>
-      <button onclick="applyAgentPreset('analytics_squad')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(52,211,153,.12),rgba(52,211,153,.06));border:1px solid rgba(52,211,153,.3);border-radius:12px;color:#34d399;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(52,211,153,.6)';this.style.background='linear-gradient(135deg,rgba(52,211,153,.2),rgba(52,211,153,.1))'" onmouseleave="this.style.borderColor='rgba(52,211,153,.3)';this.style.background='linear-gradient(135deg,rgba(52,211,153,.12),rgba(52,211,153,.06))'">
+      <button onclick="applyAgentPreset('analytics_squad')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">📊</span>
         <span style="font-weight:700;font-size:.9em">Analytics Squad</span>
         <span style="font-size:.74em;color:var(--text-muted)">Reports, KPIs & insights</span>
@@ -7126,6 +7170,7 @@ async function loadDashboard() {
   if (!d || d.error || !Array.isArray(d.agents)) {
     animateCount('stat-running', 0);
     animateCount('stat-total', 0);
+    animateCount('stat-offline', 0);
     document.getElementById('header-sub').textContent = 'System offline';
     const healthBar = document.getElementById('health-bar');
     const sysRing = document.getElementById('sys-ring');
@@ -7143,15 +7188,23 @@ async function loadDashboard() {
   const agents = normalizeAgents(d);
   const running = agents.filter(a => a.running).length;
   const total = agents.length;
+  const offline = total - running;
 
   // Animate stat numbers
   animateCount('stat-running', running);
   animateCount('stat-total', total);
+  animateCount('stat-offline', offline);
+  // Update SYSTEM ONLINE banner
+  const ovBannerMode = document.getElementById('ov-banner-mode');
+  const ovBannerAgents = document.getElementById('ov-banner-agents');
+  if (ovBannerMode && d.mode) ovBannerMode.textContent = d.mode.toUpperCase() + ' MODE';
+  if (ovBannerAgents) ovBannerAgents.textContent = `${running} / ${total} Agents Active`;
   const modeCapacity = {starter: 3, business: 15, power: 73};
   const capacity = modeCapacity[d.mode] || total;
   const totalSubEl = document.getElementById('stat-total-sub');
   if (totalSubEl && d.mode) totalSubEl.textContent = `${d.mode} mode · ${capacity} max`;
-  const modeLabel = d.mode ? ` · ${d.mode}` : '';
+  const offlineSubEl = document.getElementById('stat-offline-sub');
+  if (offlineSubEl) offlineSubEl.textContent = total > 0 ? (offline > 0 ? `${Math.round(offline/total*100)}% idle` : 'All running ✓') : '';
   const modeColors = {starter:'#34d399',business:'#D4AF37',power:'#c084fc'};
   const mc = modeColors[d.mode] || 'var(--gold)';
   document.getElementById('header-sub').innerHTML =
@@ -7183,8 +7236,10 @@ async function loadDashboard() {
 
   // Uptime
   const secs = Math.floor((Date.now() - _startTime) / 1000);
-  document.getElementById('stat-uptime').textContent =
-    secs < 60 ? secs + 's' : secs < 3600 ? Math.floor(secs/60) + 'm' : Math.floor(secs/3600) + 'h';
+  const uptimeStr = secs < 60 ? secs + 's' : secs < 3600 ? Math.floor(secs/60) + 'm' : Math.floor(secs/3600) + 'h';
+  document.getElementById('stat-uptime').textContent = uptimeStr;
+  const ovBannerUptime = document.getElementById('ov-banner-uptime');
+  if (ovBannerUptime) ovBannerUptime.textContent = 'Uptime: ' + uptimeStr;
 
   // Gateway status (try to ping)
   fetch('http://localhost:18789', {mode:'no-cors',signal:AbortSignal.timeout(1500)})
@@ -13143,8 +13198,8 @@ async function loadMeetings() {
         ${m.summary?`<div style="color:#a78bfa;font-size:.78em;margin-top:3px">${escHtml(m.summary.slice(0,80))}…</div>`:''}
         <div style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="viewMeeting('${m.id}')">📋 View</button>
-          ${m.transcript?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#a78bfa" onclick="summarizeMeeting('${m.id}')">◈ Summarize</button>`:''}
-          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#10b981" onclick="generateMeetingFollowup('${m.id}')">📧 Follow-up</button>
+          ${m.transcript?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:var(--gold)" onclick="summarizeMeeting('${m.id}')">◈ Summarize</button>`:''}
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:var(--gold)" onclick="generateMeetingFollowup('${m.id}')">📧 Follow-up</button>
           <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteMeeting('${m.id}')">🗑</button>
         </div>
       </div>`).join('');
@@ -14609,7 +14664,7 @@ async function submitLogin() {
 /* named constants */
 const MAX_HEARTBEAT_LINES = 80;
 const MAX_CHAT_MESSAGES = 60;
-const MAX_AGENTS_TOTAL = 56; /* matches AGENTS_BY_MODE power list */
+const MAX_AGENTS_TOTAL = 73; /* matches AGENTS_BY_MODE power list (unique non-infra agents) */
 
 document.addEventListener('DOMContentLoaded', () => {
   const passEl = document.getElementById('login-pass');
@@ -16447,7 +16502,7 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
       allowed = ", ".join(_available_agent_ids(mode))
       return (
         f"Only {len(_available_agent_ids(mode))} agents are available in {mode} mode: {allowed}. "
-        "Switch to power mode to run all 56 agents, or I can handle this with the current set."
+        "Switch to power mode to run all 73 agents, or I can handle this with the current set."
       )
     if not _agent_allowed_in_mode(routed_agent, mode):
       return (
