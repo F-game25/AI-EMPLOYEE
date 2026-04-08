@@ -20,6 +20,7 @@ The brain also runs a background thread that:
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 import time
@@ -207,6 +208,9 @@ class Brain:
         self._model_path.parent.mkdir(parents=True, exist_ok=True)
         self.load()
 
+        # ── Model lock (serialises get_action / learn across threads) ─────────
+        self._model_lock = threading.RLock()
+
         # ── Background thread ─────────────────────────────────────────────────
         self._stop_event   = threading.Event()
         self._bg_thread: Optional[threading.Thread] = None
@@ -245,7 +249,8 @@ class Brain:
         if state.dim() == 1:
             state = state.unsqueeze(0)
         state = state.float().to(self.device)
-        action_t, conf_t = self.model.predict(state)
+        with self._model_lock:
+            action_t, conf_t = self.model.predict(state)
         action     = int(action_t[0].item())
         confidence = float(conf_t[0].item())
         logger.debug("get_action → %d (conf=%.4f)", action, confidence)
@@ -274,9 +279,15 @@ class Brain:
         if next_state.dim() > 1:
             next_state = next_state.squeeze(0)
 
-        self.replay_buffer.push(state.float(), action, float(reward), next_state.float())
-        self.reward_window.append(float(reward))
-        self.last_reward  = float(reward)
+        # Sanitize reward — NaN/Inf values would corrupt loss computation
+        reward_f = float(reward)
+        if not math.isfinite(reward_f):
+            logger.warning("store_experience: non-finite reward %s replaced with 0.0", reward_f)
+            reward_f = 0.0
+
+        self.replay_buffer.push(state.float(), action, reward_f, next_state.float())
+        self.reward_window.append(reward_f)
+        self.last_reward  = reward_f
         self.experience_count += 1
 
         if (
@@ -302,29 +313,30 @@ class Brain:
         rewards     = rewards.to(self.device)
         is_weights  = is_weights.to(self.device)
 
-        # ── Reward-weighted cross-entropy ─────────────────────────────────────
-        self.model.train()
-        logits = self.model(states)                            # (B, output_size)
+        with self._model_lock:
+            # ── Reward-weighted cross-entropy ─────────────────────────────────
+            self.model.train()
+            logits = self.model(states)                            # (B, output_size)
 
-        per_sample_loss = nn.functional.cross_entropy(
-            logits, actions, reduction="none"
-        )                                                      # (B,)
+            per_sample_loss = nn.functional.cross_entropy(
+                logits, actions, reduction="none"
+            )                                                      # (B,)
 
-        # Shift rewards to [0, 1]: −1→0, 0→0.5, +1→1
-        reward_weights = (rewards + 1.0) / 2.0
-        loss = (per_sample_loss * reward_weights * is_weights).mean()
+            # Shift rewards to [0, 1]: −1→0, 0→0.5, +1→1
+            reward_weights = (rewards + 1.0) / 2.0
+            loss = (per_sample_loss * reward_weights * is_weights).mean()
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-        self.optimizer.step()
+            self.optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            self.optimizer.step()
 
-        loss_val = float(loss.item())
-        self.scheduler.step(loss_val)
-        self.last_loss = loss_val
-        self.loss_history.append(loss_val)
+            loss_val = float(loss.item())
+            self.scheduler.step(loss_val)
+            self.last_loss = loss_val
+            self.loss_history.append(loss_val)
 
-        # Update priorities with TD errors
+        # Update priorities with TD errors (outside model lock — buffer has its own lock)
         with torch.no_grad():
             td_errors = per_sample_loss.detach().cpu()
         self.replay_buffer.update_priorities(indices, td_errors)
