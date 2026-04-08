@@ -260,8 +260,8 @@ class NeuralNetworkAgent:
         ce_loss = nn.functional.cross_entropy(logits, actions, reduction="none")  # (B,)
 
         # Shift rewards to [0, 1] for a stable weighting signal
-        weights = (rewards + 1.0) / 2.0                  # −1→0, 0→0.5, +1→1
-        loss = (ce_loss * weights).mean()
+        reward_weights = (rewards + 1.0) / 2.0                  # −1→0, 0→0.5, +1→1
+        loss = (ce_loss * reward_weights).mean()
 
         self.optimizer.zero_grad()
         loss.backward()
