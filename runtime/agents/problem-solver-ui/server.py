@@ -1794,11 +1794,11 @@ INDEX_HTML = r"""<!doctype html>
     .tab-content{display:none;width:100%;box-sizing:border-box}
     .tab-content.active{
       display:block;width:100%;
-      animation:tabReveal .38s cubic-bezier(.4,0,.2,1);
+      animation:tabReveal .4s cubic-bezier(.4,0,.2,1);
     }
     .tab-content.tab-leaving{
       display:block;width:100%;pointer-events:none;
-      animation:tabLeave .22s cubic-bezier(.4,0,.2,1) forwards;
+      animation:tabLeave .2s cubic-bezier(.4,0,.2,1) forwards;
     }
     @keyframes tabReveal{
       0%{opacity:0;transform:translateY(14px) scale(.993)}
@@ -1824,7 +1824,7 @@ INDEX_HTML = r"""<!doctype html>
 
     /* ── Tab panels ── */
     .tab-content{display:none;width:100%;box-sizing:border-box}
-    .tab-content.active{display:block;animation:tabReveal .38s cubic-bezier(.4,0,.2,1);width:100%}
+    .tab-content.active{display:block;animation:tabReveal .4s cubic-bezier(.4,0,.2,1);width:100%}
 
     /* ── Tab page headers ── */
     .page-header{
@@ -7030,6 +7030,10 @@ function _renderDashAgentMap(agents, statusData) {
 let currentTab = 'dashboard';
 const _startTime = Date.now();
 
+/* Tab animation durations — must match CSS */
+const TAB_LEAVE_MS = 200;   /* matches tabLeave .2s */
+const TAB_ENTER_DELAY_MS = 80; /* stagger: let leave start before enter */
+
 function switchToChatTab() {
   const btn = document.getElementById('nav-btn-chat');
   if (btn) btn.click();
@@ -7063,9 +7067,10 @@ document.addEventListener('DOMContentLoaded', function() {
 function _switchTabBase(tab, btn) {
   // Animate out current active tab
   const prevTab = document.querySelector('.tab-content.active');
-  if (prevTab && prevTab.id !== 'tab-' + tab) {
+  const isNewTab = prevTab && prevTab.id !== 'tab-' + tab;
+  if (isNewTab) {
     prevTab.classList.add('tab-leaving');
-    setTimeout(() => { prevTab.classList.remove('active', 'tab-leaving'); }, 220);
+    setTimeout(() => { prevTab.classList.remove('active', 'tab-leaving'); }, TAB_LEAVE_MS);
   } else {
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   }
@@ -7075,7 +7080,7 @@ function _switchTabBase(tab, btn) {
   setTimeout(() => {
     const tabEl = document.getElementById('tab-' + tab);
     if (tabEl) tabEl.classList.add('active');
-  }, prevTab && prevTab.id !== 'tab-' + tab ? 80 : 0);
+  }, isNewTab ? TAB_ENTER_DELAY_MS : 0);
   if (btn && btn.classList) {
     btn.classList.add('active');
     btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
