@@ -156,7 +156,6 @@ export default function ChatPanel() {
           autoComplete="off"
           className="flex-1 font-mono text-xs outline-none bg-transparent min-w-0"
           style={{ color: 'var(--text-primary)', caretColor: 'var(--gold)' }}
-          aria-label="Command input"
         />
         <motion.button
           whileHover={{ scale: 1.05 }}
