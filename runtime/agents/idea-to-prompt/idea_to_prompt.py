@@ -200,6 +200,4 @@ def _parse_ai_response(raw: str, idea: str) -> tuple[str, str]:
         else:
             prompt_lines.append(line)
     prompt_text = "\n".join(prompt_lines).strip()
-    if not prompt_text:
-        prompt_text = raw.strip()
     return prompt_text, title
