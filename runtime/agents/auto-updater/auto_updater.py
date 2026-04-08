@@ -60,7 +60,7 @@ logging.basicConfig(
 logger = logging.getLogger("updater")
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
-_GH_HEADERS: dict = {
+_GH_HEADERS: dict[str, str] = {
     "Accept":     "application/vnd.github.v3+json",
     "User-Agent": "ai-employee-updater/2.0",
 }
@@ -122,7 +122,10 @@ def _download_raw(repo_path: str, dest: Path) -> bool:
 # ── State helpers ─────────────────────────────────────────────────────────────
 
 # Fields that must never be persisted to the on-disk state file
-_STATE_SENSITIVE_KEYS = frozenset({"token", "api_key", "secret", "password"})
+_STATE_SENSITIVE_KEYS = frozenset({
+    "token", "api_key", "secret", "password",
+    "github_token", "auth_token", "bearer_token", "access_token",
+})
 
 
 def _save_state(data: dict) -> None:
