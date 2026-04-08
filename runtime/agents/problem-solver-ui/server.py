@@ -3194,6 +3194,7 @@ INDEX_HTML = r"""<!doctype html>
 <div class="sub-nav" id="subnav-power">
   <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn">⚡ BLACKLIGHT</button>
   <button onclick="switchTab('ascend',this)" id="nav-ascend-btn">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('neural-brain',this)" id="nav-neural-brain-btn">🧠 Neural Brain</button>
   <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
   <button onclick="switchTab('crm',this)">🎯 CRM</button>
   <button onclick="switchTab('email-marketing',this)">📧 Email Mktg</button>
@@ -7006,6 +7007,159 @@ function _renderDashAgentMap(agents, statusData) {
       </div>
     </div>
   </div>
+</div>
+
+<!-- ── Neural Brain ── -->
+<div id="tab-neural-brain" class="tab-content" style="width:100%;box-sizing:border-box">
+
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#050812 0%,#0a0d1e 60%,#050a18 100%);border:1px solid rgba(212,175,55,.55);border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(212,175,55,.12),0 8px 32px rgba(0,0,0,.8)">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(212,175,55,.14) 0%,transparent 60%);pointer-events:none"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(212,175,55,.9),transparent)"></div>
+    <div style="font-size:2.6rem;line-height:1;animation:brainPulse 3s ease-in-out infinite;position:relative;z-index:1">🧠</div>
+    <div style="flex:1;position:relative;z-index:1">
+      <div style="font-size:1.3rem;font-weight:800;letter-spacing:.08em;background:linear-gradient(135deg,#fff 30%,var(--gold-light) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;text-shadow:none">NEURAL BRAIN</div>
+      <div style="font-size:.83em;color:rgba(212,175,55,.8);margin-top:3px;font-weight:500">Central intelligence core — every agent decision routes through this brain in real time</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:18px;position:relative;z-index:1;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div id="brain-mode-dot" style="width:10px;height:10px;border-radius:50%;background:#6b7280;transition:background .4s,box-shadow .4s"></div>
+        <span id="brain-mode-label" style="font-size:.82em;color:rgba(212,175,55,.8);font-weight:700;letter-spacing:.05em">LOADING</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div id="brain-bg-dot" style="width:10px;height:10px;border-radius:50%;background:#6b7280;transition:background .4s"></div>
+        <span id="brain-bg-label" style="font-size:.82em;color:var(--text-secondary);font-weight:600">BG LOOP</span>
+      </div>
+    </div>
+  </div>
+  <style>
+  @keyframes brainPulse{0%,100%{filter:drop-shadow(0 0 6px rgba(212,175,55,.5))}50%{filter:drop-shadow(0 0 22px rgba(212,175,55,.9))}}
+  .bn-stat-card{background:linear-gradient(135deg,rgba(212,175,55,.06),rgba(212,175,55,.03));border:1px solid rgba(212,175,55,.2);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s;position:relative;overflow:hidden}
+  .bn-stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(212,175,55,.3),transparent)}
+  .bn-stat-card:hover{border-color:rgba(212,175,55,.5);box-shadow:0 0 20px rgba(212,175,55,.1);transform:translateY(-2px)}
+  .bn-stat-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1em;flex-shrink:0}
+  .bn-btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.3);border-radius:8px;color:var(--gold);font-size:.82em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s;letter-spacing:.03em;white-space:nowrap}
+  .bn-btn:hover{background:rgba(212,175,55,.16);border-color:rgba(212,175,55,.6);box-shadow:0 0 16px rgba(212,175,55,.2);transform:translateY(-1px)}
+  .bn-btn:active{transform:translateY(0)}
+  .bn-btn.danger{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.3);color:#f87171}
+  .bn-btn.danger:hover{background:rgba(239,68,68,.18);border-color:rgba(239,68,68,.6);box-shadow:0 0 16px rgba(239,68,68,.2)}
+  .bn-btn.green{background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3);color:#34d399}
+  .bn-btn.green:hover{background:rgba(16,185,129,.18);border-color:rgba(16,185,129,.6);box-shadow:0 0 16px rgba(16,185,129,.2)}
+  .bn-chart-bar{display:inline-block;width:5px;border-radius:3px 3px 0 0;background:var(--gold);opacity:.75;transition:height .3s ease,opacity .3s;flex-shrink:0;align-self:flex-end;min-height:2px}
+  </style>
+
+  <!-- Stat cards row -->
+  <div class="grid-stat" id="brain-stat-grid" style="margin-bottom:18px">
+    <div class="bn-stat-card">
+      <div class="bn-stat-icon" style="background:rgba(212,175,55,.12)">🎓</div>
+      <div class="stat-body"><div class="val" id="bn-learn-steps" style="color:var(--gold)">—</div><div class="lbl">Learn Steps</div></div>
+    </div>
+    <div class="bn-stat-card">
+      <div class="bn-stat-icon" style="background:rgba(99,102,241,.12)">📊</div>
+      <div class="stat-body"><div class="val" id="bn-experiences" style="color:#818cf8">—</div><div class="lbl">Experiences</div></div>
+    </div>
+    <div class="bn-stat-card">
+      <div class="bn-stat-icon" style="background:rgba(16,185,129,.12)">🗄️</div>
+      <div class="stat-body"><div class="val" id="bn-buffer" style="color:#34d399">—</div><div class="lbl">Buffer Size</div></div>
+    </div>
+    <div class="bn-stat-card">
+      <div class="bn-stat-icon" style="background:rgba(251,191,36,.12)">⭐</div>
+      <div class="stat-body"><div class="val" id="bn-avg-reward" style="color:#fbbf24">—</div><div class="lbl">Avg Reward</div></div>
+    </div>
+    <div class="bn-stat-card">
+      <div class="bn-stat-icon" style="background:rgba(244,63,94,.12)">📉</div>
+      <div class="stat-body"><div class="val" id="bn-last-loss" style="color:#fb7185">—</div><div class="lbl">Last Loss</div></div>
+    </div>
+    <div class="bn-stat-card">
+      <div class="bn-stat-icon" style="background:rgba(34,211,238,.12)">⚡</div>
+      <div class="stat-body"><div class="val" id="bn-lr" style="color:#22d3ee;font-size:1em">—</div><div class="lbl">Learning Rate</div></div>
+    </div>
+  </div>
+
+  <!-- Charts row -->
+  <div class="grid2" style="margin-bottom:18px">
+
+    <!-- Loss chart -->
+    <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.04),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📉</span> Live Loss History</div>
+        <span id="bn-loss-latest" style="font-size:.8em;color:var(--text-secondary);font-family:var(--mono)">—</span>
+      </div>
+      <div id="bn-loss-chart" style="height:90px;display:flex;align-items:flex-end;gap:2px;overflow:hidden;padding:4px 0 0">
+        <span style="color:var(--text-secondary);font-size:.8em;align-self:center;width:100%;text-align:center">Waiting for learn steps…</span>
+      </div>
+    </div>
+
+    <!-- Reward chart -->
+    <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.04),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">📈</span> Avg Reward History</div>
+        <span id="bn-reward-latest" style="font-size:.8em;color:var(--text-secondary);font-family:var(--mono)">—</span>
+      </div>
+      <div id="bn-reward-chart" style="height:90px;display:flex;align-items:flex-end;gap:2px;overflow:hidden;padding:4px 0 0">
+        <span style="color:var(--text-secondary);font-size:.8em;align-self:center;width:100%;text-align:center">Waiting for experiences…</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Controls + Model info row -->
+  <div class="grid2" style="margin-bottom:18px">
+
+    <!-- Controls card -->
+    <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.05),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🕹️</span> Brain Controls</div>
+        <button class="bn-btn" onclick="brainRefresh()" title="Refresh all stats">↻ Refresh</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">
+        <button class="bn-btn green" onclick="brainLearn()">🎓 Manual Learn</button>
+        <button class="bn-btn" onclick="brainForceOffline()">🔌 Force Offline Learn</button>
+        <button class="bn-btn" onclick="brainSave()">💾 Save Model</button>
+        <button class="bn-btn danger" onclick="brainClear()">🗑️ Clear Buffer</button>
+      </div>
+      <div id="brain-action-msg" style="margin-top:12px;font-size:.82em;min-height:20px;color:var(--text-secondary)"></div>
+
+      <!-- Auto-poll toggle -->
+      <div style="margin-top:16px;display:flex;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:14px">
+        <label class="toggle" style="width:44px;height:24px" title="Auto-refresh brain stats every 5s">
+          <input type="checkbox" id="brain-autopoll" onchange="brainToggleAutopoll(this.checked)"/>
+          <span class="slider" style="border-radius:24px"></span>
+        </label>
+        <span style="font-size:.82em;color:var(--text-secondary);font-weight:600">Auto-refresh every 5s</span>
+        <span id="brain-poll-indicator" style="display:none;font-size:.75em;color:var(--gold);animation:blink 2s infinite">● LIVE</span>
+      </div>
+    </div>
+
+    <!-- Model info card -->
+    <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.04),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">⚙️</span> Model Configuration</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:.83em">
+        <div><span style="color:var(--text-secondary)">Device</span><br><span id="bn-device" style="color:var(--gold);font-family:var(--mono);font-weight:700">—</span></div>
+        <div><span style="color:var(--text-secondary)">Input Size</span><br><span id="bn-input-size" style="color:var(--text);font-family:var(--mono)">—</span></div>
+        <div><span style="color:var(--text-secondary)">Output Size</span><br><span id="bn-output-size" style="color:var(--text);font-family:var(--mono)">—</span></div>
+        <div><span style="color:var(--text-secondary)">Hidden Layers</span><br><span id="bn-hidden" style="color:var(--text);font-family:var(--mono)">—</span></div>
+        <div><span style="color:var(--text-secondary)">Batch Size</span><br><span id="bn-batch" style="color:var(--text);font-family:var(--mono)">—</span></div>
+        <div><span style="color:var(--text-secondary)">Update Freq</span><br><span id="bn-update-freq" style="color:var(--text);font-family:var(--mono)">—</span></div>
+        <div style="grid-column:span 2"><span style="color:var(--text-secondary)">Model Path</span><br><span id="bn-model-path" style="color:var(--text-secondary);font-family:var(--mono);font-size:.9em;word-break:break-all">—</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Activity log -->
+  <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.04),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📡</span> Brain Activity Log</div>
+      <button class="btn btn-ghost btn-sm" onclick="brainLoadLog()">↻ Refresh</button>
+    </div>
+    <div id="brain-log" style="font-family:var(--mono);font-size:.77em;background:rgba(0,0,0,.7);border:1px solid rgba(212,175,55,.12);border-radius:8px;padding:14px;height:260px;overflow-y:auto;color:rgba(212,175,55,.7);line-height:1.7;box-shadow:inset 0 0 30px rgba(212,175,55,.04)">
+      <span style="color:var(--text-secondary)">Loading brain log…</span>
+    </div>
+  </div>
+
 </div>
 
 </main>
@@ -13027,6 +13181,7 @@ function switchTab(tab, btn) {
       if (d.grade) { document.getElementById('hc-report-card').style.display=''; document.getElementById('hc-latest-msg').style.display='none'; runHealthCheck && null; }
     }),
     'export': () => { loadExportModules(); loadBackupsList(); },
+    'neural-brain': () => { brainLoad(); brainLoadLog(); },
   };
   if (loaders[tab]) { try { loaders[tab](); } catch(e) {} }
 }
@@ -15231,6 +15386,221 @@ document.addEventListener('DOMContentLoaded', () => {
   /* ensure body starts in boot state */
   document.body.classList.add('state-boot');
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// Neural Brain live dashboard
+// ═══════════════════════════════════════════════════════════════════
+
+(function() {
+
+// ── private state ──────────────────────────────────────────────────
+const _BN = {
+  lossHistory:   [],
+  rewardHistory: [],
+  pollTimer:     null,
+};
+
+// ── tiny bar-chart renderer ────────────────────────────────────────
+function _renderChart(containerId, values, color) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!values || values.length === 0) {
+    el.innerHTML = '<span style="color:var(--text-secondary);font-size:.8em;align-self:center;width:100%;text-align:center">No data yet…</span>';
+    return;
+  }
+  const H = 82;
+  const max = Math.max(...values, 0.001);
+  const min = Math.min(...values, 0);
+  const range = max - min || 0.001;
+  const visible = values.slice(-80);
+  el.innerHTML = '';
+  el.style.display = 'flex';
+  el.style.alignItems = 'flex-end';
+  el.style.gap = '2px';
+  visible.forEach(v => {
+    const pct = Math.max(0.02, (v - min) / range);
+    const bar = document.createElement('div');
+    bar.className = 'bn-chart-bar';
+    bar.style.height = Math.round(pct * H) + 'px';
+    bar.style.background = color;
+    bar.style.flexGrow = '1';
+    bar.style.maxWidth = '12px';
+    el.appendChild(bar);
+  });
+}
+
+// ── helpers ────────────────────────────────────────────────────────
+function _setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+function _setMsg(msg, cls) {
+  const el = document.getElementById('brain-action-msg');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = cls === 'ok' ? '#34d399' : cls === 'err' ? '#f87171' : 'var(--text-secondary)';
+}
+
+// ── core status loader ─────────────────────────────────────────────
+window.brainLoad = async function() {
+  try {
+    const s = await api('/api/brain/status');
+
+    // Mode / connectivity badges
+    const modeDot = document.getElementById('brain-mode-dot');
+    const modeLabel = document.getElementById('brain-mode-label');
+    const bgDot = document.getElementById('brain-bg-dot');
+    if (modeDot && modeLabel) {
+      const online = s.is_online;
+      modeDot.style.background   = online ? 'var(--success)' : '#f59e0b';
+      modeDot.style.boxShadow    = online ? '0 0 8px var(--success)' : '0 0 8px #f59e0b';
+      modeLabel.textContent      = online ? 'ONLINE' : 'OFFLINE';
+      modeLabel.style.color      = online ? 'var(--success)' : '#f59e0b';
+    }
+    if (bgDot) {
+      const running = s.bg_running;
+      bgDot.style.background  = running ? 'var(--success)' : '#6b7280';
+      bgDot.style.boxShadow   = running ? '0 0 6px var(--success)' : 'none';
+    }
+    _setText('brain-bg-label', s.bg_running ? 'BG LOOP ●' : 'BG LOOP ○');
+
+    // Stat values
+    _setText('bn-learn-steps',  s.learn_step !== undefined ? s.learn_step.toLocaleString() : '—');
+    _setText('bn-experiences',  s.experience_count !== undefined ? s.experience_count.toLocaleString() : '—');
+    const bufText = s.buffer_size !== undefined ? `${s.buffer_size.toLocaleString()} / ${(s.buffer_capacity||0).toLocaleString()}` : '—';
+    _setText('bn-buffer', bufText);
+    _setText('bn-avg-reward',   s.avg_reward !== undefined ? s.avg_reward.toFixed(4) : '—');
+    _setText('bn-last-loss',    s.last_loss  !== undefined ? s.last_loss.toFixed(5)  : '—');
+    _setText('bn-lr',           s.lr         !== undefined ? s.lr.toExponential(2)   : '—');
+
+    // Model config
+    _setText('bn-device',       (s.device || '—').toUpperCase());
+    _setText('bn-input-size',   s.cfg_input_size  !== undefined ? s.cfg_input_size  : '—');
+    _setText('bn-output-size',  s.cfg_output_size !== undefined ? s.cfg_output_size : '—');
+    _setText('bn-hidden',       s.cfg_hidden || '—');
+    _setText('bn-batch',        s.cfg_batch_size  !== undefined ? s.cfg_batch_size  : '—');
+    _setText('bn-update-freq',  s.cfg_update_freq !== undefined ? s.cfg_update_freq : '—');
+    _setText('bn-model-path',   s.model_path || '—');
+
+    // Update rolling histories from server-side loss_history if available
+    if (Array.isArray(s.loss_history) && s.loss_history.length > 0) {
+      _BN.lossHistory = s.loss_history.slice(-120);
+    } else if (s.last_loss > 0) {
+      _BN.lossHistory.push(s.last_loss);
+      if (_BN.lossHistory.length > 120) _BN.lossHistory.shift();
+    }
+    if (s.avg_reward !== undefined) {
+      _BN.rewardHistory.push(s.avg_reward);
+      if (_BN.rewardHistory.length > 120) _BN.rewardHistory.shift();
+    }
+
+    // Render charts
+    const lossLatest = _BN.lossHistory.length ? _BN.lossHistory.slice(-1)[0].toFixed(5) : '—';
+    const rewLatest  = _BN.rewardHistory.length ? _BN.rewardHistory.slice(-1)[0].toFixed(4) : '—';
+    _setText('bn-loss-latest',   lossLatest);
+    _setText('bn-reward-latest', rewLatest);
+    _renderChart('bn-loss-chart',   _BN.lossHistory,   'rgba(251,113,133,.85)');
+    _renderChart('bn-reward-chart', _BN.rewardHistory, 'rgba(212,175,55,.85)');
+
+  } catch(e) {
+    _setText('brain-mode-label', 'ERROR');
+  }
+};
+
+// ── log loader ─────────────────────────────────────────────────────
+window.brainLoadLog = async function() {
+  const logEl = document.getElementById('brain-log');
+  if (!logEl) return;
+  try {
+    const r = await api('/api/brain/log?limit=80');
+    const lines = r.lines || [];
+    if (lines.length === 0) {
+      logEl.innerHTML = '<span style="color:var(--text-secondary)">No brain log entries yet.</span>';
+      return;
+    }
+    logEl.innerHTML = lines.map(l => {
+      // Colour-code log levels
+      const safe = l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if (/ERROR|CRITICAL/.test(safe)) return `<div style="color:#f87171">${safe}</div>`;
+      if (/WARNING/.test(safe))        return `<div style="color:#fbbf24">${safe}</div>`;
+      if (/smarter|↑/.test(safe))      return `<div style="color:#34d399;font-weight:600">${safe}</div>`;
+      if (/↓|regressed/.test(safe))    return `<div style="color:#f87171">${safe}</div>`;
+      return `<div>${safe}</div>`;
+    }).join('');
+    logEl.scrollTop = logEl.scrollHeight;
+  } catch(e) {
+    logEl.innerHTML = '<span style="color:#f87171">Failed to load log.</span>';
+  }
+};
+
+// ── convenience wrapper ────────────────────────────────────────────
+window.brainRefresh = async function() {
+  await brainLoad();
+  await brainLoadLog();
+  _setMsg('Refreshed ' + new Date().toLocaleTimeString(), 'info');
+};
+
+// ── control actions ────────────────────────────────────────────────
+window.brainLearn = async function() {
+  _setMsg('Triggering learn step…', 'info');
+  const r = await api('/api/brain/learn', {method:'POST'});
+  if (r.ok) {
+    _setMsg(`✓ Learn step ${r.learn_step} — loss: ${(r.loss||0).toFixed(5)}`, 'ok');
+    brainLoad();
+  } else {
+    _setMsg('✗ ' + (r.message || 'Learn failed'), 'err');
+  }
+};
+
+window.brainForceOffline = async function() {
+  _setMsg('Running offline learning…', 'info');
+  const r = await api('/api/brain/force-offline', {method:'POST'});
+  if (r.ok) {
+    _setMsg(`✓ Offline learn — ${r.collected} experiences collected, step ${r.learn_step}`, 'ok');
+    brainLoad();
+  } else {
+    _setMsg('✗ ' + (r.message || 'Offline learn failed'), 'err');
+  }
+};
+
+window.brainSave = async function() {
+  _setMsg('Saving model…', 'info');
+  const r = await api('/api/brain/save', {method:'POST'});
+  if (r.ok) {
+    _setMsg('✓ Model saved to ' + (r.path || 'disk'), 'ok');
+  } else {
+    _setMsg('✗ ' + (r.message || 'Save failed'), 'err');
+  }
+};
+
+window.brainClear = async function() {
+  if (!confirm('Clear the replay buffer? This cannot be undone.')) return;
+  const r = await api('/api/brain/clear', {method:'POST'});
+  if (r.ok) {
+    _BN.lossHistory = []; _BN.rewardHistory = [];
+    _setMsg('✓ Replay buffer cleared.', 'ok');
+    brainLoad();
+  } else {
+    _setMsg('✗ ' + (r.message || 'Clear failed'), 'err');
+  }
+};
+
+// ── auto-poll ──────────────────────────────────────────────────────
+window.brainToggleAutopoll = function(on) {
+  const indicator = document.getElementById('brain-poll-indicator');
+  if (on) {
+    if (indicator) indicator.style.display = '';
+    _BN.pollTimer = setInterval(() => {
+      // Only poll when the neural-brain tab is visible
+      const tab = document.getElementById('tab-neural-brain');
+      if (tab && tab.classList.contains('active')) {
+        brainLoad();
+      }
+    }, 5000);
+  } else {
+    if (indicator) indicator.style.display = 'none';
+    if (_BN.pollTimer) { clearInterval(_BN.pollTimer); _BN.pollTimer = null; }
+  }
+};
+
+})(); // end Neural Brain IIFE
 </script>
 </body>
 </html>"""
@@ -19213,7 +19583,138 @@ def blacklight_task_progress():
         return JSONResponse(dict(_bl_direct_task))
 
 
-# ── Agent bundle → swarm ──────────────────────────────────────────────────────
+# ── Neural Brain API ──────────────────────────────────────────────────────────
+
+_brain_mod = None
+_brain_mod_lock = threading.Lock()
+
+
+def _load_brain():
+    """Lazy-import and return the global Brain singleton.
+
+    Adds runtime/brain/ to sys.path the first time it's called so the import
+    works regardless of the working directory.  Returns None gracefully if
+    PyTorch is not installed or brain module cannot be loaded.
+    """
+    global _brain_mod
+    if _brain_mod is not None:
+        return _brain_mod
+    with _brain_mod_lock:
+        if _brain_mod is not None:
+            return _brain_mod
+        try:
+            _brain_dir = Path(__file__).resolve().parents[2] / "brain"
+            _runtime_dir = Path(__file__).resolve().parents[2]
+            for _d in [str(_runtime_dir), str(_brain_dir)]:
+                if _d not in sys.path:
+                    sys.path.insert(0, _d)
+            from brain.brain import get_brain  # noqa: PLC0415
+            _brain_mod = get_brain()
+        except Exception as exc:
+            logger.warning("Neural Brain unavailable: %s", exc)
+            return None
+    return _brain_mod
+
+
+def _brain_fallback_status() -> dict:
+    return {
+        "available": False, "learn_step": 0, "experience_count": 0,
+        "buffer_size": 0, "buffer_capacity": 0, "last_loss": 0.0,
+        "last_reward": 0.0, "avg_reward": 0.0, "device": "—",
+        "model_path": "—", "is_online": False, "bg_running": False, "lr": 0.0,
+    }
+
+
+@app.get("/api/brain/status")
+def brain_status():
+    """Return current Neural Brain stats (safe — never raises)."""
+    brain = _load_brain()
+    if brain is None:
+        return JSONResponse(_brain_fallback_status())
+    try:
+        s = brain.stats()
+        cfg = brain.cfg
+        s["available"] = True
+        s["cfg_input_size"]   = cfg["model"]["input_size"]
+        s["cfg_output_size"]  = cfg["model"]["output_size"]
+        s["cfg_hidden"]       = str(cfg["model"]["hidden_sizes"])
+        s["cfg_batch_size"]   = cfg["training"]["batch_size"]
+        s["cfg_update_freq"]  = cfg["training"]["update_frequency"]
+        return JSONResponse(s)
+    except Exception as exc:
+        logger.warning("brain status error: %s", exc)
+        return JSONResponse(_brain_fallback_status())
+
+
+@app.post("/api/brain/learn")
+def brain_learn(_auth: None = Depends(require_auth)):
+    """Trigger one manual learn step."""
+    brain = _load_brain()
+    if brain is None:
+        return JSONResponse({"ok": False, "message": "Brain not available"})
+    try:
+        loss = brain.learn()
+        return JSONResponse({"ok": True, "loss": loss, "learn_step": brain.learn_step})
+    except Exception as exc:
+        logger.error("brain learn error: %s", exc)
+        return JSONResponse({"ok": False, "message": "Learn step failed — check server logs"})
+def brain_save(_auth: None = Depends(require_auth)):
+    """Save brain model to disk."""
+    brain = _load_brain()
+    if brain is None:
+        return JSONResponse({"ok": False, "message": "Brain not available"})
+    try:
+        brain.save()
+        return JSONResponse({"ok": True, "path": str(brain._model_path)})
+    except Exception as exc:
+        logger.error("brain save error: %s", exc)
+        return JSONResponse({"ok": False, "message": "Save failed — check server logs"})
+
+
+@app.post("/api/brain/clear")
+def brain_clear(_auth: None = Depends(require_auth)):
+    """Clear the replay buffer."""
+    brain = _load_brain()
+    if brain is None:
+        return JSONResponse({"ok": False, "message": "Brain not available"})
+    try:
+        brain.replay_buffer.clear()
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        logger.error("brain clear error: %s", exc)
+        return JSONResponse({"ok": False, "message": "Clear failed — check server logs"})
+
+
+@app.post("/api/brain/force-offline")
+def brain_force_offline(_auth: None = Depends(require_auth)):
+    """Force-collect offline experiences and run a learn step."""
+    brain = _load_brain()
+    if brain is None:
+        return JSONResponse({"ok": False, "message": "Brain not available"})
+    try:
+        n = brain.force_offline_learn()
+        return JSONResponse({"ok": True, "collected": n, "learn_step": brain.learn_step})
+    except Exception as exc:
+        logger.error("brain force-offline error: %s", exc)
+        return JSONResponse({"ok": False, "message": "Offline learn failed — check server logs"})
+
+
+@app.get("/api/brain/log")
+def brain_log(limit: int = 60):
+    """Return recent brain log lines from the log file."""
+    try:
+        _log_file = Path.home() / ".ai-employee" / "logs" / "brain.log"
+        if not _log_file.exists():
+            return JSONResponse({"lines": []})
+        _limit = min(limit, 200)
+        raw = _log_file.read_text(errors="replace").splitlines()
+        return JSONResponse({"lines": raw[-_limit:]})
+    except Exception as exc:
+        logger.warning("brain log read error: %s", exc)
+        return JSONResponse({"lines": []})
+
+
+
 
 @app.post("/api/agents/bundle-swarm")
 def agents_bundle_swarm(payload: dict, _auth: None = Depends(require_auth)):
