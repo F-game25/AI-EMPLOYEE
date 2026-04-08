@@ -3543,7 +3543,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="input-wrap">
           <div class="input-prefix">&gt;_</div>
           <textarea id="chat-input" class="input-field" rows="2"
-            placeholder="Enter command for AI workforce…"
+            placeholder="Enter command or idea for AI workforce…"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
           <button class="send-btn" onclick="sendChat()">SEND</button>
         </div>
@@ -7807,9 +7807,81 @@ function updateChatModelBadge() {
 
 async function sendChat() {
   const input = document.getElementById('chat-input');
-  const q = input?.value?.trim();
+  let q = input?.value?.trim();
   if (!q) return;
   const route = document.getElementById('chat-model')?.value || 'auto';
+
+  // Auto-detect rough ideas and expand them silently before sending
+  if (_looksLikeIdea(q)) {
+    input.value = '';
+    const log = document.getElementById('chat-log');
+    const empty = document.getElementById('chat-empty');
+    if (empty) empty.style.display = 'none';
+    // Show the original idea as the user bubble
+    if (log) {
+      const userWrap = document.createElement('div');
+      userWrap.className = 'msg-wrap user';
+      userWrap.innerHTML = `<div class="msg-meta">
+          <div class="msg-avatar">\u203a</div>
+          <span class="msg-source">YOU</span>
+          <span class="msg-ts">${new Date().toTimeString().slice(0,8)}</span>
+        </div>
+        <div class="msg-bubble">${renderMarkdown(q)}</div>`;
+      log.appendChild(userWrap);
+      log.scrollTop = log.scrollHeight;
+    }
+    // Show "💡 Expanding idea…" indicator
+    const ideaId = 'idea-expand-' + Date.now();
+    if (log) {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg-wrap agent';
+      wrap.id = ideaId;
+      wrap.innerHTML = `<div class="msg-meta"><div class="msg-avatar">💡</div><span class="msg-source">AI-SYSTEM</span></div>
+        <div class="msg-thinking">
+          <span style="font-family:var(--mono);font-size:.72em;color:rgba(245,196,0,0.4)">EXPANDING IDEA</span>
+          <div class="think-dots"><div class="think-dot"></div><div class="think-dot"></div><div class="think-dot"></div></div>
+        </div>`;
+      log.appendChild(wrap);
+      log.scrollTop = log.scrollHeight;
+    }
+    if (typeof sysLog === 'function') sysLog('// IDEA: auto-expanding…');
+    try {
+      const r = await api('/api/idea/convert', {
+        method: 'POST',
+        body: JSON.stringify({ idea: q })
+      });
+      if (r && r.ok) {
+        q = r.prompt;
+        if (typeof sysLog === 'function') sysLog(`// IDEA: expanded via ${r.provider||'AI'}`, 'ok');
+      }
+    } catch(_) { /* fall through with original q */ }
+    document.getElementById(ideaId)?.remove();
+    // Now dispatch the (possibly expanded) prompt
+    const thinkId2 = 'thinking-' + Date.now();
+    if (log) {
+      const wrap2 = document.createElement('div');
+      wrap2.className = 'msg-wrap agent';
+      wrap2.id = thinkId2;
+      wrap2.innerHTML = `<div class="msg-meta"><div class="msg-avatar">\u25c8</div><span class="msg-source">AI-SYSTEM</span></div>
+        <div class="msg-thinking">
+          <span style="font-family:var(--mono);font-size:.72em;color:rgba(245,196,0,0.4)">PROCESSING</span>
+          <div class="think-dots"><div class="think-dot"></div><div class="think-dot"></div><div class="think-dot"></div></div>
+        </div>`;
+      log.appendChild(wrap2);
+      log.scrollTop = log.scrollHeight;
+    }
+    try {
+      await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:q,model_route:route})});
+      document.getElementById(thinkId2)?.remove();
+      if (typeof sysLog === 'function') sysLog('// RESPONSE RECEIVED','ok');
+      await loadChatLog();
+    } catch(e) {
+      document.getElementById(thinkId2)?.remove();
+      if (typeof sysLog === 'function') sysLog('// TRANSMIT ERROR','err');
+    }
+    return;
+  }
+
   input.value = '';
   const log = document.getElementById('chat-log');
   const empty = document.getElementById('chat-empty');
@@ -8631,6 +8703,34 @@ let _allAgents = [];          // full list from /api/agents
 let _autoSelectedIds = new Set(); // IDs suggested by auto-select
 let _selectedAgentIds = new Set(); // currently selected (user may adjust)
 let _taskMode = 'auto';       // 'auto' | 'parallel' | 'single'
+
+// ── Idea auto-detect: heuristic to identify raw ideas vs. commands ─────────────
+function _looksLikeIdea(text) {
+  const t = text.trim().toLowerCase();
+  // Short phrases that sound like intentions or wishes
+  const ideaStarters = [
+    /^i (want|need|wish|would like|plan|hope|am trying|am looking) to\b/,
+    /^i (have an? idea|have a concept|have a vision|have a plan|had an idea)\b/,
+    /^help me (build|create|make|start|launch|develop|grow|design)\b/,
+    /^(build|create|make|start|launch|develop|design|grow) (a|an|my)\b/,
+    /^(how (do i|can i|should i)|what('s| is) the best way to)\b/,
+    /^i want\b/,
+    /^(let'?s|we should) (build|create|make|start|launch)\b/,
+  ];
+  if (ideaStarters.some(r => r.test(t))) return true;
+  // No period, colon, numbered list, or URL — looks vague/conversational
+  const wordCount = t.split(/\s+/).length;
+  if (wordCount <= 20 && !/[.:\n]/.test(t) && !/https?:\/\//.test(t) && !/^\d+\./.test(t)) {
+    // Extra signal: at least one of these intent words
+    if (/\b(build|create|sell|launch|start|grow|develop|design|market|automate|improve)\b/.test(t)) return true;
+  }
+  return false;
+}
+
+// ── Idea Mode (legacy stubs — no-op) ─────────────────────────────────────────
+function toggleIdeaMode() {}
+function convertIdea() {}
+function convertChatIdea() {}
 
 function onTaskInputChange() {
   const v = document.getElementById('task-input').value.trim();
@@ -17003,6 +17103,90 @@ def list_tasks():
     """List all task plans (active and history)."""
     plans = _load_task_plans()
     return JSONResponse({"plans": plans[:20]})
+
+
+# ── Idea-to-Prompt Converter ──────────────────────────────────────────────────
+_idea_to_prompt_path = AI_HOME / "agents" / "idea-to-prompt"
+if str(_idea_to_prompt_path) not in sys.path:
+    sys.path.insert(0, str(_idea_to_prompt_path))
+
+try:
+    from idea_to_prompt import convert_idea as _convert_idea  # type: ignore
+    _IDEA_CONVERTER_AVAILABLE = True
+except ImportError:
+    _IDEA_CONVERTER_AVAILABLE = False
+
+
+@app.post("/api/idea/convert")
+async def convert_idea_to_prompt(payload: dict):
+    """Convert a rough idea into a structured, professional task prompt.
+
+    Accepts: {"idea": "<raw idea text>"}
+    Returns: {"ok": true, "prompt": "...", "title": "...", "original": "...", "provider": "..."}
+
+    This endpoint sits between the user's input and the orchestrator — it uses
+    the AI router to produce an efficient, actionable task description from
+    whatever the user typed.
+    """
+    idea = (payload.get("idea") or "").strip()
+    if not idea:
+        raise HTTPException(400, "idea required")
+    if len(idea) > 4000:
+        raise HTTPException(400, "idea too long (max 4000 characters)")
+
+    if _IDEA_CONVERTER_AVAILABLE:
+        result = await run_in_threadpool(_convert_idea, idea)
+    else:
+        # Inline fallback when the module is not on the path
+        result = _inline_convert_idea(idea)
+
+    if not result.get("ok"):
+        raise HTTPException(500, result.get("error", "conversion failed"))
+    return JSONResponse(result)
+
+
+def _inline_convert_idea(idea: str) -> dict:
+    """Inline fallback converter used when the idea-to-prompt module is unavailable."""
+    _SYSTEM = (
+        "You are an expert AI prompt engineer. Convert the rough idea below into a "
+        "clear, numbered, professional task description an AI orchestrator can execute. "
+        "End with a line: TITLE: <short title>. Output ONLY the task description and title."
+    )
+    prompt_text = ""
+    provider = "fallback"
+    title = idea[:60].strip()
+
+    if _AI_ROUTER_AVAILABLE:
+        try:
+            res = _query_ai_for_agent(
+                "reasoning",
+                f"Convert this idea into a structured AI task:\n\n{idea}",
+                _SYSTEM,
+            )
+            raw = (res.get("content") or res.get("answer") or res.get("text") or "").strip()
+            if raw:
+                lines = []
+                for line in raw.splitlines():
+                    if line.strip().upper().startswith("TITLE:"):
+                        title = line.strip()[6:].strip() or title
+                    else:
+                        lines.append(line)
+                prompt_text = "\n".join(lines).strip()
+                provider = res.get("provider", "ai")
+        except Exception:
+            pass
+
+    if not prompt_text:
+        prompt_text = (
+            f"Goal: {idea}\n\n"
+            "1. Research and analyse the current state of the topic.\n"
+            "2. Identify the key actions needed to achieve the goal.\n"
+            "3. Create a detailed action plan with clear milestones.\n"
+            "4. Execute each step and document the outcomes.\n"
+            "5. Review results against success criteria and iterate.\n"
+        )
+
+    return {"ok": True, "prompt": prompt_text, "title": title, "original": idea, "provider": provider}
 
 
 @app.get("/api/task/status/{task_id}")
