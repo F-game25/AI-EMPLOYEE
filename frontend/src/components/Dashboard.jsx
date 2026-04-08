@@ -9,9 +9,9 @@ import { useAppStore } from '../store/appStore'
 export default function Dashboard() {
   const setAgents = useAppStore(s => s.setAgents)
 
-  // Fetch initial agents
+  // Fetch initial agents via relative URL (proxied to backend in dev)
   useEffect(() => {
-    fetch('http://localhost:3001/agents')
+    fetch(`http://${window.location.hostname}:3001/agents`)
       .then(r => r.json())
       .then(d => d.agents && setAgents(d.agents))
       .catch(() => {})
@@ -24,7 +24,7 @@ export default function Dashboard() {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
       className="fixed inset-0 flex flex-col scanlines"
-      style={{ background: '#050505' }}
+      style={{ background: 'var(--bg-base)' }}
     >
       {/* Top bar */}
       <TopBar />
@@ -38,8 +38,8 @@ export default function Dashboard() {
 
         {/* Center: Chat */}
         <div
-          className="flex-1 overflow-hidden"
-          style={{ borderLeft: '1px solid rgba(245,196,0,0.05)', borderRight: '1px solid rgba(245,196,0,0.05)' }}
+          className="flex-1 min-w-0 overflow-hidden"
+          style={{ borderLeft: '1px solid var(--border-gold-dim)', borderRight: '1px solid var(--border-gold-dim)' }}
         >
           <ChatPanel />
         </div>
@@ -50,12 +50,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* CRT glow overlay */}
+      {/* CRT vignette overlay — decorative only */}
       <div
         className="pointer-events-none fixed inset-0"
+        aria-hidden="true"
         style={{
-          background: 'radial-gradient(ellipse at 50% 50%, transparent 60%, rgba(0,0,0,0.4) 100%)',
-          zIndex: 100,
+          background: 'radial-gradient(ellipse at 50% 50%, transparent 60%, rgba(0,0,0,0.45) 100%)',
+          zIndex: 'var(--z-overlay)',
         }}
       />
     </motion.div>

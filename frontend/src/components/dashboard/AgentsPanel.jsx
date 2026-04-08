@@ -2,76 +2,116 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 
 const STATUS_CONFIG = {
-  idle: { color: '#555', label: 'IDLE', dot: '#555' },
-  working: { color: '#F5C400', label: 'WORKING', dot: '#F5C400' },
-  error: { color: '#ff3366', label: 'ERROR', dot: '#ff3366' },
+  idle: { color: 'var(--text-dim)', label: 'IDLE', dot: 'var(--text-dim)' },
+  working: { color: 'var(--gold)', label: 'WORKING', dot: 'var(--gold)' },
+  error: { color: 'var(--error)', label: 'ERROR', dot: 'var(--error)' },
 }
 
 export default function AgentsPanel() {
   const agents = useAppStore(s => s.agents)
+  const activeCount = agents.filter(a => a.status === 'working').length
 
   return (
     <div
       className="flex flex-col h-full"
       style={{
-        background: 'rgba(10,10,10,0.8)',
-        borderLeft: '1px solid rgba(245,196,0,0.1)',
+        background: 'var(--bg-panel)',
+        borderLeft: '1px solid var(--border-gold-dim)',
       }}
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between px-3 py-2 flex-shrink-0"
-        style={{ borderBottom: '1px solid rgba(245,196,0,0.1)' }}
+        className="flex items-center justify-between px-3 py-2.5 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--border-gold-dim)' }}
       >
-        <span className="font-mono text-xs tracking-widest" style={{ color: '#F5C400' }}>
+        <span className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
           AGENTS
         </span>
-        <span className="font-mono text-xs" style={{ color: '#444' }}>
-          {agents.filter(a => a.status === 'working').length}/{agents.length} active
-        </span>
+        {agents.length > 0 && (
+          <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>
+            {activeCount}/{agents.length}
+          </span>
+        )}
       </div>
 
       {/* Agent list */}
-      <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5">
+      <div
+        role="list"
+        aria-label="Agent status list"
+        className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5"
+      >
+        {agents.length === 0 && (
+          <p
+            className="font-mono text-xs text-center mt-4"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            No agents connected
+          </p>
+        )}
+
         <AnimatePresence>
           {agents.map((agent) => {
             const cfg = STATUS_CONFIG[agent.status] || STATUS_CONFIG.idle
             return (
               <motion.div
                 key={agent.id}
+                role="listitem"
                 layout
                 initial={{ opacity: 0, x: 10 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.2 }}
                 className="px-3 py-2 rounded"
                 style={{
-                  background: 'rgba(255,255,255,0.02)',
-                  border: `1px solid ${agent.status === 'working' ? 'rgba(245,196,0,0.2)' : 'rgba(255,255,255,0.04)'}`,
-                  boxShadow: agent.status === 'working' ? '0 0 10px rgba(245,196,0,0.05)' : 'none',
+                  background: agent.status === 'working'
+                    ? 'rgba(245,196,0,0.04)'
+                    : 'rgba(255,255,255,0.02)',
+                  border: `1px solid ${agent.status === 'working'
+                    ? 'rgba(245,196,0,0.18)'
+                    : 'var(--border-subtle)'}`,
+                  cursor: 'default',
+                  transition: 'background 0.2s, border-color 0.2s',
                 }}
               >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-mono text-xs font-semibold" style={{ color: '#e8e8e8' }}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span
+                    className="font-mono text-xs font-semibold truncate"
+                    style={{ color: 'var(--text-primary)' }}
+                    title={agent.name}
+                  >
                     {agent.name}
                   </span>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
                     <motion.div
                       animate={agent.status === 'working' ? { opacity: [1, 0.3, 1] } : { opacity: 1 }}
                       transition={{ duration: 1, repeat: Infinity }}
-                      className="w-1.5 h-1.5 rounded-full"
+                      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                      aria-hidden="true"
                       style={{ background: cfg.dot }}
                     />
-                    <span className="font-mono" style={{ fontSize: '10px', color: cfg.color }}>
+                    <span
+                      className="font-mono"
+                      style={{ fontSize: '11px', color: cfg.color }}
+                      aria-label={`Status: ${cfg.label}`}
+                    >
                       {cfg.label}
                     </span>
                   </div>
                 </div>
+
                 {agent.task && (
-                  <div className="font-mono leading-tight" style={{ fontSize: '10px', color: '#444' }}>
+                  <div
+                    className="font-mono leading-snug truncate"
+                    style={{ fontSize: '11px', color: 'var(--text-muted)' }}
+                    title={agent.task}
+                  >
                     {agent.task}
                   </div>
                 )}
-                <div className="font-mono mt-1" style={{ fontSize: '10px', color: '#333' }}>
+
+                <div
+                  className="font-mono mt-0.5"
+                  style={{ fontSize: '11px', color: 'var(--text-dim)' }}
+                >
                   {agent.type}
                 </div>
               </motion.div>

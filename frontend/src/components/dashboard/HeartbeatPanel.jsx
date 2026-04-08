@@ -3,10 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 
 const LEVEL_COLORS = {
-  info: '#888',
-  success: '#00ff88',
-  warning: '#ffaa00',
-  error: '#ff3366',
+  info: 'var(--text-secondary)',
+  success: 'var(--success)',
+  warning: 'var(--warning)',
+  error: 'var(--error)',
 }
 
 export default function HeartbeatPanel() {
@@ -23,44 +23,54 @@ export default function HeartbeatPanel() {
     <div
       className="flex flex-col h-full"
       style={{
-        background: 'rgba(10,10,10,0.8)',
-        borderRight: '1px solid rgba(245,196,0,0.1)',
+        background: 'var(--bg-panel)',
+        borderRight: '1px solid var(--border-gold-dim)',
       }}
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between px-3 py-2 flex-shrink-0"
-        style={{ borderBottom: '1px solid rgba(245,196,0,0.1)' }}
+        className="flex items-center justify-between px-3 py-2.5 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--border-gold-dim)' }}
       >
-        <span className="font-mono text-xs tracking-widest" style={{ color: '#F5C400' }}>
+        <span className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
           HEARTBEAT
         </span>
         <motion.div
           animate={{ opacity: [1, 0.3, 1] }}
           transition={{ duration: 1.5, repeat: Infinity }}
           className="w-1.5 h-1.5 rounded-full"
-          style={{ background: '#F5C400' }}
+          aria-hidden="true"
+          style={{ background: 'var(--gold)' }}
         />
       </div>
 
-      {/* Logs */}
+      {/* Logs — announced to screen readers as a live region */}
       <div
         ref={scrollRef}
+        role="log"
+        aria-label="System heartbeat log"
+        aria-live="polite"
+        aria-atomic="false"
         className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5"
         style={{ scrollBehavior: 'smooth' }}
       >
         <AnimatePresence initial={false}>
           {logs.map((log, idx) => (
             <motion.div
-              key={idx}
+              key={`${log.ts}-${idx}`}
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.15 }}
               className="font-mono text-xs leading-relaxed"
-              style={{ color: LEVEL_COLORS[log.level] || '#888' }}
+              style={{ color: LEVEL_COLORS[log.level] || 'var(--text-secondary)' }}
             >
-              <span style={{ color: '#333', marginRight: '6px' }}>
-                {new Date(log.ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              <span style={{ color: 'var(--text-dim)', marginRight: '6px' }}>
+                {new Date(log.ts).toLocaleTimeString('en-US', {
+                  hour12: false,
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                })}
               </span>
               {log.text}
             </motion.div>
