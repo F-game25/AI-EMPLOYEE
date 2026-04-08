@@ -14678,7 +14678,10 @@ function showOffline(msg) {
 
 async function checkHealth() {
   try {
-    const res = await fetch('/health', {cache:'no-store'});
+    const res = await fetch('/health', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000)
+    });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return true;
   } catch (e) {
@@ -14805,12 +14808,29 @@ function runBootSequence() {
   const barTimer = setInterval(async () => {
     progress += Math.random() * 12 + 4;
     if (progress >= 100) { progress = 100; clearInterval(barTimer); }
-    bar.style.width = progress + '%';
-    pct.textContent = Math.round(progress) + '%';
+    if (bar) bar.style.width = progress + '%';
+    if (pct) pct.textContent = Math.round(progress) + '%';
     if (progress >= 100) {
       clearInterval(lineTimer);
-      /* check backend health */
-      const healthy = await checkHealth();
+      /* retry health check up to 8 times (2 s apart = ~16 s max) so the UI
+         waits gracefully while the server is still booting instead of
+         immediately showing the offline screen */
+      let healthy = false;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        healthy = await checkHealth();
+        if (healthy) break;
+        if (attempt < 7) {
+          if (terminal) {
+            const span = document.createElement('span');
+            span.className = 'boot-terminal-line';
+            span.style.animationDelay = '0s';
+            span.textContent = '> Retrying connection\u2026 (' + (attempt + 2) + '/8)';
+            terminal.appendChild(span);
+            terminal.scrollTop = terminal.scrollHeight;
+          }
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
       if (!healthy) {
         hideBoot();
         showOffline('> Backend unreachable\n> GET /health → connection refused\n> Ensure AI Employee server is running\n> on http://localhost:3000');
