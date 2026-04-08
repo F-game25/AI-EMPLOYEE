@@ -3208,31 +3208,6 @@ INDEX_HTML = r"""<!doctype html>
 <div class="sub-nav" id="subnav-power">
   <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn">⚡ BLACKLIGHT</button>
   <button onclick="switchTab('ascend',this)" id="nav-ascend-btn">🔥 ASCEND FORGE</button>
-  <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
-  <button onclick="switchTab('crm',this)">🎯 CRM</button>
-  <button onclick="switchTab('email-marketing',this)">📧 Email Mktg</button>
-  <button onclick="switchTab('meetings',this)">🗓️ Meetings</button>
-  <button onclick="switchTab('social',this)">📱 Social</button>
-  <button onclick="switchTab('briefing',this)">📰 CEO Brief</button>
-  <button onclick="switchTab('financial',this)">💳 Financial</button>
-  <button onclick="switchTab('competitors',this)">🕵️ Competitors</button>
-  <button onclick="switchTab('content-calendar',this)">🗃️ Content Cal</button>
-  <button onclick="switchTab('email-mkt',this)">📧 Email</button>
-  <button onclick="switchTab('meetings',this)">🎙️ Meetings</button>
-  <button onclick="switchTab('social',this)">📱 Social</button>
-  <button onclick="switchTab('briefing',this)">☀️ Briefing</button>
-  <button onclick="switchTab('invoicing',this)">🧾 Finance</button>
-  <button onclick="switchTab('analytics-bi',this)">📊 Analytics</button>
-  <button onclick="switchTab('workflows',this)">⚙️ Workflows</button>
-  <button onclick="switchTab('team',this)">👥 Team</button>
-  <button onclick="switchTab('support-desk',this)">🎧 Support</button>
-  <button onclick="switchTab('website-builder',this)">🌐 Website</button>
-  <button onclick="switchTab('competitors',this)">🔍 Competitors</button>
-  <button onclick="switchTab('brand',this)">✨ Brand</button>
-  <button onclick="switchTab('health',this)">❤️ Health</button>
-  <button onclick="switchTab('export',this)">💾 Export</button>
-</nav>
-  <button class="nav-scroll-btn right" id="nav-scroll-right" onclick="navScroll(1)" title="Scroll right">›</button>
 </div>
 
 <main>
@@ -5854,11 +5829,16 @@ const _TAB_TO_GROUP = {
   chat:'intel', history:'intel',
   tasks:'operations', swarm:'operations', 'live-office':'operations', scheduler:'operations',
   workers:'forces', skills:'forces', improvements:'forces', commands:'forces',
-  metrics:'analytics', budget:'analytics',
+  metrics:'analytics', budget:'analytics', roi:'analytics',
   templates:'library', artifacts:'library', memory:'library',
   guardrails:'systems', integrations:'systems', options:'systems', org:'systems',
   goals:'systems', tickets:'systems', boardroom:'systems', companies:'systems',
-  blacklight:'power', ascend:'power'
+  blacklight:'power', ascend:'power',
+  crm:'power', 'email-mkt':'power', 'email-marketing':'power', meetings:'power',
+  social:'power', briefing:'power', invoicing:'power', financial:'power',
+  'analytics-bi':'power', workflows:'power', team:'power', 'support-desk':'power',
+  'website-builder':'power', competitors:'power', brand:'power', health:'power',
+  export:'power', 'content-calendar':'power'
 };
 
 function switchGroup(group, btn) {
@@ -7058,16 +7038,30 @@ function _switchTabBase(tab, btn) {
   } else {
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   }
-  // Update nav buttons
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   // Animate in new tab (slight delay so leave animation starts first)
   setTimeout(() => {
     const tabEl = document.getElementById('tab-' + tab);
     if (tabEl) tabEl.classList.add('active');
   }, isNewTab ? TAB_ENTER_DELAY_MS : 0);
-  if (btn && btn.classList) {
+  // Sync primary group nav button
+  const group = _TAB_TO_GROUP[tab] || 'overview';
+  document.querySelectorAll('.nav-group-btn').forEach(b => b.classList.remove('active'));
+  const groupBtn = document.querySelector('.nav-group-btn[data-group="' + group + '"]');
+  if (groupBtn) groupBtn.classList.add('active');
+  // Sync sub-nav visibility
+  document.querySelectorAll('.sub-nav').forEach(s => s.classList.remove('active'));
+  const subNav = document.getElementById('subnav-' + group);
+  if (subNav) subNav.classList.add('active');
+  // Sync sub-nav active button
+  document.querySelectorAll('.sub-nav button').forEach(b => b.classList.remove('active'));
+  if (btn && btn.classList && !btn.classList.contains('nav-group-btn')) {
     btn.classList.add('active');
     btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
+  } else {
+    // Auto-find the matching sub-nav button when btn is null or a group button
+    const safeTab = Object.prototype.hasOwnProperty.call(_TAB_TO_GROUP, tab) ? tab : '';
+    const autoBtn = safeTab && subNav ? subNav.querySelector('button[onclick*="' + safeTab + '"]') : null;
+    if (autoBtn) autoBtn.classList.add('active');
   }
   currentTab = tab;
   if (tab === 'dashboard') loadDashboard();
