@@ -19,6 +19,8 @@ import itertools
 import json
 import logging
 import os
+import re as _re
+import subprocess
 import sys
 import threading
 import time
@@ -86,10 +88,13 @@ def _default_state() -> dict:
         "current_activity": "idle",
         "current_target": "",
         "last_scan": None,
+        "last_scan_ts": None,
+        "last_doctor_output": "",
         "blacklight_active": False,
         "patches_approved": 0,
         "patches_rejected": 0,
         "patches_failed": 0,
+        "total_patches": 0,
     }
 
 
@@ -166,6 +171,18 @@ def _risk_level(affected_files: list[str], change_size: int) -> str:
 
 def _infer_patch_type(description: str) -> str:
     desc_l = description.lower()
+    if any(k in desc_l for k in ("restart", "not running", "agent down")):
+        return "agent_restart"
+    if any(k in desc_l for k in ("permission", "security", "access denied", "privilege")):
+        return "security"
+    if any(k in desc_l for k in ("disk", "storage", "space", "memory", "cpu", "efficiency")):
+        return "efficiency"
+    if any(k in desc_l for k in ("config", "setting", "configuration", "missing")):
+        return "config"
+    if any(k in desc_l for k in ("schedule", "cron", "interval", "timer")):
+        return "schedule"
+    if any(k in desc_l for k in ("capability", "feature", "expand", "add support")):
+        return "capability"
     if any(k in desc_l for k in ("prompt", "output", "monetiz", "revenue", "lead")):
         return "prompt" if "prompt" in desc_l else "monetization"
     if any(k in desc_l for k in ("ui", "ux", "visual", "style", "design", "layout")):
@@ -303,8 +320,7 @@ def scan_prompts(target_path: Optional[Path] = None) -> list[dict]:
         except Exception:
             continue
         # Find triple-quoted strings longer than 40 chars (likely prompt templates)
-        import re
-        pattern = re.compile(r'(?:"""([\s\S]{40,400}?)"""|\'\'\'([\s\S]{40,400}?)\'\'\')', re.DOTALL)
+        pattern = _re.compile(r'(?:"""([\s\S]{40,400}?)"""|\'\'\'([\s\S]{40,400}?)\'\'\')', _re.DOTALL)
         for match in pattern.finditer(source):
             text = (match.group(1) or match.group(2)).strip()
             _, suggestions = _optimize_prompt(text)
@@ -330,6 +346,8 @@ def create_patch(
     trigger: str = "auto scan",
     patch_type: Optional[str] = None,
     mode: Optional[str] = None,
+    source: str = "manual",
+    risk_override: Optional[str] = None,
 ) -> dict:
     """Create a PENDING patch entry and log it."""
     state = _load_state()
@@ -341,8 +359,11 @@ def create_patch(
     if patch_type is None:
         patch_type = _infer_patch_type(description)
 
-    change_size = len(diff_preview.splitlines())
-    risk = _risk_level(affected_files, change_size)
+    if risk_override is not None and risk_override in ("LOW", "MEDIUM", "HIGH"):
+        risk = risk_override
+    else:
+        change_size = len(diff_preview.splitlines())
+        risk = _risk_level(affected_files, change_size)
 
     # Protected area — force HIGH risk for any change to protected modules
     for f in affected_files:
@@ -357,6 +378,7 @@ def create_patch(
         "applied_timestamp": None,
         "mode": mode,
         "trigger": trigger,
+        "source": source,
         "description": description,
         "reason": reason,
         "affected_files": affected_files,
@@ -370,6 +392,12 @@ def create_patch(
     _push_activity(
         f"📋 New patch queued [{risk}]: {description[:60]}", "info"
     )
+
+    # Update total_patches counter
+    with _state_lock:
+        s = _load_state()
+        s["total_patches"] = s.get("total_patches", 0) + 1
+        _save_state(s)
 
     # Auto-approve LOW risk if toggle is on
     if risk == "LOW" and state.get("auto_approve_low"):
@@ -456,7 +484,14 @@ def rollback_patch(patch_id: str) -> dict:
 # ── Scan / analysis ───────────────────────────────────────────────────────────
 
 def scan_system(trigger: str = "auto scan") -> list[dict]:
-    """Run a lightweight system scan and generate patches."""
+    """Run a full system scan and generate patches.
+
+    Performs three checks in order:
+      1. DOCTOR INTEGRATION  — call ai-employee doctor, parse output
+      2. AGENT EFFICIENCY    — scan agent dirs for error indicators
+      3. PROMPT OPTIMISATION — find weak prompt strings (MONEY/AUTO)
+      4. STRUCTURAL CHECK    — TODO/FIXME markers (GENERAL/AUTO)
+    """
     if _load_state().get("observe_only"):
         _push_activity("👁️ Observe-only mode active — scan skipped.", "warn")
         return []
@@ -465,7 +500,172 @@ def scan_system(trigger: str = "auto scan") -> list[dict]:
     patches: list[dict] = []
     mode = _resolve_effective_mode("system scan")
 
-    # 1. Prompt optimisation (MONEY_MODE / AUTO)
+    # ── CHECK 1 — DOCTOR INTEGRATION ─────────────────────────────────────────
+    _push_activity("🩺 Running doctor check…", "info")
+    doctor_output = ""
+    try:
+        result = subprocess.run(
+            [str(AI_HOME / "bin" / "ai-employee"), "doctor"],
+            capture_output=True, text=True, timeout=30,
+        )
+        doctor_output = result.stdout + result.stderr
+    except FileNotFoundError:
+        doctor_output = "ai-employee binary not found"
+        _push_activity("⚠️ ai-employee binary not found — skipping doctor check.", "warn")
+    except subprocess.TimeoutExpired:
+        doctor_output = "doctor command timed out"
+        _push_activity("⚠️ Doctor check timed out.", "warn")
+    except Exception as exc:
+        doctor_output = f"Doctor unavailable: {exc}"
+        _push_activity(f"⚠️ Doctor check failed: {exc}", "warn")
+
+    # Persist doctor output to state (capped to avoid state file bloat)
+    with _state_lock:
+        s = _load_state()
+        s["last_doctor_output"] = doctor_output[:4000]
+        _save_state(s)
+
+    # Parse each line for issue patterns
+    _seen_doctor_reasons: set[str] = set()
+    for raw_line in doctor_output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        patch_type: Optional[str] = None
+        risk: Optional[str] = None
+        description: Optional[str] = None
+        line_lower = line.lower()
+
+        # Order matters — check more specific patterns first
+        if "not running" in line_lower:
+            risk = "MEDIUM"
+            description = f"Restart agent that is not running: {line[:80]}"
+            patch_type = "agent_restart"
+        elif "permission denied" in line_lower or "access denied" in line_lower:
+            risk = "HIGH"
+            description = f"Fix permissions issue: {line[:80]}"
+            patch_type = "security"
+        elif any(k in line_lower for k in ("disk", "storage", "space")):
+            risk = "MEDIUM"
+            description = f"Address storage issue: {line[:80]}"
+            patch_type = "efficiency"
+        elif any(x in line for x in ("❌",)) or \
+                any(x in line_lower for x in ("fail", "error")):
+            risk = "HIGH"
+            description = f"Fix error detected by doctor: {line[:80]}"
+            patch_type = "functionality"
+        elif any(x in line for x in ("⚠️",)) or \
+                any(x in line_lower for x in ("warning", "warn")):
+            risk = "MEDIUM"
+            description = f"Resolve warning detected by doctor: {line[:80]}"
+            patch_type = "config"
+        elif any(k in line_lower for k in ("not found", "missing")):
+            risk = "MEDIUM"
+            description = f"Install or restore missing component: {line[:80]}"
+            patch_type = "config"
+
+        if description and patch_type and risk:
+            # Deduplicate by description to avoid flooding
+            dedup_key = description[:60]
+            if dedup_key in _seen_doctor_reasons:
+                continue
+            _seen_doctor_reasons.add(dedup_key)
+            try:
+                p = create_patch(
+                    description=description,
+                    reason=line,
+                    affected_files=[],
+                    diff_preview=f"# Doctor reported: {line[:200]}",
+                    trigger=trigger,
+                    patch_type=patch_type,
+                    mode=mode,
+                    source="doctor",
+                    risk_override=risk,
+                )
+                patches.append(p)
+                if len(patches) >= 10:
+                    # Cap doctor patches to avoid flooding the queue
+                    break
+            except RuntimeError:
+                pass
+
+    # ── CHECK 2 — AGENT EFFICIENCY ANALYSIS ──────────────────────────────────
+    _push_activity("📊 Analysing agent efficiency…", "info")
+    agents_dir = AI_HOME / "agents"
+    state_dir = AI_HOME / "state"
+    if agents_dir.exists():
+        for agent_dir in sorted(agents_dir.iterdir()):
+            if not agent_dir.is_dir():
+                continue
+            agent_name = agent_dir.name
+            run_sh = agent_dir / "run.sh"
+            if not run_sh.exists():
+                continue
+
+            # Look for a matching state file
+            state_candidates = [
+                state_dir / f"{agent_name}.json",
+                state_dir / f"{agent_name}.state.json",
+                state_dir / f"{agent_name}_state.json",
+            ]
+            agent_state: dict = {}
+            for sc in state_candidates:
+                if sc.exists():
+                    try:
+                        agent_state = json.loads(sc.read_text())
+                    except Exception:
+                        pass
+                    break
+
+            # Score the agent for issues
+            issues: list[str] = []
+
+            # Check for high error count in state
+            # 3+ consecutive errors signals a persistently unhealthy agent
+            error_count = (
+                agent_state.get("errors", 0)
+                or agent_state.get("error_count", 0)
+                or agent_state.get("consecutive_failures", 0)
+            )
+            if isinstance(error_count, int) and error_count >= 3:
+                issues.append(f"high error count ({error_count})")
+
+            # Check for slowness indicators
+            # >5 000 ms avg response is considered unacceptably slow
+            avg_ms = (
+                agent_state.get("avg_response_ms")
+                or agent_state.get("avg_latency_ms")
+            )
+            if isinstance(avg_ms, (int, float)) and avg_ms > 5000:
+                issues.append(f"high avg latency ({avg_ms:.0f}ms)")
+
+            # Check for disabled / stopped state
+            if agent_state.get("status") in ("stopped", "crashed", "disabled"):
+                issues.append(f"agent status is {agent_state['status']!r}")
+
+            if issues:
+                issue_str = "; ".join(issues)
+                desc = f"Improve efficiency of {agent_name} agent ({issue_str})"
+                try:
+                    p = create_patch(
+                        description=desc,
+                        reason=(
+                            f"Agent '{agent_name}' shows efficiency problems: {issue_str}. "
+                            "Reviewing and tuning agent settings can reduce errors and latency."
+                        ),
+                        affected_files=[str(run_sh.relative_to(agents_dir))],
+                        diff_preview=f"# Efficiency issues in {agent_name}: {issue_str}",
+                        trigger=trigger,
+                        patch_type="efficiency",
+                        mode=mode,
+                        source="efficiency",
+                    )
+                    patches.append(p)
+                except RuntimeError:
+                    pass
+
+    # ── CHECK 3 — PROMPT OPTIMISATION (MONEY / AUTO) ──────────────────────────
     if mode in (MODE_MONEY, MODE_AUTO):
         candidates = scan_prompts()
         if candidates:
@@ -490,22 +690,22 @@ def scan_system(trigger: str = "auto scan") -> list[dict]:
                     trigger=trigger,
                     patch_type="prompt",
                     mode=mode,
+                    source="capability",
                 )
                 patches.append(p)
             except RuntimeError:
                 pass
 
-    # 2. Structural check — look for TODO/FIXME in source files (GENERAL_MODE)
+    # ── CHECK 4 — STRUCTURAL CHECK (GENERAL / AUTO) ───────────────────────────
     if mode in (MODE_GENERAL, MODE_AUTO):
         bots_dir = AI_HOME / "agents"
         todos: list[str] = []
         todo_files: list[str] = []
         if bots_dir.exists():
-            import re
             for py_file in itertools.islice(bots_dir.rglob("*.py"), 30):
                 try:
                     src = py_file.read_text(errors="replace")
-                    hits = re.findall(r"#\s*(TODO|FIXME)[^\n]*", src, re.IGNORECASE)
+                    hits = _re.findall(r"#\s*(TODO|FIXME)[^\n]*", src, _re.IGNORECASE)
                     if hits:
                         todos.extend(hits[:3])
                         todo_files.append(str(py_file.relative_to(bots_dir)))
@@ -526,6 +726,7 @@ def scan_system(trigger: str = "auto scan") -> list[dict]:
                     trigger=trigger,
                     patch_type="functionality",
                     mode=mode,
+                    source="efficiency",
                 )
                 patches.append(p)
             except RuntimeError:
@@ -534,9 +735,11 @@ def scan_system(trigger: str = "auto scan") -> list[dict]:
     _push_activity(
         f"✅ Scan complete — {len(patches)} patch(es) queued.", "info"
     )
+    now = _now_iso()
     with _state_lock:
         s = _load_state()
-        s["last_scan"] = _now_iso()
+        s["last_scan"] = now       # legacy field kept for backward compatibility
+        s["last_scan_ts"] = now    # canonical field per new schema
         _save_state(s)
 
     return patches
