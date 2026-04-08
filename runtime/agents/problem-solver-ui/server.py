@@ -15758,7 +15758,7 @@ def get_system_resources():
                     first = next(iter(temps.values()), [])
                     if first:
                         cpu_temp = round(first[0].current, 1)
-        except (AttributeError, Exception):
+        except Exception:
             pass
 
         # GPU via nvidia-smi (best-effort, 2 s timeout)
@@ -15766,17 +15766,20 @@ def get_system_resources():
         gpu_temp = None
         gpu_name = None
         try:
+            import csv as _csv
             res = subprocess.run(
                 ["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,name",
                  "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=2,
             )
             if res.returncode == 0:
-                parts = res.stdout.strip().split(",")
-                if len(parts) >= 3:
-                    gpu_pct = int(parts[0].strip())
-                    gpu_temp = int(parts[1].strip())
-                    gpu_name = parts[2].strip()
+                rows = list(_csv.reader([res.stdout.strip()]))
+                if rows and len(rows[0]) >= 3:
+                    gpu_pct = int(rows[0][0].strip())
+                    gpu_temp = int(rows[0][1].strip())
+                    gpu_name = rows[0][2].strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, IndexError):
+            pass
         except Exception:
             pass
 
