@@ -7,10 +7,27 @@ source =
     runtime/agents/utils.py
     runtime/agents/ascend-forge/ascend_forge.py
     runtime/agents/turbo-quant/turbo_quant.py
+    runtime/agents/ai-router/ai_router.py
+    runtime/agents/ai-router/hybrid_mode.py
+    runtime/agents/idea-to-prompt/idea_to_prompt.py
+    runtime/agents/problem-solver-ui/features/crm.py
+    runtime/agents/problem-solver-ui/features/email_marketing.py
+    runtime/agents/problem-solver-ui/features/meeting_intelligence.py
+    runtime/agents/problem-solver-ui/features/social_media.py
+    runtime/agents/problem-solver-ui/features/ceo_briefing.py
+    runtime/agents/problem-solver-ui/features/invoicing.py
+    runtime/agents/problem-solver-ui/features/analytics.py
+    runtime/agents/problem-solver-ui/features/workflow_builder.py
+    runtime/agents/problem-solver-ui/features/team_management.py
+    runtime/agents/problem-solver-ui/features/customer_support.py
+    runtime/agents/problem-solver-ui/features/website_builder.py
+    runtime/agents/problem-solver-ui/features/competitor_watch.py
+    runtime/agents/problem-solver-ui/features/personal_brand.py
+    runtime/agents/problem-solver-ui/features/health_check.py
+    runtime/agents/problem-solver-ui/features/export_backup.py
 omit =
     tests/*
     */site-packages/*
-    runtime/agents/problem-solver-ui/*
 
 [report]
 show_missing = true
