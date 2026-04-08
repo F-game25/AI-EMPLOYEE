@@ -491,7 +491,6 @@ AGENTS_BY_MODE = {
     "team-management",
     "customer-support",
     "website-builder",
-    "competitor-watch",
     "personal-brand",
     "health-check",
     "export-backup",
@@ -1917,6 +1916,32 @@ INDEX_HTML = r"""<!doctype html>
       animation:countUp .5s ease;letter-spacing:-.04em;line-height:1}
     .stat-body .lbl{font-size:.75em;color:var(--text-muted);margin-top:6px;letter-spacing:.03em;text-transform:uppercase;font-weight:500}
 
+    /* ── Overview hero stat cards ── */
+    .ov-hero-card{
+      background:var(--surface2);
+      border:1px solid rgba(212,175,55,.18);
+      border-radius:10px;
+      padding:18px 20px;
+      position:relative;overflow:hidden;
+      transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+    }
+    .ov-hero-card::before{
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(212,175,55,.04),transparent);
+      pointer-events:none;
+    }
+    .ov-hero-card:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(212,175,55,.18)}
+    .ov-hero-running{border-color:rgba(52,211,153,.2)}
+    .ov-hero-running:hover{border-color:rgba(52,211,153,.4);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(52,211,153,.08)}
+    .ov-hero-total{border-color:rgba(212,175,55,.25)}
+    .ov-hero-total:hover{border-color:rgba(212,175,55,.5);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(212,175,55,.1)}
+    .ov-hero-offline{border-color:rgba(248,113,113,.15)}
+    .ov-hero-offline:hover{border-color:rgba(248,113,113,.35);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(248,113,113,.07)}
+    .ov-hero-gateway{border-color:rgba(56,189,248,.15)}
+    .ov-hero-gateway:hover{border-color:rgba(56,189,248,.35);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(56,189,248,.07)}
+    .ov-hero-uptime{border-color:rgba(167,139,250,.15)}
+    .ov-hero-uptime:hover{border-color:rgba(167,139,250,.35);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(167,139,250,.07)}
+
     /* ── System control hero ── */
     .sys-control{
       background:linear-gradient(135deg,rgba(212,175,55,.08) 0%,rgba(212,175,55,.04) 50%,rgba(212,175,55,.02) 100%);
@@ -3258,6 +3283,19 @@ INDEX_HTML = r"""<!doctype html>
 <!-- ── Dashboard ── -->
 <div id="tab-dashboard" class="tab-content active">
 
+  <!-- ── SYSTEM ONLINE Status Banner ── -->
+  <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:linear-gradient(90deg,rgba(0,255,136,.05),rgba(212,175,55,.05),rgba(0,0,0,0));border:1px solid rgba(0,255,136,.18);border-radius:8px;margin-bottom:14px;font-family:var(--mono);font-size:.72em;letter-spacing:.08em;overflow:hidden;position:relative" id="ov-system-banner">
+    <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,255,136,.04),transparent);pointer-events:none"></div>
+    <div style="width:8px;height:8px;border-radius:50%;background:#00ff88;box-shadow:0 0 10px #00ff88,0 0 20px rgba(0,255,136,.4);animation:blink 1.2s infinite;flex-shrink:0"></div>
+    <span style="color:#00ff88;font-weight:700;text-transform:uppercase">◈ SYSTEM ONLINE</span>
+    <div style="width:1px;height:14px;background:rgba(255,255,255,.12)"></div>
+    <span style="color:var(--gold);text-transform:uppercase" id="ov-banner-mode">POWER MODE</span>
+    <div style="width:1px;height:14px;background:rgba(255,255,255,.12)"></div>
+    <span style="color:var(--text-secondary)" id="ov-banner-uptime">Uptime: –</span>
+    <div style="flex:1"></div>
+    <span style="color:var(--gold);font-weight:700" id="ov-banner-agents">– / – Agents Active</span>
+  </div>
+
   <!-- ── Overview Page Header ── -->
   <div class="page-header" style="border-left-color:var(--gold);background:linear-gradient(135deg,rgba(212,175,55,.08),rgba(212,175,55,.02));border:1px solid rgba(212,175,55,.2);box-shadow:0 0 30px rgba(212,175,55,.06)">
     <div class="page-header-icon" style="color:var(--gold);filter:drop-shadow(0 0 8px rgba(212,175,55,.5))">◈</div>
@@ -3266,6 +3304,49 @@ INDEX_HTML = r"""<!doctype html>
       <div class="page-header-desc">Real-time operations hub — monitor all agents, launch tasks, and manage your autonomous AI workforce from one place.</div>
     </div>
     <span class="page-header-badge" style="color:var(--gold);background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.3)">Live Operations</span>
+  </div>
+
+  <!-- ── Agent Count Hero Cards ── -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
+    <div class="ov-hero-card ov-hero-running" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('running')" style="cursor:pointer" aria-label="Agents Running – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#34d399;margin-bottom:6px;font-family:var(--mono)">▶ RUNNING</div>
+      <div class="val" id="stat-running" style="font-size:2.6em;font-weight:800;color:#34d399;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(52,211,153,.4)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Active</div>
+      <div style="font-size:.68em;color:#34d399;margin-top:4px" id="stat-running-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-total" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('total')" style="cursor:pointer" aria-label="Total Agents – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin-bottom:6px;font-family:var(--mono)">◆ TOTAL</div>
+      <div class="val" id="stat-total" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(212,175,55,.4)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Registered Agents</div>
+      <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-total-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-offline" aria-label="Offline Agents">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#f87171;margin-bottom:6px;font-family:var(--mono)">◌ OFFLINE</div>
+      <div class="val" id="stat-offline" style="font-size:2.6em;font-weight:800;color:#f87171;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(248,113,113,.3)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Stopped</div>
+      <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-offline-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-gateway" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('gateway')" style="cursor:pointer" aria-label="Gateway – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#38bdf8;margin-bottom:6px;font-family:var(--mono)">◉ GATEWAY</div>
+      <div class="val" id="stat-gateway" style="font-size:2.6em;font-weight:800;color:#38bdf8;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(56,189,248,.3)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">API Gateway</div>
+      <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-gateway-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-uptime" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('uptime')" style="cursor:pointer" aria-label="Uptime – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#a78bfa;margin-bottom:6px;font-family:var(--mono)">◎ UPTIME</div>
+      <div class="val" id="stat-uptime" style="font-size:2.6em;font-weight:800;color:#a78bfa;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(167,139,250,.3)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">System Uptime</div>
+      <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-uptime-sub"></div>
+    </div>
+  </div>
+
+  <!-- Stat detail panel -->
+  <div id="stat-detail-panel" style="display:none;background:var(--surface2);border:1px solid var(--gold);border-radius:var(--radius);padding:16px;margin-bottom:16px;animation:fadeIn .2s ease">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" id="stat-detail-title">Details</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stat-detail-panel').style.display='none'">✕</button>
+    </div>
+    <div id="stat-detail-content" style="font-size:.88em;color:var(--text-secondary)"></div>
   </div>
 
   <!-- ── Cyber Operations Panel ── -->
@@ -3370,33 +3451,6 @@ INDEX_HTML = r"""<!doctype html>
         <span class="btn-icon">■</span> Stop All Agents
       </button>
     </div>
-  </div>
-
-  <div class="grid-stat" id="stat-cards">
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('running')" style="cursor:pointer" aria-label="Agents Running – click for details">
-      <div class="stat-icon green">●</div>
-      <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Agents Running</div><div class="stat-trend" id="stat-running-sub" style="font-size:.7em;color:var(--gold);margin-top:3px"></div></div>
-    </div>
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('total')" style="cursor:pointer" aria-label="Total Agents – click for details">
-      <div class="stat-icon blue">◆</div>
-      <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Agents</div><div class="stat-trend" id="stat-total-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
-    </div>
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('gateway')" style="cursor:pointer" aria-label="Gateway – click for details">
-      <div class="stat-icon cyan">◉</div>
-      <div class="stat-body"><div class="val" id="stat-gateway">–</div><div class="lbl">Gateway</div><div class="stat-trend" id="stat-gateway-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
-    </div>
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('uptime')" style="cursor:pointer" aria-label="Uptime – click for details">
-      <div class="stat-icon yellow">◎</div>
-      <div class="stat-body"><div class="val" id="stat-uptime">–</div><div class="lbl">Uptime</div><div class="stat-trend" id="stat-uptime-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
-    </div>
-  </div>
-  <!-- Stat detail panel -->
-  <div id="stat-detail-panel" style="display:none;background:var(--surface2);border:1px solid var(--gold);border-radius:var(--radius);padding:16px;margin-bottom:16px;animation:fadeIn .2s ease">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div class="card-title" id="stat-detail-title">Details</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stat-detail-panel').style.display='none'">✕</button>
-    </div>
-    <div id="stat-detail-content" style="font-size:.88em;color:var(--text-secondary)"></div>
   </div>
 
   <div class="grid2">
@@ -7126,6 +7180,7 @@ async function loadDashboard() {
   if (!d || d.error || !Array.isArray(d.agents)) {
     animateCount('stat-running', 0);
     animateCount('stat-total', 0);
+    animateCount('stat-offline', 0);
     document.getElementById('header-sub').textContent = 'System offline';
     const healthBar = document.getElementById('health-bar');
     const sysRing = document.getElementById('sys-ring');
@@ -7143,15 +7198,23 @@ async function loadDashboard() {
   const agents = normalizeAgents(d);
   const running = agents.filter(a => a.running).length;
   const total = agents.length;
+  const offline = total - running;
 
   // Animate stat numbers
   animateCount('stat-running', running);
   animateCount('stat-total', total);
+  animateCount('stat-offline', offline);
+  // Update SYSTEM ONLINE banner
+  const ovBannerMode = document.getElementById('ov-banner-mode');
+  const ovBannerAgents = document.getElementById('ov-banner-agents');
+  if (ovBannerMode && d.mode) ovBannerMode.textContent = d.mode.toUpperCase() + ' MODE';
+  if (ovBannerAgents) ovBannerAgents.textContent = `${running} / ${total} Agents Active`;
   const modeCapacity = {starter: 3, business: 15, power: 73};
   const capacity = modeCapacity[d.mode] || total;
   const totalSubEl = document.getElementById('stat-total-sub');
   if (totalSubEl && d.mode) totalSubEl.textContent = `${d.mode} mode · ${capacity} max`;
-  const modeLabel = d.mode ? ` · ${d.mode}` : '';
+  const offlineSubEl = document.getElementById('stat-offline-sub');
+  if (offlineSubEl) offlineSubEl.textContent = offline > 0 ? `${Math.round(offline/total*100)}% idle` : total > 0 ? 'All running ✓' : '';
   const modeColors = {starter:'#34d399',business:'#D4AF37',power:'#c084fc'};
   const mc = modeColors[d.mode] || 'var(--gold)';
   document.getElementById('header-sub').innerHTML =
@@ -7183,8 +7246,10 @@ async function loadDashboard() {
 
   // Uptime
   const secs = Math.floor((Date.now() - _startTime) / 1000);
-  document.getElementById('stat-uptime').textContent =
-    secs < 60 ? secs + 's' : secs < 3600 ? Math.floor(secs/60) + 'm' : Math.floor(secs/3600) + 'h';
+  const uptimeStr = secs < 60 ? secs + 's' : secs < 3600 ? Math.floor(secs/60) + 'm' : Math.floor(secs/3600) + 'h';
+  document.getElementById('stat-uptime').textContent = uptimeStr;
+  const ovBannerUptime = document.getElementById('ov-banner-uptime');
+  if (ovBannerUptime) ovBannerUptime.textContent = 'Uptime: ' + uptimeStr;
 
   // Gateway status (try to ping)
   fetch('http://localhost:18789', {mode:'no-cors',signal:AbortSignal.timeout(1500)})
@@ -14609,7 +14674,7 @@ async function submitLogin() {
 /* named constants */
 const MAX_HEARTBEAT_LINES = 80;
 const MAX_CHAT_MESSAGES = 60;
-const MAX_AGENTS_TOTAL = 56; /* matches AGENTS_BY_MODE power list */
+const MAX_AGENTS_TOTAL = 73; /* matches AGENTS_BY_MODE power list (unique non-infra agents) */
 
 document.addEventListener('DOMContentLoaded', () => {
   const passEl = document.getElementById('login-pass');
@@ -16447,7 +16512,7 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
       allowed = ", ".join(_available_agent_ids(mode))
       return (
         f"Only {len(_available_agent_ids(mode))} agents are available in {mode} mode: {allowed}. "
-        "Switch to power mode to run all 56 agents, or I can handle this with the current set."
+        "Switch to power mode to run all 73 agents, or I can handle this with the current set."
       )
     if not _agent_allowed_in_mode(routed_agent, mode):
       return (
