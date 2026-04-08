@@ -50,9 +50,9 @@ def _cpu_sampler_loop() -> None:
             if _PSUTIL_OK and _psutil is not None:
                 _cpu_sample_value = _psutil.cpu_percent(interval=1)
             else:
-                import time as _t; _t.sleep(2)
+                time.sleep(2)
         except Exception:
-            import time as _t; _t.sleep(2)
+            time.sleep(2)
 
 _cpu_thread = threading.Thread(target=_cpu_sampler_loop, daemon=True, name="cpu-sampler")
 _cpu_thread.start()
@@ -1549,7 +1549,7 @@ INDEX_HTML = r"""<!doctype html>
       padding:3px 12px;font-size:.85em;letter-spacing:.15em;color:rgba(245,196,0,.45);
     }
     .boot-terminal-inner{padding-top:22px;height:100%;overflow:hidden}
-    .boot-terminal-line{display:block;opacity:0;animation:termLine .06s ease forwards;white-space:pre;font-family:var(--mono)}
+    .boot-terminal-line{display:block;opacity:0;animation:termLine .12s ease forwards;white-space:pre;font-family:var(--mono)}
     .boot-terminal-line.cmd{color:rgba(245,196,0,.9)}
     .boot-terminal-line.ok{color:rgba(34,197,94,.85)}
     .boot-terminal-line.warn{color:rgba(251,146,60,.85)}
@@ -15093,7 +15093,8 @@ async function loadSysRes() {
       const gpuVal = d.gpu_pct.toFixed ? d.gpu_pct.toFixed(0) + '%' : d.gpu_pct + '%';
       const gpuTempBadge = _srTempBadge(d.gpu_temp);
       const gpuNameStr = d.gpu_name ? escHtml(d.gpu_name) : 'GPU';
-      html += _srMetric('GPU Load', gpuVal, [gpuNameStr, gpuTempBadge].join('  '), d.gpu_pct);
+      const gpuSub = [gpuNameStr, gpuTempBadge].join('  ');
+      html += _srMetric('GPU Load', gpuVal, gpuSub, d.gpu_pct);
     }
 
     html += _srMetric('RAM', ramVal, ramSub, d.ram_pct);
