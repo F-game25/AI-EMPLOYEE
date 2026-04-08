@@ -103,6 +103,19 @@ body {
   z-index: var(--z-scanlines);
 }
 
+/* Login input field wrapper — border controlled via CSS, not inline JS */
+.input-field-wrap {
+  border: 1px solid rgba(245, 196, 0, 0.2);
+  border-radius: 4px;
+  transition: border-color 0.2s ease;
+}
+.input-field-wrap:focus-within {
+  border-color: rgba(245, 196, 0, 0.6);
+}
+.input-field-wrap input {
+  display: block;
+}
+
 /* Visually hidden — accessible to screen readers */
 .sr-only {
   position: absolute;
