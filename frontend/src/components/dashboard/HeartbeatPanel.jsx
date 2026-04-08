@@ -64,7 +64,7 @@ export default function HeartbeatPanel() {
               className="font-mono text-xs leading-relaxed"
               style={{ color: LEVEL_COLORS[log.level] || 'var(--text-secondary)' }}
             >
-              <span style={{ color: 'var(--text-dim)', marginRight: '6px' }}>
+              <span style={{ color: 'var(--text-muted)', marginRight: '6px' }}>
                 {new Date(log.ts).toLocaleTimeString('en-US', {
                   hour12: false,
                   hour: '2-digit',

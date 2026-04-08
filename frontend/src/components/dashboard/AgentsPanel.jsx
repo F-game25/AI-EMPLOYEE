@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 
 const STATUS_CONFIG = {
-  idle: { color: 'var(--text-dim)', label: 'IDLE', dot: 'var(--text-dim)' },
+  idle: { color: 'var(--text-muted)', label: 'IDLE', dot: 'var(--text-muted)' },
   working: { color: 'var(--gold)', label: 'WORKING', dot: 'var(--gold)' },
   error: { color: 'var(--error)', label: 'ERROR', dot: 'var(--error)' },
 }
@@ -90,7 +90,7 @@ export default function AgentsPanel() {
                     />
                     <span
                       className="font-mono"
-                      style={{ fontSize: '11px', color: cfg.color }}
+                      style={{ fontSize: '12px', color: cfg.color }}
                       aria-label={`Status: ${cfg.label}`}
                     >
                       {cfg.label}
@@ -110,7 +110,7 @@ export default function AgentsPanel() {
 
                 <div
                   className="font-mono mt-0.5"
-                  style={{ fontSize: '11px', color: 'var(--text-dim)' }}
+                  style={{ fontSize: '11px', color: 'var(--text-muted)' }}
                 >
                   {agent.type}
                 </div>

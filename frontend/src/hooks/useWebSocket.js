@@ -54,6 +54,7 @@ function connectSingleton() {
     const store = getStore()
     store.setWsConnected(false)
     store.setWs(null)
+    clearTimeout(_typingTimeout)
     store.setTyping(false)
     store.addHeartbeatLog({ text: '[SYSTEM] Connection lost — reconnecting...', level: 'warning', ts: Date.now() })
     _wsInstance = null
