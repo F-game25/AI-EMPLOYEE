@@ -1930,17 +1930,7 @@ INDEX_HTML = r"""<!doctype html>
       background:linear-gradient(135deg,rgba(212,175,55,.04),transparent);
       pointer-events:none;
     }
-    .ov-hero-card:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(212,175,55,.18)}
-    .ov-hero-running{border-color:rgba(52,211,153,.2)}
-    .ov-hero-running:hover{border-color:rgba(52,211,153,.4);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(52,211,153,.08)}
-    .ov-hero-total{border-color:rgba(212,175,55,.25)}
-    .ov-hero-total:hover{border-color:rgba(212,175,55,.5);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(212,175,55,.1)}
-    .ov-hero-offline{border-color:rgba(248,113,113,.15)}
-    .ov-hero-offline:hover{border-color:rgba(248,113,113,.35);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(248,113,113,.07)}
-    .ov-hero-gateway{border-color:rgba(56,189,248,.15)}
-    .ov-hero-gateway:hover{border-color:rgba(56,189,248,.35);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(56,189,248,.07)}
-    .ov-hero-uptime{border-color:rgba(167,139,250,.15)}
-    .ov-hero-uptime:hover{border-color:rgba(167,139,250,.35);box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 20px rgba(167,139,250,.07)}
+    .ov-hero-card:hover{transform:translateY(-2px);border-color:rgba(212,175,55,.45);box-shadow:0 8px 32px rgba(0,0,0,.5),0 0 24px rgba(212,175,55,.1)}
 
     /* ── System control hero ── */
     .sys-control{
@@ -3284,10 +3274,10 @@ INDEX_HTML = r"""<!doctype html>
 <div id="tab-dashboard" class="tab-content active">
 
   <!-- ── SYSTEM ONLINE Status Banner ── -->
-  <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:linear-gradient(90deg,rgba(0,255,136,.05),rgba(212,175,55,.05),rgba(0,0,0,0));border:1px solid rgba(0,255,136,.18);border-radius:8px;margin-bottom:14px;font-family:var(--mono);font-size:.72em;letter-spacing:.08em;overflow:hidden;position:relative" id="ov-system-banner">
-    <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,255,136,.04),transparent);pointer-events:none"></div>
-    <div style="width:8px;height:8px;border-radius:50%;background:#00ff88;box-shadow:0 0 10px #00ff88,0 0 20px rgba(0,255,136,.4);animation:blink 1.2s infinite;flex-shrink:0"></div>
-    <span style="color:#00ff88;font-weight:700;text-transform:uppercase">◈ SYSTEM ONLINE</span>
+  <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:linear-gradient(90deg,rgba(212,175,55,.06),rgba(212,175,55,.03),rgba(0,0,0,0));border:1px solid rgba(212,175,55,.22);border-radius:8px;margin-bottom:14px;font-family:var(--mono);font-size:.72em;letter-spacing:.08em;overflow:hidden;position:relative" id="ov-system-banner">
+    <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(212,175,55,.04),transparent);pointer-events:none"></div>
+    <div style="width:8px;height:8px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px rgba(212,175,55,.6),0 0 16px rgba(212,175,55,.3);animation:blink 1.2s infinite;flex-shrink:0"></div>
+    <span style="color:var(--gold);font-weight:700;text-transform:uppercase">◈ SYSTEM ONLINE</span>
     <div style="width:1px;height:14px;background:rgba(255,255,255,.12)"></div>
     <span style="color:var(--gold);text-transform:uppercase" id="ov-banner-mode">POWER MODE</span>
     <div style="width:1px;height:14px;background:rgba(255,255,255,.12)"></div>
@@ -3309,34 +3299,34 @@ INDEX_HTML = r"""<!doctype html>
   <!-- ── Agent Count Hero Cards ── -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
     <div class="ov-hero-card ov-hero-running" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('running')}" style="cursor:pointer" aria-label="Agents Running – click for details">
-      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#34d399;margin-bottom:6px;font-family:var(--mono)">▶ RUNNING</div>
-      <div class="val" id="stat-running" style="font-size:2.6em;font-weight:800;color:#34d399;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(52,211,153,.4)">–</div>
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">▶ RUNNING</div>
+      <div class="val" id="stat-running" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.35)">–</div>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Active</div>
-      <div style="font-size:.68em;color:#34d399;margin-top:4px" id="stat-running-sub"></div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.5);margin-top:4px" id="stat-running-sub"></div>
     </div>
     <div class="ov-hero-card ov-hero-total" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('total')}" style="cursor:pointer" aria-label="Total Agents – click for details">
-      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin-bottom:6px;font-family:var(--mono)">◆ TOTAL</div>
-      <div class="val" id="stat-total" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(212,175,55,.4)">–</div>
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◆ TOTAL</div>
+      <div class="val" id="stat-total" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.35)">–</div>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Registered Agents</div>
-      <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-total-sub"></div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-total-sub"></div>
     </div>
     <div class="ov-hero-card ov-hero-offline" aria-label="Offline Agents">
-      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#f87171;margin-bottom:6px;font-family:var(--mono)">◌ OFFLINE</div>
-      <div class="val" id="stat-offline" style="font-size:2.6em;font-weight:800;color:#f87171;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(248,113,113,.3)">–</div>
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◌ OFFLINE</div>
+      <div class="val" id="stat-offline" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.25)">–</div>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Stopped</div>
-      <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-offline-sub"></div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-offline-sub"></div>
     </div>
     <div class="ov-hero-card ov-hero-gateway" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('gateway')}" style="cursor:pointer" aria-label="Gateway – click for details">
-      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#38bdf8;margin-bottom:6px;font-family:var(--mono)">◉ GATEWAY</div>
-      <div class="val" id="stat-gateway" style="font-size:2.6em;font-weight:800;color:#38bdf8;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(56,189,248,.3)">–</div>
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◉ GATEWAY</div>
+      <div class="val" id="stat-gateway" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.25)">–</div>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">API Gateway</div>
-      <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-gateway-sub"></div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-gateway-sub"></div>
     </div>
     <div class="ov-hero-card ov-hero-uptime" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('uptime')}" style="cursor:pointer" aria-label="Uptime – click for details">
-      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:#a78bfa;margin-bottom:6px;font-family:var(--mono)">◎ UPTIME</div>
-      <div class="val" id="stat-uptime" style="font-size:2.6em;font-weight:800;color:#a78bfa;line-height:1;font-family:var(--display);text-shadow:0 0 20px rgba(167,139,250,.3)">–</div>
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◎ UPTIME</div>
+      <div class="val" id="stat-uptime" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.25)">–</div>
       <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">System Uptime</div>
-      <div style="font-size:.68em;color:var(--text-muted);margin-top:4px" id="stat-uptime-sub"></div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-uptime-sub"></div>
     </div>
   </div>
 
