@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 const BOOT_LINES = [
@@ -64,6 +64,12 @@ export default function BootSequence({ onComplete }) {
   const [showLogo, setShowLogo] = useState(false)
   const [logoReady, setLogoReady] = useState(false)
 
+  // Keep a stable ref to the latest onComplete so the timer effect below
+  // never needs to re-run (and reset all timers) when the parent re-renders
+  // due to unrelated state changes (e.g. WebSocket events).
+  const onCompleteRef = useRef(onComplete)
+  useLayoutEffect(() => { onCompleteRef.current = onComplete })
+
   useEffect(() => {
     const timers = []
 
@@ -79,10 +85,10 @@ export default function BootSequence({ onComplete }) {
     const lastDelay = BOOT_LINES[BOOT_LINES.length - 1].delay
     timers.push(setTimeout(() => setShowLogo(true), lastDelay + 300))
     timers.push(setTimeout(() => setLogoReady(true), lastDelay + 700))
-    timers.push(setTimeout(() => onComplete?.(), lastDelay + 1400))
+    timers.push(setTimeout(() => onCompleteRef.current?.(), lastDelay + 1400))
 
     return () => timers.forEach(clearTimeout)
-  }, [onComplete])
+  }, []) // empty deps — run once on mount; onComplete accessed via stable ref
 
   return (
     <motion.div
