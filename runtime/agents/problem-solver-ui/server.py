@@ -11232,7 +11232,7 @@ async function afSendTask() {
   toast('🔥 Task sent to Ascend Forge!');
   if (input) input.value = '';
   if (_afTaskTimer) clearInterval(_afTaskTimer);
-  _afTaskTimer = setInterval(_afPollTaskProgress, 1200);
+  _afTaskTimer = setInterval(_afPollTaskProgress, 2500);
 }
 
 async function _afPollTaskProgress() {
@@ -11304,7 +11304,7 @@ async function blSendTask() {
   toast('⚡ BLACKLIGHT launched!');
   if (input) input.value = '';
   if (_blTaskTimer) clearInterval(_blTaskTimer);
-  _blTaskTimer = setInterval(_blPollTaskProgress, 1200);
+  _blTaskTimer = setInterval(_blPollTaskProgress, 2500);
 }
 
 async function _blPollTaskProgress() {
@@ -14973,6 +14973,7 @@ function startTopbarClock() {
   const el = document.getElementById('topbar-time');
   if (!el) return;
   function tick() {
+    if (document.hidden) return;
     const now = new Date();
     const pad = n => String(n).padStart(2,'0');
     el.textContent = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate())
@@ -15026,11 +15027,13 @@ function startHeartbeat() {
     appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
   }
   function scheduleNext() {
-    const delay = 600 + Math.random() * 2200;
+    const delay = 3000 + Math.random() * 5000;
     setTimeout(() => {
-      const agent = HB_AGENTS[Math.floor(Math.random() * HB_AGENTS.length)];
-      const msgs = HB_MSGS[agent];
-      appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
+      if (!document.hidden) {
+        const agent = HB_AGENTS[Math.floor(Math.random() * HB_AGENTS.length)];
+        const msgs = HB_MSGS[agent];
+        appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
+      }
       scheduleNext();
     }, delay);
   }
@@ -15147,6 +15150,7 @@ function updateStatBar(barId, valId, pct, label) {
 
 function startStatsUpdater() {
   async function update() {
+    if (document.hidden) return;
     /* fetch real status when possible */
     let agents = '–', tasks = '–', uptime = '–', gwStatus = 'online';
     try {
@@ -15180,7 +15184,7 @@ function startStatsUpdater() {
   }
 
   update();
-  setInterval(update, 4000);
+  setInterval(update, 10000);
 }
 
 /* ══════════════════════════════════════════════════
@@ -15213,38 +15217,43 @@ function startStatsUpdater() {
     });
   }
 
-  function frame() {
-    ctx.clearRect(0, 0, W, H);
-    for (const p of particles) {
-      p.x += p.vx; p.y += p.vy;
-      p.a += p.da;
-      if (p.a < 0.05) p.da = Math.abs(p.da);
-      if (p.a > 0.6) p.da = -Math.abs(p.da);
-      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
-      ctx.fill();
-    }
-    for (let i = 0; i < particles.length; i++) {
-      for (let j = i + 1; j < particles.length; j++) {
-        const dx = particles[i].x - particles[j].x;
-        const dy = particles[i].y - particles[j].y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 90) {
-          ctx.beginPath();
-          ctx.moveTo(particles[i].x, particles[i].y);
-          ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
+  // Throttle to ~20fps (50ms between frames) and skip entirely when tab is hidden
+  let _particleLastTs = 0;
+  function frame(ts) {
+    if (!document.hidden && ts - _particleLastTs >= 50) {
+      _particleLastTs = ts;
+      ctx.clearRect(0, 0, W, H);
+      for (const p of particles) {
+        p.x += p.vx; p.y += p.vy;
+        p.a += p.da;
+        if (p.a < 0.05) p.da = Math.abs(p.da);
+        if (p.a > 0.6) p.da = -Math.abs(p.da);
+        if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+        if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
+        ctx.fill();
+      }
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 90) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
         }
       }
     }
     requestAnimationFrame(frame);
   }
-  frame();
+  requestAnimationFrame(frame);
 })();
 
 /* init nav active state */
