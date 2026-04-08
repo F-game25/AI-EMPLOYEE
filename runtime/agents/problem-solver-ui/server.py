@@ -4118,6 +4118,7 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <div id="ceo-chat-status" style="font-size:.78em;color:var(--text-muted);margin-top:6px"></div>
   </div>
+  <div class="card" style="margin-bottom:16px">
     <div class="card-header">
       <div class="card-title"><span class="icon">🎯</span> Company Mission</div>
       <button class="btn btn-ghost btn-sm" onclick="loadGoals()">↻ Refresh</button>
@@ -6488,8 +6489,6 @@ function switchTab(tab, btn) {
     </div>
 
   </div>
-
-</div>
 
 </div>
 
