@@ -123,13 +123,13 @@ class TestAIEmployeeNet:
         assert 0 <= int(action[0].item()) < OUTPUT_SIZE
         assert 0.0 <= float(conf[0].item()) <= 1.0
 
-    def test_predict_does_not_leave_model_in_train_mode_when_started_in_train(self):
+    def test_predict_preserves_train_mode(self):
         net = AIEmployeeNet(INPUT_SIZE, HIDDEN, OUTPUT_SIZE)
         net.train()
         net.predict(torch.randn(1, INPUT_SIZE))
         assert net.training  # should be restored
 
-    def test_predict_does_not_leave_model_in_train_mode_when_started_in_eval(self):
+    def test_predict_preserves_eval_mode(self):
         net = AIEmployeeNet(INPUT_SIZE, HIDDEN, OUTPUT_SIZE)
         net.eval()
         net.predict(torch.randn(1, INPUT_SIZE))
