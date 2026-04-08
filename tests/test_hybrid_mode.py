@@ -33,7 +33,6 @@ if str(_ROUTER_DIR) not in sys.path:
 
 def _fresh_hybrid_mode(env_overrides: dict | None = None):
     """Import a freshly-reset hybrid_mode module with optional env overrides."""
-    import importlib
     env = env_overrides or {}
     with patch.dict(os.environ, env, clear=False):
         if "hybrid_mode" in sys.modules:
