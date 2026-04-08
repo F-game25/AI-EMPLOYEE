@@ -19,4 +19,4 @@ if [[ -f "$AI_HOME/config/ollama-agent.env" ]]; then
   set +a
 fi
 
-python3 "$AGENT_HOME/ollama_agent.py"
+exec python3 "$AGENT_HOME/ollama_agent.py"
