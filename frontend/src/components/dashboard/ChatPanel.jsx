@@ -1,18 +1,20 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import { useWebSocket } from '../../hooks/useWebSocket'
 
 export default function ChatPanel() {
   const messages = useAppStore(s => s.chatMessages)
+  const isTyping = useAppStore(s => s.isTyping)
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
   const addChatMessage = useAppStore(s => s.addChatMessage)
   const { sendMessage } = useWebSocket()
+  const inputId = useId()
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, isTyping])
 
   const handleSend = () => {
     const text = input.trim()
@@ -33,87 +35,145 @@ export default function ChatPanel() {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div
-        className="flex items-center px-4 py-2 flex-shrink-0"
-        style={{ borderBottom: '1px solid rgba(245,196,0,0.1)' }}
+        className="flex items-center px-4 py-2.5 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--border-gold-dim)' }}
       >
-        <span className="font-mono text-xs tracking-widest" style={{ color: '#F5C400' }}>
+        <span className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
           ORCHESTRATOR CHAT
         </span>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {messages.length === 0 && (
-          <div className="text-center mt-8">
-            <p className="font-mono text-xs" style={{ color: '#333' }}>
-              Send a message to the orchestrator...
+      <div
+        role="log"
+        aria-label="Chat messages"
+        aria-live="polite"
+        aria-atomic="false"
+        className="flex-1 overflow-y-auto px-4 py-3 space-y-3"
+      >
+        {messages.length === 0 && !isTyping && (
+          <div className="flex items-center justify-center h-full">
+            <p className="font-mono text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+              Send a command to the orchestrator
             </p>
           </div>
         )}
+
         <AnimatePresence initial={false}>
           {messages.map((msg, idx) => (
             <motion.div
-              key={idx}
-              initial={{ opacity: 0, y: 10 }}
+              key={`${msg.ts}-${idx}`}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2 }}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className="max-w-xs lg:max-w-md px-3 py-2 font-mono text-xs leading-relaxed"
+                className="max-w-sm lg:max-w-lg px-3 py-2 font-mono text-xs leading-relaxed"
                 style={msg.role === 'user' ? {
-                  background: 'rgba(245,196,0,0.1)',
-                  border: '1px solid rgba(245,196,0,0.3)',
+                  background: 'rgba(245,196,0,0.08)',
+                  border: '1px solid rgba(245,196,0,0.25)',
                   borderRadius: '6px 6px 2px 6px',
-                  color: '#F5C400',
-                  boxShadow: '0 0 10px rgba(245,196,0,0.1)',
+                  color: 'var(--gold)',
                 } : {
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.08)',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid var(--border-subtle)',
                   borderRadius: '6px 6px 6px 2px',
-                  color: '#ccc',
+                  color: 'var(--text-primary)',
                 }}
               >
                 {msg.role === 'ai' && (
-                  <div className="text-xs mb-1" style={{ color: '#444' }}>ORCHESTRATOR</div>
+                  <div
+                    className="text-xs mb-1 font-semibold tracking-widest"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    ORCHESTRATOR
+                  </div>
                 )}
                 {msg.content}
               </div>
             </motion.div>
           ))}
         </AnimatePresence>
+
+        {/* Typing indicator */}
+        <AnimatePresence>
+          {isTyping && (
+            <motion.div
+              key="typing"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.2 }}
+              className="flex justify-start"
+            >
+              <div
+                className="px-3 py-2.5"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '6px 6px 6px 2px',
+                }}
+                aria-label="Orchestrator is typing"
+              >
+                <div className="flex items-center gap-1.5">
+                  {[0, 1, 2].map(i => (
+                    <motion.div
+                      key={i}
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{ background: 'var(--text-dim)' }}
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
       <div
-        className="flex items-center px-3 py-2 flex-shrink-0 gap-2"
-        style={{ borderTop: '1px solid rgba(245,196,0,0.1)' }}
+        className="flex items-center px-3 py-2.5 flex-shrink-0 gap-2"
+        style={{ borderTop: '1px solid var(--border-gold-dim)' }}
       >
-        <span className="font-mono text-sm" style={{ color: '#F5C400' }}>{'>'}</span>
-        <div className="flex-1 relative">
-          <input
-            type="text"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="Enter command..."
-            className="w-full font-mono text-xs outline-none bg-transparent"
-            style={{ color: '#e8e8e8', caretColor: '#F5C400' }}
-          />
-        </div>
+        <label htmlFor={inputId} className="sr-only">
+          Send a command to the orchestrator
+        </label>
+        <span className="font-mono text-sm flex-shrink-0" style={{ color: 'var(--gold)' }}>
+          {'>'}
+        </span>
+        <input
+          id={inputId}
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKey}
+          placeholder="Enter command..."
+          autoComplete="off"
+          className="flex-1 font-mono text-xs outline-none bg-transparent min-w-0"
+          style={{ color: 'var(--text-primary)', caretColor: 'var(--gold)' }}
+          aria-label="Command input"
+        />
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={handleSend}
-          className="font-mono text-xs px-3 py-1"
+          disabled={!input.trim()}
+          className="font-mono text-xs px-3 py-1.5 flex-shrink-0"
           style={{
             border: '1px solid rgba(245,196,0,0.3)',
-            color: '#F5C400',
-            background: 'rgba(245,196,0,0.05)',
+            color: 'var(--gold)',
+            background: 'rgba(245,196,0,0.06)',
             borderRadius: '3px',
-            cursor: 'pointer',
+            cursor: input.trim() ? 'pointer' : 'not-allowed',
+            opacity: input.trim() ? 1 : 0.5,
+            transition: 'opacity 0.15s',
           }}
+          aria-label="Send message"
         >
           SEND
         </motion.button>

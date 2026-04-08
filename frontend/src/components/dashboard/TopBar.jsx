@@ -12,25 +12,30 @@ export default function TopBar() {
   }, [])
 
   return (
-    <div
-      className="flex items-center justify-between px-4 h-10 flex-shrink-0"
+    <header
+      className="flex items-center justify-between px-4 flex-shrink-0"
       style={{
-        background: 'rgba(10,10,10,0.95)',
-        borderBottom: '1px solid rgba(245,196,0,0.15)',
+        height: '44px',
+        background: 'rgba(10,10,10,0.97)',
+        borderBottom: '1px solid var(--border-gold-dim)',
         backdropFilter: 'blur(10px)',
+        zIndex: 'var(--z-topbar)',
       }}
     >
       {/* Left: logo */}
       <div className="flex items-center gap-3">
-        <span className="font-mono text-xs font-bold tracking-widest" style={{ color: '#F5C400' }}>
+        <span
+          className="font-mono text-xs font-bold tracking-widest"
+          style={{ color: 'var(--gold)' }}
+        >
           AI-EMPLOYEE
         </span>
-        <span className="font-mono text-xs" style={{ color: '#333' }}>|</span>
-        <span className="font-mono text-xs" style={{ color: '#555' }}>OS v2.0</span>
+        <span className="font-mono text-xs" style={{ color: 'var(--text-dim)' }}>|</span>
+        <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>OS v2.0</span>
       </div>
 
       {/* Center: system metrics */}
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-6" role="status" aria-label="System metrics">
         <Metric label="CPU" value={`${systemStatus.cpu || 0}%`} warn={systemStatus.cpu > 70} />
         <Metric label="MEM" value={`${systemStatus.memory || 0}%`} warn={systemStatus.memory > 70} />
         <Metric label="CONN" value={systemStatus.connections || 0} />
@@ -38,37 +43,54 @@ export default function TopBar() {
 
       {/* Right: time + connection + user */}
       <div className="flex items-center gap-4">
-        <span className="font-mono text-xs" style={{ color: '#555' }}>
+        <time
+          className="font-mono text-xs"
+          style={{ color: 'var(--text-muted)' }}
+          aria-label="Current time"
+        >
           {time.toLocaleTimeString('en-US', { hour12: false })}
-        </span>
+        </time>
+
         <motion.div
-          animate={{ opacity: [1, 0.4, 1] }}
+          animate={{ opacity: [1, 0.45, 1] }}
           transition={{ duration: 2, repeat: Infinity }}
           className="flex items-center gap-1.5"
+          role="status"
+          aria-label={wsConnected ? 'Connected' : 'Offline'}
+          title={wsConnected ? 'WebSocket connected' : 'WebSocket disconnected'}
         >
           <div
             className="w-1.5 h-1.5 rounded-full"
-            style={{ background: wsConnected ? '#00ff88' : '#ff3366' }}
+            style={{ background: wsConnected ? 'var(--success)' : 'var(--error)' }}
           />
-          <span className="font-mono text-xs" style={{ color: wsConnected ? '#00ff88' : '#ff3366' }}>
+          <span
+            className="font-mono text-xs"
+            style={{ color: wsConnected ? 'var(--success)' : 'var(--error)' }}
+          >
             {wsConnected ? 'LIVE' : 'OFFLINE'}
           </span>
         </motion.div>
+
         {user && (
-          <span className="font-mono text-xs" style={{ color: '#666' }}>
+          <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>
             [{user.username.toUpperCase()}]
           </span>
         )}
       </div>
-    </div>
+    </header>
   )
 }
 
 function Metric({ label, value, warn }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="font-mono text-xs" style={{ color: '#444' }}>{label}</span>
-      <span className="font-mono text-xs" style={{ color: warn ? '#ffaa00' : '#888' }}>{value}</span>
+      <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span
+        className="font-mono text-xs font-medium"
+        style={{ color: warn ? 'var(--warning)' : 'var(--text-secondary)' }}
+      >
+        {value}
+      </span>
     </div>
   )
 }
