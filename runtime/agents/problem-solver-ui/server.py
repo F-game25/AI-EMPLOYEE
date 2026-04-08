@@ -29,6 +29,15 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
+try:
+    import psutil as _psutil
+    _PSUTIL_OK = True
+    # Prime cpu_percent so the first real call returns a meaningful value
+    _psutil.cpu_percent(interval=None)
+except ImportError:
+    _psutil = None  # type: ignore[assignment]
+    _PSUTIL_OK = False
+
 # ── Python version guard ──────────────────────────────────────────────────────
 if sys.version_info < (3, 10):
     print("ERROR: Python 3.10+ is required. Current version: "
@@ -1081,7 +1090,7 @@ if not _audit_logger.handlers:
 async def audit_logging_middleware(request: Request, call_next):
     """Log every inbound request and outbound status for the audit trail."""
     # Skip high-frequency health/status probes to reduce I/O noise
-    if request.url.path in ("/health", "/api/status", "/api/gateway/status"):
+    if request.url.path in ("/health", "/api/status", "/api/gateway/status", "/api/system/resources"):
         return await call_next(request)
 
     _audit_enabled = (
@@ -2425,6 +2434,19 @@ INDEX_HTML = r"""<!doctype html>
     .health-check-item.ok .hc-val{color:var(--success)}
     .health-check-item.warn .hc-val{color:var(--warning)}
     .health-check-item.err .hc-val{color:var(--danger)}
+    /* System Resources card */
+    .sysres-metric{background:rgba(0,0,0,.25);border:1px solid rgba(212,175,55,.12);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;transition:border-color .3s}
+    .sysres-metric:hover{border-color:rgba(212,175,55,.3)}
+    .sysres-metric-header{display:flex;justify-content:space-between;align-items:center}
+    .sysres-metric-label{font-size:.72em;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)}
+    .sysres-metric-value{font-size:1.15em;font-weight:700;font-family:var(--mono);color:var(--gold)}
+    .sysres-metric-sub{font-size:.7em;color:var(--text-muted)}
+    .sysres-bar-track{height:4px;background:rgba(255,255,255,.06);border-radius:100px;overflow:hidden;margin-top:2px}
+    .sysres-bar-fill{height:100%;border-radius:100px;transition:width .8s ease,background .5s}
+    .sysres-bar-fill.ok{background:linear-gradient(90deg,#22c55e,#4ade80)}
+    .sysres-bar-fill.warn{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+    .sysres-bar-fill.hot{background:linear-gradient(90deg,#ef4444,#f87171)}
+    .sysres-na{font-size:.78em;color:var(--text-dim);font-style:italic}
     .office-desk-item{position:absolute;width:80px;height:44px;background:linear-gradient(180deg,rgba(212,175,55,.18),rgba(212,175,55,.06));border:1px solid rgba(212,175,55,.25);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.3)}
     .robot-agent{position:absolute;cursor:pointer;transition:transform .3s;animation:robotWalk 3s ease-in-out infinite}
     .robot-agent:hover{transform:scale(1.2)!important;z-index:100}
@@ -3449,6 +3471,21 @@ INDEX_HTML = r"""<!doctype html>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">workers</code><span style="font-size:.78em;color:var(--text-muted)">List active agents</span></div>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">schedule</code><span style="font-size:.78em;color:var(--text-muted)">List scheduled tasks</span></div>
       <div style="background:rgba(212,175,55,.05);border:1px solid rgba(212,175,55,.15);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px"><code style="color:var(--gold-light);font-size:.8em;min-width:60px">help</code><span style="font-size:.78em;color:var(--text-muted)">Show all commands</span></div>
+    </div>
+  </div>
+
+  <!-- System Resources card (real hardware metrics) -->
+  <div class="card" id="sysres-card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:var(--gold)">⬡</span> System Resources</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="sysres-updated" style="font-size:.7em;color:var(--text-muted)">Loading…</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadSysRes()">↻</button>
+      </div>
+    </div>
+    <div id="sysres-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+      <!-- filled by JS -->
+      <div class="empty" style="grid-column:1/-1"><div class="icon">⬡</div><p>Loading hardware metrics…</p></div>
     </div>
   </div>
 
@@ -5896,7 +5933,7 @@ function switchTab(tab, btn) {
   const subNav = document.getElementById('subnav-' + group);
   if (subNav) subNav.classList.add('active');
   currentTab = tab;
-  if (tab === 'dashboard') loadDashboard();
+  if (tab === 'dashboard') { loadDashboard(); if (typeof loadSysRes === 'function') loadSysRes(); }
   if (tab === 'chat') loadChatLog();
   if (tab === 'scheduler') loadSchedules();
   if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm().then(renderSwarmAgentGrid); else renderSwarmAgentGrid(); }
@@ -7063,7 +7100,7 @@ function _switchTabBase(tab, btn) {
     if (autoBtn) autoBtn.classList.add('active');
   }
   currentTab = tab;
-  if (tab === 'dashboard') loadDashboard();
+  if (tab === 'dashboard') { loadDashboard(); if (typeof loadSysRes === 'function') loadSysRes(); }
   if (tab === 'chat') loadChatLog();
   if (tab === 'scheduler') loadSchedules();
   if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm().then(renderSwarmAgentGrid); else renderSwarmAgentGrid(); }
@@ -11232,7 +11269,7 @@ async function afSendTask() {
   toast('🔥 Task sent to Ascend Forge!');
   if (input) input.value = '';
   if (_afTaskTimer) clearInterval(_afTaskTimer);
-  _afTaskTimer = setInterval(_afPollTaskProgress, 1200);
+  _afTaskTimer = setInterval(_afPollTaskProgress, 2500);
 }
 
 async function _afPollTaskProgress() {
@@ -11304,7 +11341,7 @@ async function blSendTask() {
   toast('⚡ BLACKLIGHT launched!');
   if (input) input.value = '';
   if (_blTaskTimer) clearInterval(_blTaskTimer);
-  _blTaskTimer = setInterval(_blPollTaskProgress, 1200);
+  _blTaskTimer = setInterval(_blPollTaskProgress, 2500);
 }
 
 async function _blPollTaskProgress() {
@@ -14862,6 +14899,7 @@ async function submitLogin() {
       startHeartbeat();
       startStatsUpdater();
       startTopbarClock();
+      startSysResPolling();
     }, 520);
   }, 600);
 }
@@ -14973,6 +15011,7 @@ function startTopbarClock() {
   const el = document.getElementById('topbar-time');
   if (!el) return;
   function tick() {
+    if (document.hidden) return;
     const now = new Date();
     const pad = n => String(n).padStart(2,'0');
     el.textContent = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate())
@@ -15026,11 +15065,13 @@ function startHeartbeat() {
     appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
   }
   function scheduleNext() {
-    const delay = 600 + Math.random() * 2200;
+    const delay = 3000 + Math.random() * 5000;
     setTimeout(() => {
-      const agent = HB_AGENTS[Math.floor(Math.random() * HB_AGENTS.length)];
-      const msgs = HB_MSGS[agent];
-      appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
+      if (!document.hidden) {
+        const agent = HB_AGENTS[Math.floor(Math.random() * HB_AGENTS.length)];
+        const msgs = HB_MSGS[agent];
+        appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
+      }
       scheduleNext();
     }, delay);
   }
@@ -15147,6 +15188,7 @@ function updateStatBar(barId, valId, pct, label) {
 
 function startStatsUpdater() {
   async function update() {
+    if (document.hidden) return;
     /* fetch real status when possible */
     let agents = '–', tasks = '–', uptime = '–', gwStatus = 'online';
     try {
@@ -15180,7 +15222,94 @@ function startStatsUpdater() {
   }
 
   update();
-  setInterval(update, 4000);
+  setInterval(update, 10000);
+}
+
+/* ══════════════════════════════════════════════════
+   SYSTEM RESOURCES (real hardware metrics)
+══════════════════════════════════════════════════ */
+let _sysResTimer = null;
+
+function _srBar(pct) {
+  const cls = pct >= 85 ? 'hot' : pct >= 65 ? 'warn' : 'ok';
+  return `<div class="sysres-bar-track"><div class="sysres-bar-fill ${cls}" style="width:${Math.min(100,pct)}%"></div></div>`;
+}
+
+function _srTempColor(t) {
+  if (t === null) return 'var(--text-muted)';
+  if (t >= 85) return '#f87171';
+  if (t >= 70) return '#fbbf24';
+  return '#4ade80';
+}
+
+function _srMetric(label, value, sub, barPct) {
+  const bar = (typeof barPct === 'number') ? _srBar(barPct) : '';
+  return `<div class="sysres-metric">
+    <div class="sysres-metric-header">
+      <span class="sysres-metric-label">${label}</span>
+      <span class="sysres-metric-value">${value}</span>
+    </div>
+    ${bar}
+    ${sub ? `<div class="sysres-metric-sub">${sub}</div>` : ''}
+  </div>`;
+}
+
+async function loadSysRes() {
+  const grid = document.getElementById('sysres-grid');
+  const updEl = document.getElementById('sysres-updated');
+  if (!grid) return;
+  try {
+    const d = await api('/api/system/resources');
+    if (d.error) {
+      grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><p style="color:var(--text-muted)">${escHtml(d.error)}</p></div>`;
+      return;
+    }
+
+    const cpuVal = typeof d.cpu_pct === 'number' ? d.cpu_pct.toFixed(1) + '%' : '–';
+    const cpuTemp = d.cpu_temp !== null ? `<span style="color:${_srTempColor(d.cpu_temp)}">${d.cpu_temp}°C</span>` : '<span class="sysres-na">temp N/A</span>';
+    const ramVal = typeof d.ram_pct === 'number' ? d.ram_pct.toFixed(1) + '%' : '–';
+    const ramSub = (d.ram_used_gb && d.ram_total_gb) ? `${d.ram_used_gb} GB / ${d.ram_total_gb} GB used` : '';
+    const diskVal = typeof d.disk_pct === 'number' ? d.disk_pct.toFixed(1) + '%' : '–';
+    const diskSub = (d.disk_used_gb && d.disk_total_gb) ? `${d.disk_used_gb} GB / ${d.disk_total_gb} GB used` : '';
+    const loadSub = d.load_avg ? `1m: ${d.load_avg['1m']}  5m: ${d.load_avg['5m']}  15m: ${d.load_avg['15m']}` : '';
+
+    let html = _srMetric('CPU Usage', cpuVal, cpuTemp, d.cpu_pct)
+      + _srMetric('RAM Usage', ramVal, ramSub, d.ram_pct)
+      + _srMetric('Disk Usage', diskVal, diskSub, d.disk_pct)
+      + _srMetric('Uptime', d.uptime || '–', '', null);
+
+    if (d.load_avg) {
+      html += _srMetric('Load Avg', d.load_avg['1m'], loadSub, null);
+    }
+
+    if (d.gpu_pct !== null) {
+      const gpuTemp = d.gpu_temp !== null ? `<span style="color:${_srTempColor(d.gpu_temp)}">${d.gpu_temp}°C</span>` : '';
+      const gpuSub = [d.gpu_name ? escHtml(d.gpu_name) : '', gpuTemp].filter(Boolean).join(' · ');
+      html += _srMetric('GPU Usage', d.gpu_pct + '%', gpuSub, d.gpu_pct);
+    }
+
+    grid.innerHTML = html;
+    if (updEl) {
+      const t = new Date();
+      updEl.textContent = 'Updated ' + String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0') + ':' + String(t.getSeconds()).padStart(2,'0');
+    }
+
+    // Also feed real CPU into the sidebar ring
+    if (typeof d.cpu_pct === 'number') updateCpuRing(d.cpu_pct);
+    if (typeof d.ram_pct === 'number') updateStatBar('sb-mem', 'sv-mem', d.ram_pct, d.ram_pct.toFixed(0) + '%');
+    if (d.uptime) { const upEl = document.getElementById('sv-uptime'); if (upEl) upEl.textContent = d.uptime; }
+  } catch (e) {
+    if (grid) grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><p style="color:var(--text-muted)">Metrics unavailable</p></div>';
+  }
+}
+
+function startSysResPolling() {
+  loadSysRes();
+  if (_sysResTimer) clearInterval(_sysResTimer);
+  // Poll every 5s only when dashboard is active and page is visible
+  _sysResTimer = setInterval(() => {
+    if (!document.hidden && currentTab === 'dashboard') loadSysRes();
+  }, 5000);
 }
 
 /* ══════════════════════════════════════════════════
@@ -15213,38 +15342,43 @@ function startStatsUpdater() {
     });
   }
 
-  function frame() {
-    ctx.clearRect(0, 0, W, H);
-    for (const p of particles) {
-      p.x += p.vx; p.y += p.vy;
-      p.a += p.da;
-      if (p.a < 0.05) p.da = Math.abs(p.da);
-      if (p.a > 0.6) p.da = -Math.abs(p.da);
-      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
-      ctx.fill();
-    }
-    for (let i = 0; i < particles.length; i++) {
-      for (let j = i + 1; j < particles.length; j++) {
-        const dx = particles[i].x - particles[j].x;
-        const dy = particles[i].y - particles[j].y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 90) {
-          ctx.beginPath();
-          ctx.moveTo(particles[i].x, particles[i].y);
-          ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
+  // Throttle to ~20fps (50ms between frames) and skip entirely when tab is hidden
+  let _particleLastTs = 0;
+  function frame(ts) {
+    if (!document.hidden && ts - _particleLastTs >= 50) {
+      _particleLastTs = ts;
+      ctx.clearRect(0, 0, W, H);
+      for (const p of particles) {
+        p.x += p.vx; p.y += p.vy;
+        p.a += p.da;
+        if (p.a < 0.05) p.da = Math.abs(p.da);
+        if (p.a > 0.6) p.da = -Math.abs(p.da);
+        if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+        if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
+        ctx.fill();
+      }
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 90) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
         }
       }
     }
     requestAnimationFrame(frame);
   }
-  frame();
+  requestAnimationFrame(frame);
 })();
 
 /* init nav active state */
@@ -15553,6 +15687,124 @@ def get_status():
 def get_doctor():
     rc, out = ai_employee("doctor")
     return JSONResponse({"output": out, "rc": rc})
+
+
+# ── System Resources endpoint ─────────────────────────────────────────────────
+_sysres_cache: dict = {}
+_sysres_cache_ts: float = 0.0
+_SYSRES_CACHE_TTL = 3.0  # seconds — prevents hammering psutil on rapid requests
+
+
+def _format_uptime(seconds: int) -> str:
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+@app.get("/api/system/resources")
+def get_system_resources():
+    """Return real hardware metrics: CPU, RAM, disk, temps, GPU (if available), load avg."""
+    global _sysres_cache, _sysres_cache_ts
+    now_ts = time.monotonic()
+    if now_ts - _sysres_cache_ts < _SYSRES_CACHE_TTL and _sysres_cache:
+        return JSONResponse(_sysres_cache)
+
+    if not _PSUTIL_OK:
+        return JSONResponse({"error": "psutil not available"})
+
+    try:
+        # CPU — non-blocking (uses measurement from previous call)
+        cpu_pct = _psutil.cpu_percent(interval=None)
+
+        # RAM
+        vm = _psutil.virtual_memory()
+        ram_used_gb = round(vm.used / (1024 ** 3), 1)
+        ram_total_gb = round(vm.total / (1024 ** 3), 1)
+        ram_pct = vm.percent
+
+        # Disk (root partition)
+        disk = _psutil.disk_usage("/")
+        disk_used_gb = round(disk.used / (1024 ** 3), 1)
+        disk_total_gb = round(disk.total / (1024 ** 3), 1)
+        disk_pct = disk.percent
+
+        # Load average (Unix only)
+        load_avg = None
+        try:
+            load1, load5, load15 = os.getloadavg()
+            load_avg = {"1m": round(load1, 2), "5m": round(load5, 2), "15m": round(load15, 2)}
+        except (AttributeError, OSError):
+            pass
+
+        # Uptime
+        boot_ts = _psutil.boot_time()
+        uptime_str = _format_uptime(int(time.time() - boot_ts))
+
+        # CPU Temperature
+        cpu_temp = None
+        try:
+            temps = _psutil.sensors_temperatures()
+            if temps:
+                for key in ("coretemp", "k10temp", "cpu_thermal", "acpitz", "cpu-thermal"):
+                    if key in temps and temps[key]:
+                        cpu_temp = round(temps[key][0].current, 1)
+                        break
+                if cpu_temp is None:
+                    first = next(iter(temps.values()), [])
+                    if first:
+                        cpu_temp = round(first[0].current, 1)
+        except Exception:
+            pass
+
+        # GPU via nvidia-smi (best-effort, 2 s timeout)
+        gpu_pct = None
+        gpu_temp = None
+        gpu_name = None
+        try:
+            import csv as _csv
+            res = subprocess.run(
+                ["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,name",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if res.returncode == 0:
+                rows = list(_csv.reader([res.stdout.strip()]))
+                if rows and len(rows[0]) >= 3:
+                    gpu_pct = int(rows[0][0].strip())
+                    gpu_temp = int(rows[0][1].strip())
+                    gpu_name = rows[0][2].strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, IndexError):
+            pass
+        except Exception:
+            pass
+
+        data: dict = {
+            "cpu_pct": cpu_pct,
+            "cpu_temp": cpu_temp,
+            "ram_used_gb": ram_used_gb,
+            "ram_total_gb": ram_total_gb,
+            "ram_pct": ram_pct,
+            "disk_used_gb": disk_used_gb,
+            "disk_total_gb": disk_total_gb,
+            "disk_pct": disk_pct,
+            "load_avg": load_avg,
+            "uptime": uptime_str,
+            "gpu_pct": gpu_pct,
+            "gpu_temp": gpu_temp,
+            "gpu_name": gpu_name,
+        }
+    except Exception as exc:
+        logging.getLogger(__name__).warning("system/resources collection failed: %s", exc)
+        data = {"error": "Failed to collect system metrics"}
+
+    _sysres_cache = data
+    _sysres_cache_ts = now_ts
+    return JSONResponse(data)
 
 
 @app.post("/api/gateway/pull-model")
