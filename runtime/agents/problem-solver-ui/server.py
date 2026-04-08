@@ -1403,6 +1403,7 @@ INDEX_HTML = r"""<!doctype html>
       font-family:inherit;position:relative;letter-spacing:.01em;
     }
     .sub-nav button:hover{color:rgba(212,175,55,.85);background:rgba(212,175,55,.04)}
+    .sub-nav button:active{transform:scale(.96);transition:transform .1s}
     .sub-nav button.active{
       color:var(--gold);border-bottom-color:rgba(212,175,55,.7);
       background:rgba(212,175,55,.06);font-weight:600;
@@ -1412,6 +1413,10 @@ INDEX_HTML = r"""<!doctype html>
       background:linear-gradient(90deg,transparent,rgba(212,175,55,.8),transparent);
       filter:blur(1px);
     }
+    @keyframes navBtnActivate{
+      0%{transform:scale(.95)}50%{transform:scale(1.03)}100%{transform:scale(1)}
+    }
+    .sub-nav button.active{animation:navBtnActivate .25s cubic-bezier(.4,0,.2,1)}
     /* Legacy hidden scroll buttons */
     .nav-scroll-btn.hidden{display:none}
 
@@ -1789,11 +1794,20 @@ INDEX_HTML = r"""<!doctype html>
     .tab-content{display:none;width:100%;box-sizing:border-box}
     .tab-content.active{
       display:block;width:100%;
-      animation:tabReveal .35s cubic-bezier(.4,0,.2,1);
+      animation:tabReveal .4s cubic-bezier(.4,0,.2,1);
+    }
+    .tab-content.tab-leaving{
+      display:block;width:100%;pointer-events:none;
+      animation:tabLeave .2s cubic-bezier(.4,0,.2,1) forwards;
     }
     @keyframes tabReveal{
-      0%{opacity:0;transform:translateY(10px) scale(.995)}
+      0%{opacity:0;transform:translateY(14px) scale(.993)}
+      60%{opacity:1;transform:translateY(-2px) scale(1.001)}
       100%{opacity:1;transform:none}
+    }
+    @keyframes tabLeave{
+      0%{opacity:1;transform:none}
+      100%{opacity:0;transform:translateY(-8px) scale(.996)}
     }
 
     /* ── Gold glow line under header ── */
@@ -1810,7 +1824,7 @@ INDEX_HTML = r"""<!doctype html>
 
     /* ── Tab panels ── */
     .tab-content{display:none;width:100%;box-sizing:border-box}
-    .tab-content.active{display:block;animation:fadeIn .3s ease;width:100%}
+    .tab-content.active{display:block;animation:tabReveal .4s cubic-bezier(.4,0,.2,1);width:100%}
 
     /* ── Tab page headers ── */
     .page-header{
@@ -7016,6 +7030,10 @@ function _renderDashAgentMap(agents, statusData) {
 let currentTab = 'dashboard';
 const _startTime = Date.now();
 
+/* Tab animation durations — must match CSS */
+const TAB_LEAVE_MS = 200;   /* matches tabLeave .2s */
+const TAB_ENTER_DELAY_MS = 80; /* stagger: let leave start before enter */
+
 function switchToChatTab() {
   const btn = document.getElementById('nav-btn-chat');
   if (btn) btn.click();
@@ -7046,13 +7064,27 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 
-function switchTab(tab, btn) {
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+function _switchTabBase(tab, btn) {
+  // Animate out current active tab
+  const prevTab = document.querySelector('.tab-content.active');
+  const isNewTab = prevTab && prevTab.id !== 'tab-' + tab;
+  if (isNewTab) {
+    prevTab.classList.add('tab-leaving');
+    setTimeout(() => { prevTab.classList.remove('active', 'tab-leaving'); }, TAB_LEAVE_MS);
+  } else {
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  }
+  // Update nav buttons
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + tab).classList.add('active');
-  btn.classList.add('active');
-  // Scroll active tab into view
-  btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
+  // Animate in new tab (slight delay so leave animation starts first)
+  setTimeout(() => {
+    const tabEl = document.getElementById('tab-' + tab);
+    if (tabEl) tabEl.classList.add('active');
+  }, isNewTab ? TAB_ENTER_DELAY_MS : 0);
+  if (btn && btn.classList) {
+    btn.classList.add('active');
+    btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
+  }
   currentTab = tab;
   if (tab === 'dashboard') loadDashboard();
   if (tab === 'chat') loadChatLog();
@@ -13001,10 +13033,9 @@ async function loadBackupsList() {
   </div>`).join('');
 }
 
-// ── Auto-load on tab switch (extend existing switchTab) ───────────
-const _origSwitchTab = switchTab;
+// ── Auto-load on tab switch (extend base switchTab) ───────────
 function switchTab(tab, btn) {
-  _origSwitchTab(tab, btn);
+  _switchTabBase(tab, btn);
   const loaders = {
     'crm': loadCRM,
     'email-mkt': loadEmailCampaigns,
@@ -13056,6 +13087,7 @@ async function viewTaskById(taskId) {
     toast('Task not found in recent history — it may have been pruned', 'info');
     switchTab('tasks', null);
   }
+}
 // ═══════════════════════════════════════════════════════════════════
 // CRM
 // ═══════════════════════════════════════════════════════════════════
@@ -13385,6 +13417,7 @@ function assignTaskToAgent(agentId) {
       if (checkbox) checkbox.click();
     }, 300);
   }, 200);
+}
 // ═══════════════════════════════════════════════════════════════════
 // Social Scheduler
 // ═══════════════════════════════════════════════════════════════════
