@@ -2983,8 +2983,8 @@ INDEX_HTML = r"""<!doctype html>
 </head>
 <body>
 
-<!-- ══ BOOT SCREEN ══ -->
-<div id="boot">
+<!-- ══ BOOT SCREEN (legacy — hidden, superseded by #boot-overlay) ══ -->
+<div id="boot" style="display:none">
   <div id="boot-log"></div>
   <div id="boot-center">
     <div class="boot-box">
@@ -2992,6 +2992,39 @@ INDEX_HTML = r"""<!doctype html>
       <div class="boot-sub">Autonomous Workforce Interface v4.0</div>
       <div class="boot-status" id="boot-status-text">INITIALIZING SYSTEMS...</div>
       <div class="boot-bar"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ BOOT OVERLAY (used by runBootSequence / hideBoot) ══ -->
+<div id="boot-overlay">
+  <div class="boot-scanline"></div>
+  <div class="boot-glow-h"></div>
+  <div class="boot-corner tl"></div>
+  <div class="boot-corner tr"></div>
+  <div class="boot-corner bl"></div>
+  <div class="boot-corner br"></div>
+  <div class="boot-logo" data-text="AI EMPLOYEE">AI EMPLOYEE</div>
+  <div class="boot-sub">Autonomous Workforce Interface · v4.0</div>
+  <!-- Terminal output area -->
+  <div class="boot-terminal">
+    <div class="boot-terminal-inner" id="boot-terminal"></div>
+  </div>
+  <!-- Progress bar -->
+  <div class="boot-bar-wrap">
+    <div class="boot-bar-label">
+      <span>SYSTEM INIT</span>
+      <span id="boot-pct">0%</span>
+    </div>
+    <div class="boot-bar-track">
+      <div class="boot-bar-fill" id="boot-bar"></div>
+    </div>
+  </div>
+  <!-- Login phase shown after boot completes -->
+  <div id="boot-login">
+    <div class="boot-login-box">
+      <div class="boot-login-welcome">SYSTEM READY<span class="boot-login-cursor"></span></div>
+      <div class="boot-login-sub">Redirecting to authentication…</div>
     </div>
   </div>
 </div>
