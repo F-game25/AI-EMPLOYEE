@@ -5171,7 +5171,7 @@ INDEX_HTML = r"""<!doctype html>
               style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"
               oninput="onTaskInputChange()"></textarea>
             <!-- Idea conversion controls (shown in idea mode) -->
-            <div id="idea-convert-row" style="display:none;margin-top:6px;display:none">
+            <div id="idea-convert-row" style="display:none;margin-top:6px">
               <button class="btn btn-primary" onclick="convertIdea()" id="btn-convert-idea" style="width:100%">✨ Convert Idea → Professional Prompt</button>
               <div id="idea-convert-status" style="margin-top:6px;font-size:.82em;color:var(--text-muted)"></div>
             </div>
@@ -8662,7 +8662,7 @@ function toggleIdeaMode() {
     btn.textContent = '💡 Idea Mode ON';
     notice.style.display = 'block';
     convertRow.style.display = 'block';
-    taskInput.placeholder = 'e.g. I want to start an online business selling handmade jewellery\ne.g. Grow my YouTube channel to 10k subscribers\ne.g. Build an app that helps people track their habits';
+    taskInput.placeholder = 'e.g. I want to start an online business selling handmade jewelry\ne.g. Grow my YouTube channel to 10k subscribers\ne.g. Build an app that helps people track their habits';
   } else {
     btn.style.background = '';
     btn.style.borderColor = 'rgba(212,175,55,.4)';
