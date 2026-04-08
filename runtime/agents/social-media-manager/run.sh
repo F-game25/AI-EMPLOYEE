@@ -19,4 +19,4 @@ if [[ -f "$AI_HOME/config/social-media-manager.env" ]]; then
   set +a
 fi
 
-python3 "$AGENT_HOME/social_media_manager.py"
+exec python3 "$AGENT_HOME/social_media_manager.py"
