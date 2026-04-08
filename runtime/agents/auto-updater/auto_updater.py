@@ -385,8 +385,8 @@ def _handle_sigusr1(sig, frame):
     logger.info("SIGUSR1 received — triggering immediate update check")
 
 
-def _handle_shutdown(sig, frame):  # noqa: ARG001
-    logger.info("Signal %s received — auto-updater shutting down …", sig)
+def _handle_shutdown(signum, frame):  # noqa: ARG001
+    logger.info("Signal %s received -- auto-updater shutting down ...", signum)
     _shutdown.set()
     _wakeup.set()   # wake the inner sleep so we exit promptly
 
