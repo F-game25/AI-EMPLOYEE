@@ -117,6 +117,41 @@ from typing import Optional
 
 logger = logging.getLogger("ai_router")
 
+# ── Hybrid Mode integration (optional — graceful fallback if not present) ────
+_hybrid_mode = None
+try:
+    _hm_path = Path(__file__).parent
+    if str(_hm_path) not in sys.path:
+        sys.path.insert(0, str(_hm_path))
+    import hybrid_mode as _hybrid_mode  # type: ignore[import]
+    logger.debug("ai_router: hybrid_mode loaded — Dual-Mode Architecture active")
+except Exception:
+    _hybrid_mode = None
+
+
+def _is_online() -> bool:
+    """Return True if the system is effectively online (internet reachable).
+
+    Delegates to hybrid_mode.is_online() when available; falls back to True
+    so that existing behaviour is preserved when the module is absent.
+    """
+    if _hybrid_mode is not None:
+        try:
+            return _hybrid_mode.is_online()
+        except Exception:
+            pass
+    return True
+
+
+def _record_cloud_failure(provider: str = "") -> None:
+    """Signal a cloud provider network failure to the hybrid mode controller."""
+    if _hybrid_mode is not None:
+        try:
+            _hybrid_mode.record_provider_failure(provider)
+        except Exception:
+            pass
+
+
 # ── Turbo Quantization integration (optional — graceful fallback if not present) ─
 _turbo_quant = None
 try:
@@ -448,8 +483,13 @@ def _try_nvidia_nim(
     Model selection (if model is None):
       - Defaults to NIM_REASONING_MODEL (Nemotron) for general queries.
       - Callers can pass NIM_CODING_MODEL or NIM_BULK_MODEL explicitly.
+
+    Skipped entirely when the system is in offline mode.
     """
     if not NVIDIA_API_KEY:
+        return None
+    if not _is_online():
+        logger.debug("ai_router: offline — skipping NVIDIA NIM")
         return None
 
     use_model = model or NIM_REASONING_MODEL
@@ -516,12 +556,19 @@ def _try_nvidia_nim(
         }
     except Exception as exc:
         logger.debug("ai_router: NVIDIA NIM unavailable — %s", exc)
+        _record_cloud_failure("nvidia_nim")
     return None
 
 
 def _try_anthropic(prompt: str, system_prompt: str, history: list, model: Optional[str] = None) -> Optional[dict]:
-    """Attempt to get a response from Anthropic Claude (cloud fallback)."""
+    """Attempt to get a response from Anthropic Claude (cloud fallback).
+
+    Skipped entirely when the system is in offline mode.
+    """
     if not ANTHROPIC_API_KEY:
+        return None
+    if not _is_online():
+        logger.debug("ai_router: offline — skipping Anthropic")
         return None
     try:
         import anthropic
@@ -550,12 +597,19 @@ def _try_anthropic(prompt: str, system_prompt: str, history: list, model: Option
         }
     except Exception as exc:
         logger.debug("ai_router: Anthropic unavailable — %s", exc)
+        _record_cloud_failure("anthropic")
     return None
 
 
 def _try_openai(prompt: str, system_prompt: str, history: list, model: Optional[str] = None) -> Optional[dict]:
-    """Attempt to get a response from OpenAI (last-resort cloud fallback)."""
+    """Attempt to get a response from OpenAI (last-resort cloud fallback).
+
+    Skipped entirely when the system is in offline mode.
+    """
     if not OPENAI_API_KEY:
+        return None
+    if not _is_online():
+        logger.debug("ai_router: offline — skipping OpenAI")
         return None
     try:
         import openai
@@ -583,6 +637,7 @@ def _try_openai(prompt: str, system_prompt: str, history: list, model: Optional[
         }
     except Exception as exc:
         logger.debug("ai_router: OpenAI unavailable — %s", exc)
+        _record_cloud_failure("openai")
     return None
 
 
@@ -1234,6 +1289,10 @@ def search_web(query: str, max_results: int = 5, include_news: bool = False) -> 
         3. DuckDuckGo Instant Answers + Wikipedia (always available, no key needed)
         4. NewsAPI (if NEWS_API_KEY set and include_news=True or query is news-like)
 
+    When the system is in offline mode, all providers are skipped and an
+    offline notice is returned so callers receive a graceful degradation
+    instead of a timeout or empty result.
+
     Args:
         query:        Search query string.
         max_results:  Maximum number of results to return.
@@ -1243,6 +1302,26 @@ def search_web(query: str, max_results: int = 5, include_news: bool = False) -> 
         List of dicts with keys: title, url, snippet, source.
         Empty list if all providers fail.
     """
+    # ── Offline mode: skip all network calls ─────────────────────────────────
+    if not _is_online():
+        logger.debug("ai_router: offline — returning offline notice for search_web('%s')", query)
+        if _hybrid_mode is not None:
+            try:
+                return _hybrid_mode.offline_search_notice(query)
+            except Exception:
+                pass
+        return [
+            {
+                "title": "[OFFLINE MODE] Web search unavailable",
+                "url": "",
+                "snippet": (
+                    f"Web search for '{query}' could not be performed — "
+                    "the system is currently in offline mode."
+                ),
+                "source": "hybrid_mode",
+            }
+        ]
+
     # Try best-quality providers first
     results = _tavily_search(query, max_results)
     if results:
@@ -1333,3 +1412,76 @@ def research(
         "provider": result.get("provider", "error"),
         "error": result.get("error"),
     }
+
+
+# ── Hybrid Mode convenience re-exports ───────────────────────────────────────
+# Allow callers to access hybrid mode controls via the router:
+#   from ai_router import get_hybrid_mode, set_hybrid_mode, hybrid_status
+
+def get_hybrid_mode() -> str:
+    """Return the currently configured hybrid mode ("auto" | "online" | "offline").
+
+    Delegates to hybrid_mode module when available; returns "auto" otherwise.
+    """
+    if _hybrid_mode is not None:
+        try:
+            return _hybrid_mode.get_hybrid_mode()
+        except Exception:
+            pass
+    return "auto"
+
+
+def set_hybrid_mode(mode: str) -> None:
+    """Set the hybrid mode at runtime.
+
+    Args:
+        mode: One of "auto", "online", or "offline".
+
+    When set to "offline", all cloud AI providers (NVIDIA NIM, Anthropic,
+    OpenAI) are skipped and only local models (Ollama, Gemma-via-Ollama) are
+    used.  Web search is replaced with an offline notice.
+
+    When set to "online", connectivity checks are bypassed and all providers
+    are available as normal.
+
+    When set to "auto" (default), connectivity is probed before each cloud
+    call and the system switches modes automatically.
+    """
+    if _hybrid_mode is not None:
+        try:
+            _hybrid_mode.set_hybrid_mode(mode)
+            return
+        except Exception as exc:
+            logger.warning("ai_router: set_hybrid_mode failed — %s", exc)
+    logger.debug("ai_router: hybrid_mode module not loaded; ignoring set_hybrid_mode('%s')", mode)
+
+
+def hybrid_status() -> dict:
+    """Return a dict describing the current hybrid mode state.
+
+    Keys (all present even when hybrid_mode module is absent):
+        configured_mode  (str)  — "auto" | "online" | "offline"
+        effective_online (bool) — True if currently acting as online
+        failsafe_active  (bool) — True if failsafe is forcing offline
+        failsafe_remaining_s (int|None)
+        cache_age_s      (float|None)
+        probe_result     (bool|None)
+        hybrid_module    (bool) — True if hybrid_mode module is loaded
+    """
+    base: dict = {
+        "configured_mode": "auto",
+        "effective_online": True,
+        "failsafe_active": False,
+        "failsafe_remaining_s": None,
+        "cache_age_s": None,
+        "probe_result": None,
+        "hybrid_module": _hybrid_mode is not None,
+    }
+    if _hybrid_mode is not None:
+        try:
+            status = _hybrid_mode.get_status()
+            base.update(status)
+        except Exception:
+            pass
+    base["hybrid_module"] = _hybrid_mode is not None
+    return base
