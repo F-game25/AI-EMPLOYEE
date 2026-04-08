@@ -38,6 +38,25 @@ except ImportError:
     _psutil = None  # type: ignore[assignment]
     _PSUTIL_OK = False
 
+# ── Background CPU sampler — updates every 2 s using interval=1 for accuracy ──
+_cpu_sample_value: float = 0.0
+
+def _cpu_sampler_loop() -> None:
+    """Continuously sample CPU usage with a 1-second blocking interval for
+    accurate readings without burdening the request thread."""
+    global _cpu_sample_value
+    while True:
+        try:
+            if _PSUTIL_OK and _psutil is not None:
+                _cpu_sample_value = _psutil.cpu_percent(interval=1)
+            else:
+                import time as _t; _t.sleep(2)
+        except Exception:
+            import time as _t; _t.sleep(2)
+
+_cpu_thread = threading.Thread(target=_cpu_sampler_loop, daemon=True, name="cpu-sampler")
+_cpu_thread.start()
+
 # ── Python version guard ──────────────────────────────────────────────────────
 if sys.version_info < (3, 10):
     print("ERROR: Python 3.10+ is required. Current version: "
@@ -1517,24 +1536,24 @@ INDEX_HTML = r"""<!doctype html>
       opacity:0;animation:fadeIn .5s ease .95s forwards;
     }
     .boot-terminal{
-      width:min(580px,92vw);height:150px;overflow:hidden;
+      width:min(620px,92vw);height:220px;overflow:hidden;
       border:1px solid rgba(245,196,0,.18);border-radius:4px;
-      background:rgba(0,0,0,.88);padding:14px 18px;
-      font-size:.71em;line-height:1.75;color:rgba(245,196,0,.7);
+      background:rgba(0,0,0,.9);padding:14px 18px;
+      font-size:.69em;line-height:1.8;color:rgba(245,196,0,.7);
       position:relative;z-index:5;
-      box-shadow:0 0 24px rgba(245,196,0,.08),inset 0 0 40px rgba(0,0,0,.6);
+      box-shadow:0 0 28px rgba(245,196,0,.1),inset 0 0 40px rgba(0,0,0,.6);
     }
     .boot-terminal::before{
       content:'SYSTEM LOG';position:absolute;top:0;left:0;right:0;
-      background:rgba(245,196,0,.06);border-bottom:1px solid rgba(245,196,0,.1);
-      padding:3px 12px;font-size:.85em;letter-spacing:.12em;color:rgba(245,196,0,.4);
+      background:rgba(245,196,0,.07);border-bottom:1px solid rgba(245,196,0,.12);
+      padding:3px 12px;font-size:.85em;letter-spacing:.15em;color:rgba(245,196,0,.45);
     }
-    .boot-terminal-inner{padding-top:20px;height:100%;overflow:hidden}
-    .boot-terminal-line{display:block;opacity:0;animation:termLine .08s ease forwards;white-space:pre}
+    .boot-terminal-inner{padding-top:22px;height:100%;overflow:hidden}
+    .boot-terminal-line{display:block;opacity:0;animation:termLine .06s ease forwards;white-space:pre;font-family:var(--mono)}
     .boot-terminal-line.cmd{color:rgba(245,196,0,.9)}
-    .boot-terminal-line.ok{color:rgba(34,197,94,.8)}
-    .boot-terminal-line.warn{color:rgba(255,165,0,.75)}
-    .boot-terminal-line.dim{color:rgba(245,196,0,.35)}
+    .boot-terminal-line.ok{color:rgba(34,197,94,.85)}
+    .boot-terminal-line.warn{color:rgba(251,146,60,.85)}
+    .boot-terminal-line.dim{color:rgba(245,196,0,.3)}
     @keyframes termLine{to{opacity:1}}
     .boot-bar-wrap{margin-top:24px;width:min(380px,82vw);z-index:5;position:relative}
     .boot-bar-label{display:flex;justify-content:space-between;font-size:.67em;color:rgba(245,196,0,.5);margin-bottom:7px;letter-spacing:.08em;font-family:var(--mono)}
@@ -2450,18 +2469,20 @@ INDEX_HTML = r"""<!doctype html>
     .health-check-item.warn .hc-val{color:var(--warning)}
     .health-check-item.err .hc-val{color:var(--danger)}
     /* System Resources card */
-    .sysres-metric{background:rgba(0,0,0,.25);border:1px solid rgba(212,175,55,.12);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;transition:border-color .3s}
-    .sysres-metric:hover{border-color:rgba(212,175,55,.3)}
-    .sysres-metric-header{display:flex;justify-content:space-between;align-items:center}
-    .sysres-metric-label{font-size:.72em;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)}
-    .sysres-metric-value{font-size:1.15em;font-weight:700;font-family:var(--mono);color:var(--gold)}
-    .sysres-metric-sub{font-size:.7em;color:var(--text-muted)}
-    .sysres-bar-track{height:4px;background:rgba(255,255,255,.06);border-radius:100px;overflow:hidden;margin-top:2px}
-    .sysres-bar-fill{height:100%;border-radius:100px;transition:width .8s ease,background .5s}
-    .sysres-bar-fill.ok{background:linear-gradient(90deg,#22c55e,#4ade80)}
-    .sysres-bar-fill.warn{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
-    .sysres-bar-fill.hot{background:linear-gradient(90deg,#ef4444,#f87171)}
-    .sysres-na{font-size:.78em;color:var(--text-dim);font-style:italic}
+    .sysres-metric{background:rgba(0,0,0,.3);border:1px solid rgba(212,175,55,.14);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:7px;transition:border-color .3s,box-shadow .3s}
+    .sysres-metric:hover{border-color:rgba(212,175,55,.35);box-shadow:0 0 16px rgba(212,175,55,.07)}
+    .sysres-metric-header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .sysres-metric-label{font-size:.68em;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(148,163,184,.6)}
+    .sysres-metric-value{font-size:1.18em;font-weight:700;font-family:var(--mono);color:var(--gold);letter-spacing:.03em}
+    .sysres-metric-sub{font-size:.69em;color:rgba(148,163,184,.5);letter-spacing:.02em}
+    .sysres-temp-badge{display:inline-flex;align-items:center;gap:3px;font-size:.72em;font-family:var(--mono);padding:1px 6px;border-radius:4px;border:1px solid currentColor;opacity:.85}
+    .sysres-section-divider{grid-column:1/-1;height:1px;background:linear-gradient(90deg,transparent,rgba(212,175,55,.15),transparent);margin:2px 0}
+    .sysres-bar-track{height:3px;background:rgba(255,255,255,.06);border-radius:100px;overflow:hidden;margin-top:3px}
+    .sysres-bar-fill{height:100%;border-radius:100px;transition:width .9s cubic-bezier(.4,0,.2,1),background .5s}
+    .sysres-bar-fill.ok{background:linear-gradient(90deg,#16a34a,#4ade80)}
+    .sysres-bar-fill.warn{background:linear-gradient(90deg,#d97706,#fbbf24)}
+    .sysres-bar-fill.hot{background:linear-gradient(90deg,#dc2626,#f87171)}
+    .sysres-na{font-size:.75em;color:var(--text-dim);font-style:italic}
     .office-desk-item{position:absolute;width:80px;height:44px;background:linear-gradient(180deg,rgba(212,175,55,.18),rgba(212,175,55,.06));border:1px solid rgba(212,175,55,.25);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.3)}
     .robot-agent{position:absolute;cursor:pointer;transition:transform .3s;animation:robotWalk 3s ease-in-out infinite}
     .robot-agent:hover{transform:scale(1.2)!important;z-index:100}
@@ -3068,7 +3089,7 @@ INDEX_HTML = r"""<!doctype html>
   <!-- Progress bar -->
   <div class="boot-bar-wrap">
     <div class="boot-bar-label">
-      <span>SYSTEM INIT</span>
+      <span id="boot-stage-label">INITIALIZING</span>
       <span id="boot-pct">0%</span>
     </div>
     <div class="boot-bar-track">
@@ -3558,7 +3579,7 @@ INDEX_HTML = r"""<!doctype html>
         <button class="btn btn-ghost btn-sm" onclick="loadSysRes()">↻</button>
       </div>
     </div>
-    <div id="sysres-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+    <div id="sysres-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
       <!-- filled by JS -->
       <div class="empty" style="grid-column:1/-1"><div class="icon">⬡</div><p>Loading hardware metrics…</p></div>
     </div>
@@ -14695,68 +14716,90 @@ function runBootSequence() {
   if (bar) bar.style.width = '0%';
   if (pct) pct.textContent = '0%';
 
-  const lines = [
-    '> INITIALIZING AI EMPLOYEE v4.0\u2026',
-    '> Loading neural subsystems\u2026',
-    '> Mounting agent registry\u2026',
-    '> Establishing secure channel\u2026',
-    '> Probing backend health check\u2026',
-    '> Calibrating gold resonance matrix\u2026',
-    '> All systems nominal. Welcome.',
+  // Each entry: [text, cssClass, delayMs, progressTarget]
+  // cssClass: '' (gold), 'ok' (green), 'warn' (orange), 'dim' (faint)
+  const steps = [
+    ['[BOOT]  AI Employee v4.0 — Autonomous Workforce Interface', 'dim', 0, 5],
+    ['[SYS ]  Kernel interface initializing…', '', 180, 12],
+    ['[SYS ]  Memory subsystem: OK', 'ok', 260, 18],
+    ['[SYS ]  CPU sampler: started (background thread)', 'ok', 220, 24],
+    ['[NET ]  Binding API server on :3000…', '', 280, 30],
+    ['[NET ]  TLS context: ready', 'ok', 200, 36],
+    ['[AUTH]  JWT secret: loaded', 'ok', 220, 41],
+    ['[AGNT]  Loading agent registry…', '', 300, 47],
+    ['[AGNT]  56 agents registered — all modes available', 'ok', 250, 54],
+    ['[LLM ]  Probing Ollama endpoint…', '', 320, 60],
+    ['[AI  ]  Hybrid router: ONLINE/OFFLINE/AUTO configured', 'ok', 220, 67],
+    ['[DB  ]  State store: mounted', 'ok', 200, 73],
+    ['[MEM ]  Memory index: warm', 'ok', 180, 78],
+    ['[UI  ]  Initializing dashboard interface…', '', 260, 85],
+    ['[UI  ]  Particle system: active', 'ok', 180, 91],
+    ['[HLTH]  Verifying backend health…', '', 220, 96],
   ];
-  let lineIdx = 0;
+
+  let stepIdx = 0;
   let progress = 0;
 
-  function addLine() {
-    if (lineIdx >= lines.length) return;
+  function bootLog(text, cls) {
+    if (!terminal) return;
     const span = document.createElement('span');
-    span.className = 'boot-terminal-line';
+    span.className = 'boot-terminal-line' + (cls ? ' ' + cls : '');
     span.style.animationDelay = '0s';
-    span.textContent = lines[lineIdx++];
+    span.textContent = text;
     terminal.appendChild(span);
     terminal.scrollTop = terminal.scrollHeight;
   }
 
-  const lineTimer = setInterval(() => {
-    addLine();
-    if (lineIdx >= lines.length) clearInterval(lineTimer);
-  }, 280);
+  const stageLabel = document.getElementById('boot-stage-label');
+  const stageMap = [[10,'SYSTEM CHECK'],[30,'NETWORK'],[50,'AGENTS'],[65,'AI ENGINE'],[80,'DATABASE'],[90,'UI INIT'],[96,'HEALTH CHECK'],[100,'UI READY']];
 
-  const barTimer = setInterval(async () => {
-    progress += Math.random() * 12 + 4;
-    if (progress >= 100) { progress = 100; clearInterval(barTimer); }
-    if (bar) bar.style.width = progress + '%';
-    if (pct) pct.textContent = Math.round(progress) + '%';
-    if (progress >= 100) {
-      clearInterval(lineTimer);
-      /* retry health check up to 8 times (2 s apart = ~16 s max) so the UI
-         waits gracefully while the server is still booting instead of
-         immediately showing the offline screen */
-      let healthy = false;
-      for (let attempt = 0; attempt < 8; attempt++) {
-        healthy = await checkHealth();
-        if (healthy) break;
-        if (attempt < 7) {
-          if (terminal) {
-            const span = document.createElement('span');
-            span.className = 'boot-terminal-line';
-            span.style.animationDelay = '0s';
-            span.textContent = '> Retrying connection\u2026 (' + (attempt + 2) + '/8)';
-            terminal.appendChild(span);
-            terminal.scrollTop = terminal.scrollHeight;
-          }
-          await new Promise(r => setTimeout(r, 2000));
-        }
+  function setProgress(target) {
+    if (bar) bar.style.width = Math.min(target, 100) + '%';
+    if (pct) pct.textContent = Math.min(Math.round(target), 100) + '%';
+    if (stageLabel) {
+      for (let i = stageMap.length - 1; i >= 0; i--) {
+        if (target >= stageMap[i][0]) { stageLabel.textContent = stageMap[i][1]; break; }
       }
-      if (!healthy) {
-        hideBoot();
-        showOffline('> Backend unreachable\n> GET /health → connection refused\n> Ensure AI Employee server is running\n> on http://localhost:3000');
-        return;
-      }
-      hideBoot();
-      setTimeout(() => showLogin(), 200);
     }
-  }, 120);
+  }
+
+  function runNextStep() {
+    if (stepIdx >= steps.length) return;
+    const [text, cls, delay, prog] = steps[stepIdx++];
+    setTimeout(() => {
+      bootLog(text, cls);
+      setProgress(prog);
+      runNextStep();
+    }, delay);
+  }
+
+  runNextStep();
+
+  // After all steps finish (~3.5 s) start health check loop
+  const totalDelay = steps.reduce((acc, s) => acc + s[2], 0) + 400;
+  setTimeout(async () => {
+    setProgress(96);
+    let healthy = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      healthy = await checkHealth();
+      if (healthy) break;
+      if (attempt < 7) {
+        bootLog('[HLTH]  Retrying connection… (' + (attempt + 2) + '/8)', 'warn');
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+    if (!healthy) {
+      bootLog('[ERR ]  Backend unreachable — connection refused on :3000', 'warn');
+      hideBoot();
+      showOffline('> Backend unreachable\n> GET /health → connection refused\n> Ensure AI Employee server is running\n> on http://localhost:3000');
+      return;
+    }
+    bootLog('[DONE]  All systems nominal. Welcome, Operator.', 'ok');
+    setProgress(100);
+    await new Promise(r => setTimeout(r, 600));
+    hideBoot();
+    setTimeout(() => showLogin(), 200);
+  }, totalDelay);
 }
 runBootSequence();
 
@@ -14998,6 +15041,12 @@ function _srTempColor(t) {
   return '#4ade80';
 }
 
+function _srTempBadge(t) {
+  if (t === null || t === undefined) return '<span class="sysres-na">N/A</span>';
+  const col = _srTempColor(t);
+  return `<span class="sysres-temp-badge" style="color:${col};border-color:${col}">🌡 ${t}°C</span>`;
+}
+
 function _srMetric(label, value, sub, barPct) {
   const bar = (typeof barPct === 'number') ? _srBar(barPct) : '';
   return `<div class="sysres-metric">
@@ -15022,27 +15071,39 @@ async function loadSysRes() {
     }
 
     const cpuVal = typeof d.cpu_pct === 'number' ? d.cpu_pct.toFixed(1) + '%' : '–';
-    const cpuTemp = d.cpu_temp !== null ? `<span style="color:${_srTempColor(d.cpu_temp)}">${d.cpu_temp}°C</span>` : '<span class="sysres-na">temp N/A</span>';
-    const ramVal = typeof d.ram_pct === 'number' ? d.ram_pct.toFixed(1) + '%' : '–';
-    const ramSub = (d.ram_used_gb && d.ram_total_gb) ? `${d.ram_used_gb} GB / ${d.ram_total_gb} GB used` : '';
-    const diskVal = typeof d.disk_pct === 'number' ? d.disk_pct.toFixed(1) + '%' : '–';
-    const diskSub = (d.disk_used_gb && d.disk_total_gb) ? `${d.disk_used_gb} GB / ${d.disk_total_gb} GB used` : '';
-    const loadSub = d.load_avg ? `1m: ${d.load_avg['1m']}  5m: ${d.load_avg['5m']}  15m: ${d.load_avg['15m']}` : '';
+    const cpuCoreSub = (d.cpu_cores && d.cpu_threads)
+      ? `${d.cpu_cores} cores · ${d.cpu_threads} threads`
+      : (d.cpu_cores ? `${d.cpu_cores} cores` : '');
+    const cpuTempBadge = _srTempBadge(d.cpu_temp);
 
-    let html = _srMetric('CPU Usage', cpuVal, cpuTemp, d.cpu_pct)
-      + _srMetric('RAM Usage', ramVal, ramSub, d.ram_pct)
-      + _srMetric('Disk Usage', diskVal, diskSub, d.disk_pct)
-      + _srMetric('Uptime', d.uptime || '–', '', null);
+    const ramVal = typeof d.ram_pct === 'number' ? d.ram_pct.toFixed(1) + '%' : '–';
+    const ramSub = (d.ram_used_gb && d.ram_total_gb) ? `${d.ram_used_gb} GB / ${d.ram_total_gb} GB` : '';
+
+    const diskVal = typeof d.disk_pct === 'number' ? d.disk_pct.toFixed(1) + '%' : '–';
+    const diskSub = (d.disk_used_gb && d.disk_total_gb) ? `${d.disk_used_gb} GB / ${d.disk_total_gb} GB` : '';
+
+    const loadSub = d.load_avg ? `1m ${d.load_avg['1m']}  5m ${d.load_avg['5m']}  15m ${d.load_avg['15m']}` : '';
+
+    // CPU metric — load + temperature together
+    let cpuSub = [cpuCoreSub, cpuTempBadge].filter(Boolean).join('  ');
+    let html = _srMetric('CPU Load', cpuVal, cpuSub, d.cpu_pct);
+
+    // GPU section — only when NVIDIA GPU is detected
+    if (d.gpu_pct !== null && d.gpu_pct !== undefined) {
+      const gpuVal = d.gpu_pct.toFixed ? d.gpu_pct.toFixed(0) + '%' : d.gpu_pct + '%';
+      const gpuTempBadge = _srTempBadge(d.gpu_temp);
+      const gpuNameStr = d.gpu_name ? escHtml(d.gpu_name) : 'GPU';
+      html += _srMetric('GPU Load', gpuVal, [gpuNameStr, gpuTempBadge].join('  '), d.gpu_pct);
+    }
+
+    html += _srMetric('RAM', ramVal, ramSub, d.ram_pct);
+    html += _srMetric('Disk', diskVal, diskSub, d.disk_pct);
 
     if (d.load_avg) {
       html += _srMetric('Load Avg', d.load_avg['1m'], loadSub, null);
     }
 
-    if (d.gpu_pct !== null) {
-      const gpuTemp = d.gpu_temp !== null ? `<span style="color:${_srTempColor(d.gpu_temp)}">${d.gpu_temp}°C</span>` : '';
-      const gpuSub = [d.gpu_name ? escHtml(d.gpu_name) : '', gpuTemp].filter(Boolean).join(' · ');
-      html += _srMetric('GPU Usage', d.gpu_pct + '%', gpuSub, d.gpu_pct);
-    }
+    html += _srMetric('Uptime', d.uptime || '–', '', null);
 
     grid.innerHTML = html;
     if (updEl) {
@@ -15474,8 +15535,10 @@ def get_system_resources():
         return JSONResponse({"error": "psutil not available"})
 
     try:
-        # CPU — non-blocking (uses measurement from previous call)
-        cpu_pct = _psutil.cpu_percent(interval=None)
+        # CPU — use value from background sampler thread (accurate, non-blocking)
+        cpu_pct = _cpu_sample_value
+        cpu_cores = _psutil.cpu_count(logical=False) or _psutil.cpu_count()
+        cpu_threads = _psutil.cpu_count(logical=True)
 
         # RAM
         vm = _psutil.virtual_memory()
@@ -15542,6 +15605,8 @@ def get_system_resources():
         data: dict = {
             "cpu_pct": cpu_pct,
             "cpu_temp": cpu_temp,
+            "cpu_cores": cpu_cores,
+            "cpu_threads": cpu_threads,
             "ram_used_gb": ram_used_gb,
             "ram_total_gb": ram_total_gb,
             "ram_pct": ram_pct,
