@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion'
 import { useAppStore } from './store/appStore'
 import BootSequence from './components/BootSequence'
 import Dashboard from './components/Dashboard'
+import ErrorScreen from './components/ErrorScreen'
 import { useWebSocket } from './hooks/useWebSocket'
 
 function AppContent() {
@@ -24,6 +25,7 @@ function AppContent() {
         <BootSequence key="boot" onComplete={handleBootComplete} />
       )}
       {appState === 'dashboard' && <Dashboard key="dashboard" />}
+      {appState === 'error' && <ErrorScreen key="error" />}
     </AnimatePresence>
   )
 }

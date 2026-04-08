@@ -42,6 +42,10 @@ export const useAppStore = create((set, get) => ({
     return { chatMessages: msgs }
   }),
 
+  // Typing indicator — true while waiting for AI response
+  isTyping: false,
+  setTyping: (v) => set({ isTyping: v }),
+
   // System status
   systemStatus: { cpu: 0, memory: 0, uptime: 0, connections: 0 },
   setSystemStatus: (s) => set({ systemStatus: s }),

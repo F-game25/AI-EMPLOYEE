@@ -7,6 +7,8 @@ const WS_URL = `ws://${window.location.hostname}:3001/ws`
 let _wsInstance = null
 let _reconnectTimer = null
 let _initialized = false
+// Safety timer: clears the typing indicator if no AI response arrives
+let _typingTimeout = null
 
 function getStore() {
   return useAppStore.getState()
@@ -40,6 +42,8 @@ function connectSingleton() {
           store.setSystemStatus(data)
           break
         case 'orchestrator:message':
+          clearTimeout(_typingTimeout)
+          store.setTyping(false)
           store.addChatMessage({ role: 'ai', content: data.message, ts: Date.now() })
           break
       }
@@ -50,6 +54,8 @@ function connectSingleton() {
     const store = getStore()
     store.setWsConnected(false)
     store.setWs(null)
+    clearTimeout(_typingTimeout)
+    store.setTyping(false)
     store.addHeartbeatLog({ text: '[SYSTEM] Connection lost — reconnecting...', level: 'warning', ts: Date.now() })
     _wsInstance = null
     _reconnectTimer = setTimeout(connectSingleton, 3000)
@@ -76,6 +82,10 @@ export function useWebSocket() {
   const sendMessage = (message) => {
     if (_wsInstance?.readyState === WebSocket.OPEN) {
       _wsInstance.send(JSON.stringify({ type: 'chat', message }))
+      getStore().setTyping(true)
+      // Safety: clear typing indicator after 30 s if no response arrives
+      clearTimeout(_typingTimeout)
+      _typingTimeout = setTimeout(() => getStore().setTyping(false), 30000)
     }
   }
 
