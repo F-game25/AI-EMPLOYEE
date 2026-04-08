@@ -2563,9 +2563,13 @@ INDEX_HTML = r"""<!doctype html>
     #cyber-panel{display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:14px;height:520px;margin-bottom:20px}
     @media(max-width:1100px){#cyber-panel{grid-template-columns:1fr;height:auto}}
     .cyber-col{
-      border:1px solid rgba(212,175,55,.2);border-radius:6px;background:rgba(8,8,8,.97);
-      box-shadow:0 0 20px rgba(212,175,55,.04);display:flex;flex-direction:column;overflow:hidden;
+      border:1px solid rgba(212,175,55,.25);border-radius:10px;
+      background:linear-gradient(135deg,rgba(10,8,5,.98),rgba(18,14,7,.95));
+      box-shadow:0 0 30px rgba(212,175,55,.06),inset 0 0 40px rgba(212,175,55,.02);
+      display:flex;flex-direction:column;overflow:hidden;
+      transition:box-shadow .3s ease,border-color .3s ease;
     }
+    .cyber-col:hover{border-color:rgba(212,175,55,.4);box-shadow:0 0 40px rgba(212,175,55,.1),inset 0 0 40px rgba(212,175,55,.03)}
     .cyber-col-header{
       padding:10px 14px;border-bottom:1px solid rgba(212,175,55,.15);
       font-size:.72em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.6);
@@ -3230,12 +3234,39 @@ INDEX_HTML = r"""<!doctype html>
 <div class="sub-nav" id="subnav-power">
   <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn">⚡ BLACKLIGHT</button>
   <button onclick="switchTab('ascend',this)" id="nav-ascend-btn">🔥 ASCEND FORGE</button>
+  <button onclick="switchTab('crm',this)">🎯 CRM</button>
+  <button onclick="switchTab('email-mkt',this)">📧 Email Mkt</button>
+  <button onclick="switchTab('meetings',this)">📅 Meetings</button>
+  <button onclick="switchTab('social',this)">📱 Social</button>
+  <button onclick="switchTab('briefing',this)">📰 Briefing</button>
+  <button onclick="switchTab('invoicing',this)">💳 Invoicing</button>
+  <button onclick="switchTab('analytics-bi',this)">📊 Analytics</button>
+  <button onclick="switchTab('workflows',this)">⚙️ Workflows</button>
+  <button onclick="switchTab('team',this)">👥 Team</button>
+  <button onclick="switchTab('support-desk',this)">🎫 Support</button>
+  <button onclick="switchTab('website-builder',this)">🌐 Website</button>
+  <button onclick="switchTab('competitors',this)">🔍 Competitors</button>
+  <button onclick="switchTab('brand',this)">🎨 Brand</button>
+  <button onclick="switchTab('health',this)">🏥 Health</button>
+  <button onclick="switchTab('export',this)">📤 Export</button>
+  <button onclick="switchTab('content-calendar',this)">📅 Content Cal</button>
+  <button onclick="switchTab('financial',this)">💰 Financial</button>
 </div>
 
 <main>
 
 <!-- ── Dashboard ── -->
 <div id="tab-dashboard" class="tab-content active">
+
+  <!-- ── Overview Page Header ── -->
+  <div class="page-header" style="border-left-color:var(--gold);background:linear-gradient(135deg,rgba(212,175,55,.08),rgba(212,175,55,.02));border:1px solid rgba(212,175,55,.2);box-shadow:0 0 30px rgba(212,175,55,.06)">
+    <div class="page-header-icon" style="color:var(--gold);filter:drop-shadow(0 0 8px rgba(212,175,55,.5))">◈</div>
+    <div>
+      <div class="page-header-title" style="background:linear-gradient(135deg,#D4AF37,#f5c400);-webkit-background-clip:text;-webkit-text-fill-color:transparent">AI Employee Command Center</div>
+      <div class="page-header-desc">Real-time operations hub — monitor all agents, launch tasks, and manage your autonomous AI workforce from one place.</div>
+    </div>
+    <span class="page-header-badge" style="color:var(--gold);background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.3)">Live Operations</span>
+  </div>
 
   <!-- ── Cyber Operations Panel ── -->
   <div id="cyber-panel">
@@ -4145,29 +4176,6 @@ INDEX_HTML = r"""<!doctype html>
     <div class="form-group"><label>Vision (optional)</label><input id="goals-vision-input" placeholder="Long-term company vision"/></div>
     <button class="btn btn-primary" onclick="saveCompanyMission()">💾 Save Mission</button>
   </div>
-  <div class="grid2">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">📁</span> Projects</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadGoals()">↻ Refresh</button>
-      </div>
-      <div id="goals-projects-list"><div class="empty"><div class="icon">📁</div><p>No projects yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Project</div></div>
-      <div class="form-group"><label>Project Name</label><input id="goals-proj-name" placeholder="e.g. MVP Launch"/></div>
-      <div class="form-group"><label>Goal</label><input id="goals-proj-goal" placeholder="e.g. Ship v1.0 by Q2"/></div>
-      <div class="form-group"><label>Description</label><input id="goals-proj-desc" placeholder="Brief description"/></div>
-      <div class="form-group"><label>Priority</label>
-        <select id="goals-proj-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="high">🔴 High</option>
-          <option value="medium" selected>🟡 Medium</option>
-          <option value="low">🟢 Low</option>
-        </select>
-      </div>
-      <button class="btn btn-primary" onclick="addGoalProject()">➕ Add Project</button>
-    </div>
-  </div>
 </div>
 
 <!-- ── Tickets ── -->
@@ -4465,199 +4473,6 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════════════════════════════════════
-     NEW FEATURE TABS
-     ══════════════════════════════════════════════════════════════════════════ -->
-
-<!-- ── CRM Pipeline ── -->
-<div id="tab-crm" class="tab-content">
-  <div class="page-header" style="border-left-color:#f59e0b">
-    <div class="page-header-icon">🎯</div>
-    <div><div class="page-header-title">CRM Pipeline</div><div class="page-header-desc">Manage leads, track deal stages, score prospects, and run automated follow-up sequences.</div></div>
-    <span class="page-header-badge" style="color:#f59e0b">Sales Pipeline</span>
-  </div>
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon yellow">👥</div><div class="stat-body"><div class="val" id="crm-total">–</div><div class="lbl">Total Leads</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">🏆</div><div class="stat-body"><div class="val" id="crm-won">–</div><div class="lbl">Won Deals</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">💰</div><div class="stat-body"><div class="val" id="crm-pipeline-val">–</div><div class="lbl">Pipeline Value</div></div></div>
-    <div class="stat-card"><div class="stat-icon cyan">📈</div><div class="stat-body"><div class="val" id="crm-conv">–</div><div class="lbl">Conversion %</div></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">🎯</span> Leads</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadCRM()">↻</button>
-      </div>
-      <div id="crm-leads-list"><div class="empty"><div class="icon">🎯</div><p>No leads yet. Add your first lead.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Lead</div></div>
-      <div class="form-group"><label>Name</label><input id="crm-name" placeholder="John Smith"/></div>
-      <div class="form-group"><label>Company</label><input id="crm-company" placeholder="Acme Corp"/></div>
-      <div class="form-group"><label>Email</label><input id="crm-email" placeholder="john@acme.com"/></div>
-      <div class="form-group"><label>Phone</label><input id="crm-phone" placeholder="+1 555 000"/></div>
-      <div class="form-group"><label>Deal Value ($)</label><input id="crm-value" type="number" placeholder="5000"/></div>
-      <div class="form-group"><label>Stage</label>
-        <select id="crm-stage" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="lead">Lead</option><option value="contacted">Contacted</option>
-          <option value="qualified">Qualified</option><option value="proposal">Proposal</option>
-          <option value="negotiation">Negotiation</option><option value="won">Won</option><option value="lost">Lost</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Notes</label><input id="crm-notes" placeholder="Any notes…"/></div>
-      <button class="btn btn-primary" onclick="addLead()">➕ Add Lead</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Email Marketing ── -->
-<div id="tab-email-mkt" class="tab-content">
-  <div class="page-header" style="border-left-color:#06b6d4">
-    <div class="page-header-icon">📧</div>
-    <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create campaigns, set up drip sequences, and track open/click rates.</div></div>
-    <span class="page-header-badge" style="color:#06b6d4">Automation</span>
-  </div>
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon cyan">📧</div><div class="stat-body"><div class="val" id="em-campaigns">–</div><div class="lbl">Campaigns</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">📤</div><div class="stat-body"><div class="val" id="em-sent">–</div><div class="lbl">Emails Sent</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">👁️</div><div class="stat-body"><div class="val" id="em-open-rate">–</div><div class="lbl">Open Rate</div></div></div>
-    <div class="stat-card"><div class="stat-icon yellow">🖱️</div><div class="stat-body"><div class="val" id="em-click-rate">–</div><div class="lbl">Click Rate</div></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">📧</span> Campaigns</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadEmailCampaigns()">↻</button>
-      </div>
-      <div id="em-campaign-list"><div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Campaign</div></div>
-      <div class="form-group"><label>Campaign Name</label><input id="em-name" placeholder="Q1 Cold Outreach"/></div>
-      <div class="form-group"><label>Subject Line</label><input id="em-subject" placeholder="Quick question about your business…"/></div>
-      <div class="form-group"><label>Email Body</label>
-        <textarea id="em-body" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Hi {{name}},…"></textarea>
-      </div>
-      <div class="form-group"><label>Recipients (comma-separated emails)</label><input id="em-recipients" placeholder="a@co.com, b@co.com"/></div>
-      <button class="btn btn-primary" onclick="createEmailCampaign()">➕ Create Campaign</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Meeting Intelligence ── -->
-<div id="tab-meetings" class="tab-content">
-  <div class="page-header" style="border-left-color:#8b5cf6">
-    <div class="page-header-icon">🎙️</div>
-    <div><div class="page-header-title">Meeting Intelligence</div><div class="page-header-desc">Paste meeting transcripts to get AI summaries, action items, and auto-drafted follow-up emails.</div></div>
-    <span class="page-header-badge" style="color:#8b5cf6">AI Analysis</span>
-  </div>
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon purple">🎙️</div><div class="stat-body"><div class="val" id="mt-total">–</div><div class="lbl">Total Meetings</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="mt-analyzed">–</div><div class="lbl">Analyzed</div></div></div>
-    <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="mt-pending">–</div><div class="lbl">Pending</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">⏱️</div><div class="stat-body"><div class="val" id="mt-duration">–</div><div class="lbl">Total Mins</div></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">🎙️</span> Meetings</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadMeetings()">↻</button>
-      </div>
-      <div id="meetings-list"><div class="empty"><div class="icon">🎙️</div><p>No meetings yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Meeting</div></div>
-      <div class="form-group"><label>Title</label><input id="mt-title" placeholder="Sales call with Acme Corp"/></div>
-      <div class="form-group"><label>Platform</label>
-        <select id="mt-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="zoom">Zoom</option><option value="google_meet">Google Meet</option>
-          <option value="teams">Microsoft Teams</option><option value="other">Other</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Duration (mins)</label><input id="mt-duration" type="number" placeholder="45"/></div>
-      <div class="form-group"><label>Transcript (paste here)</label>
-        <textarea id="mt-transcript" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Paste meeting transcript…"></textarea>
-      </div>
-      <button class="btn btn-primary" onclick="addMeeting()">🎙️ Add &amp; Analyze</button>
-    </div>
-  </div>
-  <div class="card" style="margin-top:16px;display:none" id="mt-result-card">
-    <div class="card-header"><div class="card-title"><span class="icon">🤖</span> AI Analysis</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('mt-result-card').style.display='none'">✕</button>
-    </div>
-    <div id="mt-result-body" style="white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
-  </div>
-</div>
-
-<!-- ── Social Media ── -->
-<div id="tab-social" class="tab-content">
-  <div class="page-header" style="border-left-color:#ec4899">
-    <div class="page-header-icon">📱</div>
-    <div><div class="page-header-title">Social Media Manager</div><div class="page-header-desc">Schedule posts, generate AI content, and track engagement across LinkedIn, Instagram, X, and more.</div></div>
-    <span class="page-header-badge" style="color:#ec4899">Content</span>
-  </div>
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon pink">📱</div><div class="stat-body"><div class="val" id="sm-total">–</div><div class="lbl">Total Posts</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="sm-published">–</div><div class="lbl">Published</div></div></div>
-    <div class="stat-card"><div class="stat-icon yellow">📅</div><div class="stat-body"><div class="val" id="sm-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">❤️</div><div class="stat-body"><div class="val" id="sm-likes">–</div><div class="lbl">Total Likes</div></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">📱</span> Posts</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadSocialPosts()">↻</button>
-      </div>
-      <div id="sm-posts-list"><div class="empty"><div class="icon">📱</div><p>No posts yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">✨</span> Create Post</div></div>
-      <div class="form-group"><label>Topic (for AI generation)</label><input id="sm-topic" placeholder="AI trends in 2025…"/></div>
-      <div class="form-group"><label>Platform</label>
-        <select id="sm-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="linkedin">LinkedIn</option><option value="instagram">Instagram</option>
-          <option value="twitter">X / Twitter</option><option value="facebook">Facebook</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Tone</label>
-        <select id="sm-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="professional">Professional</option><option value="casual">Casual</option>
-          <option value="inspirational">Inspirational</option><option value="educational">Educational</option>
-        </select>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="generateSocialPost()" style="flex:1">✨ AI Generate</button>
-        <button class="btn btn-primary" onclick="saveSocialPost()" style="flex:1">💾 Save Draft</button>
-      </div>
-      <div class="form-group" style="margin-top:12px"><label>Content (edit after generation)</label>
-        <textarea id="sm-content" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Post content…"></textarea>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ── CEO Briefing ── -->
-<div id="tab-briefing" class="tab-content">
-  <div class="page-header" style="border-left-color:#fbbf24">
-    <div class="page-header-icon">☀️</div>
-    <div><div class="page-header-title">Daily CEO Briefing</div><div class="page-header-desc">Your AI-generated morning summary — yesterday's wins, today's priorities, and key metrics all in one place.</div></div>
-    <span class="page-header-badge" style="color:#fbbf24">Daily Report</span>
-  </div>
-  <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-    <button class="btn btn-primary" onclick="generateBriefing()">☀️ Generate Today's Briefing</button>
-    <button class="btn btn-ghost" onclick="loadBriefingHistory()">📅 View History</button>
-  </div>
-  <div class="card" id="briefing-card">
-    <div class="card-header"><div class="card-title"><span class="icon">☀️</span> Latest Briefing</div>
-      <span id="briefing-date" style="font-size:.8em;color:var(--text-muted)"></span>
-    </div>
-    <div id="briefing-content" style="white-space:pre-wrap;line-height:1.7;color:var(--text);font-size:.9em">
-      <div class="empty"><div class="icon">☀️</div><p>Click "Generate Today's Briefing" to get your morning summary.</p></div>
-    </div>
-  </div>
-  <div id="briefing-history" style="margin-top:16px"></div>
-</div>
-
 <!-- ── Finance / Invoicing ── -->
 <div id="tab-invoicing" class="tab-content">
   <div class="page-header" style="border-left-color:#10b981">
@@ -4942,36 +4757,6 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <button class="btn btn-primary" onclick="generateWebPage()">🌐 Generate Page</button>
     </div>
-  </div>
-</div>
-
-<!-- ── Competitor Watch ── -->
-<div id="tab-competitors" class="tab-content">
-  <div class="page-header" style="border-left-color:#ef4444">
-    <div class="page-header-icon">🔍</div>
-    <div><div class="page-header-title">Competitor Watch</div><div class="page-header-desc">Track competitors, run AI analysis, and get counter-strategy recommendations.</div></div>
-    <span class="page-header-badge" style="color:#ef4444">Intelligence</span>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">🔍</span> Competitors</div><button class="btn btn-ghost btn-sm" onclick="loadCompetitors()">↻</button></div>
-      <div id="comp-list"><div class="empty"><div class="icon">🔍</div><p>No competitors tracked yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Competitor</div></div>
-      <div class="form-group"><label>Company Name</label><input id="comp-name" placeholder="Competitor Inc"/></div>
-      <div class="form-group"><label>Website</label><input id="comp-website" placeholder="https://competitor.com"/></div>
-      <div class="form-group"><label>Description</label>
-        <textarea id="comp-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="What they do and who they target…"></textarea>
-      </div>
-      <button class="btn btn-primary" onclick="addCompetitor()">➕ Add &amp; Watch</button>
-    </div>
-  </div>
-  <div class="card" style="margin-top:16px;display:none" id="comp-analysis-card">
-    <div class="card-header"><div class="card-title"><span class="icon">🤖</span> AI Analysis</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('comp-analysis-card').style.display='none'">✕</button>
-    </div>
-    <div id="comp-analysis-body" style="white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
   </div>
 </div>
 
@@ -5860,6 +5645,7 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<script>
 // ── Nav scroll arrows ──
 /* ── Group ↔ Tab navigation ── */
 const _TAB_TO_GROUP = {
@@ -5960,6 +5746,7 @@ function switchTab(tab, btn) {
   if (tab === 'companies') loadCompanies();
   if (tab === 'artifacts') { loadArtifacts(); loadSessions(); }
 }
+</script>
 <!-- ── History ── -->
 <div id="tab-history" class="tab-content">
   <div class="page-header" style="border-left-color:#7dd3fc">
@@ -6559,7 +6346,7 @@ function switchTab(tab, btn) {
 </div>
 
 <!-- ── Email Marketing ── -->
-<div id="tab-email-marketing" class="tab-content">
+<div id="tab-email-mkt" class="tab-content">
   <div class="page-header" style="border-left-color:#06b6d4">
     <div class="page-header-icon">📧</div>
     <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create and manage email campaigns, multi-step sequences, and track performance metrics.</div></div>
@@ -7360,7 +7147,7 @@ async function loadDashboard() {
   // Animate stat numbers
   animateCount('stat-running', running);
   animateCount('stat-total', total);
-  const modeCapacity = {starter: 3, business: 8, power: 56};
+  const modeCapacity = {starter: 3, business: 15, power: 73};
   const capacity = modeCapacity[d.mode] || total;
   const totalSubEl = document.getElementById('stat-total-sub');
   if (totalSubEl && d.mode) totalSubEl.textContent = `${d.mode} mode · ${capacity} max`;
@@ -7368,7 +7155,7 @@ async function loadDashboard() {
   const modeColors = {starter:'#34d399',business:'#D4AF37',power:'#c084fc'};
   const mc = modeColors[d.mode] || 'var(--gold)';
   document.getElementById('header-sub').innerHTML =
-    `${running}/${total} agents running` +
+    `${running}/${capacity} agents running` +
     (d.mode ? ` <span style="background:${mc}22;color:${mc};border:1px solid ${mc}44;border-radius:8px;padding:1px 8px;font-size:.8em;font-weight:700;margin-left:4px">${d.mode.toUpperCase()}</span>` : '');
 
   // Update system control hero
@@ -14085,92 +13872,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // ══════════════════════════════════════════════════════════════════
 //  FEATURE MODULE JAVASCRIPT
 // ══════════════════════════════════════════════════════════════════
-
-// ── CRM ──────────────────────────────────────────────────────────
-async function loadCRM() {
-  try {
-    const [leads, stats] = await Promise.all([api('/api/crm/leads'), api('/api/crm/stats')]);
-    document.getElementById('crm-total').textContent = stats.total_leads || 0;
-    document.getElementById('crm-won').textContent = stats.by_stage?.won || 0;
-    document.getElementById('crm-pipeline-val').textContent = '$' + (stats.pipeline_value || 0).toLocaleString();
-    document.getElementById('crm-conv').textContent = (stats.conversion_rate || 0) + '%';
-    const el = document.getElementById('crm-leads-list');
-    if (!leads.length) { el.innerHTML = '<div class="empty"><div class="icon">🎯</div><p>No leads yet.</p></div>'; return; }
-    el.innerHTML = leads.map(l => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-      <div><strong>${l.name}</strong> <span style="font-size:.75em;color:var(--text-muted)">${l.company}</span>
-        <br><span style="font-size:.8em;color:var(--text-muted)">${l.email}</span>
-        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px;margin-left:6px">${l.stage}</span>
-        <span style="font-size:.75em;color:var(--gold);margin-left:6px">Score: ${l.score}</span></div>
-      <div style="text-align:right">
-        <div style="font-size:.9em;font-weight:700;color:var(--green)">$${(l.value||0).toLocaleString()}</div>
-        <button class="btn btn-ghost btn-sm" onclick="deleteLead('${l.id}')" style="font-size:.7em;margin-top:4px">🗑</button>
-      </div></div>`).join('');
-  } catch(e) { console.error('CRM load error', e); }
-}
-async function addLead() {
-  const payload = {
-    name: document.getElementById('crm-name').value,
-    company: document.getElementById('crm-company').value,
-    email: document.getElementById('crm-email').value,
-    phone: document.getElementById('crm-phone').value,
-    value: parseFloat(document.getElementById('crm-value').value) || 0,
-    stage: document.getElementById('crm-stage').value,
-    notes: document.getElementById('crm-notes').value,
-  };
-  if (!payload.name) return showToast('Name is required', 'error');
-  await api('/api/crm/leads', 'POST', payload);
-  ['crm-name','crm-company','crm-email','crm-phone','crm-value','crm-notes'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
-  showToast('Lead added!');
-  loadCRM();
-}
-async function deleteLead(id) {
-  if (!confirm('Delete this lead?')) return;
-  await api(`/api/crm/leads/${id}`, 'DELETE');
-  showToast('Lead deleted');
-  loadCRM();
-}
-
-// ── Email Marketing ───────────────────────────────────────────────
-async function loadEmailCampaigns() {
-  try {
-    const [campaigns, stats] = await Promise.all([api('/api/email-mkt/campaigns'), api('/api/email-mkt/stats')]);
-    document.getElementById('em-campaigns').textContent = stats.total_campaigns || 0;
-    document.getElementById('em-sent').textContent = stats.total_sent || 0;
-    document.getElementById('em-open-rate').textContent = (stats.open_rate || 0) + '%';
-    document.getElementById('em-click-rate').textContent = (stats.click_rate || 0) + '%';
-    const el = document.getElementById('em-campaign-list');
-    if (!campaigns.length) { el.innerHTML = '<div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div>'; return; }
-    el.innerHTML = campaigns.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
-      <div style="display:flex;justify-content:space-between"><strong>${c.name}</strong>
-        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${c.status}</span></div>
-      <div style="font-size:.8em;color:var(--text-muted);margin-top:2px">${c.subject}</div>
-      <div style="display:flex;gap:10px;margin-top:6px;font-size:.8em">
-        <span>Sent: ${c.sent}</span><span>Opened: ${c.opened}</span><span>Clicked: ${c.clicked}</span>
-        ${c.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendCampaign('${c.id}')" style="font-size:.75em;padding:2px 8px">📤 Send</button>`:''}
-      </div></div>`).join('');
-  } catch(e) { console.error('Email load error', e); }
-}
-async function createEmailCampaign() {
-  const recipients = (document.getElementById('em-recipients').value || '').split(',').map(s=>s.trim()).filter(Boolean);
-  const payload = {
-    name: document.getElementById('em-name').value,
-    subject: document.getElementById('em-subject').value,
-    body: document.getElementById('em-body').value,
-    recipients,
-  };
-  if (!payload.name) return showToast('Campaign name required', 'error');
-  await api('/api/email-mkt/campaigns', 'POST', payload);
-  ['em-name','em-subject','em-body','em-recipients'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  showToast('Campaign created!');
-  loadEmailCampaigns();
-}
-async function sendCampaign(id) {
-  if (!confirm('Send this campaign now?')) return;
-  await api(`/api/email-mkt/campaigns/${id}/send`, 'POST', {});
-  showToast('Campaign sent!');
-  loadEmailCampaigns();
-}
-
 // ── Meetings ─────────────────────────────────────────────────────
 async function loadMeetings() {
   try {
