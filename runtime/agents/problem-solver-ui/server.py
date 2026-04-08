@@ -1334,8 +1334,8 @@ INDEX_HTML = r"""<!doctype html>
       border-radius:20px;cursor:pointer;font-size:.775em;font-weight:600;
       transition:all .2s;font-family:inherit;white-space:nowrap;position:relative;overflow:hidden;
       letter-spacing:.01em}
-    .hdr-btn-start{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3)}
-    .hdr-btn-start:hover{background:rgba(16,185,129,.3);box-shadow:0 0 18px rgba(16,185,129,.4);transform:translateY(-1px)}
+    .hdr-btn-start{background:rgba(212,175,55,.15);color:var(--gold);border:1px solid rgba(212,175,55,.35)}
+    .hdr-btn-start:hover{background:rgba(212,175,55,.28);box-shadow:0 0 18px rgba(212,175,55,.35);transform:translateY(-1px)}
     .hdr-btn-stop{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.28)}
     .hdr-btn-stop:hover{background:rgba(244,63,94,.25);box-shadow:0 0 18px rgba(244,63,94,.35);transform:translateY(-1px)}
     .hdr-btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
@@ -2071,8 +2071,8 @@ INDEX_HTML = r"""<!doctype html>
     .btn-primary:hover{transform:translateY(-1px);box-shadow:0 5px 20px rgba(212,175,55,.55),0 0 0 1px rgba(212,175,55,.2);filter:brightness(1.08)}
     .btn-danger{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.22)}
     .btn-danger:hover{background:rgba(244,63,94,.22);box-shadow:0 3px 12px rgba(244,63,94,.28);border-color:rgba(244,63,94,.4)}
-    .btn-success{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(16,185,129,.22)}
-    .btn-success:hover{background:rgba(16,185,129,.24);box-shadow:0 3px 12px rgba(16,185,129,.3);border-color:rgba(16,185,129,.4)}
+    .btn-success{background:rgba(212,175,55,.12);color:var(--gold);border:1px solid rgba(212,175,55,.25)}
+    .btn-success:hover{background:rgba(212,175,55,.24);box-shadow:0 3px 12px rgba(212,175,55,.25);border-color:rgba(212,175,55,.45)}
     .btn-ghost{background:rgba(255,255,255,.04);color:var(--text-secondary);border:1px solid rgba(148,163,184,.12)}
     .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(129,140,248,.3)}
     .btn-sm{padding:5px 12px;font-size:.78em}
@@ -3901,7 +3901,7 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Click a preset to instantly configure and launch a coordinated agent bundle. Then click <strong style="color:var(--gold)">Send Bundle to Swarm</strong> to deploy.</p>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px">
-      <button onclick="applyAgentPreset('business_automator')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(16,185,129,.06));border:1px solid rgba(16,185,129,.3);border-radius:12px;color:#34d399;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(16,185,129,.6)';this.style.background='linear-gradient(135deg,rgba(16,185,129,.2),rgba(16,185,129,.1))'" onmouseleave="this.style.borderColor='rgba(16,185,129,.3)';this.style.background='linear-gradient(135deg,rgba(16,185,129,.12),rgba(16,185,129,.06))'">
+      <button onclick="applyAgentPreset('business_automator')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🏢</span>
         <span style="font-weight:700;font-size:.9em">Business Automator</span>
         <span style="font-size:.74em;color:var(--text-muted)">Automate ops, admin & scheduling</span>
@@ -3911,32 +3911,32 @@ INDEX_HTML = r"""<!doctype html>
         <span style="font-weight:700;font-size:.9em">Money Printer</span>
         <span style="font-size:.74em;color:var(--text-muted)">Revenue, upsells & monetization</span>
       </button>
-      <button onclick="applyAgentPreset('research_team')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(99,102,241,.06));border:1px solid rgba(99,102,241,.3);border-radius:12px;color:#818cf8;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(99,102,241,.6)';this.style.background='linear-gradient(135deg,rgba(99,102,241,.2),rgba(99,102,241,.1))'" onmouseleave="this.style.borderColor='rgba(99,102,241,.3)';this.style.background='linear-gradient(135deg,rgba(99,102,241,.12),rgba(99,102,241,.06))'">
+      <button onclick="applyAgentPreset('research_team')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🔬</span>
         <span style="font-weight:700;font-size:.9em">Research Team</span>
         <span style="font-size:.74em;color:var(--text-muted)">Deep research & competitive intel</span>
       </button>
-      <button onclick="applyAgentPreset('lead_gen_swarm')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(239,68,68,.12),rgba(239,68,68,.06));border:1px solid rgba(239,68,68,.3);border-radius:12px;color:#f87171;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(239,68,68,.6)';this.style.background='linear-gradient(135deg,rgba(239,68,68,.2),rgba(239,68,68,.1))'" onmouseleave="this.style.borderColor='rgba(239,68,68,.3)';this.style.background='linear-gradient(135deg,rgba(239,68,68,.12),rgba(239,68,68,.06))'">
+      <button onclick="applyAgentPreset('lead_gen_swarm')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🎯</span>
         <span style="font-weight:700;font-size:.9em">Lead Generation Swarm</span>
         <span style="font-size:.74em;color:var(--text-muted)">Hunt, score & convert leads</span>
       </button>
-      <button onclick="applyAgentPreset('content_empire')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(236,72,153,.12),rgba(236,72,153,.06));border:1px solid rgba(236,72,153,.3);border-radius:12px;color:#f472b6;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(236,72,153,.6)';this.style.background='linear-gradient(135deg,rgba(236,72,153,.2),rgba(236,72,153,.1))'" onmouseleave="this.style.borderColor='rgba(236,72,153,.3)';this.style.background='linear-gradient(135deg,rgba(236,72,153,.12),rgba(236,72,153,.06))'">
+      <button onclick="applyAgentPreset('content_empire')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">✍️</span>
         <span style="font-weight:700;font-size:.9em">Content Empire</span>
         <span style="font-size:.74em;color:var(--text-muted)">Content, SEO & brand building</span>
       </button>
-      <button onclick="applyAgentPreset('ecom_powerhouse')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(251,146,60,.12),rgba(251,146,60,.06));border:1px solid rgba(251,146,60,.3);border-radius:12px;color:#fb923c;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(251,146,60,.6)';this.style.background='linear-gradient(135deg,rgba(251,146,60,.2),rgba(251,146,60,.1))'" onmouseleave="this.style.borderColor='rgba(251,146,60,.3)';this.style.background='linear-gradient(135deg,rgba(251,146,60,.12),rgba(251,146,60,.06))'">
+      <button onclick="applyAgentPreset('ecom_powerhouse')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🛒</span>
         <span style="font-weight:700;font-size:.9em">E-com Powerhouse</span>
         <span style="font-size:.74em;color:var(--text-muted)">Orders, inventory & fulfillment</span>
       </button>
-      <button onclick="applyAgentPreset('outreach_machine')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(0,240,255,.12),rgba(0,240,255,.06));border:1px solid rgba(0,240,255,.3);border-radius:12px;color:#00f0ff;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(0,240,255,.6)';this.style.background='linear-gradient(135deg,rgba(0,240,255,.2),rgba(0,240,255,.1))'" onmouseleave="this.style.borderColor='rgba(0,240,255,.3)';this.style.background='linear-gradient(135deg,rgba(0,240,255,.12),rgba(0,240,255,.06))'">
+      <button onclick="applyAgentPreset('outreach_machine')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">📣</span>
         <span style="font-weight:700;font-size:.9em">Outreach Machine</span>
         <span style="font-size:.74em;color:var(--text-muted)">Email, calls & social DMs</span>
       </button>
-      <button onclick="applyAgentPreset('analytics_squad')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(52,211,153,.12),rgba(52,211,153,.06));border:1px solid rgba(52,211,153,.3);border-radius:12px;color:#34d399;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(52,211,153,.6)';this.style.background='linear-gradient(135deg,rgba(52,211,153,.2),rgba(52,211,153,.1))'" onmouseleave="this.style.borderColor='rgba(52,211,153,.3)';this.style.background='linear-gradient(135deg,rgba(52,211,153,.12),rgba(52,211,153,.06))'">
+      <button onclick="applyAgentPreset('analytics_squad')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">📊</span>
         <span style="font-weight:700;font-size:.9em">Analytics Squad</span>
         <span style="font-size:.74em;color:var(--text-muted)">Reports, KPIs & insights</span>
@@ -9735,8 +9735,8 @@ async function loadGuardrails() {
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
-            <button onclick="approveAction('${jsEsc(a.id)}')" style="padding:8px 16px;background:linear-gradient(135deg,#064e3b,#065f46);color:#34d399;border:2px solid rgba(52,211,153,.4);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap" onmouseenter="this.style.background='linear-gradient(135deg,#065f46,#047857)';this.style.boxShadow='0 0 16px rgba(52,211,153,.4)'" onmouseleave="this.style.background='linear-gradient(135deg,#064e3b,#065f46)';this.style.boxShadow=''">✅ Accept</button>
-            <button onclick="rejectAction('${jsEsc(a.id)}')" style="padding:8px 16px;background:linear-gradient(135deg,#450a0a,#7f1d1d);color:#f87171;border:2px solid rgba(248,113,113,.4);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap" onmouseenter="this.style.background='linear-gradient(135deg,#7f1d1d,#991b1b)';this.style.boxShadow='0 0 16px rgba(248,113,113,.4)'" onmouseleave="this.style.background='linear-gradient(135deg,#450a0a,#7f1d1d)';this.style.boxShadow=''">🚫 Reject</button>
+            <button onclick="approveAction('${jsEsc(a.id)}')" style="padding:8px 16px;background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.08));color:var(--gold);border:2px solid rgba(212,175,55,.4);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap" onmouseenter="this.style.background='linear-gradient(135deg,rgba(212,175,55,.28),rgba(212,175,55,.15))';this.style.boxShadow='0 0 14px rgba(212,175,55,.3)'" onmouseleave="this.style.background='linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.08))';this.style.boxShadow=''">✅ Accept</button>
+            <button onclick="rejectAction('${jsEsc(a.id)}')" style="padding:8px 16px;background:rgba(60,10,10,.6);color:#e07070;border:2px solid rgba(200,60,60,.3);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap" onmouseenter="this.style.background='rgba(90,10,10,.8)';this.style.boxShadow='0 0 12px rgba(200,60,60,.2)'" onmouseleave="this.style.background='rgba(60,10,10,.6)';this.style.boxShadow=''">🚫 Reject</button>
           </div>
         </div>
       </div>`;
@@ -10995,8 +10995,8 @@ async function afLoadPatches() {
         <div style="font-size:.79em;color:rgba(217,119,6,.6);margin-bottom:10px;line-height:1.5">${escHtml(p.reason||'')}</div>
         ${p.diff_preview ? `<details style="margin-bottom:10px"><summary style="font-size:.76em;cursor:pointer;color:rgba(217,119,6,.55);user-select:none">▶ View diff / code changes</summary><pre style="font-size:.73em;background:rgba(6,3,0,.95);border:1px solid rgba(217,119,6,.15);border-radius:6px;padding:10px;overflow-x:auto;color:#c9d1d9;margin-top:6px;line-height:1.5">${escHtml(p.diff_preview)}</pre></details>` : ''}
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button style="padding:6px 16px;background:linear-gradient(135deg,#14532d,#15803d);border:1px solid rgba(74,222,128,.3);border-radius:7px;color:#4ade80;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 12px rgba(74,222,128,.25)'" onmouseleave="this.style.boxShadow=''" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
-          <button style="padding:6px 16px;background:linear-gradient(135deg,#450a0a,#7f1d1d);border:1px solid rgba(239,68,68,.3);border-radius:7px;color:#f87171;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 12px rgba(239,68,68,.2)'" onmouseleave="this.style.boxShadow=''" onclick="afReject('${p.patch_id}')">❌ Reject</button>
+          <button style="padding:6px 16px;background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.07));border:1px solid rgba(212,175,55,.35);border-radius:7px;color:var(--gold);font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 12px rgba(212,175,55,.25)'" onmouseleave="this.style.boxShadow=''" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
+          <button style="padding:6px 16px;background:rgba(60,10,10,.6);border:1px solid rgba(200,60,60,.25);border-radius:7px;color:#e07070;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 10px rgba(200,60,60,.15)'" onmouseleave="this.style.boxShadow=''" onclick="afReject('${p.patch_id}')">❌ Reject</button>
         </div>
       </div>`;
     }).join('');
@@ -11070,7 +11070,7 @@ async function afLoadChangelog() {
         <div style="font-size:.85em;font-weight:700;color:#fef3c7;margin-bottom:3px">${escHtml(p.description)}</div>
         <div style="font-size:.77em;color:rgba(217,119,6,.55);line-height:1.5;margin-bottom:6px">${escHtml(p.reason||'')}</div>
         ${p.diff_preview ? `<details style="margin-bottom:6px"><summary style="font-size:.74em;cursor:pointer;color:rgba(217,119,6,.45);user-select:none">▶ View diff</summary><pre style="font-size:.71em;background:rgba(6,3,0,.95);border:1px solid rgba(217,119,6,.12);border-radius:6px;padding:10px;overflow-x:auto;color:#c9d1d9;margin-top:5px;line-height:1.5">${escHtml(p.diff_preview)}</pre></details>` : ''}
-        ${p.status==='approved' ? `<button style="padding:4px 12px;background:rgba(127,29,29,.6);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;font-size:.75em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(127,29,29,.9)'" onmouseleave="this.style.background='rgba(127,29,29,.6)'" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
+        ${p.status==='approved' ? `<button style="padding:4px 12px;background:rgba(60,10,10,.5);border:1px solid rgba(200,60,60,.22);border-radius:6px;color:#c87070;font-size:.75em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(80,10,10,.75)'" onmouseleave="this.style.background='rgba(60,10,10,.5)'" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
       </div>`;
     }).join('');
   } catch(e) { console.warn('afLoadChangelog', e); }
@@ -13198,8 +13198,8 @@ async function loadMeetings() {
         ${m.summary?`<div style="color:#a78bfa;font-size:.78em;margin-top:3px">${escHtml(m.summary.slice(0,80))}…</div>`:''}
         <div style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="viewMeeting('${m.id}')">📋 View</button>
-          ${m.transcript?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#a78bfa" onclick="summarizeMeeting('${m.id}')">◈ Summarize</button>`:''}
-          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#10b981" onclick="generateMeetingFollowup('${m.id}')">📧 Follow-up</button>
+          ${m.transcript?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:var(--gold)" onclick="summarizeMeeting('${m.id}')">◈ Summarize</button>`:''}
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:var(--gold)" onclick="generateMeetingFollowup('${m.id}')">📧 Follow-up</button>
           <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteMeeting('${m.id}')">🗑</button>
         </div>
       </div>`).join('');
