@@ -20,6 +20,7 @@ import stat
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,13 +61,12 @@ logging.basicConfig(
 logger = logging.getLogger("updater")
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
-_GH_HEADERS = {
+_GH_HEADERS: dict[str, str] = {
     "Accept":     "application/vnd.github.v3+json",
     "User-Agent": "ai-employee-updater/2.0",
 }
 if _GH_TOKEN:
     _GH_HEADERS["Authorization"] = f"Bearer {_GH_TOKEN}"
-
 
 def _gh_get(url: str):
     try:
@@ -74,9 +74,9 @@ def _gh_get(url: str):
         with urllib.request.urlopen(req, timeout=15) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
-        logger.warning("GitHub API HTTP %d: %s", e.code, url)
+        logger.warning("GitHub API HTTP %d: %s", e.code, _sanitize_url(url))
     except Exception as e:
-        logger.warning("GitHub API error (%s): %s", url, e)
+        logger.warning("GitHub API error (%s): %s", _sanitize_url(url), e)
     return None
 
 
@@ -130,9 +130,17 @@ def _download_raw(repo_path: str, dest: Path, retries: int = 3) -> bool:
 
 # ── State helpers ─────────────────────────────────────────────────────────────
 
+# Fields that must never be persisted to the on-disk state file
+_STATE_SENSITIVE_KEYS = frozenset({
+    "token", "api_key", "secret", "password",
+    "github_token", "auth_token", "bearer_token", "access_token",
+})
+
+
 def _save_state(data: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    safe = {k: v for k, v in data.items() if k.lower() not in _STATE_SENSITIVE_KEYS}
+    STATE_FILE.write_text(json.dumps(safe, indent=2), encoding="utf-8")
 
 
 def _load_state() -> dict:
@@ -246,8 +254,6 @@ def check_and_update(force: bool = False) -> dict:
         "last_check":       now,
         "local_sha":        local_sha,
         "remote_sha":       remote_sha,
-        "repo":             REPO,
-        "branch":           BRANCH,
         "interval_seconds": INTERVAL,
         "pid":              os.getpid(),
     })
@@ -413,8 +419,7 @@ def main() -> None:
         return
 
     # ── Background polling mode ───────────────────────────────────────────────
-    logger.info("Auto-updater started  repo=%s  branch=%s  interval=%ds",
-                REPO, BRANCH, INTERVAL)
+    logger.info("Auto-updater started  interval=%ds", INTERVAL)
 
     try:
         signal.signal(signal.SIGUSR1, _handle_sigusr1)
@@ -424,8 +429,6 @@ def main() -> None:
     _save_state({
         "status":           "started",
         "started":          datetime.now(timezone.utc).isoformat(),
-        "repo":             REPO,
-        "branch":           BRANCH,
         "interval_seconds": INTERVAL,
         "pid":              os.getpid(),
     })
