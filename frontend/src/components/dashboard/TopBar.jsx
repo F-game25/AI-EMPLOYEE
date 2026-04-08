@@ -30,7 +30,11 @@ export default function TopBar() {
         >
           AI-EMPLOYEE
         </span>
-        <span className="font-mono text-xs" style={{ color: 'var(--text-dim)' }}>|</span>
+        {/* Vertical divider */}
+        <div
+          aria-hidden="true"
+          style={{ width: '1px', height: '12px', background: 'var(--text-dim)' }}
+        />
         <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>OS v2.0</span>
       </div>
 
@@ -72,9 +76,17 @@ export default function TopBar() {
         </motion.div>
 
         {user && (
-          <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>
-            [{user.username.toUpperCase()}]
-          </span>
+          <div
+            className="font-mono text-xs px-2 py-0.5"
+            style={{
+              color: 'var(--text-muted)',
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '3px',
+            }}
+          >
+            {user.username.toUpperCase()}
+          </div>
         )}
       </div>
     </header>

@@ -143,9 +143,18 @@ export default function ChatPanel() {
         <label htmlFor={inputId} className="sr-only">
           Send a command to the orchestrator
         </label>
-        <span className="font-mono text-sm flex-shrink-0" style={{ color: 'var(--gold)' }}>
-          {'>'}
-        </span>
+        {/* Chevron prompt indicator */}
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          aria-hidden="true"
+          className="flex-shrink-0"
+          style={{ color: 'var(--gold)' }}
+        >
+          <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
         <input
           id={inputId}
           type="text"
