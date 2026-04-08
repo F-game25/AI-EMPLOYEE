@@ -5154,11 +5154,27 @@ INDEX_HTML = r"""<!doctype html>
         <!-- Step 1: description -->
         <div id="task-step1">
           <div class="form-group">
-            <label>Task Description</label>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <label style="margin:0">Task Description</label>
+              <button class="btn btn-ghost btn-sm" id="btn-idea-mode" onclick="toggleIdeaMode()"
+                title="Turn on Idea Mode — describe a rough concept and AI will convert it into a professional task prompt"
+                style="font-size:.78em;border:1px solid rgba(212,175,55,.4);color:var(--gold);padding:3px 9px">
+                💡 Idea Mode
+              </button>
+            </div>
+            <!-- Idea mode notice (shown when active) -->
+            <div id="idea-mode-notice" style="display:none;background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.3);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:8px;font-size:.82em;color:var(--gold)">
+              💡 <strong>Idea Mode active</strong> — type any rough idea and click <em>Convert Idea</em>. AI will turn it into a professional task prompt.
+            </div>
             <textarea id="task-input" rows="4"
               placeholder="e.g. Build a SaaS company for remote team management — create business plan, brand identity, hiring plan, financial model, and go-to-market strategy"
               style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"
               oninput="onTaskInputChange()"></textarea>
+            <!-- Idea conversion controls (shown in idea mode) -->
+            <div id="idea-convert-row" style="display:none;margin-top:6px;display:none">
+              <button class="btn btn-primary" onclick="convertIdea()" id="btn-convert-idea" style="width:100%">✨ Convert Idea → Professional Prompt</button>
+              <div id="idea-convert-status" style="margin-top:6px;font-size:.82em;color:var(--text-muted)"></div>
+            </div>
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-primary" onclick="runAutoSelect()" style="flex:1" id="btn-autoselect" disabled>🤖 Auto-Select Agents</button>
@@ -8631,6 +8647,65 @@ let _allAgents = [];          // full list from /api/agents
 let _autoSelectedIds = new Set(); // IDs suggested by auto-select
 let _selectedAgentIds = new Set(); // currently selected (user may adjust)
 let _taskMode = 'auto';       // 'auto' | 'parallel' | 'single'
+let _ideaModeActive = false;  // whether idea mode is on
+
+// ── Idea Mode ─────────────────────────────────────────────────────────────────
+function toggleIdeaMode() {
+  _ideaModeActive = !_ideaModeActive;
+  const btn = document.getElementById('btn-idea-mode');
+  const notice = document.getElementById('idea-mode-notice');
+  const convertRow = document.getElementById('idea-convert-row');
+  const taskInput = document.getElementById('task-input');
+  if (_ideaModeActive) {
+    btn.style.background = 'rgba(212,175,55,.2)';
+    btn.style.borderColor = 'var(--gold)';
+    btn.textContent = '💡 Idea Mode ON';
+    notice.style.display = 'block';
+    convertRow.style.display = 'block';
+    taskInput.placeholder = 'e.g. I want to start an online business selling handmade jewellery\ne.g. Grow my YouTube channel to 10k subscribers\ne.g. Build an app that helps people track their habits';
+  } else {
+    btn.style.background = '';
+    btn.style.borderColor = 'rgba(212,175,55,.4)';
+    btn.textContent = '💡 Idea Mode';
+    notice.style.display = 'none';
+    convertRow.style.display = 'none';
+    taskInput.placeholder = 'e.g. Build a SaaS company for remote team management — create business plan, brand identity, hiring plan, financial model, and go-to-market strategy';
+    document.getElementById('idea-convert-status').textContent = '';
+  }
+}
+
+async function convertIdea() {
+  const idea = document.getElementById('task-input').value.trim();
+  if (!idea) { toast('Please enter your idea first', 'error'); return; }
+  const statusEl = document.getElementById('idea-convert-status');
+  const btn = document.getElementById('btn-convert-idea');
+  btn.disabled = true;
+  statusEl.innerHTML = '⏳ Converting idea to professional prompt…';
+  try {
+    const r = await api('/api/idea/convert', {
+      method: 'POST',
+      body: JSON.stringify({ idea })
+    });
+    if (r.ok) {
+      document.getElementById('task-input').value = r.prompt;
+      onTaskInputChange();
+      statusEl.innerHTML = `<span style="color:var(--success)">✅ Converted! (via ${escHtml(r.provider||'AI')})</span>`;
+      // Auto-disable idea mode so the converted prompt flows normally
+      _ideaModeActive = false;
+      const modeBtn = document.getElementById('btn-idea-mode');
+      modeBtn.style.background = '';
+      modeBtn.style.borderColor = 'rgba(212,175,55,.4)';
+      modeBtn.textContent = '💡 Idea Mode';
+      document.getElementById('idea-mode-notice').style.display = 'none';
+      document.getElementById('idea-convert-row').style.display = 'none';
+    } else {
+      statusEl.innerHTML = `<span style="color:var(--danger)">❌ ${escHtml(r.detail||r.error||'Conversion failed')}</span>`;
+    }
+  } catch(e) {
+    statusEl.innerHTML = '<span style="color:var(--danger)">❌ Network error — is the server running?</span>';
+  }
+  btn.disabled = false;
+}
 
 function onTaskInputChange() {
   const v = document.getElementById('task-input').value.trim();
@@ -16983,6 +17058,90 @@ def list_tasks():
     """List all task plans (active and history)."""
     plans = _load_task_plans()
     return JSONResponse({"plans": plans[:20]})
+
+
+# ── Idea-to-Prompt Converter ──────────────────────────────────────────────────
+_idea_to_prompt_path = AI_HOME / "agents" / "idea-to-prompt"
+if str(_idea_to_prompt_path) not in sys.path:
+    sys.path.insert(0, str(_idea_to_prompt_path))
+
+try:
+    from idea_to_prompt import convert_idea as _convert_idea  # type: ignore
+    _IDEA_CONVERTER_AVAILABLE = True
+except ImportError:
+    _IDEA_CONVERTER_AVAILABLE = False
+
+
+@app.post("/api/idea/convert")
+async def convert_idea_to_prompt(payload: dict):
+    """Convert a rough idea into a structured, professional task prompt.
+
+    Accepts: {"idea": "<raw idea text>"}
+    Returns: {"ok": true, "prompt": "...", "title": "...", "original": "...", "provider": "..."}
+
+    This endpoint sits between the user's input and the orchestrator — it uses
+    the AI router to produce an efficient, actionable task description from
+    whatever the user typed.
+    """
+    idea = (payload.get("idea") or "").strip()
+    if not idea:
+        raise HTTPException(400, "idea required")
+    if len(idea) > 4000:
+        raise HTTPException(400, "idea too long (max 4000 characters)")
+
+    if _IDEA_CONVERTER_AVAILABLE:
+        result = await run_in_threadpool(_convert_idea, idea)
+    else:
+        # Inline fallback when the module is not on the path
+        result = _inline_convert_idea(idea)
+
+    if not result.get("ok"):
+        raise HTTPException(500, result.get("error", "conversion failed"))
+    return JSONResponse(result)
+
+
+def _inline_convert_idea(idea: str) -> dict:
+    """Inline fallback converter used when the idea-to-prompt module is unavailable."""
+    _SYSTEM = (
+        "You are an expert AI prompt engineer. Convert the rough idea below into a "
+        "clear, numbered, professional task description an AI orchestrator can execute. "
+        "End with a line: TITLE: <short title>. Output ONLY the task description and title."
+    )
+    prompt_text = ""
+    provider = "fallback"
+    title = idea[:60].strip()
+
+    if _AI_ROUTER_AVAILABLE:
+        try:
+            res = _query_ai_for_agent(
+                "reasoning",
+                f"Convert this idea into a structured AI task:\n\n{idea}",
+                _SYSTEM,
+            )
+            raw = (res.get("content") or res.get("answer") or res.get("text") or "").strip()
+            if raw:
+                lines = []
+                for line in raw.splitlines():
+                    if line.strip().upper().startswith("TITLE:"):
+                        title = line.strip()[6:].strip() or title
+                    else:
+                        lines.append(line)
+                prompt_text = "\n".join(lines).strip()
+                provider = res.get("provider", "ai")
+        except Exception:
+            pass
+
+    if not prompt_text:
+        prompt_text = (
+            f"Goal: {idea}\n\n"
+            "1. Research and analyse the current state of the topic.\n"
+            "2. Identify the key actions needed to achieve the goal.\n"
+            "3. Create a detailed action plan with clear milestones.\n"
+            "4. Execute each step and document the outcomes.\n"
+            "5. Review results against success criteria and iterate.\n"
+        )
+
+    return {"ok": True, "prompt": prompt_text, "title": title, "original": idea, "provider": provider}
 
 
 @app.get("/api/task/status/{task_id}")
