@@ -256,7 +256,7 @@ def main():
     _stop_event = threading.Event()
 
     def _handle_signal(signum, frame):  # noqa: ARG001
-        print(f"[{now_iso()}] scheduler-runner received signal {signum}, shutting down …")
+        print(f"[{now_iso()}] scheduler-runner received signal {signum}, shutting down ...")
         _stop_event.set()
 
     signal.signal(signal.SIGTERM, _handle_signal)
