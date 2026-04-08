@@ -402,7 +402,7 @@ class TestInvoicing:
     def test_list_expenses_empty(self):
         assert self.client.get("/api/finance/expenses").json() == []
 
-
+    def test_create_invoice_tax(self):
         r = self.client.post("/api/finance/invoices", json={
             "client": "Acme", "subtotal": 1000, "tax_rate": 10,
         })
