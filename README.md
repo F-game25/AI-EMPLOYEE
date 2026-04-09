@@ -1157,8 +1157,8 @@ Interact with ASCEND FORGE via the Chat tab or API using `/` commands:
 | `/schedule <name> <freq>` | Register a recurring task (hourly/daily/weekly) |
 | `/schedule list` | Show active schedules |
 | `/schedule remove <name>` | Cancel a schedule |
-| `/mode <general\|money\|auto>` | Set operating mode |
-| `/blacklight <on\|off>` | Toggle BLACKLIGHT revenue override |
+| `/mode <general|money|auto>` | Set operating mode |
+| `/blacklight <on|off>` | Toggle BLACKLIGHT revenue override |
 
 #### Agent Routing
 
@@ -1197,7 +1197,7 @@ AI Employee has a full neural intelligence stack — three layers that learn and
 All agents share one global Brain singleton. It uses a PyTorch neural network (`BrainNet`) with Prioritized Experience Replay to learn which actions produce the best outcomes over time.
 
 ```python
-from brain.brain import get_brain   # requires PYTHONPATH=runtime
+from brain.brain import get_brain   # requires PYTHONPATH=runtime (run from repo root: `export PYTHONPATH=runtime`)
 brain = get_brain()                 # global singleton shared by all agents
 
 # Make a decision
