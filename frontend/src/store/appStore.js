@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export const useAppStore = create((set, get) => ({
+export const useAppStore = create((set) => ({
   // State machine
   appState: 'boot', // boot | connecting | login | dashboard | error
   setAppState: (s) => set({ appState: s }),
@@ -41,6 +41,10 @@ export const useAppStore = create((set, get) => ({
     }
     return { chatMessages: msgs }
   }),
+
+  // Typing indicator — true while waiting for AI response
+  isTyping: false,
+  setTyping: (v) => set({ isTyping: v }),
 
   // System status
   systemStatus: { cpu: 0, memory: 0, uptime: 0, connections: 0 },

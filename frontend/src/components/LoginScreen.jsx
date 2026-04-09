@@ -64,41 +64,39 @@ export default function LoginScreen() {
             <label className="block font-mono text-xs mb-2" style={{ color: '#666', letterSpacing: '1px' }}>
               OPERATOR ID
             </label>
-            <input
-              type="text"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              placeholder="operator"
-              className="w-full font-mono text-sm px-4 py-3 outline-none transition-all duration-200"
-              style={{
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(245,196,0,0.2)',
-                borderRadius: '4px',
-                color: '#e8e8e8',
-              }}
-              onFocus={e => e.target.style.borderColor = 'rgba(245,196,0,0.6)'}
-              onBlur={e => e.target.style.borderColor = 'rgba(245,196,0,0.2)'}
-            />
+            <div className="input-field-wrap">
+              <input
+                type="text"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="operator"
+                className="w-full font-mono text-sm px-4 py-3 outline-none transition-all duration-200"
+                style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  borderRadius: '4px',
+                  color: '#e8e8e8',
+                }}
+              />
+            </div>
           </div>
           <div>
             <label className="block font-mono text-xs mb-2" style={{ color: '#666', letterSpacing: '1px' }}>
               ACCESS CODE
             </label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full font-mono text-sm px-4 py-3 outline-none transition-all duration-200"
-              style={{
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(245,196,0,0.2)',
-                borderRadius: '4px',
-                color: '#e8e8e8',
-              }}
-              onFocus={e => e.target.style.borderColor = 'rgba(245,196,0,0.6)'}
-              onBlur={e => e.target.style.borderColor = 'rgba(245,196,0,0.2)'}
-            />
+            <div className="input-field-wrap">
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full font-mono text-sm px-4 py-3 outline-none transition-all duration-200"
+                style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  borderRadius: '4px',
+                  color: '#e8e8e8',
+                }}
+              />
+            </div>
           </div>
 
           <motion.button

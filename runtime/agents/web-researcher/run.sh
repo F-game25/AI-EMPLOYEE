@@ -19,4 +19,4 @@ if [[ -f "$AI_HOME/config/web-researcher.env" ]]; then
   set +a
 fi
 
-python3 "$AGENT_HOME/web_researcher.py"
+exec python3 "$AGENT_HOME/web_researcher.py"

@@ -3,18 +3,41 @@
 @import "tailwindcss";
 
 :root {
+  /* Brand */
   --gold: #F5C400;
   --gold-bright: #FFCC00;
   --gold-dim: #a38600;
+
+  /* Backgrounds */
   --bg-base: #050505;
   --bg-panel: #0a0a0a;
   --bg-panel-2: #0f0f0f;
+  --bg-hover: rgba(255, 255, 255, 0.04);
+
+  /* Borders */
   --border-gold: rgba(245, 196, 0, 0.3);
-  --text-primary: #e8e8e8;
-  --text-muted: #666;
-  --success: #00ff88;
-  --error: #ff3366;
+  --border-gold-dim: rgba(245, 196, 0, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+
+  /* Text — all meet WCAG AA (4.5:1) on --bg-base */
+  --text-primary: #e8e8e8;   /* ~14:1 */
+  --text-secondary: #aaaaaa; /* ~7:1  */
+  --text-muted: #777777;     /* ~4.6:1 */
+  --text-dim: #555555;       /* ~3:1 — large text / decorative only */
+
+  /* Status */
+  --success: #00e676;
+  --error: #ff4466;
   --warning: #ffaa00;
+  --info: #60b4ff;
+
+  /* Z-index scale */
+  --z-base: 0;
+  --z-panel: 10;
+  --z-overlay: 50;
+  --z-topbar: 60;
+  --z-modal: 200;
+  --z-scanlines: 300;
 }
 
 * {
@@ -32,6 +55,14 @@ body {
   width: 100vw;
 }
 
+/* Focus ring — keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Thin custom scrollbar */
 ::-webkit-scrollbar {
   width: 4px;
 }
@@ -43,6 +74,7 @@ body {
   border-radius: 2px;
 }
 
+/* Utility classes */
 .font-mono {
   font-family: 'JetBrains Mono', monospace;
 }
@@ -55,6 +87,7 @@ body {
   text-shadow: 0 0 10px rgba(245, 196, 0, 0.5);
 }
 
+/* Screen scanlines — decorative overlay, non-interactive */
 .scanlines::after {
   content: '';
   position: fixed;
@@ -63,9 +96,35 @@ body {
     0deg,
     transparent,
     transparent 2px,
-    rgba(0, 0, 0, 0.08) 2px,
-    rgba(0, 0, 0, 0.08) 4px
+    rgba(0, 0, 0, 0.06) 2px,
+    rgba(0, 0, 0, 0.06) 4px
   );
   pointer-events: none;
-  z-index: 9999;
+  z-index: var(--z-scanlines);
+}
+
+/* Login input field wrapper — border controlled via CSS, not inline JS */
+.input-field-wrap {
+  border: 1px solid rgba(245, 196, 0, 0.2);
+  border-radius: 4px;
+  transition: border-color 0.2s ease;
+}
+.input-field-wrap:focus-within {
+  border-color: rgba(245, 196, 0, 0.6);
+}
+.input-field-wrap input {
+  display: block;
+}
+
+/* Visually hidden — accessible to screen readers */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
