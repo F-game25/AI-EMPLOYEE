@@ -10,7 +10,9 @@ Usage (from any other module):
 from __future__ import annotations
 
 import logging
+import math
 import os
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -175,6 +177,9 @@ class NeuralNetworkAgent:
         self._model_path = _resolve(mcfg["model_path"])
         self._model_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Model lock (serialises get_action / learn across threads)
+        self._model_lock = threading.RLock()
+
         # Load checkpoint if it exists
         self.load()
 
@@ -194,7 +199,8 @@ class NeuralNetworkAgent:
             state = state.unsqueeze(0)
         state = state.float().to(self.device)
 
-        action_t, conf_t = self.model.predict(state)
+        with self._model_lock:
+            action_t, conf_t = self.model.predict(state)
         action = int(action_t[0].item())
         confidence = float(conf_t[0].item())
 
@@ -225,9 +231,15 @@ class NeuralNetworkAgent:
         if next_state.dim() > 1:
             next_state = next_state.squeeze(0)
 
-        self.replay_buffer.push(state.float(), action, float(reward), next_state.float())
-        self.reward_window.append(float(reward))
-        self.last_reward = float(reward)
+        # Sanitize reward — NaN/Inf values would corrupt loss computation
+        reward_f = float(reward)
+        if not math.isfinite(reward_f):
+            logger.warning("store_experience: non-finite reward %s replaced with 0.0", reward_f)
+            reward_f = 0.0
+
+        self.replay_buffer.push(state.float(), action, reward_f, next_state.float())
+        self.reward_window.append(reward_f)
+        self.last_reward = reward_f
         self.experience_count += 1
 
         if (
@@ -252,24 +264,26 @@ class NeuralNetworkAgent:
         rewards = rewards.to(self.device)             # (B,)
         next_states = next_states.to(self.device)     # (B, input_size)
 
-        # --- Cross-entropy supervised signal: predict the taken action -------
-        # We weight the loss by the reward so positive outcomes are reinforced
-        # and negative outcomes are penalised.
-        self.model.train()
-        logits = self.model(states)                      # (B, output_size)
-        ce_loss = nn.functional.cross_entropy(logits, actions, reduction="none")  # (B,)
+        with self._model_lock:
+            # --- Cross-entropy supervised signal: predict the taken action ---
+            # We weight the loss by the reward so positive outcomes are reinforced
+            # and negative outcomes are penalised.
+            self.model.train()
+            logits = self.model(states)                      # (B, output_size)
+            ce_loss = nn.functional.cross_entropy(logits, actions, reduction="none")  # (B,)
 
-        # Shift rewards to [0, 1] for a stable weighting signal
-        reward_weights = (rewards + 1.0) / 2.0                  # −1→0, 0→0.5, +1→1
-        loss = (ce_loss * reward_weights).mean()
+            # Shift rewards to [0, 1] for a stable weighting signal
+            reward_weights = (rewards + 1.0) / 2.0                  # −1→0, 0→0.5, +1→1
+            loss = (ce_loss * reward_weights).mean()
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-        self.optimizer.step()
+            self.optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            self.optimizer.step()
 
-        loss_val = float(loss.item())
-        self.last_loss = loss_val
+            loss_val = float(loss.item())
+            self.last_loss = loss_val
+
         self.learn_step += 1
 
         avg_reward = sum(self.reward_window) / max(len(self.reward_window), 1)
