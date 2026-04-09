@@ -15701,7 +15701,9 @@ def start_all_agents(_auth: None = Depends(require_auth)):
     targets = _mode_agent_targets(mode)
     outputs = []
     failures = []
-    skipped_governor = []
+    skipped_agents: list = []        # agents skipped by governor or circuit breaker
+    skipped_by_governor: list = []   # agents skipped specifically by the cap
+    skipped_by_breaker: list = []    # agents skipped by an open circuit breaker
     # Check governor before starting agents
     with _AGENT_GOVERNOR_LOCK:
         gov_enabled = _AGENT_GOVERNOR["enabled"]
@@ -15712,12 +15714,14 @@ def start_all_agents(_auth: None = Depends(require_auth)):
         continue
       # Governor: skip start if cap already reached
       if gov_enabled and running_count >= gov_max:
-        skipped_governor.append(agent_name)
+        skipped_agents.append(agent_name)
+        skipped_by_governor.append(agent_name)
         outputs.append(f"[{agent_name}] skipped — agent governor cap ({gov_max}) reached")
         continue
       # Circuit breaker: skip agents whose breaker is open
       if circuit_breaker_is_open(agent_name):
-        skipped_governor.append(agent_name)
+        skipped_agents.append(agent_name)
+        skipped_by_breaker.append(agent_name)
         outputs.append(f"[{agent_name}] skipped — circuit breaker is open (too many recent failures)")
         continue
       rc, out = ai_employee("start", agent_name)
@@ -15733,9 +15737,10 @@ def start_all_agents(_auth: None = Depends(require_auth)):
       "ok": len(failures) == 0,
       "mode": mode,
       "targets": targets,
-      "started": len(targets) - len(failures) - len(skipped_governor),
+      "started": len(targets) - len(failures) - len(skipped_agents),
       "failed": failures,
-      "skipped_governor": skipped_governor,
+      "skipped_by_governor": skipped_by_governor,
+      "skipped_by_breaker": skipped_by_breaker,
       "output": "\n".join(outputs),
     })
 
@@ -21464,10 +21469,11 @@ def _audit_campaign(campaign: dict) -> dict:
             "fix": "Remove or rephrase these phrases to avoid spam filters",
         })
 
-    # ALL CAPS check (>20 % of words)
-    words = subject.split()
-    caps_words = [w for w in (campaign.get("subject") or "").split() if w.isupper() and len(w) > 2]
-    if len(words) > 0 and len(caps_words) / max(len(words), 1) > 0.2:
+    # ALL CAPS check (>20 % of words) — use the original (non-lowercased) subject for both counts
+    original_subject = campaign.get("subject") or ""
+    orig_words = original_subject.split()
+    caps_words = [w for w in orig_words if w.isupper() and len(w) > 2]
+    if len(orig_words) > 0 and len(caps_words) / max(len(orig_words), 1) > 0.2:
         issues.append({
             "severity": "medium",
             "type": "excessive_caps",
@@ -21538,7 +21544,7 @@ async def email_deliverability_audit():
             if not isinstance(campaigns, list):
                 campaigns = []
             results = [_audit_campaign(c) for c in campaigns]
-            overall = round(sum(r["score"] for r in results) / max(len(results), 1), 1) if results else 100.0
+            overall = round(sum(r["score"] for r in results) / len(results), 1) if results else None
             high_issues = sum(1 for r in results for i in r["issues"] if i["severity"] == "high")
             return {
                 "overall_score": overall,
@@ -21633,9 +21639,8 @@ def circuit_breaker_is_open(agent_id: str) -> bool:
         cb = _CIRCUIT_BREAKERS[agent_id]
         if cb["state"] == "open" and cb.get("opened_at"):
             try:
-                from datetime import datetime as _dt, timezone as _tz
-                opened = _dt.fromisoformat(cb["opened_at"].replace("Z", "+00:00"))
-                elapsed = (_dt.now(_tz.utc) - opened).total_seconds()
+                opened = datetime.fromisoformat(cb["opened_at"].replace("Z", "+00:00"))
+                elapsed = (datetime.now(timezone.utc) - opened).total_seconds()
                 if elapsed >= _CB_HALF_OPEN_AFTER:
                     cb["state"] = "half_open"
                     cb["success_streak"] = 0
