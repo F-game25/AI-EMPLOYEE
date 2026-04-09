@@ -830,3 +830,193 @@ class TestHighThroughput:
         for p in brain.model.parameters():
             assert torch.isfinite(p).all()
         brain.stop()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 14. WebKnowledgeCollector
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestWebKnowledgeCollector:
+    """Unit tests for the BeautifulSoup-based web knowledge collector.
+
+    These tests do NOT make real HTTP requests.  All network calls are
+    monkey-patched so the suite passes offline and in CI.
+    """
+
+    def _make_collector(self):
+        from brain.web_knowledge_collector import WebKnowledgeCollector
+        return WebKnowledgeCollector(input_size=32, output_size=8, fetch_delay=0.0)
+
+    # ── dependency availability checks ───────────────────────────────────────
+
+    def test_collector_instantiates(self):
+        col = self._make_collector()
+        assert col.input_size == 32
+        assert col.output_size == 8
+
+    def test_collect_returns_empty_when_unavailable(self, monkeypatch):
+        import brain.web_knowledge_collector as wkc_mod
+        monkeypatch.setattr(wkc_mod, "_REQUESTS_OK", False)
+        monkeypatch.setattr(wkc_mod, "_BS4_OK", False)
+        col = wkc_mod.WebKnowledgeCollector(input_size=32, output_size=8)
+        assert col.collect() == []
+
+    # ── _sanitize_url ─────────────────────────────────────────────────────────
+
+    def test_sanitize_url_accepts_https(self):
+        from brain.web_knowledge_collector import _sanitize_url
+        assert _sanitize_url("https://en.wikipedia.org/wiki/Python") is not None
+
+    def test_sanitize_url_rejects_localhost(self):
+        from brain.web_knowledge_collector import _sanitize_url
+        assert _sanitize_url("http://localhost/secret") is None
+
+    def test_sanitize_url_rejects_private_ip(self):
+        from brain.web_knowledge_collector import _sanitize_url
+        assert _sanitize_url("http://192.168.1.1/data") is None
+
+    def test_sanitize_url_rejects_loopback_ip(self):
+        from brain.web_knowledge_collector import _sanitize_url
+        assert _sanitize_url("http://127.0.0.1/data") is None
+
+    def test_sanitize_url_rejects_non_http(self):
+        from brain.web_knowledge_collector import _sanitize_url
+        assert _sanitize_url("ftp://example.com/file") is None
+
+    # ── _extract_text ─────────────────────────────────────────────────────────
+
+    def test_extract_text_strips_scripts_and_styles(self):
+        bs4 = pytest.importorskip("bs4", reason="beautifulsoup4 not installed")
+        from brain.web_knowledge_collector import _extract_text
+        html = (
+            "<html><head><style>body{}</style><script>alert(1)</script></head>"
+            "<body><p>Hello world</p></body></html>"
+        )
+        text = _extract_text(html)
+        assert "Hello world" in text
+        assert "alert" not in text
+        assert "body{}" not in text
+
+    def test_extract_text_respects_max_chars(self):
+        bs4 = pytest.importorskip("bs4", reason="beautifulsoup4 not installed")
+        from brain.web_knowledge_collector import _extract_text
+        html = "<html><body><p>" + "x" * 10000 + "</p></body></html>"
+        text = _extract_text(html, max_chars=100)
+        assert len(text) <= 100
+
+    def test_extract_text_empty_html_returns_empty_string(self):
+        bs4 = pytest.importorskip("bs4", reason="beautifulsoup4 not installed")
+        from brain.web_knowledge_collector import _extract_text
+        assert _extract_text("") == ""
+
+    # ── _text_to_tensor ───────────────────────────────────────────────────────
+
+    def test_text_to_tensor_shape(self):
+        from brain.web_knowledge_collector import _text_to_tensor
+        t = _text_to_tensor("machine learning", 32)
+        assert t is not None
+        assert t.shape == (32,)
+
+    def test_text_to_tensor_empty_returns_zeros(self):
+        from brain.web_knowledge_collector import _text_to_tensor
+        t = _text_to_tensor("", 32)
+        assert t is not None
+        assert t.abs().sum().item() == 0.0
+
+    def test_text_to_tensor_is_normalised(self):
+        from brain.web_knowledge_collector import _text_to_tensor
+        t = _text_to_tensor("artificial intelligence and deep learning", 64)
+        assert t.abs().max().item() <= 1.0 + 1e-6
+
+    # ── _topic_to_action ──────────────────────────────────────────────────────
+
+    def test_topic_to_action_known_topics(self):
+        from brain.web_knowledge_collector import _topic_to_action
+        assert _topic_to_action("security vulnerabilities") == 5
+        assert _topic_to_action("software technology") == 1
+        assert _topic_to_action("performance benchmarks") == 6
+
+    def test_topic_to_action_unknown_returns_other(self):
+        from brain.web_knowledge_collector import _topic_to_action
+        assert _topic_to_action("random xyz topic") == 7
+
+    # ── scrape_wikipedia (mocked) ────────────────────────────────────────────
+
+    def test_scrape_wikipedia_returns_experience_on_success(self, monkeypatch):
+        import brain.web_knowledge_collector as wkc_mod
+        monkeypatch.setattr(wkc_mod, "_wiki_summary", lambda topic: "Python is a programming language.")
+        col = self._make_collector()
+        exp = col.scrape_wikipedia("Python programming language")
+        assert exp is not None
+        state, action, reward, next_state = exp
+        assert state.shape == (32,)
+        assert next_state.shape == (32,)
+        assert 0 <= action < 8
+        assert reward == 1.0
+
+    def test_scrape_wikipedia_returns_none_on_no_content(self, monkeypatch):
+        import brain.web_knowledge_collector as wkc_mod
+        monkeypatch.setattr(wkc_mod, "_wiki_summary", lambda topic: None)
+        monkeypatch.setattr(wkc_mod, "_fetch_html", lambda url: None)
+        col = self._make_collector()
+        assert col.scrape_wikipedia("nonexistent_xyz_topic_12345") is None
+
+    # ── scrape_url (mocked) ───────────────────────────────────────────────────
+
+    def test_scrape_url_returns_experience_on_success(self, monkeypatch):
+        bs4 = pytest.importorskip("bs4", reason="beautifulsoup4 not installed")
+        import brain.web_knowledge_collector as wkc_mod
+        fake_html = "<html><body><p>Deep learning tutorial content here.</p></body></html>"
+        monkeypatch.setattr(wkc_mod, "_fetch_html", lambda url: fake_html)
+        col = self._make_collector()
+        exp = col.scrape_url("https://example.com/article", topic_hint="technology")
+        assert exp is not None
+        state, action, reward, next_state = exp
+        assert state.shape == (32,)
+        assert reward == pytest.approx(0.8)
+
+    def test_scrape_url_returns_none_on_fetch_failure(self, monkeypatch):
+        import brain.web_knowledge_collector as wkc_mod
+        monkeypatch.setattr(wkc_mod, "_fetch_html", lambda url: None)
+        col = self._make_collector()
+        assert col.scrape_url("https://example.com/404") is None
+
+    # ── collect (mocked) ──────────────────────────────────────────────────────
+
+    def test_collect_wikipedia_returns_up_to_max_items(self, monkeypatch):
+        import brain.web_knowledge_collector as wkc_mod
+        monkeypatch.setattr(
+            wkc_mod, "_wiki_summary",
+            lambda topic: f"{topic} is an interesting subject in computing.",
+        )
+        col = self._make_collector()
+        topics = ["Machine learning", "Python", "Neural network", "Compiler", "Database"]
+        exps = col.collect_wikipedia(topics, max_items=3)
+        assert len(exps) == 3
+        for state, action, reward, next_state in exps:
+            assert state.shape == (32,)
+            assert next_state.shape == (32,)
+
+    def test_collect_uses_default_topics_when_none_given(self, monkeypatch):
+        import brain.web_knowledge_collector as wkc_mod
+        monkeypatch.setattr(
+            wkc_mod, "_wiki_summary",
+            lambda topic: "Wikipedia article content about " + topic,
+        )
+        col = self._make_collector()
+        exps = col.collect(max_items=3)
+        assert len(exps) <= 3
+        assert len(exps) >= 1
+
+    def test_collect_wires_into_experience_collector(self, monkeypatch):
+        """ExperienceCollector must have a .web attribute after the integration."""
+        from brain.experience_collector import ExperienceCollector
+        pushed: list = []
+        col = ExperienceCollector(
+            input_size=32,
+            output_size=8,
+            push_fn=lambda s, a, r, ns: pushed.append(a),
+        )
+        assert hasattr(col, "web"), "ExperienceCollector missing .web attribute"
+        from brain.web_knowledge_collector import WebKnowledgeCollector
+        assert isinstance(col.web, WebKnowledgeCollector)
