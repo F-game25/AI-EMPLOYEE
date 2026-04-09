@@ -923,7 +923,7 @@ class TestWebKnowledgeCollector:
         assert t is not None
         assert t.abs().sum().item() == 0.0
 
-    def test_text_to_tensor_is_normalised(self):
+    def test_text_to_tensor_is_normalized(self):
         from brain.web_knowledge_collector import _text_to_tensor
         t = _text_to_tensor("artificial intelligence and deep learning", 64)
         assert t.abs().max().item() <= 1.0 + 1e-6

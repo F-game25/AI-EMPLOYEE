@@ -104,8 +104,17 @@ def _sanitize_url(url: str) -> Optional[str]:
         return None
 
     host = parsed.hostname or ""
-    # Block private / loopback ranges
-    _blocked_prefixes = ("localhost", "127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.")
+    # Block private / loopback ranges (RFC 1918 + loopback)
+    _blocked_prefixes = (
+        "localhost",
+        "127.",
+        "10.",
+        "192.168.",
+        "172.16.", "172.17.", "172.18.", "172.19.",
+        "172.20.", "172.21.", "172.22.", "172.23.",
+        "172.24.", "172.25.", "172.26.", "172.27.",
+        "172.28.", "172.29.", "172.30.", "172.31.",
+    )
     if any(host.startswith(p) for p in _blocked_prefixes) or host == "::1":
         return None
 
@@ -229,10 +238,10 @@ class WebKnowledgeCollector:
         output_size: int,
         fetch_delay: float = _FETCH_DELAY_S,
     ) -> None:
-        self.input_size  = input_size
+        self.input_size = input_size
         self.output_size = output_size
         self.fetch_delay = fetch_delay
-        self._available  = _is_available()
+        self._available = _is_available()
 
         if not self._available:
             missing = []
