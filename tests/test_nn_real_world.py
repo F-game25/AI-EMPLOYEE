@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import List
 
 import pytest
-import torch
+torch = pytest.importorskip("torch", reason="torch not installed")
 
 # ── Ensure both runtime packages are importable ───────────────────────────────
 _RUNTIME   = Path(__file__).parent.parent / "runtime"

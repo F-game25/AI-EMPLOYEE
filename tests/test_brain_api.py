@@ -23,7 +23,7 @@ from typing import Any, Dict, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
+torch = pytest.importorskip("torch", reason="torch not installed")
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _REPO_ROOT = Path(__file__).parent.parent

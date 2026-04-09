@@ -233,15 +233,13 @@ class UserProfile:
         self.user_id = user_id
         _dir = (profile_dir if profile_dir is not None else _PROFILE_DIR).resolve()
         _dir.mkdir(parents=True, exist_ok=True)
-        # Guard against path-traversal: safe_id only allows alphanumeric/-/_.
-        _safe = _safe_id(user_id)
-        _candidate = (_dir / f"{_safe}.json").resolve()
-        # Ensure the resolved path is still inside the profile directory
-        try:
-            _candidate.relative_to(_dir)
-        except ValueError:
+        # Guard against path-traversal: sanitize to alphanum/-/_ only, then use
+        # os.path.basename to guarantee no directory component survives.
+        _safe = os.path.basename(_safe_id(user_id))
+        if not _safe:
             raise ValueError(f"Unsafe user_id would escape profile dir: {user_id!r}")
-        self._path = _candidate
+        # Construct path purely from the known-safe directory + a literal basename.
+        self._path = _dir / (_safe + ".json")
         self._lock = threading.Lock()
         self._data: Dict[str, Any] = self._load()
 

@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 
 import pytest
-import torch
+torch = pytest.importorskip("torch", reason="torch not installed")
 
 # Ensure runtime/ is on sys.path
 _RUNTIME = Path(__file__).parent.parent / "runtime"

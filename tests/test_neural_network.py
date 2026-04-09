@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 
 import pytest
-import torch
+torch = pytest.importorskip("torch", reason="torch not installed")
 
 # Ensure runtime/agents is on sys.path (conftest.py may already do this)
 _AGENTS_DIR = Path(__file__).parent.parent / "runtime" / "agents"

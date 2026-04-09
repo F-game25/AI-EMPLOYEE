@@ -31,7 +31,12 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
+try:
+    import torch as _torch
+    _HAS_TORCH = True
+except ImportError:
+    _torch = None  # type: ignore[assignment]
+    _HAS_TORCH = False
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _REPO    = Path(__file__).parent.parent
@@ -87,6 +92,8 @@ _BRAIN_CFG = {
 
 
 def _make_brain(tmp_path: Path, monkeypatch):
+    if not _HAS_TORCH:
+        pytest.skip("torch not installed")
     import brain.brain as brain_mod
     cfg = copy.deepcopy(_BRAIN_CFG)
     cfg["model"]["model_path"] = str(tmp_path / "brain.pth")
@@ -678,6 +685,7 @@ class TestBrainIntegration:
             )
         assert brain.experience_count > 0
 
+    @pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
     def test_brain_receives_valid_feature_vectors(self, tmp_path, monkeypatch):
         ic = _make_intel(tmp_path, monkeypatch)
         brain = ic._get_brain()
@@ -685,7 +693,7 @@ class TestBrainIntegration:
         ic.on_exchange("user:bv1", "second message", "second response", "general", reward=0.5)
         # Model weights must still be finite after training on these vectors
         for p in brain.model.parameters():
-            assert torch.isfinite(p).all()
+            assert _torch.isfinite(p).all()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
