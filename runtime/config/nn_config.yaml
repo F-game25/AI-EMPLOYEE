@@ -1,0 +1,42 @@
+# AI Employee — Neural Intelligence Configuration
+# Covers both the legacy NeuralNetworkAgent (runtime/agents/neural_network/)
+# and the new Central Brain (runtime/brain/).
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Central Brain (runtime/brain/brain.py)
+# ──────────────────────────────────────────────────────────────────────────────
+
+model:
+  model_path: "runtime/models/brain.pth"
+  input_size: 64           # feature vector length
+  hidden_sizes: [256, 128, 64]
+  output_size: 8           # number of action classes
+  dropout: 0.15
+
+training:
+  learning_rate: 0.0002
+  batch_size: 32
+  replay_buffer_size: 20000
+  update_frequency: 10     # auto-learn after every N store_experience() calls
+  min_buffer_size: 64
+  max_grad_norm: 1.0
+  # Prioritized Experience Replay
+  per_alpha: 0.6           # priority exponent  (0=uniform, 1=full PER)
+  per_beta: 0.4            # IS-weight exponent (annealed toward 1.0)
+  per_beta_increment: 0.001
+  autosave_every: 100      # auto-save every N learn steps
+
+background:
+  enabled: true
+  collect_interval: 120    # seconds between experience collection runs
+  learn_interval: 30       # seconds between background learn steps
+  max_collect_items: 30
+
+device: "auto"             # "auto" | "cpu" | "cuda" | "mps"
+
+ui:
+  update_interval: 3       # seconds between auto-refresh in UI
+  show_graphs: true
+  reward_window: 50        # rolling window for avg-reward display
+  max_log_lines: 200
+
