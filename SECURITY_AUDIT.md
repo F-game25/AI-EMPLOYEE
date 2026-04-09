@@ -1,6 +1,7 @@
 # Security Audit Report
 
-**Date:** 2026-03-27  
+**Date:** 2026-04-09 (Audit v3)  
+**Previous Audit:** 2026-03-27 (Audit v2)
 **Version:** 2.0.0 (server.py `app_version`)  
 **Auditor:** GitHub Copilot Coding Agent — full automated audit  
 **Scope:** Entire `F-game25/AI-EMPLOYEE` repository
@@ -21,7 +22,7 @@
 | 8 | Path traversal blocked | ✅ | `InputSanitizer.validate_path()` enforces allowed base dir |
 | 9 | Bot name injection blocked | ✅ | Regex `[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}` enforced in server + CLI |
 | 10 | Chat message sanitized | ✅ | `InputSanitizer.sanitize_input(max_length=10000)` + null-byte strip |
-| 11 | API keys redacted in chatlog | ✅ | `_API_KEY_PATTERN` sub applied before every chatlog write |
+| 11 | API keys redacted in chatlog | ✅ | `_API_KEY_PATTERN` covers Anthropic, OpenAI, Google, Groq, HuggingFace, NVIDIA, xAI |
 | 12 | Server binds localhost only | ✅ | `HOST = "127.0.0.1"` — no `0.0.0.0` in `server.py` |
 | 13 | Webhook default binding changed | ✅ | `webhook_server.py` now defaults to `127.0.0.1`; `0.0.0.0` documented as opt-in |
 | 14 | Security headers present | ✅ | `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `CSP` on every response |
@@ -33,12 +34,54 @@
 | 20 | `users.json` in `.gitignore` | ✅ | Added `state/users.json` to `.gitignore` |
 | 21 | No eval() on user input | ✅ | No `eval()`/`exec()` calls on user-controlled data found |
 | 22 | Python version check | ✅ | `server.py` exits with clear error on Python < 3.10 |
-| 23 | Dependencies pinned | ✅ | All `>=` replaced with `==` in `requirements.txt` |
-| 24 | Vulnerable dependencies fixed | ✅ | `cryptography` → 46.0.5; `python-jose` → 3.4.0 (both CVE-free) |
+| 23 | Dependencies pinned | ✅ | All packages pinned with `==` in `requirements.txt` (incl. `psutil==6.1.1`) |
+| 24 | Vulnerable dependencies fixed | ✅ | `cryptography` → 46.0.7; `python-jose` → 3.4.0 (both CVE-free) |
 | 25 | `.gitignore` covers key files | ✅ | Added `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx` |
 | 26 | JWT_SECRET_KEY never hardcoded | ✅ | Always read from env; placeholder detected and rejected at startup |
 | 27 | Mode command injection blocked | ✅ | `case` only accepts `starter\|business\|power` |
 | 28 | `ai-employee` bin bot name validated | ✅ | Added regex guard in `start_bot()` and `stop_bot()` shell functions |
+| 29 | SSRF in webhook test blocked | ✅ | `_validate_webhook_url()` rejects private/reserved IP ranges; `require_auth` added |
+| 30 | Mutation endpoints protected | ✅ | `require_auth` added to schedules, guardrails, integrations, bundles, templates, agents |
+| 31 | API key redaction covers all providers | ✅ | Added Groq (`gsk_`), HuggingFace (`hf_`), NVIDIA (`nvapi-`), xAI (`xai-`) |
+
+---
+
+## Critical Issues Fixed (Audit v3 — 2026-04-09)
+
+### 29. SSRF (Server-Side Request Forgery) in webhook integration test
+- **File:** `runtime/agents/problem-solver-ui/server.py`, `POST /api/integrations/{integration_id}/test`
+- **Was:** User-supplied webhook URL passed directly to `urllib.request.urlopen()` without any validation. An attacker could set the URL to `http://169.254.169.254/` (AWS metadata), `http://192.168.x.x/`, or other private hosts to probe internal services.
+- **Fix:** Added `_validate_webhook_url(url)` that checks:
+  - Scheme must be `http://` or `https://`
+  - Hostname must resolve to a public IP
+  - Resolves all IP addresses and rejects any in private/loopback/link-local/reserved ranges (RFC 1918, RFC 3927, loopback, cloud metadata)
+  - Returns 400 with a safe error message if rejected (no URL echo)
+- **Also added:** `require_auth` on `update_integration()` and `test_integration()` so only authenticated users can trigger outbound HTTP connections.
+- **Test:** Set webhook URL to `http://127.0.0.1:22` → HTTP 400. Set to `http://169.254.169.254/latest/meta-data/` → HTTP 400.
+
+---
+
+## High-Severity Issues Fixed (Audit v3 — 2026-04-09)
+
+### 30. Missing `require_auth` on 14 state-mutation endpoints
+- **File:** `runtime/agents/problem-solver-ui/server.py`
+- **Was:** The following endpoints accepted POST/PATCH/DELETE requests from any origin without authentication, even when `REQUIRE_AUTH=1` was set: `/api/schedules`, `/api/improvements/{id}`, `/api/skills`, `/api/agents/custom`, `/api/workers/bundles`, `/api/templates/{id}/deploy`, `/api/guardrails/settings`, `/api/guardrails/custom`, `/api/guardrails/{id}/approve`, `/api/guardrails/{id}/reject`, `/api/task/reassign`, `/api/integrations/{id}`, `/api/integrations/{id}/test`, and alias endpoints.
+- **Fix:** Added `_auth: None = Depends(require_auth)` to all 14 endpoints (and their alias equivalents). Behavior is unchanged when `REQUIRE_AUTH=0` (default): localhost requests still pass through automatically. When `REQUIRE_AUTH=1`, a valid JWT is required.
+- **Why guardrails matter most:** `/api/guardrails/settings` controls which AI actions require human approval. Without auth, any network-reachable client could disable all safety checks.
+
+---
+
+## Medium-Severity Issues Fixed (Audit v3 — 2026-04-09)
+
+### 31. Incomplete API key redaction pattern
+- **File:** `runtime/agents/problem-solver-ui/server.py`, `_API_KEY_PATTERN`
+- **Was:** Pattern only matched Anthropic (`sk-ant-`), OpenAI (`sk-`), and Google (`AIza`) keys. Keys from Groq, HuggingFace, NVIDIA, and xAI were not redacted.
+- **Fix:** Expanded `_API_KEY_PATTERN` to also match `gsk_*` (Groq), `hf_*` (HuggingFace), `nvapi-*` (NVIDIA), and `xai-*` (xAI).
+
+### 32. `psutil` dependency not pinned
+- **File:** `runtime/agents/problem-solver-ui/requirements.txt`
+- **Was:** `psutil>=5.9.0` (floating minimum — could auto-upgrade to a future vulnerable version)
+- **Fix:** Pinned to `psutil==6.1.1` (latest stable, no known CVEs).
 
 ---
 
