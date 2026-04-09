@@ -375,6 +375,7 @@ def check_and_update(force: bool = False) -> dict:
 # ── Signal / trigger handling ─────────────────────────────────────────────────
 _force_check = False
 _wakeup      = threading.Event()   # set by SIGUSR1 to interrupt the sleep early
+_shutdown    = threading.Event()   # set by SIGTERM/SIGINT for graceful exit
 
 
 def _handle_sigusr1(sig, frame):
@@ -382,6 +383,12 @@ def _handle_sigusr1(sig, frame):
     _force_check = True
     _wakeup.set()
     logger.info("SIGUSR1 received — triggering immediate update check")
+
+
+def _handle_shutdown(signum, frame):  # noqa: ARG001
+    logger.info("Signal %s received -- auto-updater shutting down ...", signum)
+    _shutdown.set()
+    _wakeup.set()   # wake the inner sleep so we exit promptly
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -448,6 +455,12 @@ def main() -> None:
     except (AttributeError, OSError):
         pass  # SIGUSR1 not available on Windows
 
+    try:
+        signal.signal(signal.SIGTERM, _handle_shutdown)
+        signal.signal(signal.SIGINT, _handle_shutdown)
+    except (AttributeError, OSError):
+        pass
+
     _save_state({
         "status":           "started",
         "started":          datetime.now(timezone.utc).isoformat(),
@@ -456,9 +469,9 @@ def main() -> None:
     })
 
     # Let the rest of the system fully start before the first check
-    time.sleep(30)
+    _shutdown.wait(30)
 
-    while True:
+    while not _shutdown.is_set():
         force = _force_check
         _force_check = False
 
@@ -486,12 +499,15 @@ def main() -> None:
         # to catch a newly written trigger file (written by the UI buttons).
         _wakeup.clear()
         deadline = time.monotonic() + INTERVAL
-        while time.monotonic() < deadline:
+        while not _shutdown.is_set() and time.monotonic() < deadline:
             remaining = deadline - time.monotonic()
             if _wakeup.wait(timeout=min(1.0, remaining)):
                 break
             if TRIGGER_FILE.exists():
                 break
+
+    _save_state({"status": "stopped", "stopped": datetime.now(timezone.utc).isoformat()})
+    logger.info("Auto-updater stopped.")
 
 
 if __name__ == "__main__":

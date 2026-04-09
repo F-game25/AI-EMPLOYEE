@@ -221,7 +221,8 @@ start_agent() {
   fi
 
   echo "Starting agent: $bot ..."
-  nohup "$entry" >>"$log" 2>&1 &
+  # setsid gives each agent its own process group so we can kill the entire tree
+  setsid "$entry" >>"$log" 2>&1 &
   echo $! > "$pid_file"
   echo "Started agent: $bot pid=$!"
 
@@ -254,8 +255,13 @@ stop_agent() {
   fi
   if kill -0 "$pid" 2>/dev/null; then
     echo "Stopping agent: $bot pid=$pid ..."
+    # Kill the entire process group (setsid gives each agent its own PGID = its PID)
+    kill -- -"$pid" 2>/dev/null || true
     kill "$pid" 2>/dev/null || true
     sleep 1
+    # Kill any remaining children and SIGKILL stragglers
+    pkill -P "$pid" 2>/dev/null || true
+    kill -9 -- -"$pid" 2>/dev/null || true
     kill -9 "$pid" 2>/dev/null || true
   fi
   rm -f "$pid_file"
@@ -275,14 +281,17 @@ stop_all_agents() {
     agents+=("$bot")
   done < <(list_mode_agents)
 
-  # Phase 1: SIGTERM all
+  # Phase 1: SIGTERM all (individual PID + process group)
   for bot in "${agents[@]}"; do
     local pid_file
     pid_file="$(agent_pid_file "$bot")"
     if [[ -f "$pid_file" ]]; then
       local pid
       pid="$(cat "$pid_file" 2>/dev/null || true)"
-      [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+      if [[ -n "$pid" ]]; then
+        kill -- -"$pid" 2>/dev/null || true
+        kill "$pid" 2>/dev/null || true
+      fi
     fi
   done
 
@@ -296,7 +305,11 @@ stop_all_agents() {
     if [[ -f "$pid_file" ]]; then
       local pid
       pid="$(cat "$pid_file" 2>/dev/null || true)"
-      [[ -n "$pid" ]] && kill -9 "$pid" 2>/dev/null || true
+      if [[ -n "$pid" ]]; then
+        pkill -P "$pid" 2>/dev/null || true
+        kill -9 -- -"$pid" 2>/dev/null || true
+        kill -9 "$pid" 2>/dev/null || true
+      fi
       rm -f "$pid_file"
       local state_file="$STATE_DIR/$bot.state.json"
       echo "{\"bot\":\"$bot\",\"status\":\"stopped\",\"stopped_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$state_file"

@@ -29,6 +29,34 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
+try:
+    import psutil as _psutil
+    _PSUTIL_OK = True
+    # Prime cpu_percent so the first real call returns a meaningful value
+    _psutil.cpu_percent(interval=None)
+except ImportError:
+    _psutil = None  # type: ignore[assignment]
+    _PSUTIL_OK = False
+
+# ── Background CPU sampler — updates every 2 s using interval=1 for accuracy ──
+_cpu_sample_value: float = 0.0
+
+def _cpu_sampler_loop() -> None:
+    """Continuously sample CPU usage with a 1-second blocking interval for
+    accurate readings without burdening the request thread."""
+    global _cpu_sample_value
+    while True:
+        try:
+            if _PSUTIL_OK and _psutil is not None:
+                _cpu_sample_value = _psutil.cpu_percent(interval=1)
+            else:
+                time.sleep(2)
+        except Exception:
+            time.sleep(2)
+
+_cpu_thread = threading.Thread(target=_cpu_sampler_loop, daemon=True, name="cpu-sampler")
+_cpu_thread.start()
+
 # ── Python version guard ──────────────────────────────────────────────────────
 if sys.version_info < (3, 10):
     print("ERROR: Python 3.10+ is required. Current version: "
@@ -486,7 +514,6 @@ AGENTS_BY_MODE = {
     "team-management",
     "customer-support",
     "website-builder",
-    "competitor-watch",
     "personal-brand",
     "health-check",
     "export-backup",
@@ -614,7 +641,7 @@ def route_to_agent(message: str) -> str:
   for keyword in sorted(ROUTING_MAP, key=len, reverse=True):
     if keyword in message_lower:
       return ROUTING_MAP[keyword]
-  if "all 56 agents" in message_lower or "all agents" in message_lower:
+  if "all 74 agents" in message_lower or "all agents" in message_lower:
     return "task-orchestrator"
   return "task-orchestrator"
 
@@ -1127,7 +1154,7 @@ if not _audit_logger.handlers:
 async def audit_logging_middleware(request: Request, call_next):
     """Log every inbound request and outbound status for the audit trail."""
     # Skip high-frequency health/status probes to reduce I/O noise
-    if request.url.path in ("/health", "/api/status", "/api/gateway/status"):
+    if request.url.path in ("/health", "/api/status", "/api/gateway/status", "/api/system/resources"):
         return await call_next(request)
 
     _audit_enabled = (
@@ -1255,6 +1282,7 @@ INDEX_HTML = r"""<!doctype html>
       --bg:#050508;
       --bg2:#08080d;
       --bg3:#0c0c14;
+      --bg-deep:#080810;
       --panel:rgba(10,10,18,0.95);
       --panel2:rgba(14,14,24,0.92);
       --surface:rgba(10,10,18,0.95);
@@ -1364,7 +1392,7 @@ INDEX_HTML = r"""<!doctype html>
       border:1px solid rgba(255,255,255,.1);border-radius:20px;
       padding:5px 13px;font-size:.78em;color:rgba(240,244,255,.8);
       backdrop-filter:blur(8px);transition:all .3s}
-    .status-pill:hover{background:rgba(255,255,255,.09);border-color:rgba(129,140,248,.3)}
+    .status-pill:hover{background:rgba(255,255,255,.09);border-color:rgba(212,175,55,.3)}
     .status-dot{width:7px;height:7px;border-radius:50%;background:var(--success);
       box-shadow:0 0 9px var(--success);animation:blink 2.5s infinite;flex-shrink:0}
     .hdr-ctrl{display:flex;align-items:center;gap:8px}
@@ -1372,8 +1400,8 @@ INDEX_HTML = r"""<!doctype html>
       border-radius:20px;cursor:pointer;font-size:.775em;font-weight:600;
       transition:all .2s;font-family:inherit;white-space:nowrap;position:relative;overflow:hidden;
       letter-spacing:.01em}
-    .hdr-btn-start{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3)}
-    .hdr-btn-start:hover{background:rgba(16,185,129,.3);box-shadow:0 0 18px rgba(16,185,129,.4);transform:translateY(-1px)}
+    .hdr-btn-start{background:rgba(212,175,55,.15);color:var(--gold);border:1px solid rgba(212,175,55,.35)}
+    .hdr-btn-start:hover{background:rgba(212,175,55,.28);box-shadow:0 0 18px rgba(212,175,55,.35);transform:translateY(-1px)}
     .hdr-btn-stop{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.28)}
     .hdr-btn-stop:hover{background:rgba(244,63,94,.25);box-shadow:0 0 18px rgba(244,63,94,.35);transform:translateY(-1px)}
     .hdr-btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
@@ -1449,6 +1477,7 @@ INDEX_HTML = r"""<!doctype html>
       font-family:inherit;position:relative;letter-spacing:.01em;
     }
     .sub-nav button:hover{color:rgba(212,175,55,.85);background:rgba(212,175,55,.04)}
+    .sub-nav button:active{transform:scale(.96);transition:transform .1s}
     .sub-nav button.active{
       color:var(--gold);border-bottom-color:rgba(212,175,55,.7);
       background:rgba(212,175,55,.06);font-weight:600;
@@ -1458,6 +1487,10 @@ INDEX_HTML = r"""<!doctype html>
       background:linear-gradient(90deg,transparent,rgba(212,175,55,.8),transparent);
       filter:blur(1px);
     }
+    @keyframes navBtnActivate{
+      0%{transform:scale(.95)}50%{transform:scale(1.03)}100%{transform:scale(1)}
+    }
+    .sub-nav button.active{animation:navBtnActivate .25s cubic-bezier(.4,0,.2,1)}
     /* Legacy hidden scroll buttons */
     .nav-scroll-btn.hidden{display:none}
 
@@ -1550,24 +1583,24 @@ INDEX_HTML = r"""<!doctype html>
       opacity:0;animation:fadeIn .5s ease .95s forwards;
     }
     .boot-terminal{
-      width:min(580px,92vw);height:150px;overflow:hidden;
+      width:min(620px,92vw);height:220px;overflow:hidden;
       border:1px solid rgba(245,196,0,.18);border-radius:4px;
-      background:rgba(0,0,0,.88);padding:14px 18px;
-      font-size:.71em;line-height:1.75;color:rgba(245,196,0,.7);
+      background:rgba(0,0,0,.9);padding:14px 18px;
+      font-size:.69em;line-height:1.8;color:rgba(245,196,0,.7);
       position:relative;z-index:5;
-      box-shadow:0 0 24px rgba(245,196,0,.08),inset 0 0 40px rgba(0,0,0,.6);
+      box-shadow:0 0 28px rgba(245,196,0,.1),inset 0 0 40px rgba(0,0,0,.6);
     }
     .boot-terminal::before{
       content:'SYSTEM LOG';position:absolute;top:0;left:0;right:0;
-      background:rgba(245,196,0,.06);border-bottom:1px solid rgba(245,196,0,.1);
-      padding:3px 12px;font-size:.85em;letter-spacing:.12em;color:rgba(245,196,0,.4);
+      background:rgba(245,196,0,.07);border-bottom:1px solid rgba(245,196,0,.12);
+      padding:3px 12px;font-size:.85em;letter-spacing:.15em;color:rgba(245,196,0,.45);
     }
-    .boot-terminal-inner{padding-top:20px;height:100%;overflow:hidden}
-    .boot-terminal-line{display:block;opacity:0;animation:termLine .08s ease forwards;white-space:pre}
+    .boot-terminal-inner{padding-top:22px;height:100%;overflow:hidden}
+    .boot-terminal-line{display:block;opacity:0;animation:termLine .12s ease forwards;white-space:pre;font-family:var(--mono)}
     .boot-terminal-line.cmd{color:rgba(245,196,0,.9)}
-    .boot-terminal-line.ok{color:rgba(34,197,94,.8)}
-    .boot-terminal-line.warn{color:rgba(255,165,0,.75)}
-    .boot-terminal-line.dim{color:rgba(245,196,0,.35)}
+    .boot-terminal-line.ok{color:rgba(34,197,94,.85)}
+    .boot-terminal-line.warn{color:rgba(251,146,60,.85)}
+    .boot-terminal-line.dim{color:rgba(245,196,0,.3)}
     @keyframes termLine{to{opacity:1}}
     .boot-bar-wrap{margin-top:24px;width:min(380px,82vw);z-index:5;position:relative}
     .boot-bar-label{display:flex;justify-content:space-between;font-size:.67em;color:rgba(245,196,0,.5);margin-bottom:7px;letter-spacing:.08em;font-family:var(--mono)}
@@ -1835,11 +1868,20 @@ INDEX_HTML = r"""<!doctype html>
     .tab-content{display:none;width:100%;box-sizing:border-box}
     .tab-content.active{
       display:block;width:100%;
-      animation:tabReveal .35s cubic-bezier(.4,0,.2,1);
+      animation:tabReveal .4s cubic-bezier(.4,0,.2,1);
+    }
+    .tab-content.tab-leaving{
+      display:block;width:100%;pointer-events:none;
+      animation:tabLeave .2s cubic-bezier(.4,0,.2,1) forwards;
     }
     @keyframes tabReveal{
-      0%{opacity:0;transform:translateY(10px) scale(.995)}
+      0%{opacity:0;transform:translateY(14px) scale(.993)}
+      60%{opacity:1;transform:translateY(-2px) scale(1.001)}
       100%{opacity:1;transform:none}
+    }
+    @keyframes tabLeave{
+      0%{opacity:1;transform:none}
+      100%{opacity:0;transform:translateY(-8px) scale(.996)}
     }
 
     /* ── Gold glow line under header ── */
@@ -1855,8 +1897,6 @@ INDEX_HTML = r"""<!doctype html>
     @media(max-width:768px){main{padding:12px 10px}}
 
     /* ── Tab panels ── */
-    .tab-content{display:none;width:100%;box-sizing:border-box}
-    .tab-content.active{display:block;animation:fadeIn .3s ease;width:100%}
 
     /* ── Tab page headers ── */
     .page-header{
@@ -1940,6 +1980,22 @@ INDEX_HTML = r"""<!doctype html>
       animation:countUp .5s ease;letter-spacing:-.04em;line-height:1}
     .stat-body .lbl{font-size:.75em;color:var(--text-muted);margin-top:6px;letter-spacing:.03em;text-transform:uppercase;font-weight:500}
 
+    /* ── Overview hero stat cards ── */
+    .ov-hero-card{
+      background:var(--surface2);
+      border:1px solid rgba(212,175,55,.18);
+      border-radius:10px;
+      padding:18px 20px;
+      position:relative;overflow:hidden;
+      transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+    }
+    .ov-hero-card::before{
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(212,175,55,.04),transparent);
+      pointer-events:none;
+    }
+    .ov-hero-card:hover{transform:translateY(-2px);border-color:rgba(212,175,55,.45);box-shadow:0 8px 32px rgba(0,0,0,.5),0 0 24px rgba(212,175,55,.1)}
+
     /* ── System control hero ── */
     .sys-control{
       background:linear-gradient(135deg,rgba(212,175,55,.08) 0%,rgba(212,175,55,.04) 50%,rgba(212,175,55,.02) 100%);
@@ -1952,12 +2008,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     .sys-control::before{
       content:'';position:absolute;top:-80%;right:-5%;width:400px;height:400px;
-      background:radial-gradient(circle,rgba(99,102,241,.1) 0%,transparent 65%);
+      background:radial-gradient(circle,rgba(212,175,55,.08) 0%,transparent 65%);
       pointer-events:none;animation:float 10s ease-in-out infinite;
     }
     .sys-control::after{
       content:'';position:absolute;top:0;left:0;right:0;height:1px;
-      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.4),transparent);
     }
     .sys-control-left{display:flex;align-items:center;gap:20px}
     .sys-status-ring{position:relative;width:60px;height:60px;flex-shrink:0}
@@ -2055,7 +2111,7 @@ INDEX_HTML = r"""<!doctype html>
     .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:var(--success);border:1px solid rgba(16,185,129,.25)}
     .badge.stopped,.badge.rejected{background:rgba(239,68,68,.12);color:var(--danger);border:1px solid rgba(239,68,68,.25)}
     .badge.pending{background:rgba(245,158,11,.12);color:var(--warning);border:1px solid rgba(245,158,11,.25)}
-    .badge.enabled{background:rgba(99,102,241,.12);color:var(--primary);border:1px solid rgba(99,102,241,.25)}
+    .badge.enabled{background:rgba(212,175,55,.12);color:var(--primary);border:1px solid rgba(212,175,55,.25)}
     .badge.disabled{background:rgba(100,116,139,.12);color:var(--text-muted);border:1px solid rgba(100,116,139,.25)}
 
     /* ── Buttons ── */
@@ -2079,10 +2135,10 @@ INDEX_HTML = r"""<!doctype html>
     .btn-primary:hover{transform:translateY(-1px);box-shadow:0 5px 20px rgba(212,175,55,.55),0 0 0 1px rgba(212,175,55,.2);filter:brightness(1.08)}
     .btn-danger{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.22)}
     .btn-danger:hover{background:rgba(244,63,94,.22);box-shadow:0 3px 12px rgba(244,63,94,.28);border-color:rgba(244,63,94,.4)}
-    .btn-success{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(16,185,129,.22)}
-    .btn-success:hover{background:rgba(16,185,129,.24);box-shadow:0 3px 12px rgba(16,185,129,.3);border-color:rgba(16,185,129,.4)}
+    .btn-success{background:rgba(212,175,55,.12);color:var(--gold);border:1px solid rgba(212,175,55,.25)}
+    .btn-success:hover{background:rgba(212,175,55,.24);box-shadow:0 3px 12px rgba(212,175,55,.25);border-color:rgba(212,175,55,.45)}
     .btn-ghost{background:rgba(255,255,255,.04);color:var(--text-secondary);border:1px solid rgba(148,163,184,.12)}
-    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(129,140,248,.3)}
+    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(212,175,55,.3)}
     .btn-sm{padding:5px 12px;font-size:.78em}
     .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
@@ -2091,7 +2147,7 @@ INDEX_HTML = r"""<!doctype html>
     label{display:block;font-size:.8em;font-weight:500;color:var(--text-secondary);margin-bottom:5px;letter-spacing:.02em}
     input,textarea,select{
       width:100%;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       border:1px solid rgba(148,163,184,.12);
       color:var(--text);border-radius:var(--radius-sm);padding:9px 13px;
       font-size:.875em;font-family:inherit;transition:border-color .2s,box-shadow .2s,background .2s;outline:none;
@@ -2100,11 +2156,11 @@ INDEX_HTML = r"""<!doctype html>
     input:focus,textarea:focus,select:focus{
       border-color:rgba(212,175,55,.6);
       box-shadow:0 0 0 3px rgba(212,175,55,.12),0 0 16px rgba(212,175,55,.1);
-      background:rgba(15,25,55,.9);
+      background:rgba(10,10,22,0.95);
     }
     input:hover:not(:focus),select:hover:not(:focus){border-color:rgba(212,175,55,.3)}
     textarea{resize:vertical;min-height:80px}
-    select option{background:#0d1b33;color:var(--text)}
+    select option{background:#08080d;color:var(--text)}
 
     /* ── Toggle (enhanced) ── */
     .toggle{position:relative;display:inline-block;width:44px;height:25px;flex-shrink:0}
@@ -2132,7 +2188,7 @@ INDEX_HTML = r"""<!doctype html>
       font-family:'JetBrains Mono','Fira Code','Consolas',monospace;
       backdrop-filter:blur(4px);
     }
-    code{background:rgba(99,102,241,.14);color:var(--primary-light);
+    code{background:rgba(212,175,55,.12);color:var(--primary-light);
       padding:1px 7px;border-radius:5px;font-size:.875em;font-family:monospace}
 
     /* ── Chat ── */
@@ -2247,17 +2303,17 @@ INDEX_HTML = r"""<!doctype html>
     .office-plant{position:absolute;bottom:104px;width:22px;height:36px;background:#143027;border-radius:6px 6px 3px 3px;border:1px solid rgba(65,217,147,.3)}
     .office-plant::before{content:'';position:absolute;left:-5px;top:-22px;width:32px;height:24px;border-radius:50%;background:radial-gradient(circle,#3fdc94,#1f7f56)}
     .office-desk{position:absolute;bottom:120px;width:175px;height:15px;
-      background:linear-gradient(135deg,#1e3a52,#243d5e);border-radius:9px;
+      background:linear-gradient(135deg,#1a1208,#2a1e08);border-radius:9px;
       box-shadow:0 4px 12px rgba(0,0,0,.4)}
     .office-desk::after{content:'';position:absolute;left:12px;top:-18px;width:36px;height:18px;
-      border-radius:5px 5px 3px 3px;background:linear-gradient(135deg,#2a5080,#193559)}
+      border-radius:5px 5px 3px 3px;background:linear-gradient(135deg,#2e1e06,#1e1004)}
     .office-agent{position:absolute;bottom:88px;width:42px;height:42px;border-radius:50%;
       display:flex;align-items:center;justify-content:center;
-      background:radial-gradient(circle at 30% 30%,#c4eeff,#818cf8);
-      border:2px solid rgba(255,255,255,.3);cursor:pointer;
+      background:radial-gradient(circle at 30% 30%,#ffe8a0,#D4AF37);
+      border:2px solid rgba(212,175,55,.4);cursor:pointer;
       animation:officeWalk linear infinite;
       will-change:transform;
-      box-shadow:0 0 20px rgba(129,140,248,.5),0 4px 12px rgba(0,0,0,.4)}
+      box-shadow:0 0 20px rgba(212,175,55,.4),0 4px 12px rgba(0,0,0,.4)}
     .office-agent.warning{box-shadow:0 0 24px rgba(244,63,94,.7);border-color:rgba(244,63,94,.9)}
     .office-agent:hover{transform:scale(1.15)!important;z-index:10}
     .office-agent .agent-emoji{font-size:18px}
@@ -2266,8 +2322,8 @@ INDEX_HTML = r"""<!doctype html>
       font-size:.62em;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;
       background:rgba(4,8,20,.92);
       padding:2px 8px;border-radius:999px;
-      border:1px solid rgba(129,140,248,.3);
-      box-shadow:0 0 8px rgba(99,102,241,.2);
+      border:1px solid rgba(212,175,55,.25);
+      box-shadow:0 0 8px rgba(212,175,55,.15);
     }
     @keyframes officeWalk{
       0%{translate:0}25%{translate:32px 0}75%{translate:-16px 0}100%{translate:0}
@@ -2276,9 +2332,9 @@ INDEX_HTML = r"""<!doctype html>
     .office-modal.open{display:flex;animation:fadeIn .2s ease}
     .office-modal-card{
       width:min(540px,92vw);
-      background:rgba(12,20,40,.96);
-      border:1px solid rgba(129,140,248,.2);border-radius:18px;padding:22px;
-      box-shadow:0 24px 64px rgba(0,0,0,.6),0 0 0 1px rgba(129,140,248,.08);
+      background:rgba(10,10,18,0.97);
+      border:1px solid rgba(212,175,55,.2);border-radius:18px;padding:22px;
+      box-shadow:0 24px 64px rgba(0,0,0,.6),0 0 0 1px rgba(212,175,55,.08);
       backdrop-filter:blur(20px);
     }
     #office-modal-action{overflow-wrap:anywhere;word-break:break-word}
@@ -2289,7 +2345,7 @@ INDEX_HTML = r"""<!doctype html>
     .improv-row{
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:16px;margin-bottom:10px;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       transition:border-color .25s,transform .2s,box-shadow .25s;
       backdrop-filter:blur(8px);
     }
@@ -2301,7 +2357,7 @@ INDEX_HTML = r"""<!doctype html>
     .sched-row{
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:13px 16px;margin-bottom:10px;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       display:flex;align-items:flex-start;gap:12px;
       transition:border-color .25s,box-shadow .25s;
       backdrop-filter:blur(6px);
@@ -2316,7 +2372,7 @@ INDEX_HTML = r"""<!doctype html>
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:13px;margin-bottom:8px;cursor:pointer;
       transition:all .22s;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       backdrop-filter:blur(6px);
     }
     .skill-card:hover{border-color:rgba(212,175,55,.4);background:rgba(212,175,55,.06);
@@ -2332,13 +2388,13 @@ INDEX_HTML = r"""<!doctype html>
       cursor:pointer;border:1px solid var(--border);color:var(--text-secondary);
       margin:2px;transition:all .2s;font-weight:500}
     .cat-pill:hover{border-color:var(--primary);color:var(--primary)}
-    .cat-pill.active{background:var(--primary);color:#fff;border-color:var(--primary);
-      box-shadow:0 2px 10px rgba(99,102,241,.35);}
+    .cat-pill.active{background:var(--primary);color:#080808;border-color:var(--primary);
+      box-shadow:0 2px 10px rgba(212,175,55,.35);}
     .skill-grid{max-height:500px;overflow-y:auto;padding-right:4px}
     .agent-card{
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:15px;margin-bottom:8px;
-      background:rgba(15,25,48,.7);transition:all .22s;
+      background:rgba(10,10,18,0.85);transition:all .22s;
       backdrop-filter:blur(6px);
     }
     .agent-card:hover{border-color:rgba(212,175,55,.35);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.3),0 0 0 1px rgba(212,175,55,.1)}
@@ -2361,7 +2417,7 @@ INDEX_HTML = r"""<!doctype html>
     #toast.show{opacity:1;transform:translateY(0) scale(1)}
     #toast.success{background:rgba(16,67,30,.9);border:1px solid rgba(52,211,153,.25);border-left:3px solid #34d399}
     #toast.error{background:rgba(67,10,20,.9);border:1px solid rgba(244,63,94,.25);border-left:3px solid #f43f5e}
-    #toast.info{background:rgba(20,25,60,.95);border:1px solid rgba(129,140,248,.25);border-left:3px solid #818cf8}
+    #toast.info{background:rgba(10,10,22,.95);border:1px solid rgba(212,175,55,.25);border-left:3px solid var(--gold)}
 
     /* ── Empty states ── */
     .empty{text-align:center;padding:40px 16px;color:var(--text-muted)}
@@ -2380,10 +2436,10 @@ INDEX_HTML = r"""<!doctype html>
     /* ── Cmd reference ── */
     .cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:8px}
     .cmd-item{
-      background:rgba(15,25,48,.7);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      background:rgba(10,10,18,0.85);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:11px 14px;transition:all .2s;cursor:pointer;backdrop-filter:blur(6px);
     }
-    .cmd-item:hover{border-color:rgba(129,140,248,.3);background:rgba(99,102,241,.08);transform:translateY(-1px)}
+    .cmd-item:hover{border-color:rgba(212,175,55,.3);background:rgba(212,175,55,.06);transform:translateY(-1px)}
     .cmd-item code{display:block;margin-bottom:4px;font-size:.8em;color:var(--primary-light)}
     .cmd-item span{font-size:.77em;color:var(--text-muted)}
 
@@ -2393,7 +2449,7 @@ INDEX_HTML = r"""<!doctype html>
     .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(52,211,153,.2)}
     .badge.stopped,.badge.rejected{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.2)}
     .badge.pending{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.2)}
-    .badge.enabled{background:rgba(129,140,248,.12);color:var(--primary-light);border:1px solid rgba(129,140,248,.2)}
+    .badge.enabled{background:rgba(212,175,55,.12);color:var(--primary-light);border:1px solid rgba(212,175,55,.2)}
     .badge.disabled{background:rgba(100,116,139,.08);color:var(--text-muted);border:1px solid rgba(100,116,139,.15)}
 
     /* ── Dots ── */
@@ -2429,20 +2485,20 @@ INDEX_HTML = r"""<!doctype html>
     .office-floor{
       position:absolute;left:0;right:0;bottom:0;height:46%;
       background:linear-gradient(180deg,#0e1928,#08111c);
-      border-top:1px solid rgba(129,140,248,.15);
+      border-top:1px solid rgba(212,175,55,.12);
     }
     .office-floor::before{
       content:'';position:absolute;top:0;left:0;right:0;height:1px;
-      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.35),transparent);
     }
     .office-window{
       position:absolute;top:20px;width:150px;height:88px;border-radius:10px;
-      border:1px solid rgba(129,140,248,.3);
-      background:linear-gradient(180deg,rgba(99,102,241,.25),rgba(79,70,229,.06));
-      box-shadow:0 0 28px rgba(99,102,241,.2),inset 0 1px 0 rgba(255,255,255,.12);
+      border:1px solid rgba(212,175,55,.2);
+      background:linear-gradient(180deg,rgba(212,175,55,.1),rgba(212,175,55,.03));
+      box-shadow:0 0 20px rgba(212,175,55,.08),inset 0 1px 0 rgba(255,255,255,.08);
     }
-    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(129,140,248,.3)}
-    .office-window::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(129,140,248,.2)}
+    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(212,175,55,.2)}
+    .office-window::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(212,175,55,.15)}
     .office-plant{position:absolute;bottom:106px;width:18px;height:32px;background:linear-gradient(180deg,#0f2e1c,#0b2016);border-radius:5px 5px 2px 2px;border:1px solid rgba(52,211,153,.2)}
     .office-plant::before{content:'';position:absolute;left:-8px;top:-28px;width:34px;height:30px;border-radius:50% 50% 0 50%;background:radial-gradient(circle at 40% 40%,#34d399,#059669);box-shadow:0 0 14px rgba(52,211,153,.3)}
     .health-check-item{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)}
@@ -2457,6 +2513,21 @@ INDEX_HTML = r"""<!doctype html>
     .health-check-item.ok .hc-val{color:var(--success)}
     .health-check-item.warn .hc-val{color:var(--warning)}
     .health-check-item.err .hc-val{color:var(--danger)}
+    /* System Resources card */
+    .sysres-metric{background:rgba(0,0,0,.3);border:1px solid rgba(212,175,55,.14);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:7px;transition:border-color .3s,box-shadow .3s}
+    .sysres-metric:hover{border-color:rgba(212,175,55,.35);box-shadow:0 0 16px rgba(212,175,55,.07)}
+    .sysres-metric-header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .sysres-metric-label{font-size:.68em;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(148,163,184,.6)}
+    .sysres-metric-value{font-size:1.18em;font-weight:700;font-family:var(--mono);color:var(--gold);letter-spacing:.03em}
+    .sysres-metric-sub{font-size:.69em;color:rgba(148,163,184,.5);letter-spacing:.02em}
+    .sysres-temp-badge{display:inline-flex;align-items:center;gap:3px;font-size:.72em;font-family:var(--mono);padding:1px 6px;border-radius:4px;border:1px solid currentColor;opacity:.85}
+    .sysres-section-divider{grid-column:1/-1;height:1px;background:linear-gradient(90deg,transparent,rgba(212,175,55,.15),transparent);margin:2px 0}
+    .sysres-bar-track{height:3px;background:rgba(255,255,255,.06);border-radius:100px;overflow:hidden;margin-top:3px}
+    .sysres-bar-fill{height:100%;border-radius:100px;transition:width .9s cubic-bezier(.4,0,.2,1),background .5s}
+    .sysres-bar-fill.ok{background:linear-gradient(90deg,#16a34a,#4ade80)}
+    .sysres-bar-fill.warn{background:linear-gradient(90deg,#d97706,#fbbf24)}
+    .sysres-bar-fill.hot{background:linear-gradient(90deg,#dc2626,#f87171)}
+    .sysres-na{font-size:.75em;color:var(--text-dim);font-style:italic}
     .office-desk-item{position:absolute;width:80px;height:44px;background:linear-gradient(180deg,rgba(212,175,55,.18),rgba(212,175,55,.06));border:1px solid rgba(212,175,55,.25);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.3)}
     .robot-agent{position:absolute;cursor:pointer;transition:transform .3s;animation:robotWalk 3s ease-in-out infinite}
     .robot-agent:hover{transform:scale(1.2)!important;z-index:100}
@@ -2479,7 +2550,7 @@ INDEX_HTML = r"""<!doctype html>
     .agent-pick-item{
       display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
       border:1px solid rgba(148,163,184,.1);cursor:pointer;
-      background:rgba(15,25,48,.6);transition:all .2s;font-size:.82em;
+      background:rgba(10,10,18,0.75);transition:all .2s;font-size:.82em;
     }
     .agent-pick-item:hover{border-color:rgba(212,175,55,.3);background:rgba(212,175,55,.06)}
     .agent-pick-item.selected{border-color:rgba(212,175,55,.5);background:rgba(212,175,55,.1);box-shadow:0 0 12px rgba(212,175,55,.12)}
@@ -2573,9 +2644,13 @@ INDEX_HTML = r"""<!doctype html>
     #cyber-panel{display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:14px;height:520px;margin-bottom:20px}
     @media(max-width:1100px){#cyber-panel{grid-template-columns:1fr;height:auto}}
     .cyber-col{
-      border:1px solid rgba(212,175,55,.2);border-radius:6px;background:rgba(8,8,8,.97);
-      box-shadow:0 0 20px rgba(212,175,55,.04);display:flex;flex-direction:column;overflow:hidden;
+      border:1px solid rgba(212,175,55,.25);border-radius:10px;
+      background:linear-gradient(135deg,rgba(10,8,5,.98),rgba(18,14,7,.95));
+      box-shadow:0 0 30px rgba(212,175,55,.06),inset 0 0 40px rgba(212,175,55,.02);
+      display:flex;flex-direction:column;overflow:hidden;
+      transition:box-shadow .3s ease,border-color .3s ease;
     }
+    .cyber-col:hover{border-color:rgba(212,175,55,.4);box-shadow:0 0 40px rgba(212,175,55,.1),inset 0 0 40px rgba(212,175,55,.03)}
     .cyber-col-header{
       padding:10px 14px;border-bottom:1px solid rgba(212,175,55,.15);
       font-size:.72em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.6);
@@ -3059,7 +3134,7 @@ INDEX_HTML = r"""<!doctype html>
   <!-- Progress bar -->
   <div class="boot-bar-wrap">
     <div class="boot-bar-label">
-      <span>SYSTEM INIT</span>
+      <span id="boot-stage-label">INITIALIZING</span>
       <span id="boot-pct">0%</span>
     </div>
     <div class="boot-bar-track">
@@ -3201,9 +3276,11 @@ INDEX_HTML = r"""<!doctype html>
   <button class="nav-scroll-btn right hidden" id="nav-scroll-right" style="display:none"></button>
 </div>
 <!-- Sub-navigation rows (one per group) -->
-<div class="sub-nav" id="subnav-overview"></div>
+<div class="sub-nav active" id="subnav-overview">
+  <button class="active" onclick="switchTab('dashboard',this)">◈ Overview</button>
+</div>
 <div class="sub-nav" id="subnav-intel">
-  <button class="active" onclick="switchTab('chat',this)" id="nav-btn-chat">💬 Chat</button>
+  <button onclick="switchTab('chat',this)" id="nav-btn-chat">💬 Chat</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
 </div>
 <div class="sub-nav" id="subnav-operations">
@@ -3243,35 +3320,94 @@ INDEX_HTML = r"""<!doctype html>
   <button onclick="switchTab('neural-brain',this)" id="nav-neural-brain-btn">🧠 Neural Brain</button>
   <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
   <button onclick="switchTab('crm',this)">🎯 CRM</button>
-  <button onclick="switchTab('email-marketing',this)">📧 Email Mktg</button>
-  <button onclick="switchTab('meetings',this)">🗓️ Meetings</button>
+  <button onclick="switchTab('email-mkt',this)">📧 Email Mkt</button>
+  <button onclick="switchTab('meetings',this)">📅 Meetings</button>
   <button onclick="switchTab('social',this)">📱 Social</button>
-  <button onclick="switchTab('briefing',this)">📰 CEO Brief</button>
-  <button onclick="switchTab('financial',this)">💳 Financial</button>
-  <button onclick="switchTab('competitors',this)">🕵️ Competitors</button>
-  <button onclick="switchTab('content-calendar',this)">🗃️ Content Cal</button>
-  <button onclick="switchTab('email-mkt',this)">📧 Email</button>
-  <button onclick="switchTab('meetings',this)">🎙️ Meetings</button>
-  <button onclick="switchTab('social',this)">📱 Social</button>
-  <button onclick="switchTab('briefing',this)">☀️ Briefing</button>
-  <button onclick="switchTab('invoicing',this)">🧾 Finance</button>
+  <button onclick="switchTab('briefing',this)">📰 Briefing</button>
+  <button onclick="switchTab('invoicing',this)">💳 Invoicing</button>
   <button onclick="switchTab('analytics-bi',this)">📊 Analytics</button>
   <button onclick="switchTab('workflows',this)">⚙️ Workflows</button>
   <button onclick="switchTab('team',this)">👥 Team</button>
-  <button onclick="switchTab('support-desk',this)">🎧 Support</button>
+  <button onclick="switchTab('support-desk',this)">🎫 Support</button>
   <button onclick="switchTab('website-builder',this)">🌐 Website</button>
   <button onclick="switchTab('competitors',this)">🔍 Competitors</button>
-  <button onclick="switchTab('brand',this)">✨ Brand</button>
-  <button onclick="switchTab('health',this)">❤️ Health</button>
-  <button onclick="switchTab('export',this)">💾 Export</button>
-</nav>
-  <button class="nav-scroll-btn right" id="nav-scroll-right" onclick="navScroll(1)" title="Scroll right">›</button>
+  <button onclick="switchTab('brand',this)">🎨 Brand</button>
+  <button onclick="switchTab('health',this)">🏥 Health</button>
+  <button onclick="switchTab('export',this)">📤 Export</button>
+  <button onclick="switchTab('content-calendar',this)">📅 Content Cal</button>
+  <button onclick="switchTab('financial',this)">💰 Financial</button>
 </div>
 
 <main>
 
 <!-- ── Dashboard ── -->
 <div id="tab-dashboard" class="tab-content active">
+
+  <!-- ── SYSTEM ONLINE Status Banner ── -->
+  <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:linear-gradient(90deg,rgba(212,175,55,.06),rgba(212,175,55,.03),rgba(0,0,0,0));border:1px solid rgba(212,175,55,.22);border-radius:8px;margin-bottom:14px;font-family:var(--mono);font-size:.72em;letter-spacing:.08em;overflow:hidden;position:relative" id="ov-system-banner">
+    <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(212,175,55,.04),transparent);pointer-events:none"></div>
+    <div style="width:8px;height:8px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px rgba(212,175,55,.6),0 0 16px rgba(212,175,55,.3);animation:blink 1.2s infinite;flex-shrink:0"></div>
+    <span style="color:var(--gold);font-weight:700;text-transform:uppercase">◈ SYSTEM ONLINE</span>
+    <div style="width:1px;height:14px;background:rgba(255,255,255,.12)"></div>
+    <span style="color:var(--gold);text-transform:uppercase" id="ov-banner-mode">POWER MODE</span>
+    <div style="width:1px;height:14px;background:rgba(255,255,255,.12)"></div>
+    <span style="color:var(--text-secondary)" id="ov-banner-uptime">Uptime: –</span>
+    <div style="flex:1"></div>
+    <span style="color:var(--gold);font-weight:700" id="ov-banner-agents">– / – Agents Active</span>
+  </div>
+
+  <!-- ── Overview Page Header ── -->
+  <div class="page-header" style="border-left-color:var(--gold);background:linear-gradient(135deg,rgba(212,175,55,.08),rgba(212,175,55,.02));border:1px solid rgba(212,175,55,.2);box-shadow:0 0 30px rgba(212,175,55,.06)">
+    <div class="page-header-icon" style="color:var(--gold);filter:drop-shadow(0 0 8px rgba(212,175,55,.5))">◈</div>
+    <div>
+      <div class="page-header-title" style="background:linear-gradient(135deg,#D4AF37,#f5c400);-webkit-background-clip:text;-webkit-text-fill-color:transparent">AI Employee Command Center</div>
+      <div class="page-header-desc">Real-time operations hub — monitor all agents, launch tasks, and manage your autonomous AI workforce from one place.</div>
+    </div>
+    <span class="page-header-badge" style="color:var(--gold);background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.3)">Live Operations</span>
+  </div>
+
+  <!-- ── Agent Count Hero Cards ── -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
+    <div class="ov-hero-card ov-hero-running" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('running')}" style="cursor:pointer" aria-label="Agents Running – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">▶ RUNNING</div>
+      <div class="val" id="stat-running" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.35)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Active</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.5);margin-top:4px" id="stat-running-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-total" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('total')}" style="cursor:pointer" aria-label="Total Agents – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◆ TOTAL</div>
+      <div class="val" id="stat-total" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.35)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Registered Agents</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-total-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-offline" aria-label="Offline Agents">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◌ OFFLINE</div>
+      <div class="val" id="stat-offline" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.25)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">Agents Stopped</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-offline-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-gateway" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('gateway')}" style="cursor:pointer" aria-label="Gateway – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◉ GATEWAY</div>
+      <div class="val" id="stat-gateway" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.25)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">API Gateway</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-gateway-sub"></div>
+    </div>
+    <div class="ov-hero-card ov-hero-uptime" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showStatDetail('uptime')}" style="cursor:pointer" aria-label="Uptime – click for details">
+      <div style="font-size:.65em;letter-spacing:.12em;text-transform:uppercase;color:rgba(212,175,55,.65);margin-bottom:6px;font-family:var(--mono)">◎ UPTIME</div>
+      <div class="val" id="stat-uptime" style="font-size:2.6em;font-weight:800;color:var(--gold);line-height:1;font-family:var(--display);text-shadow:0 0 18px rgba(212,175,55,.25)">–</div>
+      <div style="font-size:.75em;color:var(--text-secondary);margin-top:4px">System Uptime</div>
+      <div style="font-size:.68em;color:rgba(212,175,55,.45);margin-top:4px" id="stat-uptime-sub"></div>
+    </div>
+  </div>
+
+  <!-- Stat detail panel -->
+  <div id="stat-detail-panel" style="display:none;background:var(--surface2);border:1px solid var(--gold);border-radius:var(--radius);padding:16px;margin-bottom:16px;animation:fadeIn .2s ease">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" id="stat-detail-title">Details</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stat-detail-panel').style.display='none'">✕</button>
+    </div>
+    <div id="stat-detail-content" style="font-size:.88em;color:var(--text-secondary)"></div>
+  </div>
 
   <!-- ── Cyber Operations Panel ── -->
   <div id="cyber-panel">
@@ -3375,33 +3511,6 @@ INDEX_HTML = r"""<!doctype html>
         <span class="btn-icon">■</span> Stop All Agents
       </button>
     </div>
-  </div>
-
-  <div class="grid-stat" id="stat-cards">
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('running')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('running')" style="cursor:pointer" aria-label="Agents Running – click for details">
-      <div class="stat-icon green">●</div>
-      <div class="stat-body"><div class="val" id="stat-running">–</div><div class="lbl">Agents Running</div><div class="stat-trend" id="stat-running-sub" style="font-size:.7em;color:var(--gold);margin-top:3px"></div></div>
-    </div>
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('total')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('total')" style="cursor:pointer" aria-label="Total Agents – click for details">
-      <div class="stat-icon blue">◆</div>
-      <div class="stat-body"><div class="val" id="stat-total">–</div><div class="lbl">Total Agents</div><div class="stat-trend" id="stat-total-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
-    </div>
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('gateway')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('gateway')" style="cursor:pointer" aria-label="Gateway – click for details">
-      <div class="stat-icon cyan">◉</div>
-      <div class="stat-body"><div class="val" id="stat-gateway">–</div><div class="lbl">Gateway</div><div class="stat-trend" id="stat-gateway-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
-    </div>
-    <div class="stat-card" role="button" tabindex="0" onclick="showStatDetail('uptime')" onkeydown="if(event.key==='Enter'||event.key===' ')showStatDetail('uptime')" style="cursor:pointer" aria-label="Uptime – click for details">
-      <div class="stat-icon yellow">◎</div>
-      <div class="stat-body"><div class="val" id="stat-uptime">–</div><div class="lbl">Uptime</div><div class="stat-trend" id="stat-uptime-sub" style="font-size:.7em;color:var(--text-muted);margin-top:3px"></div></div>
-    </div>
-  </div>
-  <!-- Stat detail panel -->
-  <div id="stat-detail-panel" style="display:none;background:var(--surface2);border:1px solid var(--gold);border-radius:var(--radius);padding:16px;margin-bottom:16px;animation:fadeIn .2s ease">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div class="card-title" id="stat-detail-title">Details</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stat-detail-panel').style.display='none'">✕</button>
-    </div>
-    <div id="stat-detail-content" style="font-size:.88em;color:var(--text-secondary)"></div>
   </div>
 
   <div class="grid2">
@@ -3510,10 +3619,25 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
-  <!-- CEO Daily Briefing Widget -->
-  <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+  <!-- System Resources card (real hardware metrics) -->
+  <div class="card" id="sysres-card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
     <div class="card-header">
-      <div class="card-title"><span style="color:#818cf8">📰</span> CEO Daily Briefing</div>
+      <div class="card-title"><span style="color:var(--gold)">⬡</span> System Resources</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="sysres-updated" style="font-size:.7em;color:var(--text-muted)">Loading…</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadSysRes()">↻</button>
+      </div>
+    </div>
+    <div id="sysres-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
+      <!-- filled by JS -->
+      <div class="empty" style="grid-column:1/-1"><div class="icon">⬡</div><p>Loading hardware metrics…</p></div>
+    </div>
+  </div>
+
+  <!-- CEO Daily Briefing Widget -->
+  <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.06),var(--surface2))">
+    <div class="card-header">
+      <div class="card-title"><span style="color:var(--gold)">📰</span> CEO Daily Briefing</div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="loadCEOBriefing()">↻ Refresh</button>
         <button class="btn btn-ghost btn-sm" onclick="forceRegenerateBriefing()">⚡ Regenerate</button>
@@ -3723,10 +3847,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Scheduler ── -->
 <div id="tab-scheduler" class="tab-content">
-  <div class="page-header" style="border-left-color:#c084fc">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📅</div>
     <div><div class="page-header-title">Task Scheduler</div><div class="page-header-desc">Schedule recurring and one-time tasks for your agents. View your agenda, create schedules, and manage triggers.</div></div>
-    <span class="page-header-badge" style="color:#c084fc">Automation</span>
+    <span class="page-header-badge" style="color:var(--gold)">Automation</span>
   </div>
   <div style="display:flex;gap:16px;height:calc(100vh - 175px)">
     <!-- Left: Agenda calendar -->
@@ -3833,10 +3957,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Workers ── -->
 <div id="tab-workers" class="tab-content" style="width:100%;box-sizing:border-box">
-  <div class="page-header" style="border-left-color:#6ee7b7">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">👷</div>
     <div><div class="page-header-title">Agent Teams</div><div class="page-header-desc">Bundle agents together with recurring tasks. Agent teams run on a schedule and always perform their assigned role automatically.</div></div>
-    <span class="page-header-badge" style="color:#6ee7b7">Workforce</span>
+    <span class="page-header-badge" style="color:var(--gold)">Workforce</span>
   </div>
 
   <!-- ── Quick Presets ── -->
@@ -3847,7 +3971,7 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Click a preset to instantly configure and launch a coordinated agent bundle. Then click <strong style="color:var(--gold)">Send Bundle to Swarm</strong> to deploy.</p>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px">
-      <button onclick="applyAgentPreset('business_automator')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(16,185,129,.06));border:1px solid rgba(16,185,129,.3);border-radius:12px;color:#34d399;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(16,185,129,.6)';this.style.background='linear-gradient(135deg,rgba(16,185,129,.2),rgba(16,185,129,.1))'" onmouseleave="this.style.borderColor='rgba(16,185,129,.3)';this.style.background='linear-gradient(135deg,rgba(16,185,129,.12),rgba(16,185,129,.06))'">
+      <button onclick="applyAgentPreset('business_automator')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🏢</span>
         <span style="font-weight:700;font-size:.9em">Business Automator</span>
         <span style="font-size:.74em;color:var(--text-muted)">Automate ops, admin & scheduling</span>
@@ -3857,32 +3981,32 @@ INDEX_HTML = r"""<!doctype html>
         <span style="font-weight:700;font-size:.9em">Money Printer</span>
         <span style="font-size:.74em;color:var(--text-muted)">Revenue, upsells & monetization</span>
       </button>
-      <button onclick="applyAgentPreset('research_team')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(99,102,241,.06));border:1px solid rgba(99,102,241,.3);border-radius:12px;color:#818cf8;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(99,102,241,.6)';this.style.background='linear-gradient(135deg,rgba(99,102,241,.2),rgba(99,102,241,.1))'" onmouseleave="this.style.borderColor='rgba(99,102,241,.3)';this.style.background='linear-gradient(135deg,rgba(99,102,241,.12),rgba(99,102,241,.06))'">
+      <button onclick="applyAgentPreset('research_team')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🔬</span>
         <span style="font-weight:700;font-size:.9em">Research Team</span>
         <span style="font-size:.74em;color:var(--text-muted)">Deep research & competitive intel</span>
       </button>
-      <button onclick="applyAgentPreset('lead_gen_swarm')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(239,68,68,.12),rgba(239,68,68,.06));border:1px solid rgba(239,68,68,.3);border-radius:12px;color:#f87171;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(239,68,68,.6)';this.style.background='linear-gradient(135deg,rgba(239,68,68,.2),rgba(239,68,68,.1))'" onmouseleave="this.style.borderColor='rgba(239,68,68,.3)';this.style.background='linear-gradient(135deg,rgba(239,68,68,.12),rgba(239,68,68,.06))'">
+      <button onclick="applyAgentPreset('lead_gen_swarm')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🎯</span>
         <span style="font-weight:700;font-size:.9em">Lead Generation Swarm</span>
         <span style="font-size:.74em;color:var(--text-muted)">Hunt, score & convert leads</span>
       </button>
-      <button onclick="applyAgentPreset('content_empire')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(236,72,153,.12),rgba(236,72,153,.06));border:1px solid rgba(236,72,153,.3);border-radius:12px;color:#f472b6;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(236,72,153,.6)';this.style.background='linear-gradient(135deg,rgba(236,72,153,.2),rgba(236,72,153,.1))'" onmouseleave="this.style.borderColor='rgba(236,72,153,.3)';this.style.background='linear-gradient(135deg,rgba(236,72,153,.12),rgba(236,72,153,.06))'">
+      <button onclick="applyAgentPreset('content_empire')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">✍️</span>
         <span style="font-weight:700;font-size:.9em">Content Empire</span>
         <span style="font-size:.74em;color:var(--text-muted)">Content, SEO & brand building</span>
       </button>
-      <button onclick="applyAgentPreset('ecom_powerhouse')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(251,146,60,.12),rgba(251,146,60,.06));border:1px solid rgba(251,146,60,.3);border-radius:12px;color:#fb923c;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(251,146,60,.6)';this.style.background='linear-gradient(135deg,rgba(251,146,60,.2),rgba(251,146,60,.1))'" onmouseleave="this.style.borderColor='rgba(251,146,60,.3)';this.style.background='linear-gradient(135deg,rgba(251,146,60,.12),rgba(251,146,60,.06))'">
+      <button onclick="applyAgentPreset('ecom_powerhouse')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">🛒</span>
         <span style="font-weight:700;font-size:.9em">E-com Powerhouse</span>
         <span style="font-size:.74em;color:var(--text-muted)">Orders, inventory & fulfillment</span>
       </button>
-      <button onclick="applyAgentPreset('outreach_machine')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(0,240,255,.12),rgba(0,240,255,.06));border:1px solid rgba(0,240,255,.3);border-radius:12px;color:#00f0ff;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(0,240,255,.6)';this.style.background='linear-gradient(135deg,rgba(0,240,255,.2),rgba(0,240,255,.1))'" onmouseleave="this.style.borderColor='rgba(0,240,255,.3)';this.style.background='linear-gradient(135deg,rgba(0,240,255,.12),rgba(0,240,255,.06))'">
+      <button onclick="applyAgentPreset('outreach_machine')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">📣</span>
         <span style="font-weight:700;font-size:.9em">Outreach Machine</span>
         <span style="font-size:.74em;color:var(--text-muted)">Email, calls & social DMs</span>
       </button>
-      <button onclick="applyAgentPreset('analytics_squad')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(52,211,153,.12),rgba(52,211,153,.06));border:1px solid rgba(52,211,153,.3);border-radius:12px;color:#34d399;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(52,211,153,.6)';this.style.background='linear-gradient(135deg,rgba(52,211,153,.2),rgba(52,211,153,.1))'" onmouseleave="this.style.borderColor='rgba(52,211,153,.3)';this.style.background='linear-gradient(135deg,rgba(52,211,153,.12),rgba(52,211,153,.06))'">
+      <button onclick="applyAgentPreset('analytics_squad')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
         <span style="font-size:1.3em">📊</span>
         <span style="font-weight:700;font-size:.9em">Analytics Squad</span>
         <span style="font-size:.74em;color:var(--text-muted)">Reports, KPIs & insights</span>
@@ -3993,10 +4117,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Improvements ── -->
 <div id="tab-improvements" class="tab-content">
-  <div class="page-header" style="border-left-color:#facc15">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💡</div>
     <div><div class="page-header-title">AI Improvement Proposals</div><div class="page-header-desc">AI-generated improvement proposals for your system. Review, approve, or escalate to execution. No changes applied automatically.</div></div>
-    <span class="page-header-badge" style="color:#facc15">AI Insights</span>
+    <span class="page-header-badge" style="color:var(--gold)">AI Insights</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -4033,10 +4157,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Budget ── -->
 <div id="tab-budget" class="tab-content">
-  <div class="page-header" style="border-left-color:#34d399">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💰</div>
     <div><div class="page-header-title">Budget & Cost Management</div><div class="page-header-desc">Track monthly AI compute spend per agent. Set hard caps, monitor warnings, and record usage manually.</div></div>
-    <span class="page-header-badge" style="color:#34d399">Cost Control</span>
+    <span class="page-header-badge" style="color:var(--gold)">Cost Control</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="bud-total-spent">–</div><div class="lbl">Total Spent (month)</div></div></div>
@@ -4079,10 +4203,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Org Chart ── -->
 <div id="tab-org" class="tab-content">
-  <div class="page-header" style="border-left-color:#818cf8">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🏢</div>
     <div><div class="page-header-title">Org Chart & Agent Hierarchy</div><div class="page-header-desc">Visual hierarchy of roles and reporting lines. Assign agents to roles for structured delegation and task routing.</div></div>
-    <span class="page-header-badge" style="color:#818cf8">Agent Structure</span>
+    <span class="page-header-badge" style="color:var(--gold)">Agent Structure</span>
   </div>
   <div class="grid2">
     <div class="card">
@@ -4129,10 +4253,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Goals ── -->
 <div id="tab-goals" class="tab-content">
-  <div class="page-header" style="border-left-color:#fb923c">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎯</div>
     <div><div class="page-header-title">Goals & Company Mission</div><div class="page-header-desc">Set OKR-style goals, define the company mission, and track strategic objectives across your AI team.</div></div>
-    <span class="page-header-badge" style="color:#fb923c">Strategic Layer</span>
+    <span class="page-header-badge" style="color:var(--gold)">Strategic Layer</span>
   </div>
   <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,rgba(234,88,12,.08),rgba(251,146,60,.04));border-color:rgba(251,146,60,.3)">
     <div class="card-header">
@@ -4151,6 +4275,7 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <div id="ceo-chat-status" style="font-size:.78em;color:var(--text-muted);margin-top:6px"></div>
   </div>
+  <div class="card" style="margin-bottom:16px">
     <div class="card-header">
       <div class="card-title"><span class="icon">🎯</span> Company Mission</div>
       <button class="btn btn-ghost btn-sm" onclick="loadGoals()">↻ Refresh</button>
@@ -4165,37 +4290,14 @@ INDEX_HTML = r"""<!doctype html>
     <div class="form-group"><label>Vision (optional)</label><input id="goals-vision-input" placeholder="Long-term company vision"/></div>
     <button class="btn btn-primary" onclick="saveCompanyMission()">💾 Save Mission</button>
   </div>
-  <div class="grid2">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">📁</span> Projects</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadGoals()">↻ Refresh</button>
-      </div>
-      <div id="goals-projects-list"><div class="empty"><div class="icon">📁</div><p>No projects yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Project</div></div>
-      <div class="form-group"><label>Project Name</label><input id="goals-proj-name" placeholder="e.g. MVP Launch"/></div>
-      <div class="form-group"><label>Goal</label><input id="goals-proj-goal" placeholder="e.g. Ship v1.0 by Q2"/></div>
-      <div class="form-group"><label>Description</label><input id="goals-proj-desc" placeholder="Brief description"/></div>
-      <div class="form-group"><label>Priority</label>
-        <select id="goals-proj-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="high">🔴 High</option>
-          <option value="medium" selected>🟡 Medium</option>
-          <option value="low">🟢 Low</option>
-        </select>
-      </div>
-      <button class="btn btn-primary" onclick="addGoalProject()">➕ Add Project</button>
-    </div>
-  </div>
 </div>
 
 <!-- ── Tickets ── -->
 <div id="tab-tickets" class="tab-content">
-  <div class="page-header" style="border-left-color:#38bdf8">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎫</div>
     <div><div class="page-header-title">Tickets & Task Tracker</div><div class="page-header-desc">Track system tickets, feature requests, and AI tasks. Filter by status, assign agents, and monitor progress.</div></div>
-    <span class="page-header-badge" style="color:#38bdf8">Issue Tracker</span>
+    <span class="page-header-badge" style="color:var(--gold)">Issue Tracker</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon blue">🎫</div><div class="stat-body"><div class="val" id="tkt-total">–</div><div class="lbl">Total Tickets</div></div></div>
@@ -4262,10 +4364,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Boardroom (Governance) ── -->
 <div id="tab-boardroom" class="tab-content">
-  <div class="page-header" style="border-left-color:#f87171">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🛡️</div>
     <div><div class="page-header-title">Boardroom & Governance</div><div class="page-header-desc">High-level approval workflows, governance decisions, and strategic oversight. Human-in-the-loop for critical actions.</div></div>
-    <span class="page-header-badge" style="color:#f87171">Governance</span>
+    <span class="page-header-badge" style="color:var(--gold)">Governance</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="gov-pending">–</div><div class="lbl">Pending Approvals</div></div></div>
@@ -4327,10 +4429,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Companies ── -->
 <div id="tab-companies" class="tab-content">
-  <div class="page-header" style="border-left-color:#86efac">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🏗️</div>
     <div><div class="page-header-title">Multi-Company Manager</div><div class="page-header-desc">One deployment, many companies. Complete data isolation with a single control plane for your entire portfolio.</div></div>
-    <span class="page-header-badge" style="color:#86efac">Portfolio CRM</span>
+    <span class="page-header-badge" style="color:var(--gold)">Portfolio CRM</span>
   </div>
   <div class="card" style="margin-bottom:16px">
     <div class="card-header">
@@ -4370,10 +4472,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Outputs (Artifacts + Sessions) ── -->
 <div id="tab-artifacts" class="tab-content">
-  <div class="page-header" style="border-left-color:#fde68a">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📦</div>
     <div><div class="page-header-title">Artifacts & Generated Content</div><div class="page-header-desc">Browse and manage all files, documents, and code generated by your AI agents. Filter, preview, and deploy artifacts.</div></div>
-    <span class="page-header-badge" style="color:#fde68a">Output Library</span>
+    <span class="page-header-badge" style="color:var(--gold)">Output Library</span>
   </div>
 
   <!-- ── Sub-tab navigation (Artifacts / Sessions) ── -->
@@ -4485,205 +4587,12 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════════════════════════════════════
-     NEW FEATURE TABS
-     ══════════════════════════════════════════════════════════════════════════ -->
-
-<!-- ── CRM Pipeline ── -->
-<div id="tab-crm" class="tab-content">
-  <div class="page-header" style="border-left-color:#f59e0b">
-    <div class="page-header-icon">🎯</div>
-    <div><div class="page-header-title">CRM Pipeline</div><div class="page-header-desc">Manage leads, track deal stages, score prospects, and run automated follow-up sequences.</div></div>
-    <span class="page-header-badge" style="color:#f59e0b">Sales Pipeline</span>
-  </div>
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon yellow">👥</div><div class="stat-body"><div class="val" id="crm-total">–</div><div class="lbl">Total Leads</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">🏆</div><div class="stat-body"><div class="val" id="crm-won">–</div><div class="lbl">Won Deals</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">💰</div><div class="stat-body"><div class="val" id="crm-pipeline-val">–</div><div class="lbl">Pipeline Value</div></div></div>
-    <div class="stat-card"><div class="stat-icon cyan">📈</div><div class="stat-body"><div class="val" id="crm-conv">–</div><div class="lbl">Conversion %</div></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">🎯</span> Leads</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadCRM()">↻</button>
-      </div>
-      <div id="crm-leads-list"><div class="empty"><div class="icon">🎯</div><p>No leads yet. Add your first lead.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Lead</div></div>
-      <div class="form-group"><label>Name</label><input id="crm-name" placeholder="John Smith"/></div>
-      <div class="form-group"><label>Company</label><input id="crm-company" placeholder="Acme Corp"/></div>
-      <div class="form-group"><label>Email</label><input id="crm-email" placeholder="john@acme.com"/></div>
-      <div class="form-group"><label>Phone</label><input id="crm-phone" placeholder="+1 555 000"/></div>
-      <div class="form-group"><label>Deal Value ($)</label><input id="crm-value" type="number" placeholder="5000"/></div>
-      <div class="form-group"><label>Stage</label>
-        <select id="crm-stage" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="lead">Lead</option><option value="contacted">Contacted</option>
-          <option value="qualified">Qualified</option><option value="proposal">Proposal</option>
-          <option value="negotiation">Negotiation</option><option value="won">Won</option><option value="lost">Lost</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Notes</label><input id="crm-notes" placeholder="Any notes…"/></div>
-      <button class="btn btn-primary" onclick="addLead()">➕ Add Lead</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Email Marketing ── -->
-<div id="tab-email-mkt" class="tab-content">
-  <div class="page-header" style="border-left-color:#06b6d4">
-    <div class="page-header-icon">📧</div>
-    <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create campaigns, set up drip sequences, and track open/click rates.</div></div>
-    <span class="page-header-badge" style="color:#06b6d4">Automation</span>
-  </div>
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon cyan">📧</div><div class="stat-body"><div class="val" id="em-campaigns">–</div><div class="lbl">Campaigns</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">📤</div><div class="stat-body"><div class="val" id="em-sent">–</div><div class="lbl">Emails Sent</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">👁️</div><div class="stat-body"><div class="val" id="em-open-rate">–</div><div class="lbl">Open Rate</div></div></div>
-    <div class="stat-card"><div class="stat-icon yellow">🖱️</div><div class="stat-body"><div class="val" id="em-click-rate">–</div><div class="lbl">Click Rate</div></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">📧</span> Campaigns</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadEmailCampaigns()">↻</button>
-      </div>
-      <div id="em-campaign-list"><div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Campaign</div></div>
-      <div class="form-group"><label>Campaign Name</label><input id="em-name" placeholder="Q1 Cold Outreach"/></div>
-      <div class="form-group"><label>Subject Line</label><input id="em-subject" placeholder="Quick question about your business…"/></div>
-      <div class="form-group"><label>Email Body</label>
-        <textarea id="em-body" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Hi {{name}},…"></textarea>
-      </div>
-      <div class="form-group"><label>Recipients (comma-separated emails)</label><input id="em-recipients" placeholder="a@co.com, b@co.com"/></div>
-      <button class="btn btn-primary" onclick="createEmailCampaign()">➕ Create Campaign</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Meeting Intelligence ── -->
-<div id="tab-meetings" class="tab-content">
-  <div class="page-header" style="border-left-color:#8b5cf6">
-    <div class="page-header-icon">🎙️</div>
-    <div><div class="page-header-title">Meeting Intelligence</div><div class="page-header-desc">Paste meeting transcripts to get AI summaries, action items, and auto-drafted follow-up emails.</div></div>
-    <span class="page-header-badge" style="color:#8b5cf6">AI Analysis</span>
-  </div>
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon purple">🎙️</div><div class="stat-body"><div class="val" id="mt-total">–</div><div class="lbl">Total Meetings</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="mt-analyzed">–</div><div class="lbl">Analyzed</div></div></div>
-    <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="mt-pending">–</div><div class="lbl">Pending</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">⏱️</div><div class="stat-body"><div class="val" id="mt-duration">–</div><div class="lbl">Total Mins</div></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">🎙️</span> Meetings</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadMeetings()">↻</button>
-      </div>
-      <div id="meetings-list"><div class="empty"><div class="icon">🎙️</div><p>No meetings yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Meeting</div></div>
-      <div class="form-group"><label>Title</label><input id="mt-title" placeholder="Sales call with Acme Corp"/></div>
-      <div class="form-group"><label>Platform</label>
-        <select id="mt-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="zoom">Zoom</option><option value="google_meet">Google Meet</option>
-          <option value="teams">Microsoft Teams</option><option value="other">Other</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Duration (mins)</label><input id="mt-duration" type="number" placeholder="45"/></div>
-      <div class="form-group"><label>Transcript (paste here)</label>
-        <textarea id="mt-transcript" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Paste meeting transcript…"></textarea>
-      </div>
-      <button class="btn btn-primary" onclick="addMeeting()">🎙️ Add &amp; Analyze</button>
-    </div>
-  </div>
-  <div class="card" style="margin-top:16px;display:none" id="mt-result-card">
-    <div class="card-header"><div class="card-title"><span class="icon">🤖</span> AI Analysis</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('mt-result-card').style.display='none'">✕</button>
-    </div>
-    <div id="mt-result-body" style="white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
-  </div>
-</div>
-
-<!-- ── Social Media ── -->
-<div id="tab-social" class="tab-content">
-  <div class="page-header" style="border-left-color:#ec4899">
-    <div class="page-header-icon">📱</div>
-    <div><div class="page-header-title">Social Media Manager</div><div class="page-header-desc">Schedule posts, generate AI content, and track engagement across LinkedIn, Instagram, X, and more.</div></div>
-    <span class="page-header-badge" style="color:#ec4899">Content</span>
-  </div>
-  <div class="grid-stat" style="margin-bottom:16px">
-    <div class="stat-card"><div class="stat-icon pink">📱</div><div class="stat-body"><div class="val" id="sm-total">–</div><div class="lbl">Total Posts</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-body"><div class="val" id="sm-published">–</div><div class="lbl">Published</div></div></div>
-    <div class="stat-card"><div class="stat-icon yellow">📅</div><div class="stat-body"><div class="val" id="sm-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">❤️</div><div class="stat-body"><div class="val" id="sm-likes">–</div><div class="lbl">Total Likes</div></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon">📱</span> Posts</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadSocialPosts()">↻</button>
-      </div>
-      <div id="sm-posts-list"><div class="empty"><div class="icon">📱</div><p>No posts yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">✨</span> Create Post</div></div>
-      <div class="form-group"><label>Topic (for AI generation)</label><input id="sm-topic" placeholder="AI trends in 2025…"/></div>
-      <div class="form-group"><label>Platform</label>
-        <select id="sm-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="linkedin">LinkedIn</option><option value="instagram">Instagram</option>
-          <option value="twitter">X / Twitter</option><option value="facebook">Facebook</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Tone</label>
-        <select id="sm-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
-          <option value="professional">Professional</option><option value="casual">Casual</option>
-          <option value="inspirational">Inspirational</option><option value="educational">Educational</option>
-        </select>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="generateSocialPost()" style="flex:1">✨ AI Generate</button>
-        <button class="btn btn-primary" onclick="saveSocialPost()" style="flex:1">💾 Save Draft</button>
-      </div>
-      <div class="form-group" style="margin-top:12px"><label>Content (edit after generation)</label>
-        <textarea id="sm-content" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Post content…"></textarea>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ── CEO Briefing ── -->
-<div id="tab-briefing" class="tab-content">
-  <div class="page-header" style="border-left-color:#fbbf24">
-    <div class="page-header-icon">☀️</div>
-    <div><div class="page-header-title">Daily CEO Briefing</div><div class="page-header-desc">Your AI-generated morning summary — yesterday's wins, today's priorities, and key metrics all in one place.</div></div>
-    <span class="page-header-badge" style="color:#fbbf24">Daily Report</span>
-  </div>
-  <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-    <button class="btn btn-primary" onclick="generateBriefing()">☀️ Generate Today's Briefing</button>
-    <button class="btn btn-ghost" onclick="loadBriefingHistory()">📅 View History</button>
-  </div>
-  <div class="card" id="briefing-card">
-    <div class="card-header"><div class="card-title"><span class="icon">☀️</span> Latest Briefing</div>
-      <span id="briefing-date" style="font-size:.8em;color:var(--text-muted)"></span>
-    </div>
-    <div id="briefing-content" style="white-space:pre-wrap;line-height:1.7;color:var(--text);font-size:.9em">
-      <div class="empty"><div class="icon">☀️</div><p>Click "Generate Today's Briefing" to get your morning summary.</p></div>
-    </div>
-  </div>
-  <div id="briefing-history" style="margin-top:16px"></div>
-</div>
-
 <!-- ── Finance / Invoicing ── -->
 <div id="tab-invoicing" class="tab-content">
-  <div class="page-header" style="border-left-color:#10b981">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🧾</div>
     <div><div class="page-header-title">Finance & Invoicing</div><div class="page-header-desc">Create invoices, track expenses, and view your live P&amp;L report.</div></div>
-    <span class="page-header-badge" style="color:#10b981">Finance</span>
+    <span class="page-header-badge" style="color:var(--gold)">Finance</span>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:16px">
     <button class="fi-tab-btn btn btn-primary btn-sm active" onclick="switchFinanceTab('invoices',this)">🧾 Invoices</button>
@@ -4754,10 +4663,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Analytics ── -->
 <div id="tab-analytics-bi" class="tab-content">
-  <div class="page-header" style="border-left-color:#6366f1">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📊</div>
     <div><div class="page-header-title">Analytics &amp; Insights</div><div class="page-header-desc">Business intelligence dashboard — unified KPIs, AI recommendations, and trends across all modules.</div></div>
-    <span class="page-header-badge" style="color:#6366f1">Intelligence</span>
+    <span class="page-header-badge" style="color:var(--gold)">Intelligence</span>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:16px">
     <button class="btn btn-primary" onclick="loadAnalyticsOverview()">↻ Refresh Overview</button>
@@ -4783,10 +4692,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Workflow Builder ── -->
 <div id="tab-workflows" class="tab-content">
-  <div class="page-header" style="border-left-color:#f97316">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">⚙️</div>
     <div><div class="page-header-title">Workflow Builder</div><div class="page-header-desc">No-code automation editor — create trigger → condition → action workflows that run automatically.</div></div>
-    <span class="page-header-badge" style="color:#f97316">Automation</span>
+    <span class="page-header-badge" style="color:var(--gold)">Automation</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card">
@@ -4824,10 +4733,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Team Management ── -->
 <div id="tab-team" class="tab-content">
-  <div class="page-header" style="border-left-color:#0ea5e9">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">👥</div>
     <div><div class="page-header-title">Team Management</div><div class="page-header-desc">Invite team members, assign roles, and manage access permissions across your AI Employee workspace.</div></div>
-    <span class="page-header-badge" style="color:#0ea5e9">Multi-User</span>
+    <span class="page-header-badge" style="color:var(--gold)">Multi-User</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card">
@@ -4856,10 +4765,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Customer Support ── -->
 <div id="tab-support-desk" class="tab-content">
-  <div class="page-header" style="border-left-color:#14b8a6">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎧</div>
     <div><div class="page-header-title">Customer Support</div><div class="page-header-desc">24/7 helpdesk with smart ticket routing, AI reply suggestions, and a searchable knowledge base.</div></div>
-    <span class="page-header-badge" style="color:#14b8a6">Helpdesk</span>
+    <span class="page-header-badge" style="color:var(--gold)">Helpdesk</span>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:16px">
     <button class="sup-tab-btn btn btn-primary btn-sm active" onclick="switchSupportTab('tickets',this)">🎫 Tickets</button>
@@ -4936,10 +4845,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Website Builder ── -->
 <div id="tab-website-builder" class="tab-content">
-  <div class="page-header" style="border-left-color:#3b82f6">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🌐</div>
     <div><div class="page-header-title">Website Builder</div><div class="page-header-desc">Generate complete landing page HTML from a business description using AI. Edit and export instantly.</div></div>
-    <span class="page-header-badge" style="color:#3b82f6">AI Builder</span>
+    <span class="page-header-badge" style="color:var(--gold)">AI Builder</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card">
@@ -4965,42 +4874,12 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
-<!-- ── Competitor Watch ── -->
-<div id="tab-competitors" class="tab-content">
-  <div class="page-header" style="border-left-color:#ef4444">
-    <div class="page-header-icon">🔍</div>
-    <div><div class="page-header-title">Competitor Watch</div><div class="page-header-desc">Track competitors, run AI analysis, and get counter-strategy recommendations.</div></div>
-    <span class="page-header-badge" style="color:#ef4444">Intelligence</span>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">🔍</span> Competitors</div><button class="btn btn-ghost btn-sm" onclick="loadCompetitors()">↻</button></div>
-      <div id="comp-list"><div class="empty"><div class="icon">🔍</div><p>No competitors tracked yet.</p></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Competitor</div></div>
-      <div class="form-group"><label>Company Name</label><input id="comp-name" placeholder="Competitor Inc"/></div>
-      <div class="form-group"><label>Website</label><input id="comp-website" placeholder="https://competitor.com"/></div>
-      <div class="form-group"><label>Description</label>
-        <textarea id="comp-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="What they do and who they target…"></textarea>
-      </div>
-      <button class="btn btn-primary" onclick="addCompetitor()">➕ Add &amp; Watch</button>
-    </div>
-  </div>
-  <div class="card" style="margin-top:16px;display:none" id="comp-analysis-card">
-    <div class="card-header"><div class="card-title"><span class="icon">🤖</span> AI Analysis</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('comp-analysis-card').style.display='none'">✕</button>
-    </div>
-    <div id="comp-analysis-body" style="white-space:pre-wrap;font-size:.85em;color:var(--text-muted)"></div>
-  </div>
-</div>
-
 <!-- ── Personal Brand ── -->
 <div id="tab-brand" class="tab-content">
-  <div class="page-header" style="border-left-color:#a855f7">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">✨</div>
     <div><div class="page-header-title">Personal Brand Agent</div><div class="page-header-desc">Build your thought leadership — AI content generation, topic ideas, and brand voice consistency.</div></div>
-    <span class="page-header-badge" style="color:#a855f7">Brand</span>
+    <span class="page-header-badge" style="color:var(--gold)">Brand</span>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:16px">
     <button class="br-tab-btn btn btn-primary btn-sm active" onclick="switchBrandTab('generate',this)">✍️ Generate</button>
@@ -5064,10 +4943,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Health Check ── -->
 <div id="tab-health" class="tab-content">
-  <div class="page-header" style="border-left-color:#f43f5e">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">❤️</div>
     <div><div class="page-header-title">Business Health Check</div><div class="page-header-desc">One-click audit of your entire business — graded A to D with issues identified and fixes recommended.</div></div>
-    <span class="page-header-badge" style="color:#f43f5e">Audit</span>
+    <span class="page-header-badge" style="color:var(--gold)">Audit</span>
   </div>
   <div style="display:flex;gap:10px;margin-bottom:16px">
     <button class="btn btn-primary" onclick="runHealthCheck()">❤️ Run Health Check</button>
@@ -5089,10 +4968,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Export & Backup ── -->
 <div id="tab-export" class="tab-content">
-  <div class="page-header" style="border-left-color:#64748b">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💾</div>
     <div><div class="page-header-title">Export &amp; Backup</div><div class="page-header-desc">Export any module as JSON or CSV, create full ZIP backups of all your AI Employee data.</div></div>
-    <span class="page-header-badge" style="color:#64748b">Data</span>
+    <span class="page-header-badge" style="color:var(--gold)">Data</span>
   </div>
   <div style="display:flex;gap:10px;margin-bottom:16px">
     <button class="btn btn-primary" onclick="createBackup()">🗜️ Create Full Backup</button>
@@ -5115,10 +4994,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Skills ── -->
 <div id="tab-skills" class="tab-content">
-  <div class="page-header" style="border-left-color:#22d3ee">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🛠️</div>
     <div><div class="page-header-title">Skills Library</div><div class="page-header-desc">Manage capabilities your agents can learn and use. Train skills, assign them to agents, and build new ones.</div></div>
-    <span class="page-header-badge" style="color:#22d3ee">Agent Capabilities</span>
+    <span class="page-header-badge" style="color:var(--gold)">Agent Capabilities</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card" style="min-height:600px;display:flex;flex-direction:column">
@@ -5181,10 +5060,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Tasks ── -->
 <div id="tab-tasks" class="tab-content">
-  <div class="page-header" style="border-left-color:#f472b6">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🚀</div>
     <div><div class="page-header-title">Task Runner</div><div class="page-header-desc">Build and launch tasks for your AI workforce. Describe any goal — agents are auto-selected, you control the final launch.</div></div>
-    <span class="page-header-badge" style="color:#f472b6">Task Builder</span>
+    <span class="page-header-badge" style="color:var(--gold)">Task Builder</span>
   </div>
 
   <!-- Task Builder -->
@@ -5287,10 +5166,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Swarm ── -->
 <div id="tab-swarm" class="tab-content">
-  <div class="page-header" style="border-left-color:#fbbf24">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🐝</div>
     <div><div class="page-header-title">Agent Swarm</div><div class="page-header-desc">All AI agents at a glance — capabilities, status, and current workload. Filter by category or search by skill.</div></div>
-    <span class="page-header-badge" style="color:#fbbf24" id="swarm-header-badge">– Agents</span>
+    <span class="page-header-badge" style="color:var(--gold)" id="swarm-header-badge">– Agents</span>
   </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap">
     <!-- Left: agent grid -->
@@ -5355,8 +5234,8 @@ INDEX_HTML = r"""<!doctype html>
             <div style="font-size:1.6em;font-weight:800;color:var(--success)" id="swarm-stat-total">–</div>
             <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Total Agents</div>
           </div>
-          <div style="text-align:center;padding:10px;background:rgba(99,102,241,.06);border-radius:8px;border:1px solid rgba(99,102,241,.12)">
-            <div style="font-size:1.6em;font-weight:800;color:#818cf8" id="swarm-stat-tasks">–</div>
+          <div style="text-align:center;padding:10px;background:rgba(212,175,55,.06);border-radius:8px;border:1px solid rgba(212,175,55,.15)">
+            <div style="font-size:1.6em;font-weight:800;color:var(--gold)" id="swarm-stat-tasks">–</div>
             <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Tasks Run</div>
           </div>
           <div style="text-align:center;padding:10px;background:rgba(239,68,68,.06);border-radius:8px;border:1px solid rgba(239,68,68,.12)">
@@ -5387,13 +5266,13 @@ INDEX_HTML = r"""<!doctype html>
 .swarm-msg{animation:swarmMsg .3s ease forwards}
 .swarm-msg-bubble{padding:8px 12px;border-radius:12px;font-size:.82em;max-width:80%;line-height:1.4}
 .swarm-msg-left .swarm-msg-bubble{background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.2);border-bottom-left-radius:3px;color:var(--text)}
-.swarm-msg-right .swarm-msg-bubble{background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-bottom-right-radius:3px;color:var(--text);margin-left:auto}
+.swarm-msg-right .swarm-msg-bubble{background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.2);border-bottom-right-radius:3px;color:var(--text);margin-left:auto}
 </style>
 <div id="tab-commands" class="tab-content">
-  <div class="page-header" style="border-left-color:#d4af37">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📜</div>
     <div><div class="page-header-title">Command Reference</div><div class="page-header-desc">Full list of WhatsApp and bot commands available across your AI system. Search, filter by category, and copy commands directly.</div></div>
-    <span class="page-header-badge" style="color:#d4af37">Commands</span>
+    <span class="page-header-badge" style="color:var(--gold)">Commands</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -5411,10 +5290,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── ROI Metrics ── -->
 <div id="tab-metrics" class="tab-content">
-  <div class="page-header" style="border-left-color:#4ade80">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📈</div>
     <div><div class="page-header-title">ROI & Performance Analytics</div><div class="page-header-desc">Real usage data tracked automatically from all agent activity. Measure tasks, hours saved, cost efficiency, and business impact.</div></div>
-    <span class="page-header-badge" style="color:#4ade80">Analytics</span>
+    <span class="page-header-badge" style="color:var(--gold)">Analytics</span>
   </div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
     <div>
@@ -5557,10 +5436,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Templates ── -->
 <div id="tab-templates" class="tab-content">
-  <div class="page-header" style="border-left-color:#60a5fa">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📋</div>
     <div><div class="page-header-title">Business Templates</div><div class="page-header-desc">Pre-built plug-and-play templates for common business use-cases. One click to deploy a full AI team.</div></div>
-    <span class="page-header-badge" style="color:#60a5fa">Templates</span>
+    <span class="page-header-badge" style="color:var(--gold)">Templates</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -5594,10 +5473,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Guardrails ── -->
 <div id="tab-guardrails" class="tab-content">
-  <div class="page-header" style="border-left-color:#f97316">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🔒</div>
     <div><div class="page-header-title">Guardrails & Safety Controls</div><div class="page-header-desc">Define rules that keep your AI agents operating safely. High-risk actions require manual approval before execution.</div></div>
-    <span class="page-header-badge" style="color:#f97316">Security Layer</span>
+    <span class="page-header-badge" style="color:var(--gold)">Security Layer</span>
   </div>
   <!-- Pending approvals notification banner -->
   <div id="guardrails-notification-banner" style="display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(239,68,68,.1));border:1px solid rgba(245,158,11,.5);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.88em;color:var(--warning);font-weight:600;animation:blink 1.5s infinite"></div>
@@ -5773,10 +5652,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Memory ── -->
 <div id="tab-memory" class="tab-content">
-  <div class="page-header" style="border-left-color:#e879f9">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🧠</div>
     <div><div class="page-header-title">Memory & Knowledge Base</div><div class="page-header-desc">Client contacts, conversation history, and contextual knowledge stored across all AI sessions.</div></div>
-    <span class="page-header-badge" style="color:#e879f9">Persistent Memory</span>
+    <span class="page-header-badge" style="color:var(--gold)">Persistent Memory</span>
   </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:start">
     <!-- Left: Client Memory with search -->
@@ -5855,10 +5734,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Integrations ── -->
 <div id="tab-integrations" class="tab-content">
-  <div class="page-header" style="border-left-color:#a78bfa">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🔌</div>
     <div><div class="page-header-title">Integrations & Connections</div><div class="page-header-desc">Connect your tools and services. The AI uses these integrations to take real actions across your business.</div></div>
-    <span class="page-header-badge" style="color:#a78bfa">Connected Services</span>
+    <span class="page-header-badge" style="color:var(--gold)">Connected Services</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon" style="background:linear-gradient(135deg,rgba(167,139,250,.2),rgba(167,139,250,.05));color:#a78bfa">🔌</div><div class="stat-body"><div class="val" id="intg-stat-total">–</div><div class="lbl">Total Services</div></div></div>
@@ -5880,6 +5759,7 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<script>
 // ── Nav scroll arrows ──
 /* ── Group ↔ Tab navigation ── */
 const _TAB_TO_GROUP = {
@@ -5887,11 +5767,16 @@ const _TAB_TO_GROUP = {
   chat:'intel', history:'intel',
   tasks:'operations', swarm:'operations', 'live-office':'operations', scheduler:'operations',
   workers:'forces', skills:'forces', improvements:'forces', commands:'forces',
-  metrics:'analytics', budget:'analytics',
+  metrics:'analytics', budget:'analytics', roi:'analytics',
   templates:'library', artifacts:'library', memory:'library',
   guardrails:'systems', integrations:'systems', options:'systems', org:'systems',
   goals:'systems', tickets:'systems', boardroom:'systems', companies:'systems',
-  blacklight:'power', ascend:'power'
+  blacklight:'power', ascend:'power',
+  crm:'power', 'email-mkt':'power', 'email-marketing':'power', meetings:'power',
+  social:'power', briefing:'power', invoicing:'power', financial:'power',
+  'analytics-bi':'power', workflows:'power', team:'power', 'support-desk':'power',
+  'website-builder':'power', competitors:'power', brand:'power', health:'power',
+  export:'power', 'content-calendar':'power'
 };
 
 function switchGroup(group, btn) {
@@ -5948,7 +5833,7 @@ function switchTab(tab, btn) {
   const subNav = document.getElementById('subnav-' + group);
   if (subNav) subNav.classList.add('active');
   currentTab = tab;
-  if (tab === 'dashboard') loadDashboard();
+  if (tab === 'dashboard') { loadDashboard(); if (typeof loadSysRes === 'function') loadSysRes(); }
   if (tab === 'chat') loadChatLog();
   if (tab === 'scheduler') loadSchedules();
   if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm().then(renderSwarmAgentGrid); else renderSwarmAgentGrid(); }
@@ -5975,12 +5860,13 @@ function switchTab(tab, btn) {
   if (tab === 'companies') loadCompanies();
   if (tab === 'artifacts') { loadArtifacts(); loadSessions(); }
 }
+</script>
 <!-- ── History ── -->
 <div id="tab-history" class="tab-content">
-  <div class="page-header" style="border-left-color:#7dd3fc">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🕐</div>
     <div><div class="page-header-title">Activity History</div><div class="page-header-desc">A persistent, filterable timeline of all agent activities, security checks, and system events from all time.</div></div>
-    <span class="page-header-badge" style="color:#7dd3fc">Full Audit Log</span>
+    <span class="page-header-badge" style="color:var(--gold)">Full Audit Log</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -6034,10 +5920,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Options ── -->
 <div id="tab-options" class="tab-content">
-  <div class="page-header" style="border-left-color:#94a3b8">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">⚙️</div>
     <div><div class="page-header-title">Settings & Configuration</div><div class="page-header-desc">API keys, agent behavior, security settings, and system preferences. Changes take effect immediately.</div></div>
-    <span class="page-header-badge" style="color:#94a3b8">System Config</span>
+    <span class="page-header-badge" style="color:var(--gold)">System Config</span>
   </div>
   <div class="grid2">
 
@@ -6358,70 +6244,39 @@ function switchTab(tab, btn) {
 <!-- ── ASCEND FORGE ── -->
 <div id="tab-ascend" class="tab-content" style="width:100%;box-sizing:border-box">
 
-  <!-- Header banner -->
-  <div style="background:linear-gradient(135deg,#0a1628 0%,#1a0e05 50%,#0f2240 100%);border:1px solid #d97706;border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(217,119,6,.12),0 8px 32px rgba(0,0,0,.6)">
-    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(217,119,6,.2) 0%,transparent 60%);pointer-events:none"></div>
-    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(251,191,36,.5),transparent)"></div>
-    <div style="font-size:2.6rem;line-height:1;animation:forgeFire 2s ease-in-out infinite;position:relative;z-index:1">🔥</div>
-    <div style="flex:1;position:relative;z-index:1">
-      <div style="font-size:1.3rem;font-weight:800;color:#fef3c7;letter-spacing:.1em;text-shadow:0 0 20px rgba(251,191,36,.4)">ASCEND FORGE</div>
-      <div style="font-size:.83em;color:#f59e0b;margin-top:3px;font-weight:500">Top-layer self-improver — continuously improves the system safely</div>
-    </div>
-    <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
-      <div id="af-pulse" style="width:12px;height:12px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
-      <span id="af-mode-badge" style="font-size:.78em;font-weight:800;padding:4px 12px;border-radius:20px;background:linear-gradient(135deg,#b45309,#d97706);color:#fff1c6;letter-spacing:.08em;box-shadow:0 0 12px rgba(217,119,6,.4)">AUTO</span>
-    </div>
-  </div>
-
   <style>
   @keyframes afPulse{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.5)}50%{box-shadow:0 0 0 8px rgba(217,119,6,0)}}
   @keyframes forgeFire{0%,100%{filter:drop-shadow(0 0 6px #f59e0b);transform:scale(1)}25%{filter:drop-shadow(0 0 16px #fbbf24);transform:scale(1.05)}50%{filter:drop-shadow(0 0 8px #f97316);transform:scale(.97)}75%{filter:drop-shadow(0 0 20px #f59e0b);transform:scale(1.03)}}
-  .af-mode-btn{padding:8px 18px;border-radius:8px;font-size:.82em;font-weight:700;cursor:pointer;transition:all .2s;font-family:inherit;letter-spacing:.03em}
-  .af-mode-btn.active{background:linear-gradient(135deg,#92400e,#b45309,#d97706);color:#fff;border:1px solid #f59e0b;box-shadow:0 0 16px rgba(217,119,6,.4)}
-  .af-mode-btn:not(.active){background:rgba(217,119,6,.08);color:#f59e0b;border:1px solid rgba(217,119,6,.3)}
-  .af-mode-btn:not(.active):hover{background:rgba(217,119,6,.15);border-color:rgba(217,119,6,.5)}
-  .af-stat-card{background:linear-gradient(135deg,rgba(120,53,15,.2),rgba(217,119,6,.08));border:1px solid rgba(217,119,6,.25);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:12px;transition:all .25s}
-  .af-stat-card:hover{border-color:rgba(251,191,36,.4);box-shadow:0 0 20px rgba(217,119,6,.15)}
-  @media(prefers-reduced-motion:reduce){.af-mode-btn{transition:none}.af-stat-card{transition:none}}
+  .af-mode-btn{padding:8px 20px;border-radius:8px;font-size:.82em;font-weight:700;cursor:pointer;transition:all .25s;font-family:inherit;letter-spacing:.05em;text-transform:uppercase}
+  .af-mode-btn.active{background:linear-gradient(135deg,#92400e,#b45309,#d97706);color:#fff1c6;border:1px solid #f59e0b;box-shadow:0 0 18px rgba(217,119,6,.5),0 4px 12px rgba(0,0,0,.4)}
+  .af-mode-btn:not(.active){background:rgba(217,119,6,.06);color:#d97706;border:1px solid rgba(217,119,6,.25)}
+  .af-mode-btn:not(.active):hover{background:rgba(217,119,6,.14);border-color:rgba(217,119,6,.55);color:#f59e0b;transform:translateY(-1px)}
+  .af-stat-card{background:linear-gradient(135deg,rgba(120,53,15,.18),rgba(10,5,0,.9));border:1px solid rgba(217,119,6,.22);border-radius:var(--radius);padding:18px 20px;display:flex;align-items:center;gap:14px;transition:all .25s;cursor:default}
+  .af-stat-card:hover{border-color:rgba(251,191,36,.45);box-shadow:0 0 24px rgba(217,119,6,.18),0 4px 20px rgba(0,0,0,.4);transform:translateY(-2px)}
+  .af-patch-card{border:1px solid rgba(217,119,6,.2);border-radius:10px;padding:14px 16px;margin-bottom:10px;background:linear-gradient(135deg,rgba(120,53,15,.1),rgba(10,5,0,.85));transition:all .2s}
+  .af-patch-card:hover{border-color:rgba(251,191,36,.4);box-shadow:0 0 16px rgba(217,119,6,.12)}
+  .af-log-card{border:1px solid rgba(30,20,5,.8);border-radius:10px;padding:12px 16px;margin-bottom:8px;background:rgba(10,5,0,.6);transition:all .2s;border-left:3px solid rgba(217,119,6,.3)}
+  .af-log-card:hover{background:rgba(20,10,0,.8);border-left-color:#d97706}
+  .af-risk-badge{display:inline-block;font-size:.68em;font-weight:800;padding:2px 9px;border-radius:12px;letter-spacing:.06em;text-transform:uppercase}
+  @media(prefers-reduced-motion:reduce){.af-mode-btn,.af-stat-card{transition:none}}
   </style>
 
-function _renderDashAgentMap(agents, statusData) {
-  const el = document.getElementById('dash-agent-map');
-  if (!el) return;
-  const activeAgents = new Set(statusData?.active_agents || []);
-  if (!agents.length) {
-    el.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="icon">🤖</div><p style="font-size:.84em">No agents loaded. Start agents from the button above.</p></div>';
-    return;
-  }
-  const agentEmoji = {
-    'task-orchestrator':'🎯','lead-generator':'🎯','lead-hunter':'🎯','offer-agent':'📧',
-    'company-builder':'🏢','brand-strategist':'🎨','finance-wizard':'💰','growth-hacker':'📈',
-    'social-media-manager':'📱','paid-media-specialist':'📣','qualification-agent':'🔍',
-    'follow-up-agent':'🔄','appointment-setter':'📅','ui-designer':'🎨','web-researcher':'🌐',
-    'engineering-assistant':'💻','ecom-agent':'🛒','chatbot-builder':'🤖','creator-agency':'✍️',
-    'recruiter':'👔','hr-manager':'👔','project-manager':'📋','finance':'💰',
-    'newsletter-bot':'📰','faceless-video':'🎬','course-creator':'📚',
-  };
-  const taskLabels = {
-    'task-orchestrator':'Routing tasks','lead-generator':'Finding leads','offer-agent':'Writing outreach',
-    'company-builder':'Building strategy','brand-strategist':'Crafting brand','finance-wizard':'Analyzing finances',
-    'growth-hacker':'Growing traffic','social-media-manager':'Posting content','paid-media-specialist':'Optimizing ads',
-    'web-researcher':'Researching web','engineering-assistant':'Writing code','ecom-agent':'Managing store',
-    'follow-up-agent':'Following up leads','project-manager':'Managing tasks',
-  };
-  el.innerHTML = agents.map(a => {
-    const isRunning = a.running;
-    const isActive = activeAgents.has(a.id);
-    const emoji = agentEmoji[a.id] || '🤖';
-    const task = isActive ? (taskLabels[a.id] || 'Working on task') : (isRunning ? 'Ready — standing by' : 'Stopped');
-    const dotColor = isActive ? 'var(--gold)' : (isRunning ? 'var(--success)' : 'rgba(148,163,184,.3)');
-    const cardBg = isActive ? 'rgba(212,175,55,.07)' : (isRunning ? 'rgba(16,185,129,.04)' : 'transparent');
-    const cardBorder = isActive ? 'rgba(212,175,55,.4)' : (isRunning ? 'rgba(16,185,129,.2)' : 'rgba(148,163,184,.12)');
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid ${cardBorder};background:${cardBg};transition:all .2s;cursor:pointer" title="${a.id}" onclick="switchTab('live-office',null)">
-      <div style="font-size:1.2em;flex-shrink:0">${emoji}</div>
-      <div style="min-width:0;flex:1">
-        <div style="font-size:.8em;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.id)}</div>
-        <div style="font-size:.7em;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(task)}</div>
+  <!-- Header banner -->
+  <div style="background:linear-gradient(135deg,#0a0802 0%,#1a0e05 50%,#0d0a00 100%);border:1px solid rgba(217,119,6,.55);border-radius:14px;padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(217,119,6,.14),0 8px 40px rgba(0,0,0,.7)">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 15% 50%,rgba(217,119,6,.22) 0%,transparent 55%);pointer-events:none"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(251,191,36,.6),transparent)"></div>
+    <div style="font-size:2.8rem;line-height:1;animation:forgeFire 2s ease-in-out infinite;position:relative;z-index:1">🔥</div>
+    <div style="flex:1;position:relative;z-index:1">
+      <div style="font-size:1.45rem;font-weight:800;color:#fef3c7;letter-spacing:.12em;text-shadow:0 0 28px rgba(251,191,36,.5),0 2px 4px rgba(0,0,0,.8);font-family:var(--display)">ASCEND FORGE</div>
+      <div style="font-size:.82em;color:#d97706;margin-top:4px;font-weight:500;letter-spacing:.02em">Top-layer self-improver — continuously improves the system safely</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
+      <div id="af-pulse" style="width:11px;height:11px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
+      <span id="af-mode-badge" style="font-size:.75em;font-weight:800;padding:4px 14px;border-radius:20px;background:linear-gradient(135deg,#92400e,#b45309,#d97706);color:#fff1c6;letter-spacing:.1em;text-transform:uppercase;box-shadow:0 0 14px rgba(217,119,6,.45)">AUTO</span>
+      <button onclick="switchTab('chat',null)" style="padding:6px 14px;background:rgba(245,196,0,.08);border:1px solid rgba(245,196,0,.25);border-radius:8px;color:var(--gold);font-size:.75em;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.04em;transition:all .2s" onmouseenter="this.style.background='rgba(245,196,0,.16)';this.style.borderColor='rgba(245,196,0,.5)'" onmouseleave="this.style.background='rgba(245,196,0,.08)';this.style.borderColor='rgba(245,196,0,.25)'">← Overview</button>
+    </div>
+  </div>
+
   <!-- ── Ascend Forge Task Composer ── -->
   <div class="card" style="margin-bottom:18px;border:2px solid rgba(251,191,36,.35);background:linear-gradient(135deg,rgba(120,53,15,.18),rgba(10,5,0,.95));box-shadow:0 0 40px rgba(217,119,6,.12)">
     <div class="card-header">
@@ -6438,6 +6293,7 @@ function _renderDashAgentMap(agents, statusData) {
         onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();afSendTask();}"></textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button onclick="afSendTask()" style="padding:10px 24px;background:linear-gradient(135deg,#92400e,#d97706,#f59e0b);border:none;border-radius:10px;color:#fff;font-weight:800;font-size:.9em;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 16px rgba(217,119,6,.3);letter-spacing:.03em" onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 24px rgba(217,119,6,.5)'" onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(217,119,6,.3)'">🔥 Send to Ascend Forge <kbd style="background:rgba(255,255,255,.15);padding:1px 5px;border-radius:4px;font-size:.75em">Ctrl+↵</kbd></button>
+        <button onclick="afAnalyzeOnly()" class="btn btn-ghost btn-sm" style="border-color:rgba(251,191,36,.45);color:#fbbf24;font-weight:700" title="Analyze the prompt and show a structured plan — without queuing any patches">🗺 Plan Only</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('optimize all AI prompts for higher revenue and better output quality')">💰 Optimize Prompts</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('scan system for improvements and automatically apply all low-risk patches')">🔍 Auto-Improve</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('analyze all agent modules and improve their performance and reliability')">🤖 Boost Agents</button>
@@ -6453,7 +6309,7 @@ function _renderDashAgentMap(agents, statusData) {
         <div id="af-task-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#92400e,#d97706,#fbbf24);border-radius:100px;transition:width .4s ease;box-shadow:0 0 10px rgba(251,191,36,.4)"></div>
       </div>
       <div id="af-task-desc" style="margin-top:8px;font-size:.8em;color:var(--text-muted);font-style:italic"></div>
-      <div id="af-task-result" style="margin-top:8px;font-size:.84em;color:#4ade80;display:none"></div>
+      <div id="af-task-result" style="margin-top:8px;font-size:.84em;color:#4ade80;display:none;white-space:pre-wrap;line-height:1.65"></div>
     </div>
   </div>
 
@@ -6506,48 +6362,61 @@ function _renderDashAgentMap(agents, statusData) {
   </div>
 
   <!-- Pending patches -->
-  <div class="card" style="margin-bottom:18px">
+  <div class="card" style="margin-bottom:18px;border:1px solid rgba(217,119,6,.22);background:linear-gradient(135deg,rgba(120,53,15,.1),var(--surface))">
     <div class="card-header">
-      <div class="card-title"><span class="icon">⏳</span> Pending Patches</div>
-      <button class="btn btn-ghost btn-sm" onclick="afLoadPatches()">↻ Refresh</button>
+      <div class="card-title"><span style="color:#f59e0b">⏳</span> Pending Patches</div>
+      <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#d97706" onclick="afLoadPatches()">↻ Refresh</button>
     </div>
-    <div id="af-patches-list" style="font-size:.84em">
-      <div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>
+    <div id="af-patches-list">
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:12px;opacity:.6">
+        <div style="font-size:2.2em">📋</div>
+        <div style="font-size:.88em;color:var(--text-muted);text-align:center">No pending patches — run a scan to find improvements.</div>
+        <button onclick="afScan()" style="margin-top:4px;padding:7px 18px;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.35);border-radius:8px;color:#d97706;font-size:.8em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(217,119,6,.22)'" onmouseleave="this.style.background='rgba(217,119,6,.12)'">🔍 Run Scan Now</button>
+      </div>
     </div>
   </div>
 
-  <!-- Activity feed -->
-  <div class="card" style="margin-bottom:18px;border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.08),var(--surface2))">
-    <div class="card-header">
-      <div class="card-title"><span style="color:#f59e0b">📡</span> Activity Feed</div>
-      <button class="btn btn-ghost btn-sm" onclick="afRefresh()">↻ Refresh</button>
-    </div>
-    <div id="af-activity-log" style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace;font-size:.77em;background:rgba(10,5,0,.9);border:1px solid rgba(217,119,6,.2);border-radius:8px;padding:14px;height:200px;overflow-y:auto;color:#fef3c7;line-height:1.7;box-shadow:inset 0 0 40px rgba(120,53,15,.3)">
-      <span style="color:#6b7280">Waiting for activity…</span>
-    </div>
-  </div>
+  <!-- Two-column bottom section -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:0">
 
-  <!-- Change history -->
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title"><span class="icon">🕐</span> Change History</div>
-      <button class="btn btn-ghost btn-sm" onclick="afLoadChangelog()">↻ Refresh</button>
+    <!-- Activity feed -->
+    <div class="card" style="border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.08),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span style="color:#f59e0b">📡</span> Activity Feed</div>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#d97706" onclick="afRefresh()">↻ Refresh</button>
+      </div>
+      <div id="af-activity-log" style="font-family:var(--mono);font-size:.75em;background:rgba(6,3,0,.92);border:1px solid rgba(217,119,6,.18);border-radius:8px;padding:14px;height:240px;overflow-y:auto;color:#fef3c7;line-height:1.75;box-shadow:inset 0 0 40px rgba(120,53,15,.25)">
+        <div style="display:flex;align-items:center;gap:8px;color:rgba(107,114,128,.7);padding:4px 0">
+          <span style="width:6px;height:6px;border-radius:50%;background:rgba(107,114,128,.4);display:inline-block;flex-shrink:0"></span>
+          Waiting for activity…
+        </div>
+      </div>
     </div>
-    <div id="af-changelog" style="font-size:.84em">
-      <div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>
-    </div>
-  </div>
 
-</div>
+    <!-- Change history -->
+    <div class="card" style="border:1px solid rgba(217,119,6,.2);background:linear-gradient(135deg,rgba(120,53,15,.08),var(--surface2))">
+      <div class="card-header">
+        <div class="card-title"><span style="color:#f59e0b">🕐</span> Change History</div>
+        <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#d97706" onclick="afLoadChangelog()">↻ Refresh</button>
+      </div>
+      <div id="af-changelog" style="max-height:240px;overflow-y:auto">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:10px;opacity:.55">
+          <div style="font-size:2em">📚</div>
+          <div style="font-size:.84em;color:var(--text-muted)">No history yet.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
 
 </div>
 
 <!-- ── CRM ── -->
 <div id="tab-crm" class="tab-content">
-  <div class="page-header" style="border-left-color:#f59e0b">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎯</div>
     <div><div class="page-header-title">Lead CRM</div><div class="page-header-desc">Manage your sales pipeline from first contact to closed deal. Score leads, track stages, and schedule follow-ups.</div></div>
-    <span class="page-header-badge" style="color:#f59e0b">Sales Pipeline</span>
+    <span class="page-header-badge" style="color:var(--gold)">Sales Pipeline</span>
   </div>
   <div class="grid-stat" id="crm-pipeline-stats">
     <div class="stat-card"><div class="stat-icon yellow">🆕</div><div class="stat-body"><div class="val" id="crm-stat-new">–</div><div class="lbl">New Leads</div></div></div>
@@ -6592,11 +6461,11 @@ function _renderDashAgentMap(agents, statusData) {
 </div>
 
 <!-- ── Email Marketing ── -->
-<div id="tab-email-marketing" class="tab-content">
-  <div class="page-header" style="border-left-color:#06b6d4">
+<div id="tab-email-mkt" class="tab-content">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📧</div>
     <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create and manage email campaigns, multi-step sequences, and track performance metrics.</div></div>
-    <span class="page-header-badge" style="color:#06b6d4">Campaigns</span>
+    <span class="page-header-badge" style="color:var(--gold)">Campaigns</span>
   </div>
   <div class="grid-stat">
     <div class="stat-card"><div class="stat-icon blue">📧</div><div class="stat-body"><div class="val" id="em-stat-total">–</div><div class="lbl">Total Campaigns</div></div></div>
@@ -6661,10 +6530,10 @@ function _renderDashAgentMap(agents, statusData) {
 
 <!-- ── Meetings ── -->
 <div id="tab-meetings" class="tab-content">
-  <div class="page-header" style="border-left-color:#a78bfa">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🗓️</div>
     <div><div class="page-header-title">Meeting Intelligence</div><div class="page-header-desc">Record meetings, AI-summarize transcripts, extract action items, and generate follow-up emails automatically.</div></div>
-    <span class="page-header-badge" style="color:#a78bfa">Meetings</span>
+    <span class="page-header-badge" style="color:var(--gold)">Meetings</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -6710,10 +6579,10 @@ function _renderDashAgentMap(agents, statusData) {
 
 <!-- ── Social Media Scheduler ── -->
 <div id="tab-social" class="tab-content">
-  <div class="page-header" style="border-left-color:#ec4899">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📱</div>
     <div><div class="page-header-title">Social Media Scheduler</div><div class="page-header-desc">Schedule posts across all platforms, generate AI content, and track your publishing activity.</div></div>
-    <span class="page-header-badge" style="color:#ec4899">Social</span>
+    <span class="page-header-badge" style="color:var(--gold)">Social</span>
   </div>
   <div class="grid-stat">
     <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="soc-stat-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
@@ -6782,15 +6651,15 @@ function _renderDashAgentMap(agents, statusData) {
 
 <!-- ── CEO Briefing ── -->
 <div id="tab-briefing" class="tab-content">
-  <div class="page-header" style="border-left-color:#6366f1">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📰</div>
     <div><div class="page-header-title">CEO Daily Briefing</div><div class="page-header-desc">AI-generated executive briefings with key metrics, pipeline status, revenue, and action items for the day.</div></div>
-    <span class="page-header-badge" style="color:#6366f1">Executive</span>
+    <span class="page-header-badge" style="color:var(--gold)">Executive</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
       <!-- Today's briefing -->
-      <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+      <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.06),var(--surface2))">
         <div class="card-header">
           <div class="card-title"><span class="icon">📰</span> Today's Briefing</div>
           <div style="display:flex;gap:6px">
@@ -6816,10 +6685,10 @@ function _renderDashAgentMap(agents, statusData) {
 
 <!-- ── Financial Tools ── -->
 <div id="tab-financial" class="tab-content">
-  <div class="page-header" style="border-left-color:#10b981">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💳</div>
     <div><div class="page-header-title">Financial Tools</div><div class="page-header-desc">Create and manage invoices, quotes, track expenses, and view your P&amp;L in one place.</div></div>
-    <span class="page-header-badge" style="color:#10b981">Finance</span>
+    <span class="page-header-badge" style="color:var(--gold)">Finance</span>
   </div>
   <!-- Sub-tab nav -->
   <div style="display:flex;gap:6px;margin-bottom:16px">
@@ -6931,10 +6800,10 @@ function _renderDashAgentMap(agents, statusData) {
 
 <!-- ── Competitors ── -->
 <div id="tab-competitors" class="tab-content">
-  <div class="page-header" style="border-left-color:#f43f5e">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🕵️</div>
     <div><div class="page-header-title">Competitor Watch</div><div class="page-header-desc">Track and analyze your competitive landscape. AI-powered SWOT analysis and competitive intelligence alerts.</div></div>
-    <span class="page-header-badge" style="color:#f43f5e">Intelligence</span>
+    <span class="page-header-badge" style="color:var(--gold)">Intelligence</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -6978,10 +6847,10 @@ function _renderDashAgentMap(agents, statusData) {
 
 <!-- ── Content Calendar ── -->
 <div id="tab-content-calendar" class="tab-content">
-  <div class="page-header" style="border-left-color:#f97316">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🗃️</div>
     <div><div class="page-header-title">Content Calendar</div><div class="page-header-desc">Plan and track your content across all platforms. AI generates complete 30-day content calendars tailored to your niche.</div></div>
-    <span class="page-header-badge" style="color:#f97316">Content</span>
+    <span class="page-header-badge" style="color:var(--gold)">Content</span>
   </div>
   <div class="grid-stat">
     <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="cc-stat-total">–</div><div class="lbl">Total Entries</div></div></div>
@@ -7216,6 +7085,10 @@ function _renderDashAgentMap(agents, statusData) {
 let currentTab = 'dashboard';
 const _startTime = Date.now();
 
+/* Tab animation durations — must match CSS */
+const TAB_LEAVE_MS = 200;   /* matches tabLeave .2s */
+const TAB_ENTER_DELAY_MS = 80; /* stagger: let leave start before enter */
+
 function switchToChatTab() {
   const btn = document.getElementById('nav-btn-chat');
   if (btn) btn.click();
@@ -7246,15 +7119,43 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 
-function switchTab(tab, btn) {
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + tab).classList.add('active');
-  btn.classList.add('active');
-  // Scroll active tab into view
-  btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
+function _switchTabBase(tab, btn) {
+  // Animate out current active tab
+  const prevTab = document.querySelector('.tab-content.active');
+  const isNewTab = prevTab && prevTab.id !== 'tab-' + tab;
+  if (isNewTab) {
+    prevTab.classList.add('tab-leaving');
+    setTimeout(() => { prevTab.classList.remove('active', 'tab-leaving'); }, TAB_LEAVE_MS);
+  } else {
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  }
+  // Animate in new tab (slight delay so leave animation starts first)
+  setTimeout(() => {
+    const tabEl = document.getElementById('tab-' + tab);
+    if (tabEl) tabEl.classList.add('active');
+  }, isNewTab ? TAB_ENTER_DELAY_MS : 0);
+  // Sync primary group nav button
+  const group = _TAB_TO_GROUP[tab] || 'overview';
+  document.querySelectorAll('.nav-group-btn').forEach(b => b.classList.remove('active'));
+  const groupBtn = document.querySelector('.nav-group-btn[data-group="' + group + '"]');
+  if (groupBtn) groupBtn.classList.add('active');
+  // Sync sub-nav visibility
+  document.querySelectorAll('.sub-nav').forEach(s => s.classList.remove('active'));
+  const subNav = document.getElementById('subnav-' + group);
+  if (subNav) subNav.classList.add('active');
+  // Sync sub-nav active button
+  document.querySelectorAll('.sub-nav button').forEach(b => b.classList.remove('active'));
+  if (btn && btn.classList && !btn.classList.contains('nav-group-btn')) {
+    btn.classList.add('active');
+    btn.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
+  } else {
+    // Auto-find the matching sub-nav button when btn is null or a group button
+    const safeTab = (tab in _TAB_TO_GROUP) ? CSS.escape(tab) : '';
+    const autoBtn = safeTab && subNav ? subNav.querySelector('button[onclick*="' + safeTab + '"]') : null;
+    if (autoBtn) autoBtn.classList.add('active');
+  }
   currentTab = tab;
-  if (tab === 'dashboard') loadDashboard();
+  if (tab === 'dashboard') { loadDashboard(); if (typeof loadSysRes === 'function') loadSysRes(); }
   if (tab === 'chat') loadChatLog();
   if (tab === 'scheduler') loadSchedules();
   if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm().then(renderSwarmAgentGrid); else renderSwarmAgentGrid(); }
@@ -7493,6 +7394,7 @@ async function loadDashboard() {
   if (!d || d.error || !Array.isArray(d.agents)) {
     animateCount('stat-running', 0);
     animateCount('stat-total', 0);
+    animateCount('stat-offline', 0);
     document.getElementById('header-sub').textContent = 'System offline';
     const healthBar = document.getElementById('health-bar');
     const sysRing = document.getElementById('sys-ring');
@@ -7510,19 +7412,27 @@ async function loadDashboard() {
   const agents = normalizeAgents(d);
   const running = agents.filter(a => a.running).length;
   const total = agents.length;
+  const offline = total - running;
 
   // Animate stat numbers
   animateCount('stat-running', running);
   animateCount('stat-total', total);
-  const modeCapacity = {starter: 3, business: 8, power: 56};
+  animateCount('stat-offline', offline);
+  // Update SYSTEM ONLINE banner
+  const ovBannerMode = document.getElementById('ov-banner-mode');
+  const ovBannerAgents = document.getElementById('ov-banner-agents');
+  if (ovBannerMode && d.mode) ovBannerMode.textContent = d.mode.toUpperCase() + ' MODE';
+  if (ovBannerAgents) ovBannerAgents.textContent = `${running} / ${total} Agents Active`;
+  const modeCapacity = {starter: 3, business: 15, power: 74};
   const capacity = modeCapacity[d.mode] || total;
   const totalSubEl = document.getElementById('stat-total-sub');
   if (totalSubEl && d.mode) totalSubEl.textContent = `${d.mode} mode · ${capacity} max`;
-  const modeLabel = d.mode ? ` · ${d.mode}` : '';
+  const offlineSubEl = document.getElementById('stat-offline-sub');
+  if (offlineSubEl) offlineSubEl.textContent = total > 0 ? (offline > 0 ? `${Math.round(offline/total*100)}% idle` : 'All running ✓') : '';
   const modeColors = {starter:'#34d399',business:'#D4AF37',power:'#c084fc'};
   const mc = modeColors[d.mode] || 'var(--gold)';
   document.getElementById('header-sub').innerHTML =
-    `${running}/${total} agents running` +
+    `${running}/${capacity} agents running` +
     (d.mode ? ` <span style="background:${mc}22;color:${mc};border:1px solid ${mc}44;border-radius:8px;padding:1px 8px;font-size:.8em;font-weight:700;margin-left:4px">${d.mode.toUpperCase()}</span>` : '');
 
   // Update system control hero
@@ -7530,28 +7440,31 @@ async function loadDashboard() {
   const healthBar = document.getElementById('health-bar');
   const sysRing = document.getElementById('sys-ring');
   const sysControlSub = document.getElementById('sys-control-sub');
-  healthBar.style.width = pct + '%';
-  healthBar.className = 'health-bar-fill' + (pct < 40 ? ' danger' : pct < 70 ? ' warn' : '');
-  document.getElementById('health-label-right').textContent = pct + '%';
-  document.getElementById('health-label-left').textContent = running + ' / ' + total + ' running';
+  const healthLabelRight = document.getElementById('health-label-right');
+  const healthLabelLeft = document.getElementById('health-label-left');
+  if (healthBar) { healthBar.style.width = pct + '%'; healthBar.className = 'health-bar-fill' + (pct < 40 ? ' danger' : pct < 70 ? ' warn' : ''); }
+  if (healthLabelRight) healthLabelRight.textContent = pct + '%';
+  if (healthLabelLeft) healthLabelLeft.textContent = running + ' / ' + total + ' running';
   if (pct === 0 && total > 0) {
-    sysRing.classList.add('offline');
-    sysControlSub.textContent = 'All agents stopped — click Start All to launch';
+    if (sysRing) sysRing.classList.add('offline');
+    if (sysControlSub) sysControlSub.textContent = 'All agents stopped — click Start All to launch';
   } else if (pct === 100) {
-    sysRing.classList.remove('offline');
-    sysControlSub.textContent = 'All systems operational ✓';
+    if (sysRing) sysRing.classList.remove('offline');
+    if (sysControlSub) sysControlSub.textContent = 'All systems operational ✓';
   } else if (total === 0) {
-    sysRing.classList.add('offline');
-    sysControlSub.textContent = 'No agent state data yet — start agents first';
+    if (sysRing) sysRing.classList.add('offline');
+    if (sysControlSub) sysControlSub.textContent = 'No agent state data yet — start agents first';
   } else {
-    sysRing.classList.remove('offline');
-    sysControlSub.textContent = `${running} of ${total} agents active`;
+    if (sysRing) sysRing.classList.remove('offline');
+    if (sysControlSub) sysControlSub.textContent = `${running} of ${total} agents active`;
   }
 
   // Uptime
   const secs = Math.floor((Date.now() - _startTime) / 1000);
-  document.getElementById('stat-uptime').textContent =
-    secs < 60 ? secs + 's' : secs < 3600 ? Math.floor(secs/60) + 'm' : Math.floor(secs/3600) + 'h';
+  const uptimeStr = secs < 60 ? secs + 's' : secs < 3600 ? Math.floor(secs/60) + 'm' : Math.floor(secs/3600) + 'h';
+  document.getElementById('stat-uptime').textContent = uptimeStr;
+  const ovBannerUptime = document.getElementById('ov-banner-uptime');
+  if (ovBannerUptime) ovBannerUptime.textContent = 'Uptime: ' + uptimeStr;
 
   // Gateway status (try to ping)
   fetch('http://localhost:18789', {mode:'no-cors',signal:AbortSignal.timeout(1500)})
@@ -8579,7 +8492,7 @@ function renderImprovements() {
 
   const priorityColors = {critical:'#ef4444', high:'#f59e0b', medium:'#eab308', low:'#10b981'};
   const priorityIcons = {critical:'🔴', high:'🟠', medium:'🟡', low:'🟢'};
-  const statusColors = {pending:'rgba(245,158,11,.2)', in_progress:'rgba(99,102,241,.2)', approved:'rgba(16,185,129,.2)', completed:'rgba(34,197,94,.2)', rejected:'rgba(239,68,68,.12)'};
+  const statusColors = {pending:'rgba(245,158,11,.2)', in_progress:'rgba(212,175,55,.18)', approved:'rgba(16,185,129,.2)', completed:'rgba(34,197,94,.2)', rejected:'rgba(239,68,68,.12)'};
 
   el.innerHTML = items.map(imp => {
     const priority = imp.priority || 'medium';
@@ -9882,7 +9795,7 @@ function _renderRoiBreakdowns(events) {
             <span style="color:var(--text-muted)">${stats.count}×${stats.value>0?' · €'+stats.value:''}</span>
           </div>
           <div style="height:6px;background:rgba(212,175,55,.12);border-radius:3px;overflow:hidden">
-            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(99,102,241,.8),rgba(139,92,246,.8));border-radius:3px;transition:width .4s"></div>
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(212,175,55,.7),rgba(245,196,0,.9));border-radius:3px;transition:width .4s"></div>
           </div>
         </div>`;
       }).join('');
@@ -9951,8 +9864,8 @@ function renderTemplatesGrid() {
     el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No templates match your filter.</p></div>';
     return;
   }
-  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)',Marketing:'rgba(168,85,247,.15)',Analytics:'rgba(74,222,128,.15)',Research:'rgba(56,189,248,.15)'};
-  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(99,102,241,.3)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)',Marketing:'rgba(168,85,247,.3)',Analytics:'rgba(74,222,128,.3)',Research:'rgba(56,189,248,.3)'};
+  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(212,175,55,.12)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)',Marketing:'rgba(168,85,247,.15)',Analytics:'rgba(74,222,128,.15)',Research:'rgba(56,189,248,.15)'};
+  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(212,175,55,.25)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)',Marketing:'rgba(168,85,247,.3)',Analytics:'rgba(74,222,128,.3)',Research:'rgba(56,189,248,.3)'};
   el.innerHTML = templates.map(t => {
     const col = catColors[t.category] || 'rgba(212,175,55,.1)';
     const bdr = catBorderColors[t.category] || 'rgba(212,175,55,.2)';
@@ -10574,7 +10487,7 @@ async function runSecurityCheck() {
     ok:      'rgba(34,197,94,.15)',
     warning: 'rgba(245,158,11,.15)',
     error:   'rgba(239,68,68,.15)',
-    info:    'rgba(99,102,241,.15)',
+    info:    'rgba(212,175,55,.12)',
   };
   const warnColor = colorMap.warning;
 
@@ -11005,10 +10918,11 @@ async function deleteBotFinal() {
   }
 }
 
-// Auto-refresh dashboard every 30s
-setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
-// Poll guardrails for pending approvals badge (every 60 seconds)
+// Auto-refresh dashboard every 30s (skip when page is hidden)
+setInterval(() => { if (!document.hidden && currentTab === 'dashboard') loadDashboard(); }, 30000);
+// Poll guardrails for pending approvals badge (every 60 seconds, skip when hidden)
 setInterval(() => {
+  if (document.hidden) return;
   api('/api/guardrails').then(d => {
     const pending = (d.pending || []).length;
     const navBadge = document.getElementById('guardrail-pending-badge');
@@ -11218,6 +11132,7 @@ function _updateChatHermesStatus(running) {
 
 // ── ASCEND FORGE JS ───────────────────────────────────────────────────────────
 const RISK_COLORS = {LOW:'#4ade80', MEDIUM:'#fb923c', HIGH:'#ef4444'};
+const RISK_BG    = {LOW:'rgba(74,222,128,.12)', MEDIUM:'rgba(251,146,60,.12)', HIGH:'rgba(239,68,68,.12)'};
 const STATUS_EMOJI = {pending:'⏳', approved:'✅', rejected:'❌', rolled_back:'↩️', failed:'💥'};
 
 async function afRefresh() {
@@ -11232,7 +11147,7 @@ async function afRefresh() {
     set('af-stat-approved', s.patches_approved || 0);
     set('af-stat-rejected', s.patches_rejected || 0);
     set('af-stat-total',    s.total_patches   || 0);
-    // Activity
+    // Activity inline labels
     const act = document.getElementById('af-current-activity');
     if (act) act.textContent = 'Activity: ' + (s.current_activity || 'idle');
     const tgt = document.getElementById('af-current-target');
@@ -11240,23 +11155,25 @@ async function afRefresh() {
     // Highlight active mode button
     ['GENERAL','MONEY','AUTO'].forEach(m => {
       const btn = document.getElementById('af-mode-'+m.toLowerCase());
-      if (btn) {
-        if (s.mode === m) {
-          btn.classList.add('active');
-        } else {
-          btn.classList.remove('active');
-        }
-      }
+      if (btn) { btn.classList.toggle('active', s.mode === m); }
     });
     // Auto-approve toggle
     const aa = document.getElementById('af-auto-approve');
     if (aa) aa.checked = !!s.auto_approve_low;
-    // Activity feed
+    // Activity feed — premium log style
     const logEl = document.getElementById('af-activity-log');
     if (logEl && Array.isArray(s.activity) && s.activity.length) {
+      const levelDot = {warn:'#fb923c', error:'#ef4444', success:'#4ade80'};
+      const levelColor = {warn:'#fb923c', error:'#ef4444', success:'#4ade80'};
       logEl.innerHTML = s.activity.map(e => {
-        const color = e.level==='warn'?'#fb923c':e.level==='error'?'#ef4444':e.level==='success'?'#4ade80':'#c9d1d9';
-        return `<div style="color:${color}">[${(e.ts||'').slice(11,19)}] ${escHtml(e.msg)}</div>`;
+        const dot = levelDot[e.level] || 'rgba(217,119,6,.5)';
+        const col = levelColor[e.level] || '#d4b483';
+        const ts  = (e.ts||'').slice(11,19);
+        return `<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;border-bottom:1px solid rgba(217,119,6,.06)">
+          <span style="width:6px;height:6px;border-radius:50%;background:${dot};margin-top:5px;flex-shrink:0;box-shadow:0 0 5px ${dot}"></span>
+          <span style="color:rgba(217,119,6,.5);flex-shrink:0">${ts}</span>
+          <span style="color:${col};flex:1;word-break:break-word">${escHtml(e.msg)}</span>
+        </div>`;
       }).join('');
       logEl.scrollTop = logEl.scrollHeight;
     }
@@ -11284,24 +11201,31 @@ async function afLoadPatches() {
     const el = document.getElementById('af-patches-list');
     if (!el) return;
     if (!Array.isArray(patches) || !patches.length) {
-      el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No pending patches — run a scan.</p></div>';
+      el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:12px;opacity:.6">
+        <div style="font-size:2.2em">📋</div>
+        <div style="font-size:.88em;color:var(--text-muted);text-align:center">No pending patches — run a scan to find improvements.</div>
+        <button onclick="afScan()" style="margin-top:4px;padding:7px 18px;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.35);border-radius:8px;color:#d97706;font-size:.8em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(217,119,6,.22)'" onmouseleave="this.style.background='rgba(217,119,6,.12)'">🔍 Run Scan Now</button>
+      </div>`;
       return;
     }
-    el.innerHTML = patches.map(p => `
-      <div style="border:1px solid #374151;border-radius:8px;padding:10px 14px;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${RISK_COLORS[p.risk_level]||'#6b7280'};color:#000">${p.risk_level}</span>
-          <span style="font-size:.8em;color:#9ca3af">${p.patch_type}</span>
-          <span style="font-size:.8em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}</span>
+    el.innerHTML = patches.map(p => {
+      const rc = RISK_COLORS[p.risk_level] || '#6b7280';
+      const rb = RISK_BG[p.risk_level]    || 'rgba(107,114,128,.1)';
+      return `<div class="af-patch-card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <span class="af-risk-badge" style="background:${rb};color:${rc};border:1px solid ${rc}40">${escHtml(p.risk_level||'?')}</span>
+          <span style="font-size:.78em;color:#d97706;font-weight:600">${escHtml(p.patch_type||'')}</span>
+          <span style="font-size:.75em;color:rgba(217,119,6,.45);margin-left:auto">${(p.timestamp||'').slice(0,16)}</span>
         </div>
-        <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
-        <div style="font-size:.8em;color:#9ca3af;margin-bottom:6px">${escHtml(p.reason||'')}</div>
-        ${p.diff_preview ? `<details style="margin-bottom:6px"><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-sm" style="background:#15803d;color:#fff" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
-          <button class="btn btn-sm" style="background:#7f1d1d;color:#fff" onclick="afReject('${p.patch_id}')">❌ Reject</button>
+        <div style="font-size:.9em;font-weight:700;color:#fef3c7;margin-bottom:4px">${escHtml(p.description)}</div>
+        <div style="font-size:.79em;color:rgba(217,119,6,.6);margin-bottom:10px;line-height:1.5">${escHtml(p.reason||'')}</div>
+        ${p.diff_preview ? `<details style="margin-bottom:10px"><summary style="font-size:.76em;cursor:pointer;color:rgba(217,119,6,.55);user-select:none">▶ View diff / code changes</summary><pre style="font-size:.73em;background:rgba(6,3,0,.95);border:1px solid rgba(217,119,6,.15);border-radius:6px;padding:10px;overflow-x:auto;color:#c9d1d9;margin-top:6px;line-height:1.5">${escHtml(p.diff_preview)}</pre></details>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button style="padding:6px 16px;background:linear-gradient(135deg,#14532d,#15803d);border:1px solid rgba(74,222,128,.3);border-radius:7px;color:#4ade80;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 12px rgba(74,222,128,.25)'" onmouseleave="this.style.boxShadow=''" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
+          <button style="padding:6px 16px;background:linear-gradient(135deg,#450a0a,#7f1d1d);border:1px solid rgba(239,68,68,.3);border-radius:7px;color:#f87171;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 12px rgba(239,68,68,.2)'" onmouseleave="this.style.boxShadow=''" onclick="afReject('${p.patch_id}')">❌ Reject</button>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } catch(e) { console.warn('afLoadPatches', e); }
 }
 
@@ -11351,26 +11275,29 @@ async function afLoadChangelog() {
     const el = document.getElementById('af-changelog');
     if (!el) return;
     if (!Array.isArray(log) || !log.length) {
-      el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>No history yet.</p></div>';
+      el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:10px;opacity:.55">
+        <div style="font-size:2em">📚</div>
+        <div style="font-size:.84em;color:var(--text-muted)">No history yet.</div>
+      </div>`;
       return;
     }
     el.innerHTML = log.map(p => {
       const emoji = STATUS_EMOJI[p.status] || '?';
-      const riskColor = RISK_COLORS[p.risk_level] || '#6b7280';
-      const appliedAt = p.applied_timestamp ? ` → applied ${p.applied_timestamp.slice(0,16)}` : '';
-      return `
-        <div style="border:1px solid #1f2937;border-radius:8px;padding:10px 14px;margin-bottom:8px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
-            <span style="font-size:1em">${emoji}</span>
-            <span style="font-size:.72em;font-weight:700;padding:2px 8px;border-radius:12px;background:${riskColor};color:#000">${p.risk_level}</span>
-            <span style="font-size:.78em;font-weight:600;color:#e5e7eb">${escHtml(p.patch_id)}</span>
-            <span style="font-size:.75em;color:#6b7280;margin-left:auto">${(p.timestamp||'').slice(0,16)}${appliedAt}</span>
-          </div>
-          <div style="font-weight:600;margin-bottom:2px">${escHtml(p.description)}</div>
-          <div style="font-size:.8em;color:#9ca3af;margin-bottom:4px">${escHtml(p.reason||'')}</div>
-          ${p.diff_preview ? `<details><summary style="font-size:.78em;cursor:pointer;color:#6b7280">View diff / code changes</summary><pre style="font-size:.75em;background:#0d1117;border-radius:6px;padding:8px;overflow-x:auto;color:#c9d1d9;margin-top:4px">${escHtml(p.diff_preview)}</pre></details>` : ''}
-          ${p.status==='approved' ? `<button class="btn btn-sm" style="margin-top:6px;background:#7f1d1d;color:#fff" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
-        </div>`;
+      const rc = RISK_COLORS[p.risk_level] || '#6b7280';
+      const rb = RISK_BG[p.risk_level]    || 'rgba(107,114,128,.08)';
+      const appliedAt = p.applied_timestamp ? `<span style="color:rgba(74,222,128,.6)"> → applied ${p.applied_timestamp.slice(0,16)}</span>` : '';
+      return `<div class="af-log-card">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;flex-wrap:wrap">
+          <span style="font-size:1em;line-height:1">${emoji}</span>
+          <span class="af-risk-badge" style="background:${rb};color:${rc};border:1px solid ${rc}40">${escHtml(p.risk_level||'?')}</span>
+          <span style="font-size:.74em;color:rgba(217,119,6,.55);font-family:var(--mono)">${escHtml((p.patch_id||'').slice(0,14))}</span>
+          <span style="font-size:.73em;color:rgba(217,119,6,.4);margin-left:auto">${(p.timestamp||'').slice(0,16)}${appliedAt}</span>
+        </div>
+        <div style="font-size:.85em;font-weight:700;color:#fef3c7;margin-bottom:3px">${escHtml(p.description)}</div>
+        <div style="font-size:.77em;color:rgba(217,119,6,.55);line-height:1.5;margin-bottom:6px">${escHtml(p.reason||'')}</div>
+        ${p.diff_preview ? `<details style="margin-bottom:6px"><summary style="font-size:.74em;cursor:pointer;color:rgba(217,119,6,.45);user-select:none">▶ View diff</summary><pre style="font-size:.71em;background:rgba(6,3,0,.95);border:1px solid rgba(217,119,6,.12);border-radius:6px;padding:10px;overflow-x:auto;color:#c9d1d9;margin-top:5px;line-height:1.5">${escHtml(p.diff_preview)}</pre></details>` : ''}
+        ${p.status==='approved' ? `<button style="padding:4px 12px;background:rgba(127,29,29,.6);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;font-size:.75em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(127,29,29,.9)'" onmouseleave="this.style.background='rgba(127,29,29,.6)'" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
+      </div>`;
     }).join('');
   } catch(e) { console.warn('afLoadChangelog', e); }
 }
@@ -11387,6 +11314,49 @@ let _afTaskTimer = null;
 function afFillTask(text) {
   const el = document.getElementById('af-task-input');
   if (el) { el.value = text; el.focus(); }
+}
+
+async function afAnalyzeOnly() {
+  const input = document.getElementById('af-task-input');
+  const task = (input?.value || '').trim();
+  if (!task) { toast('Enter a prompt to analyze', 'error'); return; }
+  const panel = document.getElementById('af-task-progress-panel');
+  const stxt  = document.getElementById('af-task-status-text');
+  const pct   = document.getElementById('af-task-pct');
+  const desc  = document.getElementById('af-task-desc');
+  const res   = document.getElementById('af-task-result');
+  if (panel) panel.style.display = 'block';
+  if (stxt)  stxt.textContent = '🗺 Analyzing prompt…';
+  if (pct)   pct.textContent = '…';
+  if (desc)  desc.textContent = task;
+  if (res)   { res.style.display = 'none'; res.textContent = ''; }
+  try {
+    const r = await api('/api/ascend/analyze', {method:'POST', body:{task}});
+    if (!r.ok) { toast(r.detail || 'Analysis failed', 'error'); return; }
+    const plan = r.plan || {};
+    const lines = [];
+    lines.push(`📊 Summary: ${plan.summary || task.slice(0,100)}`);
+    if (plan.phases && plan.phases.length) {
+      lines.push('');
+      lines.push('📋 Plan:');
+      plan.phases.forEach(ph => {
+        lines.push(`  ${ph.name} (Priority: ${ph.priority})`);
+        (ph.items || []).slice(0,5).forEach(it => lines.push(`    • ${it}`));
+      });
+    } else if (plan.actions && plan.actions.length) {
+      lines.push('');
+      lines.push('📋 Planned Actions:');
+      plan.actions.slice(0,8).forEach(a => lines.push(`  • ${a}`));
+    }
+    if (plan.patch_types && plan.patch_types.length) lines.push(`\n🔧 Improvements: ${plan.patch_types.join(', ')}`);
+    if (plan.mentioned_agents && plan.mentioned_agents.length) lines.push(`🤖 Agents: ${plan.mentioned_agents.join(', ')}`);
+    if (plan.mentioned_files && plan.mentioned_files.length) lines.push(`📁 Files: ${plan.mentioned_files.join(', ')}`);
+    lines.push('');
+    lines.push(plan.has_high_risk ? '⚠️ HIGH risk changes detected — review before executing.' : '✅ Plan ready. Click "Send to Ascend Forge" to execute.');
+    if (stxt) stxt.textContent = '🗺 Plan generated';
+    if (pct)  pct.textContent = '100%';
+    if (res) { res.style.display = 'block'; res.style.color = '#fbbf24'; res.textContent = lines.join('\n'); }
+  } catch(e) { toast('Analysis error', 'error'); console.warn('afAnalyzeOnly', e); }
 }
 
 async function afSendTask() {
@@ -11410,7 +11380,7 @@ async function afSendTask() {
   toast('🔥 Task sent to Ascend Forge!');
   if (input) input.value = '';
   if (_afTaskTimer) clearInterval(_afTaskTimer);
-  _afTaskTimer = setInterval(_afPollTaskProgress, 1200);
+  _afTaskTimer = setInterval(_afPollTaskProgress, 2500);
 }
 
 async function _afPollTaskProgress() {
@@ -11452,8 +11422,8 @@ async function _afPollTaskProgress() {
   }
 }
 
-// Auto-poll Ascend Forge progress on the dashboard widget
-setInterval(() => { if (currentTab === 'dashboard') _afPollTaskProgress(); }, 8000);
+// Auto-poll Ascend Forge progress on the dashboard widget (skip when hidden)
+setInterval(() => { if (!document.hidden && currentTab === 'dashboard') _afPollTaskProgress(); }, 8000);
 
 // ── BLACKLIGHT Direct Task Assignment ────────────────────────────────────────
 let _blTaskTimer = null;
@@ -11482,7 +11452,7 @@ async function blSendTask() {
   toast('⚡ BLACKLIGHT launched!');
   if (input) input.value = '';
   if (_blTaskTimer) clearInterval(_blTaskTimer);
-  _blTaskTimer = setInterval(_blPollTaskProgress, 1200);
+  _blTaskTimer = setInterval(_blPollTaskProgress, 2500);
 }
 
 async function _blPollTaskProgress() {
@@ -11632,8 +11602,8 @@ function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Auto-refresh ASCEND FORGE every 15s when tab is active
-setInterval(() => { if (currentTab === 'ascend') { afRefresh(); afLoadPatches(); } }, 15000);
+// Auto-refresh ASCEND FORGE every 15s when tab is active (skip when hidden)
+setInterval(() => { if (!document.hidden && currentTab === 'ascend') { afRefresh(); afLoadPatches(); } }, 15000);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ── BUDGET TAB ──────────────────────────────────────────────────────────────
@@ -12459,8 +12429,9 @@ async function restoreCheckpoint(session_id, checkpoint_id) {
   else toast(r.detail || 'Error', 'error');
 }
 
-// Auto-refresh new tabs every 30s when active
+// Auto-refresh new tabs every 30s when active (skip when page is hidden)
 setInterval(() => {
+  if (document.hidden) return;
   if (currentTab === 'budget') loadBudget();
   if (currentTab === 'boardroom') loadBoardroom();
   if (currentTab === 'tickets') loadTickets();
@@ -13201,10 +13172,9 @@ async function loadBackupsList() {
   </div>`).join('');
 }
 
-// ── Auto-load on tab switch (extend existing switchTab) ───────────
-const _origSwitchTab = switchTab;
+// ── Auto-load on tab switch (extend base switchTab) ───────────
 function switchTab(tab, btn) {
-  _origSwitchTab(tab, btn);
+  _switchTabBase(tab, btn);
   const loaders = {
     'crm': loadCRM,
     'email-mkt': loadEmailCampaigns,
@@ -13257,6 +13227,7 @@ async function viewTaskById(taskId) {
     toast('Task not found in recent history — it may have been pruned', 'info');
     switchTab('tasks', null);
   }
+}
 // ═══════════════════════════════════════════════════════════════════
 // CRM
 // ═══════════════════════════════════════════════════════════════════
@@ -13498,8 +13469,8 @@ async function loadMeetings() {
         ${m.summary?`<div style="color:#a78bfa;font-size:.78em;margin-top:3px">${escHtml(m.summary.slice(0,80))}…</div>`:''}
         <div style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" style="font-size:.72em" onclick="viewMeeting('${m.id}')">📋 View</button>
-          ${m.transcript?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#a78bfa" onclick="summarizeMeeting('${m.id}')">◈ Summarize</button>`:''}
-          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#10b981" onclick="generateMeetingFollowup('${m.id}')">📧 Follow-up</button>
+          ${m.transcript?`<button class="btn btn-ghost btn-sm" style="font-size:.72em;color:var(--gold)" onclick="summarizeMeeting('${m.id}')">◈ Summarize</button>`:''}
+          <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:var(--gold)" onclick="generateMeetingFollowup('${m.id}')">📧 Follow-up</button>
           <button class="btn btn-ghost btn-sm" style="font-size:.72em;color:#ef4444" onclick="deleteMeeting('${m.id}')">🗑</button>
         </div>
       </div>`).join('');
@@ -13586,6 +13557,7 @@ function assignTaskToAgent(agentId) {
       if (checkbox) checkbox.click();
     }, 300);
   }, 200);
+}
 // ═══════════════════════════════════════════════════════════════════
 // Social Scheduler
 // ═══════════════════════════════════════════════════════════════════
@@ -13949,7 +13921,7 @@ async function loadPL() {
           <div style="color:var(--text-muted)">Expenses</div>
           <div style="color:var(--text-muted);font-size:.8em">${pl.expense_count||0} entries</div>
         </div>
-        <div style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:14px;text-align:center">
+        <div style="background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.2);border-radius:8px;padding:14px;text-align:center">
           <div style="font-size:1.8em;font-weight:800;color:${profitColor}">$${Number(pl.profit||0).toLocaleString()}</div>
           <div style="color:var(--text-muted)">Net Profit</div>
         </div>
@@ -14226,92 +14198,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // ══════════════════════════════════════════════════════════════════
 //  FEATURE MODULE JAVASCRIPT
 // ══════════════════════════════════════════════════════════════════
-
-// ── CRM ──────────────────────────────────────────────────────────
-async function loadCRM() {
-  try {
-    const [leads, stats] = await Promise.all([api('/api/crm/leads'), api('/api/crm/stats')]);
-    document.getElementById('crm-total').textContent = stats.total_leads || 0;
-    document.getElementById('crm-won').textContent = stats.by_stage?.won || 0;
-    document.getElementById('crm-pipeline-val').textContent = '$' + (stats.pipeline_value || 0).toLocaleString();
-    document.getElementById('crm-conv').textContent = (stats.conversion_rate || 0) + '%';
-    const el = document.getElementById('crm-leads-list');
-    if (!leads.length) { el.innerHTML = '<div class="empty"><div class="icon">🎯</div><p>No leads yet.</p></div>'; return; }
-    el.innerHTML = leads.map(l => `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-      <div><strong>${l.name}</strong> <span style="font-size:.75em;color:var(--text-muted)">${l.company}</span>
-        <br><span style="font-size:.8em;color:var(--text-muted)">${l.email}</span>
-        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px;margin-left:6px">${l.stage}</span>
-        <span style="font-size:.75em;color:var(--gold);margin-left:6px">Score: ${l.score}</span></div>
-      <div style="text-align:right">
-        <div style="font-size:.9em;font-weight:700;color:var(--green)">$${(l.value||0).toLocaleString()}</div>
-        <button class="btn btn-ghost btn-sm" onclick="deleteLead('${l.id}')" style="font-size:.7em;margin-top:4px">🗑</button>
-      </div></div>`).join('');
-  } catch(e) { console.error('CRM load error', e); }
-}
-async function addLead() {
-  const payload = {
-    name: document.getElementById('crm-name').value,
-    company: document.getElementById('crm-company').value,
-    email: document.getElementById('crm-email').value,
-    phone: document.getElementById('crm-phone').value,
-    value: parseFloat(document.getElementById('crm-value').value) || 0,
-    stage: document.getElementById('crm-stage').value,
-    notes: document.getElementById('crm-notes').value,
-  };
-  if (!payload.name) return showToast('Name is required', 'error');
-  await api('/api/crm/leads', 'POST', payload);
-  ['crm-name','crm-company','crm-email','crm-phone','crm-value','crm-notes'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
-  showToast('Lead added!');
-  loadCRM();
-}
-async function deleteLead(id) {
-  if (!confirm('Delete this lead?')) return;
-  await api(`/api/crm/leads/${id}`, 'DELETE');
-  showToast('Lead deleted');
-  loadCRM();
-}
-
-// ── Email Marketing ───────────────────────────────────────────────
-async function loadEmailCampaigns() {
-  try {
-    const [campaigns, stats] = await Promise.all([api('/api/email-mkt/campaigns'), api('/api/email-mkt/stats')]);
-    document.getElementById('em-campaigns').textContent = stats.total_campaigns || 0;
-    document.getElementById('em-sent').textContent = stats.total_sent || 0;
-    document.getElementById('em-open-rate').textContent = (stats.open_rate || 0) + '%';
-    document.getElementById('em-click-rate').textContent = (stats.click_rate || 0) + '%';
-    const el = document.getElementById('em-campaign-list');
-    if (!campaigns.length) { el.innerHTML = '<div class="empty"><div class="icon">📧</div><p>No campaigns yet.</p></div>'; return; }
-    el.innerHTML = campaigns.map(c => `<div style="padding:10px;border-bottom:1px solid var(--border)">
-      <div style="display:flex;justify-content:space-between"><strong>${c.name}</strong>
-        <span style="font-size:.75em;background:var(--surface3);padding:2px 6px;border-radius:4px">${c.status}</span></div>
-      <div style="font-size:.8em;color:var(--text-muted);margin-top:2px">${c.subject}</div>
-      <div style="display:flex;gap:10px;margin-top:6px;font-size:.8em">
-        <span>Sent: ${c.sent}</span><span>Opened: ${c.opened}</span><span>Clicked: ${c.clicked}</span>
-        ${c.status==='draft'?`<button class="btn btn-ghost btn-sm" onclick="sendCampaign('${c.id}')" style="font-size:.75em;padding:2px 8px">📤 Send</button>`:''}
-      </div></div>`).join('');
-  } catch(e) { console.error('Email load error', e); }
-}
-async function createEmailCampaign() {
-  const recipients = (document.getElementById('em-recipients').value || '').split(',').map(s=>s.trim()).filter(Boolean);
-  const payload = {
-    name: document.getElementById('em-name').value,
-    subject: document.getElementById('em-subject').value,
-    body: document.getElementById('em-body').value,
-    recipients,
-  };
-  if (!payload.name) return showToast('Campaign name required', 'error');
-  await api('/api/email-mkt/campaigns', 'POST', payload);
-  ['em-name','em-subject','em-body','em-recipients'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  showToast('Campaign created!');
-  loadEmailCampaigns();
-}
-async function sendCampaign(id) {
-  if (!confirm('Send this campaign now?')) return;
-  await api(`/api/email-mkt/campaigns/${id}/send`, 'POST', {});
-  showToast('Campaign sent!');
-  loadEmailCampaigns();
-}
-
 // ── Meetings ─────────────────────────────────────────────────────
 async function loadMeetings() {
   try {
@@ -15040,6 +14926,7 @@ async function submitLogin() {
       startHeartbeat();
       startStatsUpdater();
       startTopbarClock();
+      startSysResPolling();
     }, 520);
   }, 600);
 }
@@ -15048,7 +14935,7 @@ async function submitLogin() {
 /* named constants */
 const MAX_HEARTBEAT_LINES = 80;
 const MAX_CHAT_MESSAGES = 60;
-const MAX_AGENTS_TOTAL = 56; /* matches AGENTS_BY_MODE power list */
+const MAX_AGENTS_TOTAL = 74; /* matches AGENTS_BY_MODE power list */
 
 document.addEventListener('DOMContentLoaded', () => {
   const passEl = document.getElementById('login-pass');
@@ -15079,68 +14966,90 @@ function runBootSequence() {
   if (bar) bar.style.width = '0%';
   if (pct) pct.textContent = '0%';
 
-  const lines = [
-    '> INITIALIZING AI EMPLOYEE v4.0\u2026',
-    '> Loading neural subsystems\u2026',
-    '> Mounting agent registry\u2026',
-    '> Establishing secure channel\u2026',
-    '> Probing backend health check\u2026',
-    '> Calibrating gold resonance matrix\u2026',
-    '> All systems nominal. Welcome.',
+  // Each entry: [text, cssClass, delayMs, progressTarget]
+  // cssClass: '' (gold), 'ok' (green), 'warn' (orange), 'dim' (faint)
+  const steps = [
+    ['[BOOT]  AI Employee v4.0 — Autonomous Workforce Interface', 'dim', 0, 5],
+    ['[SYS ]  Kernel interface initializing…', '', 180, 12],
+    ['[SYS ]  Memory subsystem: OK', 'ok', 260, 18],
+    ['[SYS ]  CPU sampler: started (background thread)', 'ok', 220, 24],
+    ['[NET ]  Binding API server on :3000…', '', 280, 30],
+    ['[NET ]  TLS context: ready', 'ok', 200, 36],
+    ['[AUTH]  JWT secret: loaded', 'ok', 220, 41],
+    ['[AGNT]  Loading agent registry…', '', 300, 47],
+    ['[AGNT]  74 agents registered — all modes available', 'ok', 250, 54],
+    ['[LLM ]  Probing Ollama endpoint…', '', 320, 60],
+    ['[AI  ]  Hybrid router: ONLINE/OFFLINE/AUTO configured', 'ok', 220, 67],
+    ['[DB  ]  State store: mounted', 'ok', 200, 73],
+    ['[MEM ]  Memory index: warm', 'ok', 180, 78],
+    ['[UI  ]  Initializing dashboard interface…', '', 260, 85],
+    ['[UI  ]  Particle system: active', 'ok', 180, 91],
+    ['[HLTH]  Verifying backend health…', '', 220, 96],
   ];
-  let lineIdx = 0;
+
+  let stepIdx = 0;
   let progress = 0;
 
-  function addLine() {
-    if (lineIdx >= lines.length) return;
+  function bootLog(text, cls) {
+    if (!terminal) return;
     const span = document.createElement('span');
-    span.className = 'boot-terminal-line';
+    span.className = 'boot-terminal-line' + (cls ? ' ' + cls : '');
     span.style.animationDelay = '0s';
-    span.textContent = lines[lineIdx++];
+    span.textContent = text;
     terminal.appendChild(span);
     terminal.scrollTop = terminal.scrollHeight;
   }
 
-  const lineTimer = setInterval(() => {
-    addLine();
-    if (lineIdx >= lines.length) clearInterval(lineTimer);
-  }, 280);
+  const stageLabel = document.getElementById('boot-stage-label');
+  const stageMap = [[10,'SYSTEM CHECK'],[30,'NETWORK'],[50,'AGENTS'],[65,'AI ENGINE'],[80,'DATABASE'],[90,'UI INIT'],[96,'HEALTH CHECK'],[100,'UI READY']];
 
-  const barTimer = setInterval(async () => {
-    progress += Math.random() * 12 + 4;
-    if (progress >= 100) { progress = 100; clearInterval(barTimer); }
-    if (bar) bar.style.width = progress + '%';
-    if (pct) pct.textContent = Math.round(progress) + '%';
-    if (progress >= 100) {
-      clearInterval(lineTimer);
-      /* retry health check up to 8 times (2 s apart = ~16 s max) so the UI
-         waits gracefully while the server is still booting instead of
-         immediately showing the offline screen */
-      let healthy = false;
-      for (let attempt = 0; attempt < 8; attempt++) {
-        healthy = await checkHealth();
-        if (healthy) break;
-        if (attempt < 7) {
-          if (terminal) {
-            const span = document.createElement('span');
-            span.className = 'boot-terminal-line';
-            span.style.animationDelay = '0s';
-            span.textContent = '> Retrying connection\u2026 (' + (attempt + 2) + '/8)';
-            terminal.appendChild(span);
-            terminal.scrollTop = terminal.scrollHeight;
-          }
-          await new Promise(r => setTimeout(r, 2000));
-        }
+  function setProgress(target) {
+    if (bar) bar.style.width = Math.min(target, 100) + '%';
+    if (pct) pct.textContent = Math.min(Math.round(target), 100) + '%';
+    if (stageLabel) {
+      for (let i = stageMap.length - 1; i >= 0; i--) {
+        if (target >= stageMap[i][0]) { stageLabel.textContent = stageMap[i][1]; break; }
       }
-      if (!healthy) {
-        hideBoot();
-        showOffline('> Backend unreachable\n> GET /health → connection refused\n> Ensure AI Employee server is running\n> on http://localhost:3000');
-        return;
-      }
-      hideBoot();
-      setTimeout(() => showLogin(), 200);
     }
-  }, 120);
+  }
+
+  function runNextStep() {
+    if (stepIdx >= steps.length) return;
+    const [text, cls, delay, prog] = steps[stepIdx++];
+    setTimeout(() => {
+      bootLog(text, cls);
+      setProgress(prog);
+      runNextStep();
+    }, delay);
+  }
+
+  runNextStep();
+
+  // After all steps finish (~3.5 s) start health check loop
+  const totalDelay = steps.reduce((acc, s) => acc + s[2], 0) + 400;
+  setTimeout(async () => {
+    setProgress(96);
+    let healthy = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      healthy = await checkHealth();
+      if (healthy) break;
+      if (attempt < 7) {
+        bootLog('[HLTH]  Retrying connection… (' + (attempt + 2) + '/8)', 'warn');
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+    if (!healthy) {
+      bootLog('[ERR ]  Backend unreachable — connection refused on :3000', 'warn');
+      hideBoot();
+      showOffline('> Backend unreachable\n> GET /health → connection refused\n> Ensure AI Employee server is running\n> on http://localhost:3000');
+      return;
+    }
+    bootLog('[DONE]  All systems nominal. Welcome, Operator.', 'ok');
+    setProgress(100);
+    await new Promise(r => setTimeout(r, 600));
+    hideBoot();
+    setTimeout(() => showLogin(), 200);
+  }, totalDelay);
 }
 runBootSequence();
 
@@ -15151,6 +15060,7 @@ function startTopbarClock() {
   const el = document.getElementById('topbar-time');
   if (!el) return;
   function tick() {
+    if (document.hidden) return;
     const now = new Date();
     const pad = n => String(n).padStart(2,'0');
     el.textContent = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate())
@@ -15204,11 +15114,13 @@ function startHeartbeat() {
     appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
   }
   function scheduleNext() {
-    const delay = 600 + Math.random() * 2200;
+    const delay = 3000 + Math.random() * 5000;
     setTimeout(() => {
-      const agent = HB_AGENTS[Math.floor(Math.random() * HB_AGENTS.length)];
-      const msgs = HB_MSGS[agent];
-      appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
+      if (!document.hidden) {
+        const agent = HB_AGENTS[Math.floor(Math.random() * HB_AGENTS.length)];
+        const msgs = HB_MSGS[agent];
+        appendHeartbeatLine(agent, msgs[Math.floor(Math.random() * msgs.length)]);
+      }
       scheduleNext();
     }, delay);
   }
@@ -15304,8 +15216,10 @@ function sendCyberChat() {
 /* ══════════════════════════════════════════════════
    SYSTEM STATS UPDATER
 ══════════════════════════════════════════════════ */
-let _fakeCpu = 30 + Math.random() * 20;
-let _fakeMem = 40 + Math.random() * 25;
+let _fakeCpu = 0;
+let _fakeMem = 0;
+// Real CPU/RAM values are fed by loadSysRes() via updateCpuRing() and updateStatBar().
+// _fakeCpu/_fakeMem are kept as fallback placeholders but not actively simulated.
 
 function updateCpuRing(pct) {
   const circ = document.getElementById('cpu-ring-circle');
@@ -15325,6 +15239,7 @@ function updateStatBar(barId, valId, pct, label) {
 
 function startStatsUpdater() {
   async function update() {
+    if (document.hidden) return;
     /* fetch real status when possible */
     let agents = '–', tasks = '–', uptime = '–', gwStatus = 'online';
     try {
@@ -15338,18 +15253,9 @@ function startStatsUpdater() {
       }
     } catch (_) {}
 
-    /* CPU simulation */
-    _fakeCpu += (Math.random() - 0.45) * 6;
-    _fakeCpu = Math.max(5, Math.min(95, _fakeCpu));
-    _fakeMem += (Math.random() - 0.45) * 3;
-    _fakeMem = Math.max(20, Math.min(90, _fakeMem));
-
-    updateCpuRing(_fakeCpu);
-    const maxAgents = 56;
     const agentNum = typeof agents === 'number' ? agents : (parseInt(agents) || 0);
     updateStatBar('sb-agents', 'sv-agents', agentNum / MAX_AGENTS_TOTAL * 100, agents);
     updateStatBar('sb-tasks', 'sv-tasks', 10, tasks);
-    updateStatBar('sb-mem', 'sv-mem', _fakeMem, Math.round(_fakeMem) + '%');
 
     const gw = document.getElementById('sv-gw');
     if (gw) { gw.textContent = gwStatus; gw.style.color = gwStatus === 'online' ? 'var(--success)' : 'var(--danger)'; }
@@ -15358,7 +15264,113 @@ function startStatsUpdater() {
   }
 
   update();
-  setInterval(update, 4000);
+  setInterval(update, 10000);
+}
+
+/* ══════════════════════════════════════════════════
+   SYSTEM RESOURCES (real hardware metrics)
+══════════════════════════════════════════════════ */
+let _sysResTimer = null;
+
+function _srBar(pct) {
+  const cls = pct >= 85 ? 'hot' : pct >= 65 ? 'warn' : 'ok';
+  return `<div class="sysres-bar-track"><div class="sysres-bar-fill ${cls}" style="width:${Math.min(100,pct)}%"></div></div>`;
+}
+
+function _srTempColor(t) {
+  if (t === null) return 'var(--text-muted)';
+  if (t >= 85) return '#f87171';
+  if (t >= 70) return '#fbbf24';
+  return '#4ade80';
+}
+
+function _srTempBadge(t) {
+  if (t === null || t === undefined) return '<span class="sysres-na">N/A</span>';
+  const col = _srTempColor(t);
+  return `<span class="sysres-temp-badge" style="color:${col};border-color:${col}">🌡 ${t}°C</span>`;
+}
+
+function _srMetric(label, value, sub, barPct) {
+  const bar = (typeof barPct === 'number') ? _srBar(barPct) : '';
+  return `<div class="sysres-metric">
+    <div class="sysres-metric-header">
+      <span class="sysres-metric-label">${label}</span>
+      <span class="sysres-metric-value">${value}</span>
+    </div>
+    ${bar}
+    ${sub ? `<div class="sysres-metric-sub">${sub}</div>` : ''}
+  </div>`;
+}
+
+async function loadSysRes() {
+  const grid = document.getElementById('sysres-grid');
+  const updEl = document.getElementById('sysres-updated');
+  if (!grid) return;
+  try {
+    const d = await api('/api/system/resources');
+    if (d.error) {
+      grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><p style="color:var(--text-muted)">${escHtml(d.error)}</p></div>`;
+      return;
+    }
+
+    const cpuVal = typeof d.cpu_pct === 'number' ? d.cpu_pct.toFixed(1) + '%' : '–';
+    const cpuCoreSub = (d.cpu_cores && d.cpu_threads)
+      ? `${d.cpu_cores} cores · ${d.cpu_threads} threads`
+      : (d.cpu_cores ? `${d.cpu_cores} cores` : '');
+    const cpuTempBadge = _srTempBadge(d.cpu_temp);
+
+    const ramVal = typeof d.ram_pct === 'number' ? d.ram_pct.toFixed(1) + '%' : '–';
+    const ramSub = (d.ram_used_gb && d.ram_total_gb) ? `${d.ram_used_gb} GB / ${d.ram_total_gb} GB` : '';
+
+    const diskVal = typeof d.disk_pct === 'number' ? d.disk_pct.toFixed(1) + '%' : '–';
+    const diskSub = (d.disk_used_gb && d.disk_total_gb) ? `${d.disk_used_gb} GB / ${d.disk_total_gb} GB` : '';
+
+    const loadSub = d.load_avg ? `1m ${d.load_avg['1m']}  5m ${d.load_avg['5m']}  15m ${d.load_avg['15m']}` : '';
+
+    // CPU metric — load + temperature together
+    let cpuSub = [cpuCoreSub, cpuTempBadge].filter(Boolean).join('  ');
+    let html = _srMetric('CPU Load', cpuVal, cpuSub, d.cpu_pct);
+
+    // GPU section — only when NVIDIA GPU is detected
+    if (d.gpu_pct !== null && d.gpu_pct !== undefined) {
+      const gpuVal = d.gpu_pct.toFixed ? d.gpu_pct.toFixed(0) + '%' : d.gpu_pct + '%';
+      const gpuTempBadge = _srTempBadge(d.gpu_temp);
+      const gpuNameStr = d.gpu_name ? escHtml(d.gpu_name) : 'GPU';
+      const gpuSub = [gpuNameStr, gpuTempBadge].join('  ');
+      html += _srMetric('GPU Load', gpuVal, gpuSub, d.gpu_pct);
+    }
+
+    html += _srMetric('RAM', ramVal, ramSub, d.ram_pct);
+    html += _srMetric('Disk', diskVal, diskSub, d.disk_pct);
+
+    if (d.load_avg) {
+      html += _srMetric('Load Avg', d.load_avg['1m'], loadSub, null);
+    }
+
+    html += _srMetric('Uptime', d.uptime || '–', '', null);
+
+    grid.innerHTML = html;
+    if (updEl) {
+      const t = new Date();
+      updEl.textContent = 'Updated ' + String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0') + ':' + String(t.getSeconds()).padStart(2,'0');
+    }
+
+    // Also feed real CPU into the sidebar ring
+    if (typeof d.cpu_pct === 'number') updateCpuRing(d.cpu_pct);
+    if (typeof d.ram_pct === 'number') updateStatBar('sb-mem', 'sv-mem', d.ram_pct, d.ram_pct.toFixed(0) + '%');
+    if (d.uptime) { const upEl = document.getElementById('sv-uptime'); if (upEl) upEl.textContent = d.uptime; }
+  } catch (e) {
+    if (grid) grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><p style="color:var(--text-muted)">Metrics unavailable</p></div>';
+  }
+}
+
+function startSysResPolling() {
+  loadSysRes();
+  if (_sysResTimer) clearInterval(_sysResTimer);
+  // Poll every 5s only when dashboard is active and page is visible
+  _sysResTimer = setInterval(() => {
+    if (!document.hidden && currentTab === 'dashboard') loadSysRes();
+  }, 5000);
 }
 
 /* ══════════════════════════════════════════════════
@@ -15391,38 +15403,43 @@ function startStatsUpdater() {
     });
   }
 
-  function frame() {
-    ctx.clearRect(0, 0, W, H);
-    for (const p of particles) {
-      p.x += p.vx; p.y += p.vy;
-      p.a += p.da;
-      if (p.a < 0.05) p.da = Math.abs(p.da);
-      if (p.a > 0.6) p.da = -Math.abs(p.da);
-      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
-      ctx.fill();
-    }
-    for (let i = 0; i < particles.length; i++) {
-      for (let j = i + 1; j < particles.length; j++) {
-        const dx = particles[i].x - particles[j].x;
-        const dy = particles[i].y - particles[j].y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 90) {
-          ctx.beginPath();
-          ctx.moveTo(particles[i].x, particles[i].y);
-          ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
+  // Throttle to ~20fps (50ms between frames) and skip entirely when tab is hidden
+  let _particleLastTs = 0;
+  function frame(ts) {
+    if (!document.hidden && ts - _particleLastTs >= 50) {
+      _particleLastTs = ts;
+      ctx.clearRect(0, 0, W, H);
+      for (const p of particles) {
+        p.x += p.vx; p.y += p.vy;
+        p.a += p.da;
+        if (p.a < 0.05) p.da = Math.abs(p.da);
+        if (p.a > 0.6) p.da = -Math.abs(p.da);
+        if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+        if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = GOLD + p.a.toFixed(2) + ')';
+        ctx.fill();
+      }
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 90) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = GOLD + (0.06 * (1 - dist/90)).toFixed(3) + ')';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
         }
       }
     }
     requestAnimationFrame(frame);
   }
-  frame();
+  requestAnimationFrame(frame);
 })();
 
 /* init nav active state */
@@ -15901,6 +15918,11 @@ async def sse_events(request: Request):
 
 @app.get("/api/status")
 def get_status():
+  # Return cached response if still fresh
+  cached = _get_cached_status()
+  if cached is not None:
+    return JSONResponse(cached)
+
   agents = []
   mode = _current_mode()
   for agent_name in _mode_agent_targets(mode):
@@ -15929,7 +15951,11 @@ def get_status():
     for a in (active_task.get("agents_hint") or []):
       active_agents.add(a)
 
-  return JSONResponse({
+  # Attach governor info
+  with _AGENT_GOVERNOR_LOCK:
+    gov = dict(_AGENT_GOVERNOR)
+
+  data = {
     "ts": now_iso(),
     "mode": mode,
     "agents": agents,
@@ -15939,13 +15965,141 @@ def get_status():
     "active_task_id": active_task.get("id") if active_task else None,
     "active_agents": list(active_agents),
     "ollama_ok": _ollama_reachable(ollama_host_url),
-  })
+    "governor": {
+      "enabled": gov["enabled"],
+      "max_agents": gov["max_agents"],
+    },
+  }
+  _set_cached_status(data)
+  return JSONResponse(data)
 
 
 @app.get("/api/doctor")
 def get_doctor():
     rc, out = ai_employee("doctor")
     return JSONResponse({"output": out, "rc": rc})
+
+
+# ── System Resources endpoint ─────────────────────────────────────────────────
+_sysres_cache: dict = {}
+_sysres_cache_ts: float = 0.0
+_SYSRES_CACHE_TTL = 3.0  # seconds — prevents hammering psutil on rapid requests
+
+
+def _format_uptime(seconds: int) -> str:
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+@app.get("/api/system/resources")
+def get_system_resources():
+    """Return real hardware metrics: CPU, RAM, disk, temps, GPU (if available), load avg."""
+    global _sysres_cache, _sysres_cache_ts
+    now_ts = time.monotonic()
+    if now_ts - _sysres_cache_ts < _SYSRES_CACHE_TTL and _sysres_cache:
+        return JSONResponse(_sysres_cache)
+
+    if not _PSUTIL_OK:
+        return JSONResponse({"error": "psutil not available"})
+
+    try:
+        # CPU — use value from background sampler thread (accurate, non-blocking)
+        cpu_pct = _cpu_sample_value
+        cpu_cores = _psutil.cpu_count(logical=False) or _psutil.cpu_count()
+        cpu_threads = _psutil.cpu_count(logical=True)
+
+        # RAM
+        vm = _psutil.virtual_memory()
+        ram_used_gb = round(vm.used / (1024 ** 3), 1)
+        ram_total_gb = round(vm.total / (1024 ** 3), 1)
+        ram_pct = vm.percent
+
+        # Disk (root partition)
+        disk = _psutil.disk_usage("/")
+        disk_used_gb = round(disk.used / (1024 ** 3), 1)
+        disk_total_gb = round(disk.total / (1024 ** 3), 1)
+        disk_pct = disk.percent
+
+        # Load average (Unix only)
+        load_avg = None
+        try:
+            load1, load5, load15 = os.getloadavg()
+            load_avg = {"1m": round(load1, 2), "5m": round(load5, 2), "15m": round(load15, 2)}
+        except (AttributeError, OSError):
+            pass
+
+        # Uptime
+        boot_ts = _psutil.boot_time()
+        uptime_str = _format_uptime(int(time.time() - boot_ts))
+
+        # CPU Temperature
+        cpu_temp = None
+        try:
+            temps = _psutil.sensors_temperatures()
+            if temps:
+                for key in ("coretemp", "k10temp", "cpu_thermal", "acpitz", "cpu-thermal"):
+                    if key in temps and temps[key]:
+                        cpu_temp = round(temps[key][0].current, 1)
+                        break
+                if cpu_temp is None:
+                    first = next(iter(temps.values()), [])
+                    if first:
+                        cpu_temp = round(first[0].current, 1)
+        except Exception:
+            pass
+
+        # GPU via nvidia-smi (best-effort, 2 s timeout)
+        gpu_pct = None
+        gpu_temp = None
+        gpu_name = None
+        try:
+            import csv as _csv
+            res = subprocess.run(
+                ["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,name",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if res.returncode == 0:
+                rows = list(_csv.reader([res.stdout.strip()]))
+                if rows and len(rows[0]) >= 3:
+                    gpu_pct = int(rows[0][0].strip())
+                    gpu_temp = int(rows[0][1].strip())
+                    gpu_name = rows[0][2].strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, IndexError):
+            pass
+        except Exception:
+            pass
+
+        data: dict = {
+            "cpu_pct": cpu_pct,
+            "cpu_temp": cpu_temp,
+            "cpu_cores": cpu_cores,
+            "cpu_threads": cpu_threads,
+            "ram_used_gb": ram_used_gb,
+            "ram_total_gb": ram_total_gb,
+            "ram_pct": ram_pct,
+            "disk_used_gb": disk_used_gb,
+            "disk_total_gb": disk_total_gb,
+            "disk_pct": disk_pct,
+            "load_avg": load_avg,
+            "uptime": uptime_str,
+            "gpu_pct": gpu_pct,
+            "gpu_temp": gpu_temp,
+            "gpu_name": gpu_name,
+        }
+    except Exception as exc:
+        logging.getLogger(__name__).warning("system/resources collection failed: %s", exc)
+        data = {"error": "Failed to collect system metrics"}
+
+    _sysres_cache = data
+    _sysres_cache_ts = now_ts
+    return JSONResponse(data)
 
 
 @app.post("/api/gateway/pull-model")
@@ -16005,19 +16159,46 @@ def start_all_agents(_auth: None = Depends(require_auth)):
     targets = _mode_agent_targets(mode)
     outputs = []
     failures = []
+    skipped_agents: list = []        # agents skipped by governor or circuit breaker
+    skipped_by_governor: list = []   # agents skipped specifically by the cap
+    skipped_by_breaker: list = []    # agents skipped by an open circuit breaker
+    # Check governor before starting agents
+    with _AGENT_GOVERNOR_LOCK:
+        gov_enabled = _AGENT_GOVERNOR["enabled"]
+        gov_max = _AGENT_GOVERNOR["max_agents"]
+    running_count = _count_running_agents() if gov_enabled else 0
     for agent_name in targets:
       if agent_name in INFRA_AGENTS:
+        continue
+      # Governor: skip start if cap already reached
+      if gov_enabled and running_count >= gov_max:
+        skipped_agents.append(agent_name)
+        skipped_by_governor.append(agent_name)
+        outputs.append(f"[{agent_name}] skipped — agent governor cap ({gov_max}) reached")
+        continue
+      # Circuit breaker: skip agents whose breaker is open
+      if circuit_breaker_is_open(agent_name):
+        skipped_agents.append(agent_name)
+        skipped_by_breaker.append(agent_name)
+        outputs.append(f"[{agent_name}] skipped — circuit breaker is open (too many recent failures)")
         continue
       rc, out = ai_employee("start", agent_name)
       outputs.append(f"[{agent_name}] {out.strip()}")
       if rc != 0:
         failures.append(agent_name)
+        circuit_breaker_record_failure(agent_name)
+      else:
+        running_count += 1
+        circuit_breaker_record_success(agent_name)
+    _invalidate_status_cache()
     return JSONResponse({
       "ok": len(failures) == 0,
       "mode": mode,
       "targets": targets,
-      "started": len(targets) - len(failures),
+      "started": len(targets) - len(failures) - len(skipped_agents),
       "failed": failures,
+      "skipped_by_governor": skipped_by_governor,
+      "skipped_by_breaker": skipped_by_breaker,
       "output": "\n".join(outputs),
     })
 
@@ -16035,6 +16216,7 @@ def stop_all_agents(_auth: None = Depends(require_auth)):
       outputs.append(f"[{agent_name}] {out.strip()}")
       if rc != 0:
         failures.append(agent_name)
+    _invalidate_status_cache()
     return JSONResponse({
       "ok": len(failures) == 0,
       "mode": mode,
@@ -16136,7 +16318,14 @@ def get_workers():
 
 # ── Chatlog sanitizer — strip accidental API key leakage ─────────────────────
 _API_KEY_PATTERN = re.compile(
-    r"(sk-ant-[a-zA-Z0-9\-]{20,}|sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9\-_]{30,})",
+    r"(sk-ant-[a-zA-Z0-9\-]{20,}"        # Anthropic
+    r"|sk-[a-zA-Z0-9]{20,}"              # OpenAI
+    r"|AIza[a-zA-Z0-9\-_]{30,}"          # Google / Gemini
+    r"|gsk_[a-zA-Z0-9]{20,}"             # Groq
+    r"|hf_[a-zA-Z0-9]{20,}"              # HuggingFace
+    r"|nvapi-[a-zA-Z0-9\-_]{20,}"        # NVIDIA
+    r"|xai-[a-zA-Z0-9]{20,}"             # xAI / Grok
+    r")",
     re.IGNORECASE,
 )
 
@@ -16590,7 +16779,7 @@ def handle_command(
             "  arb opportunities / arb watchlist\n"
             "  task <description> — multi-agent orchestration\n"
             "  task status / task list / task cancel\n"
-            "  agents — list all 56 AI agents\n"
+            "  agents — list all 74 AI agents\n"
             "  assign <agent> <subtask> — manual agent dispatch\n"
             "  company build <idea> — build a company from scratch\n"
             "  company validate / plan / simulate / gtm / pitch / org / swot\n"
@@ -16925,11 +17114,11 @@ def handle_command(
 
     routed_agent = route_to_agent(message)
     mode = _current_mode()
-    if ("all 56 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
+    if ("all 74 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
       allowed = ", ".join(_available_agent_ids(mode))
       return (
         f"Only {len(_available_agent_ids(mode))} agents are available in {mode} mode: {allowed}. "
-        "Switch to power mode to run all 56 agents, or I can handle this with the current set."
+        "Switch to power mode to run all 74 agents, or I can handle this with the current set."
       )
     if not _agent_allowed_in_mode(routed_agent, mode):
       return (
@@ -16958,7 +17147,7 @@ def get_schedules():
 
 
 @app.post("/api/schedules")
-def add_schedule(task: dict):
+def add_schedule(task: dict, _auth: None = Depends(require_auth)):
     import uuid as _uuid
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     tasks = []
@@ -16986,7 +17175,7 @@ def add_schedule(task: dict):
 
 
 @app.delete("/api/schedules/{task_id}")
-def delete_schedule(task_id: str):
+def delete_schedule(task_id: str, _auth: None = Depends(require_auth)):
     if not SCHEDULES_FILE.exists():
         return JSONResponse({"ok": True})
     try:
@@ -17012,7 +17201,7 @@ def get_improvements():
 
 
 @app.patch("/api/improvements/{improvement_id}")
-def review_improvement(improvement_id: str, payload: dict):
+def review_improvement(improvement_id: str, payload: dict, _auth: None = Depends(require_auth)):
     status = payload.get("status", "")
     valid_statuses = ("approved", "rejected", "in_progress", "completed", "pending")
     if status not in valid_statuses:
@@ -17068,7 +17257,7 @@ def get_skills(category: str = "", q: str = ""):
 
 
 @app.post("/api/skills")
-def create_skill(payload: dict):
+def create_skill(payload: dict, _auth: None = Depends(require_auth)):
     skill_id = (payload.get("id") or "").strip()
     name = (payload.get("name") or "").strip()
     category = (payload.get("category") or "Automation & Productivity").strip()
@@ -17175,7 +17364,7 @@ def list_custom_agents():
 
 
 @app.post("/api/agents/custom")
-def create_custom_agent(payload: dict):
+def create_custom_agent(payload: dict, _auth: None = Depends(require_auth)):
     name = (payload.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "name required")
@@ -17211,7 +17400,7 @@ def create_custom_agent(payload: dict):
 
 
 @app.delete("/api/agents/custom/{agent_id}")
-def delete_custom_agent(agent_id: str):
+def delete_custom_agent(agent_id: str, _auth: None = Depends(require_auth)):
     agents = _load_custom_agents()
     if agent_id not in agents:
         raise HTTPException(404, f"agent '{agent_id}' not found")
@@ -17256,7 +17445,7 @@ def list_worker_bundles():
 
 
 @app.post("/api/workers/bundles")
-def create_worker_bundle(payload: dict):
+def create_worker_bundle(payload: dict, _auth: None = Depends(require_auth)):
     """Create a new worker bundle."""
     import uuid as _uuid
     name = (payload.get("name") or "").strip()
@@ -17297,7 +17486,7 @@ def create_worker_bundle(payload: dict):
 
 
 @app.patch("/api/workers/bundles/{bundle_id}")
-def update_worker_bundle(bundle_id: str, payload: dict):
+def update_worker_bundle(bundle_id: str, payload: dict, _auth: None = Depends(require_auth)):
     """Update an existing worker bundle."""
     bundles = _load_worker_bundles()
     for b in bundles:
@@ -17312,7 +17501,7 @@ def update_worker_bundle(bundle_id: str, payload: dict):
 
 
 @app.delete("/api/workers/bundles/{bundle_id}")
-def delete_worker_bundle(bundle_id: str):
+def delete_worker_bundle(bundle_id: str, _auth: None = Depends(require_auth)):
     """Delete a worker bundle."""
     bundles = _load_worker_bundles()
     remaining = [b for b in bundles if b["id"] != bundle_id]
@@ -17323,7 +17512,7 @@ def delete_worker_bundle(bundle_id: str):
 
 
 @app.post("/api/workers/bundles/{bundle_id}/run")
-def run_worker_bundle(bundle_id: str):
+def run_worker_bundle(bundle_id: str, _auth: None = Depends(require_auth)):
     """Manually trigger a worker bundle — submits its task to the orchestrator chatlog."""
     bundles = _load_worker_bundles()
     for b in bundles:
@@ -17448,7 +17637,7 @@ def cancel_task(_auth: None = Depends(require_auth)):
 
 
 @app.post("/api/task/reassign")
-def reassign_subtask(payload: dict):
+def reassign_subtask(payload: dict, _auth: None = Depends(require_auth)):
     """Reassign a pending subtask to a different agent."""
     task_id = (payload.get("task_id") or "").strip()
     subtask_id = (payload.get("subtask_id") or "").strip()
@@ -17474,6 +17663,55 @@ def reassign_subtask(payload: dict):
                 st["status"] = "pending"
                 _save_task_plans(plans)
                 return JSONResponse({"ok": True, "subtask_id": subtask_id, "old_agent": old, "new_agent": agent_id})
+        raise HTTPException(404, f"Subtask '{subtask_id}' not found in task '{task_id}'")
+    raise HTTPException(404, f"Task '{task_id}' not found")
+
+
+@app.post("/api/task/subtask-complete")
+def complete_subtask(payload: dict):
+    """Mark a subtask as done or failed and update the circuit breaker for its agent.
+
+    Payload:
+      task_id    – str (required)
+      subtask_id – str (required)
+      status     – "done" | "failed" (required)
+      result     – str (optional: outcome summary)
+    """
+    task_id = (payload.get("task_id") or "").strip()
+    subtask_id = (payload.get("subtask_id") or "").strip()
+    status = (payload.get("status") or "").strip()
+    if not all([task_id, subtask_id, status]):
+        raise HTTPException(400, "task_id, subtask_id, and status are required")
+    if status not in ("done", "failed"):
+        raise HTTPException(400, "status must be 'done' or 'failed'")
+
+    plans = _load_task_plans()
+    for p in plans:
+        if p.get("id") != task_id:
+            continue
+        for st in p.get("subtasks", []):
+            if (st.get("subtask_id") or st.get("id")) == subtask_id:
+                st["status"] = status
+                if payload.get("result"):
+                    st["result"] = str(payload["result"])[:500]
+                st["completed_at"] = now_iso()
+                agent_id = st.get("agent_id", "")
+                _save_task_plans(plans)
+                _invalidate_status_cache()
+                # Update circuit breaker
+                if agent_id:
+                    if status == "failed":
+                        cb_state = circuit_breaker_record_failure(agent_id)
+                    else:
+                        cb_state = circuit_breaker_record_success(agent_id)
+                    return JSONResponse({
+                        "ok": True,
+                        "subtask_id": subtask_id,
+                        "status": status,
+                        "agent_id": agent_id,
+                        "circuit_breaker": cb_state,
+                    })
+                return JSONResponse({"ok": True, "subtask_id": subtask_id, "status": status})
         raise HTTPException(404, f"Subtask '{subtask_id}' not found in task '{task_id}'")
     raise HTTPException(404, f"Task '{task_id}' not found")
 
@@ -17923,7 +18161,7 @@ def list_templates():
 
 
 @app.post("/api/templates/{template_id}/deploy")
-def deploy_template(template_id: str):
+def deploy_template(template_id: str, _auth: None = Depends(require_auth)):
     import uuid as _uuid
     templates = _load_templates()
     tmpl = next((t for t in templates if t["id"] == template_id), None)
@@ -18051,7 +18289,7 @@ def request_guardrail_action(payload: dict):
 
 
 @app.post("/api/guardrails/{action_id}/approve")
-def approve_guardrail_action(action_id: str):
+def approve_guardrail_action(action_id: str, _auth: None = Depends(require_auth)):
     data = _load_guardrails()
     pending = data.get("pending", [])
     action = next((a for a in pending if a["id"] == action_id), None)
@@ -18075,7 +18313,7 @@ def approve_guardrail_action(action_id: str):
 
 
 @app.post("/api/guardrails/{action_id}/reject")
-def reject_guardrail_action(action_id: str, payload: dict = None):
+def reject_guardrail_action(action_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
     data = _load_guardrails()
     pending = data.get("pending", [])
     action = next((a for a in pending if a["id"] == action_id), None)
@@ -18102,7 +18340,7 @@ def reject_guardrail_action(action_id: str, payload: dict = None):
 
 
 @app.post("/api/guardrails/settings")
-def save_guardrail_settings(payload: dict):
+def save_guardrail_settings(payload: dict, _auth: None = Depends(require_auth)):
     data = _load_guardrails()
     data["settings"] = payload
     _save_guardrails(data)
@@ -18110,7 +18348,7 @@ def save_guardrail_settings(payload: dict):
 
 
 @app.post("/api/guardrails/custom")
-def add_custom_guardrail(payload: dict):
+def add_custom_guardrail(payload: dict, _auth: None = Depends(require_auth)):
     import uuid as _uuid
     rule_text = (payload.get("rule") or "").strip()
     if not rule_text:
@@ -18467,7 +18705,7 @@ def list_integrations():
 
 
 @app.patch("/api/integrations/{integration_id}")
-def update_integration(integration_id: str, payload: dict):
+def update_integration(integration_id: str, payload: dict, _auth: None = Depends(require_auth)):
     integrations = _load_integrations()
     intg = next((i for i in integrations if i["id"] == integration_id), None)
     if not intg:
@@ -18480,8 +18718,61 @@ def update_integration(integration_id: str, payload: dict):
     return JSONResponse({"ok": True, "id": integration_id, "enabled": intg["enabled"]})
 
 
+def _validate_webhook_url(url: str) -> str | None:
+    """Validate a user-supplied webhook URL to prevent SSRF attacks.
+
+    Returns an error message string if the URL is rejected, or None if it is safe.
+    Allows only http:// and https:// schemes and rejects private / loopback / link-local
+    / cloud-metadata IP ranges.
+    """
+    import ipaddress
+    import socket
+    import urllib.parse as _up
+
+    parsed = _up.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "Webhook URL must use http:// or https://"
+
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return "Webhook URL has no valid hostname"
+
+    # Resolve hostname to IP and check for private/reserved ranges
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return "Webhook hostname could not be resolved"
+
+    _BLOCKED_NETWORKS = [
+        ipaddress.ip_network("127.0.0.0/8"),       # loopback
+        ipaddress.ip_network("::1/128"),             # IPv6 loopback
+        ipaddress.ip_network("10.0.0.0/8"),          # private
+        ipaddress.ip_network("172.16.0.0/12"),       # private
+        ipaddress.ip_network("192.168.0.0/16"),      # private
+        ipaddress.ip_network("169.254.0.0/16"),      # link-local / cloud metadata
+        ipaddress.ip_network("fc00::/7"),            # IPv6 unique local
+        ipaddress.ip_network("fe80::/10"),           # IPv6 link-local
+        ipaddress.ip_network("0.0.0.0/8"),           # this-network
+    ]
+
+    for _family, _socktype, _proto, _canonname, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return f"Could not parse resolved IP address: {ip_str}"
+        for net in _BLOCKED_NETWORKS:
+            if ip in net:
+                return (
+                    "Webhook URL resolves to a private/reserved address and is not allowed. "
+                    "Use a publicly reachable URL."
+                )
+
+    return None  # URL is safe
+
+
 @app.post("/api/integrations/{integration_id}/test")
-def test_integration(integration_id: str):
+def test_integration(integration_id: str, _auth: None = Depends(require_auth)):
     """Basic connectivity test for an integration."""
     integrations = _load_integrations()
     intg = next((i for i in integrations if i["id"] == integration_id), None)
@@ -18494,6 +18785,9 @@ def test_integration(integration_id: str):
         url = config.get("url", "").strip()
         if not url:
             return JSONResponse({"ok": False, "message": "No webhook URL configured"})
+        ssrf_error = _validate_webhook_url(url)
+        if ssrf_error:
+            raise HTTPException(400, ssrf_error)
         try:
             import urllib.request as _req
             req = _req.Request(url, method="POST",
@@ -19225,7 +19519,7 @@ def record_metric_alias(payload: dict):
 
 
 @app.post("/api/templates/deploy")
-def deploy_template_alias(payload: dict):
+def deploy_template_alias(payload: dict, _auth: None = Depends(require_auth)):
     """Convenience endpoint — calls POST /api/templates/{template_id}/deploy.
     Accepts {"template_id": "get-10-leads-24h"}.
     """
@@ -19236,7 +19530,7 @@ def deploy_template_alias(payload: dict):
 
 
 @app.post("/api/guardrails/approve")
-def approve_guardrail_alias(payload: dict):
+def approve_guardrail_alias(payload: dict, _auth: None = Depends(require_auth)):
     """Convenience endpoint — approves a pending guardrail action.
     Accepts {"action_id": "..."}.
     Returns 200 always; {"ok": false} if the action was not found in the queue.
@@ -19253,7 +19547,7 @@ def approve_guardrail_alias(payload: dict):
 
 
 @app.post("/api/guardrails/reject")
-def reject_guardrail_alias(payload: dict):
+def reject_guardrail_alias(payload: dict, _auth: None = Depends(require_auth)):
     """Convenience endpoint — rejects a pending guardrail action.
     Accepts {"action_id": "...", "reason": "..."}.
     Returns 200 always; {"ok": false} if the action was not found in the queue.
@@ -19544,23 +19838,13 @@ def _run_ascend_task(task_id: str, task: str) -> None:
         })
     try:
         af = _load_ascend_module()
-        # Step 1 – parse intent (20%)
+        # Step 1 – analyze intent (20%)
         with _af_task_lock:
             _af_current_task["progress"] = 20
-        result = af.handle_chat_command("ascend: " + task)
-        if not result:
-            # Fall back to scan if command not handled
-            with _af_task_lock:
-                _af_current_task["progress"] = 40
-            patches = af.scan_system(trigger=f"user task: {task[:60]}")
-            with _af_task_lock:
-                _af_current_task["progress"] = 80
-            if patches:
-                result = f"✅ Task queued {len(patches)} patch(es): " + "; ".join(
-                    p.get("description", "patch")[:50] for p in patches[:3]
-                )
-            else:
-                result = "✅ Task processed — system already optimal for this request."
+        # Step 2 – plan and execute (60%)
+        with _af_task_lock:
+            _af_current_task["progress"] = 60
+        result = af.handle_complex_task(task)
         with _af_task_lock:
             _af_current_task.update({
                 "status": "done",
@@ -19596,6 +19880,21 @@ def ascend_progress():
     """Return current Ascend Forge task progress."""
     with _af_task_lock:
         return JSONResponse(dict(_af_current_task))
+
+
+@app.post("/api/ascend/analyze")
+def ascend_analyze(payload: dict, _auth: None = Depends(require_auth)):
+    """Analyze a complex prompt and return a structured plan without executing."""
+    task = (payload.get("task") or "").strip()
+    if not task:
+        raise HTTPException(400, "task is required")
+    try:
+        af = _load_ascend_module()
+        plan = af.analyze_prompt(task)
+        return JSONResponse({"ok": True, "plan": plan})
+    except Exception as exc:
+        logger.error("ascend analyze error: %s", exc)
+        raise HTTPException(500, "Analysis failed")
 
 
 # ── Blacklight direct task assignment ────────────────────────────────────────
@@ -21785,7 +22084,7 @@ async def guardrails_submit_action(payload: dict):
 
 
 @app.post("/api/guardrails/pending-actions/{action_id}/approve")
-async def guardrails_approve_action(action_id: str, payload: dict = {}):
+async def guardrails_approve_action(action_id: str, payload: dict = {}, _auth: None = Depends(require_auth)):
     def _approve():
         data = _load_pending_actions()
         for i, action in enumerate(data["actions"]):
@@ -21805,7 +22104,7 @@ async def guardrails_approve_action(action_id: str, payload: dict = {}):
 
 
 @app.post("/api/guardrails/pending-actions/{action_id}/reject")
-async def guardrails_reject_action(action_id: str, payload: dict = {}):
+async def guardrails_reject_action(action_id: str, payload: dict = {}, _auth: None = Depends(require_auth)):
     def _reject():
         data = _load_pending_actions()
         for i, action in enumerate(data["actions"]):
@@ -21822,6 +22121,433 @@ async def guardrails_reject_action(action_id: str, payload: dict = {}):
     if not result:
         raise HTTPException(404, "Action not found")
     return JSONResponse(result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. Agent Governor — limits concurrent active agents to a stable cap
+# ═══════════════════════════════════════════════════════════════════════════
+
+_AGENT_GOVERNOR_LOCK = threading.Lock()
+_AGENT_GOVERNOR: dict = {
+    "enabled": True,
+    "max_agents": 56,
+    "updated_at": None,
+}
+
+
+def _count_running_agents() -> int:
+    """Return the number of currently running (PID-alive) agents."""
+    count = 0
+    for agent_name in _mode_agent_targets():
+        if agent_name in INFRA_AGENTS:
+            continue
+        pid_file = AI_HOME / "run" / f"{agent_name}.pid"
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text().strip()), 0)
+                count += 1
+            except Exception:
+                pass
+    return count
+
+
+@app.get("/api/agents/governor")
+def get_agent_governor():
+    """Return the current agent governor configuration and live agent count."""
+    with _AGENT_GOVERNOR_LOCK:
+        cfg = dict(_AGENT_GOVERNOR)
+    cfg["running"] = _count_running_agents()
+    cfg["headroom"] = max(0, cfg["max_agents"] - cfg["running"]) if cfg["enabled"] else None
+    return JSONResponse(cfg)
+
+
+@app.post("/api/agents/governor")
+def set_agent_governor(payload: dict, _auth: None = Depends(require_auth)):
+    """Update agent governor settings.
+
+    Payload fields (all optional):
+      enabled  – bool: activate/deactivate the governor
+      max_agents – int (1-200): new agent cap
+    """
+    with _AGENT_GOVERNOR_LOCK:
+        if "enabled" in payload:
+            _AGENT_GOVERNOR["enabled"] = bool(payload["enabled"])
+        if "max_agents" in payload:
+            cap = int(payload["max_agents"])
+            if not (1 <= cap <= 200):
+                raise HTTPException(400, "max_agents must be between 1 and 200")
+            _AGENT_GOVERNOR["max_agents"] = cap
+        _AGENT_GOVERNOR["updated_at"] = now_iso()
+        cfg = dict(_AGENT_GOVERNOR)
+    cfg["running"] = _count_running_agents()
+    cfg["headroom"] = max(0, cfg["max_agents"] - cfg["running"]) if cfg["enabled"] else None
+    return JSONResponse({"ok": True, **cfg})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. Dashboard status cache — reduces repeated disk/CPU work on fast polls
+# ═══════════════════════════════════════════════════════════════════════════
+
+_STATUS_CACHE: dict = {}
+_STATUS_CACHE_LOCK = threading.Lock()
+_STATUS_CACHE_TTL = 4.0  # seconds — short enough to feel live, long enough to reduce load
+
+
+def _get_cached_status() -> "dict | None":
+    with _STATUS_CACHE_LOCK:
+        entry = _STATUS_CACHE.get("data")
+        ts = _STATUS_CACHE.get("ts", 0.0)
+    if entry and time.monotonic() - ts < _STATUS_CACHE_TTL:
+        return entry
+    return None
+
+
+def _set_cached_status(data: dict) -> None:
+    with _STATUS_CACHE_LOCK:
+        _STATUS_CACHE["data"] = data
+        _STATUS_CACHE["ts"] = time.monotonic()
+
+
+def _invalidate_status_cache() -> None:
+    with _STATUS_CACHE_LOCK:
+        _STATUS_CACHE.clear()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. Email Deliverability Audit — scans campaigns for spam signals
+# ═══════════════════════════════════════════════════════════════════════════
+
+_SPAM_TRIGGER_WORDS = [
+    "free money", "click here", "winner", "congratulations", "guaranteed",
+    "no risk", "risk free", "100% free", "act now", "limited time",
+    "earn extra cash", "make money fast", "double your income",
+    "increase sales", "work from home", "be your own boss",
+    "dear friend", "this is not spam", "unsubscribe here",
+    "order now", "buy now", "cash bonus", "extra cash",
+    "prize", "you've been selected", "important information",
+]
+
+_DNS_AUTH_TIPS = [
+    {"check": "SPF", "status": "manual", "action": "Verify v=spf1 record exists for your sending domain via DNS lookup"},
+    {"check": "DKIM", "status": "manual", "action": "Ensure DKIM TXT record is published and selector matches your mailer"},
+    {"check": "DMARC", "status": "manual", "action": "Add v=DMARC1; p=quarantine; rua=mailto:dmarc@yourdomain.com"},
+    {"check": "BIMI", "status": "manual", "action": "Publish a BIMI TXT record with a verified SVG logo for inbox branding"},
+    {"check": "Reverse DNS", "status": "manual", "action": "Ensure PTR record for sending IP resolves to your mail hostname"},
+]
+
+
+def _audit_campaign(campaign: dict) -> dict:
+    """Analyse a single campaign for deliverability issues."""
+    issues = []
+    subject = (campaign.get("subject") or "").lower()
+    body = (campaign.get("body") or "").lower()
+    full_text = subject + " " + body
+
+    # Spam trigger words
+    found_triggers = [w for w in _SPAM_TRIGGER_WORDS if w in full_text]
+    if found_triggers:
+        issues.append({
+            "severity": "high",
+            "type": "spam_trigger",
+            "detail": f"Spam trigger words detected: {', '.join(found_triggers[:5])}",
+            "fix": "Remove or rephrase these phrases to avoid spam filters",
+        })
+
+    # ALL CAPS check (>20 % of words) — use the original (non-lowercased) subject for both counts
+    original_subject = campaign.get("subject") or ""
+    orig_words = original_subject.split()
+    caps_words = [w for w in orig_words if w.isupper() and len(w) > 2]
+    if len(orig_words) > 0 and len(caps_words) / max(len(orig_words), 1) > 0.2:
+        issues.append({
+            "severity": "medium",
+            "type": "excessive_caps",
+            "detail": "Subject line contains excessive ALL-CAPS words",
+            "fix": "Use sentence case or title case instead of all-caps",
+        })
+
+    # Missing unsubscribe link
+    if campaign.get("body") and "unsubscribe" not in body:
+        issues.append({
+            "severity": "high",
+            "type": "missing_unsubscribe",
+            "detail": "Email body does not contain an unsubscribe link",
+            "fix": "Add a visible unsubscribe link — required by CAN-SPAM and GDPR",
+        })
+
+    # Subject line length
+    subj_len = len(campaign.get("subject") or "")
+    if subj_len > 60:
+        issues.append({
+            "severity": "low",
+            "type": "long_subject",
+            "detail": f"Subject line is {subj_len} characters (recommended ≤60)",
+            "fix": "Shorten subject to under 60 characters for better mobile display",
+        })
+    elif subj_len == 0:
+        issues.append({
+            "severity": "high",
+            "type": "empty_subject",
+            "detail": "Campaign has no subject line",
+            "fix": "Add a compelling subject line to improve open rates",
+        })
+
+    # Empty body
+    if not (campaign.get("body") or "").strip():
+        issues.append({
+            "severity": "high",
+            "type": "empty_body",
+            "detail": "Campaign body is empty",
+            "fix": "Add email body content",
+        })
+
+    score = max(0, 100 - sum({"high": 25, "medium": 10, "low": 5}.get(i["severity"], 0) for i in issues))
+    return {
+        "id": campaign.get("id"),
+        "name": campaign.get("name"),
+        "score": score,
+        "rating": "good" if score >= 80 else "needs_work" if score >= 50 else "poor",
+        "issues": issues,
+    }
+
+
+@app.get("/api/email/deliverability-audit")
+async def email_deliverability_audit():
+    """Run a deliverability audit across all campaigns.
+
+    Returns per-campaign scores, detected spam triggers, and DNS auth tips.
+    """
+    try:
+        def _run_audit():
+            try:
+                campaigns = _email_mktg().list_campaigns()
+            except Exception:
+                campaigns = []
+            if hasattr(campaigns, "body"):
+                import json as _json
+                campaigns = _json.loads(campaigns.body)
+            if not isinstance(campaigns, list):
+                campaigns = []
+            results = [_audit_campaign(c) for c in campaigns]
+            overall = round(sum(r["score"] for r in results) / len(results), 1) if results else None
+            high_issues = sum(1 for r in results for i in r["issues"] if i["severity"] == "high")
+            return {
+                "overall_score": overall,
+                "campaigns_audited": len(results),
+                "high_severity_issues": high_issues,
+                "campaigns": results,
+                "dns_checklist": _DNS_AUTH_TIPS,
+                "warmup_advice": (
+                    "Warm up new sending domains gradually: 50→200→500→1000→2000 emails/day "
+                    "over 4-6 weeks. Keep bounce rate <2% and complaint rate <0.1%."
+                ),
+                "sender_reputation_tools": [
+                    "Google Postmaster Tools (postmaster.google.com)",
+                    "Microsoft SNDS (sendersupport.olc.protection.outlook.com)",
+                    "MXToolbox Blacklist Check (mxtoolbox.com/blacklists.aspx)",
+                    "Mail-Tester (mail-tester.com)",
+                ],
+                "ts": now_iso(),
+            }
+        return JSONResponse(await run_in_threadpool(_run_audit))
+    except Exception as exc:
+        logger.error("Deliverability audit error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. Circuit Breaker — pause agents that repeatedly fail
+# ═══════════════════════════════════════════════════════════════════════════
+
+_CB_LOCK = threading.Lock()
+# Per-agent state: {"state": "closed"|"open"|"half_open",
+#                   "failures": int, "last_failure": str|None,
+#                   "opened_at": str|None, "success_streak": int}
+_CIRCUIT_BREAKERS: dict[str, dict] = {}
+
+_CB_FAILURE_THRESHOLD = 3    # consecutive failures before opening
+_CB_HALF_OPEN_AFTER = 300    # seconds before trying again (5 min)
+_CB_SUCCESS_TO_CLOSE = 2     # successes in half-open needed to close
+
+
+def _cb_get(agent_id: str) -> dict:
+    """Return (creating if missing) the circuit-breaker state for an agent."""
+    if agent_id not in _CIRCUIT_BREAKERS:
+        _CIRCUIT_BREAKERS[agent_id] = {
+            "state": "closed",
+            "failures": 0,
+            "last_failure": None,
+            "opened_at": None,
+            "success_streak": 0,
+        }
+    return _CIRCUIT_BREAKERS[agent_id]
+
+
+def circuit_breaker_record_failure(agent_id: str) -> dict:
+    """Record a subtask failure for *agent_id* and open the breaker if threshold is reached."""
+    with _CB_LOCK:
+        cb = _cb_get(agent_id)
+        cb["failures"] += 1
+        cb["success_streak"] = 0
+        cb["last_failure"] = now_iso()
+        if cb["state"] == "closed" and cb["failures"] >= _CB_FAILURE_THRESHOLD:
+            cb["state"] = "open"
+            cb["opened_at"] = now_iso()
+            logger.warning("Circuit breaker OPENED for agent '%s' after %d failures", agent_id, cb["failures"])
+        return dict(cb)
+
+
+def circuit_breaker_record_success(agent_id: str) -> dict:
+    """Record a subtask success; close the breaker if it was half-open."""
+    with _CB_LOCK:
+        cb = _cb_get(agent_id)
+        cb["success_streak"] += 1
+        # Transition from half-open → closed after enough consecutive successes
+        if cb["state"] == "half_open" and cb["success_streak"] >= _CB_SUCCESS_TO_CLOSE:
+            cb["state"] = "closed"
+            cb["failures"] = 0
+            cb["opened_at"] = None
+            logger.info("Circuit breaker CLOSED for agent '%s'", agent_id)
+        elif cb["state"] == "closed":
+            cb["failures"] = 0  # reset failure count on success
+        return dict(cb)
+
+
+def circuit_breaker_is_open(agent_id: str) -> bool:
+    """Return True if the agent should be skipped (circuit is open).
+
+    Automatically transitions open → half_open after the cooldown period.
+    """
+    with _CB_LOCK:
+        if agent_id not in _CIRCUIT_BREAKERS:
+            return False
+        cb = _CIRCUIT_BREAKERS[agent_id]
+        if cb["state"] == "open" and cb.get("opened_at"):
+            try:
+                opened = datetime.fromisoformat(cb["opened_at"].replace("Z", "+00:00"))
+                elapsed = (datetime.now(timezone.utc) - opened).total_seconds()
+                if elapsed >= _CB_HALF_OPEN_AFTER:
+                    cb["state"] = "half_open"
+                    cb["success_streak"] = 0
+                    logger.info("Circuit breaker HALF-OPEN for agent '%s' after %.0fs cooldown", agent_id, elapsed)
+            except Exception:
+                pass
+        return cb["state"] == "open"
+
+
+@app.get("/api/agents/circuit-breakers")
+def get_circuit_breakers():
+    """Return all circuit-breaker states and current thresholds."""
+    with _CB_LOCK:
+        snapshot = {k: dict(v) for k, v in _CIRCUIT_BREAKERS.items()}
+    # Trigger the open→half-open check for each agent
+    for agent_id in list(snapshot.keys()):
+        circuit_breaker_is_open(agent_id)
+    with _CB_LOCK:
+        snapshot = {k: dict(v) for k, v in _CIRCUIT_BREAKERS.items()}
+    return JSONResponse({
+        "circuit_breakers": snapshot,
+        "thresholds": {
+            "failure_threshold": _CB_FAILURE_THRESHOLD,
+            "half_open_after_seconds": _CB_HALF_OPEN_AFTER,
+            "success_to_close": _CB_SUCCESS_TO_CLOSE,
+        },
+        "summary": {
+            "total": len(snapshot),
+            "open": sum(1 for v in snapshot.values() if v["state"] == "open"),
+            "half_open": sum(1 for v in snapshot.values() if v["state"] == "half_open"),
+            "closed": sum(1 for v in snapshot.values() if v["state"] == "closed"),
+        },
+    })
+
+
+@app.post("/api/agents/circuit-breakers/{agent_id}/reset")
+def reset_circuit_breaker(agent_id: str, _auth: None = Depends(require_auth)):
+    """Manually reset the circuit breaker for a specific agent to closed state."""
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent ID")
+    with _CB_LOCK:
+        _CIRCUIT_BREAKERS[agent_id] = {
+            "state": "closed",
+            "failures": 0,
+            "last_failure": None,
+            "opened_at": None,
+            "success_streak": 0,
+        }
+    logger.info("Circuit breaker manually RESET for agent '%s'", agent_id)
+    return JSONResponse({"ok": True, "agent_id": agent_id, "state": "closed"})
+
+
+@app.post("/api/agents/circuit-breakers/{agent_id}/record-failure")
+def record_agent_failure(agent_id: str, _auth: None = Depends(require_auth)):
+    """Manually record a failure event for an agent (useful for testing)."""
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent ID")
+    state = circuit_breaker_record_failure(agent_id)
+    return JSONResponse({"ok": True, "agent_id": agent_id, **state})
+
+
+@app.post("/api/agents/circuit-breakers/{agent_id}/record-success")
+def record_agent_success(agent_id: str, _auth: None = Depends(require_auth)):
+    """Manually record a success event for an agent (useful for testing)."""
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent ID")
+    state = circuit_breaker_record_success(agent_id)
+    return JSONResponse({"ok": True, "agent_id": agent_id, **state})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. Simplified Lead Generation Pilot
+# ═══════════════════════════════════════════════════════════════════════════
+
+_LEAD_PILOT_LOCK = threading.Lock()
+_LEAD_PILOT: dict = {
+    "enabled": False,
+    "max_leads": 5,
+    "niche": "web design agencies",
+    "use_case": "web-design",
+    "updated_at": None,
+    "description": (
+        "Pilot mode: produce only 5 highly-targeted leads for a single use case "
+        "to validate lead quality before scaling."
+    ),
+}
+
+
+@app.get("/api/lead-pilot")
+def get_lead_pilot():
+    """Return the current simplified lead-generation pilot configuration."""
+    with _LEAD_PILOT_LOCK:
+        return JSONResponse(dict(_LEAD_PILOT))
+
+
+@app.post("/api/lead-pilot")
+def set_lead_pilot(payload: dict, _auth: None = Depends(require_auth)):
+    """Enable or configure the simplified lead generation pilot.
+
+    Payload fields (all optional):
+      enabled   – bool
+      max_leads – int (1-50)
+      niche     – str: target market segment
+      use_case  – str: identifier for the use case
+    """
+    with _LEAD_PILOT_LOCK:
+        if "enabled" in payload:
+            _LEAD_PILOT["enabled"] = bool(payload["enabled"])
+        if "max_leads" in payload:
+            n = int(payload["max_leads"])
+            if not (1 <= n <= 50):
+                raise HTTPException(400, "max_leads must be between 1 and 50")
+            _LEAD_PILOT["max_leads"] = n
+        if "niche" in payload:
+            niche = str(payload["niche"])[:120].strip()
+            if not niche:
+                raise HTTPException(400, "niche cannot be empty")
+            _LEAD_PILOT["niche"] = niche
+        if "use_case" in payload:
+            _LEAD_PILOT["use_case"] = str(payload["use_case"])[:60].strip()
+        _LEAD_PILOT["updated_at"] = now_iso()
+        cfg = dict(_LEAD_PILOT)
+    return JSONResponse({"ok": True, **cfg})
 
 
 if __name__ == "__main__":
