@@ -637,7 +637,7 @@ def route_to_agent(message: str) -> str:
   for keyword in sorted(ROUTING_MAP, key=len, reverse=True):
     if keyword in message_lower:
       return ROUTING_MAP[keyword]
-  if "all 56 agents" in message_lower or "all agents" in message_lower:
+  if "all 74 agents" in message_lower or "all agents" in message_lower:
     return "task-orchestrator"
   return "task-orchestrator"
 
@@ -6244,6 +6244,7 @@ function switchTab(tab, btn) {
         onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();afSendTask();}"></textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button onclick="afSendTask()" style="padding:10px 24px;background:linear-gradient(135deg,#92400e,#d97706,#f59e0b);border:none;border-radius:10px;color:#fff;font-weight:800;font-size:.9em;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 16px rgba(217,119,6,.3);letter-spacing:.03em" onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 24px rgba(217,119,6,.5)'" onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(217,119,6,.3)'">🔥 Send to Ascend Forge <kbd style="background:rgba(255,255,255,.15);padding:1px 5px;border-radius:4px;font-size:.75em">Ctrl+↵</kbd></button>
+        <button onclick="afAnalyzeOnly()" class="btn btn-ghost btn-sm" style="border-color:rgba(251,191,36,.45);color:#fbbf24;font-weight:700" title="Analyze the prompt and show a structured plan — without queuing any patches">🗺 Plan Only</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('optimize all AI prompts for higher revenue and better output quality')">💰 Optimize Prompts</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('scan system for improvements and automatically apply all low-risk patches')">🔍 Auto-Improve</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('analyze all agent modules and improve their performance and reliability')">🤖 Boost Agents</button>
@@ -6259,7 +6260,7 @@ function switchTab(tab, btn) {
         <div id="af-task-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#92400e,#d97706,#fbbf24);border-radius:100px;transition:width .4s ease;box-shadow:0 0 10px rgba(251,191,36,.4)"></div>
       </div>
       <div id="af-task-desc" style="margin-top:8px;font-size:.8em;color:var(--text-muted);font-style:italic"></div>
-      <div id="af-task-result" style="margin-top:8px;font-size:.84em;color:#4ade80;display:none"></div>
+      <div id="af-task-result" style="margin-top:8px;font-size:.84em;color:#4ade80;display:none;white-space:pre-wrap;line-height:1.65"></div>
     </div>
   </div>
 
@@ -7220,7 +7221,7 @@ async function loadDashboard() {
   const ovBannerAgents = document.getElementById('ov-banner-agents');
   if (ovBannerMode && d.mode) ovBannerMode.textContent = d.mode.toUpperCase() + ' MODE';
   if (ovBannerAgents) ovBannerAgents.textContent = `${running} / ${total} Agents Active`;
-  const modeCapacity = {starter: 3, business: 15, power: 73};
+  const modeCapacity = {starter: 3, business: 15, power: 74};
   const capacity = modeCapacity[d.mode] || total;
   const totalSubEl = document.getElementById('stat-total-sub');
   if (totalSubEl && d.mode) totalSubEl.textContent = `${d.mode} mode · ${capacity} max`;
@@ -7237,22 +7238,23 @@ async function loadDashboard() {
   const healthBar = document.getElementById('health-bar');
   const sysRing = document.getElementById('sys-ring');
   const sysControlSub = document.getElementById('sys-control-sub');
-  healthBar.style.width = pct + '%';
-  healthBar.className = 'health-bar-fill' + (pct < 40 ? ' danger' : pct < 70 ? ' warn' : '');
-  document.getElementById('health-label-right').textContent = pct + '%';
-  document.getElementById('health-label-left').textContent = running + ' / ' + total + ' running';
+  const healthLabelRight = document.getElementById('health-label-right');
+  const healthLabelLeft = document.getElementById('health-label-left');
+  if (healthBar) { healthBar.style.width = pct + '%'; healthBar.className = 'health-bar-fill' + (pct < 40 ? ' danger' : pct < 70 ? ' warn' : ''); }
+  if (healthLabelRight) healthLabelRight.textContent = pct + '%';
+  if (healthLabelLeft) healthLabelLeft.textContent = running + ' / ' + total + ' running';
   if (pct === 0 && total > 0) {
-    sysRing.classList.add('offline');
-    sysControlSub.textContent = 'All agents stopped — click Start All to launch';
+    if (sysRing) sysRing.classList.add('offline');
+    if (sysControlSub) sysControlSub.textContent = 'All agents stopped — click Start All to launch';
   } else if (pct === 100) {
-    sysRing.classList.remove('offline');
-    sysControlSub.textContent = 'All systems operational ✓';
+    if (sysRing) sysRing.classList.remove('offline');
+    if (sysControlSub) sysControlSub.textContent = 'All systems operational ✓';
   } else if (total === 0) {
-    sysRing.classList.add('offline');
-    sysControlSub.textContent = 'No agent state data yet — start agents first';
+    if (sysRing) sysRing.classList.add('offline');
+    if (sysControlSub) sysControlSub.textContent = 'No agent state data yet — start agents first';
   } else {
-    sysRing.classList.remove('offline');
-    sysControlSub.textContent = `${running} of ${total} agents active`;
+    if (sysRing) sysRing.classList.remove('offline');
+    if (sysControlSub) sysControlSub.textContent = `${running} of ${total} agents active`;
   }
 
   // Uptime
@@ -10714,10 +10716,11 @@ async function deleteBotFinal() {
   }
 }
 
-// Auto-refresh dashboard every 30s
-setInterval(() => { if (currentTab === 'dashboard') loadDashboard(); }, 30000);
-// Poll guardrails for pending approvals badge (every 60 seconds)
+// Auto-refresh dashboard every 30s (skip when page is hidden)
+setInterval(() => { if (!document.hidden && currentTab === 'dashboard') loadDashboard(); }, 30000);
+// Poll guardrails for pending approvals badge (every 60 seconds, skip when hidden)
 setInterval(() => {
+  if (document.hidden) return;
   api('/api/guardrails').then(d => {
     const pending = (d.pending || []).length;
     const navBadge = document.getElementById('guardrail-pending-badge');
@@ -11111,6 +11114,49 @@ function afFillTask(text) {
   if (el) { el.value = text; el.focus(); }
 }
 
+async function afAnalyzeOnly() {
+  const input = document.getElementById('af-task-input');
+  const task = (input?.value || '').trim();
+  if (!task) { toast('Enter a prompt to analyze', 'error'); return; }
+  const panel = document.getElementById('af-task-progress-panel');
+  const stxt  = document.getElementById('af-task-status-text');
+  const pct   = document.getElementById('af-task-pct');
+  const desc  = document.getElementById('af-task-desc');
+  const res   = document.getElementById('af-task-result');
+  if (panel) panel.style.display = 'block';
+  if (stxt)  stxt.textContent = '🗺 Analyzing prompt…';
+  if (pct)   pct.textContent = '…';
+  if (desc)  desc.textContent = task;
+  if (res)   { res.style.display = 'none'; res.textContent = ''; }
+  try {
+    const r = await api('/api/ascend/analyze', {method:'POST', body:{task}});
+    if (!r.ok) { toast(r.detail || 'Analysis failed', 'error'); return; }
+    const plan = r.plan || {};
+    const lines = [];
+    lines.push(`📊 Summary: ${plan.summary || task.slice(0,100)}`);
+    if (plan.phases && plan.phases.length) {
+      lines.push('');
+      lines.push('📋 Plan:');
+      plan.phases.forEach(ph => {
+        lines.push(`  ${ph.name} (Priority: ${ph.priority})`);
+        (ph.items || []).slice(0,5).forEach(it => lines.push(`    • ${it}`));
+      });
+    } else if (plan.actions && plan.actions.length) {
+      lines.push('');
+      lines.push('📋 Planned Actions:');
+      plan.actions.slice(0,8).forEach(a => lines.push(`  • ${a}`));
+    }
+    if (plan.patch_types && plan.patch_types.length) lines.push(`\n🔧 Improvements: ${plan.patch_types.join(', ')}`);
+    if (plan.mentioned_agents && plan.mentioned_agents.length) lines.push(`🤖 Agents: ${plan.mentioned_agents.join(', ')}`);
+    if (plan.mentioned_files && plan.mentioned_files.length) lines.push(`📁 Files: ${plan.mentioned_files.join(', ')}`);
+    lines.push('');
+    lines.push(plan.has_high_risk ? '⚠️ HIGH risk changes detected — review before executing.' : '✅ Plan ready. Click "Send to Ascend Forge" to execute.');
+    if (stxt) stxt.textContent = '🗺 Plan generated';
+    if (pct)  pct.textContent = '100%';
+    if (res) { res.style.display = 'block'; res.style.color = '#fbbf24'; res.textContent = lines.join('\n'); }
+  } catch(e) { toast('Analysis error', 'error'); console.warn('afAnalyzeOnly', e); }
+}
+
 async function afSendTask() {
   const input = document.getElementById('af-task-input');
   const task = (input?.value || '').trim();
@@ -11174,8 +11220,8 @@ async function _afPollTaskProgress() {
   }
 }
 
-// Auto-poll Ascend Forge progress on the dashboard widget
-setInterval(() => { if (currentTab === 'dashboard') _afPollTaskProgress(); }, 8000);
+// Auto-poll Ascend Forge progress on the dashboard widget (skip when hidden)
+setInterval(() => { if (!document.hidden && currentTab === 'dashboard') _afPollTaskProgress(); }, 8000);
 
 // ── BLACKLIGHT Direct Task Assignment ────────────────────────────────────────
 let _blTaskTimer = null;
@@ -11354,8 +11400,8 @@ function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Auto-refresh ASCEND FORGE every 15s when tab is active
-setInterval(() => { if (currentTab === 'ascend') { afRefresh(); afLoadPatches(); } }, 15000);
+// Auto-refresh ASCEND FORGE every 15s when tab is active (skip when hidden)
+setInterval(() => { if (!document.hidden && currentTab === 'ascend') { afRefresh(); afLoadPatches(); } }, 15000);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ── BUDGET TAB ──────────────────────────────────────────────────────────────
@@ -12181,8 +12227,9 @@ async function restoreCheckpoint(session_id, checkpoint_id) {
   else toast(r.detail || 'Error', 'error');
 }
 
-// Auto-refresh new tabs every 30s when active
+// Auto-refresh new tabs every 30s when active (skip when page is hidden)
 setInterval(() => {
+  if (document.hidden) return;
   if (currentTab === 'budget') loadBudget();
   if (currentTab === 'boardroom') loadBoardroom();
   if (currentTab === 'tickets') loadTickets();
@@ -14685,7 +14732,7 @@ async function submitLogin() {
 /* named constants */
 const MAX_HEARTBEAT_LINES = 80;
 const MAX_CHAT_MESSAGES = 60;
-const MAX_AGENTS_TOTAL = 73; /* matches AGENTS_BY_MODE power list (unique non-infra agents) */
+const MAX_AGENTS_TOTAL = 74; /* matches AGENTS_BY_MODE power list */
 
 document.addEventListener('DOMContentLoaded', () => {
   const passEl = document.getElementById('login-pass');
@@ -14727,7 +14774,7 @@ function runBootSequence() {
     ['[NET ]  TLS context: ready', 'ok', 200, 36],
     ['[AUTH]  JWT secret: loaded', 'ok', 220, 41],
     ['[AGNT]  Loading agent registry…', '', 300, 47],
-    ['[AGNT]  56 agents registered — all modes available', 'ok', 250, 54],
+    ['[AGNT]  74 agents registered — all modes available', 'ok', 250, 54],
     ['[LLM ]  Probing Ollama endpoint…', '', 320, 60],
     ['[AI  ]  Hybrid router: ONLINE/OFFLINE/AUTO configured', 'ok', 220, 67],
     ['[DB  ]  State store: mounted', 'ok', 200, 73],
@@ -14966,8 +15013,10 @@ function sendCyberChat() {
 /* ══════════════════════════════════════════════════
    SYSTEM STATS UPDATER
 ══════════════════════════════════════════════════ */
-let _fakeCpu = 30 + Math.random() * 20;
-let _fakeMem = 40 + Math.random() * 25;
+let _fakeCpu = 0;
+let _fakeMem = 0;
+// Real CPU/RAM values are fed by loadSysRes() via updateCpuRing() and updateStatBar().
+// _fakeCpu/_fakeMem are kept as fallback placeholders but not actively simulated.
 
 function updateCpuRing(pct) {
   const circ = document.getElementById('cpu-ring-circle');
@@ -15001,18 +15050,9 @@ function startStatsUpdater() {
       }
     } catch (_) {}
 
-    /* CPU simulation */
-    _fakeCpu += (Math.random() - 0.45) * 6;
-    _fakeCpu = Math.max(5, Math.min(95, _fakeCpu));
-    _fakeMem += (Math.random() - 0.45) * 3;
-    _fakeMem = Math.max(20, Math.min(90, _fakeMem));
-
-    updateCpuRing(_fakeCpu);
-    const maxAgents = 56;
     const agentNum = typeof agents === 'number' ? agents : (parseInt(agents) || 0);
     updateStatBar('sb-agents', 'sv-agents', agentNum / MAX_AGENTS_TOTAL * 100, agents);
     updateStatBar('sb-tasks', 'sv-tasks', 10, tasks);
-    updateStatBar('sb-mem', 'sv-mem', _fakeMem, Math.round(_fakeMem) + '%');
 
     const gw = document.getElementById('sv-gw');
     if (gw) { gw.textContent = gwStatus; gw.style.color = gwStatus === 'online' ? 'var(--success)' : 'var(--danger)'; }
@@ -16272,7 +16312,7 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
             "  arb opportunities / arb watchlist\n"
             "  task <description> — multi-agent orchestration\n"
             "  task status / task list / task cancel\n"
-            "  agents — list all 56 AI agents\n"
+            "  agents — list all 74 AI agents\n"
             "  assign <agent> <subtask> — manual agent dispatch\n"
             "  company build <idea> — build a company from scratch\n"
             "  company validate / plan / simulate / gtm / pitch / org / swot\n"
@@ -16607,11 +16647,11 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
 
     routed_agent = route_to_agent(message)
     mode = _current_mode()
-    if ("all 56 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
+    if ("all 74 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
       allowed = ", ".join(_available_agent_ids(mode))
       return (
         f"Only {len(_available_agent_ids(mode))} agents are available in {mode} mode: {allowed}. "
-        "Switch to power mode to run all 73 agents, or I can handle this with the current set."
+        "Switch to power mode to run all 74 agents, or I can handle this with the current set."
       )
     if not _agent_allowed_in_mode(routed_agent, mode):
       return (
@@ -19275,23 +19315,13 @@ def _run_ascend_task(task_id: str, task: str) -> None:
         })
     try:
         af = _load_ascend_module()
-        # Step 1 – parse intent (20%)
+        # Step 1 – analyze intent (20%)
         with _af_task_lock:
             _af_current_task["progress"] = 20
-        result = af.handle_chat_command("ascend: " + task)
-        if not result:
-            # Fall back to scan if command not handled
-            with _af_task_lock:
-                _af_current_task["progress"] = 40
-            patches = af.scan_system(trigger=f"user task: {task[:60]}")
-            with _af_task_lock:
-                _af_current_task["progress"] = 80
-            if patches:
-                result = f"✅ Task queued {len(patches)} patch(es): " + "; ".join(
-                    p.get("description", "patch")[:50] for p in patches[:3]
-                )
-            else:
-                result = "✅ Task processed — system already optimal for this request."
+        # Step 2 – plan and execute (60%)
+        with _af_task_lock:
+            _af_current_task["progress"] = 60
+        result = af.handle_complex_task(task)
         with _af_task_lock:
             _af_current_task.update({
                 "status": "done",
@@ -19327,6 +19357,21 @@ def ascend_progress():
     """Return current Ascend Forge task progress."""
     with _af_task_lock:
         return JSONResponse(dict(_af_current_task))
+
+
+@app.post("/api/ascend/analyze")
+def ascend_analyze(payload: dict, _auth: None = Depends(require_auth)):
+    """Analyze a complex prompt and return a structured plan without executing."""
+    task = (payload.get("task") or "").strip()
+    if not task:
+        raise HTTPException(400, "task is required")
+    try:
+        af = _load_ascend_module()
+        plan = af.analyze_prompt(task)
+        return JSONResponse({"ok": True, "plan": plan})
+    except Exception as exc:
+        logger.error("ascend analyze error: %s", exc)
+        raise HTTPException(500, "Analysis failed")
 
 
 # ── Blacklight direct task assignment ────────────────────────────────────────

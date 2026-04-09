@@ -517,3 +517,181 @@ class TestActivityFeed:
             af._push_activity(f"msg {i}")
         with af._activity_lock:
             assert len(af._activity_feed) <= af._MAX_FEED
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# analyze_prompt
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestAnalyzePrompt:
+    def test_returns_dict_with_expected_keys(self):
+        result = af.analyze_prompt("Fix the login bug.")
+        for key in ("is_complex", "phases", "actions", "mentioned_agents",
+                    "mentioned_files", "patch_types", "has_high_risk", "summary"):
+            assert key in result
+
+    def test_simple_prompt_not_complex(self):
+        result = af.analyze_prompt("Fix the login bug.")
+        assert not result["is_complex"]
+
+    def test_multi_phase_prompt_is_complex(self):
+        result = af.analyze_prompt(
+            "Phase 1: Fix stability issues\n- fix crashes\n- improve logging\n"
+            "Phase 2: Add new features\n- add user auth\n- add dashboard"
+        )
+        assert result["is_complex"]
+        assert len(result["phases"]) == 2
+
+    def test_phase_extraction(self):
+        result = af.analyze_prompt(
+            "Phase 1: Fix bugs\n- fix crash\n- fix error\n"
+            "Phase 2: Improve UI\n- better layout"
+        )
+        assert result["phases"][0]["name"].startswith("Phase 1")
+        assert len(result["phases"][0]["items"]) >= 1
+
+    def test_phase_priorities_assigned(self):
+        result = af.analyze_prompt(
+            "Phase 1: First phase\n- do something\n"
+            "Phase 2: Second phase\n- do another\n"
+            "Phase 3: Third phase\n- do more"
+        )
+        assert result["phases"][0]["priority"] == "HIGH"
+        assert result["phases"][1]["priority"] == "MEDIUM"
+        assert result["phases"][2]["priority"] == "LOW"
+
+    def test_action_extraction(self):
+        result = af.analyze_prompt(
+            "Do the following:\n"
+            "- Fix login crash\n- Optimize prompts\n- Update the UI layout"
+        )
+        assert len(result["actions"]) >= 3
+
+    def test_agent_detection(self):
+        result = af.analyze_prompt(
+            "Agent: task-orchestrator needs to handle phase 2 planning"
+        )
+        assert "task-orchestrator" in result["mentioned_agents"]
+
+    def test_file_detection(self):
+        result = af.analyze_prompt("Update server.py and the index.html file")
+        assert "server.py" in result["mentioned_files"]
+        assert "index.html" in result["mentioned_files"]
+
+    def test_patch_type_ui_detected(self):
+        result = af.analyze_prompt(
+            "Fix the dashboard UI layout and improve visual design"
+        )
+        assert "UI" in result["patch_types"]
+
+    def test_patch_type_performance_detected(self):
+        result = af.analyze_prompt("Optimize the performance and reduce latency")
+        assert "performance" in result["patch_types"]
+
+    def test_patch_type_functionality_detected(self):
+        result = af.analyze_prompt("Fix crash and resolve error in login flow")
+        assert "functionality" in result["patch_types"]
+
+    def test_high_risk_detection_server(self):
+        result = af.analyze_prompt(
+            "Update server.py and the ai-router configuration"
+        )
+        assert result["has_high_risk"]
+
+    def test_no_high_risk_for_safe_prompt(self):
+        result = af.analyze_prompt("Improve the color scheme of the UI buttons")
+        assert not result["has_high_risk"]
+
+    def test_summary_is_first_line(self):
+        result = af.analyze_prompt(
+            "Fix critical bugs in the system\nPhase 1: Do X"
+        )
+        assert "Fix critical bugs" in result["summary"]
+
+    def test_persists_last_plan_to_state(self):
+        af.analyze_prompt("Test prompt for state persistence")
+        state = af._load_state()
+        assert "last_plan" in state
+        assert state["last_plan"] is not None
+
+    def test_many_lines_marks_complex(self):
+        prompt = "\n".join(f"Step {i}: do something important" for i in range(12))
+        result = af.analyze_prompt(prompt)
+        assert result["is_complex"]
+
+    def test_plan_keyword_marks_complex(self):
+        result = af.analyze_prompt("Create a plan to upgrade the system")
+        assert result["is_complex"]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# handle_complex_task
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestHandleComplexTask:
+    def test_returns_string(self):
+        result = af.handle_complex_task("Fix login crash in the system")
+        assert isinstance(result, str)
+
+    def test_response_has_summary(self):
+        result = af.handle_complex_task("Fix login crash in the system")
+        assert "Summary" in result
+
+    def test_response_ends_with_ready_or_awaiting(self):
+        result = af.handle_complex_task("Fix login crash")
+        assert "Ready to execute" in result or "Awaiting your approval" in result
+
+    def test_delegates_ascend_prefix_commands(self):
+        result = af.handle_complex_task("ascend: status")
+        assert "ASCEND_FORGE Status" in result
+
+    def test_complex_prompt_queues_patches(self):
+        initial_count = len(af._load_changelog())
+        af.handle_complex_task(
+            "Phase 1: Fix UI issues\n- improve layout\n- fix dashboard\n"
+            "Phase 2: Optimize performance\n- reduce latency\n- improve speed"
+        )
+        new_log = af._load_changelog()
+        assert len(new_log) > initial_count
+        descriptions = [p["description"] for p in new_log]
+        assert any("Phase 1" in d or "UI" in d for d in descriptions)
+        assert any("Phase 2" in d or "performance" in d or "Optim" in d for d in descriptions)
+
+    def test_observe_only_still_returns_analysis(self):
+        state = af._load_state()
+        state["observe_only"] = True
+        af._save_state(state)
+        try:
+            # Should return analysis even when observe-only blocks patch creation
+            result = af.handle_complex_task("Improve the UI layout and design")
+            assert isinstance(result, str)
+            assert "Summary" in result
+        finally:
+            s = af._load_state()
+            s["observe_only"] = False
+            af._save_state(s)
+
+    def test_high_risk_prompt_awaiting_approval(self):
+        result = af.handle_complex_task(
+            "Rewrite server.py to integrate with ai-router backend"
+        )
+        assert "Awaiting your approval" in result
+
+    def test_plan_section_in_complex_prompt(self):
+        result = af.handle_complex_task(
+            "Phase 1: Stability fixes\n- fix crash\n- fix errors\n"
+            "Phase 2: New features\n- add feature A\n- add feature B"
+        )
+        assert "Plan" in result
+        assert "Phase 1" in result
+
+    def test_performance_prompt_queues_performance_patch(self):
+        af.handle_complex_task("Optimize performance and reduce response latency")
+        log = af._load_changelog()
+        assert any(p.get("patch_type") == "performance" for p in log)
+
+    def test_ui_prompt_queues_ui_patch(self):
+        af.handle_complex_task("Improve the dashboard UI layout and visual design")
+        log = af._load_changelog()
+        assert any(p.get("patch_type") == "UI" for p in log)
+
