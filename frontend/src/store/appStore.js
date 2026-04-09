@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export const useAppStore = create((set, get) => ({
+export const useAppStore = create((set) => ({
   // State machine
   appState: 'boot', // boot | connecting | login | dashboard | error
   setAppState: (s) => set({ appState: s }),

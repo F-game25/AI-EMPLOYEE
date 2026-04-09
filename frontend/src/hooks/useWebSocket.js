@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 
 const WS_URL = `ws://${window.location.hostname}:3001/ws`
