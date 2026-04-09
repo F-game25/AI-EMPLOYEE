@@ -378,9 +378,13 @@ class TestBrainLogEndpoint:
     def test_log_returns_empty_when_no_file(self, server_mod, tmp_path, monkeypatch):
         """No log file → {"lines": []} — must not 500."""
         monkeypatch.setattr(server_mod, "_brain_mod", None)
+        # Point the log directory to a fresh tmp dir so no real brain.log is found
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
         with patch.object(server_mod, "_load_brain", return_value=None):
-            with TestClient(server_mod.app, raise_server_exceptions=False) as c:
-                r = c.get("/api/brain/log?limit=10")
+            with patch("pathlib.Path.home", return_value=fake_home):
+                with TestClient(server_mod.app, raise_server_exceptions=False) as c:
+                    r = c.get("/api/brain/log?limit=10")
         assert r.status_code == 200
         assert r.json()["lines"] == []
 

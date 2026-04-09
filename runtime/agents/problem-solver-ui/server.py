@@ -298,6 +298,10 @@ PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
 MAX_CHAT_MESSAGE_LENGTH = 10000
 CHATLOG_MAX_ENTRIES = 1000
+
+# ── IntelligenceCore identity ─────────────────────────────────────────────────
+# Default user ID when no auth token is present (single-user / local install).
+_DEFAULT_USER = "user:default"
 LLM_TIMEOUT_SECONDS = 30
 
 ROUTING_MAP = {
@@ -715,19 +719,55 @@ def _llm_auth_failed(exc: Exception) -> bool:
   return "401" in text or "403" in text or "unauthorized" in text or "invalid api key" in text or "authentication" in text
 
 
-def _build_llm_system_prompt(message: str, routed_agent: str, mode: str) -> str:
-  available_agents = ", ".join(_available_agent_ids(mode))
-  return (
-    "You are AI Employee, a high-agency execution assistant with a natural human tone. "
-    f"Current mode: {mode}. "
-    f"Available agents in this mode: {available_agents}. "
-    f"Routed specialist agent: {routed_agent}. "
-    f"User task: {message}. "
-    "Produce real output immediately. Do not ask follow-up questions. "
-    "Write conversationally, with clear structure, and avoid robotic phrasing. "
-    "If live data or browsing is unavailable, say that clearly and provide the exact plan, structure, or draft you would deliver instead. "
-    "Be concrete, concise, and useful."
-  )
+def _build_llm_system_prompt(
+    message: str,
+    routed_agent: str,
+    mode: str,
+    user_id: str = _DEFAULT_USER,
+) -> str:
+    available_agents = ", ".join(_available_agent_ids(mode))
+
+    # ── Tone hint from personalisation profile ────────────────────────────────
+    tone_hint = ""
+    intel = _load_intelligence()
+    if intel is not None:
+        try:
+            from brain.intelligence import get_intelligence  # noqa: PLC0415
+            _ic = get_intelligence()
+            profile = _ic._profile(user_id)
+            if profile.tone == "concise":
+                tone_hint = "The user prefers concise, short responses. Be brief. "
+            elif profile.tone == "detailed":
+                tone_hint = "The user prefers thorough, detailed explanations. Be comprehensive. "
+            if profile.prefers_local > 0.5:
+                tone_hint += "The user prefers local / offline processing — do not suggest cloud services. "
+        except Exception:
+            pass
+
+    # ── Personalised context block (memory + facts + history) ────────────────
+    context_block = ""
+    if intel is not None:
+        try:
+            context_block = intel.build_context(user_id, message, mode)
+        except Exception as exc:
+            logger.debug("_build_llm_system_prompt: context error — %s", exc)
+
+    base = (
+        "You are AI Employee, a high-agency execution assistant with a natural human tone. "
+        f"Current mode: {mode}. "
+        f"Available agents in this mode: {available_agents}. "
+        f"Routed specialist agent: {routed_agent}. "
+        f"User task: {message}. "
+        "Produce real output immediately. Do not ask follow-up questions. "
+        f"{tone_hint}"
+        "Write conversationally, with clear structure, and avoid robotic phrasing. "
+        "If live data or browsing is unavailable, say that clearly and provide the exact plan, structure, or draft you would deliver instead. "
+        "Be concrete, concise, and useful."
+    )
+
+    if context_block:
+        return f"{base}\n\n{context_block}"
+    return base
 
 
 def _call_groq_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
@@ -825,7 +865,13 @@ def _call_gemma_chat(prompt: str, system_prompt: str, ollama_host: str) -> str:
   return _call_ollama_chat(prompt, system_prompt, gemma_model, ollama_host)
 
 
-def _generate_llm_response(message: str, routed_agent: str, mode: str, model_route: Optional[str] = None) -> str:
+def _generate_llm_response(
+    message: str,
+    routed_agent: str,
+    mode: str,
+    model_route: Optional[str] = None,
+    user_id: str = _DEFAULT_USER,
+) -> str:
   provider, model, runtime_env = _detect_llm_provider(model_route)
   if not provider:
     return (
@@ -833,7 +879,7 @@ def _generate_llm_response(message: str, routed_agent: str, mode: str, model_rou
       "or run Ollama locally: https://ollama.ai"
     )
 
-  system_prompt = _build_llm_system_prompt(message, routed_agent, mode)
+  system_prompt = _build_llm_system_prompt(message, routed_agent, mode, user_id=user_id)
   try:
     if provider == "anthropic":
       api_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
@@ -16106,7 +16152,7 @@ def get_chat():
 
 
 @app.post("/api/chat")
-async def post_chat(payload: dict):
+async def post_chat(payload: dict, request: Request):
     raw_message = (payload or {}).get("message", "").strip()
     model_route = ((payload or {}).get("model_route") or "").strip().lower()
     if not raw_message:
@@ -16122,11 +16168,49 @@ async def post_chat(payload: dict):
     entry = {"ts": now_iso(), "type": "user", "message": message, "model_route": model_route}
     append_chatlog(entry)
 
+    # Identify the user — use JWT sub if authenticated, else IP-based default
+    user_id = _DEFAULT_USER
+    try:
+        from fastapi.security.utils import get_authorization_scheme_param  # noqa: PLC0415
+        auth_header = request.headers.get("Authorization", "")
+        _scheme, token_str = get_authorization_scheme_param(auth_header)
+        if token_str:
+            decoded = _verify_any_token.__wrapped__(token_str) if hasattr(_verify_any_token, "__wrapped__") else None
+            if decoded and "sub" in (decoded or {}):
+                user_id = f"user:{decoded['sub']}"
+    except Exception:
+        pass
+
+    # Start a session the first time we see this user
+    intel = _load_intelligence()
+    if intel is not None:
+        try:
+            profile = intel._profile(user_id)
+            if profile.interaction_count == 0:
+                intel.start_session(user_id)
+        except Exception:
+            pass
+
     # Run handle_command in a thread pool to avoid blocking the async event loop
-    response = await run_in_threadpool(handle_command, message, model_route=model_route)
+    response = await run_in_threadpool(
+        handle_command, message, model_route=model_route, user_id=user_id
+    )
     safe_response = _sanitize_for_log(response)
     resp_entry = {"ts": now_iso(), "type": "agent", "message": safe_response, "model_route": model_route}
     append_chatlog(resp_entry)
+
+    # ── Post-exchange intelligence update (memory + brain training) ────────────
+    if intel is not None:
+        try:
+            # Determine which agent handled the response
+            routed_agent = route_to_agent(message)
+            mode = _current_mode()
+            await run_in_threadpool(
+                intel.on_exchange,
+                user_id, message, response, routed_agent, mode
+            )
+        except Exception as exc:
+            logger.debug("IntelligenceCore.on_exchange error: %s", exc)
 
     _log_activity(
         "agent_command",
@@ -16137,7 +16221,11 @@ async def post_chat(payload: dict):
     return JSONResponse({"ok": True, "response": response})
 
 
-def handle_command(message: str, model_route: Optional[str] = None) -> str:
+def handle_command(
+    message: str,
+    model_route: Optional[str] = None,
+    user_id: str = _DEFAULT_USER,
+) -> str:
     msg_lower = message.lower().strip()
 
     # ── ASCEND_FORGE chat commands ─────────────────────────────────────────────
@@ -16849,7 +16937,7 @@ def handle_command(message: str, model_route: Optional[str] = None) -> str:
         f"Run: ai-employee mode {'business' if mode == 'starter' else 'power'} to unlock more agents."
       )
 
-    return _generate_llm_response(message, routed_agent, mode, model_route=model_route)
+    return _generate_llm_response(message, routed_agent, mode, model_route=model_route, user_id=user_id)
 
     return (
         f"Task queued: '{message}'\n"
@@ -19583,10 +19671,40 @@ def blacklight_task_progress():
         return JSONResponse(dict(_bl_direct_task))
 
 
-# ── Neural Brain API ──────────────────────────────────────────────────────────
+# ── Neural Brain + IntelligenceCore API ──────────────────────────────────────
 
 _brain_mod = None
 _brain_mod_lock = threading.Lock()
+
+_intel_mod = None
+_intel_mod_lock = threading.Lock()
+
+# (_DEFAULT_USER is defined at the top of the file, near the path constants)
+
+
+def _load_intelligence():
+    """Lazy-load and return the IntelligenceCore singleton.
+
+    Returns None gracefully if PyTorch is not installed or the module fails
+    to import — all callers must handle None.
+    """
+    global _intel_mod
+    if _intel_mod is not None:
+        return _intel_mod
+    with _intel_mod_lock:
+        if _intel_mod is not None:
+            return _intel_mod
+        try:
+            _brain_dir   = Path(__file__).resolve().parents[2] / "brain"
+            _runtime_dir = Path(__file__).resolve().parents[2]
+            for _d in [str(_runtime_dir), str(_brain_dir)]:
+                if _d not in sys.path:
+                    sys.path.insert(0, _d)
+            from brain.intelligence import get_intelligence  # noqa: PLC0415
+            _intel_mod = get_intelligence()
+        except Exception as exc:
+            logger.warning("IntelligenceCore unavailable: %s", exc)
+    return _intel_mod
 
 
 def _load_brain():
@@ -19716,6 +19834,59 @@ def brain_log(limit: int = 60):
         return JSONResponse({"lines": []})
 
 
+# ── IntelligenceCore API ──────────────────────────────────────────────────────
+
+@app.get("/api/intelligence/profile")
+def intelligence_profile(user: str = "user:default"):
+    """Return the personalisation profile for a user."""
+    intel = _load_intelligence()
+    if intel is None:
+        return JSONResponse({"available": False})
+    try:
+        data = intel.stats(user_id=user)
+        data["available"] = True
+        data["summary"]   = intel.profile_summary(user)
+        return JSONResponse(data)
+    except Exception as exc:
+        logger.warning("intelligence_profile error: %s", exc)
+        return JSONResponse({"available": False, "error": str(exc)})
+
+
+@app.post("/api/intelligence/reward")
+def intelligence_reward(payload: dict, _auth: None = Depends(require_auth)):
+    """Provide explicit outcome feedback to train the brain.
+
+    Body: {"user_id": "user:default", "reward": 1.0}
+    """
+    intel = _load_intelligence()
+    if intel is None:
+        return JSONResponse({"ok": False, "message": "IntelligenceCore not available"})
+    user_id = (payload.get("user_id") or _DEFAULT_USER).strip()
+    try:
+        reward = float(payload.get("reward", 0.0))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "reward must be a number")
+    try:
+        intel.reward(user_id, reward)
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        logger.error("intelligence_reward error: %s", exc)
+        return JSONResponse({"ok": False, "message": str(exc)})
+
+
+@app.get("/api/intelligence/stats")
+def intelligence_stats():
+    """Return aggregate IntelligenceCore statistics."""
+    intel = _load_intelligence()
+    if intel is None:
+        return JSONResponse({"available": False})
+    try:
+        s = intel.stats()
+        s["available"] = True
+        return JSONResponse(s)
+    except Exception as exc:
+        logger.warning("intelligence_stats error: %s", exc)
+        return JSONResponse({"available": False})
 
 
 @app.post("/api/agents/bundle-swarm")
