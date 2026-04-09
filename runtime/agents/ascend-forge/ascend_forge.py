@@ -511,10 +511,10 @@ def handle_complex_task(task: str) -> str:
     _desc_map: dict[str, str] = {
         "UI": "Improve UI/UX based on task specification",
         "functionality": "Fix functionality issues identified in task",
-        "performance": "Optimise performance as specified in task",
+        "performance": "Optimize performance as specified in task",
         "prompt": "Upgrade AI prompt quality for better output",
         "capability": "Implement new capability from task specification",
-        "efficiency": "Stabilise and improve agent efficiency",
+        "efficiency": "Stabilize and improve agent efficiency",
         "monetization": "Enhance revenue-generating features",
     }
     for ptype in plan["patch_types"]:

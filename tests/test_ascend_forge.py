@@ -651,16 +651,25 @@ class TestHandleComplexTask:
             "Phase 1: Fix UI issues\n- improve layout\n- fix dashboard\n"
             "Phase 2: Optimize performance\n- reduce latency\n- improve speed"
         )
-        assert len(af._load_changelog()) > initial_count
+        new_log = af._load_changelog()
+        assert len(new_log) > initial_count
+        descriptions = [p["description"] for p in new_log]
+        assert any("Phase 1" in d or "UI" in d for d in descriptions)
+        assert any("Phase 2" in d or "performance" in d or "Optim" in d for d in descriptions)
 
     def test_observe_only_still_returns_analysis(self):
         state = af._load_state()
         state["observe_only"] = True
         af._save_state(state)
-        # Should return analysis even when observe-only blocks patch creation
-        result = af.handle_complex_task("Improve the UI layout and design")
-        assert isinstance(result, str)
-        assert "Summary" in result
+        try:
+            # Should return analysis even when observe-only blocks patch creation
+            result = af.handle_complex_task("Improve the UI layout and design")
+            assert isinstance(result, str)
+            assert "Summary" in result
+        finally:
+            s = af._load_state()
+            s["observe_only"] = False
+            af._save_state(s)
 
     def test_high_risk_prompt_awaiting_approval(self):
         result = af.handle_complex_task(
