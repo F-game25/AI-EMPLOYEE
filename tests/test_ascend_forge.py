@@ -695,3 +695,640 @@ class TestHandleComplexTask:
         log = af._load_changelog()
         assert any(p.get("patch_type") == "UI" for p in log)
 
+    def test_routing_suggestion_shown_for_ui_task(self):
+        result = af.handle_complex_task("Improve the dashboard UI layout")
+        assert "ui-engine" in result.lower() or "Routing" in result
+
+    def test_routing_suggestion_shown_for_revenue_task(self):
+        result = af.handle_complex_task("Generate leads and increase revenue")
+        assert "cold-outreach" in result.lower() or "Routing" in result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature 5: Agent routing — _route_task
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestRouteTask:
+    def test_ui_routes_to_ui_engine(self):
+        assert af._route_task("Fix the dashboard UI layout") == "ui-engine"
+
+    def test_visual_routes_to_ui_engine(self):
+        assert af._route_task("Improve visual design and CSS styling") == "ui-engine"
+
+    def test_revenue_routes_to_cold_outreach(self):
+        agent = af._route_task("Generate leads and increase revenue")
+        assert agent == "cold-outreach-assassin"
+
+    def test_bug_routes_to_hermes(self):
+        assert af._route_task("Fix crash and resolve error exception") == "hermes-agent"
+
+    def test_research_routes_to_problem_solver(self):
+        assert af._route_task("Research competitor market analysis") == "problem-solver"
+
+    def test_prompt_routes_to_ascend_forge(self):
+        assert af._route_task("Improve prompt quality for better output") == "ascend-forge"
+
+    def test_unmatched_returns_none(self):
+        assert af._route_task("something completely unrelated xyz") is None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature 4: Real execution — _apply_simple_diff, _execute_real_patch
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestApplySimpleDiff:
+    def test_replaces_matching_line(self):
+        original = "hello world\nkeep this\n"
+        diff = "-hello world\n+hello universe\n"
+        result = af._apply_simple_diff(original, diff)
+        assert "hello universe" in result
+        assert "keep this" in result
+
+    def test_returns_original_when_removal_not_found(self):
+        original = "something else\n"
+        diff = "-missing line\n+replacement\n"
+        result = af._apply_simple_diff(original, diff)
+        assert result == original
+
+    def test_returns_original_when_no_real_lines(self):
+        original = "no change\n"
+        diff = "# just a comment\n"
+        result = af._apply_simple_diff(original, diff)
+        assert result == original
+
+    def test_ignores_diff_header_lines(self):
+        original = "old value\n"
+        diff = "--- a/file.py\n+++ b/file.py\n-old value\n+new value\n"
+        result = af._apply_simple_diff(original, diff)
+        assert "new value" in result
+
+
+class TestExecuteRealPatch:
+    def test_returns_false_for_empty_affected_files(self):
+        patch = {"affected_files": [], "diff_preview": "-old\n+new\n"}
+        assert af._execute_real_patch(patch) is False
+
+    def test_returns_false_for_empty_diff(self):
+        patch = {"affected_files": ["safe.py"], "diff_preview": ""}
+        assert af._execute_real_patch(patch) is False
+
+    def test_returns_false_when_diff_has_only_comments(self):
+        patch = {
+            "affected_files": ["safe.py"],
+            "diff_preview": "# Just a metadata comment\n# Another comment",
+        }
+        assert af._execute_real_patch(patch) is False
+
+    def test_returns_false_when_file_not_found(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(af, "AI_HOME", tmp_path)
+        patch = {
+            "affected_files": ["nonexistent/agent.py"],
+            "diff_preview": "-old line\n+new line\n",
+        }
+        assert af._execute_real_patch(patch) is False
+
+    def test_applies_to_real_file(self, tmp_path, monkeypatch):
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        target = agents_dir / "myagent.py"
+        target.write_text("old line\nkeep this\n")
+        monkeypatch.setattr(af, "AI_HOME", tmp_path)
+
+        patch = {
+            "affected_files": ["myagent.py"],
+            "diff_preview": "-old line\n+new line\n",
+        }
+        result = af._execute_real_patch(patch)
+        assert result is True
+        assert "new line" in target.read_text()
+        assert "keep this" in target.read_text()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature 3: Web research — web_research
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestWebResearch:
+    def test_returns_string(self, monkeypatch):
+        """web_research always returns a string regardless of network."""
+        # Patch urlopen to raise to simulate offline environment
+        import urllib.request as _urlreq
+
+        def _fail(*a, **kw):
+            raise OSError("network unavailable")
+
+        monkeypatch.setattr(_urlreq, "urlopen", _fail)
+        result = af.web_research("test query")
+        assert isinstance(result, str)
+
+    def test_offline_message_contains_query(self, monkeypatch):
+        import urllib.request as _urlreq
+
+        monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(OSError("offline")))
+        result = af.web_research("best email openers")
+        assert "best email openers" in result
+
+    def test_returns_findings_on_success(self, monkeypatch):
+        import io, urllib.request as _urlreq
+
+        fake_html = (
+            b'<span class="result__snippet">First great result about topic.</span>'
+            b'<a class="result__snippet">Second result here.</a>'
+        )
+
+        class _FakeResp:
+            def read(self):
+                return fake_html
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                pass
+
+        monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **kw: _FakeResp())
+        result = af.web_research("AI automation")
+        assert "FINDINGS" in result
+
+    def test_max_results_respected(self, monkeypatch):
+        import urllib.request as _urlreq
+
+        snippets = "".join(
+            f'<span class="result__snippet">Result {i}.</span>' for i in range(10)
+        ).encode()
+
+        class _FakeResp:
+            def read(self):
+                return snippets
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                pass
+
+        monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **kw: _FakeResp())
+        result = af.web_research("test", max_results=2)
+        # Should not have more than 2 numbered results
+        lines = [l for l in result.splitlines() if l.strip().startswith(("1.", "2.", "3.", "4."))]
+        assert len(lines) <= 2
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature 6: Context compaction + cost tracking
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestCompactContext:
+    def test_returns_string(self):
+        result = af.compact_context()
+        assert isinstance(result, str)
+
+    def test_empty_feed_message(self):
+        result = af.compact_context()
+        assert "empty" in result.lower() or "nothing" in result.lower()
+
+    def test_compresses_feed(self):
+        for i in range(20):
+            af._push_activity(f"✅ Event {i}", "success")
+        af.compact_context()
+        with af._activity_lock:
+            feed_size = len(af._activity_feed)
+        assert feed_size == 1  # collapsed to one compact entry
+
+    def test_compact_summary_entry_message(self):
+        af._push_activity("✅ patch applied", "success")
+        af.compact_context()
+        with af._activity_lock:
+            feed = list(af._activity_feed)
+        assert any("compact" in e["msg"].lower() for e in feed)
+
+    def test_returns_compressed_label(self):
+        af._push_activity("✅ patch applied", "success")
+        result = af.compact_context()
+        assert "COMPRESSED" in result or "compact" in result.lower()
+
+
+class TestGetSessionCost:
+    def test_returns_dict_with_expected_keys(self):
+        stats = af.get_session_cost()
+        for key in (
+            "patches_applied", "patches_pending", "patches_rejected",
+            "patches_rolled_back", "session_minutes", "activity_entries",
+            "context_health",
+        ):
+            assert key in stats
+
+    def test_session_minutes_non_negative(self):
+        stats = af.get_session_cost()
+        assert stats["session_minutes"] >= 0
+
+    def test_context_health_green_for_small_feed(self):
+        stats = af.get_session_cost()
+        assert "🟢" in stats["context_health"]
+
+    def test_context_health_yellow_when_feed_large(self):
+        for i in range(60):
+            af._push_activity(f"msg {i}")
+        stats = af.get_session_cost()
+        assert "🟡" in stats["context_health"] or "🔴" in stats["context_health"]
+
+    def test_patch_counts_reflect_changelog(self):
+        p = af.create_patch(
+            description="Cost test",
+            reason="Test",
+            affected_files=["agents/safe.py"],
+            diff_preview="+x\n",
+        )
+        af.approve_patch(p["patch_id"])
+        stats = af.get_session_cost()
+        assert stats["patches_applied"] >= 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature 7: Scheduler
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestScheduler:
+    def test_register_returns_entry(self):
+        entry = af.register_schedule("test_scan", "daily")
+        assert entry["name"] == "test_scan"
+        assert entry["freq"] == "daily"
+        assert entry["freq_seconds"] == 86400
+        assert entry["last_run_ts"] is None
+
+    def test_register_persists_to_state(self):
+        af.register_schedule("persist_test", "weekly")
+        state = af._load_state()
+        assert "persist_test" in state.get("schedules", {})
+
+    def test_freq_normalization_hourly(self):
+        entry = af.register_schedule("hourly_task", "hourly")
+        assert entry["freq"] == "hourly"
+        assert entry["freq_seconds"] == 3600
+
+    def test_freq_normalization_weekly(self):
+        entry = af.register_schedule("weekly_task", "weekly")
+        assert entry["freq"] == "weekly"
+        assert entry["freq_seconds"] == 604800
+
+    def test_freq_default_to_daily_for_unknown(self):
+        entry = af.register_schedule("unknown_freq", "monthly")
+        assert entry["freq"] == "daily"
+
+    def test_list_schedules_empty_initially(self):
+        assert af.list_schedules() == []
+
+    def test_list_schedules_shows_registered(self):
+        af.register_schedule("scan_daily", "daily")
+        schedules = af.list_schedules()
+        assert len(schedules) >= 1
+        names = [s["name"] for s in schedules]
+        assert "scan_daily" in names
+
+    def test_remove_schedule_returns_true(self):
+        af.register_schedule("to_remove", "daily")
+        result = af.remove_schedule("to_remove")
+        assert result is True
+
+    def test_remove_schedule_removes_from_state(self):
+        af.register_schedule("removable", "daily")
+        af.remove_schedule("removable")
+        state = af._load_state()
+        assert "removable" not in state.get("schedules", {})
+
+    def test_remove_nonexistent_returns_false(self):
+        assert af.remove_schedule("does_not_exist") is False
+
+    def test_check_schedules_fires_overdue_task(self):
+        # Register with last_run set far in the past to guarantee firing
+        af.register_schedule("overdue_scan", "daily")
+        state = af._load_state()
+        state["schedules"]["overdue_scan"]["last_run_ts"] = "2000-01-01T00:00:00Z"
+        af._save_state(state)
+        fired = af.check_schedules()
+        assert "overdue_scan" in fired
+
+    def test_check_schedules_does_not_fire_recent_task(self):
+        af.register_schedule("fresh_scan", "daily")
+        # Set last_run to now
+        state = af._load_state()
+        state["schedules"]["fresh_scan"]["last_run_ts"] = af._now_iso()
+        af._save_state(state)
+        fired = af.check_schedules()
+        assert "fresh_scan" not in fired
+
+    def test_check_schedules_returns_list(self):
+        result = af.check_schedules()
+        assert isinstance(result, list)
+
+    def test_check_schedules_updates_last_run_ts(self):
+        af.register_schedule("ts_test_scan", "daily")
+        state = af._load_state()
+        state["schedules"]["ts_test_scan"]["last_run_ts"] = "2000-01-01T00:00:00Z"
+        af._save_state(state)
+        af.check_schedules()
+        state_after = af._load_state()
+        ts = state_after["schedules"]["ts_test_scan"]["last_run_ts"]
+        assert ts != "2000-01-01T00:00:00Z"
+        assert ts is not None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Feature 1 & 2: Slash command handler
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestHandleSlashCommand:
+    def test_non_slash_returns_empty(self):
+        assert af.handle_slash_command("ascend: status") == ""
+
+    def test_empty_slash_returns_empty(self):
+        assert af.handle_slash_command("/") == ""
+
+    def test_help_lists_commands(self):
+        result = af.handle_slash_command("/help")
+        assert "/scan" in result
+        assert "/plan" in result
+        assert "/execute" in result
+        assert "/research" in result
+        assert "/compact" in result
+        assert "/cost" in result
+        assert "/schedule" in result
+
+    def test_status_returns_state(self):
+        result = af.handle_slash_command("/status")
+        assert "ASCEND_FORGE Status" in result
+        assert "Mode" in result
+
+    def test_scan_returns_string(self):
+        result = af.handle_slash_command("/scan")
+        assert isinstance(result, str)
+        assert "Scan" in result
+
+    def test_patches_empty(self):
+        result = af.handle_slash_command("/patches")
+        assert "No pending" in result
+
+    def test_patches_shows_pending(self):
+        af.create_patch(
+            description="Slash pending test",
+            reason="Test",
+            affected_files=["agents/x.py"],
+            diff_preview="+x\n",
+        )
+        result = af.handle_slash_command("/patches")
+        assert "patch" in result.lower()
+
+    def test_approve_missing_id(self):
+        result = af.handle_slash_command("/approve")
+        assert "Usage" in result
+
+    def test_approve_nonexistent_id(self):
+        result = af.handle_slash_command("/approve patch-00000000")
+        assert "❌" in result
+
+    def test_approve_valid_patch(self):
+        p = af.create_patch(
+            description="Slash approve test",
+            reason="Test",
+            affected_files=["agents/safe.py"],
+            diff_preview="+x\n",
+        )
+        result = af.handle_slash_command(f"/approve {p['patch_id']}")
+        assert "✅" in result
+
+    def test_approve_all_low(self):
+        af.create_patch(
+            description="Low slash test",
+            reason="Test",
+            affected_files=["agents/safe.py"],
+            diff_preview="+x\n",
+        )
+        result = af.handle_slash_command("/approve all low")
+        assert isinstance(result, str)
+
+    def test_reject_missing_id(self):
+        result = af.handle_slash_command("/reject")
+        assert "Usage" in result
+
+    def test_reject_valid_patch(self):
+        p = af.create_patch(
+            description="Slash reject test",
+            reason="Test",
+            affected_files=["agents/safe.py"],
+            diff_preview="+x\n",
+        )
+        result = af.handle_slash_command(f"/reject {p['patch_id']}")
+        assert "❌" in result
+
+    def test_rollback_missing_id(self):
+        result = af.handle_slash_command("/rollback")
+        assert "Usage" in result
+
+    def test_rollback_pending_fails(self):
+        p = af.create_patch(
+            description="Slash rollback test",
+            reason="Test",
+            affected_files=["agents/safe.py"],
+            diff_preview="+x\n",
+        )
+        result = af.handle_slash_command(f"/rollback {p['patch_id']}")
+        assert "❌" in result
+
+    def test_explain_missing_id(self):
+        result = af.handle_slash_command("/explain")
+        assert "Usage" in result
+
+    def test_explain_valid_patch(self):
+        p = af.create_patch(
+            description="Slash explain test",
+            reason="Test reason",
+            affected_files=["agents/safe.py"],
+            diff_preview="+x\n",
+        )
+        result = af.handle_slash_command(f"/explain {p['patch_id']}")
+        assert p["patch_id"] in result
+        assert "Status" in result
+
+    def test_history_empty(self):
+        result = af.handle_slash_command("/history")
+        assert "No change history" in result
+
+    def test_history_shows_entries(self):
+        af.create_patch(
+            description="History entry test",
+            reason="Test",
+            affected_files=["agents/safe.py"],
+            diff_preview="+x\n",
+        )
+        result = af.handle_slash_command("/history")
+        assert "⏳" in result  # pending emoji
+
+    def test_improve_missing_module(self):
+        result = af.handle_slash_command("/improve")
+        assert "Usage" in result
+
+    def test_improve_nonexistent_module(self):
+        result = af.handle_slash_command("/improve nonexistent_module_xyz")
+        assert "complete" in result.lower()
+
+    def test_mode_get_current(self):
+        result = af.handle_slash_command("/mode")
+        assert "Current mode" in result
+
+    def test_mode_set_general(self):
+        result = af.handle_slash_command("/mode general")
+        assert "GENERAL" in result
+
+    def test_mode_set_invalid(self):
+        result = af.handle_slash_command("/mode turbo")
+        assert "❌" in result
+
+    def test_blacklight_on(self):
+        result = af.handle_slash_command("/blacklight on")
+        assert "BLACKLIGHT" in result or "⚡" in result
+        af.set_blacklight_active(False)  # cleanup
+
+    def test_blacklight_off(self):
+        af.set_blacklight_active(True)
+        result = af.handle_slash_command("/blacklight off")
+        assert "deactivated" in result.lower() or "🔴" in result
+
+    def test_blacklight_invalid(self):
+        result = af.handle_slash_command("/blacklight maybe")
+        assert "Usage" in result
+
+    def test_unknown_command(self):
+        result = af.handle_slash_command("/unknownxyz")
+        assert "Unknown" in result
+        assert "/help" in result
+
+    def test_compact_empty(self):
+        result = af.handle_slash_command("/compact")
+        assert isinstance(result, str)
+
+    def test_cost_returns_report(self):
+        result = af.handle_slash_command("/cost")
+        assert "Session Report" in result
+        assert "patches" in result.lower()
+
+    def test_schedule_register(self):
+        result = af.handle_slash_command("/schedule nightly_scan daily")
+        assert "nightly_scan" in result
+        assert "daily" in result
+
+    def test_schedule_list_empty(self):
+        result = af.handle_slash_command("/schedule list")
+        assert "No schedules" in result
+
+    def test_schedule_list_shows_entry(self):
+        af.register_schedule("show_me", "daily")
+        result = af.handle_slash_command("/schedule list")
+        assert "show_me" in result
+
+    def test_schedule_remove(self):
+        af.register_schedule("remove_me", "daily")
+        result = af.handle_slash_command("/schedule remove remove_me")
+        assert "removed" in result.lower()
+
+    def test_schedule_remove_nonexistent(self):
+        result = af.handle_slash_command("/schedule remove does_not_exist")
+        assert "❌" in result
+
+    def test_schedule_missing_freq(self):
+        result = af.handle_slash_command("/schedule onlyname")
+        assert "Usage" in result
+
+    def test_plan_missing_args(self):
+        result = af.handle_slash_command("/plan")
+        assert "Usage" in result
+
+    def test_plan_stores_task(self):
+        af.handle_slash_command("/plan Improve the UI layout and fix bugs")
+        state = af._load_state()
+        assert state.get("plan_pending_task") is not None
+
+    def test_plan_returns_plan_block(self):
+        result = af.handle_slash_command("/plan Fix critical login crash in auth module")
+        assert "PLAN" in result
+
+    def test_plan_shows_execute_hint(self):
+        result = af.handle_slash_command("/plan Fix login bug")
+        assert "/execute" in result or "execute" in result.lower()
+
+    def test_execute_no_plan(self):
+        result = af.handle_slash_command("/execute")
+        assert "No pending plan" in result
+
+    def test_execute_runs_stored_plan(self):
+        af.handle_slash_command("/plan Fix the login error crash")
+        result = af.handle_slash_command("/execute")
+        assert isinstance(result, str)
+        assert "Summary" in result
+
+    def test_execute_clears_pending_plan(self):
+        af.handle_slash_command("/plan Fix login error")
+        af.handle_slash_command("/execute")
+        state = af._load_state()
+        assert state.get("plan_pending_task") is None
+
+    def test_research_missing_query(self):
+        result = af.handle_slash_command("/research")
+        assert "Usage" in result
+
+    def test_research_returns_string(self, monkeypatch):
+        import urllib.request as _urlreq
+        monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(OSError("offline")))
+        result = af.handle_slash_command("/research cold email tips")
+        assert isinstance(result, str)
+        assert "cold email tips" in result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# handle_chat_command slash delegation
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestHandleChatCommandSlashDelegation:
+    def test_slash_help_via_handle_chat_command(self):
+        result = af.handle_chat_command("/help")
+        assert "/scan" in result
+
+    def test_slash_status_via_handle_chat_command(self):
+        result = af.handle_chat_command("/status")
+        assert "ASCEND_FORGE Status" in result
+
+    def test_slash_scan_via_handle_chat_command(self):
+        result = af.handle_chat_command("/scan")
+        assert "Scan" in result
+
+    def test_legacy_ascend_prefix_still_works(self):
+        result = af.handle_chat_command("ascend: status")
+        assert "ASCEND_FORGE Status" in result
+
+    def test_non_slash_non_ascend_still_empty(self):
+        assert af.handle_chat_command("random text") == ""
+
+    def test_unknown_command_mentions_help(self):
+        result = af.handle_chat_command("ascend: unknowncommandxyz")
+        assert "/help" in result or "help" in result.lower()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# New state fields
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestNewStateFields:
+    def test_default_state_has_schedules(self):
+        state = af._default_state()
+        assert "schedules" in state
+        assert isinstance(state["schedules"], dict)
+
+    def test_default_state_has_plan_pending_task(self):
+        state = af._default_state()
+        assert "plan_pending_task" in state
+        assert state["plan_pending_task"] is None
+
+    def test_load_state_includes_new_fields(self):
+        state = af._load_state()
+        assert "schedules" in state
+        assert "plan_pending_task" in state
+
