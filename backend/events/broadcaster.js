@@ -63,7 +63,7 @@ function emitSystemStatus() {
 }
 
 function scheduleNext() {
-  const delay = randomInt(500, 1500);
+  const delay = randomInt(2000, 4000);
   setTimeout(() => {
     const type = eventIndex % 3;
     if (type === 0) emitHeartbeat();

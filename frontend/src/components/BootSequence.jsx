@@ -5,7 +5,7 @@ const BOOT_LINES = [
   { text: '> INITIALIZING AI-EMPLOYEE OS v2.0...', delay: 0 },
   { text: '> Loading neural core modules...', delay: 320 },
   { text: '> Establishing secure channels...', delay: 640 },
-  { text: '> Calibrating agent network [56 agents]...', delay: 960 },
+  { text: '> Calibrating agent network [74 agents]...', delay: 960 },
   { text: '> Scanning for anomalies... [CLEAR]', delay: 1280 },
   { text: '> Synchronizing orchestrator...', delay: 1600 },
   { text: '> Verifying memory integrity... [OK]', delay: 1920 },
