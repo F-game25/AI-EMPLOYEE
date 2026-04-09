@@ -1236,6 +1236,7 @@ INDEX_HTML = r"""<!doctype html>
       --bg:#050508;
       --bg2:#08080d;
       --bg3:#0c0c14;
+      --bg-deep:#080810;
       --panel:rgba(10,10,18,0.95);
       --panel2:rgba(14,14,24,0.92);
       --surface:rgba(10,10,18,0.95);
@@ -1345,7 +1346,7 @@ INDEX_HTML = r"""<!doctype html>
       border:1px solid rgba(255,255,255,.1);border-radius:20px;
       padding:5px 13px;font-size:.78em;color:rgba(240,244,255,.8);
       backdrop-filter:blur(8px);transition:all .3s}
-    .status-pill:hover{background:rgba(255,255,255,.09);border-color:rgba(129,140,248,.3)}
+    .status-pill:hover{background:rgba(255,255,255,.09);border-color:rgba(212,175,55,.3)}
     .status-dot{width:7px;height:7px;border-radius:50%;background:var(--success);
       box-shadow:0 0 9px var(--success);animation:blink 2.5s infinite;flex-shrink:0}
     .hdr-ctrl{display:flex;align-items:center;gap:8px}
@@ -1961,12 +1962,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     .sys-control::before{
       content:'';position:absolute;top:-80%;right:-5%;width:400px;height:400px;
-      background:radial-gradient(circle,rgba(99,102,241,.1) 0%,transparent 65%);
+      background:radial-gradient(circle,rgba(212,175,55,.08) 0%,transparent 65%);
       pointer-events:none;animation:float 10s ease-in-out infinite;
     }
     .sys-control::after{
       content:'';position:absolute;top:0;left:0;right:0;height:1px;
-      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.4),transparent);
     }
     .sys-control-left{display:flex;align-items:center;gap:20px}
     .sys-status-ring{position:relative;width:60px;height:60px;flex-shrink:0}
@@ -2064,7 +2065,7 @@ INDEX_HTML = r"""<!doctype html>
     .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:var(--success);border:1px solid rgba(16,185,129,.25)}
     .badge.stopped,.badge.rejected{background:rgba(239,68,68,.12);color:var(--danger);border:1px solid rgba(239,68,68,.25)}
     .badge.pending{background:rgba(245,158,11,.12);color:var(--warning);border:1px solid rgba(245,158,11,.25)}
-    .badge.enabled{background:rgba(99,102,241,.12);color:var(--primary);border:1px solid rgba(99,102,241,.25)}
+    .badge.enabled{background:rgba(212,175,55,.12);color:var(--primary);border:1px solid rgba(212,175,55,.25)}
     .badge.disabled{background:rgba(100,116,139,.12);color:var(--text-muted);border:1px solid rgba(100,116,139,.25)}
 
     /* ── Buttons ── */
@@ -2091,7 +2092,7 @@ INDEX_HTML = r"""<!doctype html>
     .btn-success{background:rgba(212,175,55,.12);color:var(--gold);border:1px solid rgba(212,175,55,.25)}
     .btn-success:hover{background:rgba(212,175,55,.24);box-shadow:0 3px 12px rgba(212,175,55,.25);border-color:rgba(212,175,55,.45)}
     .btn-ghost{background:rgba(255,255,255,.04);color:var(--text-secondary);border:1px solid rgba(148,163,184,.12)}
-    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(129,140,248,.3)}
+    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(212,175,55,.3)}
     .btn-sm{padding:5px 12px;font-size:.78em}
     .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
@@ -2100,7 +2101,7 @@ INDEX_HTML = r"""<!doctype html>
     label{display:block;font-size:.8em;font-weight:500;color:var(--text-secondary);margin-bottom:5px;letter-spacing:.02em}
     input,textarea,select{
       width:100%;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       border:1px solid rgba(148,163,184,.12);
       color:var(--text);border-radius:var(--radius-sm);padding:9px 13px;
       font-size:.875em;font-family:inherit;transition:border-color .2s,box-shadow .2s,background .2s;outline:none;
@@ -2109,11 +2110,11 @@ INDEX_HTML = r"""<!doctype html>
     input:focus,textarea:focus,select:focus{
       border-color:rgba(212,175,55,.6);
       box-shadow:0 0 0 3px rgba(212,175,55,.12),0 0 16px rgba(212,175,55,.1);
-      background:rgba(15,25,55,.9);
+      background:rgba(10,10,22,0.95);
     }
     input:hover:not(:focus),select:hover:not(:focus){border-color:rgba(212,175,55,.3)}
     textarea{resize:vertical;min-height:80px}
-    select option{background:#0d1b33;color:var(--text)}
+    select option{background:#08080d;color:var(--text)}
 
     /* ── Toggle (enhanced) ── */
     .toggle{position:relative;display:inline-block;width:44px;height:25px;flex-shrink:0}
@@ -2141,7 +2142,7 @@ INDEX_HTML = r"""<!doctype html>
       font-family:'JetBrains Mono','Fira Code','Consolas',monospace;
       backdrop-filter:blur(4px);
     }
-    code{background:rgba(99,102,241,.14);color:var(--primary-light);
+    code{background:rgba(212,175,55,.12);color:var(--primary-light);
       padding:1px 7px;border-radius:5px;font-size:.875em;font-family:monospace}
 
     /* ── Chat ── */
@@ -2256,17 +2257,17 @@ INDEX_HTML = r"""<!doctype html>
     .office-plant{position:absolute;bottom:104px;width:22px;height:36px;background:#143027;border-radius:6px 6px 3px 3px;border:1px solid rgba(65,217,147,.3)}
     .office-plant::before{content:'';position:absolute;left:-5px;top:-22px;width:32px;height:24px;border-radius:50%;background:radial-gradient(circle,#3fdc94,#1f7f56)}
     .office-desk{position:absolute;bottom:120px;width:175px;height:15px;
-      background:linear-gradient(135deg,#1e3a52,#243d5e);border-radius:9px;
+      background:linear-gradient(135deg,#1a1208,#2a1e08);border-radius:9px;
       box-shadow:0 4px 12px rgba(0,0,0,.4)}
     .office-desk::after{content:'';position:absolute;left:12px;top:-18px;width:36px;height:18px;
-      border-radius:5px 5px 3px 3px;background:linear-gradient(135deg,#2a5080,#193559)}
+      border-radius:5px 5px 3px 3px;background:linear-gradient(135deg,#2e1e06,#1e1004)}
     .office-agent{position:absolute;bottom:88px;width:42px;height:42px;border-radius:50%;
       display:flex;align-items:center;justify-content:center;
-      background:radial-gradient(circle at 30% 30%,#c4eeff,#818cf8);
-      border:2px solid rgba(255,255,255,.3);cursor:pointer;
+      background:radial-gradient(circle at 30% 30%,#ffe8a0,#D4AF37);
+      border:2px solid rgba(212,175,55,.4);cursor:pointer;
       animation:officeWalk linear infinite;
       will-change:transform;
-      box-shadow:0 0 20px rgba(129,140,248,.5),0 4px 12px rgba(0,0,0,.4)}
+      box-shadow:0 0 20px rgba(212,175,55,.4),0 4px 12px rgba(0,0,0,.4)}
     .office-agent.warning{box-shadow:0 0 24px rgba(244,63,94,.7);border-color:rgba(244,63,94,.9)}
     .office-agent:hover{transform:scale(1.15)!important;z-index:10}
     .office-agent .agent-emoji{font-size:18px}
@@ -2275,8 +2276,8 @@ INDEX_HTML = r"""<!doctype html>
       font-size:.62em;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;
       background:rgba(4,8,20,.92);
       padding:2px 8px;border-radius:999px;
-      border:1px solid rgba(129,140,248,.3);
-      box-shadow:0 0 8px rgba(99,102,241,.2);
+      border:1px solid rgba(212,175,55,.25);
+      box-shadow:0 0 8px rgba(212,175,55,.15);
     }
     @keyframes officeWalk{
       0%{translate:0}25%{translate:32px 0}75%{translate:-16px 0}100%{translate:0}
@@ -2285,9 +2286,9 @@ INDEX_HTML = r"""<!doctype html>
     .office-modal.open{display:flex;animation:fadeIn .2s ease}
     .office-modal-card{
       width:min(540px,92vw);
-      background:rgba(12,20,40,.96);
-      border:1px solid rgba(129,140,248,.2);border-radius:18px;padding:22px;
-      box-shadow:0 24px 64px rgba(0,0,0,.6),0 0 0 1px rgba(129,140,248,.08);
+      background:rgba(10,10,18,0.97);
+      border:1px solid rgba(212,175,55,.2);border-radius:18px;padding:22px;
+      box-shadow:0 24px 64px rgba(0,0,0,.6),0 0 0 1px rgba(212,175,55,.08);
       backdrop-filter:blur(20px);
     }
     #office-modal-action{overflow-wrap:anywhere;word-break:break-word}
@@ -2298,7 +2299,7 @@ INDEX_HTML = r"""<!doctype html>
     .improv-row{
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:16px;margin-bottom:10px;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       transition:border-color .25s,transform .2s,box-shadow .25s;
       backdrop-filter:blur(8px);
     }
@@ -2310,7 +2311,7 @@ INDEX_HTML = r"""<!doctype html>
     .sched-row{
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:13px 16px;margin-bottom:10px;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       display:flex;align-items:flex-start;gap:12px;
       transition:border-color .25s,box-shadow .25s;
       backdrop-filter:blur(6px);
@@ -2325,7 +2326,7 @@ INDEX_HTML = r"""<!doctype html>
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:13px;margin-bottom:8px;cursor:pointer;
       transition:all .22s;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       backdrop-filter:blur(6px);
     }
     .skill-card:hover{border-color:rgba(212,175,55,.4);background:rgba(212,175,55,.06);
@@ -2341,13 +2342,13 @@ INDEX_HTML = r"""<!doctype html>
       cursor:pointer;border:1px solid var(--border);color:var(--text-secondary);
       margin:2px;transition:all .2s;font-weight:500}
     .cat-pill:hover{border-color:var(--primary);color:var(--primary)}
-    .cat-pill.active{background:var(--primary);color:#fff;border-color:var(--primary);
-      box-shadow:0 2px 10px rgba(99,102,241,.35);}
+    .cat-pill.active{background:var(--primary);color:#080808;border-color:var(--primary);
+      box-shadow:0 2px 10px rgba(212,175,55,.35);}
     .skill-grid{max-height:500px;overflow-y:auto;padding-right:4px}
     .agent-card{
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:15px;margin-bottom:8px;
-      background:rgba(15,25,48,.7);transition:all .22s;
+      background:rgba(10,10,18,0.85);transition:all .22s;
       backdrop-filter:blur(6px);
     }
     .agent-card:hover{border-color:rgba(212,175,55,.35);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.3),0 0 0 1px rgba(212,175,55,.1)}
@@ -2370,7 +2371,7 @@ INDEX_HTML = r"""<!doctype html>
     #toast.show{opacity:1;transform:translateY(0) scale(1)}
     #toast.success{background:rgba(16,67,30,.9);border:1px solid rgba(52,211,153,.25);border-left:3px solid #34d399}
     #toast.error{background:rgba(67,10,20,.9);border:1px solid rgba(244,63,94,.25);border-left:3px solid #f43f5e}
-    #toast.info{background:rgba(20,25,60,.95);border:1px solid rgba(129,140,248,.25);border-left:3px solid #818cf8}
+    #toast.info{background:rgba(10,10,22,.95);border:1px solid rgba(212,175,55,.25);border-left:3px solid var(--gold)}
 
     /* ── Empty states ── */
     .empty{text-align:center;padding:40px 16px;color:var(--text-muted)}
@@ -2389,10 +2390,10 @@ INDEX_HTML = r"""<!doctype html>
     /* ── Cmd reference ── */
     .cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:8px}
     .cmd-item{
-      background:rgba(15,25,48,.7);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      background:rgba(10,10,18,0.85);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:11px 14px;transition:all .2s;cursor:pointer;backdrop-filter:blur(6px);
     }
-    .cmd-item:hover{border-color:rgba(129,140,248,.3);background:rgba(99,102,241,.08);transform:translateY(-1px)}
+    .cmd-item:hover{border-color:rgba(212,175,55,.3);background:rgba(212,175,55,.06);transform:translateY(-1px)}
     .cmd-item code{display:block;margin-bottom:4px;font-size:.8em;color:var(--primary-light)}
     .cmd-item span{font-size:.77em;color:var(--text-muted)}
 
@@ -2402,7 +2403,7 @@ INDEX_HTML = r"""<!doctype html>
     .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(52,211,153,.2)}
     .badge.stopped,.badge.rejected{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.2)}
     .badge.pending{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.2)}
-    .badge.enabled{background:rgba(129,140,248,.12);color:var(--primary-light);border:1px solid rgba(129,140,248,.2)}
+    .badge.enabled{background:rgba(212,175,55,.12);color:var(--primary-light);border:1px solid rgba(212,175,55,.2)}
     .badge.disabled{background:rgba(100,116,139,.08);color:var(--text-muted);border:1px solid rgba(100,116,139,.15)}
 
     /* ── Dots ── */
@@ -2438,20 +2439,20 @@ INDEX_HTML = r"""<!doctype html>
     .office-floor{
       position:absolute;left:0;right:0;bottom:0;height:46%;
       background:linear-gradient(180deg,#0e1928,#08111c);
-      border-top:1px solid rgba(129,140,248,.15);
+      border-top:1px solid rgba(212,175,55,.12);
     }
     .office-floor::before{
       content:'';position:absolute;top:0;left:0;right:0;height:1px;
-      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.35),transparent);
     }
     .office-window{
       position:absolute;top:20px;width:150px;height:88px;border-radius:10px;
-      border:1px solid rgba(129,140,248,.3);
-      background:linear-gradient(180deg,rgba(99,102,241,.25),rgba(79,70,229,.06));
-      box-shadow:0 0 28px rgba(99,102,241,.2),inset 0 1px 0 rgba(255,255,255,.12);
+      border:1px solid rgba(212,175,55,.2);
+      background:linear-gradient(180deg,rgba(212,175,55,.1),rgba(212,175,55,.03));
+      box-shadow:0 0 20px rgba(212,175,55,.08),inset 0 1px 0 rgba(255,255,255,.08);
     }
-    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(129,140,248,.3)}
-    .office-window::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(129,140,248,.2)}
+    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(212,175,55,.2)}
+    .office-window::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(212,175,55,.15)}
     .office-plant{position:absolute;bottom:106px;width:18px;height:32px;background:linear-gradient(180deg,#0f2e1c,#0b2016);border-radius:5px 5px 2px 2px;border:1px solid rgba(52,211,153,.2)}
     .office-plant::before{content:'';position:absolute;left:-8px;top:-28px;width:34px;height:30px;border-radius:50% 50% 0 50%;background:radial-gradient(circle at 40% 40%,#34d399,#059669);box-shadow:0 0 14px rgba(52,211,153,.3)}
     .health-check-item{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)}
@@ -2503,7 +2504,7 @@ INDEX_HTML = r"""<!doctype html>
     .agent-pick-item{
       display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
       border:1px solid rgba(148,163,184,.1);cursor:pointer;
-      background:rgba(15,25,48,.6);transition:all .2s;font-size:.82em;
+      background:rgba(10,10,18,0.75);transition:all .2s;font-size:.82em;
     }
     .agent-pick-item:hover{border-color:rgba(212,175,55,.3);background:rgba(212,175,55,.06)}
     .agent-pick-item.selected{border-color:rgba(212,175,55,.5);background:rgba(212,175,55,.1);box-shadow:0 0 12px rgba(212,175,55,.12)}
@@ -3586,9 +3587,9 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <!-- CEO Daily Briefing Widget -->
-  <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+  <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.06),var(--surface2))">
     <div class="card-header">
-      <div class="card-title"><span style="color:#818cf8">📰</span> CEO Daily Briefing</div>
+      <div class="card-title"><span style="color:var(--gold)">📰</span> CEO Daily Briefing</div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="loadCEOBriefing()">↻ Refresh</button>
         <button class="btn btn-ghost btn-sm" onclick="forceRegenerateBriefing()">⚡ Regenerate</button>
@@ -5185,8 +5186,8 @@ INDEX_HTML = r"""<!doctype html>
             <div style="font-size:1.6em;font-weight:800;color:var(--success)" id="swarm-stat-total">–</div>
             <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Total Agents</div>
           </div>
-          <div style="text-align:center;padding:10px;background:rgba(99,102,241,.06);border-radius:8px;border:1px solid rgba(99,102,241,.12)">
-            <div style="font-size:1.6em;font-weight:800;color:#818cf8" id="swarm-stat-tasks">–</div>
+          <div style="text-align:center;padding:10px;background:rgba(212,175,55,.06);border-radius:8px;border:1px solid rgba(212,175,55,.15)">
+            <div style="font-size:1.6em;font-weight:800;color:var(--gold)" id="swarm-stat-tasks">–</div>
             <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Tasks Run</div>
           </div>
           <div style="text-align:center;padding:10px;background:rgba(239,68,68,.06);border-radius:8px;border:1px solid rgba(239,68,68,.12)">
@@ -5217,7 +5218,7 @@ INDEX_HTML = r"""<!doctype html>
 .swarm-msg{animation:swarmMsg .3s ease forwards}
 .swarm-msg-bubble{padding:8px 12px;border-radius:12px;font-size:.82em;max-width:80%;line-height:1.4}
 .swarm-msg-left .swarm-msg-bubble{background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.2);border-bottom-left-radius:3px;color:var(--text)}
-.swarm-msg-right .swarm-msg-bubble{background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-bottom-right-radius:3px;color:var(--text);margin-left:auto}
+.swarm-msg-right .swarm-msg-bubble{background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.2);border-bottom-right-radius:3px;color:var(--text);margin-left:auto}
 </style>
 <div id="tab-commands" class="tab-content">
   <div class="page-header" style="border-left-color:var(--gold)">
@@ -6610,7 +6611,7 @@ function switchTab(tab, btn) {
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
       <!-- Today's briefing -->
-      <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+      <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.06),var(--surface2))">
         <div class="card-header">
           <div class="card-title"><span class="icon">📰</span> Today's Briefing</div>
           <div style="display:flex;gap:6px">
@@ -8290,7 +8291,7 @@ function renderImprovements() {
 
   const priorityColors = {critical:'#ef4444', high:'#f59e0b', medium:'#eab308', low:'#10b981'};
   const priorityIcons = {critical:'🔴', high:'🟠', medium:'🟡', low:'🟢'};
-  const statusColors = {pending:'rgba(245,158,11,.2)', in_progress:'rgba(99,102,241,.2)', approved:'rgba(16,185,129,.2)', completed:'rgba(34,197,94,.2)', rejected:'rgba(239,68,68,.12)'};
+  const statusColors = {pending:'rgba(245,158,11,.2)', in_progress:'rgba(212,175,55,.18)', approved:'rgba(16,185,129,.2)', completed:'rgba(34,197,94,.2)', rejected:'rgba(239,68,68,.12)'};
 
   el.innerHTML = items.map(imp => {
     const priority = imp.priority || 'medium';
@@ -9593,7 +9594,7 @@ function _renderRoiBreakdowns(events) {
             <span style="color:var(--text-muted)">${stats.count}×${stats.value>0?' · €'+stats.value:''}</span>
           </div>
           <div style="height:6px;background:rgba(212,175,55,.12);border-radius:3px;overflow:hidden">
-            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(99,102,241,.8),rgba(139,92,246,.8));border-radius:3px;transition:width .4s"></div>
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(212,175,55,.7),rgba(245,196,0,.9));border-radius:3px;transition:width .4s"></div>
           </div>
         </div>`;
       }).join('');
@@ -9662,8 +9663,8 @@ function renderTemplatesGrid() {
     el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No templates match your filter.</p></div>';
     return;
   }
-  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)',Marketing:'rgba(168,85,247,.15)',Analytics:'rgba(74,222,128,.15)',Research:'rgba(56,189,248,.15)'};
-  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(99,102,241,.3)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)',Marketing:'rgba(168,85,247,.3)',Analytics:'rgba(74,222,128,.3)',Research:'rgba(56,189,248,.3)'};
+  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(212,175,55,.12)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)',Marketing:'rgba(168,85,247,.15)',Analytics:'rgba(74,222,128,.15)',Research:'rgba(56,189,248,.15)'};
+  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(212,175,55,.25)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)',Marketing:'rgba(168,85,247,.3)',Analytics:'rgba(74,222,128,.3)',Research:'rgba(56,189,248,.3)'};
   el.innerHTML = templates.map(t => {
     const col = catColors[t.category] || 'rgba(212,175,55,.1)';
     const bdr = catBorderColors[t.category] || 'rgba(212,175,55,.2)';
@@ -10285,7 +10286,7 @@ async function runSecurityCheck() {
     ok:      'rgba(34,197,94,.15)',
     warning: 'rgba(245,158,11,.15)',
     error:   'rgba(239,68,68,.15)',
-    info:    'rgba(99,102,241,.15)',
+    info:    'rgba(212,175,55,.12)',
   };
   const warnColor = colorMap.warning;
 
@@ -13718,7 +13719,7 @@ async function loadPL() {
           <div style="color:var(--text-muted)">Expenses</div>
           <div style="color:var(--text-muted);font-size:.8em">${pl.expense_count||0} entries</div>
         </div>
-        <div style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:14px;text-align:center">
+        <div style="background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.2);border-radius:8px;padding:14px;text-align:center">
           <div style="font-size:1.8em;font-weight:800;color:${profitColor}">$${Number(pl.profit||0).toLocaleString()}</div>
           <div style="color:var(--text-muted)">Net Profit</div>
         </div>
