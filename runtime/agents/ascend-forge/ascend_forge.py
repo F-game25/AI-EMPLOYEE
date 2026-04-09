@@ -1376,12 +1376,14 @@ def _normalize_freq(freq: str) -> str:
     return "daily"
 
 
-def register_schedule(name: str, freq: str) -> dict:
+def register_schedule(name: str, freq: str, task_type: str = "scan") -> dict:
     """Register a recurring autonomous task.
 
     Args:
         name: Schedule identifier (e.g. 'nightly_scan', 'weekly_audit').
         freq: Frequency string — 'hourly', 'daily', or 'weekly'.
+        task_type: One of 'scan', 'audit', or 'blacklight'. Determines which
+            action fires when the schedule is due. Defaults to 'scan'.
 
     Returns the schedule entry dict.
     """
@@ -1390,6 +1392,7 @@ def register_schedule(name: str, freq: str) -> dict:
         "name": name,
         "freq": normalized,
         "freq_seconds": _FREQ_SECONDS[normalized],
+        "task_type": task_type,
         "last_run_ts": None,
         "created_ts": _now_iso(),
     }
@@ -1458,10 +1461,10 @@ def check_schedules() -> list[str]:
 
         _push_activity(f"⏰ Scheduled task running: {name}", "info")
         try:
-            name_lower = name.lower()
-            if "audit" in name_lower or "prompt" in name_lower:
+            task_type = entry.get("task_type", "scan")
+            if task_type == "audit":
                 scan_prompts()
-            elif "blacklight" in name_lower:
+            elif task_type == "blacklight":
                 set_blacklight_active(True)
             else:
                 # Default: full system scan
@@ -1770,18 +1773,21 @@ def handle_slash_command(message: str) -> str:
                 return f"🗑️ Schedule '{sched_name}' removed."
             return f"❌ Schedule '{sched_name}' not found."
 
-        sched_parts = args.split(None, 1)
+        sched_parts = args.split(None, 2)
         if len(sched_parts) < 2:
             return (
                 "❌ Usage:\n"
-                "  /schedule <name> <hourly|daily|weekly>\n"
+                "  /schedule <name> <hourly|daily|weekly> [scan|audit|blacklight]\n"
                 "  /schedule list\n"
                 "  /schedule remove <name>"
             )
-        sched_name, sched_freq = sched_parts[0], sched_parts[1]
-        entry = register_schedule(sched_name, sched_freq)
+        sched_name = sched_parts[0]
+        sched_freq = sched_parts[1]
+        sched_task = sched_parts[2] if len(sched_parts) > 2 else "scan"
+        entry = register_schedule(sched_name, sched_freq, task_type=sched_task)
         return (
-            f"⏰ Scheduled: **{sched_name}** running {entry['freq']}.\n"
+            f"⏰ Scheduled: **{sched_name}** running {entry['freq']} "
+            f"({entry['task_type']}).\n"
             "→ Will execute automatically. Run /schedule list to view all."
         )
 

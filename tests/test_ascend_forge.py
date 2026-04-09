@@ -27,6 +27,13 @@ if str(_ASCEND_DIR) not in sys.path:
 import ascend_forge as af
 
 
+# ── Shared test helpers ───────────────────────────────────────────────────────
+
+def _raise_offline(*args, **kwargs):
+    """Helper used to monkeypatch urllib.urlopen to simulate offline network."""
+    raise OSError("network unavailable")
+
+
 # ── Helpers to redirect file I/O to a temp state dir ─────────────────────────
 
 @pytest.fixture(autouse=True)
@@ -697,11 +704,11 @@ class TestHandleComplexTask:
 
     def test_routing_suggestion_shown_for_ui_task(self):
         result = af.handle_complex_task("Improve the dashboard UI layout")
-        assert "ui-engine" in result.lower() or "Routing" in result
+        assert "ui-engine" in result.lower() or "routing" in result.lower()
 
     def test_routing_suggestion_shown_for_revenue_task(self):
         result = af.handle_complex_task("Generate leads and increase revenue")
-        assert "cold-outreach" in result.lower() or "Routing" in result
+        assert "cold-outreach" in result.lower() or "routing" in result.lower()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -824,7 +831,7 @@ class TestWebResearch:
     def test_offline_message_contains_query(self, monkeypatch):
         import urllib.request as _urlreq
 
-        monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(OSError("offline")))
+        monkeypatch.setattr(_urlreq, "urlopen", _raise_offline)
         result = af.web_research("best email openers")
         assert "best email openers" in result
 
@@ -955,6 +962,18 @@ class TestScheduler:
         assert entry["freq"] == "daily"
         assert entry["freq_seconds"] == 86400
         assert entry["last_run_ts"] is None
+
+    def test_register_default_task_type_is_scan(self):
+        entry = af.register_schedule("scan_default", "daily")
+        assert entry["task_type"] == "scan"
+
+    def test_register_explicit_task_type_audit(self):
+        entry = af.register_schedule("audit_task", "weekly", task_type="audit")
+        assert entry["task_type"] == "audit"
+
+    def test_register_explicit_task_type_blacklight(self):
+        entry = af.register_schedule("bl_task", "daily", task_type="blacklight")
+        assert entry["task_type"] == "blacklight"
 
     def test_register_persists_to_state(self):
         af.register_schedule("persist_test", "weekly")
@@ -1277,7 +1296,7 @@ class TestHandleSlashCommand:
 
     def test_research_returns_string(self, monkeypatch):
         import urllib.request as _urlreq
-        monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(OSError("offline")))
+        monkeypatch.setattr(_urlreq, "urlopen", _raise_offline)
         result = af.handle_slash_command("/research cold email tips")
         assert isinstance(result, str)
         assert "cold email tips" in result
