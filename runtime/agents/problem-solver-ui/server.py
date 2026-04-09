@@ -15460,6 +15460,11 @@ async def sse_events(request: Request):
 
 @app.get("/api/status")
 def get_status():
+  # Return cached response if still fresh
+  cached = _get_cached_status()
+  if cached is not None:
+    return JSONResponse(cached)
+
   agents = []
   mode = _current_mode()
   for agent_name in _mode_agent_targets(mode):
@@ -15488,7 +15493,11 @@ def get_status():
     for a in (active_task.get("agents_hint") or []):
       active_agents.add(a)
 
-  return JSONResponse({
+  # Attach governor info
+  with _AGENT_GOVERNOR_LOCK:
+    gov = dict(_AGENT_GOVERNOR)
+
+  data = {
     "ts": now_iso(),
     "mode": mode,
     "agents": agents,
@@ -15498,7 +15507,13 @@ def get_status():
     "active_task_id": active_task.get("id") if active_task else None,
     "active_agents": list(active_agents),
     "ollama_ok": _ollama_reachable(ollama_host_url),
-  })
+    "governor": {
+      "enabled": gov["enabled"],
+      "max_agents": gov["max_agents"],
+    },
+  }
+  _set_cached_status(data)
+  return JSONResponse(data)
 
 
 @app.get("/api/doctor")
@@ -15686,19 +15701,46 @@ def start_all_agents(_auth: None = Depends(require_auth)):
     targets = _mode_agent_targets(mode)
     outputs = []
     failures = []
+    skipped_agents: list = []        # agents skipped by governor or circuit breaker
+    skipped_by_governor: list = []   # agents skipped specifically by the cap
+    skipped_by_breaker: list = []    # agents skipped by an open circuit breaker
+    # Check governor before starting agents
+    with _AGENT_GOVERNOR_LOCK:
+        gov_enabled = _AGENT_GOVERNOR["enabled"]
+        gov_max = _AGENT_GOVERNOR["max_agents"]
+    running_count = _count_running_agents() if gov_enabled else 0
     for agent_name in targets:
       if agent_name in INFRA_AGENTS:
+        continue
+      # Governor: skip start if cap already reached
+      if gov_enabled and running_count >= gov_max:
+        skipped_agents.append(agent_name)
+        skipped_by_governor.append(agent_name)
+        outputs.append(f"[{agent_name}] skipped — agent governor cap ({gov_max}) reached")
+        continue
+      # Circuit breaker: skip agents whose breaker is open
+      if circuit_breaker_is_open(agent_name):
+        skipped_agents.append(agent_name)
+        skipped_by_breaker.append(agent_name)
+        outputs.append(f"[{agent_name}] skipped — circuit breaker is open (too many recent failures)")
         continue
       rc, out = ai_employee("start", agent_name)
       outputs.append(f"[{agent_name}] {out.strip()}")
       if rc != 0:
         failures.append(agent_name)
+        circuit_breaker_record_failure(agent_name)
+      else:
+        running_count += 1
+        circuit_breaker_record_success(agent_name)
+    _invalidate_status_cache()
     return JSONResponse({
       "ok": len(failures) == 0,
       "mode": mode,
       "targets": targets,
-      "started": len(targets) - len(failures),
+      "started": len(targets) - len(failures) - len(skipped_agents),
       "failed": failures,
+      "skipped_by_governor": skipped_by_governor,
+      "skipped_by_breaker": skipped_by_breaker,
       "output": "\n".join(outputs),
     })
 
@@ -15716,6 +15758,7 @@ def stop_all_agents(_auth: None = Depends(require_auth)):
       outputs.append(f"[{agent_name}] {out.strip()}")
       if rc != 0:
         failures.append(agent_name)
+    _invalidate_status_cache()
     return JSONResponse({
       "ok": len(failures) == 0,
       "mode": mode,
@@ -17113,6 +17156,55 @@ def reassign_subtask(payload: dict):
                 st["status"] = "pending"
                 _save_task_plans(plans)
                 return JSONResponse({"ok": True, "subtask_id": subtask_id, "old_agent": old, "new_agent": agent_id})
+        raise HTTPException(404, f"Subtask '{subtask_id}' not found in task '{task_id}'")
+    raise HTTPException(404, f"Task '{task_id}' not found")
+
+
+@app.post("/api/task/subtask-complete")
+def complete_subtask(payload: dict):
+    """Mark a subtask as done or failed and update the circuit breaker for its agent.
+
+    Payload:
+      task_id    – str (required)
+      subtask_id – str (required)
+      status     – "done" | "failed" (required)
+      result     – str (optional: outcome summary)
+    """
+    task_id = (payload.get("task_id") or "").strip()
+    subtask_id = (payload.get("subtask_id") or "").strip()
+    status = (payload.get("status") or "").strip()
+    if not all([task_id, subtask_id, status]):
+        raise HTTPException(400, "task_id, subtask_id, and status are required")
+    if status not in ("done", "failed"):
+        raise HTTPException(400, "status must be 'done' or 'failed'")
+
+    plans = _load_task_plans()
+    for p in plans:
+        if p.get("id") != task_id:
+            continue
+        for st in p.get("subtasks", []):
+            if (st.get("subtask_id") or st.get("id")) == subtask_id:
+                st["status"] = status
+                if payload.get("result"):
+                    st["result"] = str(payload["result"])[:500]
+                st["completed_at"] = now_iso()
+                agent_id = st.get("agent_id", "")
+                _save_task_plans(plans)
+                _invalidate_status_cache()
+                # Update circuit breaker
+                if agent_id:
+                    if status == "failed":
+                        cb_state = circuit_breaker_record_failure(agent_id)
+                    else:
+                        cb_state = circuit_breaker_record_success(agent_id)
+                    return JSONResponse({
+                        "ok": True,
+                        "subtask_id": subtask_id,
+                        "status": status,
+                        "agent_id": agent_id,
+                        "circuit_breaker": cb_state,
+                    })
+                return JSONResponse({"ok": True, "subtask_id": subtask_id, "status": status})
         raise HTTPException(404, f"Subtask '{subtask_id}' not found in task '{task_id}'")
     raise HTTPException(404, f"Task '{task_id}' not found")
 
@@ -21245,6 +21337,433 @@ async def guardrails_reject_action(action_id: str, payload: dict = {}):
     if not result:
         raise HTTPException(404, "Action not found")
     return JSONResponse(result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. Agent Governor — limits concurrent active agents to a stable cap
+# ═══════════════════════════════════════════════════════════════════════════
+
+_AGENT_GOVERNOR_LOCK = threading.Lock()
+_AGENT_GOVERNOR: dict = {
+    "enabled": True,
+    "max_agents": 56,
+    "updated_at": None,
+}
+
+
+def _count_running_agents() -> int:
+    """Return the number of currently running (PID-alive) agents."""
+    count = 0
+    for agent_name in _mode_agent_targets():
+        if agent_name in INFRA_AGENTS:
+            continue
+        pid_file = AI_HOME / "run" / f"{agent_name}.pid"
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text().strip()), 0)
+                count += 1
+            except Exception:
+                pass
+    return count
+
+
+@app.get("/api/agents/governor")
+def get_agent_governor():
+    """Return the current agent governor configuration and live agent count."""
+    with _AGENT_GOVERNOR_LOCK:
+        cfg = dict(_AGENT_GOVERNOR)
+    cfg["running"] = _count_running_agents()
+    cfg["headroom"] = max(0, cfg["max_agents"] - cfg["running"]) if cfg["enabled"] else None
+    return JSONResponse(cfg)
+
+
+@app.post("/api/agents/governor")
+def set_agent_governor(payload: dict, _auth: None = Depends(require_auth)):
+    """Update agent governor settings.
+
+    Payload fields (all optional):
+      enabled  – bool: activate/deactivate the governor
+      max_agents – int (1-200): new agent cap
+    """
+    with _AGENT_GOVERNOR_LOCK:
+        if "enabled" in payload:
+            _AGENT_GOVERNOR["enabled"] = bool(payload["enabled"])
+        if "max_agents" in payload:
+            cap = int(payload["max_agents"])
+            if not (1 <= cap <= 200):
+                raise HTTPException(400, "max_agents must be between 1 and 200")
+            _AGENT_GOVERNOR["max_agents"] = cap
+        _AGENT_GOVERNOR["updated_at"] = now_iso()
+        cfg = dict(_AGENT_GOVERNOR)
+    cfg["running"] = _count_running_agents()
+    cfg["headroom"] = max(0, cfg["max_agents"] - cfg["running"]) if cfg["enabled"] else None
+    return JSONResponse({"ok": True, **cfg})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. Dashboard status cache — reduces repeated disk/CPU work on fast polls
+# ═══════════════════════════════════════════════════════════════════════════
+
+_STATUS_CACHE: dict = {}
+_STATUS_CACHE_LOCK = threading.Lock()
+_STATUS_CACHE_TTL = 4.0  # seconds — short enough to feel live, long enough to reduce load
+
+
+def _get_cached_status() -> "dict | None":
+    with _STATUS_CACHE_LOCK:
+        entry = _STATUS_CACHE.get("data")
+        ts = _STATUS_CACHE.get("ts", 0.0)
+    if entry and time.monotonic() - ts < _STATUS_CACHE_TTL:
+        return entry
+    return None
+
+
+def _set_cached_status(data: dict) -> None:
+    with _STATUS_CACHE_LOCK:
+        _STATUS_CACHE["data"] = data
+        _STATUS_CACHE["ts"] = time.monotonic()
+
+
+def _invalidate_status_cache() -> None:
+    with _STATUS_CACHE_LOCK:
+        _STATUS_CACHE.clear()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. Email Deliverability Audit — scans campaigns for spam signals
+# ═══════════════════════════════════════════════════════════════════════════
+
+_SPAM_TRIGGER_WORDS = [
+    "free money", "click here", "winner", "congratulations", "guaranteed",
+    "no risk", "risk free", "100% free", "act now", "limited time",
+    "earn extra cash", "make money fast", "double your income",
+    "increase sales", "work from home", "be your own boss",
+    "dear friend", "this is not spam", "unsubscribe here",
+    "order now", "buy now", "cash bonus", "extra cash",
+    "prize", "you've been selected", "important information",
+]
+
+_DNS_AUTH_TIPS = [
+    {"check": "SPF", "status": "manual", "action": "Verify v=spf1 record exists for your sending domain via DNS lookup"},
+    {"check": "DKIM", "status": "manual", "action": "Ensure DKIM TXT record is published and selector matches your mailer"},
+    {"check": "DMARC", "status": "manual", "action": "Add v=DMARC1; p=quarantine; rua=mailto:dmarc@yourdomain.com"},
+    {"check": "BIMI", "status": "manual", "action": "Publish a BIMI TXT record with a verified SVG logo for inbox branding"},
+    {"check": "Reverse DNS", "status": "manual", "action": "Ensure PTR record for sending IP resolves to your mail hostname"},
+]
+
+
+def _audit_campaign(campaign: dict) -> dict:
+    """Analyse a single campaign for deliverability issues."""
+    issues = []
+    subject = (campaign.get("subject") or "").lower()
+    body = (campaign.get("body") or "").lower()
+    full_text = subject + " " + body
+
+    # Spam trigger words
+    found_triggers = [w for w in _SPAM_TRIGGER_WORDS if w in full_text]
+    if found_triggers:
+        issues.append({
+            "severity": "high",
+            "type": "spam_trigger",
+            "detail": f"Spam trigger words detected: {', '.join(found_triggers[:5])}",
+            "fix": "Remove or rephrase these phrases to avoid spam filters",
+        })
+
+    # ALL CAPS check (>20 % of words) — use the original (non-lowercased) subject for both counts
+    original_subject = campaign.get("subject") or ""
+    orig_words = original_subject.split()
+    caps_words = [w for w in orig_words if w.isupper() and len(w) > 2]
+    if len(orig_words) > 0 and len(caps_words) / max(len(orig_words), 1) > 0.2:
+        issues.append({
+            "severity": "medium",
+            "type": "excessive_caps",
+            "detail": "Subject line contains excessive ALL-CAPS words",
+            "fix": "Use sentence case or title case instead of all-caps",
+        })
+
+    # Missing unsubscribe link
+    if campaign.get("body") and "unsubscribe" not in body:
+        issues.append({
+            "severity": "high",
+            "type": "missing_unsubscribe",
+            "detail": "Email body does not contain an unsubscribe link",
+            "fix": "Add a visible unsubscribe link — required by CAN-SPAM and GDPR",
+        })
+
+    # Subject line length
+    subj_len = len(campaign.get("subject") or "")
+    if subj_len > 60:
+        issues.append({
+            "severity": "low",
+            "type": "long_subject",
+            "detail": f"Subject line is {subj_len} characters (recommended ≤60)",
+            "fix": "Shorten subject to under 60 characters for better mobile display",
+        })
+    elif subj_len == 0:
+        issues.append({
+            "severity": "high",
+            "type": "empty_subject",
+            "detail": "Campaign has no subject line",
+            "fix": "Add a compelling subject line to improve open rates",
+        })
+
+    # Empty body
+    if not (campaign.get("body") or "").strip():
+        issues.append({
+            "severity": "high",
+            "type": "empty_body",
+            "detail": "Campaign body is empty",
+            "fix": "Add email body content",
+        })
+
+    score = max(0, 100 - sum({"high": 25, "medium": 10, "low": 5}.get(i["severity"], 0) for i in issues))
+    return {
+        "id": campaign.get("id"),
+        "name": campaign.get("name"),
+        "score": score,
+        "rating": "good" if score >= 80 else "needs_work" if score >= 50 else "poor",
+        "issues": issues,
+    }
+
+
+@app.get("/api/email/deliverability-audit")
+async def email_deliverability_audit():
+    """Run a deliverability audit across all campaigns.
+
+    Returns per-campaign scores, detected spam triggers, and DNS auth tips.
+    """
+    try:
+        def _run_audit():
+            try:
+                campaigns = _email_mktg().list_campaigns()
+            except Exception:
+                campaigns = []
+            if hasattr(campaigns, "body"):
+                import json as _json
+                campaigns = _json.loads(campaigns.body)
+            if not isinstance(campaigns, list):
+                campaigns = []
+            results = [_audit_campaign(c) for c in campaigns]
+            overall = round(sum(r["score"] for r in results) / len(results), 1) if results else None
+            high_issues = sum(1 for r in results for i in r["issues"] if i["severity"] == "high")
+            return {
+                "overall_score": overall,
+                "campaigns_audited": len(results),
+                "high_severity_issues": high_issues,
+                "campaigns": results,
+                "dns_checklist": _DNS_AUTH_TIPS,
+                "warmup_advice": (
+                    "Warm up new sending domains gradually: 50→200→500→1000→2000 emails/day "
+                    "over 4-6 weeks. Keep bounce rate <2% and complaint rate <0.1%."
+                ),
+                "sender_reputation_tools": [
+                    "Google Postmaster Tools (postmaster.google.com)",
+                    "Microsoft SNDS (sendersupport.olc.protection.outlook.com)",
+                    "MXToolbox Blacklist Check (mxtoolbox.com/blacklists.aspx)",
+                    "Mail-Tester (mail-tester.com)",
+                ],
+                "ts": now_iso(),
+            }
+        return JSONResponse(await run_in_threadpool(_run_audit))
+    except Exception as exc:
+        logger.error("Deliverability audit error: %s", exc, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. Circuit Breaker — pause agents that repeatedly fail
+# ═══════════════════════════════════════════════════════════════════════════
+
+_CB_LOCK = threading.Lock()
+# Per-agent state: {"state": "closed"|"open"|"half_open",
+#                   "failures": int, "last_failure": str|None,
+#                   "opened_at": str|None, "success_streak": int}
+_CIRCUIT_BREAKERS: dict[str, dict] = {}
+
+_CB_FAILURE_THRESHOLD = 3    # consecutive failures before opening
+_CB_HALF_OPEN_AFTER = 300    # seconds before trying again (5 min)
+_CB_SUCCESS_TO_CLOSE = 2     # successes in half-open needed to close
+
+
+def _cb_get(agent_id: str) -> dict:
+    """Return (creating if missing) the circuit-breaker state for an agent."""
+    if agent_id not in _CIRCUIT_BREAKERS:
+        _CIRCUIT_BREAKERS[agent_id] = {
+            "state": "closed",
+            "failures": 0,
+            "last_failure": None,
+            "opened_at": None,
+            "success_streak": 0,
+        }
+    return _CIRCUIT_BREAKERS[agent_id]
+
+
+def circuit_breaker_record_failure(agent_id: str) -> dict:
+    """Record a subtask failure for *agent_id* and open the breaker if threshold is reached."""
+    with _CB_LOCK:
+        cb = _cb_get(agent_id)
+        cb["failures"] += 1
+        cb["success_streak"] = 0
+        cb["last_failure"] = now_iso()
+        if cb["state"] == "closed" and cb["failures"] >= _CB_FAILURE_THRESHOLD:
+            cb["state"] = "open"
+            cb["opened_at"] = now_iso()
+            logger.warning("Circuit breaker OPENED for agent '%s' after %d failures", agent_id, cb["failures"])
+        return dict(cb)
+
+
+def circuit_breaker_record_success(agent_id: str) -> dict:
+    """Record a subtask success; close the breaker if it was half-open."""
+    with _CB_LOCK:
+        cb = _cb_get(agent_id)
+        cb["success_streak"] += 1
+        # Transition from half-open → closed after enough consecutive successes
+        if cb["state"] == "half_open" and cb["success_streak"] >= _CB_SUCCESS_TO_CLOSE:
+            cb["state"] = "closed"
+            cb["failures"] = 0
+            cb["opened_at"] = None
+            logger.info("Circuit breaker CLOSED for agent '%s'", agent_id)
+        elif cb["state"] == "closed":
+            cb["failures"] = 0  # reset failure count on success
+        return dict(cb)
+
+
+def circuit_breaker_is_open(agent_id: str) -> bool:
+    """Return True if the agent should be skipped (circuit is open).
+
+    Automatically transitions open → half_open after the cooldown period.
+    """
+    with _CB_LOCK:
+        if agent_id not in _CIRCUIT_BREAKERS:
+            return False
+        cb = _CIRCUIT_BREAKERS[agent_id]
+        if cb["state"] == "open" and cb.get("opened_at"):
+            try:
+                opened = datetime.fromisoformat(cb["opened_at"].replace("Z", "+00:00"))
+                elapsed = (datetime.now(timezone.utc) - opened).total_seconds()
+                if elapsed >= _CB_HALF_OPEN_AFTER:
+                    cb["state"] = "half_open"
+                    cb["success_streak"] = 0
+                    logger.info("Circuit breaker HALF-OPEN for agent '%s' after %.0fs cooldown", agent_id, elapsed)
+            except Exception:
+                pass
+        return cb["state"] == "open"
+
+
+@app.get("/api/agents/circuit-breakers")
+def get_circuit_breakers():
+    """Return all circuit-breaker states and current thresholds."""
+    with _CB_LOCK:
+        snapshot = {k: dict(v) for k, v in _CIRCUIT_BREAKERS.items()}
+    # Trigger the open→half-open check for each agent
+    for agent_id in list(snapshot.keys()):
+        circuit_breaker_is_open(agent_id)
+    with _CB_LOCK:
+        snapshot = {k: dict(v) for k, v in _CIRCUIT_BREAKERS.items()}
+    return JSONResponse({
+        "circuit_breakers": snapshot,
+        "thresholds": {
+            "failure_threshold": _CB_FAILURE_THRESHOLD,
+            "half_open_after_seconds": _CB_HALF_OPEN_AFTER,
+            "success_to_close": _CB_SUCCESS_TO_CLOSE,
+        },
+        "summary": {
+            "total": len(snapshot),
+            "open": sum(1 for v in snapshot.values() if v["state"] == "open"),
+            "half_open": sum(1 for v in snapshot.values() if v["state"] == "half_open"),
+            "closed": sum(1 for v in snapshot.values() if v["state"] == "closed"),
+        },
+    })
+
+
+@app.post("/api/agents/circuit-breakers/{agent_id}/reset")
+def reset_circuit_breaker(agent_id: str, _auth: None = Depends(require_auth)):
+    """Manually reset the circuit breaker for a specific agent to closed state."""
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent ID")
+    with _CB_LOCK:
+        _CIRCUIT_BREAKERS[agent_id] = {
+            "state": "closed",
+            "failures": 0,
+            "last_failure": None,
+            "opened_at": None,
+            "success_streak": 0,
+        }
+    logger.info("Circuit breaker manually RESET for agent '%s'", agent_id)
+    return JSONResponse({"ok": True, "agent_id": agent_id, "state": "closed"})
+
+
+@app.post("/api/agents/circuit-breakers/{agent_id}/record-failure")
+def record_agent_failure(agent_id: str, _auth: None = Depends(require_auth)):
+    """Manually record a failure event for an agent (useful for testing)."""
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent ID")
+    state = circuit_breaker_record_failure(agent_id)
+    return JSONResponse({"ok": True, "agent_id": agent_id, **state})
+
+
+@app.post("/api/agents/circuit-breakers/{agent_id}/record-success")
+def record_agent_success(agent_id: str, _auth: None = Depends(require_auth)):
+    """Manually record a success event for an agent (useful for testing)."""
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent ID")
+    state = circuit_breaker_record_success(agent_id)
+    return JSONResponse({"ok": True, "agent_id": agent_id, **state})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. Simplified Lead Generation Pilot
+# ═══════════════════════════════════════════════════════════════════════════
+
+_LEAD_PILOT_LOCK = threading.Lock()
+_LEAD_PILOT: dict = {
+    "enabled": False,
+    "max_leads": 5,
+    "niche": "web design agencies",
+    "use_case": "web-design",
+    "updated_at": None,
+    "description": (
+        "Pilot mode: produce only 5 highly-targeted leads for a single use case "
+        "to validate lead quality before scaling."
+    ),
+}
+
+
+@app.get("/api/lead-pilot")
+def get_lead_pilot():
+    """Return the current simplified lead-generation pilot configuration."""
+    with _LEAD_PILOT_LOCK:
+        return JSONResponse(dict(_LEAD_PILOT))
+
+
+@app.post("/api/lead-pilot")
+def set_lead_pilot(payload: dict, _auth: None = Depends(require_auth)):
+    """Enable or configure the simplified lead generation pilot.
+
+    Payload fields (all optional):
+      enabled   – bool
+      max_leads – int (1-50)
+      niche     – str: target market segment
+      use_case  – str: identifier for the use case
+    """
+    with _LEAD_PILOT_LOCK:
+        if "enabled" in payload:
+            _LEAD_PILOT["enabled"] = bool(payload["enabled"])
+        if "max_leads" in payload:
+            n = int(payload["max_leads"])
+            if not (1 <= n <= 50):
+                raise HTTPException(400, "max_leads must be between 1 and 50")
+            _LEAD_PILOT["max_leads"] = n
+        if "niche" in payload:
+            niche = str(payload["niche"])[:120].strip()
+            if not niche:
+                raise HTTPException(400, "niche cannot be empty")
+            _LEAD_PILOT["niche"] = niche
+        if "use_case" in payload:
+            _LEAD_PILOT["use_case"] = str(payload["use_case"])[:60].strip()
+        _LEAD_PILOT["updated_at"] = now_iso()
+        cfg = dict(_LEAD_PILOT)
+    return JSONResponse({"ok": True, **cfg})
 
 
 if __name__ == "__main__":
