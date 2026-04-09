@@ -1850,8 +1850,6 @@ INDEX_HTML = r"""<!doctype html>
     @media(max-width:768px){main{padding:12px 10px}}
 
     /* ── Tab panels ── */
-    .tab-content{display:none;width:100%;box-sizing:border-box}
-    .tab-content.active{display:block;animation:tabReveal .4s cubic-bezier(.4,0,.2,1);width:100%}
 
     /* ── Tab page headers ── */
     .page-header{
@@ -3231,9 +3229,11 @@ INDEX_HTML = r"""<!doctype html>
   <button class="nav-scroll-btn right hidden" id="nav-scroll-right" style="display:none"></button>
 </div>
 <!-- Sub-navigation rows (one per group) -->
-<div class="sub-nav" id="subnav-overview"></div>
+<div class="sub-nav active" id="subnav-overview">
+  <button class="active" onclick="switchTab('dashboard',this)">◈ Overview</button>
+</div>
 <div class="sub-nav" id="subnav-intel">
-  <button class="active" onclick="switchTab('chat',this)" id="nav-btn-chat">💬 Chat</button>
+  <button onclick="switchTab('chat',this)" id="nav-btn-chat">💬 Chat</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
 </div>
 <div class="sub-nav" id="subnav-operations">
@@ -3798,10 +3798,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Scheduler ── -->
 <div id="tab-scheduler" class="tab-content">
-  <div class="page-header" style="border-left-color:#c084fc">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📅</div>
     <div><div class="page-header-title">Task Scheduler</div><div class="page-header-desc">Schedule recurring and one-time tasks for your agents. View your agenda, create schedules, and manage triggers.</div></div>
-    <span class="page-header-badge" style="color:#c084fc">Automation</span>
+    <span class="page-header-badge" style="color:var(--gold)">Automation</span>
   </div>
   <div style="display:flex;gap:16px;height:calc(100vh - 175px)">
     <!-- Left: Agenda calendar -->
@@ -3908,10 +3908,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Workers ── -->
 <div id="tab-workers" class="tab-content" style="width:100%;box-sizing:border-box">
-  <div class="page-header" style="border-left-color:#6ee7b7">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">👷</div>
     <div><div class="page-header-title">Agent Teams</div><div class="page-header-desc">Bundle agents together with recurring tasks. Agent teams run on a schedule and always perform their assigned role automatically.</div></div>
-    <span class="page-header-badge" style="color:#6ee7b7">Workforce</span>
+    <span class="page-header-badge" style="color:var(--gold)">Workforce</span>
   </div>
 
   <!-- ── Quick Presets ── -->
@@ -4068,10 +4068,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Improvements ── -->
 <div id="tab-improvements" class="tab-content">
-  <div class="page-header" style="border-left-color:#facc15">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💡</div>
     <div><div class="page-header-title">AI Improvement Proposals</div><div class="page-header-desc">AI-generated improvement proposals for your system. Review, approve, or escalate to execution. No changes applied automatically.</div></div>
-    <span class="page-header-badge" style="color:#facc15">AI Insights</span>
+    <span class="page-header-badge" style="color:var(--gold)">AI Insights</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -4108,10 +4108,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Budget ── -->
 <div id="tab-budget" class="tab-content">
-  <div class="page-header" style="border-left-color:#34d399">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💰</div>
     <div><div class="page-header-title">Budget & Cost Management</div><div class="page-header-desc">Track monthly AI compute spend per agent. Set hard caps, monitor warnings, and record usage manually.</div></div>
-    <span class="page-header-badge" style="color:#34d399">Cost Control</span>
+    <span class="page-header-badge" style="color:var(--gold)">Cost Control</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="bud-total-spent">–</div><div class="lbl">Total Spent (month)</div></div></div>
@@ -4154,10 +4154,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Org Chart ── -->
 <div id="tab-org" class="tab-content">
-  <div class="page-header" style="border-left-color:#818cf8">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🏢</div>
     <div><div class="page-header-title">Org Chart & Agent Hierarchy</div><div class="page-header-desc">Visual hierarchy of roles and reporting lines. Assign agents to roles for structured delegation and task routing.</div></div>
-    <span class="page-header-badge" style="color:#818cf8">Agent Structure</span>
+    <span class="page-header-badge" style="color:var(--gold)">Agent Structure</span>
   </div>
   <div class="grid2">
     <div class="card">
@@ -4204,10 +4204,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Goals ── -->
 <div id="tab-goals" class="tab-content">
-  <div class="page-header" style="border-left-color:#fb923c">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎯</div>
     <div><div class="page-header-title">Goals & Company Mission</div><div class="page-header-desc">Set OKR-style goals, define the company mission, and track strategic objectives across your AI team.</div></div>
-    <span class="page-header-badge" style="color:#fb923c">Strategic Layer</span>
+    <span class="page-header-badge" style="color:var(--gold)">Strategic Layer</span>
   </div>
   <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,rgba(234,88,12,.08),rgba(251,146,60,.04));border-color:rgba(251,146,60,.3)">
     <div class="card-header">
@@ -4245,10 +4245,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Tickets ── -->
 <div id="tab-tickets" class="tab-content">
-  <div class="page-header" style="border-left-color:#38bdf8">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎫</div>
     <div><div class="page-header-title">Tickets & Task Tracker</div><div class="page-header-desc">Track system tickets, feature requests, and AI tasks. Filter by status, assign agents, and monitor progress.</div></div>
-    <span class="page-header-badge" style="color:#38bdf8">Issue Tracker</span>
+    <span class="page-header-badge" style="color:var(--gold)">Issue Tracker</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon blue">🎫</div><div class="stat-body"><div class="val" id="tkt-total">–</div><div class="lbl">Total Tickets</div></div></div>
@@ -4315,10 +4315,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Boardroom (Governance) ── -->
 <div id="tab-boardroom" class="tab-content">
-  <div class="page-header" style="border-left-color:#f87171">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🛡️</div>
     <div><div class="page-header-title">Boardroom & Governance</div><div class="page-header-desc">High-level approval workflows, governance decisions, and strategic oversight. Human-in-the-loop for critical actions.</div></div>
-    <span class="page-header-badge" style="color:#f87171">Governance</span>
+    <span class="page-header-badge" style="color:var(--gold)">Governance</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="gov-pending">–</div><div class="lbl">Pending Approvals</div></div></div>
@@ -4380,10 +4380,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Companies ── -->
 <div id="tab-companies" class="tab-content">
-  <div class="page-header" style="border-left-color:#86efac">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🏗️</div>
     <div><div class="page-header-title">Multi-Company Manager</div><div class="page-header-desc">One deployment, many companies. Complete data isolation with a single control plane for your entire portfolio.</div></div>
-    <span class="page-header-badge" style="color:#86efac">Portfolio CRM</span>
+    <span class="page-header-badge" style="color:var(--gold)">Portfolio CRM</span>
   </div>
   <div class="card" style="margin-bottom:16px">
     <div class="card-header">
@@ -4423,10 +4423,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Outputs (Artifacts + Sessions) ── -->
 <div id="tab-artifacts" class="tab-content">
-  <div class="page-header" style="border-left-color:#fde68a">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📦</div>
     <div><div class="page-header-title">Artifacts & Generated Content</div><div class="page-header-desc">Browse and manage all files, documents, and code generated by your AI agents. Filter, preview, and deploy artifacts.</div></div>
-    <span class="page-header-badge" style="color:#fde68a">Output Library</span>
+    <span class="page-header-badge" style="color:var(--gold)">Output Library</span>
   </div>
 
   <!-- ── Sub-tab navigation (Artifacts / Sessions) ── -->
@@ -4540,10 +4540,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Finance / Invoicing ── -->
 <div id="tab-invoicing" class="tab-content">
-  <div class="page-header" style="border-left-color:#10b981">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🧾</div>
     <div><div class="page-header-title">Finance & Invoicing</div><div class="page-header-desc">Create invoices, track expenses, and view your live P&amp;L report.</div></div>
-    <span class="page-header-badge" style="color:#10b981">Finance</span>
+    <span class="page-header-badge" style="color:var(--gold)">Finance</span>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:16px">
     <button class="fi-tab-btn btn btn-primary btn-sm active" onclick="switchFinanceTab('invoices',this)">🧾 Invoices</button>
@@ -4614,10 +4614,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Analytics ── -->
 <div id="tab-analytics-bi" class="tab-content">
-  <div class="page-header" style="border-left-color:#6366f1">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📊</div>
     <div><div class="page-header-title">Analytics &amp; Insights</div><div class="page-header-desc">Business intelligence dashboard — unified KPIs, AI recommendations, and trends across all modules.</div></div>
-    <span class="page-header-badge" style="color:#6366f1">Intelligence</span>
+    <span class="page-header-badge" style="color:var(--gold)">Intelligence</span>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:16px">
     <button class="btn btn-primary" onclick="loadAnalyticsOverview()">↻ Refresh Overview</button>
@@ -4643,10 +4643,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Workflow Builder ── -->
 <div id="tab-workflows" class="tab-content">
-  <div class="page-header" style="border-left-color:#f97316">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">⚙️</div>
     <div><div class="page-header-title">Workflow Builder</div><div class="page-header-desc">No-code automation editor — create trigger → condition → action workflows that run automatically.</div></div>
-    <span class="page-header-badge" style="color:#f97316">Automation</span>
+    <span class="page-header-badge" style="color:var(--gold)">Automation</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card">
@@ -4684,10 +4684,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Team Management ── -->
 <div id="tab-team" class="tab-content">
-  <div class="page-header" style="border-left-color:#0ea5e9">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">👥</div>
     <div><div class="page-header-title">Team Management</div><div class="page-header-desc">Invite team members, assign roles, and manage access permissions across your AI Employee workspace.</div></div>
-    <span class="page-header-badge" style="color:#0ea5e9">Multi-User</span>
+    <span class="page-header-badge" style="color:var(--gold)">Multi-User</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card">
@@ -4716,10 +4716,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Customer Support ── -->
 <div id="tab-support-desk" class="tab-content">
-  <div class="page-header" style="border-left-color:#14b8a6">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎧</div>
     <div><div class="page-header-title">Customer Support</div><div class="page-header-desc">24/7 helpdesk with smart ticket routing, AI reply suggestions, and a searchable knowledge base.</div></div>
-    <span class="page-header-badge" style="color:#14b8a6">Helpdesk</span>
+    <span class="page-header-badge" style="color:var(--gold)">Helpdesk</span>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:16px">
     <button class="sup-tab-btn btn btn-primary btn-sm active" onclick="switchSupportTab('tickets',this)">🎫 Tickets</button>
@@ -4796,10 +4796,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Website Builder ── -->
 <div id="tab-website-builder" class="tab-content">
-  <div class="page-header" style="border-left-color:#3b82f6">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🌐</div>
     <div><div class="page-header-title">Website Builder</div><div class="page-header-desc">Generate complete landing page HTML from a business description using AI. Edit and export instantly.</div></div>
-    <span class="page-header-badge" style="color:#3b82f6">AI Builder</span>
+    <span class="page-header-badge" style="color:var(--gold)">AI Builder</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card">
@@ -4827,10 +4827,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Personal Brand ── -->
 <div id="tab-brand" class="tab-content">
-  <div class="page-header" style="border-left-color:#a855f7">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">✨</div>
     <div><div class="page-header-title">Personal Brand Agent</div><div class="page-header-desc">Build your thought leadership — AI content generation, topic ideas, and brand voice consistency.</div></div>
-    <span class="page-header-badge" style="color:#a855f7">Brand</span>
+    <span class="page-header-badge" style="color:var(--gold)">Brand</span>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:16px">
     <button class="br-tab-btn btn btn-primary btn-sm active" onclick="switchBrandTab('generate',this)">✍️ Generate</button>
@@ -4894,10 +4894,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Health Check ── -->
 <div id="tab-health" class="tab-content">
-  <div class="page-header" style="border-left-color:#f43f5e">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">❤️</div>
     <div><div class="page-header-title">Business Health Check</div><div class="page-header-desc">One-click audit of your entire business — graded A to D with issues identified and fixes recommended.</div></div>
-    <span class="page-header-badge" style="color:#f43f5e">Audit</span>
+    <span class="page-header-badge" style="color:var(--gold)">Audit</span>
   </div>
   <div style="display:flex;gap:10px;margin-bottom:16px">
     <button class="btn btn-primary" onclick="runHealthCheck()">❤️ Run Health Check</button>
@@ -4919,10 +4919,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Export & Backup ── -->
 <div id="tab-export" class="tab-content">
-  <div class="page-header" style="border-left-color:#64748b">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💾</div>
     <div><div class="page-header-title">Export &amp; Backup</div><div class="page-header-desc">Export any module as JSON or CSV, create full ZIP backups of all your AI Employee data.</div></div>
-    <span class="page-header-badge" style="color:#64748b">Data</span>
+    <span class="page-header-badge" style="color:var(--gold)">Data</span>
   </div>
   <div style="display:flex;gap:10px;margin-bottom:16px">
     <button class="btn btn-primary" onclick="createBackup()">🗜️ Create Full Backup</button>
@@ -4945,10 +4945,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Skills ── -->
 <div id="tab-skills" class="tab-content">
-  <div class="page-header" style="border-left-color:#22d3ee">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🛠️</div>
     <div><div class="page-header-title">Skills Library</div><div class="page-header-desc">Manage capabilities your agents can learn and use. Train skills, assign them to agents, and build new ones.</div></div>
-    <span class="page-header-badge" style="color:#22d3ee">Agent Capabilities</span>
+    <span class="page-header-badge" style="color:var(--gold)">Agent Capabilities</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card" style="min-height:600px;display:flex;flex-direction:column">
@@ -5011,10 +5011,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Tasks ── -->
 <div id="tab-tasks" class="tab-content">
-  <div class="page-header" style="border-left-color:#f472b6">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🚀</div>
     <div><div class="page-header-title">Task Runner</div><div class="page-header-desc">Build and launch tasks for your AI workforce. Describe any goal — agents are auto-selected, you control the final launch.</div></div>
-    <span class="page-header-badge" style="color:#f472b6">Task Builder</span>
+    <span class="page-header-badge" style="color:var(--gold)">Task Builder</span>
   </div>
 
   <!-- Task Builder -->
@@ -5117,10 +5117,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Swarm ── -->
 <div id="tab-swarm" class="tab-content">
-  <div class="page-header" style="border-left-color:#fbbf24">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🐝</div>
     <div><div class="page-header-title">Agent Swarm</div><div class="page-header-desc">All AI agents at a glance — capabilities, status, and current workload. Filter by category or search by skill.</div></div>
-    <span class="page-header-badge" style="color:#fbbf24" id="swarm-header-badge">– Agents</span>
+    <span class="page-header-badge" style="color:var(--gold)" id="swarm-header-badge">– Agents</span>
   </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap">
     <!-- Left: agent grid -->
@@ -5220,10 +5220,10 @@ INDEX_HTML = r"""<!doctype html>
 .swarm-msg-right .swarm-msg-bubble{background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-bottom-right-radius:3px;color:var(--text);margin-left:auto}
 </style>
 <div id="tab-commands" class="tab-content">
-  <div class="page-header" style="border-left-color:#d4af37">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📜</div>
     <div><div class="page-header-title">Command Reference</div><div class="page-header-desc">Full list of WhatsApp and bot commands available across your AI system. Search, filter by category, and copy commands directly.</div></div>
-    <span class="page-header-badge" style="color:#d4af37">Commands</span>
+    <span class="page-header-badge" style="color:var(--gold)">Commands</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -5241,10 +5241,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── ROI Metrics ── -->
 <div id="tab-metrics" class="tab-content">
-  <div class="page-header" style="border-left-color:#4ade80">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📈</div>
     <div><div class="page-header-title">ROI & Performance Analytics</div><div class="page-header-desc">Real usage data tracked automatically from all agent activity. Measure tasks, hours saved, cost efficiency, and business impact.</div></div>
-    <span class="page-header-badge" style="color:#4ade80">Analytics</span>
+    <span class="page-header-badge" style="color:var(--gold)">Analytics</span>
   </div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
     <div>
@@ -5387,10 +5387,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Templates ── -->
 <div id="tab-templates" class="tab-content">
-  <div class="page-header" style="border-left-color:#60a5fa">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📋</div>
     <div><div class="page-header-title">Business Templates</div><div class="page-header-desc">Pre-built plug-and-play templates for common business use-cases. One click to deploy a full AI team.</div></div>
-    <span class="page-header-badge" style="color:#60a5fa">Templates</span>
+    <span class="page-header-badge" style="color:var(--gold)">Templates</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -5424,10 +5424,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Guardrails ── -->
 <div id="tab-guardrails" class="tab-content">
-  <div class="page-header" style="border-left-color:#f97316">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🔒</div>
     <div><div class="page-header-title">Guardrails & Safety Controls</div><div class="page-header-desc">Define rules that keep your AI agents operating safely. High-risk actions require manual approval before execution.</div></div>
-    <span class="page-header-badge" style="color:#f97316">Security Layer</span>
+    <span class="page-header-badge" style="color:var(--gold)">Security Layer</span>
   </div>
   <!-- Pending approvals notification banner -->
   <div id="guardrails-notification-banner" style="display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(239,68,68,.1));border:1px solid rgba(245,158,11,.5);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.88em;color:var(--warning);font-weight:600;animation:blink 1.5s infinite"></div>
@@ -5603,10 +5603,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Memory ── -->
 <div id="tab-memory" class="tab-content">
-  <div class="page-header" style="border-left-color:#e879f9">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🧠</div>
     <div><div class="page-header-title">Memory & Knowledge Base</div><div class="page-header-desc">Client contacts, conversation history, and contextual knowledge stored across all AI sessions.</div></div>
-    <span class="page-header-badge" style="color:#e879f9">Persistent Memory</span>
+    <span class="page-header-badge" style="color:var(--gold)">Persistent Memory</span>
   </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:start">
     <!-- Left: Client Memory with search -->
@@ -5685,10 +5685,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Integrations ── -->
 <div id="tab-integrations" class="tab-content">
-  <div class="page-header" style="border-left-color:#a78bfa">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🔌</div>
     <div><div class="page-header-title">Integrations & Connections</div><div class="page-header-desc">Connect your tools and services. The AI uses these integrations to take real actions across your business.</div></div>
-    <span class="page-header-badge" style="color:#a78bfa">Connected Services</span>
+    <span class="page-header-badge" style="color:var(--gold)">Connected Services</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon" style="background:linear-gradient(135deg,rgba(167,139,250,.2),rgba(167,139,250,.05));color:#a78bfa">🔌</div><div class="stat-body"><div class="val" id="intg-stat-total">–</div><div class="lbl">Total Services</div></div></div>
@@ -5814,10 +5814,10 @@ function switchTab(tab, btn) {
 </script>
 <!-- ── History ── -->
 <div id="tab-history" class="tab-content">
-  <div class="page-header" style="border-left-color:#7dd3fc">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🕐</div>
     <div><div class="page-header-title">Activity History</div><div class="page-header-desc">A persistent, filterable timeline of all agent activities, security checks, and system events from all time.</div></div>
-    <span class="page-header-badge" style="color:#7dd3fc">Full Audit Log</span>
+    <span class="page-header-badge" style="color:var(--gold)">Full Audit Log</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -5871,10 +5871,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Options ── -->
 <div id="tab-options" class="tab-content">
-  <div class="page-header" style="border-left-color:#94a3b8">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">⚙️</div>
     <div><div class="page-header-title">Settings & Configuration</div><div class="page-header-desc">API keys, agent behavior, security settings, and system preferences. Changes take effect immediately.</div></div>
-    <span class="page-header-badge" style="color:#94a3b8">System Config</span>
+    <span class="page-header-badge" style="color:var(--gold)">System Config</span>
   </div>
   <div class="grid2">
 
@@ -6364,10 +6364,10 @@ function switchTab(tab, btn) {
 
 <!-- ── CRM ── -->
 <div id="tab-crm" class="tab-content">
-  <div class="page-header" style="border-left-color:#f59e0b">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎯</div>
     <div><div class="page-header-title">Lead CRM</div><div class="page-header-desc">Manage your sales pipeline from first contact to closed deal. Score leads, track stages, and schedule follow-ups.</div></div>
-    <span class="page-header-badge" style="color:#f59e0b">Sales Pipeline</span>
+    <span class="page-header-badge" style="color:var(--gold)">Sales Pipeline</span>
   </div>
   <div class="grid-stat" id="crm-pipeline-stats">
     <div class="stat-card"><div class="stat-icon yellow">🆕</div><div class="stat-body"><div class="val" id="crm-stat-new">–</div><div class="lbl">New Leads</div></div></div>
@@ -6413,10 +6413,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Email Marketing ── -->
 <div id="tab-email-mkt" class="tab-content">
-  <div class="page-header" style="border-left-color:#06b6d4">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📧</div>
     <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create and manage email campaigns, multi-step sequences, and track performance metrics.</div></div>
-    <span class="page-header-badge" style="color:#06b6d4">Campaigns</span>
+    <span class="page-header-badge" style="color:var(--gold)">Campaigns</span>
   </div>
   <div class="grid-stat">
     <div class="stat-card"><div class="stat-icon blue">📧</div><div class="stat-body"><div class="val" id="em-stat-total">–</div><div class="lbl">Total Campaigns</div></div></div>
@@ -6481,10 +6481,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Meetings ── -->
 <div id="tab-meetings" class="tab-content">
-  <div class="page-header" style="border-left-color:#a78bfa">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🗓️</div>
     <div><div class="page-header-title">Meeting Intelligence</div><div class="page-header-desc">Record meetings, AI-summarize transcripts, extract action items, and generate follow-up emails automatically.</div></div>
-    <span class="page-header-badge" style="color:#a78bfa">Meetings</span>
+    <span class="page-header-badge" style="color:var(--gold)">Meetings</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -6530,10 +6530,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Social Media Scheduler ── -->
 <div id="tab-social" class="tab-content">
-  <div class="page-header" style="border-left-color:#ec4899">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📱</div>
     <div><div class="page-header-title">Social Media Scheduler</div><div class="page-header-desc">Schedule posts across all platforms, generate AI content, and track your publishing activity.</div></div>
-    <span class="page-header-badge" style="color:#ec4899">Social</span>
+    <span class="page-header-badge" style="color:var(--gold)">Social</span>
   </div>
   <div class="grid-stat">
     <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="soc-stat-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
@@ -6602,10 +6602,10 @@ function switchTab(tab, btn) {
 
 <!-- ── CEO Briefing ── -->
 <div id="tab-briefing" class="tab-content">
-  <div class="page-header" style="border-left-color:#6366f1">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📰</div>
     <div><div class="page-header-title">CEO Daily Briefing</div><div class="page-header-desc">AI-generated executive briefings with key metrics, pipeline status, revenue, and action items for the day.</div></div>
-    <span class="page-header-badge" style="color:#6366f1">Executive</span>
+    <span class="page-header-badge" style="color:var(--gold)">Executive</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -6636,10 +6636,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Financial Tools ── -->
 <div id="tab-financial" class="tab-content">
-  <div class="page-header" style="border-left-color:#10b981">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💳</div>
     <div><div class="page-header-title">Financial Tools</div><div class="page-header-desc">Create and manage invoices, quotes, track expenses, and view your P&amp;L in one place.</div></div>
-    <span class="page-header-badge" style="color:#10b981">Finance</span>
+    <span class="page-header-badge" style="color:var(--gold)">Finance</span>
   </div>
   <!-- Sub-tab nav -->
   <div style="display:flex;gap:6px;margin-bottom:16px">
@@ -6751,10 +6751,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Competitors ── -->
 <div id="tab-competitors" class="tab-content">
-  <div class="page-header" style="border-left-color:#f43f5e">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🕵️</div>
     <div><div class="page-header-title">Competitor Watch</div><div class="page-header-desc">Track and analyze your competitive landscape. AI-powered SWOT analysis and competitive intelligence alerts.</div></div>
-    <span class="page-header-badge" style="color:#f43f5e">Intelligence</span>
+    <span class="page-header-badge" style="color:var(--gold)">Intelligence</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -6798,10 +6798,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Content Calendar ── -->
 <div id="tab-content-calendar" class="tab-content">
-  <div class="page-header" style="border-left-color:#f97316">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🗃️</div>
     <div><div class="page-header-title">Content Calendar</div><div class="page-header-desc">Plan and track your content across all platforms. AI generates complete 30-day content calendars tailored to your niche.</div></div>
-    <span class="page-header-badge" style="color:#f97316">Content</span>
+    <span class="page-header-badge" style="color:var(--gold)">Content</span>
   </div>
   <div class="grid-stat">
     <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="cc-stat-total">–</div><div class="lbl">Total Entries</div></div></div>
