@@ -13,7 +13,12 @@ Public API:
     intel.on_exchange("user:default", user_msg, response, agent_id)
 """
 
-from .brain import Brain, get_brain  # noqa: F401
+try:
+    from .brain import Brain, get_brain  # noqa: F401
+    _BRAIN_AVAILABLE = True
+except ImportError:
+    _BRAIN_AVAILABLE = False  # torch not installed
+
 from .intelligence import (  # noqa: F401
     IntelligenceCore,
     UserProfile,

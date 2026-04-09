@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import List
 
 import pytest
-import torch
+torch = pytest.importorskip("torch", reason="torch not installed")
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _REPO      = Path(__file__).parent.parent
