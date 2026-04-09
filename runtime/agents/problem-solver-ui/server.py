@@ -1236,6 +1236,7 @@ INDEX_HTML = r"""<!doctype html>
       --bg:#050508;
       --bg2:#08080d;
       --bg3:#0c0c14;
+      --bg-deep:#080810;
       --panel:rgba(10,10,18,0.95);
       --panel2:rgba(14,14,24,0.92);
       --surface:rgba(10,10,18,0.95);
@@ -1345,7 +1346,7 @@ INDEX_HTML = r"""<!doctype html>
       border:1px solid rgba(255,255,255,.1);border-radius:20px;
       padding:5px 13px;font-size:.78em;color:rgba(240,244,255,.8);
       backdrop-filter:blur(8px);transition:all .3s}
-    .status-pill:hover{background:rgba(255,255,255,.09);border-color:rgba(129,140,248,.3)}
+    .status-pill:hover{background:rgba(255,255,255,.09);border-color:rgba(212,175,55,.3)}
     .status-dot{width:7px;height:7px;border-radius:50%;background:var(--success);
       box-shadow:0 0 9px var(--success);animation:blink 2.5s infinite;flex-shrink:0}
     .hdr-ctrl{display:flex;align-items:center;gap:8px}
@@ -1850,8 +1851,6 @@ INDEX_HTML = r"""<!doctype html>
     @media(max-width:768px){main{padding:12px 10px}}
 
     /* ── Tab panels ── */
-    .tab-content{display:none;width:100%;box-sizing:border-box}
-    .tab-content.active{display:block;animation:tabReveal .4s cubic-bezier(.4,0,.2,1);width:100%}
 
     /* ── Tab page headers ── */
     .page-header{
@@ -1963,12 +1962,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     .sys-control::before{
       content:'';position:absolute;top:-80%;right:-5%;width:400px;height:400px;
-      background:radial-gradient(circle,rgba(99,102,241,.1) 0%,transparent 65%);
+      background:radial-gradient(circle,rgba(212,175,55,.08) 0%,transparent 65%);
       pointer-events:none;animation:float 10s ease-in-out infinite;
     }
     .sys-control::after{
       content:'';position:absolute;top:0;left:0;right:0;height:1px;
-      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.4),transparent);
     }
     .sys-control-left{display:flex;align-items:center;gap:20px}
     .sys-status-ring{position:relative;width:60px;height:60px;flex-shrink:0}
@@ -2066,7 +2065,7 @@ INDEX_HTML = r"""<!doctype html>
     .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:var(--success);border:1px solid rgba(16,185,129,.25)}
     .badge.stopped,.badge.rejected{background:rgba(239,68,68,.12);color:var(--danger);border:1px solid rgba(239,68,68,.25)}
     .badge.pending{background:rgba(245,158,11,.12);color:var(--warning);border:1px solid rgba(245,158,11,.25)}
-    .badge.enabled{background:rgba(99,102,241,.12);color:var(--primary);border:1px solid rgba(99,102,241,.25)}
+    .badge.enabled{background:rgba(212,175,55,.12);color:var(--primary);border:1px solid rgba(212,175,55,.25)}
     .badge.disabled{background:rgba(100,116,139,.12);color:var(--text-muted);border:1px solid rgba(100,116,139,.25)}
 
     /* ── Buttons ── */
@@ -2093,7 +2092,7 @@ INDEX_HTML = r"""<!doctype html>
     .btn-success{background:rgba(212,175,55,.12);color:var(--gold);border:1px solid rgba(212,175,55,.25)}
     .btn-success:hover{background:rgba(212,175,55,.24);box-shadow:0 3px 12px rgba(212,175,55,.25);border-color:rgba(212,175,55,.45)}
     .btn-ghost{background:rgba(255,255,255,.04);color:var(--text-secondary);border:1px solid rgba(148,163,184,.12)}
-    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(129,140,248,.3)}
+    .btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:rgba(212,175,55,.3)}
     .btn-sm{padding:5px 12px;font-size:.78em}
     .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
@@ -2102,7 +2101,7 @@ INDEX_HTML = r"""<!doctype html>
     label{display:block;font-size:.8em;font-weight:500;color:var(--text-secondary);margin-bottom:5px;letter-spacing:.02em}
     input,textarea,select{
       width:100%;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       border:1px solid rgba(148,163,184,.12);
       color:var(--text);border-radius:var(--radius-sm);padding:9px 13px;
       font-size:.875em;font-family:inherit;transition:border-color .2s,box-shadow .2s,background .2s;outline:none;
@@ -2111,11 +2110,11 @@ INDEX_HTML = r"""<!doctype html>
     input:focus,textarea:focus,select:focus{
       border-color:rgba(212,175,55,.6);
       box-shadow:0 0 0 3px rgba(212,175,55,.12),0 0 16px rgba(212,175,55,.1);
-      background:rgba(15,25,55,.9);
+      background:rgba(10,10,22,0.95);
     }
     input:hover:not(:focus),select:hover:not(:focus){border-color:rgba(212,175,55,.3)}
     textarea{resize:vertical;min-height:80px}
-    select option{background:#0d1b33;color:var(--text)}
+    select option{background:#08080d;color:var(--text)}
 
     /* ── Toggle (enhanced) ── */
     .toggle{position:relative;display:inline-block;width:44px;height:25px;flex-shrink:0}
@@ -2143,7 +2142,7 @@ INDEX_HTML = r"""<!doctype html>
       font-family:'JetBrains Mono','Fira Code','Consolas',monospace;
       backdrop-filter:blur(4px);
     }
-    code{background:rgba(99,102,241,.14);color:var(--primary-light);
+    code{background:rgba(212,175,55,.12);color:var(--primary-light);
       padding:1px 7px;border-radius:5px;font-size:.875em;font-family:monospace}
 
     /* ── Chat ── */
@@ -2258,17 +2257,17 @@ INDEX_HTML = r"""<!doctype html>
     .office-plant{position:absolute;bottom:104px;width:22px;height:36px;background:#143027;border-radius:6px 6px 3px 3px;border:1px solid rgba(65,217,147,.3)}
     .office-plant::before{content:'';position:absolute;left:-5px;top:-22px;width:32px;height:24px;border-radius:50%;background:radial-gradient(circle,#3fdc94,#1f7f56)}
     .office-desk{position:absolute;bottom:120px;width:175px;height:15px;
-      background:linear-gradient(135deg,#1e3a52,#243d5e);border-radius:9px;
+      background:linear-gradient(135deg,#1a1208,#2a1e08);border-radius:9px;
       box-shadow:0 4px 12px rgba(0,0,0,.4)}
     .office-desk::after{content:'';position:absolute;left:12px;top:-18px;width:36px;height:18px;
-      border-radius:5px 5px 3px 3px;background:linear-gradient(135deg,#2a5080,#193559)}
+      border-radius:5px 5px 3px 3px;background:linear-gradient(135deg,#2e1e06,#1e1004)}
     .office-agent{position:absolute;bottom:88px;width:42px;height:42px;border-radius:50%;
       display:flex;align-items:center;justify-content:center;
-      background:radial-gradient(circle at 30% 30%,#c4eeff,#818cf8);
-      border:2px solid rgba(255,255,255,.3);cursor:pointer;
+      background:radial-gradient(circle at 30% 30%,#ffe8a0,#D4AF37);
+      border:2px solid rgba(212,175,55,.4);cursor:pointer;
       animation:officeWalk linear infinite;
       will-change:transform;
-      box-shadow:0 0 20px rgba(129,140,248,.5),0 4px 12px rgba(0,0,0,.4)}
+      box-shadow:0 0 20px rgba(212,175,55,.4),0 4px 12px rgba(0,0,0,.4)}
     .office-agent.warning{box-shadow:0 0 24px rgba(244,63,94,.7);border-color:rgba(244,63,94,.9)}
     .office-agent:hover{transform:scale(1.15)!important;z-index:10}
     .office-agent .agent-emoji{font-size:18px}
@@ -2277,8 +2276,8 @@ INDEX_HTML = r"""<!doctype html>
       font-size:.62em;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;
       background:rgba(4,8,20,.92);
       padding:2px 8px;border-radius:999px;
-      border:1px solid rgba(129,140,248,.3);
-      box-shadow:0 0 8px rgba(99,102,241,.2);
+      border:1px solid rgba(212,175,55,.25);
+      box-shadow:0 0 8px rgba(212,175,55,.15);
     }
     @keyframes officeWalk{
       0%{translate:0}25%{translate:32px 0}75%{translate:-16px 0}100%{translate:0}
@@ -2287,9 +2286,9 @@ INDEX_HTML = r"""<!doctype html>
     .office-modal.open{display:flex;animation:fadeIn .2s ease}
     .office-modal-card{
       width:min(540px,92vw);
-      background:rgba(12,20,40,.96);
-      border:1px solid rgba(129,140,248,.2);border-radius:18px;padding:22px;
-      box-shadow:0 24px 64px rgba(0,0,0,.6),0 0 0 1px rgba(129,140,248,.08);
+      background:rgba(10,10,18,0.97);
+      border:1px solid rgba(212,175,55,.2);border-radius:18px;padding:22px;
+      box-shadow:0 24px 64px rgba(0,0,0,.6),0 0 0 1px rgba(212,175,55,.08);
       backdrop-filter:blur(20px);
     }
     #office-modal-action{overflow-wrap:anywhere;word-break:break-word}
@@ -2300,7 +2299,7 @@ INDEX_HTML = r"""<!doctype html>
     .improv-row{
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:16px;margin-bottom:10px;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       transition:border-color .25s,transform .2s,box-shadow .25s;
       backdrop-filter:blur(8px);
     }
@@ -2312,7 +2311,7 @@ INDEX_HTML = r"""<!doctype html>
     .sched-row{
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:13px 16px;margin-bottom:10px;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       display:flex;align-items:flex-start;gap:12px;
       transition:border-color .25s,box-shadow .25s;
       backdrop-filter:blur(6px);
@@ -2327,7 +2326,7 @@ INDEX_HTML = r"""<!doctype html>
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:13px;margin-bottom:8px;cursor:pointer;
       transition:all .22s;
-      background:rgba(15,25,48,.7);
+      background:rgba(10,10,18,0.85);
       backdrop-filter:blur(6px);
     }
     .skill-card:hover{border-color:rgba(212,175,55,.4);background:rgba(212,175,55,.06);
@@ -2343,13 +2342,13 @@ INDEX_HTML = r"""<!doctype html>
       cursor:pointer;border:1px solid var(--border);color:var(--text-secondary);
       margin:2px;transition:all .2s;font-weight:500}
     .cat-pill:hover{border-color:var(--primary);color:var(--primary)}
-    .cat-pill.active{background:var(--primary);color:#fff;border-color:var(--primary);
-      box-shadow:0 2px 10px rgba(99,102,241,.35);}
+    .cat-pill.active{background:var(--primary);color:#080808;border-color:var(--primary);
+      box-shadow:0 2px 10px rgba(212,175,55,.35);}
     .skill-grid{max-height:500px;overflow-y:auto;padding-right:4px}
     .agent-card{
       border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:15px;margin-bottom:8px;
-      background:rgba(15,25,48,.7);transition:all .22s;
+      background:rgba(10,10,18,0.85);transition:all .22s;
       backdrop-filter:blur(6px);
     }
     .agent-card:hover{border-color:rgba(212,175,55,.35);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.3),0 0 0 1px rgba(212,175,55,.1)}
@@ -2372,7 +2371,7 @@ INDEX_HTML = r"""<!doctype html>
     #toast.show{opacity:1;transform:translateY(0) scale(1)}
     #toast.success{background:rgba(16,67,30,.9);border:1px solid rgba(52,211,153,.25);border-left:3px solid #34d399}
     #toast.error{background:rgba(67,10,20,.9);border:1px solid rgba(244,63,94,.25);border-left:3px solid #f43f5e}
-    #toast.info{background:rgba(20,25,60,.95);border:1px solid rgba(129,140,248,.25);border-left:3px solid #818cf8}
+    #toast.info{background:rgba(10,10,22,.95);border:1px solid rgba(212,175,55,.25);border-left:3px solid var(--gold)}
 
     /* ── Empty states ── */
     .empty{text-align:center;padding:40px 16px;color:var(--text-muted)}
@@ -2391,10 +2390,10 @@ INDEX_HTML = r"""<!doctype html>
     /* ── Cmd reference ── */
     .cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:8px}
     .cmd-item{
-      background:rgba(15,25,48,.7);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
+      background:rgba(10,10,18,0.85);border:1px solid rgba(148,163,184,.1);border-radius:var(--radius);
       padding:11px 14px;transition:all .2s;cursor:pointer;backdrop-filter:blur(6px);
     }
-    .cmd-item:hover{border-color:rgba(129,140,248,.3);background:rgba(99,102,241,.08);transform:translateY(-1px)}
+    .cmd-item:hover{border-color:rgba(212,175,55,.3);background:rgba(212,175,55,.06);transform:translateY(-1px)}
     .cmd-item code{display:block;margin-bottom:4px;font-size:.8em;color:var(--primary-light)}
     .cmd-item span{font-size:.77em;color:var(--text-muted)}
 
@@ -2404,7 +2403,7 @@ INDEX_HTML = r"""<!doctype html>
     .badge.running,.badge.approved{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(52,211,153,.2)}
     .badge.stopped,.badge.rejected{background:rgba(244,63,94,.12);color:#fb7185;border:1px solid rgba(244,63,94,.2)}
     .badge.pending{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.2)}
-    .badge.enabled{background:rgba(129,140,248,.12);color:var(--primary-light);border:1px solid rgba(129,140,248,.2)}
+    .badge.enabled{background:rgba(212,175,55,.12);color:var(--primary-light);border:1px solid rgba(212,175,55,.2)}
     .badge.disabled{background:rgba(100,116,139,.08);color:var(--text-muted);border:1px solid rgba(100,116,139,.15)}
 
     /* ── Dots ── */
@@ -2440,20 +2439,20 @@ INDEX_HTML = r"""<!doctype html>
     .office-floor{
       position:absolute;left:0;right:0;bottom:0;height:46%;
       background:linear-gradient(180deg,#0e1928,#08111c);
-      border-top:1px solid rgba(129,140,248,.15);
+      border-top:1px solid rgba(212,175,55,.12);
     }
     .office-floor::before{
       content:'';position:absolute;top:0;left:0;right:0;height:1px;
-      background:linear-gradient(90deg,transparent,rgba(129,140,248,.4),transparent);
+      background:linear-gradient(90deg,transparent,rgba(212,175,55,.35),transparent);
     }
     .office-window{
       position:absolute;top:20px;width:150px;height:88px;border-radius:10px;
-      border:1px solid rgba(129,140,248,.3);
-      background:linear-gradient(180deg,rgba(99,102,241,.25),rgba(79,70,229,.06));
-      box-shadow:0 0 28px rgba(99,102,241,.2),inset 0 1px 0 rgba(255,255,255,.12);
+      border:1px solid rgba(212,175,55,.2);
+      background:linear-gradient(180deg,rgba(212,175,55,.1),rgba(212,175,55,.03));
+      box-shadow:0 0 20px rgba(212,175,55,.08),inset 0 1px 0 rgba(255,255,255,.08);
     }
-    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(129,140,248,.3)}
-    .office-window::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(129,140,248,.2)}
+    .office-window::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(212,175,55,.2)}
+    .office-window::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(212,175,55,.15)}
     .office-plant{position:absolute;bottom:106px;width:18px;height:32px;background:linear-gradient(180deg,#0f2e1c,#0b2016);border-radius:5px 5px 2px 2px;border:1px solid rgba(52,211,153,.2)}
     .office-plant::before{content:'';position:absolute;left:-8px;top:-28px;width:34px;height:30px;border-radius:50% 50% 0 50%;background:radial-gradient(circle at 40% 40%,#34d399,#059669);box-shadow:0 0 14px rgba(52,211,153,.3)}
     .health-check-item{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)}
@@ -2505,7 +2504,7 @@ INDEX_HTML = r"""<!doctype html>
     .agent-pick-item{
       display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
       border:1px solid rgba(148,163,184,.1);cursor:pointer;
-      background:rgba(15,25,48,.6);transition:all .2s;font-size:.82em;
+      background:rgba(10,10,18,0.75);transition:all .2s;font-size:.82em;
     }
     .agent-pick-item:hover{border-color:rgba(212,175,55,.3);background:rgba(212,175,55,.06)}
     .agent-pick-item.selected{border-color:rgba(212,175,55,.5);background:rgba(212,175,55,.1);box-shadow:0 0 12px rgba(212,175,55,.12)}
@@ -3231,9 +3230,11 @@ INDEX_HTML = r"""<!doctype html>
   <button class="nav-scroll-btn right hidden" id="nav-scroll-right" style="display:none"></button>
 </div>
 <!-- Sub-navigation rows (one per group) -->
-<div class="sub-nav" id="subnav-overview"></div>
+<div class="sub-nav active" id="subnav-overview">
+  <button class="active" onclick="switchTab('dashboard',this)">◈ Overview</button>
+</div>
 <div class="sub-nav" id="subnav-intel">
-  <button class="active" onclick="switchTab('chat',this)" id="nav-btn-chat">💬 Chat</button>
+  <button onclick="switchTab('chat',this)" id="nav-btn-chat">💬 Chat</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
 </div>
 <div class="sub-nav" id="subnav-operations">
@@ -3586,9 +3587,9 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <!-- CEO Daily Briefing Widget -->
-  <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+  <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.06),var(--surface2))">
     <div class="card-header">
-      <div class="card-title"><span style="color:#818cf8">📰</span> CEO Daily Briefing</div>
+      <div class="card-title"><span style="color:var(--gold)">📰</span> CEO Daily Briefing</div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="loadCEOBriefing()">↻ Refresh</button>
         <button class="btn btn-ghost btn-sm" onclick="forceRegenerateBriefing()">⚡ Regenerate</button>
@@ -3798,10 +3799,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Scheduler ── -->
 <div id="tab-scheduler" class="tab-content">
-  <div class="page-header" style="border-left-color:#c084fc">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📅</div>
     <div><div class="page-header-title">Task Scheduler</div><div class="page-header-desc">Schedule recurring and one-time tasks for your agents. View your agenda, create schedules, and manage triggers.</div></div>
-    <span class="page-header-badge" style="color:#c084fc">Automation</span>
+    <span class="page-header-badge" style="color:var(--gold)">Automation</span>
   </div>
   <div style="display:flex;gap:16px;height:calc(100vh - 175px)">
     <!-- Left: Agenda calendar -->
@@ -3908,10 +3909,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Workers ── -->
 <div id="tab-workers" class="tab-content" style="width:100%;box-sizing:border-box">
-  <div class="page-header" style="border-left-color:#6ee7b7">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">👷</div>
     <div><div class="page-header-title">Agent Teams</div><div class="page-header-desc">Bundle agents together with recurring tasks. Agent teams run on a schedule and always perform their assigned role automatically.</div></div>
-    <span class="page-header-badge" style="color:#6ee7b7">Workforce</span>
+    <span class="page-header-badge" style="color:var(--gold)">Workforce</span>
   </div>
 
   <!-- ── Quick Presets ── -->
@@ -4068,10 +4069,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Improvements ── -->
 <div id="tab-improvements" class="tab-content">
-  <div class="page-header" style="border-left-color:#facc15">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💡</div>
     <div><div class="page-header-title">AI Improvement Proposals</div><div class="page-header-desc">AI-generated improvement proposals for your system. Review, approve, or escalate to execution. No changes applied automatically.</div></div>
-    <span class="page-header-badge" style="color:#facc15">AI Insights</span>
+    <span class="page-header-badge" style="color:var(--gold)">AI Insights</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -4108,10 +4109,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Budget ── -->
 <div id="tab-budget" class="tab-content">
-  <div class="page-header" style="border-left-color:#34d399">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💰</div>
     <div><div class="page-header-title">Budget & Cost Management</div><div class="page-header-desc">Track monthly AI compute spend per agent. Set hard caps, monitor warnings, and record usage manually.</div></div>
-    <span class="page-header-badge" style="color:#34d399">Cost Control</span>
+    <span class="page-header-badge" style="color:var(--gold)">Cost Control</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon green">💰</div><div class="stat-body"><div class="val" id="bud-total-spent">–</div><div class="lbl">Total Spent (month)</div></div></div>
@@ -4154,10 +4155,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Org Chart ── -->
 <div id="tab-org" class="tab-content">
-  <div class="page-header" style="border-left-color:#818cf8">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🏢</div>
     <div><div class="page-header-title">Org Chart & Agent Hierarchy</div><div class="page-header-desc">Visual hierarchy of roles and reporting lines. Assign agents to roles for structured delegation and task routing.</div></div>
-    <span class="page-header-badge" style="color:#818cf8">Agent Structure</span>
+    <span class="page-header-badge" style="color:var(--gold)">Agent Structure</span>
   </div>
   <div class="grid2">
     <div class="card">
@@ -4204,10 +4205,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Goals ── -->
 <div id="tab-goals" class="tab-content">
-  <div class="page-header" style="border-left-color:#fb923c">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎯</div>
     <div><div class="page-header-title">Goals & Company Mission</div><div class="page-header-desc">Set OKR-style goals, define the company mission, and track strategic objectives across your AI team.</div></div>
-    <span class="page-header-badge" style="color:#fb923c">Strategic Layer</span>
+    <span class="page-header-badge" style="color:var(--gold)">Strategic Layer</span>
   </div>
   <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,rgba(234,88,12,.08),rgba(251,146,60,.04));border-color:rgba(251,146,60,.3)">
     <div class="card-header">
@@ -4245,10 +4246,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Tickets ── -->
 <div id="tab-tickets" class="tab-content">
-  <div class="page-header" style="border-left-color:#38bdf8">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎫</div>
     <div><div class="page-header-title">Tickets & Task Tracker</div><div class="page-header-desc">Track system tickets, feature requests, and AI tasks. Filter by status, assign agents, and monitor progress.</div></div>
-    <span class="page-header-badge" style="color:#38bdf8">Issue Tracker</span>
+    <span class="page-header-badge" style="color:var(--gold)">Issue Tracker</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon blue">🎫</div><div class="stat-body"><div class="val" id="tkt-total">–</div><div class="lbl">Total Tickets</div></div></div>
@@ -4315,10 +4316,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Boardroom (Governance) ── -->
 <div id="tab-boardroom" class="tab-content">
-  <div class="page-header" style="border-left-color:#f87171">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🛡️</div>
     <div><div class="page-header-title">Boardroom & Governance</div><div class="page-header-desc">High-level approval workflows, governance decisions, and strategic oversight. Human-in-the-loop for critical actions.</div></div>
-    <span class="page-header-badge" style="color:#f87171">Governance</span>
+    <span class="page-header-badge" style="color:var(--gold)">Governance</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon yellow">⏳</div><div class="stat-body"><div class="val" id="gov-pending">–</div><div class="lbl">Pending Approvals</div></div></div>
@@ -4380,10 +4381,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Companies ── -->
 <div id="tab-companies" class="tab-content">
-  <div class="page-header" style="border-left-color:#86efac">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🏗️</div>
     <div><div class="page-header-title">Multi-Company Manager</div><div class="page-header-desc">One deployment, many companies. Complete data isolation with a single control plane for your entire portfolio.</div></div>
-    <span class="page-header-badge" style="color:#86efac">Portfolio CRM</span>
+    <span class="page-header-badge" style="color:var(--gold)">Portfolio CRM</span>
   </div>
   <div class="card" style="margin-bottom:16px">
     <div class="card-header">
@@ -4423,10 +4424,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Outputs (Artifacts + Sessions) ── -->
 <div id="tab-artifacts" class="tab-content">
-  <div class="page-header" style="border-left-color:#fde68a">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📦</div>
     <div><div class="page-header-title">Artifacts & Generated Content</div><div class="page-header-desc">Browse and manage all files, documents, and code generated by your AI agents. Filter, preview, and deploy artifacts.</div></div>
-    <span class="page-header-badge" style="color:#fde68a">Output Library</span>
+    <span class="page-header-badge" style="color:var(--gold)">Output Library</span>
   </div>
 
   <!-- ── Sub-tab navigation (Artifacts / Sessions) ── -->
@@ -4540,10 +4541,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Finance / Invoicing ── -->
 <div id="tab-invoicing" class="tab-content">
-  <div class="page-header" style="border-left-color:#10b981">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🧾</div>
     <div><div class="page-header-title">Finance & Invoicing</div><div class="page-header-desc">Create invoices, track expenses, and view your live P&amp;L report.</div></div>
-    <span class="page-header-badge" style="color:#10b981">Finance</span>
+    <span class="page-header-badge" style="color:var(--gold)">Finance</span>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:16px">
     <button class="fi-tab-btn btn btn-primary btn-sm active" onclick="switchFinanceTab('invoices',this)">🧾 Invoices</button>
@@ -4614,10 +4615,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Analytics ── -->
 <div id="tab-analytics-bi" class="tab-content">
-  <div class="page-header" style="border-left-color:#6366f1">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📊</div>
     <div><div class="page-header-title">Analytics &amp; Insights</div><div class="page-header-desc">Business intelligence dashboard — unified KPIs, AI recommendations, and trends across all modules.</div></div>
-    <span class="page-header-badge" style="color:#6366f1">Intelligence</span>
+    <span class="page-header-badge" style="color:var(--gold)">Intelligence</span>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:16px">
     <button class="btn btn-primary" onclick="loadAnalyticsOverview()">↻ Refresh Overview</button>
@@ -4643,10 +4644,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Workflow Builder ── -->
 <div id="tab-workflows" class="tab-content">
-  <div class="page-header" style="border-left-color:#f97316">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">⚙️</div>
     <div><div class="page-header-title">Workflow Builder</div><div class="page-header-desc">No-code automation editor — create trigger → condition → action workflows that run automatically.</div></div>
-    <span class="page-header-badge" style="color:#f97316">Automation</span>
+    <span class="page-header-badge" style="color:var(--gold)">Automation</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card">
@@ -4684,10 +4685,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Team Management ── -->
 <div id="tab-team" class="tab-content">
-  <div class="page-header" style="border-left-color:#0ea5e9">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">👥</div>
     <div><div class="page-header-title">Team Management</div><div class="page-header-desc">Invite team members, assign roles, and manage access permissions across your AI Employee workspace.</div></div>
-    <span class="page-header-badge" style="color:#0ea5e9">Multi-User</span>
+    <span class="page-header-badge" style="color:var(--gold)">Multi-User</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card">
@@ -4716,10 +4717,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Customer Support ── -->
 <div id="tab-support-desk" class="tab-content">
-  <div class="page-header" style="border-left-color:#14b8a6">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎧</div>
     <div><div class="page-header-title">Customer Support</div><div class="page-header-desc">24/7 helpdesk with smart ticket routing, AI reply suggestions, and a searchable knowledge base.</div></div>
-    <span class="page-header-badge" style="color:#14b8a6">Helpdesk</span>
+    <span class="page-header-badge" style="color:var(--gold)">Helpdesk</span>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:16px">
     <button class="sup-tab-btn btn btn-primary btn-sm active" onclick="switchSupportTab('tickets',this)">🎫 Tickets</button>
@@ -4796,10 +4797,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Website Builder ── -->
 <div id="tab-website-builder" class="tab-content">
-  <div class="page-header" style="border-left-color:#3b82f6">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🌐</div>
     <div><div class="page-header-title">Website Builder</div><div class="page-header-desc">Generate complete landing page HTML from a business description using AI. Edit and export instantly.</div></div>
-    <span class="page-header-badge" style="color:#3b82f6">AI Builder</span>
+    <span class="page-header-badge" style="color:var(--gold)">AI Builder</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card">
@@ -4827,10 +4828,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Personal Brand ── -->
 <div id="tab-brand" class="tab-content">
-  <div class="page-header" style="border-left-color:#a855f7">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">✨</div>
     <div><div class="page-header-title">Personal Brand Agent</div><div class="page-header-desc">Build your thought leadership — AI content generation, topic ideas, and brand voice consistency.</div></div>
-    <span class="page-header-badge" style="color:#a855f7">Brand</span>
+    <span class="page-header-badge" style="color:var(--gold)">Brand</span>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:16px">
     <button class="br-tab-btn btn btn-primary btn-sm active" onclick="switchBrandTab('generate',this)">✍️ Generate</button>
@@ -4894,10 +4895,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Health Check ── -->
 <div id="tab-health" class="tab-content">
-  <div class="page-header" style="border-left-color:#f43f5e">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">❤️</div>
     <div><div class="page-header-title">Business Health Check</div><div class="page-header-desc">One-click audit of your entire business — graded A to D with issues identified and fixes recommended.</div></div>
-    <span class="page-header-badge" style="color:#f43f5e">Audit</span>
+    <span class="page-header-badge" style="color:var(--gold)">Audit</span>
   </div>
   <div style="display:flex;gap:10px;margin-bottom:16px">
     <button class="btn btn-primary" onclick="runHealthCheck()">❤️ Run Health Check</button>
@@ -4919,10 +4920,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Export & Backup ── -->
 <div id="tab-export" class="tab-content">
-  <div class="page-header" style="border-left-color:#64748b">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💾</div>
     <div><div class="page-header-title">Export &amp; Backup</div><div class="page-header-desc">Export any module as JSON or CSV, create full ZIP backups of all your AI Employee data.</div></div>
-    <span class="page-header-badge" style="color:#64748b">Data</span>
+    <span class="page-header-badge" style="color:var(--gold)">Data</span>
   </div>
   <div style="display:flex;gap:10px;margin-bottom:16px">
     <button class="btn btn-primary" onclick="createBackup()">🗜️ Create Full Backup</button>
@@ -4945,10 +4946,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Skills ── -->
 <div id="tab-skills" class="tab-content">
-  <div class="page-header" style="border-left-color:#22d3ee">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🛠️</div>
     <div><div class="page-header-title">Skills Library</div><div class="page-header-desc">Manage capabilities your agents can learn and use. Train skills, assign them to agents, and build new ones.</div></div>
-    <span class="page-header-badge" style="color:#22d3ee">Agent Capabilities</span>
+    <span class="page-header-badge" style="color:var(--gold)">Agent Capabilities</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div class="card" style="min-height:600px;display:flex;flex-direction:column">
@@ -5011,10 +5012,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Tasks ── -->
 <div id="tab-tasks" class="tab-content">
-  <div class="page-header" style="border-left-color:#f472b6">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🚀</div>
     <div><div class="page-header-title">Task Runner</div><div class="page-header-desc">Build and launch tasks for your AI workforce. Describe any goal — agents are auto-selected, you control the final launch.</div></div>
-    <span class="page-header-badge" style="color:#f472b6">Task Builder</span>
+    <span class="page-header-badge" style="color:var(--gold)">Task Builder</span>
   </div>
 
   <!-- Task Builder -->
@@ -5117,10 +5118,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Swarm ── -->
 <div id="tab-swarm" class="tab-content">
-  <div class="page-header" style="border-left-color:#fbbf24">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🐝</div>
     <div><div class="page-header-title">Agent Swarm</div><div class="page-header-desc">All AI agents at a glance — capabilities, status, and current workload. Filter by category or search by skill.</div></div>
-    <span class="page-header-badge" style="color:#fbbf24" id="swarm-header-badge">– Agents</span>
+    <span class="page-header-badge" style="color:var(--gold)" id="swarm-header-badge">– Agents</span>
   </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap">
     <!-- Left: agent grid -->
@@ -5185,8 +5186,8 @@ INDEX_HTML = r"""<!doctype html>
             <div style="font-size:1.6em;font-weight:800;color:var(--success)" id="swarm-stat-total">–</div>
             <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Total Agents</div>
           </div>
-          <div style="text-align:center;padding:10px;background:rgba(99,102,241,.06);border-radius:8px;border:1px solid rgba(99,102,241,.12)">
-            <div style="font-size:1.6em;font-weight:800;color:#818cf8" id="swarm-stat-tasks">–</div>
+          <div style="text-align:center;padding:10px;background:rgba(212,175,55,.06);border-radius:8px;border:1px solid rgba(212,175,55,.15)">
+            <div style="font-size:1.6em;font-weight:800;color:var(--gold)" id="swarm-stat-tasks">–</div>
             <div style="font-size:.72em;color:var(--text-muted);margin-top:2px">Tasks Run</div>
           </div>
           <div style="text-align:center;padding:10px;background:rgba(239,68,68,.06);border-radius:8px;border:1px solid rgba(239,68,68,.12)">
@@ -5217,13 +5218,13 @@ INDEX_HTML = r"""<!doctype html>
 .swarm-msg{animation:swarmMsg .3s ease forwards}
 .swarm-msg-bubble{padding:8px 12px;border-radius:12px;font-size:.82em;max-width:80%;line-height:1.4}
 .swarm-msg-left .swarm-msg-bubble{background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.2);border-bottom-left-radius:3px;color:var(--text)}
-.swarm-msg-right .swarm-msg-bubble{background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-bottom-right-radius:3px;color:var(--text);margin-left:auto}
+.swarm-msg-right .swarm-msg-bubble{background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.2);border-bottom-right-radius:3px;color:var(--text);margin-left:auto}
 </style>
 <div id="tab-commands" class="tab-content">
-  <div class="page-header" style="border-left-color:#d4af37">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📜</div>
     <div><div class="page-header-title">Command Reference</div><div class="page-header-desc">Full list of WhatsApp and bot commands available across your AI system. Search, filter by category, and copy commands directly.</div></div>
-    <span class="page-header-badge" style="color:#d4af37">Commands</span>
+    <span class="page-header-badge" style="color:var(--gold)">Commands</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -5241,10 +5242,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── ROI Metrics ── -->
 <div id="tab-metrics" class="tab-content">
-  <div class="page-header" style="border-left-color:#4ade80">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📈</div>
     <div><div class="page-header-title">ROI & Performance Analytics</div><div class="page-header-desc">Real usage data tracked automatically from all agent activity. Measure tasks, hours saved, cost efficiency, and business impact.</div></div>
-    <span class="page-header-badge" style="color:#4ade80">Analytics</span>
+    <span class="page-header-badge" style="color:var(--gold)">Analytics</span>
   </div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
     <div>
@@ -5387,10 +5388,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Templates ── -->
 <div id="tab-templates" class="tab-content">
-  <div class="page-header" style="border-left-color:#60a5fa">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📋</div>
     <div><div class="page-header-title">Business Templates</div><div class="page-header-desc">Pre-built plug-and-play templates for common business use-cases. One click to deploy a full AI team.</div></div>
-    <span class="page-header-badge" style="color:#60a5fa">Templates</span>
+    <span class="page-header-badge" style="color:var(--gold)">Templates</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -5424,10 +5425,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Guardrails ── -->
 <div id="tab-guardrails" class="tab-content">
-  <div class="page-header" style="border-left-color:#f97316">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🔒</div>
     <div><div class="page-header-title">Guardrails & Safety Controls</div><div class="page-header-desc">Define rules that keep your AI agents operating safely. High-risk actions require manual approval before execution.</div></div>
-    <span class="page-header-badge" style="color:#f97316">Security Layer</span>
+    <span class="page-header-badge" style="color:var(--gold)">Security Layer</span>
   </div>
   <!-- Pending approvals notification banner -->
   <div id="guardrails-notification-banner" style="display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(239,68,68,.1));border:1px solid rgba(245,158,11,.5);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.88em;color:var(--warning);font-weight:600;animation:blink 1.5s infinite"></div>
@@ -5603,10 +5604,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Memory ── -->
 <div id="tab-memory" class="tab-content">
-  <div class="page-header" style="border-left-color:#e879f9">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🧠</div>
     <div><div class="page-header-title">Memory & Knowledge Base</div><div class="page-header-desc">Client contacts, conversation history, and contextual knowledge stored across all AI sessions.</div></div>
-    <span class="page-header-badge" style="color:#e879f9">Persistent Memory</span>
+    <span class="page-header-badge" style="color:var(--gold)">Persistent Memory</span>
   </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:start">
     <!-- Left: Client Memory with search -->
@@ -5685,10 +5686,10 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- ── Integrations ── -->
 <div id="tab-integrations" class="tab-content">
-  <div class="page-header" style="border-left-color:#a78bfa">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🔌</div>
     <div><div class="page-header-title">Integrations & Connections</div><div class="page-header-desc">Connect your tools and services. The AI uses these integrations to take real actions across your business.</div></div>
-    <span class="page-header-badge" style="color:#a78bfa">Connected Services</span>
+    <span class="page-header-badge" style="color:var(--gold)">Connected Services</span>
   </div>
   <div class="grid-stat" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-icon" style="background:linear-gradient(135deg,rgba(167,139,250,.2),rgba(167,139,250,.05));color:#a78bfa">🔌</div><div class="stat-body"><div class="val" id="intg-stat-total">–</div><div class="lbl">Total Services</div></div></div>
@@ -5814,10 +5815,10 @@ function switchTab(tab, btn) {
 </script>
 <!-- ── History ── -->
 <div id="tab-history" class="tab-content">
-  <div class="page-header" style="border-left-color:#7dd3fc">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🕐</div>
     <div><div class="page-header-title">Activity History</div><div class="page-header-desc">A persistent, filterable timeline of all agent activities, security checks, and system events from all time.</div></div>
-    <span class="page-header-badge" style="color:#7dd3fc">Full Audit Log</span>
+    <span class="page-header-badge" style="color:var(--gold)">Full Audit Log</span>
   </div>
   <div class="card">
     <div class="card-header">
@@ -5871,10 +5872,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Options ── -->
 <div id="tab-options" class="tab-content">
-  <div class="page-header" style="border-left-color:#94a3b8">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">⚙️</div>
     <div><div class="page-header-title">Settings & Configuration</div><div class="page-header-desc">API keys, agent behavior, security settings, and system preferences. Changes take effect immediately.</div></div>
-    <span class="page-header-badge" style="color:#94a3b8">System Config</span>
+    <span class="page-header-badge" style="color:var(--gold)">System Config</span>
   </div>
   <div class="grid2">
 
@@ -6364,10 +6365,10 @@ function switchTab(tab, btn) {
 
 <!-- ── CRM ── -->
 <div id="tab-crm" class="tab-content">
-  <div class="page-header" style="border-left-color:#f59e0b">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🎯</div>
     <div><div class="page-header-title">Lead CRM</div><div class="page-header-desc">Manage your sales pipeline from first contact to closed deal. Score leads, track stages, and schedule follow-ups.</div></div>
-    <span class="page-header-badge" style="color:#f59e0b">Sales Pipeline</span>
+    <span class="page-header-badge" style="color:var(--gold)">Sales Pipeline</span>
   </div>
   <div class="grid-stat" id="crm-pipeline-stats">
     <div class="stat-card"><div class="stat-icon yellow">🆕</div><div class="stat-body"><div class="val" id="crm-stat-new">–</div><div class="lbl">New Leads</div></div></div>
@@ -6413,10 +6414,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Email Marketing ── -->
 <div id="tab-email-mkt" class="tab-content">
-  <div class="page-header" style="border-left-color:#06b6d4">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📧</div>
     <div><div class="page-header-title">Email Marketing</div><div class="page-header-desc">Create and manage email campaigns, multi-step sequences, and track performance metrics.</div></div>
-    <span class="page-header-badge" style="color:#06b6d4">Campaigns</span>
+    <span class="page-header-badge" style="color:var(--gold)">Campaigns</span>
   </div>
   <div class="grid-stat">
     <div class="stat-card"><div class="stat-icon blue">📧</div><div class="stat-body"><div class="val" id="em-stat-total">–</div><div class="lbl">Total Campaigns</div></div></div>
@@ -6481,10 +6482,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Meetings ── -->
 <div id="tab-meetings" class="tab-content">
-  <div class="page-header" style="border-left-color:#a78bfa">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🗓️</div>
     <div><div class="page-header-title">Meeting Intelligence</div><div class="page-header-desc">Record meetings, AI-summarize transcripts, extract action items, and generate follow-up emails automatically.</div></div>
-    <span class="page-header-badge" style="color:#a78bfa">Meetings</span>
+    <span class="page-header-badge" style="color:var(--gold)">Meetings</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -6530,10 +6531,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Social Media Scheduler ── -->
 <div id="tab-social" class="tab-content">
-  <div class="page-header" style="border-left-color:#ec4899">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📱</div>
     <div><div class="page-header-title">Social Media Scheduler</div><div class="page-header-desc">Schedule posts across all platforms, generate AI content, and track your publishing activity.</div></div>
-    <span class="page-header-badge" style="color:#ec4899">Social</span>
+    <span class="page-header-badge" style="color:var(--gold)">Social</span>
   </div>
   <div class="grid-stat">
     <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="soc-stat-scheduled">–</div><div class="lbl">Scheduled</div></div></div>
@@ -6602,15 +6603,15 @@ function switchTab(tab, btn) {
 
 <!-- ── CEO Briefing ── -->
 <div id="tab-briefing" class="tab-content">
-  <div class="page-header" style="border-left-color:#6366f1">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">📰</div>
     <div><div class="page-header-title">CEO Daily Briefing</div><div class="page-header-desc">AI-generated executive briefings with key metrics, pipeline status, revenue, and action items for the day.</div></div>
-    <span class="page-header-badge" style="color:#6366f1">Executive</span>
+    <span class="page-header-badge" style="color:var(--gold)">Executive</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
       <!-- Today's briefing -->
-      <div class="card" style="border:1px solid rgba(99,102,241,.3);background:linear-gradient(135deg,rgba(99,102,241,.05),var(--surface2))">
+      <div class="card" style="border:1px solid rgba(212,175,55,.25);background:linear-gradient(135deg,rgba(212,175,55,.06),var(--surface2))">
         <div class="card-header">
           <div class="card-title"><span class="icon">📰</span> Today's Briefing</div>
           <div style="display:flex;gap:6px">
@@ -6636,10 +6637,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Financial Tools ── -->
 <div id="tab-financial" class="tab-content">
-  <div class="page-header" style="border-left-color:#10b981">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">💳</div>
     <div><div class="page-header-title">Financial Tools</div><div class="page-header-desc">Create and manage invoices, quotes, track expenses, and view your P&amp;L in one place.</div></div>
-    <span class="page-header-badge" style="color:#10b981">Finance</span>
+    <span class="page-header-badge" style="color:var(--gold)">Finance</span>
   </div>
   <!-- Sub-tab nav -->
   <div style="display:flex;gap:6px;margin-bottom:16px">
@@ -6751,10 +6752,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Competitors ── -->
 <div id="tab-competitors" class="tab-content">
-  <div class="page-header" style="border-left-color:#f43f5e">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🕵️</div>
     <div><div class="page-header-title">Competitor Watch</div><div class="page-header-desc">Track and analyze your competitive landscape. AI-powered SWOT analysis and competitive intelligence alerts.</div></div>
-    <span class="page-header-badge" style="color:#f43f5e">Intelligence</span>
+    <span class="page-header-badge" style="color:var(--gold)">Intelligence</span>
   </div>
   <div class="grid2" style="align-items:start">
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -6798,10 +6799,10 @@ function switchTab(tab, btn) {
 
 <!-- ── Content Calendar ── -->
 <div id="tab-content-calendar" class="tab-content">
-  <div class="page-header" style="border-left-color:#f97316">
+  <div class="page-header" style="border-left-color:var(--gold)">
     <div class="page-header-icon">🗃️</div>
     <div><div class="page-header-title">Content Calendar</div><div class="page-header-desc">Plan and track your content across all platforms. AI generates complete 30-day content calendars tailored to your niche.</div></div>
-    <span class="page-header-badge" style="color:#f97316">Content</span>
+    <span class="page-header-badge" style="color:var(--gold)">Content</span>
   </div>
   <div class="grid-stat">
     <div class="stat-card"><div class="stat-icon blue">📅</div><div class="stat-body"><div class="val" id="cc-stat-total">–</div><div class="lbl">Total Entries</div></div></div>
@@ -8290,7 +8291,7 @@ function renderImprovements() {
 
   const priorityColors = {critical:'#ef4444', high:'#f59e0b', medium:'#eab308', low:'#10b981'};
   const priorityIcons = {critical:'🔴', high:'🟠', medium:'🟡', low:'🟢'};
-  const statusColors = {pending:'rgba(245,158,11,.2)', in_progress:'rgba(99,102,241,.2)', approved:'rgba(16,185,129,.2)', completed:'rgba(34,197,94,.2)', rejected:'rgba(239,68,68,.12)'};
+  const statusColors = {pending:'rgba(245,158,11,.2)', in_progress:'rgba(212,175,55,.18)', approved:'rgba(16,185,129,.2)', completed:'rgba(34,197,94,.2)', rejected:'rgba(239,68,68,.12)'};
 
   el.innerHTML = items.map(imp => {
     const priority = imp.priority || 'medium';
@@ -9593,7 +9594,7 @@ function _renderRoiBreakdowns(events) {
             <span style="color:var(--text-muted)">${stats.count}×${stats.value>0?' · €'+stats.value:''}</span>
           </div>
           <div style="height:6px;background:rgba(212,175,55,.12);border-radius:3px;overflow:hidden">
-            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(99,102,241,.8),rgba(139,92,246,.8));border-radius:3px;transition:width .4s"></div>
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,rgba(212,175,55,.7),rgba(245,196,0,.9));border-radius:3px;transition:width .4s"></div>
           </div>
         </div>`;
       }).join('');
@@ -9662,8 +9663,8 @@ function renderTemplatesGrid() {
     el.innerHTML = '<div class="empty"><div class="icon">📋</div><p>No templates match your filter.</p></div>';
     return;
   }
-  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(99,102,241,.15)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)',Marketing:'rgba(168,85,247,.15)',Analytics:'rgba(74,222,128,.15)',Research:'rgba(56,189,248,.15)'};
-  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(99,102,241,.3)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)',Marketing:'rgba(168,85,247,.3)',Analytics:'rgba(74,222,128,.3)',Research:'rgba(56,189,248,.3)'};
+  const catColors = {Sales:'rgba(16,185,129,.15)',Support:'rgba(212,175,55,.12)',HR:'rgba(34,211,238,.15)',Content:'rgba(245,158,11,.15)','E-commerce':'rgba(239,68,68,.15)',Marketing:'rgba(168,85,247,.15)',Analytics:'rgba(74,222,128,.15)',Research:'rgba(56,189,248,.15)'};
+  const catBorderColors = {Sales:'rgba(16,185,129,.3)',Support:'rgba(212,175,55,.25)',HR:'rgba(34,211,238,.3)',Content:'rgba(245,158,11,.3)','E-commerce':'rgba(239,68,68,.3)',Marketing:'rgba(168,85,247,.3)',Analytics:'rgba(74,222,128,.3)',Research:'rgba(56,189,248,.3)'};
   el.innerHTML = templates.map(t => {
     const col = catColors[t.category] || 'rgba(212,175,55,.1)';
     const bdr = catBorderColors[t.category] || 'rgba(212,175,55,.2)';
@@ -10285,7 +10286,7 @@ async function runSecurityCheck() {
     ok:      'rgba(34,197,94,.15)',
     warning: 'rgba(245,158,11,.15)',
     error:   'rgba(239,68,68,.15)',
-    info:    'rgba(99,102,241,.15)',
+    info:    'rgba(212,175,55,.12)',
   };
   const warnColor = colorMap.warning;
 
@@ -13718,7 +13719,7 @@ async function loadPL() {
           <div style="color:var(--text-muted)">Expenses</div>
           <div style="color:var(--text-muted);font-size:.8em">${pl.expense_count||0} entries</div>
         </div>
-        <div style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:14px;text-align:center">
+        <div style="background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.2);border-radius:8px;padding:14px;text-align:center">
           <div style="font-size:1.8em;font-weight:800;color:${profitColor}">$${Number(pl.profit||0).toLocaleString()}</div>
           <div style="color:var(--text-muted)">Net Profit</div>
         </div>
