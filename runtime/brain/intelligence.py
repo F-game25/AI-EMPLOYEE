@@ -234,7 +234,9 @@ class UserProfile:
         _safe   = _safe_id(user_id)
         _candidate = (_dir / f"{_safe}.json").resolve()
         # Ensure the resolved path is still inside the profile directory
-        if not str(_candidate).startswith(str(_dir)):
+        try:
+            _candidate.relative_to(_dir)
+        except ValueError:
             raise ValueError(f"Unsafe user_id would escape profile dir: {user_id!r}")
         self._path = _candidate
         self._lock = threading.Lock()
