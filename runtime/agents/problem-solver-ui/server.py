@@ -19658,6 +19658,8 @@ def brain_learn(_auth: None = Depends(require_auth)):
     except Exception as exc:
         logger.error("brain learn error: %s", exc)
         return JSONResponse({"ok": False, "message": "Learn step failed — check server logs"})
+
+@app.post("/api/brain/save")
 def brain_save(_auth: None = Depends(require_auth)):
     """Save brain model to disk."""
     brain = _load_brain()
