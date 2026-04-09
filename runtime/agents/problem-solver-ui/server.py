@@ -6244,6 +6244,7 @@ function switchTab(tab, btn) {
         onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();afSendTask();}"></textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button onclick="afSendTask()" style="padding:10px 24px;background:linear-gradient(135deg,#92400e,#d97706,#f59e0b);border:none;border-radius:10px;color:#fff;font-weight:800;font-size:.9em;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 16px rgba(217,119,6,.3);letter-spacing:.03em" onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 24px rgba(217,119,6,.5)'" onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(217,119,6,.3)'">🔥 Send to Ascend Forge <kbd style="background:rgba(255,255,255,.15);padding:1px 5px;border-radius:4px;font-size:.75em">Ctrl+↵</kbd></button>
+        <button onclick="afAnalyzeOnly()" class="btn btn-ghost btn-sm" style="border-color:rgba(251,191,36,.45);color:#fbbf24;font-weight:700" title="Analyze the prompt and show a structured plan — without queuing any patches">🗺 Plan Only</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('optimize all AI prompts for higher revenue and better output quality')">💰 Optimize Prompts</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('scan system for improvements and automatically apply all low-risk patches')">🔍 Auto-Improve</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('analyze all agent modules and improve their performance and reliability')">🤖 Boost Agents</button>
@@ -6259,7 +6260,7 @@ function switchTab(tab, btn) {
         <div id="af-task-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#92400e,#d97706,#fbbf24);border-radius:100px;transition:width .4s ease;box-shadow:0 0 10px rgba(251,191,36,.4)"></div>
       </div>
       <div id="af-task-desc" style="margin-top:8px;font-size:.8em;color:var(--text-muted);font-style:italic"></div>
-      <div id="af-task-result" style="margin-top:8px;font-size:.84em;color:#4ade80;display:none"></div>
+      <div id="af-task-result" style="margin-top:8px;font-size:.84em;color:#4ade80;display:none;white-space:pre-wrap;line-height:1.65"></div>
     </div>
   </div>
 
@@ -11109,6 +11110,49 @@ let _afTaskTimer = null;
 function afFillTask(text) {
   const el = document.getElementById('af-task-input');
   if (el) { el.value = text; el.focus(); }
+}
+
+async function afAnalyzeOnly() {
+  const input = document.getElementById('af-task-input');
+  const task = (input?.value || '').trim();
+  if (!task) { toast('Enter a prompt to analyze', 'error'); return; }
+  const panel = document.getElementById('af-task-progress-panel');
+  const stxt  = document.getElementById('af-task-status-text');
+  const pct   = document.getElementById('af-task-pct');
+  const desc  = document.getElementById('af-task-desc');
+  const res   = document.getElementById('af-task-result');
+  if (panel) panel.style.display = 'block';
+  if (stxt)  stxt.textContent = '🗺 Analyzing prompt…';
+  if (pct)   pct.textContent = '…';
+  if (desc)  desc.textContent = task;
+  if (res)   { res.style.display = 'none'; res.textContent = ''; }
+  try {
+    const r = await api('/api/ascend/analyze', {method:'POST', body:{task}});
+    if (!r.ok) { toast(r.detail || 'Analysis failed', 'error'); return; }
+    const plan = r.plan || {};
+    const lines = [];
+    lines.push(`📊 Summary: ${plan.summary || task.slice(0,100)}`);
+    if (plan.phases && plan.phases.length) {
+      lines.push('');
+      lines.push('📋 Plan:');
+      plan.phases.forEach(ph => {
+        lines.push(`  ${ph.name} (Priority: ${ph.priority})`);
+        (ph.items || []).slice(0,5).forEach(it => lines.push(`    • ${it}`));
+      });
+    } else if (plan.actions && plan.actions.length) {
+      lines.push('');
+      lines.push('📋 Planned Actions:');
+      plan.actions.slice(0,8).forEach(a => lines.push(`  • ${a}`));
+    }
+    if (plan.patch_types && plan.patch_types.length) lines.push(`\n🔧 Improvements: ${plan.patch_types.join(', ')}`);
+    if (plan.mentioned_agents && plan.mentioned_agents.length) lines.push(`🤖 Agents: ${plan.mentioned_agents.join(', ')}`);
+    if (plan.mentioned_files && plan.mentioned_files.length) lines.push(`📁 Files: ${plan.mentioned_files.join(', ')}`);
+    lines.push('');
+    lines.push(plan.has_high_risk ? '⚠️ HIGH risk changes detected — review before executing.' : '✅ Plan ready. Click "Send to Ascend Forge" to execute.');
+    if (stxt) stxt.textContent = '🗺 Plan generated';
+    if (pct)  pct.textContent = '100%';
+    if (res) { res.style.display = 'block'; res.style.color = '#fbbf24'; res.textContent = lines.join('\n'); }
+  } catch(e) { toast('Analysis error', 'error'); console.warn('afAnalyzeOnly', e); }
 }
 
 async function afSendTask() {
@@ -19183,23 +19227,13 @@ def _run_ascend_task(task_id: str, task: str) -> None:
         })
     try:
         af = _load_ascend_module()
-        # Step 1 – parse intent (20%)
+        # Step 1 – analyze intent (20%)
         with _af_task_lock:
             _af_current_task["progress"] = 20
-        result = af.handle_chat_command("ascend: " + task)
-        if not result:
-            # Fall back to scan if command not handled
-            with _af_task_lock:
-                _af_current_task["progress"] = 40
-            patches = af.scan_system(trigger=f"user task: {task[:60]}")
-            with _af_task_lock:
-                _af_current_task["progress"] = 80
-            if patches:
-                result = f"✅ Task queued {len(patches)} patch(es): " + "; ".join(
-                    p.get("description", "patch")[:50] for p in patches[:3]
-                )
-            else:
-                result = "✅ Task processed — system already optimal for this request."
+        # Step 2 – plan and execute (60%)
+        with _af_task_lock:
+            _af_current_task["progress"] = 60
+        result = af.handle_complex_task(task)
         with _af_task_lock:
             _af_current_task.update({
                 "status": "done",
@@ -19235,6 +19269,21 @@ def ascend_progress():
     """Return current Ascend Forge task progress."""
     with _af_task_lock:
         return JSONResponse(dict(_af_current_task))
+
+
+@app.post("/api/ascend/analyze")
+def ascend_analyze(payload: dict, _auth: None = Depends(require_auth)):
+    """Analyze a complex prompt and return a structured plan without executing."""
+    task = (payload.get("task") or "").strip()
+    if not task:
+        raise HTTPException(400, "task is required")
+    try:
+        af = _load_ascend_module()
+        plan = af.analyze_prompt(task)
+        return JSONResponse({"ok": True, "plan": plan})
+    except Exception as exc:
+        logger.error("ascend analyze error: %s", exc)
+        raise HTTPException(500, "Analysis failed")
 
 
 # ── Blacklight direct task assignment ────────────────────────────────────────

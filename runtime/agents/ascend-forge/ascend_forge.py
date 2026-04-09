@@ -41,6 +41,22 @@ PROTECTED_MODULES = {"ollama-agent", "hermes-agent", "ai-router"}
 # Failsafe threshold
 MAX_CONSECUTIVE_FAILURES = 3
 
+# Known agent names for prompt analysis
+_KNOWN_AGENTS = [
+    "task-orchestrator", "cold-outreach-assassin", "hermes-agent",
+    "ollama-agent", "ai-router", "gemma-agent", "problem-solver",
+    "ascend-forge", "blacklight", "turbo-quant", "neural-network",
+]
+
+# Phase marker pattern: "Phase 1", "Phase 2:", "PHASE ONE" etc.
+_PHASE_RE = _re.compile(
+    r'(?:^|\n)\s*Phase\s+(\d+|[Oo]ne|[Tt]wo|[Tt]hree|[Ff]our|[Ff]ive)\s*[:\-\—]?\s*(.*)',
+    _re.IGNORECASE,
+)
+
+# File reference pattern
+_FILE_RE = _re.compile(r'\b(\w[\w/\-]*\.(?:py|js|html|json|yaml|yml|sh))\b')
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING").upper(), logging.WARNING),
@@ -95,6 +111,7 @@ def _default_state() -> dict:
         "patches_rejected": 0,
         "patches_failed": 0,
         "total_patches": 0,
+        "last_plan": None,
     }
 
 
@@ -334,6 +351,274 @@ def scan_prompts(target_path: Optional[Path] = None) -> list[dict]:
                     return candidates
 
     return candidates
+
+
+# ── Prompt analysis and complex-task handling ─────────────────────────────────
+
+def analyze_prompt(prompt: str) -> dict:
+    """Analyze a complex prompt and return a structured improvement plan.
+
+    Returns a dict with keys:
+      is_complex       — True if the prompt describes a multi-step task
+      phases           — list of {name, items, priority} dicts
+      actions          — flat list of actionable items
+      mentioned_agents — agent names referenced in the prompt
+      mentioned_files  — filenames referenced in the prompt
+      patch_types      — inferred improvement categories
+      has_high_risk    — True if the prompt touches protected areas
+      summary          — first meaningful line of the prompt
+    """
+    lines = [l.strip() for l in prompt.splitlines() if l.strip()]
+
+    # ── Detect phases ─────────────────────────────────────────────────────
+    phases: list[dict] = []
+    current_phase: Optional[dict] = None
+
+    for line in lines:
+        m = _PHASE_RE.match(line)
+        if m:
+            if current_phase:
+                phases.append(current_phase)
+            phase_num = m.group(1)
+            phase_title = m.group(2).strip()
+            name = (
+                f"Phase {phase_num} — {phase_title}"
+                if phase_title
+                else f"Phase {phase_num}"
+            )
+            current_phase = {"name": name, "items": [], "priority": "MEDIUM"}
+        elif current_phase is not None:
+            if _re.match(r'^[\-\*•\d]+\.?\s+.{5,}', line):
+                item = _re.sub(r'^[\-\*•\d]+\.?\s+', '', line).strip()
+                if item:
+                    current_phase["items"].append(item)
+    if current_phase:
+        phases.append(current_phase)
+
+    # ── Extract flat action items (bullet / numbered lists) ───────────────
+    actions: list[str] = []
+    for line in lines:
+        if _re.match(r'^[\-\*•\d]+\.?\s+.{8,}', line):
+            item = _re.sub(r'^[\-\*•\d]+\.?\s+', '', line).strip()
+            if item and item not in actions:
+                actions.append(item)
+
+    # ── Detect mentioned agents ───────────────────────────────────────────
+    prompt_lower = prompt.lower()
+    mentioned_agents = [a for a in _KNOWN_AGENTS if a in prompt_lower]
+
+    # ── Detect mentioned files ────────────────────────────────────────────
+    mentioned_files = list(dict.fromkeys(_FILE_RE.findall(prompt)))[:10]
+
+    # ── Infer patch types from content ────────────────────────────────────
+    patch_type_keywords: dict[str, tuple] = {
+        "UI": ("ui", "frontend", "html", "css", "dashboard", "visual", "layout"),
+        "functionality": ("bug", "fix", "error", "crash", "broken", "stability"),
+        "performance": ("performance", "speed", "latency", "optimize", "optim"),
+        "prompt": ("prompt", "output quality", "ai response"),
+        "capability": ("feature", "capability", "add support", "implement", "new"),
+        "efficiency": ("agent count", "stabiliz", "memory", "cpu", "efficiency"),
+        "monetization": ("revenue", "monetiz", "profit", "lead", "sales"),
+    }
+    patch_types = [
+        ptype
+        for ptype, kws in patch_type_keywords.items()
+        if any(k in prompt_lower for k in kws)
+    ]
+
+    # ── Determine complexity ──────────────────────────────────────────────
+    is_complex = bool(
+        phases
+        or len(actions) >= 3
+        or len(lines) >= 10
+        or any(
+            k in prompt_lower
+            for k in ("phase", "plan", "implement", "upgrade", "system")
+        )
+    )
+
+    # ── Assign phase priorities (first = HIGH, second = MEDIUM, rest = LOW) ──
+    _priority_map = {0: "HIGH", 1: "MEDIUM"}
+    for i, phase in enumerate(phases):
+        phase["priority"] = _priority_map.get(i, "LOW")
+
+    # ── High-risk detection ───────────────────────────────────────────────
+    _high_risk_kw = ("server.py", "ai-router", "ollama", "hermes", "database",
+                     "auth", "security", "credential")
+    has_high_risk = any(k in prompt_lower for k in _high_risk_kw)
+    for f in mentioned_files:
+        for protected in PROTECTED_MODULES:
+            if protected in f:
+                has_high_risk = True
+
+    # ── Summary: first meaningful non-header line ─────────────────────────
+    summary = lines[0] if lines else prompt[:120]
+    if len(summary) > 120:
+        summary = summary[:117] + "…"
+
+    # ── Persist plan context to state ────────────────────────────────────
+    with _state_lock:
+        s = _load_state()
+        s["last_plan"] = {
+            "ts": _now_iso(),
+            "summary": summary,
+            "phases": len(phases),
+            "actions": len(actions),
+            "patch_types": patch_types,
+        }
+        _save_state(s)
+
+    return {
+        "is_complex": is_complex,
+        "phases": phases,
+        "actions": actions[:20],
+        "mentioned_agents": mentioned_agents,
+        "mentioned_files": mentioned_files,
+        "patch_types": patch_types,
+        "has_high_risk": has_high_risk,
+        "summary": summary,
+    }
+
+
+def handle_complex_task(task: str) -> str:
+    """Handle any task prompt — simple commands or complex multi-phase plans.
+
+    For ``ascend: …`` prefixed commands, delegates to handle_chat_command().
+    For all other input, analyzes structure, queues patches, and returns a
+    structured response in the format:
+
+        📊 Summary: …
+        📋 Plan:
+          Phase 1 — … (Priority: HIGH)
+            • action …
+        ⚡ Next Actions (N patch(es) queued):
+          1. [RISK] description
+        🔥 Ready to execute.   OR   ⚠️ Awaiting your approval.
+    """
+    stripped = task.strip()
+
+    # Simple ascend: command → use existing handler
+    if stripped.lower().startswith("ascend:"):
+        return handle_chat_command(stripped)
+
+    _push_activity(f"🧠 Analyzing task: {stripped[:60]}…", "info")
+    plan = analyze_prompt(stripped)
+    effective_mode = _resolve_effective_mode(stripped)
+
+    patches_queued: list[dict] = []
+
+    # ── Queue patches for each inferred patch type ────────────────────────
+    _desc_map: dict[str, str] = {
+        "UI": "Improve UI/UX based on task specification",
+        "functionality": "Fix functionality issues identified in task",
+        "performance": "Optimise performance as specified in task",
+        "prompt": "Upgrade AI prompt quality for better output",
+        "capability": "Implement new capability from task specification",
+        "efficiency": "Stabilise and improve agent efficiency",
+        "monetization": "Enhance revenue-generating features",
+    }
+    for ptype in plan["patch_types"]:
+        desc = _desc_map.get(ptype, f"Apply {ptype} improvements")
+        files = plan["mentioned_files"][:3]
+        try:
+            p = create_patch(
+                description=desc,
+                reason=f"Requested via complex task: {stripped[:200]}",
+                affected_files=files,
+                diff_preview=(
+                    f"# Task analysis → {ptype} improvement\n"
+                    f"# Source: {stripped[:120]}"
+                ),
+                trigger="complex task",
+                patch_type=ptype,
+                mode=effective_mode,
+                source="complex_task",
+            )
+            patches_queued.append(p)
+        except RuntimeError:
+            pass
+
+    # ── Queue patches for each extracted phase ────────────────────────────
+    for phase in plan["phases"]:
+        if not phase["items"]:
+            continue
+        phase_desc = f"{phase['name']}: {'; '.join(phase['items'][:3])}"[:120]
+        files = plan["mentioned_files"][:2]
+        try:
+            p = create_patch(
+                description=phase_desc,
+                reason=f"Phase task: {phase['name']}",
+                affected_files=files,
+                diff_preview="\n".join(
+                    f"# {item}" for item in phase["items"][:5]
+                ),
+                trigger="complex task",
+                mode=effective_mode,
+                source="complex_task",
+            )
+            patches_queued.append(p)
+        except RuntimeError:
+            pass
+
+    # ── If no patches queued and not complex, run a general scan ──────────
+    if not patches_queued and not plan["is_complex"]:
+        patches_queued = scan_system(trigger=f"complex task: {stripped[:60]}")
+
+    # ── Build structured response ─────────────────────────────────────────
+    out: list[str] = []
+
+    out.append(f"📊 **Summary:** {plan['summary']}")
+    out.append("")
+
+    if plan["phases"]:
+        out.append("📋 **Plan:**")
+        for phase in plan["phases"]:
+            out.append(f"  {phase['name']} (Priority: {phase['priority']})")
+            for item in phase["items"][:5]:
+                out.append(f"    • {item}")
+        out.append("")
+    elif plan["actions"]:
+        out.append("📋 **Planned Actions:**")
+        for action in plan["actions"][:8]:
+            out.append(f"  • {action}")
+        out.append("")
+
+    meta: list[str] = []
+    if plan["patch_types"]:
+        meta.append(f"🔧 **Improvements:** {', '.join(plan['patch_types'])}")
+    if plan["mentioned_agents"]:
+        meta.append(f"🤖 **Agents:** {', '.join(plan['mentioned_agents'])}")
+    if plan["mentioned_files"]:
+        meta.append(f"📁 **Files:** {', '.join(plan['mentioned_files'])}")
+    if meta:
+        out.extend(meta)
+        out.append("")
+
+    if patches_queued:
+        out.append(f"⚡ **Next Actions ({len(patches_queued)} patch(es) queued):**")
+        for i, p in enumerate(patches_queued[:5], 1):
+            out.append(f"  {i}. [{p['risk_level']}] {p['description'][:70]}")
+        out.append("")
+    else:
+        out.append(
+            "ℹ️ No patches queued — system already optimal for this task."
+        )
+        out.append("")
+
+    has_high = plan["has_high_risk"] or any(
+        p.get("risk_level") == "HIGH" for p in patches_queued
+    )
+    if has_high:
+        out.append("⚠️ **Awaiting your approval** — HIGH risk changes detected.")
+    else:
+        out.append("🔥 **Ready to execute.**")
+
+    result = "\n".join(out)
+    _push_activity(
+        f"✅ Complex task analyzed — {len(patches_queued)} patch(es) queued.",
+        "success",
+    )
+    return result
 
 
 # ── Patch creation ────────────────────────────────────────────────────────────
