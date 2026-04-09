@@ -15817,7 +15817,14 @@ def get_workers():
 
 # ── Chatlog sanitizer — strip accidental API key leakage ─────────────────────
 _API_KEY_PATTERN = re.compile(
-    r"(sk-ant-[a-zA-Z0-9\-]{20,}|sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9\-_]{30,})",
+    r"(sk-ant-[a-zA-Z0-9\-]{20,}"        # Anthropic
+    r"|sk-[a-zA-Z0-9]{20,}"              # OpenAI
+    r"|AIza[a-zA-Z0-9\-_]{30,}"          # Google / Gemini
+    r"|gsk_[a-zA-Z0-9]{20,}"             # Groq
+    r"|hf_[a-zA-Z0-9]{20,}"              # HuggingFace
+    r"|nvapi-[a-zA-Z0-9\-_]{20,}"        # NVIDIA
+    r"|xai-[a-zA-Z0-9]{20,}"             # xAI / Grok
+    r")",
     re.IGNORECASE,
 )
 
@@ -16597,7 +16604,7 @@ def get_schedules():
 
 
 @app.post("/api/schedules")
-def add_schedule(task: dict):
+def add_schedule(task: dict, _auth: None = Depends(require_auth)):
     import uuid as _uuid
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     tasks = []
@@ -16625,7 +16632,7 @@ def add_schedule(task: dict):
 
 
 @app.delete("/api/schedules/{task_id}")
-def delete_schedule(task_id: str):
+def delete_schedule(task_id: str, _auth: None = Depends(require_auth)):
     if not SCHEDULES_FILE.exists():
         return JSONResponse({"ok": True})
     try:
@@ -16651,7 +16658,7 @@ def get_improvements():
 
 
 @app.patch("/api/improvements/{improvement_id}")
-def review_improvement(improvement_id: str, payload: dict):
+def review_improvement(improvement_id: str, payload: dict, _auth: None = Depends(require_auth)):
     status = payload.get("status", "")
     valid_statuses = ("approved", "rejected", "in_progress", "completed", "pending")
     if status not in valid_statuses:
@@ -16707,7 +16714,7 @@ def get_skills(category: str = "", q: str = ""):
 
 
 @app.post("/api/skills")
-def create_skill(payload: dict):
+def create_skill(payload: dict, _auth: None = Depends(require_auth)):
     skill_id = (payload.get("id") or "").strip()
     name = (payload.get("name") or "").strip()
     category = (payload.get("category") or "Automation & Productivity").strip()
@@ -16814,7 +16821,7 @@ def list_custom_agents():
 
 
 @app.post("/api/agents/custom")
-def create_custom_agent(payload: dict):
+def create_custom_agent(payload: dict, _auth: None = Depends(require_auth)):
     name = (payload.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "name required")
@@ -16850,7 +16857,7 @@ def create_custom_agent(payload: dict):
 
 
 @app.delete("/api/agents/custom/{agent_id}")
-def delete_custom_agent(agent_id: str):
+def delete_custom_agent(agent_id: str, _auth: None = Depends(require_auth)):
     agents = _load_custom_agents()
     if agent_id not in agents:
         raise HTTPException(404, f"agent '{agent_id}' not found")
@@ -16895,7 +16902,7 @@ def list_worker_bundles():
 
 
 @app.post("/api/workers/bundles")
-def create_worker_bundle(payload: dict):
+def create_worker_bundle(payload: dict, _auth: None = Depends(require_auth)):
     """Create a new worker bundle."""
     import uuid as _uuid
     name = (payload.get("name") or "").strip()
@@ -16936,7 +16943,7 @@ def create_worker_bundle(payload: dict):
 
 
 @app.patch("/api/workers/bundles/{bundle_id}")
-def update_worker_bundle(bundle_id: str, payload: dict):
+def update_worker_bundle(bundle_id: str, payload: dict, _auth: None = Depends(require_auth)):
     """Update an existing worker bundle."""
     bundles = _load_worker_bundles()
     for b in bundles:
@@ -16951,7 +16958,7 @@ def update_worker_bundle(bundle_id: str, payload: dict):
 
 
 @app.delete("/api/workers/bundles/{bundle_id}")
-def delete_worker_bundle(bundle_id: str):
+def delete_worker_bundle(bundle_id: str, _auth: None = Depends(require_auth)):
     """Delete a worker bundle."""
     bundles = _load_worker_bundles()
     remaining = [b for b in bundles if b["id"] != bundle_id]
@@ -16962,7 +16969,7 @@ def delete_worker_bundle(bundle_id: str):
 
 
 @app.post("/api/workers/bundles/{bundle_id}/run")
-def run_worker_bundle(bundle_id: str):
+def run_worker_bundle(bundle_id: str, _auth: None = Depends(require_auth)):
     """Manually trigger a worker bundle — submits its task to the orchestrator chatlog."""
     bundles = _load_worker_bundles()
     for b in bundles:
@@ -17087,7 +17094,7 @@ def cancel_task(_auth: None = Depends(require_auth)):
 
 
 @app.post("/api/task/reassign")
-def reassign_subtask(payload: dict):
+def reassign_subtask(payload: dict, _auth: None = Depends(require_auth)):
     """Reassign a pending subtask to a different agent."""
     task_id = (payload.get("task_id") or "").strip()
     subtask_id = (payload.get("subtask_id") or "").strip()
@@ -17562,7 +17569,7 @@ def list_templates():
 
 
 @app.post("/api/templates/{template_id}/deploy")
-def deploy_template(template_id: str):
+def deploy_template(template_id: str, _auth: None = Depends(require_auth)):
     import uuid as _uuid
     templates = _load_templates()
     tmpl = next((t for t in templates if t["id"] == template_id), None)
@@ -17690,7 +17697,7 @@ def request_guardrail_action(payload: dict):
 
 
 @app.post("/api/guardrails/{action_id}/approve")
-def approve_guardrail_action(action_id: str):
+def approve_guardrail_action(action_id: str, _auth: None = Depends(require_auth)):
     data = _load_guardrails()
     pending = data.get("pending", [])
     action = next((a for a in pending if a["id"] == action_id), None)
@@ -17714,7 +17721,7 @@ def approve_guardrail_action(action_id: str):
 
 
 @app.post("/api/guardrails/{action_id}/reject")
-def reject_guardrail_action(action_id: str, payload: dict = None):
+def reject_guardrail_action(action_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
     data = _load_guardrails()
     pending = data.get("pending", [])
     action = next((a for a in pending if a["id"] == action_id), None)
@@ -17741,7 +17748,7 @@ def reject_guardrail_action(action_id: str, payload: dict = None):
 
 
 @app.post("/api/guardrails/settings")
-def save_guardrail_settings(payload: dict):
+def save_guardrail_settings(payload: dict, _auth: None = Depends(require_auth)):
     data = _load_guardrails()
     data["settings"] = payload
     _save_guardrails(data)
@@ -17749,7 +17756,7 @@ def save_guardrail_settings(payload: dict):
 
 
 @app.post("/api/guardrails/custom")
-def add_custom_guardrail(payload: dict):
+def add_custom_guardrail(payload: dict, _auth: None = Depends(require_auth)):
     import uuid as _uuid
     rule_text = (payload.get("rule") or "").strip()
     if not rule_text:
@@ -18106,7 +18113,7 @@ def list_integrations():
 
 
 @app.patch("/api/integrations/{integration_id}")
-def update_integration(integration_id: str, payload: dict):
+def update_integration(integration_id: str, payload: dict, _auth: None = Depends(require_auth)):
     integrations = _load_integrations()
     intg = next((i for i in integrations if i["id"] == integration_id), None)
     if not intg:
@@ -18119,8 +18126,61 @@ def update_integration(integration_id: str, payload: dict):
     return JSONResponse({"ok": True, "id": integration_id, "enabled": intg["enabled"]})
 
 
+def _validate_webhook_url(url: str) -> str | None:
+    """Validate a user-supplied webhook URL to prevent SSRF attacks.
+
+    Returns an error message string if the URL is rejected, or None if it is safe.
+    Allows only http:// and https:// schemes and rejects private / loopback / link-local
+    / cloud-metadata IP ranges.
+    """
+    import ipaddress
+    import socket
+    import urllib.parse as _up
+
+    parsed = _up.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "Webhook URL must use http:// or https://"
+
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return "Webhook URL has no valid hostname"
+
+    # Resolve hostname to IP and check for private/reserved ranges
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return "Webhook hostname could not be resolved"
+
+    _BLOCKED_NETWORKS = [
+        ipaddress.ip_network("127.0.0.0/8"),       # loopback
+        ipaddress.ip_network("::1/128"),             # IPv6 loopback
+        ipaddress.ip_network("10.0.0.0/8"),          # private
+        ipaddress.ip_network("172.16.0.0/12"),       # private
+        ipaddress.ip_network("192.168.0.0/16"),      # private
+        ipaddress.ip_network("169.254.0.0/16"),      # link-local / cloud metadata
+        ipaddress.ip_network("fc00::/7"),            # IPv6 unique local
+        ipaddress.ip_network("fe80::/10"),           # IPv6 link-local
+        ipaddress.ip_network("0.0.0.0/8"),           # this-network
+    ]
+
+    for _family, _socktype, _proto, _canonname, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return f"Could not parse resolved IP address: {ip_str}"
+        for net in _BLOCKED_NETWORKS:
+            if ip in net:
+                return (
+                    "Webhook URL resolves to a private/reserved address and is not allowed. "
+                    "Use a publicly reachable URL."
+                )
+
+    return None  # URL is safe
+
+
 @app.post("/api/integrations/{integration_id}/test")
-def test_integration(integration_id: str):
+def test_integration(integration_id: str, _auth: None = Depends(require_auth)):
     """Basic connectivity test for an integration."""
     integrations = _load_integrations()
     intg = next((i for i in integrations if i["id"] == integration_id), None)
@@ -18133,6 +18193,9 @@ def test_integration(integration_id: str):
         url = config.get("url", "").strip()
         if not url:
             return JSONResponse({"ok": False, "message": "No webhook URL configured"})
+        ssrf_error = _validate_webhook_url(url)
+        if ssrf_error:
+            raise HTTPException(400, ssrf_error)
         try:
             import urllib.request as _req
             req = _req.Request(url, method="POST",
@@ -18864,7 +18927,7 @@ def record_metric_alias(payload: dict):
 
 
 @app.post("/api/templates/deploy")
-def deploy_template_alias(payload: dict):
+def deploy_template_alias(payload: dict, _auth: None = Depends(require_auth)):
     """Convenience endpoint — calls POST /api/templates/{template_id}/deploy.
     Accepts {"template_id": "get-10-leads-24h"}.
     """
@@ -18875,7 +18938,7 @@ def deploy_template_alias(payload: dict):
 
 
 @app.post("/api/guardrails/approve")
-def approve_guardrail_alias(payload: dict):
+def approve_guardrail_alias(payload: dict, _auth: None = Depends(require_auth)):
     """Convenience endpoint — approves a pending guardrail action.
     Accepts {"action_id": "..."}.
     Returns 200 always; {"ok": false} if the action was not found in the queue.
@@ -18892,7 +18955,7 @@ def approve_guardrail_alias(payload: dict):
 
 
 @app.post("/api/guardrails/reject")
-def reject_guardrail_alias(payload: dict):
+def reject_guardrail_alias(payload: dict, _auth: None = Depends(require_auth)):
     """Convenience endpoint — rejects a pending guardrail action.
     Accepts {"action_id": "...", "reason": "..."}.
     Returns 200 always; {"ok": false} if the action was not found in the queue.
