@@ -21271,7 +21271,7 @@ async def guardrails_submit_action(payload: dict):
 
 
 @app.post("/api/guardrails/pending-actions/{action_id}/approve")
-async def guardrails_approve_action(action_id: str, payload: dict = {}):
+async def guardrails_approve_action(action_id: str, payload: dict = {}, _auth: None = Depends(require_auth)):
     def _approve():
         data = _load_pending_actions()
         for i, action in enumerate(data["actions"]):
@@ -21291,7 +21291,7 @@ async def guardrails_approve_action(action_id: str, payload: dict = {}):
 
 
 @app.post("/api/guardrails/pending-actions/{action_id}/reject")
-async def guardrails_reject_action(action_id: str, payload: dict = {}):
+async def guardrails_reject_action(action_id: str, payload: dict = {}, _auth: None = Depends(require_auth)):
     def _reject():
         data = _load_pending_actions()
         for i, action in enumerate(data["actions"]):
