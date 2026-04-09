@@ -74,7 +74,10 @@ def _now_iso() -> str:
 
 def _safe_id(raw: str) -> str:
     """Sanitize a user/entity ID for use in file names."""
-    return "".join(c if c.isalnum() or c in "-_." else "_" for c in raw)
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in raw)
+    if not safe or safe in {".", ".."}:
+        raise ValueError("Invalid user_id")
+    return safe
 
 
 # ── Feature encoding constants ────────────────────────────────────────────────
@@ -231,7 +234,7 @@ class UserProfile:
         _dir = (profile_dir if profile_dir is not None else _PROFILE_DIR).resolve()
         _dir.mkdir(parents=True, exist_ok=True)
         # Guard against path-traversal: safe_id only allows alphanumeric/-/_.
-        _safe   = _safe_id(user_id)
+        _safe = _safe_id(user_id)
         _candidate = (_dir / f"{_safe}.json").resolve()
         # Ensure the resolved path is still inside the profile directory
         try:
