@@ -19849,7 +19849,7 @@ def intelligence_profile(user: str = "user:default"):
         return JSONResponse(data)
     except Exception as exc:
         logger.warning("intelligence_profile error: %s", exc)
-        return JSONResponse({"available": False, "error": str(exc)})
+        return JSONResponse({"available": False, "error": "Unable to load profile"})
 
 
 @app.post("/api/intelligence/reward")
@@ -19871,7 +19871,7 @@ def intelligence_reward(payload: dict, _auth: None = Depends(require_auth)):
         return JSONResponse({"ok": True})
     except Exception as exc:
         logger.error("intelligence_reward error: %s", exc)
-        return JSONResponse({"ok": False, "message": str(exc)})
+        return JSONResponse({"ok": False, "message": "Unable to apply reward"})
 
 
 @app.get("/api/intelligence/stats")

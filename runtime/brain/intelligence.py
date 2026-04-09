@@ -228,9 +228,15 @@ class UserProfile:
 
     def __init__(self, user_id: str, profile_dir: Optional[Path] = None) -> None:
         self.user_id = user_id
-        _dir = profile_dir if profile_dir is not None else _PROFILE_DIR
+        _dir = (profile_dir if profile_dir is not None else _PROFILE_DIR).resolve()
         _dir.mkdir(parents=True, exist_ok=True)
-        self._path = _dir / f"{_safe_id(user_id)}.json"
+        # Guard against path-traversal: safe_id only allows alphanumeric/-/_.
+        _safe   = _safe_id(user_id)
+        _candidate = (_dir / f"{_safe}.json").resolve()
+        # Ensure the resolved path is still inside the profile directory
+        if not str(_candidate).startswith(str(_dir)):
+            raise ValueError(f"Unsafe user_id would escape profile dir: {user_id!r}")
+        self._path = _candidate
         self._lock = threading.Lock()
         self._data: Dict[str, Any] = self._load()
 
@@ -239,7 +245,7 @@ class UserProfile:
     def _load(self) -> Dict[str, Any]:
         if self._path.exists():
             try:
-                raw = json.loads(self._path.read_text())
+                raw = json.loads(self._path.read_text(encoding="utf-8"))
                 # Use deepcopy of defaults to avoid sharing mutable nested objects
                 merged = copy.deepcopy(self._DEFAULTS)
                 merged.update(raw)
@@ -254,7 +260,7 @@ class UserProfile:
     def save(self) -> None:
         with self._lock:
             self._data["updated_at"] = _now_iso()
-            self._path.write_text(json.dumps(self._data, indent=2))
+            self._path.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
 
     # ── Update methods ─────────────────────────────────────────────────────────
 
