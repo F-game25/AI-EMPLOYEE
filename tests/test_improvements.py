@@ -266,7 +266,7 @@ class TestDeliverabilityAudit:
         assert r.status_code == 200
         body = r.json()
         assert body["campaigns_audited"] == 0
-        assert body["overall_score"] == 100.0
+        assert body["overall_score"] is None  # no data — not misleadingly perfect
 
 
 # ═══════════════════════════════════════════════════════════════════════════
