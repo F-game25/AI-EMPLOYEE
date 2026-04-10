@@ -57,6 +57,7 @@ export const useAppStore = create((set) => ({
     mode: 'OFFLINE',
     learn_step: 0,
     buffer_size: 0,
+    max_buffer_size: 10000,
     last_loss: null,
     confidence: 0,
     device: 'cpu',
