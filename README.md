@@ -7,7 +7,7 @@
 [![Platform: Linux](https://img.shields.io/badge/Platform-Linux-informational.svg)](#-install--choose-your-platform)
 [![Platform: macOS](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)](#-install--choose-your-platform)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078d4.svg)](#-install--choose-your-platform)
-[![Agents: 56](https://img.shields.io/badge/Agents-56-success.svg)](#-new-niche-specialists--ai-growth-agency)
+[![Agents: 74](https://img.shields.io/badge/Agents-74-success.svg)](#-new-niche-specialists--ai-growth-agency)
 [![Skills: 147](https://img.shields.io/badge/Skills-147-orange.svg)](#skills-library-147-skills)
 
 ---
@@ -33,6 +33,8 @@
 - [🚀 New Niche Specialists](#-new-niche-specialists--ai-growth-agency)
 - [🧠 AI Intelligence Layer](#-ai-intelligence-layer)
 - [🏭 New Business Automation Specialists](#-new-business-automation-specialists)
+- [🧬 Neural Brain & Learning](#-neural-brain--learning)
+- [🌐 Hybrid Resilient Mode](#-hybrid-resilient-mode)
 - [Skills Library](#skills-library-147-skills)
 - [🧪 Safety Self-Test](#-safety-self-test--verify-everything-works)
 - [💻 Complete Terminal Reference](#-complete-terminal-command-reference)
@@ -48,11 +50,15 @@
 ### 🧠 Core AI Platform
 | Feature | Description |
 |---|---|
-| 🤖 **56 Specialist Agents** | A full team of AI agents — each expert in a specific business domain |
-| 🛠️ **147 Reusable Skills** | Modular skill library you can compose into custom agents |
+| 🤖 **74 Specialist Agents** | A full team of AI agents — each expert in a specific business domain |
+| 🛠️ **147 Reusable Skills** | Modular skill library across 19 categories you can compose into custom agents |
 | 🖥️ **Web Dashboard** | Full control panel at `http://127.0.0.1:8787` — no terminal needed |
-| 🗂️ **Three Modes** | Start with 3 agents (Starter), grow to 8 (Business), or unleash all 70+ (Power) |
+| 🗂️ **Three Modes** | Start with 3 agents (Starter), grow to 15 (Business), or unleash all 74 (Power) |
 | 🧠 **AI Router** | 3-layer routing: local Ollama → Gemma → NVIDIA NIM → paid APIs. Zero cost by default. |
+| 🌐 **Hybrid Resilient Mode** | ONLINE/OFFLINE/AUTO — automatically falls back to local-only when internet is unavailable |
+| 🧬 **Central Brain** | Shared neural decision-making singleton: all agents route through one trained PyTorch brain |
+| 🧠 **IntelligenceCore** | Unified Brain + MemoryStore + Personalisation layer — enriches every LLM call with user context |
+| 🤖 **Neural Network Agent** | Self-learning PyTorch agent with experience replay and a live Streamlit monitor UI |
 | 🔒 **Guardrails** | Human-in-the-loop approval queue for high-risk actions (bulk email, purchases) |
 | 🆓 **Works Locally** | Fully operational without any paid API — uses Ollama for free local AI |
 | 🎯 **Lead CRM** | Full sales pipeline (new→qualified→proposal→negotiation→won/lost), AI lead scoring, follow-up scheduling |
@@ -114,7 +120,7 @@
 
 **AI Employee is built for solo founders and small agencies** who want leverage — not complexity.
 
-You run a business. You don't have time to manage 56 agents and 147 skills. You just want results:
+You run a business. You don't have time to manage 74 agents and 147 skills. You just want results:
 - 10 qualified leads today
 - A sales email in your inbox
 - Your customer support running on autopilot
@@ -308,8 +314,12 @@ AI Employee is a multi-layer system where a single user command fans out across 
 |---|---|
 | **Problem Solver** | Orchestrator — watches all agents, routes tasks, restarts crashed agents |
 | **AI Router** | 3-layer free routing: Ollama → Gemma → NVIDIA NIM → paid APIs. Routes by task type (reasoning→Nemotron, coding→Qwen, creative→Gemma, bulk→Llama 8B) |
-| **56 Specialist Agents** | Each expert in one domain; task execution mode: Auto (orchestrator decides), Parallel (all at once), or Single (one agent) |
-| **Skills Library** | 147 reusable building blocks composed into agents |
+| **Hybrid Resilient Mode** | ONLINE/OFFLINE/AUTO connectivity detection — auto-falls back to local-only on disconnect. Set `HYBRID_MODE=offline/online/auto` in `.env` |
+| **74 Specialist Agents** | Each expert in one domain; task execution mode: Auto (orchestrator decides), Parallel (all at once), or Single (one agent) |
+| **Skills Library** | 147 reusable building blocks across 19 categories, composed into agents |
+| **Central Brain** | Shared PyTorch neural network singleton; all agents share one Brain via `get_brain()`. Thread-safe with prioritized experience replay. |
+| **IntelligenceCore** | Unified Brain + MemoryStore + Personalisation singleton. Enriches every LLM call with user history and preferences via `build_context()` / `on_exchange()`. |
+| **Neural Network Agent** | Self-learning agent (`runtime/agents/neural_network/`) with online training, experience replay, and live Streamlit monitor UI. |
 | **Memory / CRM** | Per-lead memory and interaction history persisted in JSON |
 | **Guardrails** | Human approval queue for high-risk actions before execution |
 | **Scheduler** | Cron-based task runner for recurring automation |
@@ -321,14 +331,14 @@ AI Employee is a multi-layer system where a single user command fans out across 
 ```bash
 ai-employee mode starter    # 3 agents, 5 commands — zero overwhelm
 ai-employee mode business   # templates, ROI tracking, scheduling (recommended)
-ai-employee mode power      # all 56 agents, 147+ skills, full dashboard
+ai-employee mode power      # all 74 agents, 147+ skills, full dashboard
 ```
 
 | Mode | Agents | What you see | Best for |
 |---|---|---|---|
 | **Starter** | 3 | 5 commands, no dashboard overload | Getting your first results |
-| **Business** | 8 | Templates, ROI, scheduling | Daily business automation |
-| **Power** | 56 | Everything — full dashboard, all skills | Advanced users |
+| **Business** | 15 | Templates, ROI, scheduling, feature modules | Daily business automation |
+| **Power** | 74 | Everything — full dashboard, all skills | Advanced users |
 
 Change mode any time: `ai-employee mode business`
 
@@ -661,7 +671,7 @@ Invoke-WebRequest https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/in
 .\install-windows.ps1
 ```
 Or use the one-click batch file: download and run `quick-install-windows.bat`.
-No WSL or Git Bash required — installs Python, Git, Ollama, and all 56 agents natively.
+No WSL or Git Bash required — installs Python, Git, Ollama, and all 74 agents natively.
 
 Everything is installed into **`~/.ai-employee/`** (Linux/macOS) or **`%USERPROFILE%\.ai-employee\`** (Windows).
 
@@ -1122,6 +1132,46 @@ The loop: **Scan** (screenshot + component parse) → **Analyse** (vision AI det
 
 Modes: `GENERAL` (manual approval), `MONEY` (revenue-focused auto-apply), `AUTO` (fully autonomous).
 
+#### ASCEND FORGE Slash Commands
+
+Interact with ASCEND FORGE via the Chat tab or API using `/` commands:
+
+| Command | What it does |
+|---|---|
+| `/help` | Show all available commands |
+| `/scan` | Full system scan — queue patches |
+| `/patches` | List pending patches |
+| `/approve <id>` | Approve and apply a specific patch |
+| `/approve all low` | Auto-apply all LOW-risk patches |
+| `/reject <id>` | Reject a patch |
+| `/rollback <id>` | Roll back an applied patch |
+| `/explain <id>` | Show full patch details |
+| `/history` | Recent changelog (last 10 entries) |
+| `/improve <module>` | Analyse a single agent module |
+| `/plan <task>` | Create a multi-step plan without executing |
+| `/execute` | Execute the last stored plan |
+| `/research <query>` | Web search for context before acting |
+| `/status` | Current ASCEND FORGE state |
+| `/cost` | Session report: patches, time, context tokens |
+| `/compact` | Summarise and compress the context feed |
+| `/schedule <name> <freq>` | Register a recurring task (hourly/daily/weekly) |
+| `/schedule list` | Show active schedules |
+| `/schedule remove <name>` | Cancel a schedule |
+| `/mode <general|money|auto>` | Set operating mode |
+| `/blacklight <on|off>` | Toggle BLACKLIGHT revenue override |
+
+#### Agent Routing
+
+ASCEND FORGE auto-routes tasks to specialist agents based on keyword detection:
+
+| Keywords | Routed to |
+|---|---|
+| ui, layout, visual, design, frontend, css, html | `ui-engine` |
+| lead, outreach, revenue, sales, cold email | `cold-outreach-assassin` |
+| bug, crash, error, exception, traceback | `hermes-agent` |
+| research, competitor, benchmark, analyze | `problem-solver` |
+| prompt, output quality, improve prompt | `ascend-forge` |
+
 ### BLACKLIGHT — Autonomous Intelligence
 
 BLACKLIGHT runs a continuous goal→analyse→plan→execute→evaluate→improve loop:
@@ -1138,7 +1188,96 @@ Log: `~/.ai-employee/logs/blacklight.log.jsonl`
 
 ---
 
-## 🏭 New Business Automation Specialists
+## 🧬 Neural Brain & Learning
+
+AI Employee has a full neural intelligence stack — three layers that learn and improve as you use the system.
+
+### Central Brain (`runtime/brain/brain.py`)
+
+All agents share one global Brain singleton. It uses a PyTorch neural network (`BrainNet`) with Prioritized Experience Replay to learn which actions produce the best outcomes over time.
+
+```python
+from brain.brain import get_brain   # requires PYTHONPATH=runtime (run from repo root: `export PYTHONPATH=runtime`)
+brain = get_brain()                 # global singleton shared by all agents
+
+# Make a decision
+action_idx = brain.get_action(state_tensor)
+
+# Learn from outcome
+brain.store_experience(state, action, reward, next_state, done)
+brain.learn()
+```
+
+Key features:
+- **Thread-safe** — `self._model_lock (RLock)` protects `get_action()` and `learn()` for concurrent multi-agent access
+- **NaN/Inf guard** — rewards are sanitised to `0.0` before storing
+- **Background loop** — continuous learning thread runs in the background
+- **Live UI** — `PYTHONPATH=runtime streamlit run runtime/ui/neural_brain_tab.py`
+
+### IntelligenceCore (`runtime/brain/intelligence.py`)
+
+The IntelligenceCore fuses Brain + MemoryStore + Personalisation into a single singleton that every agent uses before and after each LLM call.
+
+```python
+from brain.intelligence import get_intelligence
+intel = get_intelligence()
+
+# Before each LLM call — enriches system prompt with user context
+context = intel.build_context("user:default", message)
+
+# After each exchange — stores memory + trains the brain
+intel.on_exchange("user:default", user_msg, agent_response, agent_id)
+
+# Optional: provide outcome feedback to improve routing
+intel.reward("user:default", reward=1.0)
+```
+
+State is persisted locally under `~/.ai-employee/`. Nothing is sent to external services.
+
+### Neural Network Agent (`runtime/agents/neural_network/`)
+
+A standalone self-learning agent built on the same PyTorch stack, with its own config and live UI:
+
+```bash
+# Warm-up training (optional)
+python runtime/agents/neural_network/train.py --episodes 500
+
+# Live Streamlit monitor
+streamlit run runtime/ui/neural_network_tab.py
+```
+
+Config: `runtime/config/nn_config.yaml` — all hyperparameters and UI settings.
+
+---
+
+## 🌐 Hybrid Resilient Mode
+
+AI Employee can operate fully offline when the internet is unavailable.
+
+```python
+# Set in .env:
+HYBRID_MODE=auto      # (default) auto-detect connectivity before each call
+HYBRID_MODE=online    # always use cloud providers
+HYBRID_MODE=offline   # local-only — only Ollama/Gemma, never cloud
+```
+
+| Mode | Behaviour |
+|---|---|
+| **AUTO** | Probes connectivity (DNS → HTTPS) before each call; caches result 30 s |
+| **ONLINE** | All cloud + local providers available |
+| **OFFLINE** | Local-only (Ollama/Gemma) — cloud providers skipped entirely |
+
+**Fail-safe**: if a cloud call raises a network error in ONLINE mode, the system automatically switches to OFFLINE. It reverts to AUTO after 120 s so connectivity can be re-probed.
+
+**Memory continuity**: when switching OFFLINE → ONLINE, a `sync_ready` event fires so buffered writes can be flushed.
+
+Runtime override (no restart needed):
+```python
+from agents.ai_router.hybrid_mode import set_hybrid_mode
+set_hybrid_mode("offline")   # or "online" / "auto"
+```
+
+
 
 17 new agents added covering content creation, e-commerce, finance, and community.
 
@@ -1189,9 +1328,11 @@ ai-employee do "Create personalised offers for my top 3 CRM leads"
 ai-employee do "Score and rank my 20 leads by ICP fit"
 ```
 
+---
 
+## Skills Library (147 Skills)
 
-AI Employee includes a library of **147 reusable skills** across 13 categories. Skills are the building blocks for creating custom specialised agents.
+AI Employee includes a library of **147 reusable skills** across 19 categories. Skills are the building blocks for creating custom specialised agents.
 
 ### Categories & skill counts
 
@@ -1201,14 +1342,21 @@ AI Employee includes a library of **147 reusable skills** across 13 categories. 
 | Research & Analysis | 12 |
 | Trading & Finance | 12 |
 | Social Media | 10 |
-| Lead Generation & Sales | 19 |
-| Development & Technical | 10 |
-| E-commerce & Product | 10 |
-| Data Analysis | 8 |
+| Lead Generation & Sales | 22 |
 | Customer Support | 8 |
-| Marketing & SEO | 14 |
+| Development & Technical | 10 |
+| Data Analysis | 8 |
+| E-commerce & Product | 10 |
+| Marketing & SEO | 11 |
 | Automation & Productivity | 8 |
-| Growth & Marketing | 11 |
+| Company Building & Strategy | 4 |
+| Crypto & Web3 | 2 |
+| Finance & Investment | 3 |
+| Branding & Identity | 2 |
+| Growth & Marketing | 8 |
+| Project Management | 2 |
+| Growth Agency | *(extensible)* |
+| Conversion Optimization | *(extensible)* |
 | **Total** | **147** |
 
 ### Managing skills via the Dashboard
@@ -1571,8 +1719,8 @@ ai-employee do "deploy template get-10-leads-24h"
 ```bash
 ai-employee mode                  # Show current mode
 ai-employee mode starter          # 3 agents — no overwhelm
-ai-employee mode business         # 8 agents — recommended
-ai-employee mode power            # All 56 agents, full dashboard
+ai-employee mode business         # 15 agents — recommended
+ai-employee mode power            # All 74 agents, full dashboard
 ```
 
 ### Logs & Debugging
@@ -1727,6 +1875,8 @@ rm -f ~/.openclaw/openclaw.json
 - WhatsApp `dmPolicy: allowlist` ensures only your phone can send commands
 - The discovery bot is read-only — proposals require explicit approval
 - API keys are stored locally and never sent to third parties by this software
+- The Ollama agent processes all data locally — no external API calls are made
+- The IntelligenceCore and Brain store all user memory locally under `~/.ai-employee/`
 
 ---
 
@@ -1742,13 +1892,6 @@ rm -f ~/.openclaw/openclaw.json
 
 ---
 
-## Security notes
-
-- The installer generates a local token and stores it in `~/.ai-employee/.env`.
-- Don't share `~/.ai-employee/.env` or `~/.ai-employee/config.json`.
-- Review scripts before running, especially if you modify install sources.
-- Your Anthropic API key is stored in `~/.ai-employee/.env` (chmod 600).
-- The Ollama agent processes all data locally — no external API calls are made.
 ## Keeping Your Local Copy Up to Date
 
 ### One-time sync (manual):
@@ -1791,7 +1934,7 @@ Contributions are welcome! Whether you're fixing a bug, adding a new agent skill
 
 ### Ideas for contributions
 
-- 🤖 **New agent skills** — add skills to the 147-skill library (see `runtime/agents/skills/`)
+- 🤖 **New agent skills** — add skills to the 147-skill library across 19 categories (see `runtime/config/skills_library.json`)
 - 🐛 **Bug fixes** — check the [open issues](https://github.com/F-game25/AI-EMPLOYEE/issues)
 - 📖 **Documentation** — improve guides, add examples, fix typos
 - 🌍 **Translations** — translate the README or UI to other languages
