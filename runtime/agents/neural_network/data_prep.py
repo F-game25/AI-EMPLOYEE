@@ -90,9 +90,17 @@ def _stratified_split(
     val_ratio: float,
     test_ratio: float,
     seed: int,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[
+    Tuple[np.ndarray, np.ndarray],
+    Tuple[np.ndarray, np.ndarray],
+    Tuple[np.ndarray, np.ndarray],
+]:
     """Stratified split into train/val/test.  Falls back to random if a class
-    has too few samples for stratification."""
+    has too few samples for stratification.
+
+    Returns:
+        ``(train, val, test)`` where each element is a ``(X, y)`` tuple.
+    """
     rng = np.random.default_rng(seed)
     n = len(X)
     indices = rng.permutation(n)
@@ -102,9 +110,9 @@ def _stratified_split(
     val_idx = indices[n_test : n_test + n_val]
     train_idx = indices[n_test + n_val :]
     return (
-        X[train_idx], y[train_idx],
-        X[val_idx],   y[val_idx],
-        X[test_idx],  y[test_idx],
+        (X[train_idx], y[train_idx]),
+        (X[val_idx],   y[val_idx]),
+        (X[test_idx],  y[test_idx]),
     )
 
 
