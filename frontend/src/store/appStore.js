@@ -50,6 +50,46 @@ export const useAppStore = create((set) => ({
   systemStatus: { cpu: 0, memory: 0, uptime: 0, connections: 0 },
   setSystemStatus: (s) => set({ systemStatus: s }),
 
+  // Neural Network status
+  nnStatus: {
+    available: false,
+    active: false,
+    mode: 'OFFLINE',
+    learn_step: 0,
+    buffer_size: 0,
+    last_loss: null,
+    confidence: 0,
+    device: 'cpu',
+    total_actions: 8,
+    experiences: 0,
+    bg_running: false,
+    recent_outputs: [],
+    updated_at: null,
+  },
+  setNnStatus: (s) => set({ nnStatus: s }),
+
+  // Memory Tree
+  memoryTree: {
+    total_entities: 0,
+    nodes: [],
+    recent_updates: [],
+    updated_at: null,
+  },
+  setMemoryTree: (t) => set({ memoryTree: t }),
+
+  // Doctor / System Health
+  doctorStatus: {
+    available: false,
+    grade: null,
+    overall_score: 0,
+    scores: {},
+    issues: [],
+    strengths: [],
+    last_run: null,
+    updated_at: null,
+  },
+  setDoctorStatus: (d) => set({ doctorStatus: d }),
+
   // Error
   errorMessage: null,
   setError: (msg) => set({ errorMessage: msg, appState: 'error' }),

@@ -1,6 +1,7 @@
 'use strict';
 
 const { getAgents, updateAgentStatus } = require('../agents');
+const subsystems = require('../subsystems');
 const WebSocket = require('ws');
 
 let wss = null;
@@ -17,6 +18,11 @@ const LOG_LINES = [
   { msg: '[ORCHESTRATOR] Assigning to agent...', level: 'info' },
   { msg: '[AI-5] Retrying failed extraction', level: 'warning' },
   { msg: '[AI-4] Route resolved successfully', level: 'success' },
+  { msg: '[BRAIN] Learn step completed', level: 'info' },
+  { msg: '[MEMORY] Entity updated', level: 'info' },
+  { msg: '[DOCTOR] Health check passed', level: 'success' },
+  { msg: '[NN] Action decision: route_task (conf: 0.87)', level: 'info' },
+  { msg: '[MEMORY] New fact stored for user:default', level: 'info' },
 ];
 
 const STATUSES = ['idle', 'working', 'error'];
@@ -62,13 +68,28 @@ function emitSystemStatus() {
   });
 }
 
+function emitNNStatus() {
+  broadcast('nn:status', subsystems.getNNStatus());
+}
+
+function emitMemoryUpdate() {
+  broadcast('memory:update', subsystems.getMemoryTree());
+}
+
+function emitDoctorCheck() {
+  broadcast('doctor:check', subsystems.getDoctorStatus());
+}
+
 function scheduleNext() {
   const delay = randomInt(2000, 4000);
   setTimeout(() => {
-    const type = eventIndex % 3;
+    const type = eventIndex % 6;
     if (type === 0) emitHeartbeat();
     else if (type === 1) emitAgentUpdate();
-    else emitSystemStatus();
+    else if (type === 2) emitSystemStatus();
+    else if (type === 3) emitNNStatus();
+    else if (type === 4) emitMemoryUpdate();
+    else emitDoctorCheck();
     eventIndex++;
     scheduleNext();
   }, delay);
@@ -78,4 +99,4 @@ function startHeartbeat() {
   scheduleNext();
 }
 
-module.exports = { init, broadcast, startHeartbeat };
+module.exports = { init, broadcast, startHeartbeat, emitNNStatus, emitMemoryUpdate, emitDoctorCheck };
