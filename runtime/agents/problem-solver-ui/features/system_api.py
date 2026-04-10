@@ -1,6 +1,7 @@
 """Mode Manager & Change Log API endpoints."""
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
@@ -8,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api", tags=["system"])
+_log = logging.getLogger(__name__)
 
 # Ensure runtime/ packages are importable from within features/
 _RUNTIME_DIR = Path(__file__).parent.parent.parent.parent
@@ -29,8 +31,9 @@ def get_mode():
     try:
         from core.mode_manager import get_mode_manager
         return JSONResponse(get_mode_manager().status())
-    except Exception as exc:
-        return JSONResponse({"mode": "MANUAL", "error": str(exc)})
+    except Exception:
+        _log.exception("get_mode failed")
+        return JSONResponse({"mode": "MANUAL", "error": "Unable to read mode"})
 
 
 class SetModeRequest(BaseModel):
@@ -46,8 +49,9 @@ def set_mode(body: SetModeRequest):
         return JSONResponse({"mode": new_mode, "status": "ok"})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        _log.exception("set_mode failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ── Change log endpoints ───────────────────────────────────────────────────────
@@ -69,8 +73,9 @@ def get_changelog(
             "offset": offset,
             "entries": entries,
         })
-    except Exception as exc:
-        return JSONResponse({"total": 0, "entries": [], "error": str(exc)})
+    except Exception:
+        _log.exception("get_changelog failed")
+        return JSONResponse({"total": 0, "entries": [], "error": "Unable to read changelog"})
 
 
 # ── ActionBus approval endpoints ──────────────────────────────────────────────
@@ -81,8 +86,9 @@ def list_pending_actions():
     try:
         from actions.action_bus import get_action_bus
         return JSONResponse({"pending": get_action_bus().list_pending()})
-    except Exception as exc:
-        return JSONResponse({"pending": [], "error": str(exc)})
+    except Exception:
+        _log.exception("list_pending_actions failed")
+        return JSONResponse({"pending": [], "error": "Unable to list pending actions"})
 
 
 @router.post("/actions/{action_id}/approve")
@@ -91,8 +97,9 @@ def approve_action(action_id: str):
     try:
         from actions.action_bus import get_action_bus
         return JSONResponse(get_action_bus().approve(action_id))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        _log.exception("approve_action failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/actions/{action_id}/reject")
@@ -101,8 +108,9 @@ def reject_action(action_id: str):
     try:
         from actions.action_bus import get_action_bus
         return JSONResponse(get_action_bus().reject(action_id))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        _log.exception("reject_action failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ── Skill registry ────────────────────────────────────────────────────────────
@@ -117,8 +125,9 @@ def list_skills(category: str | None = None):
             skills = registry.list_skills(category=category)
             return JSONResponse({"category": category, "skills": skills})
         return JSONResponse(registry.to_json())
-    except Exception as exc:
-        return JSONResponse({"skills": [], "error": str(exc)})
+    except Exception:
+        _log.exception("list_skills failed")
+        return JSONResponse({"skills": [], "error": "Unable to load skill registry"})
 
 
 # ── Task engine ───────────────────────────────────────────────────────────────
@@ -134,8 +143,9 @@ def run_goal(body: RunGoalRequest):
         from core.task_engine import get_task_engine
         result = get_task_engine().run_goal(body.goal)
         return JSONResponse(result)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        _log.exception("run_goal failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/tasks/recent")
@@ -144,8 +154,9 @@ def recent_tasks(limit: int = Query(20, ge=1, le=100)):
     try:
         from core.task_engine import get_task_engine
         return JSONResponse({"tasks": get_task_engine().recent_runs(limit=limit)})
-    except Exception as exc:
-        return JSONResponse({"tasks": [], "error": str(exc)})
+    except Exception:
+        _log.exception("recent_tasks failed")
+        return JSONResponse({"tasks": [], "error": "Unable to read task log"})
 
 
 # ── Money mode ────────────────────────────────────────────────────────────────
@@ -169,8 +180,9 @@ def run_content_pipeline(body: ContentPipelineRequest):
             dry_run=body.dry_run,
         )
         return JSONResponse(result)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        _log.exception("run_content_pipeline failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class AffiliateDraftRequest(BaseModel):
@@ -190,5 +202,6 @@ def affiliate_draft(body: AffiliateDraftRequest):
             output_format=body.output_format,
         )
         return JSONResponse(result)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        _log.exception("affiliate_draft failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
