@@ -315,7 +315,7 @@ class TaskEngine:
                 "success": task.success,
                 "attempts": task.attempts,
                 "score": round(task.score, 3),
-                "error": task.error,
+                "error": "Task failed" if task.error else "",
             })
 
         performance_score = round(total_score / max(len(tasks), 1), 3)
