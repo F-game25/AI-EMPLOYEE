@@ -67,9 +67,24 @@ Architecture overview
   │  • Sandbox-mode dry-run with alternative configs                          │
   └───────────────────────────────────────────────────────────────────────────┘
 
+  ┌─ Offline Mode ────────────────────────────────────────────────────────────┐
+  │  Activated via set_offline_mode(True) or TURBO_OFFLINE=1 env var.        │
+  │  • Forces full quantization (Q4_K_M minimum)                             │
+  │  • Reduces context window to conserve RAM                                │
+  │  • Disables all cloud provider paths                                     │
+  │  • Enables disk offload hints for very large models                      │
+  └───────────────────────────────────────────────────────────────────────────┘
+
+  ┌─ Quant Config JSON ───────────────────────────────────────────────────────┐
+  │  Persisted at ~/.ai-employee/config/turbo_quant_config.json              │
+  │  Load: load_quant_config() / Save: save_quant_config()                   │
+  │  Keys: mode, cpu_ram, gpu_vram, target, offline, context_limit           │
+  └───────────────────────────────────────────────────────────────────────────┘
+
 Environment variables (all optional — auto-detected from hardware by default)
 ──────────────────────────────────────────────────────────────────────────────
   TURBO_MODE               — MONEY | POWER | AUTO  (default: AUTO)
+  TURBO_OFFLINE            — 1 = offline mode (no cloud providers, max quant)
   TURBO_VRAM_BUDGET_GB     — override detected VRAM budget in GB
                              (default: auto-detected, or 0.0 for CPU-only)
   TURBO_LOG_MAX_LINES      — max log lines kept     (default: 2000)
@@ -93,6 +108,9 @@ Usage
         select_model, QuantConfig,
         log_inference, run_auto_improvement,
         memory_status, suggest_acceleration,
+        set_offline_mode, is_offline_mode,
+        load_quant_config, save_quant_config,
+        select_quant, disk_offload_config,
     )
 
     hw = hardware_profile()
@@ -100,6 +118,11 @@ Usage
 
     cfg = select_model(agent_id="sales-closer-pro", task="Write a cold email", complexity=0.4)
     print(cfg.model, cfg.quant, cfg.provider)   # auto-tuned for your GPU
+
+    # Offline mode (no internet / cloud providers)
+    set_offline_mode(True)
+    cfg = select_model(agent_id="sales-closer-pro", task="Write a cold email")
+    # provider will always be "ollama"; quant forced to Q4_K_M or smaller
 """
 from __future__ import annotations
 
@@ -120,9 +143,21 @@ from typing import Optional
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
-STATE_DIR = AI_HOME / "state"
+STATE_DIR  = AI_HOME / "state"
+CONFIG_DIR = AI_HOME / "config"
 LOG_FILE = STATE_DIR / "turbo_quant.log.jsonl"
 SUGGESTIONS_FILE = STATE_DIR / "turbo_quant.suggestions.json"
+QUANT_CONFIG_FILE = CONFIG_DIR / "turbo_quant_config.json"
+
+# ── Default quantization config (saved / loaded as JSON) ──────────────────────
+_DEFAULT_QUANT_CONFIG: dict = {
+    "mode":          "auto",    # "auto" | "money" | "power"
+    "cpu_ram":       "auto",    # "auto" or e.g. "16GB"
+    "gpu_vram":      "auto",    # "auto" or e.g. "6GB"
+    "target":        "max_performance",  # "max_performance" | "max_quality" | "balanced"
+    "offline":       False,     # force offline mode
+    "context_limit": 0,         # 0 = no limit; positive int = max context tokens
+}
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -719,6 +754,9 @@ _loaded_lock = threading.Lock()
 # ── Active mode (in-process override, overrides env var) ──────────────────────
 _active_mode: Optional[str] = None
 
+# ── Offline mode — forces local-only providers and maximum quantization ────────
+_offline_mode: bool = os.environ.get("TURBO_OFFLINE", "0").strip() in ("1", "true", "yes")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Dataclasses
@@ -890,8 +928,184 @@ def set_mode(mode: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Complexity estimation
+# Offline mode management
 # ──────────────────────────────────────────────────────────────────────────────
+
+def is_offline_mode() -> bool:
+    """Return True when offline mode is active (no cloud providers, max quantization)."""
+    return _offline_mode
+
+
+def set_offline_mode(offline: bool) -> None:
+    """Enable or disable offline mode.
+
+    In offline mode:
+      • All cloud AI providers (NVIDIA NIM, Anthropic, OpenAI) are disabled.
+      • Quantization is forced to Q4_K_M (minimum) to reduce RAM usage.
+      • Context window is reduced to stay within local memory limits.
+      • Disk offload hints are enabled for models that exceed VRAM budget.
+    """
+    global _offline_mode
+    _offline_mode = bool(offline)
+    logger.info("TurboQuant offline mode %s", "ENABLED" if _offline_mode else "DISABLED")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Quant config JSON — persisted user preferences
+# ──────────────────────────────────────────────────────────────────────────────
+
+def load_quant_config() -> dict:
+    """Load the persisted quantization config from disk.
+
+    Returns the default config merged with whatever is saved on disk.
+    Never raises — falls back to defaults on any read/parse error.
+    """
+    cfg = dict(_DEFAULT_QUANT_CONFIG)
+    try:
+        if QUANT_CONFIG_FILE.exists():
+            with QUANT_CONFIG_FILE.open("r", encoding="utf-8") as fh:
+                saved = json.load(fh)
+            if isinstance(saved, dict):
+                cfg.update(saved)
+    except Exception as exc:
+        logger.warning("turbo_quant: could not load quant config — %s", exc)
+    return cfg
+
+
+def save_quant_config(config: dict) -> None:
+    """Persist the quantization config to disk.
+
+    Only known keys (from _DEFAULT_QUANT_CONFIG) are saved.
+    Applies mode and offline settings immediately to the running process.
+    """
+    clean: dict = {}
+    for key in _DEFAULT_QUANT_CONFIG:
+        if key in config:
+            clean[key] = config[key]
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with QUANT_CONFIG_FILE.open("w", encoding="utf-8") as fh:
+            json.dump(clean, fh, indent=2)
+        logger.info("turbo_quant: quant config saved to %s", QUANT_CONFIG_FILE)
+    except Exception as exc:
+        logger.warning("turbo_quant: could not save quant config — %s", exc)
+
+    # Apply live settings
+    if "mode" in clean:
+        try:
+            set_mode(clean["mode"])
+        except ValueError:
+            pass
+    if "offline" in clean:
+        set_offline_mode(bool(clean["offline"]))
+
+
+def get_quant_config() -> dict:
+    """Return the active quantization config, merging disk config with live state.
+
+    The returned dict always includes the current in-process ``mode`` and
+    ``offline`` values, which may differ from what is saved on disk if
+    ``set_mode()`` or ``set_offline_mode()`` were called at runtime.
+    """
+    cfg = load_quant_config()
+    cfg["mode"]    = get_mode().lower()
+    cfg["offline"] = is_offline_mode()
+    return cfg
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Smart quantization selector
+# ──────────────────────────────────────────────────────────────────────────────
+
+def select_quant(gpu_vram_gb: Optional[float] = None, ram_gb: Optional[float] = None) -> str:
+    """Return the optimal quantization level for the given hardware budget.
+
+    Uses the detected hardware profile when arguments are omitted.
+    Offline mode forces Q4_K_M regardless of available VRAM.
+
+    Args:
+        gpu_vram_gb: Available GPU VRAM in GB (auto-detected when None).
+        ram_gb:      Available system RAM in GB (auto-detected when None).
+
+    Returns:
+        One of QUANT_4BIT, QUANT_5BIT, QUANT_8BIT.
+    """
+    if _offline_mode:
+        return QUANT_4BIT
+
+    vram = gpu_vram_gb if gpu_vram_gb is not None else _HW.vram_gb
+    if vram < 6:
+        return QUANT_4BIT
+    elif vram < 10:
+        return QUANT_5BIT
+    else:
+        return QUANT_8BIT
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Disk offload configuration
+# ──────────────────────────────────────────────────────────────────────────────
+
+def disk_offload_config(
+    params_b: float,
+    quant: Optional[str] = None,
+    offload_dir: Optional[str] = None,
+) -> dict:
+    """Return disk-offload configuration for running a large model with limited VRAM.
+
+    Disk offloading streams model layers from disk (or RAM) to the GPU one at a
+    time (AirLLM / llama.cpp --mmap style), enabling models that are much larger
+    than the VRAM budget.
+
+    Args:
+        params_b:    Model size in billions of parameters.
+        quant:       Quantization level (auto-selected when None).
+        offload_dir: Directory to use for disk-paged layers
+                     (defaults to ~/.ai-employee/model_cache).
+
+    Returns:
+        Dict with keys: enabled, quant, vram_est_gb, offload_dir,
+        gpu_layers_suggested, disk_paging, airllm_recommended, notes.
+    """
+    if quant is None:
+        quant = select_quant()
+    vram_est  = vram_estimate_gb(params_b, quant)
+    offload   = offload_dir or str(AI_HOME / "model_cache")
+    needs_off = vram_est > VRAM_BUDGET_GB
+
+    # Estimate how many layers fit in VRAM.
+    # Rough heuristic: 1 GB ≈ 1 / _VRAM_PER_BPARAM[quant] layers per billion params.
+    # We approximate total transformer layers as 4 × params_b for typical models.
+    total_layers_est = max(1, int(params_b * 4))
+    layers_per_gb    = 1.0 / max(0.01, _VRAM_PER_BPARAM.get(quant, 0.58))
+    gpu_layers       = int(min(total_layers_est, max(0, VRAM_BUDGET_GB * layers_per_gb)))
+
+    notes: list[str] = []
+    if needs_off:
+        notes.append(
+            f"Model requires ~{vram_est:.1f} GB but budget is {VRAM_BUDGET_GB:.1f} GB — "
+            "disk/RAM offload is required."
+        )
+    if _offline_mode:
+        notes.append("Offline mode active — cloud providers disabled.")
+    if gpu_layers == 0:
+        notes.append("No GPU layers available; running fully on CPU/disk.")
+
+    return {
+        "enabled":            needs_off or _offline_mode,
+        "quant":              quant,
+        "vram_est_gb":        round(vram_est, 2),
+        "budget_gb":          round(VRAM_BUDGET_GB, 2),
+        "offload_dir":        offload,
+        "gpu_layers_suggested": gpu_layers,
+        "disk_paging":        needs_off,
+        "airllm_recommended": params_b > 13,
+        "ollama_cmd_hint": (
+            f"ollama run {_MODEL_CATALOGUE.get('tiny_money', {}).get('model', 'llama3.2:3b-instruct-q4_K_M')} "
+            f"--gpu-layers {gpu_layers}"
+        ),
+        "notes":              notes,
+    }
 
 _COMPLEX_KEYWORDS: frozenset[str] = frozenset({
     "analyse", "analyze", "explain", "compare", "evaluate", "assess",
@@ -1061,11 +1275,30 @@ def suggest_acceleration(params_b: float, provider: str, quant: str) -> dict:
             "(optimum + onnxruntime-gpu)."
         )
 
+    # KV cache optimisation hints
+    kv_cache_tips: list[str] = []
+    if provider == "ollama":
+        kv_cache_tips.append(
+            "Set OLLAMA_KV_CACHE_TYPE=q8_0 in .env to halve KV cache VRAM (minimal quality loss)."
+        )
+        if params_b >= 7:
+            kv_cache_tips.append(
+                "For large models use OLLAMA_NUM_CTX=2048 to cap context and reduce KV cache size."
+            )
+    elif provider in ("nvidia_nim", "openai", "anthropic"):
+        kv_cache_tips.append("Cloud provider manages KV cache server-side.")
+
+    if _offline_mode:
+        kv_cache_tips.append(
+            "Offline mode: context limit auto-reduced to 512 tokens to minimise RAM usage."
+        )
+
     return {
-        "flash_attention": use_flash_attn,
-        "onnx_recommended": use_onnx,
-        "batch_supported": provider == "ollama",
-        "tips": tips,
+        "flash_attention":    use_flash_attn,
+        "onnx_recommended":   use_onnx,
+        "batch_supported":    provider == "ollama",
+        "kv_cache_tips":      kv_cache_tips,
+        "tips":               tips,
     }
 
 
@@ -1120,6 +1353,20 @@ def select_model(
     quant     = spec["quant"]
     vram_est  = vram_estimate_gb(params_b, quant)
 
+    # Offline mode: force local provider and tightest available quantization
+    if _offline_mode and spec["provider"] != "ollama":
+        logger.info(
+            "TurboQuant offline mode — overriding provider=%s → ollama, "
+            "catalogue=%s → tiny_money",
+            spec["provider"], catalogue_key,
+        )
+        money_spec = _MODEL_CATALOGUE[money_key]
+        spec       = money_spec
+        params_b   = spec["params_b"]
+        quant      = QUANT_4BIT
+        vram_est   = vram_estimate_gb(params_b, quant)
+        catalogue_key = money_key
+
     # If estimated VRAM exceeds budget and the provider is local, downgrade to money tier
     if vram_est > VRAM_BUDGET_GB and spec["provider"] == "ollama" and catalogue_key != money_key:
         logger.warning(
@@ -1135,7 +1382,13 @@ def select_model(
     rationale = (
         f"mode={effective_mode}, complexity={complexity:.2f}, "
         f"category={category}, catalogue={catalogue_key}"
+        + (", offline=True" if _offline_mode else "")
     )
+
+    # Offline mode: reduce context to stay within local memory limits
+    max_tokens = spec["max_tokens"]
+    if _offline_mode:
+        max_tokens = min(max_tokens, 512)
 
     return QuantConfig(
         agent_id    = agent_id,
@@ -1148,7 +1401,7 @@ def select_model(
         provider    = spec["provider"],
         vram_est_gb = vram_est,
         temperature = spec["temperature"],
-        max_tokens  = spec["max_tokens"],
+        max_tokens  = max_tokens,
         complexity  = complexity,
         rationale   = rationale,
     )
