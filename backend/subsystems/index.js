@@ -27,6 +27,7 @@ const state = {
     mode: 'OFFLINE',
     learn_step: 0,
     buffer_size: 0,
+    max_buffer_size: 10000,
     last_loss: null,
     confidence: 0,
     device: 'cpu',
@@ -88,7 +89,8 @@ const _simActions = [
   'classify_intent', 'extract_entities',
 ];
 
-const BUFFER_GROWTH_RATE = 7; // simulated experiences added per learn step
+const SIM_BUFFER_GROWTH_RATE = 7; // simulated experiences added per learn step
+const MAX_SIM_BUFFER_SIZE = 10000; // cap for simulated replay buffer
 
 function _simulateNN() {
   _simStep += 1;
@@ -104,8 +106,9 @@ function _simulateNN() {
   };
 
   state.nn.learn_step = _simStep;
-  state.nn.buffer_size = Math.min(_simStep * BUFFER_GROWTH_RATE, 10000);
-  state.nn.experiences = _simStep * BUFFER_GROWTH_RATE;
+  state.nn.buffer_size = Math.min(_simStep * SIM_BUFFER_GROWTH_RATE, MAX_SIM_BUFFER_SIZE);
+  state.nn.experiences = _simStep * SIM_BUFFER_GROWTH_RATE;
+  state.nn.max_buffer_size = MAX_SIM_BUFFER_SIZE;
   state.nn.confidence = Math.round(confidence * 1000) / 1000;
   state.nn.last_loss = Math.round(loss * 10000) / 10000;
   state.nn.bg_running = true;
@@ -184,6 +187,7 @@ async function syncNNFromPython() {
       state.nn.mode = data.mode || 'ONLINE';
       state.nn.learn_step = data.learn_step || 0;
       state.nn.buffer_size = data.buffer_size || 0;
+      state.nn.max_buffer_size = data.replay_buffer_size || data.max_buffer_size || 10000;
       state.nn.experiences = data.experiences || 0;
       state.nn.last_loss = data.last_loss !== undefined ? data.last_loss : null;
       state.nn.confidence = data.avg_reward || 0;

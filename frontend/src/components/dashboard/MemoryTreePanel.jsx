@@ -129,7 +129,6 @@ export default function MemoryTreePanel() {
                   <span
                     className="font-mono truncate"
                     style={{ fontSize: '9px', color: 'var(--text-muted)' }}
-                    aria-hidden="true"
                   >
                     {recentUpdate.entity_id} &#8594; {recentUpdate.key}
                   </span>

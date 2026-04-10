@@ -50,7 +50,8 @@ export default function NeuralNetworkPanel() {
   const modeColor = MODE_COLORS[nn.mode] || 'var(--text-muted)'
   const confPct = Math.round((nn.confidence || 0) * 100)
   const bufferSize = nn.buffer_size || 0
-  const bufferPct = bufferSize > 0 ? Math.round((bufferSize / 10000) * 100) : 0
+  const maxBufferSize = nn.max_buffer_size || 10000
+  const bufferPct = bufferSize > 0 ? Math.round((bufferSize / maxBufferSize) * 100) : 0
   const learnStep = nn.learn_step || 0
   const experiences = nn.experiences || 0
 
