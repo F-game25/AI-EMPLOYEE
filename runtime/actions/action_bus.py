@@ -19,11 +19,14 @@ Usage::
 """
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
 import uuid
 from typing import Any, Callable
+
+_log = logging.getLogger(__name__)
 
 
 class ActionBus:
@@ -191,8 +194,9 @@ class ActionBus:
         if executor:
             try:
                 result = executor(record["payload"])
-            except Exception as exc:
-                return {"status": "error", "action_id": action_id, "error": str(exc)}
+            except Exception:
+                _log.exception("Executor failed for approved action %s", action_id)
+                return {"status": "error", "action_id": action_id, "error": "Execution failed"}
 
         try:
             from core.change_log import get_changelog
