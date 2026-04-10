@@ -4,6 +4,7 @@
 
 [run]
 source =
+    runtime/core/skill_registry.py
     runtime/agents/utils.py
     runtime/agents/ascend-forge/ascend_forge.py
     runtime/agents/turbo-quant/turbo_quant.py
