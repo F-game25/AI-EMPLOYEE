@@ -508,3 +508,225 @@ class TestInferenceTimer:
             pass
         entries = tq.read_recent_logs(n=5)
         assert any(e.get("agent_id") == "timer-log" for e in entries)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Offline mode management
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestOfflineMode:
+    @pytest.fixture(autouse=True)
+    def reset_offline(self, monkeypatch):
+        """Ensure offline mode is off before and after each test."""
+        monkeypatch.setattr(tq, "_offline_mode", False)
+        yield
+        monkeypatch.setattr(tq, "_offline_mode", False)
+
+    def test_default_offline_is_false(self, monkeypatch):
+        monkeypatch.delenv("TURBO_OFFLINE", raising=False)
+        assert tq.is_offline_mode() is False
+
+    def test_set_offline_true(self):
+        tq.set_offline_mode(True)
+        assert tq.is_offline_mode() is True
+
+    def test_set_offline_false(self):
+        tq.set_offline_mode(True)
+        tq.set_offline_mode(False)
+        assert tq.is_offline_mode() is False
+
+    def test_offline_forces_ollama_provider(self):
+        tq.set_offline_mode(True)
+        # Any category whose default would be cloud should fall back to ollama
+        cfg = tq.select_model(category="sales")
+        assert cfg.provider == "ollama"
+
+    def test_offline_forces_q4_quant(self):
+        tq.set_offline_mode(True)
+        cfg = tq.select_model(category="reasoning")
+        assert cfg.quant == tq.QUANT_4BIT
+
+    def test_offline_reduces_context(self):
+        tq.set_offline_mode(True)
+        cfg = tq.select_model(category="general", complexity=1.0)
+        assert cfg.max_tokens <= 512
+
+    def test_offline_rationale_mentions_offline(self):
+        tq.set_offline_mode(True)
+        cfg = tq.select_model(category="general")
+        assert "offline=True" in cfg.rationale
+
+    def test_online_rationale_no_offline_tag(self):
+        tq.set_offline_mode(False)
+        cfg = tq.select_model(category="general")
+        assert "offline=True" not in cfg.rationale
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Quant config JSON
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestQuantConfig:
+    @pytest.fixture(autouse=True)
+    def patch_config(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        monkeypatch.setattr(tq, "CONFIG_DIR",       config_dir)
+        monkeypatch.setattr(tq, "QUANT_CONFIG_FILE", config_dir / "turbo_quant_config.json")
+        monkeypatch.setattr(tq, "_offline_mode", False)
+        monkeypatch.setattr(tq, "_active_mode", None)
+        yield
+
+    def test_load_returns_defaults_when_no_file(self):
+        cfg = tq.load_quant_config()
+        assert isinstance(cfg, dict)
+        for key in tq._DEFAULT_QUANT_CONFIG:
+            assert key in cfg
+
+    def test_save_and_load_roundtrip(self):
+        tq.save_quant_config({"mode": "money", "offline": False})
+        loaded = tq.load_quant_config()
+        assert loaded["mode"] == "money"
+
+    def test_save_applies_mode_live(self):
+        tq.save_quant_config({"mode": "power"})
+        assert tq.get_mode() == "POWER"
+
+    def test_save_applies_offline_live(self):
+        tq.save_quant_config({"offline": True})
+        assert tq.is_offline_mode() is True
+
+    def test_get_quant_config_reflects_live_mode(self):
+        tq.set_mode("MONEY")
+        cfg = tq.get_quant_config()
+        assert cfg["mode"] == "money"
+
+    def test_get_quant_config_reflects_offline(self):
+        tq.set_offline_mode(True)
+        cfg = tq.get_quant_config()
+        assert cfg["offline"] is True
+
+    def test_load_ignores_unknown_keys(self):
+        tq.QUANT_CONFIG_FILE.write_text(
+            '{"mode": "auto", "unknown_key": 42}', encoding="utf-8"
+        )
+        cfg = tq.load_quant_config()
+        assert "unknown_key" not in tq._DEFAULT_QUANT_CONFIG or cfg.get("unknown_key") == 42
+
+    def test_load_survives_corrupt_json(self):
+        tq.QUANT_CONFIG_FILE.write_text("NOT JSON", encoding="utf-8")
+        cfg = tq.load_quant_config()
+        assert isinstance(cfg, dict)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Smart quant selector
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestSelectQuant:
+    @pytest.fixture(autouse=True)
+    def reset_offline(self, monkeypatch):
+        monkeypatch.setattr(tq, "_offline_mode", False)
+        yield
+
+    def test_low_vram_returns_q4(self):
+        assert tq.select_quant(gpu_vram_gb=2.0) == tq.QUANT_4BIT
+
+    def test_medium_vram_returns_q5(self):
+        assert tq.select_quant(gpu_vram_gb=8.0) == tq.QUANT_5BIT
+
+    def test_high_vram_returns_q8(self):
+        assert tq.select_quant(gpu_vram_gb=12.0) == tq.QUANT_8BIT
+
+    def test_boundary_below_6_returns_q4(self):
+        assert tq.select_quant(gpu_vram_gb=5.9) == tq.QUANT_4BIT
+
+    def test_boundary_exactly_6_returns_q5(self):
+        assert tq.select_quant(gpu_vram_gb=6.0) == tq.QUANT_5BIT
+
+    def test_boundary_exactly_10_returns_q8(self):
+        assert tq.select_quant(gpu_vram_gb=10.0) == tq.QUANT_8BIT
+
+    def test_offline_always_returns_q4(self):
+        tq.set_offline_mode(True)
+        for vram in (0.0, 6.0, 8.0, 16.0):
+            assert tq.select_quant(gpu_vram_gb=vram) == tq.QUANT_4BIT
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Disk offload config
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestDiskOffloadConfig:
+    @pytest.fixture(autouse=True)
+    def reset_offline(self, monkeypatch):
+        monkeypatch.setattr(tq, "_offline_mode", False)
+        yield
+
+    def test_returns_dict(self):
+        result = tq.disk_offload_config(7.0)
+        assert isinstance(result, dict)
+
+    def test_has_required_keys(self):
+        result = tq.disk_offload_config(7.0)
+        for key in ("enabled", "quant", "vram_est_gb", "budget_gb",
+                    "offload_dir", "gpu_layers_suggested", "disk_paging",
+                    "airllm_recommended", "notes"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_large_model_enables_disk_paging(self, monkeypatch):
+        monkeypatch.setattr(tq, "VRAM_BUDGET_GB", 4.0)
+        result = tq.disk_offload_config(70.0, quant=tq.QUANT_4BIT)
+        assert result["disk_paging"] is True
+        assert result["enabled"] is True
+
+    def test_small_model_no_disk_paging(self, monkeypatch):
+        monkeypatch.setattr(tq, "VRAM_BUDGET_GB", 24.0)
+        result = tq.disk_offload_config(3.0, quant=tq.QUANT_4BIT)
+        assert result["disk_paging"] is False
+
+    def test_offline_mode_always_enabled(self, monkeypatch):
+        monkeypatch.setattr(tq, "_offline_mode", True)
+        monkeypatch.setattr(tq, "VRAM_BUDGET_GB", 24.0)
+        result = tq.disk_offload_config(1.0, quant=tq.QUANT_4BIT)
+        assert result["enabled"] is True
+
+    def test_airllm_recommended_for_large_models(self):
+        result = tq.disk_offload_config(30.0)
+        assert result["airllm_recommended"] is True
+
+    def test_airllm_not_recommended_for_small_models(self):
+        result = tq.disk_offload_config(3.0)
+        assert result["airllm_recommended"] is False
+
+    def test_custom_offload_dir(self):
+        result = tq.disk_offload_config(7.0, offload_dir="/tmp/models")
+        assert result["offload_dir"] == "/tmp/models"
+
+    def test_notes_list(self):
+        result = tq.disk_offload_config(7.0)
+        assert isinstance(result["notes"], list)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# suggest_acceleration — KV cache tips
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestSuggestAccelerationKvCache:
+    def test_kv_cache_tips_present(self):
+        result = tq.suggest_acceleration(7.0, "ollama", tq.QUANT_4BIT)
+        assert "kv_cache_tips" in result
+
+    def test_ollama_kv_cache_tip_mentions_env_var(self):
+        result = tq.suggest_acceleration(7.0, "ollama", tq.QUANT_4BIT)
+        assert any("OLLAMA_KV_CACHE_TYPE" in t for t in result["kv_cache_tips"])
+
+    def test_cloud_provider_kv_cache_tip(self):
+        result = tq.suggest_acceleration(7.0, "openai", tq.QUANT_FP16)
+        assert any("server-side" in t for t in result["kv_cache_tips"])
+
+    def test_offline_kv_cache_note(self, monkeypatch):
+        monkeypatch.setattr(tq, "_offline_mode", True)
+        result = tq.suggest_acceleration(7.0, "ollama", tq.QUANT_4BIT)
+        assert any("Offline" in t for t in result["kv_cache_tips"])
+        monkeypatch.setattr(tq, "_offline_mode", False)
