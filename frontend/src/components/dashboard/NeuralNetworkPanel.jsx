@@ -24,15 +24,35 @@ function StatRow({ label, value, highlight }) {
   )
 }
 
+function MiniBar({ pct, color }) {
+  return (
+    <div
+      style={{
+        height: '3px',
+        background: 'rgba(255,255,255,0.06)',
+        borderRadius: '2px',
+        overflow: 'hidden',
+      }}
+    >
+      <motion.div
+        animate={{ width: `${Math.min(pct, 100)}%` }}
+        transition={{ duration: 0.6 }}
+        style={{ height: '100%', background: color, borderRadius: '2px' }}
+      />
+    </div>
+  )
+}
+
 export default function NeuralNetworkPanel() {
   const nn = useAppStore(s => s.nnStatus)
   const [expanded, setExpanded] = useState(true)
 
   const modeColor = MODE_COLORS[nn.mode] || 'var(--text-muted)'
   const confPct = Math.round((nn.confidence || 0) * 100)
-  const bufferPct = nn.buffer_size > 0
-    ? Math.round((nn.buffer_size / 10000) * 100)
-    : 0
+  const bufferSize = nn.buffer_size || 0
+  const bufferPct = bufferSize > 0 ? Math.round((bufferSize / 10000) * 100) : 0
+  const learnStep = nn.learn_step || 0
+  const experiences = nn.experiences || 0
 
   return (
     <div
@@ -94,20 +114,7 @@ export default function NeuralNetworkPanel() {
                     {confPct}%
                   </span>
                 </div>
-                <div
-                  style={{
-                    height: '3px',
-                    background: 'rgba(255,255,255,0.06)',
-                    borderRadius: '2px',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <motion.div
-                    animate={{ width: `${confPct}%` }}
-                    transition={{ duration: 0.6 }}
-                    style={{ height: '100%', background: 'var(--gold)', borderRadius: '2px' }}
-                  />
-                </div>
+                <MiniBar pct={confPct} color="var(--gold)" />
               </div>
 
               {/* Buffer bar */}
@@ -117,38 +124,21 @@ export default function NeuralNetworkPanel() {
                     REPLAY BUFFER
                   </span>
                   <span className="font-mono" style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
-                    {nn.buffer_size.toLocaleString()}
+                    {bufferSize.toLocaleString()}
                   </span>
                 </div>
-                <div
-                  style={{
-                    height: '3px',
-                    background: 'rgba(255,255,255,0.06)',
-                    borderRadius: '2px',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <motion.div
-                    animate={{ width: `${Math.min(bufferPct, 100)}%` }}
-                    transition={{ duration: 0.6 }}
-                    style={{
-                      height: '100%',
-                      background: 'rgba(212,175,55,0.5)',
-                      borderRadius: '2px',
-                    }}
-                  />
-                </div>
+                <MiniBar pct={bufferPct} color="rgba(212,175,55,0.5)" />
               </div>
 
               {/* Stats */}
               <div style={{ borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: '6px' }}>
-                <StatRow label="LEARN STEP" value={nn.learn_step.toLocaleString()} highlight />
-                <StatRow label="EXPERIENCES" value={nn.experiences.toLocaleString()} />
+                <StatRow label="LEARN STEP" value={learnStep.toLocaleString()} highlight />
+                <StatRow label="EXPERIENCES" value={experiences.toLocaleString()} />
                 <StatRow
                   label="LOSS"
-                  value={nn.last_loss !== null ? nn.last_loss.toFixed(4) : '—'}
+                  value={nn.last_loss !== null && nn.last_loss !== undefined ? nn.last_loss.toFixed(4) : '—'}
                 />
-                <StatRow label="DEVICE" value={nn.device.toUpperCase()} />
+                <StatRow label="DEVICE" value={(nn.device || 'cpu').toUpperCase()} />
                 <StatRow label="BG LOOP" value={nn.bg_running ? '● ACTIVE' : '○ IDLE'} />
               </div>
 

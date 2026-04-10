@@ -10,6 +10,7 @@ const orchestrator = require('./orchestrator');
 const broadcaster = require('./events/broadcaster');
 const { getAgents } = require('./agents');
 const subsystems = require('./subsystems');
+const { classifyMessage } = require('./routing');
 
 const PORT = process.env.PORT || 3001;
 
@@ -65,24 +66,27 @@ wss.on('connection', (ws) => {
     try {
       const parsed = JSON.parse(raw);
       if (parsed.type === 'chat' && parsed.message) {
-        const msg = parsed.message.toLowerCase();
+        const target = classifyMessage(parsed.message);
 
-        // Route to relevant subsystem based on message content
-        if (/brain|neural|nn|learn|network|decision|confidence|loss/.test(msg)) {
+        if (target === 'nn') {
           const nn = subsystems.getNNStatus();
+          const lastAction = (nn.recent_outputs && nn.recent_outputs[0]) ? nn.recent_outputs[0].action : 'N/A';
           broadcaster.broadcast('orchestrator:message', {
-            message: `[NEURAL BRAIN] Status: ${nn.mode} | Step: ${nn.learn_step} | Buffer: ${nn.buffer_size} | Confidence: ${(nn.confidence * 100).toFixed(1)}% | Last action: ${nn.recent_outputs[0]?.action || 'N/A'}`,
+            message: `[NEURAL BRAIN] Status: ${nn.mode} | Step: ${nn.learn_step} | Buffer: ${nn.buffer_size} | Confidence: ${(nn.confidence * 100).toFixed(1)}% | Last action: ${lastAction}`,
             from: 'NEURAL-BRAIN',
             subsystem: 'nn',
           });
-        } else if (/memory|remember|know|entity|fact|store/.test(msg)) {
+        } else if (target === 'memory') {
           const mem = subsystems.getMemoryTree();
+          const lastUpdate = (mem.recent_updates && mem.recent_updates[0])
+            ? `${mem.recent_updates[0].entity_id} \u2192 ${mem.recent_updates[0].key}`
+            : 'none';
           broadcaster.broadcast('orchestrator:message', {
-            message: `[MEMORY TREE] ${mem.total_entities} entities stored. Recent update: ${mem.recent_updates[0] ? `${mem.recent_updates[0].entity_id} → ${mem.recent_updates[0].key}` : 'none'}`,
+            message: `[MEMORY TREE] ${mem.total_entities} entities stored. Recent update: ${lastUpdate}`,
             from: 'MEMORY-TREE',
             subsystem: 'memory',
           });
-        } else if (/doctor|health|check|diagnos|status|grade|score/.test(msg)) {
+        } else if (target === 'doctor') {
           const dr = subsystems.getDoctorStatus();
           broadcaster.broadcast('orchestrator:message', {
             message: `[DOCTOR] Grade: ${dr.grade || 'N/A'} | Score: ${dr.overall_score}/100 | Issues: ${dr.issues.length} | Strengths: ${dr.strengths.length}`,
