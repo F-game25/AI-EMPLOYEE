@@ -24,6 +24,8 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 
 import torch
 
+from brain.web_knowledge_collector import WebKnowledgeCollector
+
 logger = logging.getLogger("brain.collector")
 
 # ── Project root ─────────────────────────────────────────────────────────────
@@ -316,6 +318,7 @@ class ExperienceCollector:
     ) -> None:
         self.online  = OnlineExperienceCollector(input_size, output_size)
         self.offline = OfflineExperienceCollector(input_size, output_size)
+        self.web     = WebKnowledgeCollector(input_size, output_size)
         self._push   = push_fn
         self.is_online: bool = False
 
@@ -330,6 +333,7 @@ class ExperienceCollector:
         if self.is_online:
             experiences = self.online.collect(max_items)
             experiences += self.online.collect_prs(max_items // 3)
+            experiences += self.web.collect(max_items=max_items // 4)
             mode = "online"
         else:
             experiences = self.offline.collect(max_items)
