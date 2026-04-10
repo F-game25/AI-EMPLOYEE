@@ -134,7 +134,14 @@ def _is_online() -> bool:
 
     Delegates to hybrid_mode.is_online() when available; falls back to True
     so that existing behaviour is preserved when the module is absent.
+    Also respects TurboQuant offline mode when turbo_quant is loaded.
     """
+    if _turbo_quant is not None:
+        try:
+            if _turbo_quant.is_offline_mode():
+                return False
+        except Exception:
+            pass
     if _hybrid_mode is not None:
         try:
             return _hybrid_mode.is_online()
@@ -756,6 +763,43 @@ def query_ai_auto(
     return result
 
 
+def _turbo_log(result: dict, cfg, prompt: str) -> None:
+    """Log one inference event to TurboQuant when the module is available.
+
+    Silently skips when turbo_quant is not loaded or logging fails.
+    """
+    if _turbo_quant is None:
+        return
+    try:
+        provider = result.get("provider", "")
+        model    = result.get("model", "")
+        error    = result.get("error") or ""
+        quant    = cfg.quant    if cfg is not None else ""
+        category = cfg.category if cfg is not None else "general"
+        mode     = cfg.mode     if cfg is not None else ""
+        # Rough token estimate when usage dict is not available
+        usage    = result.get("usage") or {}
+        prompt_tokens   = usage.get("prompt_tokens",     max(1, len(prompt.split())))
+        response_tokens = usage.get("completion_tokens", max(1, len(result.get("answer", "").split())))
+        _turbo_quant.log_inference(
+            agent_id        = "ai_router",
+            task_category   = category,
+            mode            = mode,
+            model           = model,
+            quant           = quant,
+            provider        = provider,
+            prompt_tokens   = prompt_tokens,
+            response_tokens = response_tokens,
+            error           = error,
+        )
+        logger.debug(
+            "ai_router: TurboQuant logged inference provider=%s model=%s quant=%s",
+            provider, model, quant,
+        )
+    except Exception as exc:
+        logger.debug("ai_router: turbo_quant.log_inference failed — %s", exc)
+
+
 def query_ai(
     prompt: str,
     system_prompt: str = "",
@@ -775,6 +819,9 @@ def query_ai(
     If ACTIVE_AI_PROVIDER is set, only that provider is tried (sub-agent
     inheritance: all agents follow the same provider as the main AI).
 
+    TurboQuant integration: when turbo_quant is available, selects the optimal
+    quantized Ollama model for the task and logs each inference event.
+
     Args:
         prompt: The user message or question.
         system_prompt: Optional system/role instructions for the AI.
@@ -791,24 +838,47 @@ def query_ai(
     """
     history = history or []
 
+    # ── TurboQuant: select optimal model config for this query ────────────────
+    _tq_cfg = None
+    if _turbo_quant is not None:
+        try:
+            _tq_cfg = _turbo_quant.select_model(task=prompt, category="general")
+            logger.debug(
+                "ai_router: TurboQuant selected model=%s quant=%s provider=%s",
+                _tq_cfg.model, _tq_cfg.quant, _tq_cfg.provider,
+            )
+        except Exception as exc:
+            logger.debug("ai_router: turbo_quant.select_model failed — %s", exc)
+            _tq_cfg = None
+
     # ── Provider inheritance: force a single provider for all sub-agents ─────
     if ACTIVE_AI_PROVIDER:
-        return _try_forced_provider(ACTIVE_AI_PROVIDER, prompt, system_prompt, history)
+        result = _try_forced_provider(ACTIVE_AI_PROVIDER, prompt, system_prompt, history)
+        _turbo_log(result, _tq_cfg, prompt)
+        return result
 
     # ── Layer 1: Free / Local ─────────────────────────────────────────────────
-    # 1a. Ollama (local, completely free)
-    result = _try_ollama(prompt, system_prompt, history)
+    # 1a. Ollama — use TurboQuant model when available and provider is ollama
+    _tq_ollama_model = (
+        _tq_cfg.model
+        if (_tq_cfg is not None and _tq_cfg.provider == "ollama")
+        else None
+    )
+    result = _try_ollama(prompt, system_prompt, history, model=_tq_ollama_model)
     if result:
+        _turbo_log(result, _tq_cfg, prompt)
         return result
 
     # 1b. Gemma (local via Ollama or Google AI Studio free tier)
     result = _try_gemma(prompt, system_prompt, history)
     if result:
+        _turbo_log(result, _tq_cfg, prompt)
         return result
 
     # 1c. NVIDIA NIM (free-tier cloud — Nemotron reasoning model)
     result = _try_nvidia_nim(prompt, system_prompt, history)
     if result:
+        _turbo_log(result, _tq_cfg, prompt)
         return result
 
     # ── Layer 2: Paid Cloud ───────────────────────────────────────────────────
@@ -817,15 +887,17 @@ def query_ai(
     # 2a. Anthropic Claude
     result = _try_anthropic(prompt, system_prompt, history)
     if result:
+        _turbo_log(result, _tq_cfg, prompt)
         return result
 
     # 2b. OpenAI (last resort)
     result = _try_openai(prompt, system_prompt, history)
     if result:
+        _turbo_log(result, _tq_cfg, prompt)
         return result
 
     # All providers failed
-    return {
+    error_result = {
         "answer": "",
         "provider": "error",
         "model": "",
@@ -837,6 +909,8 @@ def query_ai(
         ),
         "usage": None,
     }
+    _turbo_log(error_result, _tq_cfg, prompt)
+    return error_result
 
 
 def is_ollama_available() -> bool:
@@ -970,9 +1044,28 @@ def query_ai_for_agent(
     history = history or []
     agent_key = agent_type.lower()
 
+    # ── TurboQuant: select optimal model config for this agent/task ───────────
+    _tq_cfg = None
+    if _turbo_quant is not None:
+        try:
+            _tq_cfg = _turbo_quant.select_model(
+                agent_id = agent_key,
+                task     = prompt,
+                category = agent_key,
+            )
+            logger.debug(
+                "ai_router: TurboQuant selected model=%s quant=%s provider=%s for agent=%s",
+                _tq_cfg.model, _tq_cfg.quant, _tq_cfg.provider, agent_type,
+            )
+        except Exception as exc:
+            logger.debug("ai_router: turbo_quant.select_model failed for agent=%s — %s", agent_type, exc)
+            _tq_cfg = None
+
     # ── Provider inheritance: honour ACTIVE_AI_PROVIDER for sub-agents ────────
     if ACTIVE_AI_PROVIDER:
-        return _try_forced_provider(ACTIVE_AI_PROVIDER, prompt, system_prompt, history)
+        result = _try_forced_provider(ACTIVE_AI_PROVIDER, prompt, system_prompt, history)
+        _turbo_log(result, _tq_cfg, prompt)
+        return result
 
     routing = _route_for_agent(None, agent_key)
     preferred_provider = routing["provider"]
@@ -981,10 +1074,15 @@ def query_ai_for_agent(
     # ── Turbo Mode override ───────────────────────────────────────────────────
     turbo_mode = _turbo_mode()
     if turbo_mode == "MONEY":
-        # MONEY mode: local Ollama only — fastest and cheapest
+        # MONEY mode: local Ollama only — use TurboQuant's quantized model
         logger.debug("ai_router: TURBO MONEY mode — forcing Ollama-only for agent=%s", agent_type)
-        result = _try_ollama(prompt, system_prompt, history)
-        return result or _error_response()
+        _tq_ollama_model = (
+            _tq_cfg.model if (_tq_cfg is not None and _tq_cfg.provider == "ollama") else None
+        )
+        result = _try_ollama(prompt, system_prompt, history, model=_tq_ollama_model)
+        result = result or _error_response()
+        _turbo_log(result, _tq_cfg, prompt)
+        return result
 
     if turbo_mode == "POWER":
         # POWER mode: skip Layer 1, go straight to the best provider for this agent
@@ -995,22 +1093,31 @@ def query_ai_for_agent(
         if preferred_provider == "nvidia_nim":
             result = _try_nvidia_nim(prompt, system_prompt, history, model=preferred_model)
             if result:
+                _turbo_log(result, _tq_cfg, prompt)
                 return result
         elif preferred_provider == "openai":
             result = _try_openai(prompt, system_prompt, history, model=preferred_model)
             if result:
+                _turbo_log(result, _tq_cfg, prompt)
                 return result
             result = _try_anthropic(prompt, system_prompt, history)
-            return result or _error_response()
+            result = result or _error_response()
+            _turbo_log(result, _tq_cfg, prompt)
+            return result
         elif preferred_provider == "anthropic":
             result = _try_anthropic(prompt, system_prompt, history, model=preferred_model)
             if result:
+                _turbo_log(result, _tq_cfg, prompt)
                 return result
             result = _try_openai(prompt, system_prompt, history)
-            return result or _error_response()
+            result = result or _error_response()
+            _turbo_log(result, _tq_cfg, prompt)
+            return result
         # nvidia_nim fallback → cloud
         result = _try_anthropic(prompt, system_prompt, history) or _try_openai(prompt, system_prompt, history)
-        return result or _error_response()
+        result = result or _error_response()
+        _turbo_log(result, _tq_cfg, prompt)
+        return result
 
     logger.debug(
         "ai_router: agent_type=%s → preferred_provider=%s model=%s LOCAL_AI_FIRST=%s turbo=%s",
@@ -1019,9 +1126,13 @@ def query_ai_for_agent(
 
     if LOCAL_AI_FIRST:
         # ── Layer 1: Free / Local ─────────────────────────────────────────────
-        # 1a. Ollama — always first, completely free and private
-        result = _try_ollama(prompt, system_prompt, history)
+        # 1a. Ollama — use TurboQuant model when available and provider is ollama
+        _tq_ollama_model = (
+            _tq_cfg.model if (_tq_cfg is not None and _tq_cfg.provider == "ollama") else None
+        )
+        result = _try_ollama(prompt, system_prompt, history, model=_tq_ollama_model)
         if result:
+            _turbo_log(result, _tq_cfg, prompt)
             return result
 
         # 1b. Gemma — Google open-source, free and local.
@@ -1029,6 +1140,7 @@ def query_ai_for_agent(
         gemma_model = preferred_model if preferred_provider == "gemma" else None
         result = _try_gemma(prompt, system_prompt, history, model=gemma_model)
         if result:
+            _turbo_log(result, _tq_cfg, prompt)
             return result
 
         # 1c. NVIDIA NIM — free-tier cloud.
@@ -1037,6 +1149,7 @@ def query_ai_for_agent(
         nim_model = preferred_model if preferred_provider == "nvidia_nim" else None
         result = _try_nvidia_nim(prompt, system_prompt, history, model=nim_model)
         if result:
+            _turbo_log(result, _tq_cfg, prompt)
             return result
 
         # ── Layer 2: Paid Cloud ───────────────────────────────────────────────
@@ -1049,22 +1162,31 @@ def query_ai_for_agent(
         if preferred_provider == "openai":
             result = _try_openai(prompt, system_prompt, history, model=preferred_model)
             if result:
+                _turbo_log(result, _tq_cfg, prompt)
                 return result
             # Remaining cloud fallback
-            return _try_anthropic(prompt, system_prompt, history) or _error_response()
+            result = _try_anthropic(prompt, system_prompt, history) or _error_response()
+            _turbo_log(result, _tq_cfg, prompt)
+            return result
 
         if preferred_provider == "anthropic":
             result = _try_anthropic(prompt, system_prompt, history, model=preferred_model)
             if result:
+                _turbo_log(result, _tq_cfg, prompt)
                 return result
             # Remaining cloud fallback
-            return _try_openai(prompt, system_prompt, history) or _error_response()
+            result = _try_openai(prompt, system_prompt, history) or _error_response()
+            _turbo_log(result, _tq_cfg, prompt)
+            return result
 
         # Gemma / NIM / Ollama preferred (all already exhausted in Layer 1): try cloud
         result = _try_anthropic(prompt, system_prompt, history)
         if result:
+            _turbo_log(result, _tq_cfg, prompt)
             return result
-        return _try_openai(prompt, system_prompt, history) or _error_response()
+        result = _try_openai(prompt, system_prompt, history) or _error_response()
+        _turbo_log(result, _tq_cfg, prompt)
+        return result
 
     # ── Legacy mode: preferred-provider-first ────────────────────────────────
     result = None
@@ -1090,9 +1212,13 @@ def query_ai_for_agent(
             logger.debug("ai_router: agent=%s used Anthropic/%s", agent_type, preferred_model)
 
     elif preferred_provider == "ollama":
-        result = _try_ollama(prompt, system_prompt, history)
+        _tq_ollama_model = (
+            _tq_cfg.model if (_tq_cfg is not None and _tq_cfg.provider == "ollama") else None
+        )
+        result = _try_ollama(prompt, system_prompt, history, model=_tq_ollama_model)
 
     if result:
+        _turbo_log(result, _tq_cfg, prompt)
         return result
 
     logger.debug(
