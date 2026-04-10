@@ -1202,7 +1202,7 @@ class TestFeatureRegistration:
     def test_all_routers_importable(self):
         mod = self._import_features()
         assert hasattr(mod, "ALL_ROUTERS")
-        assert len(mod.ALL_ROUTERS) == 15
+        assert len(mod.ALL_ROUTERS) == 16
 
     def test_all_routers_have_correct_type(self):
         from fastapi.routing import APIRouter
