@@ -123,13 +123,15 @@ export default function MemoryTreePanel() {
                 <div
                   className="flex items-center gap-1 mb-2 px-2 py-1 rounded"
                   style={{ background: 'rgba(212,175,55,0.05)', border: '1px solid rgba(212,175,55,0.1)' }}
+                  aria-label={`Recent update: ${recentUpdate.entity_id} modified ${recentUpdate.key}`}
                 >
                   <span style={{ fontSize: '9px', color: 'var(--gold)' }}>● LIVE</span>
                   <span
                     className="font-mono truncate"
                     style={{ fontSize: '9px', color: 'var(--text-muted)' }}
+                    aria-hidden="true"
                   >
-                    {recentUpdate.entity_id} → {recentUpdate.key}
+                    {recentUpdate.entity_id} &#8594; {recentUpdate.key}
                   </span>
                 </div>
               )}

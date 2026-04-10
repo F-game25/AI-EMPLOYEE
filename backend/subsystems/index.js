@@ -88,6 +88,8 @@ const _simActions = [
   'classify_intent', 'extract_entities',
 ];
 
+const BUFFER_GROWTH_RATE = 7; // simulated experiences added per learn step
+
 function _simulateNN() {
   _simStep += 1;
   const confidence = 0.55 + (Math.sin(_simStep * 0.3) * 0.3 + 0.3);
@@ -102,8 +104,8 @@ function _simulateNN() {
   };
 
   state.nn.learn_step = _simStep;
-  state.nn.buffer_size = Math.min(_simStep * 7, 10000);
-  state.nn.experiences = _simStep * 7;
+  state.nn.buffer_size = Math.min(_simStep * BUFFER_GROWTH_RATE, 10000);
+  state.nn.experiences = _simStep * BUFFER_GROWTH_RATE;
   state.nn.confidence = Math.round(confidence * 1000) / 1000;
   state.nn.last_loss = Math.round(loss * 10000) / 10000;
   state.nn.bg_running = true;

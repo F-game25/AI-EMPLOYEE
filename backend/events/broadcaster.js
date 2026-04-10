@@ -80,10 +80,12 @@ function emitDoctorCheck() {
   broadcast('doctor:check', subsystems.getDoctorStatus());
 }
 
+const EVENT_TYPE_COUNT = 6; // heartbeat, agentUpdate, systemStatus, nnStatus, memoryUpdate, doctorCheck
+
 function scheduleNext() {
   const delay = randomInt(2000, 4000);
   setTimeout(() => {
-    const type = eventIndex % 6;
+    const type = eventIndex % EVENT_TYPE_COUNT;
     if (type === 0) emitHeartbeat();
     else if (type === 1) emitAgentUpdate();
     else if (type === 2) emitSystemStatus();
