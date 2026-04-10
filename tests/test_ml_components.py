@@ -471,11 +471,25 @@ class TestQuantize:
             out = q_model(sample_inputs)
         assert out.shape == (16, 4)
 
-    def test_static_quantize_returns_model(self, small_model, sample_inputs):
+    def test_static_quantize_returns_model(self, sample_inputs):
         from neural_network.quantize import static_quantize
 
-        # static_quantize wraps the model; output should be callable
-        q_model = static_quantize(small_model, sample_inputs, backend="qnnpack")
+        # BatchNorm1d is not supported by PyTorch's QuantizedCPU backend,
+        # so use a plain Linear model for static quantization testing.
+        class _LinearModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Sequential(
+                    torch.nn.Linear(16, 32),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(32, 4),
+                )
+            def forward(self, x):
+                return self.net(x)
+
+        model = _LinearModel()
+        model.eval()
+        q_model = static_quantize(model, sample_inputs, backend="qnnpack")
         assert q_model is not None
         with torch.no_grad():
             out = q_model(sample_inputs)
