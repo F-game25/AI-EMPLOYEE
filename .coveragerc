@@ -25,6 +25,19 @@ source =
     runtime/agents/problem-solver-ui/features/personal_brand.py
     runtime/agents/problem-solver-ui/features/health_check.py
     runtime/agents/problem-solver-ui/features/export_backup.py
+    runtime/agents/problem-solver-ui/features/system_api.py
+    runtime/core/__init__.py
+    runtime/core/change_log.py
+    runtime/core/roi_tracker.py
+    runtime/core/decision_engine.py
+    runtime/core/mode_manager.py
+    runtime/core/skill_registry.py
+    runtime/core/task_engine.py
+    runtime/core/money_mode.py
+    runtime/actions/__init__.py
+    runtime/actions/action_bus.py
+    runtime/memory/__init__.py
+    runtime/memory/strategy_store.py
 omit =
     tests/*
     */site-packages/*
