@@ -322,7 +322,12 @@ class RoiTracker:
         """Append one ROI event and return the recorded entry."""
         if cost < 0 or revenue < 0:
             raise ValueError("revenue and cost must be non-negative")
-        roi_pct = ((revenue - cost) / cost * 100.0) if cost > 0 else 0.0
+        # When cost is 0 and revenue > 0 this represents pure profit (infinite ROI).
+        # We store None to distinguish it from a genuinely zero ROI (revenue == cost).
+        if cost == 0:
+            roi_pct: float | None = None if revenue > 0 else 0.0
+        else:
+            roi_pct = (revenue - cost) / cost * 100.0
         entry = {
             "ts": _now_iso(),
             "agent": agent,
@@ -330,7 +335,7 @@ class RoiTracker:
             "skill": skill,
             "revenue": round(revenue, 4),
             "cost": round(cost, 4),
-            "roi": round(roi_pct, 2),
+            "roi": round(roi_pct, 2) if roi_pct is not None else None,
             "note": note,
         }
         with self._lock:
@@ -499,13 +504,13 @@ def _discover_agents(agents_dir: Path) -> dict[str, dict]:
 
         py_files = [f.name for f in item.glob("*.py")]
         has_run_sh = (item / "run.sh").exists()
-        has_requirements = (item / "requirements.txt").exists()
+        has_requirements_file = (item / "requirements.txt").exists()
 
         discovered[item.name] = {
             "path": str(item.relative_to(agents_dir.parent.parent)),
             "runnable": has_run_sh,
             "python_modules": py_files,
-            "has_requirements": has_requirements,
+            "has_requirements_file": has_requirements_file,
         }
     return discovered
 
@@ -544,7 +549,7 @@ def _build_manifest(
             "model": cap.get("model", ""),
             "runnable": False,
             "python_modules": [],
-            "has_requirements": False,
+            "has_requirements_file": False,
             "source": "capabilities",
         }
     # Overlay filesystem discovery (agents_dir uses dash-names; caps may use
@@ -555,7 +560,7 @@ def _build_manifest(
             merged_agents[agent_id].update({
                 "runnable": fs_meta["runnable"],
                 "python_modules": fs_meta["python_modules"],
-                "has_requirements": fs_meta["has_requirements"],
+                "has_requirements_file": fs_meta["has_requirements_file"],
                 "path": fs_meta["path"],
                 "source": "capabilities+filesystem",
             })

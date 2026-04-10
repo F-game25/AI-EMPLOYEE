@@ -207,7 +207,7 @@ class TestDiscoverAgents:
         assert "lead-generator" in disc
         assert disc["lead-generator"]["runnable"] is True
         assert "lead_generator.py" in disc["lead-generator"]["python_modules"]
-        assert disc["lead-generator"]["has_requirements"] is True
+        assert disc["lead-generator"]["has_requirements_file"] is True
 
     def test_discovers_python_only_agent(self, tmp_agents_dir):
         disc = sr._discover_agents(tmp_agents_dir)
@@ -456,11 +456,17 @@ class TestRoiTracker:
         assert e["cost"] == 10.0
         assert e["roi"] == 900.0  # (100-10)/10 * 100
 
-    def test_record_zero_cost_roi(self, registry):
+    def test_record_zero_cost_positive_revenue_roi_is_none(self, registry):
         e = registry.roi_tracker.record(
             agent="lead-generator", action="organic", revenue=50.0, cost=0.0
         )
-        assert e["roi"] == 0.0  # no cost → ROI undefined, returns 0
+        assert e["roi"] is None  # pure profit — undefined as a percentage
+
+    def test_record_zero_cost_zero_revenue_roi_is_zero(self, registry):
+        e = registry.roi_tracker.record(
+            agent="lead-generator", action="nothing", revenue=0.0, cost=0.0
+        )
+        assert e["roi"] == 0.0
 
     def test_record_negative_raises(self, registry):
         with pytest.raises(ValueError):
@@ -633,6 +639,7 @@ class TestChangeLog:
         for t in threads:
             t.join()
         assert not errors
+        # n=0 means "return all" — must have all 20 entries
         entries = registry.change_log.recent(n=0)
         assert len(entries) == 20
 
