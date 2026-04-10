@@ -611,7 +611,8 @@ class TestQuantConfig:
             '{"mode": "auto", "unknown_key": 42}', encoding="utf-8"
         )
         cfg = tq.load_quant_config()
-        assert "unknown_key" not in tq._DEFAULT_QUANT_CONFIG or cfg.get("unknown_key") == 42
+        # unknown_key is not in the default schema; it should NOT be present
+        assert "unknown_key" not in cfg
 
     def test_load_survives_corrupt_json(self):
         tq.QUANT_CONFIG_FILE.write_text("NOT JSON", encoding="utf-8")

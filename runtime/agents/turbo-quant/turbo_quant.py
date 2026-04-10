@@ -191,6 +191,10 @@ _VRAM_PER_BPARAM: dict[str, float] = {
     QUANT_AWQ:  0.55,
 }
 
+# Approximate transformer layer count per billion parameters for typical decoder models.
+# Most 7B–70B dense LLMs have 32–80 layers; 4 layers/B is a reasonable midpoint.
+_LAYERS_PER_BPARAM: int = 4
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Hardware detection — universal, zero external dependencies
@@ -966,7 +970,10 @@ def load_quant_config() -> dict:
             with QUANT_CONFIG_FILE.open("r", encoding="utf-8") as fh:
                 saved = json.load(fh)
             if isinstance(saved, dict):
-                cfg.update(saved)
+                # Only merge known keys to prevent unknown keys polluting the config
+                for key in _DEFAULT_QUANT_CONFIG:
+                    if key in saved:
+                        cfg[key] = saved[key]
     except Exception as exc:
         logger.warning("turbo_quant: could not load quant config — %s", exc)
     return cfg
@@ -1073,10 +1080,10 @@ def disk_offload_config(
     offload   = offload_dir or str(AI_HOME / "model_cache")
     needs_off = vram_est > VRAM_BUDGET_GB
 
-    # Estimate how many layers fit in VRAM.
-    # Rough heuristic: 1 GB ≈ 1 / _VRAM_PER_BPARAM[quant] layers per billion params.
-    # We approximate total transformer layers as 4 × params_b for typical models.
-    total_layers_est = max(1, int(params_b * 4))
+    # Estimate how many transformer layers fit in VRAM.
+    # Heuristic: typical decoder-only models have ~4 layers per billion parameters.
+    # layers_per_gb = 1 / GB_per_billion_params gives us layers per GB of VRAM.
+    total_layers_est = max(1, int(params_b * _LAYERS_PER_BPARAM))
     layers_per_gb    = 1.0 / max(0.01, _VRAM_PER_BPARAM.get(quant, 0.58))
     gpu_layers       = int(min(total_layers_est, max(0, VRAM_BUDGET_GB * layers_per_gb)))
 
