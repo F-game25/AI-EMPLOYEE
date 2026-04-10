@@ -113,7 +113,7 @@ class TFLiteRunner:
             {
                 "name":  d["name"],
                 "shape": d["shape"].tolist(),
-                "dtype": d["dtype"].__name__,
+                "dtype": d["dtype"].__name__ if hasattr(d["dtype"], "__name__") else str(d["dtype"]),
                 "index": d["index"],
             }
             for d in self._input_details
@@ -125,7 +125,7 @@ class TFLiteRunner:
             {
                 "name":  d["name"],
                 "shape": d["shape"].tolist(),
-                "dtype": d["dtype"].__name__,
+                "dtype": d["dtype"].__name__ if hasattr(d["dtype"], "__name__") else str(d["dtype"]),
                 "index": d["index"],
             }
             for d in self._output_details
