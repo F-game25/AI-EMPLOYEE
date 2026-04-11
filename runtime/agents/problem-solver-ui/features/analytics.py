@@ -1,11 +1,23 @@
 """Analytics & Insights Dashboard — cross-module BI, recommendations, trends."""
 import json
+import sys
 import time
 from pathlib import Path
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+
+# Ensure runtime/ packages are importable from within features/
+_RUNTIME_DIR = Path(__file__).parent.parent.parent.parent
+for _p in [
+    str(_RUNTIME_DIR),
+    str(_RUNTIME_DIR / "core"),
+    str(_RUNTIME_DIR / "actions"),
+    str(_RUNTIME_DIR / "memory"),
+]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 _HOME = Path.home() / ".ai-employee" / "state"
 
@@ -140,4 +152,63 @@ def get_trends():
     sorted_dates = sorted(by_date.items())[-30:]
     return JSONResponse({
         "lead_trend": [{"date": d, "count": c} for d, c in sorted_dates],
+    })
+
+
+# ── New endpoints — AI Employee system stats ──────────────────────────────────
+
+@router.get("/daily-stats")
+def get_daily_stats():
+    """Return today's task execution stats + revenue estimate."""
+    task_stats: dict = {"tasks_executed": 0, "success_rate": 0.0, "avg_score": 0.0}
+    roi_summary: dict = {"events": 0, "total_tokens": 0, "total_revenue": 0.0, "roi": 0.0}
+    best_strategies: list = []
+
+    try:
+        from core.task_engine import get_task_engine
+        task_stats = get_task_engine().daily_stats()
+    except Exception:
+        pass
+
+    try:
+        from core.roi_tracker import get_roi_tracker
+        roi_summary = get_roi_tracker().daily_summary()
+    except Exception:
+        pass
+
+    try:
+        from memory.strategy_store import get_strategy_store
+        best_strategies = get_strategy_store().top_performers(limit=3)
+    except Exception:
+        pass
+
+    return JSONResponse({
+        "date": time.strftime("%Y-%m-%d", time.gmtime()),
+        "tasks": task_stats,
+        "revenue": roi_summary,
+        "best_strategies": best_strategies,
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+
+
+@router.get("/roi")
+def get_roi(limit: int = Query(20, ge=1, le=200)):
+    """Return recent ROI events and top-performing agents."""
+    recent: list = []
+    top_agents: list = []
+    daily: dict = {}
+
+    try:
+        from core.roi_tracker import get_roi_tracker
+        tracker = get_roi_tracker()
+        recent = tracker.recent(limit=limit)
+        top_agents = tracker.top_agents(limit=5)
+        daily = tracker.daily_summary()
+    except Exception:
+        pass
+
+    return JSONResponse({
+        "daily_summary": daily,
+        "top_agents": top_agents,
+        "recent_events": recent,
     })
