@@ -129,12 +129,13 @@ class TestEnterpriseLifecycle:
 
     def test_start_bot_prevents_duplicate_instance(self, server):
         mod, client = server
-        with patch.object(mod, "_agent_has_live_process", return_value=True):
+        with patch.object(mod, "_agent_has_live_process", return_value=True), patch.object(mod, "ai_employee") as ai_cmd:
             r = client.post("/api/agents/start", json={"bot": "lead-generator"})
         assert r.status_code == 200
         body = r.json()
         assert body["ok"] is True
         assert body["already_running"] is True
+        ai_cmd.assert_not_called()
 
     def test_stop_agents_enterprise_batch_report(self, server):
         mod, _ = server
