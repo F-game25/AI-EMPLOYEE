@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
 from core.contracts import TaskNode
@@ -64,8 +65,6 @@ class TaskLogStore:
         return [dict(row) for row in rows]
 
     def daily_stats(self) -> dict:
-        import time
-
         today = time.strftime("%Y-%m-%d", time.gmtime())
         with self._conn() as conn:
             row = conn.execute(
