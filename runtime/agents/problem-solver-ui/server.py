@@ -312,6 +312,7 @@ CUSTOM_AGENTS_FILE = CONFIG_DIR / "custom_agents.json"
 METRICS_FILE = STATE_DIR / "metrics.json"
 GUARDRAILS_FILE = STATE_DIR / "guardrails.json"
 MEMORY_FILE = STATE_DIR / "memory.json"
+DOCTOR_STATE_FILE = STATE_DIR / "doctor_actions.json"
 INTEGRATIONS_FILE = CONFIG_DIR / "integrations.json"
 AGENT_TEMPLATES_FILE = CONFIG_DIR / "agent_templates.json"
 
@@ -2658,6 +2659,29 @@ INDEX_HTML = r"""<!doctype html>
       background:rgba(212,175,55,.03);
     }
     .cyber-col-header .hdr-dot{width:6px;height:6px;border-radius:50%;background:#D4AF37;box-shadow:0 0 6px #D4AF37;animation:blink 1.4s infinite}
+    /* ─ Doctor Panel ─ */
+    #doctor-panel{background:var(--surface2);border:1px solid rgba(212,175,55,.22);border-radius:var(--radius);padding:16px;margin-bottom:18px}
+    #doctor-panel .dp-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    #doctor-panel .dp-title{font-size:.82em;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);font-family:var(--mono);display:flex;align-items:center;gap:8px}
+    #doctor-panel .dp-title .hdr-dot{width:6px;height:6px;border-radius:50%;background:#D4AF37;box-shadow:0 0 6px #D4AF37;animation:blink 1.4s infinite;flex-shrink:0}
+    .dp-item{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:8px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.06);margin-bottom:8px;transition:border-color .2s}
+    .dp-item:last-child{margin-bottom:0}
+    .dp-item.dp-ok{border-left:3px solid var(--success,#10b981)}
+    .dp-item.dp-warn{border-left:3px solid #f59e0b}
+    .dp-item.dp-error{border-left:3px solid var(--danger,#ef4444)}
+    .dp-item.dp-approved{opacity:.55}
+    .dp-item.dp-rejected{opacity:.45;text-decoration:line-through}
+    .dp-icon{font-size:1.1em;flex-shrink:0;margin-top:1px}
+    .dp-body{flex:1;min-width:0}
+    .dp-item-title{font-size:.82em;font-weight:600;color:var(--text);margin-bottom:2px}
+    .dp-item-desc{font-size:.74em;color:var(--text-muted);line-height:1.45}
+    .dp-actions{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
+    .dp-btn{font-size:.7em;padding:3px 9px;border-radius:5px;border:1px solid;cursor:pointer;font-family:var(--mono);font-weight:600;letter-spacing:.04em;transition:all .15s;background:transparent}
+    .dp-btn-approve{color:#10b981;border-color:rgba(16,185,129,.4)}
+    .dp-btn-approve:hover{background:rgba(16,185,129,.15);border-color:#10b981}
+    .dp-btn-reject{color:#f87171;border-color:rgba(239,68,68,.4)}
+    .dp-btn-reject:hover{background:rgba(239,68,68,.12);border-color:#ef4444}
+    .dp-empty{font-size:.8em;color:var(--text-muted);text-align:center;padding:14px 0}
     /* ─ Heartbeat col ─ */
     #heartbeat-log{flex:1;overflow-y:auto;padding:10px 12px;font-family:monospace;font-size:.72em;line-height:1.7}
     #heartbeat-log::-webkit-scrollbar{width:3px}
@@ -3411,13 +3435,21 @@ INDEX_HTML = r"""<!doctype html>
 
   <!-- ── Cyber Operations Panel ── -->
   <div id="cyber-panel">
-    <!-- Left: AI Heartbeat / System Logs -->
-    <div class="cyber-col">
-      <div class="cyber-col-header">
+    <!-- Left: AI Heartbeat / System Logs + Doctor Panel (stacked) -->
+    <div class="cyber-col" style="display:flex;flex-direction:column;overflow:hidden">
+      <!-- Doctor Diagnostics Panel -->
+      <div id="doctor-panel">
+        <div class="dp-header">
+          <div class="dp-title"><span class="hdr-dot"></span>🩺 Diagnostics</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadDoctorPanel()" style="font-size:.7em;padding:2px 8px">↻</button>
+        </div>
+        <div id="doctor-items-list"><div class="dp-empty">Loading…</div></div>
+      </div>
+      <div class="cyber-col-header" style="flex-shrink:0">
         <span class="hdr-dot"></span>
         AI Heartbeat · System Logs
       </div>
-      <div id="heartbeat-log"></div>
+      <div id="heartbeat-log" style="flex:1;min-height:0"></div>
     </div>
 
     <!-- Center: Main Orchestrator Chat -->
@@ -5833,7 +5865,7 @@ function switchTab(tab, btn) {
   const subNav = document.getElementById('subnav-' + group);
   if (subNav) subNav.classList.add('active');
   currentTab = tab;
-  if (tab === 'dashboard') { loadDashboard(); if (typeof loadSysRes === 'function') loadSysRes(); }
+  if (tab === 'dashboard') { loadDashboard(); if (typeof loadSysRes === 'function') loadSysRes(); loadDoctorPanel(); }
   if (tab === 'chat') loadChatLog();
   if (tab === 'scheduler') loadSchedules();
   if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm().then(renderSwarmAgentGrid); else renderSwarmAgentGrid(); }
@@ -7155,7 +7187,7 @@ function _switchTabBase(tab, btn) {
     if (autoBtn) autoBtn.classList.add('active');
   }
   currentTab = tab;
-  if (tab === 'dashboard') { loadDashboard(); if (typeof loadSysRes === 'function') loadSysRes(); }
+  if (tab === 'dashboard') { loadDashboard(); if (typeof loadSysRes === 'function') loadSysRes(); loadDoctorPanel(); }
   if (tab === 'chat') loadChatLog();
   if (tab === 'scheduler') loadSchedules();
   if (tab === 'workers') { loadWorkers(); if (!_allAgents.length) loadSwarm().then(renderSwarmAgentGrid); else renderSwarmAgentGrid(); }
@@ -7387,6 +7419,62 @@ function _isHermesRunning(agents) {
   return agents.some(a => (a.id || a.name || '') === 'hermes-agent' && a.running);
 }
 
+function _isHermesRunning(agents) {
+  return agents.some(a => (a.id || a.name || '') === 'hermes-agent' && a.running);
+}
+
+// ── Doctor Panel ──────────────────────────────────────────────────────────────
+async function loadDoctorPanel() {
+  const el = document.getElementById('doctor-items-list');
+  if (!el) return;
+  try {
+    const data = await api('/api/doctor/items');
+    const items = data.items || [];
+    if (!items.length) {
+      el.innerHTML = '<div class="dp-empty">All checks passed ✅</div>';
+      return;
+    }
+    el.innerHTML = items.map(it => {
+      const isOk    = it.status === 'ok';
+      const isWarn  = it.status === 'warn';
+      const isError = it.status === 'error';
+      const icon = isOk ? '✅' : isWarn ? '⚠️' : '❌';
+      const cls  = isOk ? 'dp-ok' : isWarn ? 'dp-warn' : 'dp-error';
+      const actionCls = it.action === 'approved' ? ' dp-approved' : it.action === 'rejected' ? ' dp-rejected' : '';
+      const actionLabel = it.action ? `<span style="font-size:.68em;opacity:.7;font-style:italic">[${it.action}]</span>` : '';
+      const descHtml = it.description
+        ? `<div class="dp-item-desc">${escHtml(it.description)}</div>` : '';
+      const approveDisabled = it.action === 'approved' ? ' disabled style="opacity:.4"' : '';
+      const rejectDisabled  = it.action === 'rejected' ? ' disabled style="opacity:.4"' : '';
+      const actionsHtml = !isOk ? `
+        <div class="dp-actions">
+          <button class="dp-btn dp-btn-approve"${approveDisabled} onclick="doctorAction('${escHtml(it.id)}','approved')">✓ Approve</button>
+          <button class="dp-btn dp-btn-reject"${rejectDisabled} onclick="doctorAction('${escHtml(it.id)}','rejected')">✕ Reject</button>
+          ${it.action ? `<button class="dp-btn" style="color:var(--text-muted);border-color:rgba(255,255,255,.15)" onclick="doctorAction('${escHtml(it.id)}','reset')">↩ Reset</button>` : ''}
+        </div>` : '';
+      return `<div class="dp-item ${cls}${actionCls}">
+        <div class="dp-icon">${icon}</div>
+        <div class="dp-body">
+          <div class="dp-item-title">${escHtml(it.title)} ${actionLabel}</div>
+          ${descHtml}
+          ${actionsHtml}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<div class="dp-empty" style="color:var(--danger,#f87171)">Failed to load diagnostics</div>`;
+  }
+}
+
+async function doctorAction(id, action) {
+  try {
+    await api('/api/doctor/action', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, action})});
+    loadDoctorPanel();
+  } catch(e) {
+    console.warn('doctorAction error', e);
+  }
+}
+
 async function loadDashboard() {
   const d = await api('/api/status');
 
@@ -7466,10 +7554,10 @@ async function loadDashboard() {
   const ovBannerUptime = document.getElementById('ov-banner-uptime');
   if (ovBannerUptime) ovBannerUptime.textContent = 'Uptime: ' + uptimeStr;
 
-  // Gateway status (try to ping)
-  fetch('http://localhost:18789', {mode:'no-cors',signal:AbortSignal.timeout(1500)})
-    .then(() => document.getElementById('stat-gateway').textContent = 'Online')
-    .catch(() => document.getElementById('stat-gateway').textContent = 'Offline');
+  // Gateway status — use data from /api/status instead of a direct port ping
+  const gwOnline = !!(d.gateway_ok || d.gateway_running);
+  const gwEl = document.getElementById('stat-gateway');
+  if (gwEl) gwEl.textContent = gwOnline ? 'Online' : 'Offline';
 
   const el = document.getElementById('bot-status-list');
   if (!agents.length) {
@@ -7490,11 +7578,12 @@ async function loadDashboard() {
     }).join('');
   }
 
-  const sys = await api('/api/doctor');
-  // Try to determine real gateway status from the doctor endpoint
-  const gatewayOk = sys.gateway_ok !== undefined ? !!sys.gateway_ok : (document.getElementById('stat-gateway')?.textContent === 'Online');
-  updateHealthChecks({running_agents: running, ollama_ok: d.ollama_ok !== undefined ? !!d.ollama_ok : !!sys.ollama_ok, gateway_ok: gatewayOk});
-  document.getElementById('system-info').textContent = sys.output || '(no output)';
+  // Determine gateway and ollama health from /api/status (no direct port pings)
+  const gatewayOk = !!(d.gateway_ok || d.gateway_running || gwOnline);
+  updateHealthChecks({running_agents: running, ollama_ok: !!d.ollama_ok, gateway_ok: gatewayOk});
+
+  // Refresh doctor diagnostics panel
+  loadDoctorPanel();
 
   // Sync the BLACKLIGHT quick-toggle on the dashboard
   const bl = await api('/api/blacklight/status');
@@ -8074,6 +8163,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   loadDashboard();
+  loadDoctorPanel();
   if (!_allAgents.length) loadSwarm();
   renderAgenda();
 });
@@ -10920,6 +11010,8 @@ async function deleteBotFinal() {
 
 // Auto-refresh dashboard every 30s (skip when page is hidden)
 setInterval(() => { if (!document.hidden && currentTab === 'dashboard') loadDashboard(); }, 30000);
+// Auto-refresh doctor panel every 60s when on the dashboard tab
+setInterval(() => { if (!document.hidden && currentTab === 'dashboard') loadDoctorPanel(); }, 60000);
 // Poll guardrails for pending approvals badge (every 60 seconds, skip when hidden)
 setInterval(() => {
   if (document.hidden) return;
@@ -15980,7 +16072,158 @@ def get_doctor():
     return JSONResponse({"output": out, "rc": rc})
 
 
-# ── System Resources endpoint ─────────────────────────────────────────────────
+# ── Doctor structured diagnostics ─────────────────────────────────────────────
+
+def _load_doctor_actions() -> dict:
+    """Load persisted approve/reject decisions keyed by item id."""
+    try:
+        if DOCTOR_STATE_FILE.exists():
+            return json.loads(DOCTOR_STATE_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_doctor_actions(actions: dict) -> None:
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        DOCTOR_STATE_FILE.write_text(json.dumps(actions))
+    except Exception as exc:
+        logger.warning("doctor: could not save actions: %s", exc)
+
+
+def _is_port_open(port: int) -> bool:
+    """Return True if something is listening on the given localhost port."""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.8):
+            return True
+    except OSError:
+        return False
+
+
+def _run_doctor_checks() -> list:
+    """Run all diagnostic checks in-process and return structured items."""
+    items: list = []
+
+    def _item(id_: str, status: str, title: str, desc: str = "") -> dict:
+        return {"id": id_, "status": status, "title": title, "description": desc}
+
+    # ── Load runtime env ──────────────────────────────────────────────────────
+    env: dict = {}
+    env_file = AI_HOME / ".env"
+    if env_file.exists():
+        try:
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, _, v = line.partition("=")
+                    env[k.strip()] = v.strip()
+        except Exception:
+            pass
+
+    def _env(key: str) -> str:
+        return env.get(key) or os.environ.get(key, "")
+
+    # ── API Keys ──────────────────────────────────────────────────────────────
+    openai_key = _env("OPENAI_API_KEY")
+    if not openai_key:
+        items.append(_item("openai_key", "warn", "OpenAI API key not set",
+                           "Add OPENAI_API_KEY to ~/.ai-employee/.env to enable GPT models."))
+    else:
+        items.append(_item("openai_key", "ok", "OpenAI API key configured"))
+
+    anthropic_key = _env("ANTHROPIC_API_KEY")
+    if not anthropic_key:
+        items.append(_item("anthropic_key", "warn", "Anthropic API key not set",
+                           "Add ANTHROPIC_API_KEY to ~/.ai-employee/.env to enable Claude models."))
+    else:
+        items.append(_item("anthropic_key", "ok", "Anthropic API key configured"))
+
+    jwt_secret = _env("JWT_SECRET_KEY")
+    if not jwt_secret or jwt_secret == "CHANGE_THIS_IN_SECURITY_LOCAL_YML_OR_SET_JWT_SECRET_KEY_ENV_VAR":
+        items.append(_item("jwt_secret", "error", "JWT secret not set",
+                           "Run 'ai-employee start' to auto-generate a secure JWT secret."))
+    else:
+        items.append(_item("jwt_secret", "ok", "JWT secret configured"))
+
+    # ── Services / Ports ─────────────────────────────────────────────────────
+    ui_port = int(_env("PROBLEM_SOLVER_UI_PORT") or PORT)
+    if _is_port_open(ui_port):
+        items.append(_item("svc_ui", "ok", f"Problem Solver UI running (port {ui_port})"))
+    else:
+        items.append(_item("svc_ui", "warn", f"Problem Solver UI not detected on port {ui_port}",
+                           "Run 'ai-employee start problem-solver-ui' to start it."))
+
+    gw_port = int(_env("OPENCLAW_GATEWAY_PORT") or "18789")
+    if _is_port_open(gw_port):
+        items.append(_item("svc_gateway", "ok", f"AI Gateway running (port {gw_port})"))
+    else:
+        items.append(_item("svc_gateway", "warn", f"AI Gateway not detected on port {gw_port}",
+                           "Run 'ai-employee start' to start the gateway."))
+
+    ollama_host = _env("OLLAMA_HOST") or "http://127.0.0.1:11434"
+    try:
+        import urllib.request
+        urllib.request.urlopen(ollama_host, timeout=1.5)  # noqa: S310
+        items.append(_item("svc_ollama", "ok", "Ollama LLM service reachable"))
+    except Exception:
+        items.append(_item("svc_ollama", "warn", "Ollama LLM service not reachable",
+                           f"Start it with 'ollama serve'. Host: {ollama_host}"))
+
+    # ── Dependencies ─────────────────────────────────────────────────────────
+    import shutil
+    for bin_name, label, optional, hint in [
+        ("python3", "Python 3", False, "Install Python 3.10+"),
+        ("curl", "curl", False, "Install curl (required for gateway)"),
+        ("node", "Node.js", True, "Install Node.js (optional)"),
+        ("docker", "Docker", True, "Install Docker (optional — sandbox mode)"),
+        ("ollama", "Ollama", True, "Install Ollama for local LLM support"),
+    ]:
+        if shutil.which(bin_name):
+            items.append(_item(f"bin_{bin_name}", "ok", f"{label} installed"))
+        elif optional:
+            items.append(_item(f"bin_{bin_name}", "warn", f"{label} not installed",
+                               hint + " (optional)."))
+        else:
+            items.append(_item(f"bin_{bin_name}", "error", f"{label} not found",
+                               hint + " (required)."))
+
+    # ── Config ───────────────────────────────────────────────────────────────
+    mode = _env("AI_EMPLOYEE_MODE") or os.environ.get("AI_EMPLOYEE_MODE", "power")
+    items.append(_item("cfg_mode", "ok", f"Mode: {mode.upper()}",
+                       "Change with 'ai-employee mode starter|business|power'."))
+
+    return items
+
+
+@app.get("/api/doctor/items")
+def get_doctor_items():
+    """Return structured diagnostic check results with any user actions applied."""
+    items = _run_doctor_checks()
+    actions = _load_doctor_actions()
+    for item in items:
+        item["action"] = actions.get(item["id"])
+    return JSONResponse({"items": items})
+
+
+class DoctorActionRequest(BaseModel):
+    id: str
+    action: str  # "approved" | "rejected" | "reset"
+
+
+@app.post("/api/doctor/action")
+def post_doctor_action(req: DoctorActionRequest):
+    """Persist an approve/reject decision for a diagnostic item."""
+    if req.action not in ("approved", "rejected", "reset"):
+        raise HTTPException(status_code=400, detail="action must be approved, rejected, or reset")
+    actions = _load_doctor_actions()
+    if req.action == "reset":
+        actions.pop(req.id, None)
+    else:
+        actions[req.id] = req.action
+    _save_doctor_actions(actions)
+    return JSONResponse({"ok": True, "id": req.id, "action": req.action})
 _sysres_cache: dict = {}
 _sysres_cache_ts: float = 0.0
 _SYSRES_CACHE_TTL = 3.0  # seconds — prevents hammering psutil on rapid requests
