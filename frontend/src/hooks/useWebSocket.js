@@ -44,7 +44,16 @@ function connectSingleton() {
         case 'orchestrator:message':
           clearTimeout(_typingTimeout)
           store.setTyping(false)
-          store.addChatMessage({ role: 'ai', content: data.message, ts: Date.now() })
+          store.addChatMessage({ role: 'ai', content: data.message, ts: Date.now(), subsystem: data.subsystem })
+          break
+        case 'nn:status':
+          store.setNnStatus(data)
+          break
+        case 'memory:update':
+          store.setMemoryTree(data)
+          break
+        case 'doctor:check':
+          store.setDoctorStatus(data)
           break
       }
     } catch (e) { /* ignore */ }

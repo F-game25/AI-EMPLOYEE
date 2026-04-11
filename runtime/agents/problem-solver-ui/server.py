@@ -22130,7 +22130,7 @@ async def guardrails_reject_action(action_id: str, payload: dict = {}, _auth: No
 _AGENT_GOVERNOR_LOCK = threading.Lock()
 _AGENT_GOVERNOR: dict = {
     "enabled": True,
-    "max_agents": 56,
+    "max_agents": 73,
     "updated_at": None,
 }
 
