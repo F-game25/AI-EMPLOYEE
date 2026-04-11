@@ -62,6 +62,7 @@ const runtimeState = {
   activityFeed: [],
   executionLogs: [],
   skillStats: {},
+  _seq: 0,
 };
 
 function clamp(v, min, max) {
@@ -70,7 +71,7 @@ function clamp(v, min, max) {
 
 function addActivity(notes, kind = 'system') {
   const item = {
-    id: `activity-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    id: `activity-${++runtimeState._seq}`,
     kind,
     notes,
     ts: new Date().toISOString(),
@@ -83,7 +84,7 @@ function addActivity(notes, kind = 'system') {
 
 function recordExecution({ taskId, skill, status, notes }) {
   const logItem = {
-    id: `exec-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    id: `exec-${++runtimeState._seq}`,
     task_id: taskId,
     skill,
     status,
@@ -109,7 +110,7 @@ function estimatePipelineRoi() {
 function runPipeline(pipelineName) {
   const estimatedRoi = estimatePipelineRoi();
   const run = {
-    id: `pipeline-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    id: `pipeline-${++runtimeState._seq}`,
     pipeline: pipelineName,
     status: 'completed',
     estimated_roi: estimatedRoi,
