@@ -5,6 +5,9 @@ Every side-effecting agent action should flow through the ActionBus so that:
   - In MANUAL mode, actions wait for human approval before executing.
   - Dry-run mode returns what *would* happen without any side effects.
 
+Dependencies are injected via constructor to avoid upward layer violations.
+Default callables fall back to the core singletons when not provided.
+
 Usage::
 
     from actions.action_bus import get_action_bus
@@ -20,7 +23,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-import queue
 import threading
 import time
 import uuid
@@ -28,19 +30,33 @@ from typing import Any, Callable
 
 _log = logging.getLogger(__name__)
 
+# Type aliases for injected dependencies
+_ModeChecker = Callable[[], bool]
+_AuditFunc = Callable[[str, str, str, Any, Any, str], None]
+
 
 class ActionBus:
     """Central hub for agent action emission.
 
-    Integration points:
-      - ``get_mode_manager()`` — determines if approval is required.
-      - ``get_changelog()``    — writes every emitted action.
+    Dependencies are explicit and injectable:
+      - ``mode_checker``  — returns True when manual approval is required.
+      - ``audit_func``    — records each action to the audit trail.
+
+    When not provided, defaults fall back to the core singletons via lazy
+    import so that out-of-the-box usage remains unchanged.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        mode_checker: _ModeChecker | None = None,
+        audit_func: _AuditFunc | None = None,
+    ) -> None:
         self._lock = threading.Lock()
         self._dry_run = False
-        # Pending approvals: action_id -> (event, payload_ref)
+        self._mode_checker: _ModeChecker | None = mode_checker
+        self._audit_func: _AuditFunc | None = audit_func
+        # Pending approvals: action_id -> record dict
         self._pending: dict[str, dict] = {}
         self._pending_lock = threading.Lock()
 
@@ -57,6 +73,54 @@ class ActionBus:
     def dry_run(self) -> bool:
         with self._lock:
             return self._dry_run
+
+    # ------------------------------------------------------------------
+    # Injected-dependency helpers (no upward layer imports)
+    # ------------------------------------------------------------------
+
+    def _get_requires_approval(self) -> bool:
+        """Resolve whether manual approval is needed."""
+        if self._mode_checker is not None:
+            try:
+                return self._mode_checker()
+            except Exception:
+                return False
+        # Default: lazy fallback to core singleton (preserves existing behaviour)
+        try:
+            from core.mode_manager import get_mode_manager
+            return get_mode_manager().is_manual()
+        except Exception:
+            return False
+
+    def _record_audit(
+        self,
+        actor: str,
+        action_type: str,
+        reason: str,
+        before: Any,
+        after: Any,
+        outcome: str,
+    ) -> None:
+        """Write an audit record via the injected function or core fallback."""
+        if self._audit_func is not None:
+            try:
+                self._audit_func(actor, action_type, reason, before, after, outcome)
+            except Exception:
+                pass
+            return
+        # Default: lazy fallback to core singleton (preserves existing behaviour)
+        try:
+            from core.change_log import get_changelog
+            get_changelog().record(
+                actor=actor,
+                action_type=action_type,
+                reason=reason,
+                before=before,
+                after=after,
+                outcome=outcome,
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Core emission
@@ -93,27 +157,16 @@ class ActionBus:
         payload = payload or {}
         action_id = str(uuid.uuid4())[:8]
 
-        # Resolve mode without hard import failure
-        requires_approval = False
-        try:
-            from core.mode_manager import get_mode_manager
-            requires_approval = get_mode_manager().is_manual()
-        except Exception:
-            pass
+        requires_approval = self._get_requires_approval()
 
-        # Log to change log
-        try:
-            from core.change_log import get_changelog
-            get_changelog().record(
-                actor=actor,
-                action_type=action_type,
-                reason=reason,
-                before=None,
-                after=payload,
-                outcome="pending" if requires_approval else "queued",
-            )
-        except Exception:
-            pass
+        self._record_audit(
+            actor,
+            action_type,
+            reason,
+            None,
+            payload,
+            "pending" if requires_approval else "queued",
+        )
 
         if self.dry_run:
             return {
@@ -125,7 +178,6 @@ class ActionBus:
             }
 
         if requires_approval:
-            event = threading.Event()
             record: dict = {
                 "action_id": action_id,
                 "action_type": action_type,
@@ -134,7 +186,6 @@ class ActionBus:
                 "reason": reason,
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "status": "pending",
-                "_event": event,
                 "_approved": False,
                 "_executor": executor,
             }
@@ -175,7 +226,13 @@ class ActionBus:
     # ------------------------------------------------------------------
 
     def list_pending(self) -> list[dict]:
-        """Return all actions awaiting approval (executor removed from output)."""
+        """Return all actions awaiting approval.
+
+        Internal fields (prefixed with ``_``) such as ``_executor``,
+        ``_approved``, and ``_event`` are stripped from the output — they
+        are implementation details of the approval workflow and must never
+        be exposed to callers.
+        """
         with self._pending_lock:
             return [
                 {k: v for k, v in rec.items() if not k.startswith("_")}
@@ -198,18 +255,14 @@ class ActionBus:
                 _log.exception("Executor failed for approved action %s", action_id)
                 return {"status": "error", "action_id": action_id, "error": "Execution failed"}
 
-        try:
-            from core.change_log import get_changelog
-            get_changelog().record(
-                actor="approval_workflow",
-                action_type=record["action_type"],
-                reason="Approved by user",
-                before={"status": "pending"},
-                after=record["payload"],
-                outcome="approved",
-            )
-        except Exception:
-            pass
+        self._record_audit(
+            "approval_workflow",
+            record["action_type"],
+            "Approved by user",
+            {"status": "pending"},
+            record["payload"],
+            "approved",
+        )
 
         return {"status": "approved", "action_id": action_id, "result": result}
 
@@ -220,18 +273,14 @@ class ActionBus:
         if record is None:
             return {"status": "not_found", "action_id": action_id}
 
-        try:
-            from core.change_log import get_changelog
-            get_changelog().record(
-                actor="approval_workflow",
-                action_type=record["action_type"],
-                reason="Rejected by user",
-                before={"status": "pending"},
-                after=None,
-                outcome="rejected",
-            )
-        except Exception:
-            pass
+        self._record_audit(
+            "approval_workflow",
+            record["action_type"],
+            "Rejected by user",
+            {"status": "pending"},
+            None,
+            "rejected",
+        )
 
         return {"status": "rejected", "action_id": action_id}
 
