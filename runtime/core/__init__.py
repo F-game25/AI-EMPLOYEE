@@ -47,6 +47,11 @@ def get_task_engine():
     return _f()
 
 
+def get_agent_controller():
+    from core.agent_controller import get_agent_controller as _f
+    return _f()
+
+
 def get_skill_registry():
     from core.skill_registry import get_registry as _f
     return _f()
@@ -74,6 +79,7 @@ __all__ = [
     "get_decision_engine",
     "get_mode_manager",
     "get_task_engine",
+    "get_agent_controller",
     "get_skill_registry",
     "get_brain",
     "get_intelligence",
