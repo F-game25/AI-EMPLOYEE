@@ -24,9 +24,7 @@ export default function TopBar() {
       .catch(() => {})
   }, [])
 
-  useEffect(() => {
-    if (systemStatus?.mode) setMode(systemStatus.mode)
-  }, [systemStatus.mode])
+  const currentMode = systemStatus?.mode || mode
 
   const setModeRemote = (next) => {
     setModePending(true)
@@ -46,7 +44,7 @@ export default function TopBar() {
     fetch(`http://${window.location.hostname}:3001/agents/activate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ count: mode === 'BLACKLIGHT' ? 6 : mode === 'AUTO' ? 4 : 2 }),
+      body: JSON.stringify({ count: currentMode === 'BLACKLIGHT' ? 6 : currentMode === 'AUTO' ? 4 : 2 }),
     })
       .catch(() => {})
       .finally(() => setActivating(false))
@@ -83,7 +81,7 @@ export default function TopBar() {
         </button>
 
         <select
-          value={mode}
+          value={currentMode}
           onChange={(e) => setModeRemote(e.target.value)}
           disabled={modePending}
           className="font-mono text-xs px-2 py-2"
