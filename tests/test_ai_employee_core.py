@@ -790,7 +790,7 @@ class TestSecureExecutionEngine:
         engine.register_action("api.op", action)
 
         engine.execute(action_name="api.op", payload={}, skill="svc", idempotency_key="k")
-        time.sleep(0.01)
+        time.sleep(0.05)
         engine.execute(action_name="api.op", payload={}, skill="svc", idempotency_key="k")
 
         assert len(calls) == 2  # not deduplicated due to TTL=0

@@ -645,7 +645,7 @@ class SecureExecutionEngine:
                 if attempt < max_attempts and is_recoverable:
                     self._metrics.retries += 1
                     action_m.retries += 1
-                    # Exponential backoff: base * (2^(attempt-1)), capped at 30s.
+                    # Exponential backoff: base * 2^(attempt-1), capped at 30s.
                     backoff = action.retry_backoff_s * (1 << (attempt - 1))
                     time.sleep(min(backoff, 30.0))
                     continue
