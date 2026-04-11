@@ -129,6 +129,10 @@ class PermissionPolicy:
         with self._violation_lock:
             return self._violation_counts.get(skill, 0)
 
+    def alert_threshold(self) -> int:
+        """Return currently configured repeated-violation alert threshold."""
+        return self._alert_threshold
+
     def _load_env_mapping(self) -> dict[str, list[str]]:
         raw = os.environ.get("ACTION_PERMISSION_MAP", "").strip()
         if not raw:
@@ -270,6 +274,7 @@ class APIAction(BaseAction):
     """External API action with optional batching support."""
 
     action_kind = "api"
+    VALID_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 
     def __init__(
         self,
@@ -300,7 +305,7 @@ class APIAction(BaseAction):
         if method is not None:
             if not isinstance(method, str):
                 raise ActionValidationError("APIAction 'method' must be a string", context={"field": "method"})
-            if method.upper() not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+            if method.upper() not in self.VALID_HTTP_METHODS:
                 raise ActionValidationError(
                     "APIAction method must be a valid HTTP verb",
                     context={"field": "method", "value": method},
@@ -410,6 +415,7 @@ class ActionMetrics:
     def snapshot(self) -> dict:
         denom = max(self.total, 1)
         avg = self.total_latency_s / denom
+        # Keep both legacy and explicit key names for API compatibility.
         return {
             "total": self.total,
             "success": self.success,
@@ -431,6 +437,8 @@ class ActionMetrics:
 
 class SecureExecutionEngine:
     """Safe executor for real-world actions."""
+
+    INFLIGHT_WAIT_BUFFER_S = 5
 
     def __init__(
         self,
@@ -511,7 +519,7 @@ class SecureExecutionEngine:
             return
         with self._lock:
             expired = [
-                key for key, (ts, _payload) in self._idempotency_cache.items()
+                key for key, (ts, _response) in self._idempotency_cache.items()
                 if (now_ts - ts) > self._idempotency_ttl_s
             ]
             for key in expired:
@@ -553,8 +561,8 @@ class SecureExecutionEngine:
         """Write a structured warning to the audit log for every permission denial."""
         count = self._policy.record_violation(skill)
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        threshold = getattr(self._policy, "_alert_threshold", PermissionPolicy._DEFAULT_ALERT_THRESHOLD)
-        flagged = count >= max(1, int(threshold))
+        threshold = self._policy.alert_threshold()
+        flagged = count >= max(1, threshold)
         _log.warning(
             "PERMISSION_DENIED ts=%s skill=%s action_kind=%s action=%s violation_count=%d flagged=%s",
             timestamp,
@@ -676,7 +684,9 @@ class SecureExecutionEngine:
                     self._idempotency_inflight[cache_key] = inflight_event
                     owner_of_inflight = True
             if not owner_of_inflight and inflight_event is not None:
-                wait_completed = inflight_event.wait(timeout=max(action.timeout_s, 1) + 5)
+                wait_completed = inflight_event.wait(
+                    timeout=max(action.timeout_s, 1) + self.INFLIGHT_WAIT_BUFFER_S
+                )
                 with self._lock:
                     cached_ts_result = self._idempotency_cache.get(cache_key)
                 if cached_ts_result is not None:

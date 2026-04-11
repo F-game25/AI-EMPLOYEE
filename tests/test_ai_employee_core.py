@@ -789,12 +789,12 @@ class TestSecureExecutionEngine:
         engine = SecureExecutionEngine(permission_policy=policy)
         engine.register_action("api.call", APIAction(executor=lambda p: {}))
 
-        for _ in range(3):
+        for attempt in range(3):
             engine.execute(
                 action_name="api.call",
                 payload={},
                 skill="bad_skill",
-                idempotency_key=f"bad-skill-{_}",
+                idempotency_key=f"bad-skill-{attempt}",
             )
 
         assert len(alerts) >= 1
