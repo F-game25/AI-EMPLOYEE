@@ -36,7 +36,7 @@ export default function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
-        <span className="font-mono text-xs tier-3-surface px-2 py-1 max-w-[460px] truncate" title={systemStatus?.thinking_mode || ''}>
+        <span className="font-mono text-xs tier-3-surface px-2 py-1 max-w-md truncate" title={systemStatus?.thinking_mode || ''}>
           THINKING: {systemStatus?.thinking_mode || 'Awaiting workload'}
         </span>
         <span className="font-mono text-xs tier-3-surface px-2 py-1">

@@ -20,6 +20,10 @@ const TEMPLATE_LIBRARY = {
     cadence: ['detect_risk', 'trigger_playbook', 'expand_account'],
   },
 };
+const CONFIDENCE_MIN = 0.2;
+const CONFIDENCE_MAX = 0.97;
+const CONFIDENCE_BASE = 0.55;
+const CONFIDENCE_PRESSURE_WEIGHT = 0.05;
 
 function _firstMatch(message, patterns, fallback) {
   const msg = String(message || '').toLowerCase();
@@ -43,7 +47,10 @@ function buildMoneyTemplate({ message, subsystem, mode, runningAgents, totalAgen
   const intent = classifyMoneyIntent(message, subsystem);
   const base = TEMPLATE_LIBRARY[intent];
   const pressure = Math.max(0, (Number(totalAgents) || 1) - (Number(runningAgents) || 0));
-  const confidence = Math.max(0.2, Math.min(0.97, 0.55 + pressure * 0.05));
+  const confidence = Math.max(
+    CONFIDENCE_MIN,
+    Math.min(CONFIDENCE_MAX, CONFIDENCE_BASE + pressure * CONFIDENCE_PRESSURE_WEIGHT),
+  );
   return {
     enabled: mode === 'MONEYMODE',
     intent,
