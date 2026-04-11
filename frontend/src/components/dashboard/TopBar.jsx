@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 
-const MODE_ACTIVATION_COUNTS = {
+const AGENTS_PER_MODE = {
   MANUAL: 2,
   AUTO: 4,
   BLACKLIGHT: 6,
@@ -50,7 +50,7 @@ export default function TopBar() {
     fetch(`http://${window.location.hostname}:3001/agents/activate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ count: MODE_ACTIVATION_COUNTS[currentMode] }),
+      body: JSON.stringify({ count: AGENTS_PER_MODE[currentMode] }),
     })
       .catch((err) => {
         console.error('[TopBar] Failed to activate agents', err)
