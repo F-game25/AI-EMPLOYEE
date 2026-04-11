@@ -1,9 +1,12 @@
 """Application-layer planner emitting deterministic task graphs."""
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.contracts import TaskGraph, TaskNode
+
+if TYPE_CHECKING:
+    from analytics.structured_logger import StructuredLogger
 
 
 class Planner:
@@ -16,6 +19,9 @@ class Planner:
         "email_marketing": ("email", "campaign", "newsletter"),
         "analytics": ("analyse", "analyze", "report", "metric"),
     }
+
+    def __init__(self, logger: StructuredLogger | None = None) -> None:
+        self._logger = logger
 
     def classify_goal(self, goal: str) -> str:
         text = goal.lower()
@@ -31,8 +37,21 @@ class Planner:
         run_id: str,
         best_strategies: list[dict[str, Any]] | None = None,
     ) -> TaskGraph:
+        import time
+        start = time.perf_counter()
         tasks = self._build_tasks(goal=goal, run_id=run_id, best=best_strategies or [])
-        return TaskGraph(run_id=run_id, goal=goal, tasks=tasks)
+        graph = TaskGraph(run_id=run_id, goal=goal, tasks=tasks)
+        graph.validate_no_cycles()
+        latency_ms = (time.perf_counter() - start) * 1000
+        if self._logger is not None:
+            self._logger.log_event(
+                component="planner",
+                action="plan",
+                result="success",
+                latency_ms=latency_ms,
+                meta={"run_id": run_id, "tasks": len(tasks), "goal_type": self.classify_goal(goal)},
+            )
+        return graph
 
     def _build_tasks(
         self,

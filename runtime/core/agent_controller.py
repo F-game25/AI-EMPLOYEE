@@ -29,7 +29,7 @@ class AgentController:
         policy: SecurityPolicy | None = None,
     ) -> None:
         self._logger = logger or get_structured_logger()
-        self._planner = planner or Planner()
+        self._planner = planner or Planner(logger=self._logger)
         catalog = skills or get_skill_catalog()
         guard = policy or get_security_policy()
         self._executor = executor or Executor(
@@ -38,7 +38,7 @@ class AgentController:
             logger=self._logger,
             action_emitter=self._emit_action,
         )
-        self._validator = validator or Validator()
+        self._validator = validator or Validator(logger=self._logger)
 
     @property
     def planner(self) -> Planner:
@@ -114,7 +114,14 @@ class AgentController:
 
             goal_type = self._planner.classify_goal(goal)
             return get_strategy_store().get_best_strategy(goal_type)
-        except Exception:
+        except Exception as exc:
+            self._logger.log_event(
+                component="controller",
+                action="best_strategies",
+                result="fallback",
+                latency_ms=0.0,
+                meta={"reason": str(exc)},
+            )
             return []
 
     def _feedback_loop(self, *, goal: str, task: TaskNode) -> None:
@@ -129,8 +136,14 @@ class AgentController:
                 outcome_score=task.score,
                 notes=task.error or "ok",
             )
-        except Exception:
-            return
+        except Exception as exc:
+            self._logger.log_event(
+                component="controller",
+                action="feedback_loop",
+                result="error",
+                latency_ms=0.0,
+                meta={"reason": str(exc)},
+            )
 
     def _emit_action(self, action: str, payload: dict) -> dict:
         from actions.action_bus import get_action_bus

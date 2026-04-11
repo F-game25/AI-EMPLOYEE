@@ -27,6 +27,7 @@ class Executor:
         self._action_emitter = action_emitter
 
     def execute_graph(self, graph: TaskGraph) -> list[TaskNode]:
+        graph.validate_no_cycles()
         completed: dict[str, TaskNode] = {}
         while len(completed) < len(graph.tasks):
             progress = self._execute_ready_tasks(graph=graph, completed=completed)
@@ -110,7 +111,10 @@ class Executor:
             skill_name=skill.name,
         )
         task.allowed_actions = list(skill.allowed_actions)
-        task.output = skill.execute(task.input, self._run_action)
+        output = skill.execute(task.input, self._run_action)
+        required_output_keys = list(skill.output_schema.get("required", []))
+        self._policy.validate_output(output, required_output_keys)
+        task.output = output
 
     def _run_action(self, action: str, payload: dict) -> dict:
         self._policy.validate_payload(payload)

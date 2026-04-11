@@ -50,6 +50,32 @@ class TaskGraph:
     goal: str
     tasks: list[TaskNode]
 
+    def validate_no_cycles(self) -> None:
+        """Raise ValueError if the dependency graph contains a cycle."""
+        task_ids = {t.task_id for t in self.tasks}
+        adjacency: dict[str, list[str]] = {t.task_id: list(t.dependencies) for t in self.tasks}
+
+        visited: set[str] = set()
+        in_path: set[str] = set()
+
+        def dfs(node: str) -> None:
+            if node in in_path:
+                raise ValueError(f"circular dependency detected involving task '{node}'")
+            if node in visited:
+                return
+            in_path.add(node)
+            for dep in adjacency.get(node, []):
+                if dep not in task_ids:
+                    raise ValueError(
+                        f"task '{node}' depends on unknown task '{dep}'"
+                    )
+                dfs(dep)
+            in_path.discard(node)
+            visited.add(node)
+
+        for task_id in task_ids:
+            dfs(task_id)
+
     def to_contract(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,

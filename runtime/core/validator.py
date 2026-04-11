@@ -1,13 +1,36 @@
 """Application-layer task validator."""
 from __future__ import annotations
 
+import time
+from typing import TYPE_CHECKING
+
 from core.contracts import TaskNode, ValidationResult
+
+if TYPE_CHECKING:
+    from analytics.structured_logger import StructuredLogger
 
 
 class Validator:
     """Validates task outputs with binary and scored results."""
 
+    def __init__(self, logger: StructuredLogger | None = None) -> None:
+        self._logger = logger
+
     def validate(self, task: TaskNode) -> ValidationResult:
+        start = time.perf_counter()
+        result = self._evaluate(task)
+        latency_ms = (time.perf_counter() - start) * 1000
+        if self._logger is not None:
+            self._logger.log_event(
+                component="validator",
+                action="validate",
+                result="passed" if result.passed else "failed",
+                latency_ms=latency_ms,
+                meta={"task_id": task.task_id, "score": result.score},
+            )
+        return result
+
+    def _evaluate(self, task: TaskNode) -> ValidationResult:
         if task.status != "success":
             return ValidationResult(
                 task_id=task.task_id,

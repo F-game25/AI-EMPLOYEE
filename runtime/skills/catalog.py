@@ -6,13 +6,33 @@ from typing import Any, Callable
 
 from skills.base import SkillBase
 
+# Capability tags per skill name
+_SKILL_TAGS: dict[str, list[str]] = {
+    "content-calendar": ["content", "planning", "scheduling"],
+    "social-media-manager": ["content", "social", "publishing"],
+    "lead-generator": ["sales", "outreach", "lead_generation"],
+    "lead-crm": ["sales", "crm", "data_management"],
+    "email-marketing": ["marketing", "email", "campaigns"],
+    "ceo-briefing": ["analytics", "reporting", "business_intelligence"],
+    "problem-solver": ["general", "fallback"],
+}
+
 
 class AgentDispatchSkill(SkillBase):
     """Generic stateless adapter from domain skill to infrastructure action."""
 
-    def __init__(self, *, skill_name: str, description: str) -> None:
+    def __init__(
+        self,
+        *,
+        skill_name: str,
+        description: str,
+        version: str = "1.0",
+        capability_tags: list[str] | None = None,
+    ) -> None:
         self.name = skill_name
         self.description = description
+        self.version = version
+        self.capability_tags = capability_tags if capability_tags is not None else []
         self.input_schema = {
             "type": "object",
             "properties": {"goal": {"type": "string"}},
@@ -55,7 +75,11 @@ class SkillCatalog:
             ("problem-solver", "General-purpose fallback execution skill."),
         ]
         return {
-            skill_name: AgentDispatchSkill(skill_name=skill_name, description=desc)
+            skill_name: AgentDispatchSkill(
+                skill_name=skill_name,
+                description=desc,
+                capability_tags=list(_SKILL_TAGS.get(skill_name, [])),
+            )
             for skill_name, desc in configured
         }
 
