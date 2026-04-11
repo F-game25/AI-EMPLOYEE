@@ -150,6 +150,7 @@ export default function Dashboard() {
               <option value="MANUAL">MANUAL</option>
               <option value="AUTO">AUTO</option>
               <option value="BLACKLIGHT">BLACKLIGHT</option>
+              <option value="MONEYMODE">MONEYMODE</option>
             </select>
           </div>
 

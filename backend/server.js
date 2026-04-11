@@ -16,8 +16,10 @@ const {
   getRunningAgentCount,
   setMode,
   getMode,
+  getRobotSignal,
 } = require('./agents');
 const subsystems = require('./subsystems');
+const { buildMoneyTemplate, buildThinkingSummary } = require('./money_mode');
 
 const PORT = process.env.PORT || 3001;
 
@@ -78,6 +80,16 @@ function sampleSystemStatus() {
 
   const total = getAgents().length;
   const running = getRunningAgentCount();
+  const mode = getMode();
+  const robotSignal = getRobotSignal();
+  const thinkingTemplate = buildMoneyTemplate({
+    message: robotSignal && robotSignal.subsystem ? robotSignal.subsystem : 'general orchestration',
+    subsystem: robotSignal ? robotSignal.subsystem : 'general',
+    mode,
+    runningAgents: running,
+    totalAgents: total,
+  });
+  const thinkingSummary = buildThinkingSummary(mode, thinkingTemplate, robotSignal);
 
   return {
     cpu,
@@ -91,7 +103,12 @@ function sampleSystemStatus() {
     heartbeat: heartbeatCounter,
     running_agents: running,
     total_agents: total,
-    mode: getMode(),
+    mode,
+    robot_location: robotSignal && robotSignal.location ? robotSignal.location : 'idle',
+    active_robot: robotSignal && robotSignal.agentName ? `${robotSignal.agentName} (${robotSignal.agentId || 'n/a'})` : 'none',
+    active_subsystem: robotSignal && robotSignal.subsystem ? robotSignal.subsystem : 'general',
+    thinking_mode: thinkingSummary,
+    money_template: mode === 'MONEYMODE' ? thinkingTemplate.template : null,
     timestamp: new Date().toISOString(),
   };
 }
@@ -122,13 +139,40 @@ app.get('/api/system/stats', (req, res) => {
 });
 
 app.get('/api/mode', (req, res) => {
-  res.json({ mode: getMode() });
+  const mode = getMode();
+  const robotSignal = getRobotSignal();
+  const template = buildMoneyTemplate({
+    message: robotSignal && robotSignal.subsystem ? robotSignal.subsystem : 'general orchestration',
+    subsystem: robotSignal ? robotSignal.subsystem : 'general',
+    mode,
+    runningAgents: getRunningAgentCount(),
+    totalAgents: getAgents().length,
+  });
+  res.json({
+    mode,
+    robot_location: robotSignal && robotSignal.location ? robotSignal.location : 'idle',
+    thinking_mode: buildThinkingSummary(mode, template, robotSignal),
+    money_template: mode === 'MONEYMODE' ? template : null,
+  });
 });
 
 app.post('/api/mode', (req, res) => {
   const next = String((req.body || {}).mode || '').toUpperCase();
   const mode = setMode(next);
-  res.json({ mode });
+  const robotSignal = getRobotSignal();
+  const template = buildMoneyTemplate({
+    message: robotSignal && robotSignal.subsystem ? robotSignal.subsystem : 'general orchestration',
+    subsystem: robotSignal ? robotSignal.subsystem : 'general',
+    mode,
+    runningAgents: getRunningAgentCount(),
+    totalAgents: getAgents().length,
+  });
+  res.json({
+    mode,
+    robot_location: robotSignal && robotSignal.location ? robotSignal.location : 'idle',
+    thinking_mode: buildThinkingSummary(mode, template, robotSignal),
+    money_template: mode === 'MONEYMODE' ? template : null,
+  });
 });
 
 app.get('/api/brain/status', (req, res) => {

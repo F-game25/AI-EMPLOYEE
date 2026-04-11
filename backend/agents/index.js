@@ -25,17 +25,28 @@ const AUTO_MIN_ACTIVE = 3;
 const AUTO_ACTIVE_RATIO = 0.7;
 const MANUAL_MIN_ACTIVE = 2;
 const MANUAL_ACTIVE_RATIO = 0.4;
+const MONEYMODE_MIN_ACTIVE = 4;
+const MONEYMODE_ACTIVE_RATIO = 0.85;
 const HEALTH_DEGRADED_QUEUE_THRESHOLD = 3;
 const MODES = {
   MANUAL: 'MANUAL',
   AUTO: 'AUTO',
   BLACKLIGHT: 'BLACKLIGHT',
+  MONEYMODE: 'MONEYMODE',
 };
 
 const events = new EventEmitter();
 let mode = MODES.MANUAL;
 let desiredActiveAgents = 0;
 let _seq = 0;
+let lastRobotSignal = {
+  agentId: null,
+  agentName: null,
+  taskId: null,
+  subsystem: null,
+  location: 'idle',
+  updatedAt: new Date().toISOString(),
+};
 
 const agents = AGENT_CATALOG.map((profile) => ({
   ...profile,
@@ -43,6 +54,7 @@ const agents = AGENT_CATALOG.map((profile) => ({
   health: 'healthy', // healthy | degraded | offline
   taskQueue: [],
   currentTask: null,
+  location: 'idle',
   lastActivityAt: Date.now(),
   tasksCompleted: 0,
 }));
@@ -53,6 +65,7 @@ function _now() {
 
 function _modeMaxActive() {
   if (mode === MODES.BLACKLIGHT) return agents.length;
+  if (mode === MODES.MONEYMODE) return Math.max(MONEYMODE_MIN_ACTIVE, Math.ceil(agents.length * MONEYMODE_ACTIVE_RATIO));
   if (mode === MODES.AUTO) return Math.max(AUTO_MIN_ACTIVE, Math.ceil(agents.length * AUTO_ACTIVE_RATIO));
   return Math.max(MANUAL_MIN_ACTIVE, Math.ceil(agents.length * MANUAL_ACTIVE_RATIO));
 }
@@ -71,11 +84,23 @@ function _snapshot(agent) {
     task: agent.currentTask ? agent.currentTask.message : null,
     queueSize: agent.taskQueue.length,
     tasksCompleted: agent.tasksCompleted,
+    location: agent.location || 'idle',
   };
 }
 
 function _broadcastAgentUpdate() {
   events.emit('agent:update', getAgents());
+}
+
+function _updateRobotSignal(agent, details = {}) {
+  lastRobotSignal = {
+    agentId: agent.id,
+    agentName: agent.name,
+    taskId: details.taskId || null,
+    subsystem: details.subsystem || null,
+    location: details.location || agent.location || agent.state || 'idle',
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function _setState(agent, nextState) {
@@ -89,6 +114,7 @@ function _activateAgent(agent) {
   if (agent.state === 'idle') {
     _setState(agent, 'running');
     agent.health = 'healthy';
+    agent.location = 'standby';
   }
 }
 
@@ -97,6 +123,7 @@ function _deactivateAgent(agent) {
     _setState(agent, 'idle');
     agent.currentTask = null;
     agent.health = 'offline';
+    agent.location = 'idle';
   }
 }
 
@@ -167,6 +194,12 @@ function _tick() {
       agent.currentTask = null;
       agent.tasksCompleted += 1;
       _setState(agent, 'running');
+      agent.location = `completed:${completedTask.subsystem || 'general'}`;
+      _updateRobotSignal(agent, {
+        taskId: completedTask.id,
+        subsystem: completedTask.subsystem || 'general',
+        location: agent.location,
+      });
       agent.health = 'healthy';
       events.emit('task:completed', {
         agent: _snapshot(agent),
@@ -183,6 +216,12 @@ function _tick() {
       task.finishAt = now + _taskDurationMs();
       agent.currentTask = task;
       _setState(agent, 'busy');
+      agent.location = `processing:${task.subsystem || 'general'}`;
+      _updateRobotSignal(agent, {
+        taskId: task.id,
+        subsystem: task.subsystem || 'general',
+        location: agent.location,
+      });
       agent.health = task.queueDepth > HEALTH_DEGRADED_QUEUE_THRESHOLD ? 'degraded' : 'healthy';
       events.emit('task:started', {
         agent: _snapshot(agent),
@@ -228,7 +267,7 @@ function activateAgents(count) {
   };
 }
 
-function enqueueTask({ message, subsystem = 'general' }) {
+function enqueueTask({ message, subsystem = 'general', metadata = {} }) {
   _activateForDemand(subsystem);
   if (_runningAgents().length === 0) {
     activateAgents(1);
@@ -252,9 +291,16 @@ function enqueueTask({ message, subsystem = 'general' }) {
     subsystem,
     queuedAt: new Date().toISOString(),
     queueDepth,
+    metadata,
   };
   selected.taskQueue.push(task);
   selected.lastActivityAt = _now();
+  selected.location = `queued:${subsystem || 'general'}`;
+  _updateRobotSignal(selected, {
+    taskId: task.id,
+    subsystem: subsystem || 'general',
+    location: selected.location,
+  });
   if (selected.state === 'idle') _activateAgent(selected);
   _broadcastAgentUpdate();
   return {
@@ -273,6 +319,19 @@ function getRunningAgentCount() {
   return _runningAgents().length;
 }
 
+function getRobotSignal() {
+  const active = agents.find((a) => a.state === 'busy') || agents.find((a) => a.id === lastRobotSignal.agentId);
+  if (!active) return { ...lastRobotSignal };
+  return {
+    agentId: active.id,
+    agentName: active.name,
+    taskId: active.currentTask ? active.currentTask.id : lastRobotSignal.taskId,
+    subsystem: active.currentTask ? active.currentTask.subsystem : lastRobotSignal.subsystem,
+    location: active.currentTask ? `processing:${active.currentTask.subsystem || 'general'}` : (active.location || lastRobotSignal.location || 'idle'),
+    updatedAt: lastRobotSignal.updatedAt,
+  };
+}
+
 function on(eventName, handler) {
   events.on(eventName, handler);
 }
@@ -284,5 +343,6 @@ module.exports = {
   getRunningAgentCount,
   setMode,
   getMode,
+  getRobotSignal,
   on,
 };
