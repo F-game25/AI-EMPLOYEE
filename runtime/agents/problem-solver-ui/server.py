@@ -458,7 +458,6 @@ AGENTS_BY_MODE = {
     "chatbot-builder",
     "creator-agency",
     "recruiter",
-    # Additional agents with run.sh
     "arbitrage-bot",
     "course-creator",
     "faceless-video",
@@ -473,7 +472,6 @@ AGENTS_BY_MODE = {
     "signal-community",
     "skills-manager",
     "status-reporter",
-    # Agents without run.sh but with Python implementation
     "ad-campaign-wizard",
     "cold-outreach-assassin",
     "conversion-rate-optimizer",
@@ -482,14 +480,12 @@ AGENTS_BY_MODE = {
     "partnership-matchmaker",
     "referral-rocket",
     "sales-closer-pro",
-    # AI Intelligence Layer
     "turbo-quant",
     "ascend-forge",
     "blacklight",
     "hermes-agent",
     "obsidian-memory",
     "lead-intelligence",
-    # Business operations
     "company-manager",
     "budget-tracker",
     "goal-alignment",
@@ -498,26 +494,6 @@ AGENTS_BY_MODE = {
     "session-manager",
     "ticket-system",
     "discord-bot",
-    # New business intelligence agents
-    "lead-crm",
-    "email-marketing",
-    "meeting-intelligence",
-    "social-scheduler",
-    "ceo-briefing",
-    "financial-tools",
-    "competitor-watch",
-    "content-calendar",
-    # New feature agents (Power mode)
-    "crm-pipeline",
-    "invoicing",
-    "analytics-bi",
-    "workflow-builder",
-    "team-management",
-    "customer-support",
-    "website-builder",
-    "personal-brand",
-    "health-check",
-    "export-backup",
   ],
 }
 
@@ -642,7 +618,7 @@ def route_to_agent(message: str) -> str:
   for keyword in sorted(ROUTING_MAP, key=len, reverse=True):
     if keyword in message_lower:
       return ROUTING_MAP[keyword]
-  if "all 74 agents" in message_lower or "all agents" in message_lower:
+  if "all 56 agents" in message_lower or "all agents" in message_lower:
     return "task-orchestrator"
   return "task-orchestrator"
 
@@ -7511,7 +7487,7 @@ async function loadDashboard() {
   const ovBannerAgents = document.getElementById('ov-banner-agents');
   if (ovBannerMode && d.mode) ovBannerMode.textContent = d.mode.toUpperCase() + ' MODE';
   if (ovBannerAgents) ovBannerAgents.textContent = `${running} / ${total} Agents Active`;
-  const modeCapacity = {starter: 3, business: 15, power: 74};
+  const modeCapacity = {starter: 3, business: 15, power: 56};
   const capacity = modeCapacity[d.mode] || total;
   const totalSubEl = document.getElementById('stat-total-sub');
   if (totalSubEl && d.mode) totalSubEl.textContent = `${d.mode} mode · ${capacity} max`;
@@ -15027,7 +15003,7 @@ async function submitLogin() {
 /* named constants */
 const MAX_HEARTBEAT_LINES = 80;
 const MAX_CHAT_MESSAGES = 60;
-const MAX_AGENTS_TOTAL = 74; /* matches AGENTS_BY_MODE power list */
+const MAX_AGENTS_TOTAL = 56; /* matches AGENTS_BY_MODE power list */
 
 document.addEventListener('DOMContentLoaded', () => {
   const passEl = document.getElementById('login-pass');
@@ -15069,7 +15045,7 @@ function runBootSequence() {
     ['[NET ]  TLS context: ready', 'ok', 200, 36],
     ['[AUTH]  JWT secret: loaded', 'ok', 220, 41],
     ['[AGNT]  Loading agent registry…', '', 300, 47],
-    ['[AGNT]  74 agents registered — all modes available', 'ok', 250, 54],
+    ['[AGNT]  56 agents registered — all modes available', 'ok', 250, 54],
     ['[LLM ]  Probing Ollama endpoint…', '', 320, 60],
     ['[AI  ]  Hybrid router: ONLINE/OFFLINE/AUTO configured', 'ok', 220, 67],
     ['[DB  ]  State store: mounted', 'ok', 200, 73],
@@ -17022,7 +16998,7 @@ def handle_command(
             "  arb opportunities / arb watchlist\n"
             "  task <description> — multi-agent orchestration\n"
             "  task status / task list / task cancel\n"
-            "  agents — list all 74 AI agents\n"
+            "  agents — list all 56 AI agents\n"
             "  assign <agent> <subtask> — manual agent dispatch\n"
             "  company build <idea> — build a company from scratch\n"
             "  company validate / plan / simulate / gtm / pitch / org / swot\n"
@@ -17357,11 +17333,11 @@ def handle_command(
 
     routed_agent = route_to_agent(message)
     mode = _current_mode()
-    if ("all 74 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
+    if ("all 56 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
       allowed = ", ".join(_available_agent_ids(mode))
       return (
         f"Only {len(_available_agent_ids(mode))} agents are available in {mode} mode: {allowed}. "
-        "Switch to power mode to run all 74 agents, or I can handle this with the current set."
+        "Switch to power mode to run all 56 agents, or I can handle this with the current set."
       )
     if not _agent_allowed_in_mode(routed_agent, mode):
       return (
@@ -22373,7 +22349,7 @@ async def guardrails_reject_action(action_id: str, payload: dict = {}, _auth: No
 _AGENT_GOVERNOR_LOCK = threading.Lock()
 _AGENT_GOVERNOR: dict = {
     "enabled": True,
-    "max_agents": 73,
+    "max_agents": len(AGENTS_BY_MODE["power"]),
     "updated_at": None,
 }
 
