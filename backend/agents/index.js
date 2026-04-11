@@ -295,13 +295,13 @@ function enqueueTask({ message, subsystem = 'general', metadata = {} }) {
   };
   selected.taskQueue.push(task);
   selected.lastActivityAt = _now();
+  if (selected.state === 'idle') _activateAgent(selected);
   selected.location = `queued:${subsystem || 'general'}`;
   _updateRobotSignal(selected, {
     taskId: task.id,
     subsystem: subsystem || 'general',
     location: selected.location,
   });
-  if (selected.state === 'idle') _activateAgent(selected);
   _broadcastAgentUpdate();
   return {
     taskId: task.id,
@@ -320,14 +320,27 @@ function getRunningAgentCount() {
 }
 
 function getRobotSignal() {
-  const active = agents.find((a) => a.state === 'busy') || agents.find((a) => a.id === lastRobotSignal.agentId);
+  const lastAgentId = lastRobotSignal.agentId;
+  let active = null;
+  for (const agent of agents) {
+    if (!active && agent.state === 'busy') {
+      active = agent;
+      break;
+    }
+    if (!active && lastAgentId && agent.id === lastAgentId) {
+      active = agent;
+    }
+  }
   if (!active) return { ...lastRobotSignal };
+  const activeLocation = active.currentTask
+    ? `processing:${active.currentTask.subsystem || 'general'}`
+    : (active.location || lastRobotSignal.location || 'idle');
   return {
     agentId: active.id,
     agentName: active.name,
     taskId: active.currentTask ? active.currentTask.id : lastRobotSignal.taskId,
     subsystem: active.currentTask ? active.currentTask.subsystem : lastRobotSignal.subsystem,
-    location: active.currentTask ? `processing:${active.currentTask.subsystem || 'general'}` : (active.location || lastRobotSignal.location || 'idle'),
+    location: activeLocation,
     updatedAt: lastRobotSignal.updatedAt,
   };
 }
