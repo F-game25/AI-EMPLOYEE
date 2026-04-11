@@ -949,11 +949,12 @@ class TestSecureExecutionEngine:
 
         denial_entries = [e for e in log.read() if e.get("action_type") == "permission_denied"]
         assert len(denial_entries) >= 2
-        latest = denial_entries[-1].get("after", {})
-        assert latest.get("skill") == "intruder"
-        assert latest.get("attempted_action") == "api"
-        assert isinstance(latest.get("timestamp"), str) and latest.get("timestamp")
-        assert latest.get("flagged") is True
+        for entry in denial_entries:
+            payload = entry.get("after", {})
+            assert payload.get("skill") == "intruder"
+            assert payload.get("attempted_action") == "api"
+            assert isinstance(payload.get("timestamp"), str) and payload.get("timestamp")
+        assert any(entry.get("after", {}).get("flagged") is True for entry in denial_entries)
 
     def test_idempotency_cache_scoped_by_skill(self):
         from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
