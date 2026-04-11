@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import json
+import copy
 import threading
 import time
 import traceback
@@ -59,11 +60,13 @@ class ActionFailure:
     context: dict = field(default_factory=dict)
     category: str = "fatal"
     error_type: str = ""
+    retryable: bool = False
 
     def to_dict(self) -> dict:
         return {
             "error_type": self.error_type,
             "category": self.category,
+            "retryable": self.retryable,
             "reason": self.reason,
             "context": self.context,
             "stack_trace": self.stack_trace,
@@ -281,6 +284,28 @@ class APIAction(BaseAction):
         self._executor = executor
         self._batch_executor = batch_executor
 
+    def validate(self, payload: dict) -> None:
+        super().validate(payload)
+        batch = payload.get("batch")
+        if batch is not None:
+            if not isinstance(batch, list):
+                raise ActionValidationError("APIAction 'batch' must be a list", context={"field": "batch"})
+            for idx, item in enumerate(batch):
+                if not isinstance(item, dict):
+                    raise ActionValidationError(
+                        "APIAction batch items must be dict objects",
+                        context={"field": "batch", "index": idx},
+                    )
+        method = payload.get("method")
+        if method is not None:
+            if not isinstance(method, str):
+                raise ActionValidationError("APIAction 'method' must be a string", context={"field": "method"})
+            if method.upper() not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+                raise ActionValidationError(
+                    "APIAction method must be a valid HTTP verb",
+                    context={"field": "method", "value": method},
+                )
+
     def execute(self, payload: dict) -> Any:
         batch = payload.get("batch")
         if isinstance(batch, list) and self._batch_executor is not None:
@@ -392,11 +417,15 @@ class ActionMetrics:
             "recoverable_failures": self.recoverable_failures,
             "fatal_failures": self.fatal_failures,
             "success_rate": round(self.success / denom, 4),
+            "failure_rate": round(self.failures / denom, 4),
             "avg_latency_s": round(avg, 4),
+            "average_latency_s": round(avg, 4),
             "cache_hits": self.cache_hits,
             "cache_hit_rate": round(self.cache_hits / denom, 4),
             "retries": self.retries,
+            "retry_count": self.retries,
             "timeouts": self.timeouts,
+            "timeout_count": self.timeouts,
         }
 
 
@@ -416,10 +445,10 @@ class SecureExecutionEngine:
         self._per_action_metrics: dict[str, ActionMetrics] = {}
         self._lock = threading.Lock()
         self._rate_windows: dict[str, list[float]] = {}
-        # Idempotency cache: cache_key -> (timestamp, result)
-        self._idempotency_cache: dict[str, tuple[float, Any]] = {}
+        # Idempotency cache: cache_key -> (timestamp, response)
+        self._idempotency_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._idempotency_inflight: dict[str, threading.Event] = {}
         self._idempotency_ttl_s: int = self._config.idempotency_ttl_s
-        self._result_cache: dict[str, tuple[float, Any]] = {}
         self._lazy_resources: dict[str, tuple[Callable[[], Any], Any]] = {}
 
     def register_action(self, name: str, action: BaseAction) -> None:
@@ -463,12 +492,30 @@ class SecureExecutionEngine:
                 )
             window.append(now)
 
-    def _cache_key(self, action_name: str, payload: dict, idempotency_key: str | None) -> str:
+    def _cache_key(
+        self,
+        action_name: str,
+        payload: dict,
+        idempotency_key: str | None,
+        *,
+        skill: str,
+    ) -> str:
         try:
             stable_payload = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
         except Exception:
             stable_payload = str(sorted((str(k), str(v)) for k, v in payload.items()))
-        return f"{action_name}::{idempotency_key or ''}::{stable_payload}"
+        return f"{skill}::{action_name}::{idempotency_key or ''}::{stable_payload}"
+
+    def _prune_caches(self, now_ts: float) -> None:
+        if self._idempotency_ttl_s < 0:
+            return
+        with self._lock:
+            expired = [
+                key for key, (ts, _payload) in self._idempotency_cache.items()
+                if (now_ts - ts) > self._idempotency_ttl_s
+            ]
+            for key in expired:
+                self._idempotency_cache.pop(key, None)
 
     def metrics(self) -> dict:
         """Return global and per-action metrics snapshot."""
@@ -491,6 +538,7 @@ class SecureExecutionEngine:
                 context=merged,
                 category=category,
                 error_type=error_type,
+                retryable=bool(exc.recoverable),
             )
         return ActionFailure(
             reason=str(exc),
@@ -498,17 +546,23 @@ class SecureExecutionEngine:
             context=context,
             category="fatal",
             error_type=error_type,
+            retryable=False,
         )
 
     def _record_permission_denial(self, skill: str, action_kind: str, action_name: str) -> None:
         """Write a structured warning to the audit log for every permission denial."""
         count = self._policy.record_violation(skill)
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        threshold = getattr(self._policy, "_alert_threshold", PermissionPolicy._DEFAULT_ALERT_THRESHOLD)
+        flagged = count >= max(1, int(threshold))
         _log.warning(
-            "PERMISSION_DENIED skill=%s action_kind=%s action=%s violation_count=%d",
+            "PERMISSION_DENIED ts=%s skill=%s action_kind=%s action=%s violation_count=%d flagged=%s",
+            timestamp,
             skill,
             action_kind,
             action_name,
             count,
+            flagged,
         )
         try:
             from core.change_log import get_changelog
@@ -517,7 +571,14 @@ class SecureExecutionEngine:
                 action_type="permission_denied",
                 reason=f"Skill '{skill}' attempted disallowed action '{action_kind}'",
                 before=None,
-                after={"action": action_name, "action_kind": action_kind, "violation_count": count},
+                after={
+                    "skill": skill,
+                    "action": action_name,
+                    "attempted_action": action_kind,
+                    "timestamp": timestamp,
+                    "violation_count": count,
+                    "flagged": flagged,
+                },
                 outcome="denied",
             )
         except Exception:
@@ -532,6 +593,7 @@ class SecureExecutionEngine:
         idempotency_key: str | None = None,
     ) -> dict:
         start = time.time()
+        isolated_payload = copy.deepcopy(payload)
         self._metrics.total += 1
         action_m = self._action_metrics(action_name)
         action_m.total += 1
@@ -565,6 +627,7 @@ class SecureExecutionEngine:
                 context={"skill": skill, "action_kind": action.action_kind, "action": action_name},
                 category="fatal",
                 error_type="ActionPermissionError",
+                retryable=False,
             )
             self._metrics.failures += 1
             self._metrics.fatal_failures += 1
@@ -573,83 +636,159 @@ class SecureExecutionEngine:
             _finish(time.time() - start)
             return {"status": "error", "failure": failure.to_dict()}
 
-        cache_key = self._cache_key(action_name, payload, idempotency_key)
+        if action.idempotent and (not isinstance(idempotency_key, str) or not idempotency_key.strip()):
+            failure = ActionFailure(
+                reason=f"Missing required idempotency_key for action '{action_name}'",
+                stack_trace="",
+                context={"action": action_name, "skill": skill},
+                category="fatal",
+                error_type="ActionValidationError",
+                retryable=False,
+            )
+            self._metrics.failures += 1
+            self._metrics.fatal_failures += 1
+            action_m.failures += 1
+            action_m.fatal_failures += 1
+            _finish(time.time() - start)
+            return {"status": "error", "failure": failure.to_dict()}
+
+        cache_key = self._cache_key(action_name, isolated_payload, idempotency_key, skill=skill)
         now = time.time()
+        self._prune_caches(now)
+        owner_of_inflight = False
+        inflight_event: threading.Event | None = None
         if idempotency_key and action.idempotent:
-            cached_ts_result = self._idempotency_cache.get(cache_key)
-            if cached_ts_result is not None:
-                ts, cached_result = cached_ts_result
-                if (now - ts) <= self._idempotency_ttl_s:
+            with self._lock:
+                cached_ts_result = self._idempotency_cache.get(cache_key)
+                if cached_ts_result is not None:
+                    _ts, cached_response = cached_ts_result
                     self._metrics.cache_hits += 1
                     self._metrics.success += 1
                     action_m.cache_hits += 1
                     action_m.success += 1
                     _finish(time.time() - start)
-                    return {"status": "executed", "result": cached_result, "cached": True}
-
-        cached = self._result_cache.get(cache_key)
-        if cached and (now - cached[0]) <= self._config.cache_ttl_s:
-            self._metrics.cache_hits += 1
-            self._metrics.success += 1
-            action_m.cache_hits += 1
-            action_m.success += 1
-            _finish(time.time() - start)
-            return {"status": "executed", "result": cached[1], "cached": True}
+                    replay = copy.deepcopy(cached_response)
+                    replay["cached"] = True
+                    return replay
+                inflight_event = self._idempotency_inflight.get(cache_key)
+                if inflight_event is None:
+                    inflight_event = threading.Event()
+                    self._idempotency_inflight[cache_key] = inflight_event
+                    owner_of_inflight = True
+            if not owner_of_inflight and inflight_event is not None:
+                wait_completed = inflight_event.wait(timeout=max(action.timeout_s, 1) + 5)
+                with self._lock:
+                    cached_ts_result = self._idempotency_cache.get(cache_key)
+                if cached_ts_result is not None:
+                    _ts, cached_response = cached_ts_result
+                    self._metrics.cache_hits += 1
+                    self._metrics.success += 1
+                    action_m.cache_hits += 1
+                    action_m.success += 1
+                    _finish(time.time() - start)
+                    replay = copy.deepcopy(cached_response)
+                    replay["cached"] = True
+                    return replay
+                if not wait_completed:
+                    failure = ActionFailure(
+                        reason=f"Timed out waiting for in-flight idempotent action '{action_name}'",
+                        stack_trace="",
+                        context={"action": action_name, "skill": skill},
+                        category="recoverable",
+                        error_type="ActionTimeoutError",
+                        retryable=True,
+                    )
+                    self._metrics.failures += 1
+                    self._metrics.recoverable_failures += 1
+                    action_m.failures += 1
+                    action_m.recoverable_failures += 1
+                    self._metrics.timeouts += 1
+                    action_m.timeouts += 1
+                    _finish(time.time() - start)
+                    return {"status": "error", "failure": failure.to_dict()}
+                failure = ActionFailure(
+                    reason=f"Missing idempotency replay state for action '{action_name}'",
+                    stack_trace="",
+                    context={"action": action_name, "skill": skill},
+                    category="fatal",
+                    error_type="ActionError",
+                    retryable=False,
+                )
+                self._metrics.failures += 1
+                self._metrics.fatal_failures += 1
+                action_m.failures += 1
+                action_m.fatal_failures += 1
+                _finish(time.time() - start)
+                return {"status": "error", "failure": failure.to_dict()}
 
         failure_payload: dict | None = None
         max_attempts = max(int(action.max_retries), 0) + 1
-        for attempt in range(1, max_attempts + 1):
-            try:
-                action.validate(payload)
-                self._check_rate_limit(action_name, action.rate_limit_per_minute)
+        try:
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    action.validate(isolated_payload)
+                    self._check_rate_limit(action_name, action.rate_limit_per_minute)
 
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    fut = pool.submit(action.execute, payload)
-                    try:
-                        result = fut.result(timeout=max(action.timeout_s, 1))
-                    except FutureTimeoutError as exc:
-                        self._metrics.timeouts += 1
-                        action_m.timeouts += 1
-                        raise ActionTimeoutError(
-                            f"Action '{action_name}' timed out after {action.timeout_s}s",
-                            context={"action": action_name, "timeout_s": action.timeout_s},
-                        ) from exc
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        fut = pool.submit(action.execute, copy.deepcopy(isolated_payload))
+                        try:
+                            result = fut.result(timeout=max(action.timeout_s, 1))
+                        except FutureTimeoutError as exc:
+                            self._metrics.timeouts += 1
+                            action_m.timeouts += 1
+                            raise ActionTimeoutError(
+                                f"Action '{action_name}' timed out after {action.timeout_s}s",
+                                context={"action": action_name, "timeout_s": action.timeout_s},
+                            ) from exc
 
-                # Output validation
-                action.validate_output(result)
+                    # Output validation
+                    action.validate_output(result)
 
-                if idempotency_key and action.idempotent:
-                    self._idempotency_cache[cache_key] = (time.time(), result)
-                self._result_cache[cache_key] = (time.time(), result)
-                self._metrics.success += 1
-                action_m.success += 1
-                _finish(time.time() - start)
-                return {"status": "executed", "result": result, "attempts": attempt}
-            except Exception as exc:
-                failure = self._format_failure(
-                    exc,
-                    context={
-                        "action": action_name,
-                        "skill": skill,
-                        "attempt": attempt,
-                    },
-                )
-                failure_payload = failure.to_dict()
-                is_recoverable = failure.category == "recoverable"
-                if is_recoverable:
-                    self._metrics.recoverable_failures += 1
-                    action_m.recoverable_failures += 1
-                else:
-                    self._metrics.fatal_failures += 1
-                    action_m.fatal_failures += 1
-                if attempt < max_attempts and is_recoverable:
-                    self._metrics.retries += 1
-                    action_m.retries += 1
-                    # Exponential backoff: base * 2^(attempt-1), capped at 30s.
-                    backoff = action.retry_backoff_s * (1 << (attempt - 1))
-                    time.sleep(min(backoff, 30.0))
-                    continue
-                break
+                    response = {"status": "executed", "result": copy.deepcopy(result), "attempts": attempt}
+                    if idempotency_key and action.idempotent:
+                        with self._lock:
+                            self._idempotency_cache[cache_key] = (time.time(), copy.deepcopy(response))
+                    self._metrics.success += 1
+                    action_m.success += 1
+                    _finish(time.time() - start)
+                    return response
+                except Exception as exc:
+                    failure = self._format_failure(
+                        exc,
+                        context={
+                            "action": action_name,
+                            "skill": skill,
+                            "attempt": attempt,
+                        },
+                    )
+                    failure_payload = failure.to_dict()
+                    is_recoverable = failure.category == "recoverable"
+                    if is_recoverable:
+                        self._metrics.recoverable_failures += 1
+                        action_m.recoverable_failures += 1
+                    else:
+                        self._metrics.fatal_failures += 1
+                        action_m.fatal_failures += 1
+                    if attempt < max_attempts and is_recoverable:
+                        self._metrics.retries += 1
+                        action_m.retries += 1
+                        # Exponential backoff: base * 2^(attempt-1), capped at 30s.
+                        backoff = action.retry_backoff_s * (1 << (attempt - 1))
+                        time.sleep(min(backoff, 30.0))
+                        continue
+                    break
+        finally:
+            if idempotency_key and action.idempotent and owner_of_inflight:
+                if failure_payload:
+                    with self._lock:
+                        self._idempotency_cache[cache_key] = (
+                            time.time(),
+                            {"status": "error", "failure": copy.deepcopy(failure_payload)},
+                        )
+                with self._lock:
+                    event = self._idempotency_inflight.pop(cache_key, None)
+                if event is not None:
+                    event.set()
 
         self._metrics.failures += 1
         action_m.failures += 1
