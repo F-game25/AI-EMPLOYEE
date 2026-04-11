@@ -710,6 +710,66 @@ class SkillRegistry:
         """Return the ``_meta`` section of the manifest."""
         return self.manifest.get("_meta", {})
 
+    # ── Compatibility shims (branch API) ──────────────────────────────────────
+
+    def list_skills(self, category: str | None = None) -> list[dict]:
+        """Return skills as a flat list of ``{name, category, entry_point}`` dicts.
+
+        This shim bridges the branch's simple scanner API to the richer
+        manifest produced by :func:`_build_manifest`.  Pass *category* to
+        filter by agent category tag.
+        """
+        result = []
+        for agent_id, ameta in self.manifest.get("agents", {}).items():
+            cat = ameta.get("category", "general")
+            if category and cat != category:
+                continue
+            result.append(
+                {
+                    "name": agent_id,
+                    "category": cat,
+                    "entry_point": ameta.get("entry_point", ""),
+                    "inputs": {},
+                    "outputs": {},
+                }
+            )
+        return result
+
+    def find_skill(self, query: str) -> dict | None:
+        """Return the first agent/skill whose name contains *query* (case-insensitive)."""
+        q = query.lower()
+        for item in self.list_skills():
+            if q in item["name"].lower():
+                return item
+        return None
+
+    def categories(self) -> list[str]:
+        """Return distinct category names present in the manifest."""
+        return sorted({
+            ameta.get("category", "general")
+            for ameta in self.manifest.get("agents", {}).values()
+        })
+
+    def to_json(self) -> dict:
+        """Return a flat manifest dict compatible with the branch API.
+
+        Keys: ``total_skills``, ``categories``, ``by_category``, ``skills``.
+        """
+        skills = self.list_skills()
+        by_category: dict[str, list] = {}
+        for s in skills:
+            by_category.setdefault(s["category"], []).append(s["name"])
+        return {
+            "total_skills": len(skills),
+            "categories": self.categories(),
+            "by_category": by_category,
+            "skills": skills,
+        }
+
+    def reload(self) -> None:
+        """Force a rescan — alias for :meth:`rebuild`."""
+        self.rebuild()
+
 
 # ── Module-level singleton ─────────────────────────────────────────────────────
 

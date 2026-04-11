@@ -12,8 +12,8 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import pytest
+np = pytest.importorskip("numpy", reason="numpy not installed")
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _REPO    = Path(__file__).parent.parent

@@ -15,6 +15,7 @@ from . import (
     personal_brand,
     health_check,
     export_backup,
+    system_api,
 )
 
 ALL_ROUTERS = [
@@ -33,4 +34,5 @@ ALL_ROUTERS = [
     personal_brand.router,
     health_check.router,
     export_backup.router,
+    system_api.router,
 ]
