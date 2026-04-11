@@ -10500,6 +10500,25 @@ function _applyDensity(density, save=true) {
 function setDensity(d) { _applyDensity(d, true); }
 
 // ── Options / Settings ────────────────────────────────────────────────────────
+const _settingsDrafts = {};
+
+function _getSettingDraft(key, fallbackValue) {
+  return Object.prototype.hasOwnProperty.call(_settingsDrafts, key)
+    ? _settingsDrafts[key]
+    : fallbackValue;
+}
+
+function _bindSettingsDraftInputs(containerId) {
+  const inputs = document.querySelectorAll('#' + containerId + ' input');
+  inputs.forEach(el => {
+    const key = el.id.replace('opt-field-', '');
+    if (!key) return;
+    el.addEventListener('input', () => {
+      _settingsDrafts[key] = el.value;
+    });
+  });
+}
+
 async function loadOptions() {
   const d = await api('/api/settings');
   renderSettingsSection('opt-api-keys',   d.api_keys    || []);
@@ -10521,7 +10540,7 @@ function renderSettingsSection(containerId, fields) {
         <input id="opt-field-${escHtml(f.key)}"
           type="${f.type === 'password' ? 'password' : 'text'}"
           placeholder="${escHtml(f.placeholder)}"
-          value="${escHtml(f.value)}"
+          value="${escHtml(_getSettingDraft(f.key, f.value || ''))}"
           autocomplete="off"
           style="flex:1"/>
         ${f.type === 'password'
@@ -10530,6 +10549,7 @@ function renderSettingsSection(containerId, fields) {
           : ''}
       </div>
     </div>`).join('');
+  _bindSettingsDraftInputs(containerId);
 }
 
 function toggleSecret(inputId, btn) {
@@ -10558,7 +10578,10 @@ async function saveSettings(category) {
       ? `✅ Saved ${r.saved} setting${r.saved !== 1 ? 's' : ''}`
       : 'No changes (all values were unchanged)';
     toast(msg, r.saved ? 'success' : 'info');
-    if (r.saved) loadOptions();
+    if (r.saved) {
+      Object.keys(updates).forEach(k => { delete _settingsDrafts[k]; });
+      loadOptions();
+    }
   } else {
     toast(r.detail || 'Error saving', 'error');
   }
@@ -19634,6 +19657,43 @@ def uninstall_bot(body: _UninstallRequest):
 _UPDATER_STATE_FILE = STATE_DIR / "updater.json"
 _UPDATER_COMMIT_FILE = STATE_DIR / "installed_commit.txt"
 _UPDATER_TRIGGER_FILE = AI_HOME / "run" / "updater.trigger"
+_UPDATER_SCRIPT_FILE = AI_HOME / "agents" / "auto-updater" / "auto_updater.py"
+
+
+def _signal_running_updater() -> bool:
+    """Wake the background updater process if a live PID is known."""
+    try:
+        if not _UPDATER_STATE_FILE.exists():
+            return False
+        state = json.loads(_UPDATER_STATE_FILE.read_text())
+        pid = int(state.get("pid") or 0)
+        if pid <= 0:
+            return False
+        # liveness probe
+        os.kill(pid, 0)
+        import signal as _sig
+        os.kill(pid, _sig.SIGUSR1)
+        return True
+    except Exception:
+        return False
+
+
+def _start_updater_once() -> bool:
+    """Fallback when no updater daemon is active: run one immediate check."""
+    try:
+        if not _UPDATER_SCRIPT_FILE.exists():
+            return False
+        py_exec = sys.executable or "python3"
+        subprocess.Popen(
+            [py_exec, str(_UPDATER_SCRIPT_FILE), "--once"],
+            cwd=str(AI_HOME),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return True
+    except Exception:
+        return False
 
 
 @app.get("/api/updater/status")
@@ -19665,17 +19725,11 @@ def updater_check():
     try:
         _UPDATER_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
         _UPDATER_TRIGGER_FILE.write_text("check")
-        # Wake the updater from its sleep so the check happens within seconds
-        try:
-            if _UPDATER_STATE_FILE.exists():
-                state = json.loads(_UPDATER_STATE_FILE.read_text())
-                pid = state.get("pid")
-                if pid:
-                    import signal as _sig
-                    os.kill(int(pid), _sig.SIGUSR1)
-        except Exception:
-            pass
-        return JSONResponse({"ok": True, "message": "Check triggered — results appear in Auto Update card within seconds"})
+        if _signal_running_updater():
+            return JSONResponse({"ok": True, "message": "Check triggered — results appear in Auto Update card within seconds"})
+        if _start_updater_once():
+            return JSONResponse({"ok": True, "message": "Background updater was idle — started one immediate check now"})
+        return JSONResponse({"ok": True, "message": "Check queued — updater will run when available"})
     except Exception as exc:
         logger.error("API error: %s", exc, exc_info=True)
         raise HTTPException(500, "Internal server error")
@@ -19687,17 +19741,11 @@ def updater_update():
     try:
         _UPDATER_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
         _UPDATER_TRIGGER_FILE.write_text("force")
-        # Also send SIGUSR1 to the updater process if its PID is known
-        try:
-            if _UPDATER_STATE_FILE.exists():
-                state = json.loads(_UPDATER_STATE_FILE.read_text())
-                pid = state.get("pid")
-                if pid:
-                    import signal as _sig
-                    os.kill(int(pid), _sig.SIGUSR1)
-        except Exception:
-            pass
-        return JSONResponse({"ok": True, "message": "Update triggered — agents will restart momentarily if changes are found"})
+        if _signal_running_updater():
+            return JSONResponse({"ok": True, "message": "Update triggered — agents will restart momentarily if changes are found"})
+        if _start_updater_once():
+            return JSONResponse({"ok": True, "message": "Background updater was idle — started one immediate update check now"})
+        return JSONResponse({"ok": True, "message": "Update queued — updater will run when available"})
     except Exception as exc:
         logger.error("API error: %s", exc, exc_info=True)
         raise HTTPException(500, "Internal server error")
