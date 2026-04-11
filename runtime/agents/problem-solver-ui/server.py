@@ -614,6 +614,50 @@ def _mode_agent_targets(mode: Optional[str] = None) -> list[str]:
   return targets
 
 
+_RUNTIME_PATHS_LOCK = threading.Lock()
+_RUNTIME_RUN_FILE_MAP: dict[str, dict[str, Path]] = {}
+_RUNTIME_STATE_FILE_MAP: dict[str, Path] = {}
+
+
+def _build_runtime_path_maps() -> None:
+  run_dir = (AI_HOME / "run").resolve()
+  state_dir = STATE_DIR.resolve()
+  managed_agents: set[str] = set()
+  for mode_name in AGENTS_BY_MODE:
+    managed_agents.update(_mode_agent_targets(mode_name))
+  managed_agents.update(a for a in INFRA_AGENTS if _agent_dir_exists(a))
+  for agent_name in sorted(managed_agents):
+    if not _BOT_NAME_RE.match(agent_name):
+      continue
+    _RUNTIME_RUN_FILE_MAP[agent_name] = {
+      ".pid": run_dir / f"{agent_name}.pid",
+      ".lock": run_dir / f"{agent_name}.lock",
+      ".pid.lock": run_dir / f"{agent_name}.pid.lock",
+    }
+    _RUNTIME_STATE_FILE_MAP[agent_name] = state_dir / f"{agent_name}.state.json"
+
+
+def _ensure_runtime_path_maps() -> None:
+  if _RUNTIME_RUN_FILE_MAP and _RUNTIME_STATE_FILE_MAP:
+    return
+  with _RUNTIME_PATHS_LOCK:
+    if _RUNTIME_RUN_FILE_MAP and _RUNTIME_STATE_FILE_MAP:
+      return
+    _build_runtime_path_maps()
+
+
+def _normalize_managed_agent_name(agent_name: str) -> Optional[str]:
+  if not isinstance(agent_name, str) or not _BOT_NAME_RE.match(agent_name):
+    return None
+  _ensure_runtime_path_maps()
+  if agent_name in _RUNTIME_RUN_FILE_MAP:
+    return agent_name
+  resolved = _resolve_agent_target(agent_name)
+  if resolved and resolved in _RUNTIME_RUN_FILE_MAP:
+    return resolved
+  return None
+
+
 def route_to_agent(message: str) -> str:
   message_lower = message.lower()
   for keyword in sorted(ROUTING_MAP, key=len, reverse=True):
@@ -1257,27 +1301,19 @@ def _agent_pid_file(agent_name: str) -> Path:
 
 
 def _safe_run_file(agent_name: str, suffix: str) -> Optional[Path]:
-    if not _BOT_NAME_RE.match(agent_name):
+    if suffix not in (".pid", ".lock", ".pid.lock"):
         return None
-    run_dir = (AI_HOME / "run").resolve()
-    candidate = (run_dir / f"{agent_name}{suffix}").resolve()
-    try:
-        candidate.relative_to(run_dir)
-    except ValueError:
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
         return None
-    return candidate
+    return _RUNTIME_RUN_FILE_MAP.get(normalized, {}).get(suffix)
 
 
 def _safe_state_file(agent_name: str) -> Optional[Path]:
-    if not _BOT_NAME_RE.match(agent_name):
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
         return None
-    state_dir = STATE_DIR.resolve()
-    candidate = (state_dir / f"{agent_name}.state.json").resolve()
-    try:
-        candidate.relative_to(state_dir)
-    except ValueError:
-        return None
-    return candidate
+    return _RUNTIME_STATE_FILE_MAP.get(normalized)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1291,9 +1327,10 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _read_pid_file(agent_name: str) -> Optional[int]:
-    if not _BOT_NAME_RE.match(agent_name):
+    try:
+        pid_file = _agent_pid_file(agent_name)
+    except ValueError:
         return None
-    pid_file = _agent_pid_file(agent_name)
     if not pid_file.exists():
         return None
     try:
@@ -1353,7 +1390,8 @@ def _pid_owned_by_current_user(pid: int) -> bool:
 
 
 def _safe_to_control_pid(pid: int, agent_name: str) -> bool:
-    if not _BOT_NAME_RE.match(agent_name):
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
         return False
     if pid <= 1 or pid == os.getpid():
         return False
@@ -1363,7 +1401,7 @@ def _safe_to_control_pid(pid: int, agent_name: str) -> bool:
         return False
     cmdline, cwd = _pid_context(pid)
     ai_home = str(AI_HOME)
-    marker = f"/agents/{agent_name}/"
+    marker = f"/agents/{normalized}/"
     if ai_home not in (cmdline + " " + cwd):
         return False
     if marker not in cmdline and marker not in cwd:
@@ -1372,13 +1410,14 @@ def _safe_to_control_pid(pid: int, agent_name: str) -> bool:
 
 
 def _discover_agent_pids(agent_name: str) -> set[int]:
-    if not _BOT_NAME_RE.match(agent_name):
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
         return set()
     pids: set[int] = set()
-    pid_from_file = _read_pid_file(agent_name)
+    pid_from_file = _read_pid_file(normalized)
     if pid_from_file:
         pids.add(pid_from_file)
-    marker = f"/agents/{agent_name}/"
+    marker = f"/agents/{normalized}/"
     if _PSUTIL_OK and _psutil is not None:
         try:
             for proc in _psutil.process_iter(["pid", "cmdline", "cwd"]):
@@ -1394,7 +1433,7 @@ def _discover_agent_pids(agent_name: str) -> set[int]:
                     continue
         except Exception:
             pass
-    return {pid for pid in pids if _safe_to_control_pid(pid, agent_name)}
+    return {pid for pid in pids if _safe_to_control_pid(pid, normalized)}
 
 
 def _signal_pid_and_group(pid: int, sig: int) -> bool:
@@ -1417,10 +1456,11 @@ def _signal_pid_and_group(pid: int, sig: int) -> bool:
 
 
 def _cleanup_agent_runtime_files(agent_name: str) -> None:
-    if not _BOT_NAME_RE.match(agent_name):
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
         return
     for suffix in (".pid", ".lock", ".pid.lock"):
-        p = _safe_run_file(agent_name, suffix)
+        p = _safe_run_file(normalized, suffix)
         if p is None:
             continue
         try:
@@ -1431,13 +1471,14 @@ def _cleanup_agent_runtime_files(agent_name: str) -> None:
 
 
 def _write_stopped_state(agent_name: str, remaining_pids: list[int]) -> None:
-    if not _BOT_NAME_RE.match(agent_name):
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
         return
-    state_file = _safe_state_file(agent_name)
+    state_file = _safe_state_file(normalized)
     if state_file is None:
         return
     payload: dict = {
-        "bot": agent_name,
+        "bot": normalized,
         "status": "stopped" if not remaining_pids else "stopping_failed",
         "stopped_at": now_iso(),
     }
