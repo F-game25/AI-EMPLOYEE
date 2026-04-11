@@ -47,7 +47,20 @@ export const useAppStore = create((set) => ({
   setTyping: (v) => set({ isTyping: v }),
 
   // System status
-  systemStatus: { cpu: 0, memory: 0, uptime: 0, connections: 0 },
+  systemStatus: {
+    cpu: 0,
+    memory: 0,
+    uptime: 0,
+    connections: 0,
+    cpu_usage: 0,
+    gpu_usage: 0,
+    cpu_temperature: 0,
+    gpu_temperature: 0,
+    heartbeat: 0,
+    running_agents: 0,
+    total_agents: 0,
+    mode: 'MANUAL',
+  },
   setSystemStatus: (s) => set({ systemStatus: s }),
 
   // Neural Network status
