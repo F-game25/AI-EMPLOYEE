@@ -48,6 +48,7 @@ const MAX_ACTIVITY_ITEMS = 50;
 const MAX_EXECUTION_LOGS = 100;
 const BASE_PIPELINE_ROI = 250;
 const PIPELINE_ROI_SWING = 400;
+const REVENUE_CONVERSION_RATE = 0.45;
 
 const runtimeState = {
   automationRunning: false,
@@ -55,7 +56,7 @@ const runtimeState = {
   successfulTasks: 0,
   failedTasks: 0,
   valueGenerated: 0,
-  revenueTotal: 0,
+  revenueCents: 0,
   pipelineRuns: [],
   pipelineRoiTotal: 0,
   activityFeed: [],
@@ -89,7 +90,7 @@ function recordExecution({ taskId, skill, status, notes }) {
   runtimeState.executionLogs = runtimeState.executionLogs.slice(0, MAX_EXECUTION_LOGS);
   runtimeState.tasksExecuted += 1;
   if (status === 'success') runtimeState.successfulTasks += 1;
-  if (status !== 'success') runtimeState.failedTasks += 1;
+  if (status === 'failed') runtimeState.failedTasks += 1;
   runtimeState.skillStats[skill] = runtimeState.skillStats[skill] || { runs: 0, success: 0 };
   runtimeState.skillStats[skill].runs += 1;
   if (status === 'success') runtimeState.skillStats[skill].success += 1;
@@ -112,7 +113,7 @@ function runPipeline(pipelineName) {
   runtimeState.pipelineRuns = runtimeState.pipelineRuns.slice(0, MAX_ACTIVITY_ITEMS);
   runtimeState.pipelineRoiTotal += estimatedRoi;
   runtimeState.valueGenerated += estimatedRoi;
-  runtimeState.revenueTotal += Math.round(estimatedRoi * 0.45);
+  runtimeState.revenueCents += Math.round(estimatedRoi * REVENUE_CONVERSION_RATE * 100);
   addActivity(`[PIPELINE] ${pipelineName} completed • ROI $${estimatedRoi}`, 'pipeline');
   return run;
 }
@@ -148,7 +149,7 @@ function buildDashboardPayload() {
       },
     },
     revenue: {
-      total_revenue: runtimeState.revenueTotal,
+      total_revenue: runtimeState.revenueCents / 100,
     },
     top_skills: topSkills,
     activity_feed: runtimeState.activityFeed,
@@ -294,17 +295,17 @@ app.post('/api/automation/control', (req, res) => {
 });
 
 app.post('/api/money/content-pipeline', (req, res) => {
-  const run = runPipeline('content_publish_track');
+  const run = runPipeline('content');
   res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
 });
 
 app.post('/api/money/lead-pipeline', (req, res) => {
-  const run = runPipeline('data_leads_outreach_conversion');
+  const run = runPipeline('lead');
   res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
 });
 
 app.post('/api/money/opportunity-pipeline', (req, res) => {
-  const run = runPipeline('opportunity_execution_roi');
+  const run = runPipeline('opportunity');
   res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
 });
 

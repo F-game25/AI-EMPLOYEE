@@ -16,7 +16,7 @@ const PIPELINE_DEFAULTS = {
     endpoint: '/api/money/lead-pipeline',
     body: { source: 'crm_dataset', audience: 'SaaS founders', channels: ['email'], dry_run: false },
   },
-  outreach: {
+  opportunity: {
     endpoint: '/api/money/opportunity-pipeline',
     body: { opportunity: 'retainer upgrade outreach', budget: 500, dry_run: false },
   },
@@ -133,6 +133,7 @@ export default function Dashboard() {
     { label: 'Value Generated', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(2)}` },
     { label: 'Revenue', value: `$${(productMetrics?.revenue?.total_revenue ?? 0).toFixed(2)}` },
   ]), [productMetrics])
+  const isAutomationRunning = Boolean(productMetrics?.mode?.automation_running)
 
   return (
     <motion.div
@@ -147,12 +148,12 @@ export default function Dashboard() {
         <section className="ds-card p-3">
           <div className="flex flex-wrap items-center gap-2">
             <PrimaryButton
-              onClick={() => controlAutomation(systemStatus?.running_agents > 0 ? 'stop' : 'start')}
+              onClick={() => controlAutomation(isAutomationRunning ? 'stop' : 'start')}
               disabled={running}
             >
               {running && (activeAction === 'start' || activeAction === 'stop')
                 ? 'PROCESSING...'
-                : systemStatus?.running_agents > 0 ? 'STOP AUTOMATION' : 'START AUTOMATION'}
+                : isAutomationRunning ? 'STOP AUTOMATION' : 'START AUTOMATION'}
             </PrimaryButton>
 
             <SecondaryButton onClick={() => runPipeline('content')} disabled={running}>
@@ -161,8 +162,8 @@ export default function Dashboard() {
             <SecondaryButton onClick={() => runPipeline('lead')} disabled={running}>
               {running && activeAction === 'pipeline-lead' ? 'RUNNING...' : 'LEAD PIPELINE'}
             </SecondaryButton>
-            <SecondaryButton onClick={() => runPipeline('outreach')} disabled={running}>
-              {running && activeAction === 'pipeline-outreach' ? 'RUNNING...' : 'OPPORTUNITY PIPELINE'}
+            <SecondaryButton onClick={() => runPipeline('opportunity')} disabled={running}>
+              {running && activeAction === 'pipeline-opportunity' ? 'RUNNING...' : 'OPPORTUNITY PIPELINE'}
             </SecondaryButton>
 
             <select className="tier-2-btn font-mono text-xs px-3 py-2" value={mode} onChange={(e) => setModeRemote(e.target.value)} aria-label="Execution mode">
@@ -186,7 +187,7 @@ export default function Dashboard() {
                 onChange={(e) => setOverrideActionId(e.target.value)}
                 placeholder="Pending action ID for manual override"
               />
-              <SecondaryButton onClick={() => controlAutomation('override')} className="px-3 py-2">
+              <SecondaryButton onClick={() => controlAutomation('override')}>
                 OVERRIDE
               </SecondaryButton>
             </div>
