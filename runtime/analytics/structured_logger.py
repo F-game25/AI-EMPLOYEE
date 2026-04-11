@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -44,15 +45,16 @@ class StructuredLogger:
     def recent(self, *, limit: int = 100) -> list[dict[str, Any]]:
         if not self._path.exists():
             return []
-        rows: list[dict[str, Any]] = []
-        for raw in self._path.read_text(encoding="utf-8").splitlines():
-            if not raw.strip():
-                continue
-            try:
-                rows.append(json.loads(raw))
-            except Exception:
-                continue
-        return rows[-limit:]
+        rows: deque[dict[str, Any]] = deque(maxlen=limit)
+        with self._path.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                if not raw.strip():
+                    continue
+                try:
+                    rows.append(json.loads(raw))
+                except Exception:
+                    continue
+        return list(rows)
 
 
 _instance: StructuredLogger | None = None

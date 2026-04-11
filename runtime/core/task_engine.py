@@ -105,8 +105,8 @@ class TaskEngine:
         return TaskNode(
             task_id=task.id,
             skill=task.skill,
-            input=dict(task.inputs),
-            expected_output=dict(task.expected_outputs),
+            input=task.inputs,
+            expected_output=task.expected_outputs,
             status="success" if task.success else "pending",
             output=task.actual_output if isinstance(task.actual_output, dict) else {},
             error=task.error,
