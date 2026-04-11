@@ -103,6 +103,10 @@ function _updateRobotSignal(agent, details = {}) {
   };
 }
 
+function _formatLocation(stage, subsystem) {
+  return `${stage}:${subsystem || 'general'}`;
+}
+
 function _setState(agent, nextState) {
   if (agent.state !== nextState) {
     agent.state = nextState;
@@ -194,7 +198,7 @@ function _tick() {
       agent.currentTask = null;
       agent.tasksCompleted += 1;
       _setState(agent, 'running');
-      agent.location = `completed:${completedTask.subsystem || 'general'}`;
+      agent.location = _formatLocation('completed', completedTask.subsystem);
       _updateRobotSignal(agent, {
         taskId: completedTask.id,
         subsystem: completedTask.subsystem || 'general',
@@ -216,7 +220,7 @@ function _tick() {
       task.finishAt = now + _taskDurationMs();
       agent.currentTask = task;
       _setState(agent, 'busy');
-      agent.location = `processing:${task.subsystem || 'general'}`;
+      agent.location = _formatLocation('processing', task.subsystem);
       _updateRobotSignal(agent, {
         taskId: task.id,
         subsystem: task.subsystem || 'general',
@@ -296,7 +300,7 @@ function enqueueTask({ message, subsystem = 'general', metadata = {} }) {
   selected.taskQueue.push(task);
   selected.lastActivityAt = _now();
   if (selected.state === 'idle') _activateAgent(selected);
-  selected.location = `queued:${subsystem || 'general'}`;
+  selected.location = _formatLocation('queued', subsystem);
   _updateRobotSignal(selected, {
     taskId: task.id,
     subsystem: subsystem || 'general',
@@ -322,18 +326,17 @@ function getRunningAgentCount() {
 function getRobotSignal() {
   const lastAgentId = lastRobotSignal.agentId;
   let active = null;
-  for (const agent of agents) {
-    if (!active && agent.state === 'busy') {
-      active = agent;
-      break;
-    }
-    if (!active && lastAgentId && agent.id === lastAgentId && (agent.state === 'running' || agent.state === 'busy')) {
-      active = agent;
-    }
+  if (lastAgentId) {
+    active = agents.find((agent) => (
+      agent.id === lastAgentId && (agent.state === 'running' || agent.state === 'busy')
+    )) || null;
+  }
+  if (!active) {
+    active = agents.find((agent) => agent.state === 'busy') || null;
   }
   if (!active) return { ...lastRobotSignal };
   const activeLocation = active.currentTask
-    ? `processing:${active.currentTask.subsystem || 'general'}`
+    ? _formatLocation('processing', active.currentTask.subsystem)
     : (active.location || lastRobotSignal.location || 'idle');
   return {
     agentId: active.id,

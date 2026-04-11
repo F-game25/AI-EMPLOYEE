@@ -25,14 +25,14 @@ const CONFIDENCE_MAX = 0.97;
 const CONFIDENCE_BASE = 0.55;
 const CONFIDENCE_PRESSURE_WEIGHT = 0.05;
 
-function _firstMatch(message, patterns, fallback) {
+function _findFirstMatchingPattern(message, patterns, fallback) {
   const msg = String(message || '').toLowerCase();
   const found = Object.entries(patterns).find(([, rx]) => rx.test(msg));
   return found ? found[0] : fallback;
 }
 
 function classifyMoneyIntent(message, subsystem = 'general') {
-  const explicit = _firstMatch(message, {
+  const explicit = _findFirstMatchingPattern(message, {
     conversion: /close|deal|proposal|contract|convert|revenue|roi|opportunit/,
     retention: /retention|renew|churn|upsell|expand|health|customer/,
     acquisition: /lead|prospect|pipeline|outreach|demand|traffic|audience/,
