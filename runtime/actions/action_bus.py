@@ -44,7 +44,7 @@ class ActionBus:
         self._pending_lock = threading.Lock()
         self._secure_engine = None
 
-    def _get_engine(self):
+    def _get_or_create_secure_engine(self):
         if self._secure_engine is None:
             from actions.execution_engine import SecureExecutionEngine
             self._secure_engine = SecureExecutionEngine()
@@ -93,6 +93,10 @@ class ActionBus:
         executor:
             Optional callable that actually performs the action.  If *None*,
             the bus records the action but does not execute it.
+        idempotency_key:
+            Optional replay-safe key used by secure registered actions to
+            deduplicate retries and return cached outcomes. Provide this when
+            callers might retry the same external action request.
 
         Returns a result dict with ``status``, ``action_id``, and any
         ``result`` produced by *executor*.
@@ -170,7 +174,7 @@ class ActionBus:
                 }
         else:
             try:
-                engine = self._get_engine()
+                engine = self._get_or_create_secure_engine()
                 if engine.has_action(action_type):
                     secure_result = engine.execute(
                         action_name=action_type,
@@ -185,7 +189,9 @@ class ActionBus:
                             "action_id": action_id,
                             "status": "error",
                             "action_type": action_type,
-                            "error": secure_result.get("failure", {}).get("reason", "Execution failed"),
+                            "error": secure_result.get(
+                                "failure", {}
+                            ).get("reason", f"Execution failed for action {action_type}"),
                             "failure": secure_result.get("failure", {}),
                             "result": None,
                         }
@@ -235,7 +241,7 @@ class ActionBus:
                 return {"status": "error", "action_id": action_id, "error": "Execution failed"}
         else:
             try:
-                engine = self._get_engine()
+                engine = self._get_or_create_secure_engine()
                 if engine.has_action(record["action_type"]):
                     secure_result = engine.execute(
                         action_name=record["action_type"],
@@ -248,7 +254,10 @@ class ActionBus:
                         return {
                             "status": "error",
                             "action_id": action_id,
-                            "error": secure_result.get("failure", {}).get("reason", "Execution failed"),
+                            "error": secure_result.get("failure", {}).get(
+                                "reason",
+                                f"Execution failed for action {record['action_type']}",
+                            ),
                             "failure": secure_result.get("failure", {}),
                         }
             except Exception:
@@ -298,12 +307,12 @@ class ActionBus:
 
     def register_action(self, name: str, action: Any) -> None:
         """Register a standardized external action in the secure engine."""
-        self._get_engine().register_action(name, action)
+        self._get_or_create_secure_engine().register_action(name, action)
 
     def metrics(self) -> dict:
         """Return execution metrics for registered actions."""
         try:
-            return self._get_engine().metrics()
+            return self._get_or_create_secure_engine().metrics()
         except Exception:
             return {}
 

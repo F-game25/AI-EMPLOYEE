@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import threading
 import time
 import traceback
@@ -234,21 +235,54 @@ class FileSystemAction(BaseAction):
         p = Path(path_value)
         if not p.is_absolute():
             p = self._sandbox_dir / p
-        return p.resolve()
+        return p
+
+    def _ensure_sandbox_path(self, path_value: str) -> Path:
+        candidate = self._resolve(path_value)
+        candidate_abs = candidate.absolute()
+        try:
+            candidate_abs.relative_to(self._sandbox_dir)
+        except ValueError as exc:
+            raise ActionValidationError(
+                "FileSystemAction path escapes sandbox",
+                context={"path": str(candidate_abs), "sandbox": str(self._sandbox_dir)},
+            ) from exc
+
+        resolved = candidate_abs.resolve(strict=False)
+        try:
+            resolved.relative_to(self._sandbox_dir)
+        except ValueError as exc:
+            raise ActionValidationError(
+                "FileSystemAction resolved path escapes sandbox",
+                context={"path": str(resolved), "sandbox": str(self._sandbox_dir)},
+            ) from exc
+
+        # Reject symlink components to prevent sandbox escapes via link swapping.
+        cur = candidate_abs
+        while True:
+            if cur.exists() and cur.is_symlink():
+                raise ActionValidationError(
+                    "FileSystemAction symlink paths are not allowed",
+                    context={"path": str(cur)},
+                )
+            if cur == self._sandbox_dir:
+                break
+            parent = cur.parent
+            if parent == cur:
+                break
+            cur = parent
+
+        return resolved
 
     def validate(self, payload: dict) -> None:
         super().validate(payload)
-        resolved = self._resolve(str(payload.get("path", "")))
         self._sandbox_dir.mkdir(parents=True, exist_ok=True)
-        if not str(resolved).startswith(str(self._sandbox_dir)):
-            raise ActionValidationError(
-                "FileSystemAction path escapes sandbox",
-                context={"path": str(resolved), "sandbox": str(self._sandbox_dir)},
-            )
+        self._ensure_sandbox_path(str(payload.get("path", "")))
 
     def execute(self, payload: dict) -> Any:
         patched = dict(payload)
-        patched["path"] = str(self._resolve(str(payload.get("path", ""))))
+        # Re-validate on execution to reduce TOCTOU risk.
+        patched["path"] = str(self._ensure_sandbox_path(str(payload.get("path", ""))))
         return self._executor(patched)
 
 
@@ -267,14 +301,15 @@ class ActionMetrics:
     timeouts: int = 0
 
     def snapshot(self) -> dict:
-        avg = self.total_latency_s / max(self.total, 1)
+        denom = max(self.total, 1)
+        avg = self.total_latency_s / denom
         return {
             "total": self.total,
             "success": self.success,
             "failures": self.failures,
             "recoverable_failures": self.recoverable_failures,
             "fatal_failures": self.fatal_failures,
-            "success_rate": round(self.success / max(self.total, 1), 4),
+            "success_rate": round(self.success / denom, 4),
             "avg_latency_s": round(avg, 4),
             "cache_hits": self.cache_hits,
             "retries": self.retries,
@@ -320,12 +355,15 @@ class SecureExecutionEngine:
         return value
 
     def _check_rate_limit(self, action_name: str, limit_per_min: int) -> None:
+        # Non-positive values explicitly disable rate limiting for this action.
+        if limit_per_min <= 0:
+            return
         now = time.time()
         with self._lock:
             window = self._rate_windows.setdefault(action_name, [])
             cutoff = now - 60.0
             window[:] = [t for t in window if t >= cutoff]
-            if len(window) >= max(limit_per_min, 1):
+            if len(window) >= limit_per_min:
                 raise ActionRateLimitError(
                     f"Rate limit exceeded for action '{action_name}'",
                     context={"action": action_name, "limit_per_minute": limit_per_min},
@@ -333,8 +371,10 @@ class SecureExecutionEngine:
             window.append(now)
 
     def _cache_key(self, action_name: str, payload: dict, idempotency_key: str | None) -> str:
-        stable_items = sorted((str(k), repr(v)) for k, v in payload.items())
-        stable_payload = "|".join(f"{k}={v}" for k, v in stable_items)
+        try:
+            stable_payload = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+        except Exception:
+            stable_payload = str(sorted((str(k), str(v)) for k, v in payload.items()))
         return f"{action_name}::{idempotency_key or ''}::{stable_payload}"
 
     def metrics(self) -> dict:
@@ -409,7 +449,8 @@ class SecureExecutionEngine:
             return {"status": "executed", "result": cached[1], "cached": True}
 
         failure_payload: dict | None = None
-        for attempt in range(1, max(action.max_retries, 1) + 1):
+        max_attempts = max(int(action.max_retries), 0) + 1
+        for attempt in range(1, max_attempts + 1):
             try:
                 action.validate(payload)
                 self._check_rate_limit(action_name, action.rate_limit_per_minute)
@@ -446,9 +487,10 @@ class SecureExecutionEngine:
                     self._metrics.recoverable_failures += 1
                 else:
                     self._metrics.fatal_failures += 1
-                if attempt < max(action.max_retries, 1) and is_recoverable:
+                if attempt < max_attempts and is_recoverable:
                     self._metrics.retries += 1
-                    backoff = action.retry_backoff_s * (2 ** (attempt - 1))
+                    # Exponential backoff: base * (2^(attempt-1)), capped at 30s.
+                    backoff = action.retry_backoff_s * (1 << (attempt - 1))
                     time.sleep(min(backoff, 30.0))
                     continue
                 break
