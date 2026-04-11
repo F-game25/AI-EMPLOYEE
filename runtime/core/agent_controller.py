@@ -134,6 +134,18 @@ class AgentController:
                 agent=task.skill,
                 config=task.input,
                 outcome_score=task.score,
+                outcome_status="success" if task.status == "success" else "failed",
+                context={
+                    "task_id": task.task_id,
+                    "attempts": task.attempts,
+                    "started_at": task.started_at,
+                    "finished_at": task.finished_at,
+                },
+                outcome={
+                    "status": task.status,
+                    "output": task.output,
+                    "error": task.error,
+                },
                 notes=task.error or "ok",
             )
         except Exception as exc:
