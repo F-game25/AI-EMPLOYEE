@@ -29,6 +29,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+_CONTENT_ROI_MULTIPLIER = 0.03
+_LEAD_CONVERSION_MULTIPLIER = 0.08
+_HIGH_RISK_MULTIPLIER = 1.8
+_NORMAL_RISK_MULTIPLIER = 1.2
+
 
 class MoneyMode:
     """Orchestrates content-generation money pipelines."""
@@ -70,7 +75,7 @@ class MoneyMode:
 
         # Step 4 — ROI record (token estimate, no real revenue yet)
         self._record_roi(job_id, topic, platforms)
-        estimated_roi = round(max(len(topic), 1) * max(len(platforms), 1) * 0.03, 3)
+        estimated_roi = round(max(len(topic), 1) * max(len(platforms), 1) * _CONTENT_ROI_MULTIPLIER, 3)
         status = "dry_run" if dry_run else "queued"
         self._record_pipeline_run(
             run_id=job_id,
@@ -140,7 +145,10 @@ class MoneyMode:
                 ))
             steps.append(action)
 
-        conversion_estimate = round(max(len(audience), 1) * max(len(channels), 1) * 0.08, 3)
+        conversion_estimate = round(
+            max(len(audience), 1) * max(len(channels), 1) * _LEAD_CONVERSION_MULTIPLIER,
+            3,
+        )
         status = "dry_run" if dry_run else "queued"
         self._record_roi(
             job_id,
@@ -208,7 +216,10 @@ class MoneyMode:
         else:
             steps.append({"step": "execute_opportunity", "status": "dry_run"})
 
-        estimated_roi = round(max(budget, 1.0) * (1.8 if risk == "high" else 1.2), 3)
+        estimated_roi = round(
+            max(budget, 1.0) * (_HIGH_RISK_MULTIPLIER if risk == "high" else _NORMAL_RISK_MULTIPLIER),
+            3,
+        )
         status = "dry_run" if dry_run else "queued"
         self._record_roi(
             job_id,

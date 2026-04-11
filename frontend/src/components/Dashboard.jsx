@@ -1,9 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import TopBar from './dashboard/TopBar'
 import { useAppStore } from '../store/appStore'
 
 const BASE = `http://${window.location.hostname}:3001`
+const PIPELINE_DEFAULTS = {
+  content: {
+    endpoint: '/api/money/content-pipeline',
+    body: { topic: 'high-intent niche content', platforms: ['twitter', 'linkedin'], dry_run: false },
+  },
+  lead: {
+    endpoint: '/api/money/lead-pipeline',
+    body: { source: 'crm_dataset', audience: 'SaaS founders', channels: ['email'], dry_run: false },
+  },
+  opportunity: {
+    endpoint: '/api/money/opportunity-pipeline',
+    body: { opportunity: 'retainer upgrade campaign', budget: 500, dry_run: false },
+  },
+}
 
 export default function Dashboard() {
   const setProductMetrics = useAppStore(s => s.setProductMetrics)
@@ -15,7 +29,7 @@ export default function Dashboard() {
   const [goal, setGoal] = useState('Run value generation cycle')
   const [running, setRunning] = useState(false)
 
-  const refreshDashboard = async () => {
+  const refreshDashboard = useCallback(async () => {
     try {
       const [modeRes, dashRes] = await Promise.all([
         fetch(`${BASE}/api/mode`),
@@ -28,13 +42,13 @@ export default function Dashboard() {
     } catch {
       setAutomationStatus('Unable to refresh dashboard data.')
     }
-  }
+  }, [setAutomationStatus, setProductMetrics])
 
   useEffect(() => {
     refreshDashboard()
     const i = setInterval(refreshDashboard, 8000)
     return () => clearInterval(i)
-  }, [])
+  }, [refreshDashboard])
 
   const setModeRemote = async (nextMode) => {
     try {
@@ -77,21 +91,7 @@ export default function Dashboard() {
   }
 
   const runPipeline = async (kind) => {
-    const payloads = {
-      content: {
-        endpoint: '/api/money/content-pipeline',
-        body: { topic: 'high-intent niche content', platforms: ['twitter', 'linkedin'], dry_run: false },
-      },
-      lead: {
-        endpoint: '/api/money/lead-pipeline',
-        body: { source: 'crm_dataset', audience: 'SaaS founders', channels: ['email'], dry_run: false },
-      },
-      opportunity: {
-        endpoint: '/api/money/opportunity-pipeline',
-        body: { opportunity: 'retainer upgrade campaign', budget: 500, dry_run: false },
-      },
-    }
-    const cfg = payloads[kind]
+    const cfg = PIPELINE_DEFAULTS[kind]
     if (!cfg) return
     setRunning(true)
     try {
@@ -201,7 +201,7 @@ export default function Dashboard() {
             <div className="overflow-y-auto space-y-1 min-h-0">
               {(productMetrics?.execution_logs || []).slice(0, 12).map((log, idx) => (
                 <div key={`${log.id || idx}`} className="tier-3-surface p-2 font-mono text-[11px]">
-                  {log.task_id} · {log.skill} · {log.success ? 'SUCCESS' : 'FAILED'}
+                  {log.task_id} · {log.skill} · {(log.status === 'success') ? 'SUCCESS' : 'FAILED'}
                 </div>
               ))}
             </div>
