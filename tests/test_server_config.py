@@ -1,7 +1,7 @@
 """Tests for server.py configuration correctness.
 
 Validates agent count constants, mode lists, and agent_capabilities.json
-stay in sync so "56 agents" / "73 agents" drift never goes undetected.
+stay in sync so "56 agents" count drift is caught early.
 """
 from __future__ import annotations
 
@@ -47,8 +47,8 @@ class TestAgentCountConsistency:
 
     def test_power_mode_list_length(self):
         agents = _extract_power_agents()
-        assert len(agents) == 74, (
-            f"Power mode has {len(agents)} agents, expected 74. "
+        assert len(agents) == 56, (
+            f"Power mode has {len(agents)} agents, expected 56. "
             "Update AGENTS_BY_MODE or these tests."
         )
 
