@@ -12,6 +12,7 @@ const AGENT_CATALOG = [
 ];
 
 // Simulated task processing duration bounds (per task execution).
+// 1000-2800ms keeps UI feedback responsive while still showing visible "busy" agent state.
 const PROCESS_MS_MIN = 1000;
 const PROCESS_MS_MAX = 2800;
 // How long an inactive running agent waits before being scaled back to idle.
@@ -108,11 +109,11 @@ function _findBestAgent(subsystem) {
 
   return running
     .slice()
-    .sort((a, b) => {
-      const aLoad = (a.currentTask ? 1 : 0) + a.taskQueue.length;
-      const bLoad = (b.currentTask ? 1 : 0) + b.taskQueue.length;
-      return aLoad - bLoad;
-    })[0];
+    .sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
+}
+
+function _agentLoad(agent) {
+  return (agent.currentTask ? 1 : 0) + agent.taskQueue.length;
 }
 
 function _activateForDemand(subsystem) {
@@ -240,7 +241,7 @@ function enqueueTask({ message, subsystem = 'general' }) {
   if (!selected) {
     selected = agents
       .slice()
-      .sort((a, b) => ((a.currentTask ? 1 : 0) + a.taskQueue.length) - ((b.currentTask ? 1 : 0) + b.taskQueue.length))[0];
+      .sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
     _activateAgent(selected);
   }
 

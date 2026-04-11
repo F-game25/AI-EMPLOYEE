@@ -117,7 +117,7 @@ export default function TopBar() {
           }}
           aria-live="polite"
         >
-          RUNNING {systemStatus.running_agents || 0}/{systemStatus.total_agents || 0}
+          RUNNING: {systemStatus.running_agents || 0}/{systemStatus.total_agents || 0}
         </div>
       </div>
 
