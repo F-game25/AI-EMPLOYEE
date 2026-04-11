@@ -196,6 +196,7 @@ class ActionBus:
                 "payload": payload,
                 "actor": actor,
                 "reason": reason,
+                "idempotency_key": idempotency_key,
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "status": "pending",
                 "_approved": False,
@@ -305,6 +306,7 @@ class ActionBus:
                         action_name=record["action_type"],
                         payload=record["payload"],
                         skill=record.get("actor", "system"),
+                        idempotency_key=record.get("idempotency_key"),
                     )
                     if secure_result.get("status") == "executed":
                         result = secure_result.get("result")
