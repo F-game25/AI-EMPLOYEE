@@ -29,8 +29,9 @@ app.use(express.json());
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
 
-let gpuUsage = 18;
-let heartbeat = 0;
+let currentGpuUsage = 18;
+// Incremented by broadcaster heartbeat loop; sampled into system status.
+let currentHeartbeatSeq = 0;
 
 const GPU_RANDOM_SWING = 8;
 const GPU_SWING_OFFSET = 4;
@@ -63,13 +64,14 @@ function memoryUsagePercent() {
 function sampleSystemStatus() {
   const cpu = cpuUsagePercent();
   const memory = memoryUsagePercent();
-  gpuUsage = clamp(
-    Math.round(gpuUsage + (Math.random() * GPU_RANDOM_SWING - GPU_SWING_OFFSET) + (cpu - GPU_CPU_BASELINE) * GPU_CPU_INFLUENCE),
+  // Intentionally mutates currentGpuUsage to simulate gradual GPU trend across snapshots.
+  currentGpuUsage = clamp(
+    Math.round(currentGpuUsage + (Math.random() * GPU_RANDOM_SWING - GPU_SWING_OFFSET) + (cpu - GPU_CPU_BASELINE) * GPU_CPU_INFLUENCE),
     4,
     97,
   );
   const cpuTemp = clamp(Math.round(CPU_TEMP_BASE + cpu * CPU_TEMP_CPU_FACTOR + Math.random() * CPU_TEMP_JITTER), 32, 95);
-  const gpuTemp = clamp(Math.round(GPU_TEMP_BASE + gpuUsage * GPU_TEMP_GPU_FACTOR + Math.random() * GPU_TEMP_JITTER), 30, 90);
+  const gpuTemp = clamp(Math.round(GPU_TEMP_BASE + currentGpuUsage * GPU_TEMP_GPU_FACTOR + Math.random() * GPU_TEMP_JITTER), 30, 90);
 
   const total = getAgents().length;
   const running = getRunningAgentCount();
@@ -80,10 +82,10 @@ function sampleSystemStatus() {
     uptime: process.uptime(),
     connections: wss ? wss.clients.size : 0,
     cpu_usage: cpu,
-    gpu_usage: gpuUsage,
+    gpu_usage: currentGpuUsage,
     cpu_temperature: cpuTemp,
     gpu_temperature: gpuTemp,
-    heartbeat,
+    heartbeat: currentHeartbeatSeq,
     running_agents: running,
     total_agents: total,
     mode: getMode(),
@@ -162,7 +164,7 @@ wss.on('connection', (ws) => {
         broadcaster.broadcast('heartbeat', {
           message: `[QUEUE] ${queued.taskId} assigned to ${queued.agentId} (${queued.subsystem})`,
           level: 'info',
-          heartbeat,
+          heartbeat: currentHeartbeatSeq,
         });
       }
     } catch (err) {
@@ -180,7 +182,7 @@ subsystems.startPolling(5000);
 broadcaster.startHeartbeat({
   intervalMs: 1800,
   messageFactory: ({ seq }) => {
-    heartbeat = seq;
+    currentHeartbeatSeq = seq;
     const stats = sampleSystemStatus();
     return `[SYSTEM] heartbeat=${seq} mode=${stats.mode} running=${stats.running_agents}/${stats.total_agents}`;
   },
@@ -194,7 +196,7 @@ onAgentEvent('task:started', ({ agent, task }) => {
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] started ${task.id}`,
     level: 'info',
-    heartbeat,
+    heartbeat: currentHeartbeatSeq,
   });
 });
 
@@ -202,7 +204,7 @@ onAgentEvent('task:completed', ({ agent, task }) => {
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] completed ${task.id}`,
     level: 'success',
-    heartbeat,
+    heartbeat: currentHeartbeatSeq,
   });
 });
 
