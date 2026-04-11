@@ -3,13 +3,13 @@ import { useAppStore } from '../../store/appStore'
 
 const STATUS_CONFIG = {
   idle: { color: 'var(--text-muted)', label: 'IDLE', dot: 'var(--text-muted)' },
-  working: { color: 'var(--gold)', label: 'WORKING', dot: 'var(--gold)' },
-  error: { color: 'var(--error)', label: 'ERROR', dot: 'var(--error)' },
+  running: { color: 'var(--info)', label: 'RUNNING', dot: 'var(--info)' },
+  busy: { color: 'var(--gold)', label: 'BUSY', dot: 'var(--gold)' },
 }
 
 export default function AgentsPanel() {
   const agents = useAppStore(s => s.agents)
-  const activeCount = agents.filter(a => a.status === 'working').length
+  const activeCount = agents.filter(a => a.state === 'running' || a.state === 'busy').length
 
   return (
     <div
@@ -51,7 +51,7 @@ export default function AgentsPanel() {
 
         <AnimatePresence>
           {agents.map((agent) => {
-            const cfg = STATUS_CONFIG[agent.status] || STATUS_CONFIG.idle
+            const cfg = STATUS_CONFIG[agent.state] || STATUS_CONFIG.idle
             return (
               <motion.div
                 key={agent.id}
@@ -62,10 +62,10 @@ export default function AgentsPanel() {
                 transition={{ duration: 0.2 }}
                 className="px-3 py-2 rounded"
                 style={{
-                  background: agent.status === 'working'
+                  background: agent.state === 'busy'
                     ? 'rgba(245,196,0,0.04)'
                     : 'rgba(255,255,255,0.02)',
-                  border: `1px solid ${agent.status === 'working'
+                  border: `1px solid ${agent.state === 'busy'
                     ? 'rgba(245,196,0,0.18)'
                     : 'var(--border-subtle)'}`,
                   cursor: 'default',
@@ -82,7 +82,7 @@ export default function AgentsPanel() {
                   </span>
                   <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
                     <motion.div
-                      animate={agent.status === 'working' ? { opacity: [1, 0.3, 1] } : { opacity: 1 }}
+                      animate={agent.state === 'busy' ? { opacity: [1, 0.3, 1] } : { opacity: 1 }}
                       transition={{ duration: 1, repeat: Infinity }}
                       className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                       aria-hidden="true"
@@ -112,7 +112,7 @@ export default function AgentsPanel() {
                   className="font-mono mt-0.5"
                   style={{ fontSize: '11px', color: 'var(--text-muted)' }}
                 >
-                  {agent.type}
+                  {agent.type} · {agent.health || 'healthy'}
                 </div>
               </motion.div>
             )

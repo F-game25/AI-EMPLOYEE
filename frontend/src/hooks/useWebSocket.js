@@ -46,6 +46,13 @@ function connectSingleton() {
           store.setTyping(false)
           store.addChatMessage({ role: 'ai', content: data.message, ts: Date.now(), subsystem: data.subsystem })
           break
+        case 'orchestrator:queued':
+          store.addHeartbeatLog({
+            text: `[ORCHESTRATOR] Queued ${data.taskId} on ${data.agentId}`,
+            level: 'info',
+            ts: Date.now(),
+          })
+          break
         case 'nn:status':
           store.setNnStatus(data)
           break
