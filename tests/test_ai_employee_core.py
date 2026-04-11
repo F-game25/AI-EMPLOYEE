@@ -19,6 +19,7 @@ import importlib
 import importlib.util
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -517,6 +518,7 @@ class TestSecureExecutionEngine:
             action_name="browser.open",
             payload={"url": "https://example.com"},
             skill="scraper",
+            idempotency_key="deny-browser-open",
         )
         assert result["status"] == "error"
         assert result["failure"]["category"] == "fatal"
@@ -574,7 +576,12 @@ class TestSecureExecutionEngine:
         )
         engine.register_action("api.call", action)
 
-        result = engine.execute(action_name="api.call", payload={}, skill="api_skill")
+        result = engine.execute(
+            action_name="api.call",
+            payload={},
+            skill="api_skill",
+            idempotency_key="retry-timeout-1",
+        )
         assert result["status"] == "executed"
         assert state["n"] >= 2
 
@@ -594,6 +601,7 @@ class TestSecureExecutionEngine:
             action_name="fs.write",
             payload={"path": "../escape.txt"},
             skill="fs_skill",
+            idempotency_key="fs-escape-1",
         )
         assert result["status"] == "error"
         assert result["failure"]["category"] == "fatal"
@@ -607,6 +615,7 @@ class TestSecureExecutionEngine:
             action_name="nonexistent",
             payload={},
             skill="any",
+            idempotency_key="unknown-1",
         )
         assert result["status"] == "error"
         assert "error_type" in result["failure"]
@@ -618,9 +627,15 @@ class TestSecureExecutionEngine:
 
         engine = SecureExecutionEngine()
         engine.register_action("api.call", APIAction(executor=lambda p: {}))
-        result = engine.execute(action_name="api.call", payload={}, skill="unauthorized")
+        result = engine.execute(
+            action_name="api.call",
+            payload={},
+            skill="unauthorized",
+            idempotency_key="deny-api-1",
+        )
         assert result["status"] == "error"
         assert result["failure"]["error_type"] == "ActionPermissionError"
+        assert result["failure"]["retryable"] is False
 
     def test_output_schema_validation_passes(self):
         """Execution succeeds when result matches output_schema."""
@@ -634,7 +649,12 @@ class TestSecureExecutionEngine:
             permission_policy=PermissionPolicy({"svc": ["api"]})
         )
         engine.register_action("api.fetch", action)
-        result = engine.execute(action_name="api.fetch", payload={}, skill="svc")
+        result = engine.execute(
+            action_name="api.fetch",
+            payload={},
+            skill="svc",
+            idempotency_key="output-pass-1",
+        )
         assert result["status"] == "executed"
 
     def test_output_schema_validation_fails_on_wrong_type(self):
@@ -649,10 +669,16 @@ class TestSecureExecutionEngine:
             permission_policy=PermissionPolicy({"svc": ["api"]})
         )
         engine.register_action("api.fetch", action)
-        result = engine.execute(action_name="api.fetch", payload={}, skill="svc")
+        result = engine.execute(
+            action_name="api.fetch",
+            payload={},
+            skill="svc",
+            idempotency_key="output-fail-1",
+        )
         assert result["status"] == "error"
         assert result["failure"]["category"] == "fatal"
         assert result["failure"]["error_type"] == "ActionValidationError"
+        assert result["failure"]["retryable"] is False
 
     def test_output_schema_validation_fails_on_missing_field(self):
         """Execution fails when result is missing a required output field."""
@@ -666,7 +692,12 @@ class TestSecureExecutionEngine:
             permission_policy=PermissionPolicy({"svc": ["api"]})
         )
         engine.register_action("api.check", action)
-        result = engine.execute(action_name="api.check", payload={}, skill="svc")
+        result = engine.execute(
+            action_name="api.check",
+            payload={},
+            skill="svc",
+            idempotency_key="output-missing-1",
+        )
         assert result["status"] == "error"
         assert "required_field" in result["failure"]["reason"]
 
@@ -686,7 +717,12 @@ class TestSecureExecutionEngine:
 
         # Use distinct payloads so result cache doesn't mask rate limit.
         results = [
-            engine.execute(action_name="api.limited", payload={"seq": i}, skill="svc")
+            engine.execute(
+                action_name="api.limited",
+                payload={"seq": i},
+                skill="svc",
+                idempotency_key=f"limited-{i}",
+            )
             for i in range(4)
         ]
         statuses = [r["status"] for r in results]
@@ -709,9 +745,9 @@ class TestSecureExecutionEngine:
         engine.register_action("api.a", APIAction(executor=lambda p: {"ok": True}))
         engine.register_action("api.b", APIAction(executor=lambda p: {"ok": True}))
 
-        engine.execute(action_name="api.a", payload={}, skill="svc")
-        engine.execute(action_name="api.a", payload={}, skill="svc")
-        engine.execute(action_name="api.b", payload={}, skill="svc")
+        engine.execute(action_name="api.a", payload={}, skill="svc", idempotency_key="api-a-1")
+        engine.execute(action_name="api.a", payload={}, skill="svc", idempotency_key="api-a-2")
+        engine.execute(action_name="api.b", payload={}, skill="svc", idempotency_key="api-b-1")
 
         m = engine.metrics()
         assert "global" in m
@@ -733,6 +769,10 @@ class TestSecureExecutionEngine:
 
         m = engine.metrics()
         assert "cache_hit_rate" in m["global"]
+        assert "failure_rate" in m["global"]
+        assert "retry_count" in m["global"]
+        assert "timeout_count" in m["global"]
+        assert "average_latency_s" in m["global"]
 
     def test_repeated_violation_alert_hook(self):
         """Alert hook must fire once violations reach the threshold."""
@@ -749,8 +789,13 @@ class TestSecureExecutionEngine:
         engine = SecureExecutionEngine(permission_policy=policy)
         engine.register_action("api.call", APIAction(executor=lambda p: {}))
 
-        for _ in range(3):
-            engine.execute(action_name="api.call", payload={}, skill="bad_skill")
+        for attempt in range(3):
+            engine.execute(
+                action_name="api.call",
+                payload={},
+                skill="bad_skill",
+                idempotency_key=f"bad-skill-{attempt}",
+            )
 
         assert len(alerts) >= 1
         assert alerts[0][0] == "bad_skill"
@@ -764,8 +809,8 @@ class TestSecureExecutionEngine:
         engine = SecureExecutionEngine(permission_policy=policy)
         engine.register_action("api.call", APIAction(executor=lambda p: {}))
 
-        engine.execute(action_name="api.call", payload={}, skill="foo")
-        engine.execute(action_name="api.call", payload={}, skill="foo")
+        engine.execute(action_name="api.call", payload={}, skill="foo", idempotency_key="foo-1")
+        engine.execute(action_name="api.call", payload={}, skill="foo", idempotency_key="foo-2")
         assert policy.violation_count("foo") == 2
         assert policy.violation_count("bar") == 0
 
@@ -806,12 +851,164 @@ class TestSecureExecutionEngine:
             policy = PermissionPolicy({})
             engine = SecureExecutionEngine(permission_policy=policy)
             engine.register_action("api.call", APIAction(executor=lambda p: {}))
-            engine.execute(action_name="api.call", payload={}, skill="intruder")
+            engine.execute(
+                action_name="api.call",
+                payload={},
+                skill="intruder",
+                idempotency_key="intruder-1",
+            )
 
         entries = log.read()
         denial_entries = [e for e in entries if e.get("action_type") == "permission_denied"]
         assert denial_entries, "Expected a permission_denied entry in the changelog"
         assert denial_entries[0]["actor"] == "intruder"
+
+    def test_missing_idempotency_key_rejected(self):
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        engine = SecureExecutionEngine(permission_policy=PermissionPolicy({"svc": ["api"]}))
+        engine.register_action("api.call", APIAction(executor=lambda p: {"ok": True}))
+
+        result = engine.execute(action_name="api.call", payload={}, skill="svc")
+        assert result["status"] == "error"
+        assert result["failure"]["error_type"] == "ActionValidationError"
+        assert result["failure"]["retryable"] is False
+
+    def test_idempotent_inflight_duplicate_prevented(self):
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        calls = []
+
+        def run(_payload):
+            calls.append(1)
+            time.sleep(0.05)
+            return {"count": len(calls)}
+
+        engine = SecureExecutionEngine(permission_policy=PermissionPolicy({"svc": ["api"]}))
+        engine.register_action("api.call", APIAction(executor=run))
+
+        results = []
+
+        def invoke():
+            results.append(
+                engine.execute(
+                    action_name="api.call",
+                    payload={"q": "x"},
+                    skill="svc",
+                    idempotency_key="shared-key",
+                )
+            )
+
+        t1 = threading.Thread(target=invoke)
+        t2 = threading.Thread(target=invoke)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert len(calls) == 1
+        assert len(results) == 2
+        assert all(r["status"] == "executed" for r in results)
+        assert any(r.get("cached") is True for r in results)
+
+    def test_filesystem_symlink_blocked(self, tmp_path):
+        from actions.execution_engine import FileSystemAction, PermissionPolicy, SecureExecutionEngine
+
+        sandbox = tmp_path / "sandbox"
+        sandbox.mkdir(parents=True, exist_ok=True)
+        outside = tmp_path / "outside"
+        outside.mkdir(parents=True, exist_ok=True)
+        (sandbox / "link").symlink_to(outside, target_is_directory=True)
+
+        action = FileSystemAction(executor=lambda p: {"path": p["path"]}, sandbox_dir=sandbox)
+        engine = SecureExecutionEngine(permission_policy=PermissionPolicy({"fs_skill": ["filesystem"]}))
+        engine.register_action("fs.write", action)
+
+        result = engine.execute(
+            action_name="fs.write",
+            payload={"path": "link/target.txt"},
+            skill="fs_skill",
+            idempotency_key="fs-symlink-1",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["error_type"] == "ActionValidationError"
+
+    def test_permission_denial_audit_has_timestamp_and_flag(self, tmp_path):
+        import core.change_log as _cl_mod
+        from core.change_log import ChangeLog
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        log = ChangeLog(path=tmp_path / "changelog.jsonl")
+        with patch.object(_cl_mod, "_instance", log):
+            policy = PermissionPolicy({})
+            policy.set_alert_hook(lambda _skill, _count: None, threshold=2)
+            engine = SecureExecutionEngine(permission_policy=policy)
+            engine.register_action("api.call", APIAction(executor=lambda p: {}))
+            engine.execute(action_name="api.call", payload={}, skill="intruder", idempotency_key="deny-1")
+            engine.execute(action_name="api.call", payload={}, skill="intruder", idempotency_key="deny-2")
+
+        denial_entries = [e for e in log.read() if e.get("action_type") == "permission_denied"]
+        assert len(denial_entries) >= 2
+        for entry in denial_entries:
+            payload = entry.get("after", {})
+            assert payload.get("skill") == "intruder"
+            assert payload.get("attempted_action") == "api"
+            assert isinstance(payload.get("timestamp"), str) and payload.get("timestamp")
+        assert any(entry.get("after", {}).get("flagged") is True for entry in denial_entries)
+
+    def test_idempotency_cache_scoped_by_skill(self):
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        calls = []
+        action = APIAction(executor=lambda p: calls.append(1) or {"n": len(calls)})
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc_a": ["api"], "svc_b": ["api"]})
+        )
+        engine.register_action("api.call", action)
+
+        r1 = engine.execute(
+            action_name="api.call",
+            payload={"q": "same"},
+            skill="svc_a",
+            idempotency_key="same-key",
+        )
+        r2 = engine.execute(
+            action_name="api.call",
+            payload={"q": "same"},
+            skill="svc_b",
+            idempotency_key="same-key",
+        )
+        assert r1["status"] == "executed"
+        assert r2["status"] == "executed"
+        assert len(calls) == 2
+
+    def test_recoverable_failure_sets_retryable_true(self):
+        from actions.execution_engine import (
+            APIAction,
+            ActionTimeoutError,
+            PermissionPolicy,
+            SecureExecutionEngine,
+        )
+
+        def fail(_payload):
+            raise ActionTimeoutError("temporary")
+
+        action = APIAction(
+            executor=fail,
+            max_retries=0,
+        )
+        engine = SecureExecutionEngine(permission_policy=PermissionPolicy({"svc": ["api"]}))
+        engine.register_action("api.call", action)
+
+        result = engine.execute(
+            action_name="api.call",
+            payload={},
+            skill="svc",
+            idempotency_key="recoverable-1",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["category"] == "recoverable"
+        assert result["failure"]["retryable"] is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
