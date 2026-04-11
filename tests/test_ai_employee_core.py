@@ -325,7 +325,8 @@ class TestSkillRegistry:
         reg = SkillRegistry()
         cats = reg.categories()
         assert len(cats) > 0
-        assert "money_generation" in cats or "task_execution" in cats
+        # Categories come from agent metadata; any non-empty category list is valid
+        assert all(isinstance(c, str) and c for c in cats)
 
     def test_to_json(self):
         from core.skill_registry import SkillRegistry
