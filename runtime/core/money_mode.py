@@ -15,6 +15,10 @@ from typing import Any
 _CONTENT_ROI_MULTIPLIER = 0.03
 _LEAD_CONVERSION_MULTIPLIER = 0.08
 _OUTREACH_CONVERSION_MULTIPLIER = 0.22
+_ENGAGEMENT_FACTOR = 0.6
+_OUTREACH_COST_PER_CONTACT = 25
+_OUTREACH_RESPONSE_RATE = 0.25
+_OUTREACH_CONVERSION_RATE = 0.35
 
 
 class MoneyMode:
@@ -58,7 +62,7 @@ class MoneyMode:
             for platform in platforms:
                 steps.append({"step": "post_content", "platform": platform, "status": "dry_run"})
 
-        engagement_estimate = round(max(len(topic), 1) * max(len(platforms), 1) * 0.6, 3)
+        engagement_estimate = round(max(len(topic), 1) * max(len(platforms), 1) * _ENGAGEMENT_FACTOR, 3)
         steps.append({
             "step": "track_engagement",
             "output": {
@@ -111,8 +115,7 @@ class MoneyMode:
         dry_run: bool = False,
     ) -> dict:
         """Data scraping → lead filtering → storage pipeline."""
-        channels = channels or ["email"]
-        del channels
+        ingestion_channels = channels or ["email"]
         job_id = str(uuid.uuid4())[:8]
         scraped_records = max(len(source) * 4, 10)
         filtered_leads = max(min(scraped_records // 3, len(audience) * 2), 1)
@@ -120,7 +123,11 @@ class MoneyMode:
             {
                 "step": "scrape_data",
                 "input": {"source": source, "audience": audience},
-                "output": {"records_scraped": scraped_records, "signal_source": source},
+                "output": {
+                    "records_scraped": scraped_records,
+                    "signal_source": source,
+                    "ingestion_channels": ingestion_channels,
+                },
                 "status": "done",
             },
             {
@@ -155,7 +162,12 @@ class MoneyMode:
             pipeline="data_scrape_filter_store",
             status=status,
             estimated_roi=conversion_estimate,
-            context={"source": source, "audience": audience, "qualified_leads": filtered_leads},
+            context={
+                "source": source,
+                "audience": audience,
+                "qualified_leads": filtered_leads,
+                "ingestion_channels": ingestion_channels,
+            },
             steps=steps,
         )
         return {
@@ -163,6 +175,7 @@ class MoneyMode:
             "pipeline": "data_scrape_filter_store",
             "source": source,
             "audience": audience,
+            "ingestion_channels": ingestion_channels,
             "qualified_leads": filtered_leads,
             "steps": steps,
             "estimated_roi": conversion_estimate,
@@ -179,9 +192,9 @@ class MoneyMode:
         """Outreach → response tracking → conversion pipeline."""
         job_id = str(uuid.uuid4())[:8]
         outreach_status = "dry_run" if dry_run else "queued"
-        target_contacts = max(int(budget // 25), 5)
-        expected_responses = max(int(target_contacts * 0.25), 1)
-        expected_conversions = max(int(expected_responses * 0.35), 1)
+        target_contacts = max(int(budget // _OUTREACH_COST_PER_CONTACT), 5)
+        expected_responses = max(int(target_contacts * _OUTREACH_RESPONSE_RATE), 1)
+        expected_conversions = max(int(expected_responses * _OUTREACH_CONVERSION_RATE), 1)
         steps: list[dict] = [
             {
                 "step": "outreach",
