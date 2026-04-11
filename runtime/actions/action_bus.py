@@ -226,7 +226,13 @@ class ActionBus:
     # ------------------------------------------------------------------
 
     def list_pending(self) -> list[dict]:
-        """Return all actions awaiting approval (internal keys removed)."""
+        """Return all actions awaiting approval.
+
+        Internal fields (prefixed with ``_``) such as ``_executor``,
+        ``_approved``, and ``_event`` are stripped from the output — they
+        are implementation details of the approval workflow and must never
+        be exposed to callers.
+        """
         with self._pending_lock:
             return [
                 {k: v for k, v in rec.items() if not k.startswith("_")}
