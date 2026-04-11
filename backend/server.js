@@ -69,24 +69,28 @@ function clamp(v, min, max) {
 }
 
 function addActivity(notes, kind = 'system') {
-  runtimeState.activityFeed.unshift({
+  const item = {
     id: `activity-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     kind,
     notes,
     ts: new Date().toISOString(),
-  });
+  };
+  runtimeState.activityFeed.unshift(item);
   runtimeState.activityFeed = runtimeState.activityFeed.slice(0, MAX_ACTIVITY_ITEMS);
+  // Broadcast immediately so UI gets real-time updates without polling
+  broadcaster.broadcast('activity:item', item);
 }
 
 function recordExecution({ taskId, skill, status, notes }) {
-  runtimeState.executionLogs.unshift({
+  const logItem = {
     id: `exec-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     task_id: taskId,
     skill,
     status,
     notes,
     ts: new Date().toISOString(),
-  });
+  };
+  runtimeState.executionLogs.unshift(logItem);
   runtimeState.executionLogs = runtimeState.executionLogs.slice(0, MAX_EXECUTION_LOGS);
   runtimeState.tasksExecuted += 1;
   if (status === 'success') runtimeState.successfulTasks += 1;
@@ -94,6 +98,8 @@ function recordExecution({ taskId, skill, status, notes }) {
   runtimeState.skillStats[skill] = runtimeState.skillStats[skill] || { runs: 0, success: 0 };
   runtimeState.skillStats[skill].runs += 1;
   if (status === 'success') runtimeState.skillStats[skill].success += 1;
+  // Broadcast so the UI execution log updates in real time
+  broadcaster.broadcast('execution:log', logItem);
 }
 
 function estimatePipelineRoi() {
@@ -273,7 +279,14 @@ app.post('/api/automation/control', (req, res) => {
     activateAgents(3);
     runtimeState.automationRunning = true;
     addActivity(`[AUTOMATION] started${goal ? ` • goal: ${goal}` : ''}`, 'automation');
-    return res.json({ status: 'running', message: 'Automation started.' });
+    // Submit initial tasks so the agent execution loop becomes visible immediately
+    const taskMessages = [
+      goal || 'Analyze current market conditions',
+      'Generate value opportunities',
+      'Route prioritized tasks to agents',
+    ];
+    const queued = taskMessages.map(msg => orchestrator.submitTask(msg));
+    return res.json({ status: 'running', message: 'Automation started.', tasks_queued: queued.length });
   }
 
   if (action === 'stop') {
@@ -309,6 +322,15 @@ app.post('/api/money/opportunity-pipeline', (req, res) => {
   res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
 });
 
+// ── Task execution endpoint ───────────────────────────────────────────────────
+
+app.post('/api/tasks/run', (req, res) => {
+  const message = String((req.body || {}).message || 'Execute task').trim();
+  const result = orchestrator.submitTask(message);
+  addActivity(`[TASK] Submitted: ${message}`, 'task');
+  res.json({ ok: true, ...result });
+});
+
 // ── WebSocket server ──────────────────────────────────────────────────────────
 
 const server = http.createServer(app);
@@ -323,6 +345,14 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ event: 'nn:status', data: subsystems.getNNStatus(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'memory:update', data: subsystems.getMemoryTree(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'doctor:check', data: subsystems.getDoctorStatus(), timestamp: new Date().toISOString() }));
+
+  // Send existing activity feed so newly connected clients are up to date
+  if (runtimeState.activityFeed.length > 0) {
+    ws.send(JSON.stringify({ event: 'activity:snapshot', data: runtimeState.activityFeed, timestamp: new Date().toISOString() }));
+  }
+  if (runtimeState.executionLogs.length > 0) {
+    ws.send(JSON.stringify({ event: 'execution:snapshot', data: runtimeState.executionLogs, timestamp: new Date().toISOString() }));
+  }
 
   ws.on('message', (raw) => {
     try {
