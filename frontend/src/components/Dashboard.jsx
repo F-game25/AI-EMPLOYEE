@@ -114,7 +114,7 @@ export default function Dashboard() {
     { label: 'Tasks Executed', value: productMetrics?.tasks?.tasks_executed ?? 0 },
     { label: 'Success Rate', value: `${Math.round((productMetrics?.tasks?.success_rate ?? 0) * 100)}%` },
     { label: 'Value Generated', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(2)}` },
-    { label: 'Top Skill', value: (productMetrics?.top_skills?.[0]?.skill || 'N/A').toUpperCase() },
+    { label: 'Top Skill', value: productMetrics?.top_skills?.[0]?.skill?.toUpperCase() || 'N/A' },
   ]), [productMetrics])
 
   return (
