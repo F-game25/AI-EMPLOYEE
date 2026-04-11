@@ -9,16 +9,19 @@ from core.contracts import TaskGraph, TaskNode
 class Planner:
     """Deterministic planner: input goal -> structured task graph."""
 
+    # Keep both UK/US variants ("analyse"/"analyze") for user input robustness.
+    _GOAL_KEYWORDS = {
+        "content_generation": ("content", "post", "publish", "video"),
+        "lead_generation": ("lead", "prospect", "outreach"),
+        "email_marketing": ("email", "campaign", "newsletter"),
+        "analytics": ("analyse", "analyze", "report", "metric"),
+    }
+
     def classify_goal(self, goal: str) -> str:
         text = goal.lower()
-        if any(word in text for word in ("content", "post", "publish", "video")):
-            return "content_generation"
-        if any(word in text for word in ("lead", "prospect", "outreach")):
-            return "lead_generation"
-        if any(word in text for word in ("email", "campaign", "newsletter")):
-            return "email_marketing"
-        if any(word in text for word in ("analyse", "analyze", "report", "metric")):
-            return "analytics"
+        for goal_type, keywords in self._GOAL_KEYWORDS.items():
+            if any(word in text for word in keywords):
+                return goal_type
         return "general"
 
     def plan(

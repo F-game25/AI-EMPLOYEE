@@ -39,7 +39,7 @@ def test_agent_controller_produces_deterministic_summary(tmp_path):
     store = TaskLogStore(tmp_path / "task_log.db")
     controller = AgentController()
     result = controller.run_goal(
-        "Analyse business metrics",
+        "Analyze business metrics",
         persist_task=store.log_task,
     )
     assert "task_graph" in result

@@ -138,11 +138,12 @@ class RunGoalRequest(BaseModel):
 
 @router.post("/tasks/run")
 def run_goal(body: RunGoalRequest):
-    """Run a goal through the 3-layer task engine (plan → execute → validate)."""
+    """Run a goal through the central controller pipeline."""
     try:
-        from core.task_engine import get_task_engine
-        result = get_task_engine().run_goal(body.goal)
-        return JSONResponse(result)
+        from api.contracts import normalize_task_response
+        from core.agent_controller import get_agent_controller
+        result = get_agent_controller().run_goal(body.goal)
+        return JSONResponse(normalize_task_response(result))
     except Exception:
         _log.exception("run_goal failed")
         raise HTTPException(status_code=500, detail="Internal server error")

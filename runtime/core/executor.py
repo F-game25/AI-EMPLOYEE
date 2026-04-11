@@ -59,11 +59,17 @@ class Executor:
         for task in graph.tasks:
             if task.task_id in completed or task.status != "pending":
                 continue
-            if not all(dep in completed and completed[dep].status == "success" for dep in task.dependencies):
+            if not self._dependencies_satisfied(task=task, completed=completed):
                 continue
             completed[task.task_id] = self.execute_task(task)
             progress = True
         return progress
+
+    def _dependencies_satisfied(self, *, task: TaskNode, completed: dict[str, TaskNode]) -> bool:
+        return all(
+            dep in completed and completed[dep].status == "success"
+            for dep in task.dependencies
+        )
 
     def _fail_blocked_tasks(self, *, graph: TaskGraph, completed: dict[str, TaskNode]) -> None:
         for task in graph.tasks:
