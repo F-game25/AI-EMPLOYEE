@@ -20,7 +20,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-import queue
 import threading
 import time
 import uuid
@@ -43,6 +42,13 @@ class ActionBus:
         # Pending approvals: action_id -> (event, payload_ref)
         self._pending: dict[str, dict] = {}
         self._pending_lock = threading.Lock()
+        self._secure_engine = None
+
+    def _get_engine(self):
+        if self._secure_engine is None:
+            from actions.execution_engine import SecureExecutionEngine
+            self._secure_engine = SecureExecutionEngine()
+        return self._secure_engine
 
     # ------------------------------------------------------------------
     # Configuration
@@ -70,6 +76,7 @@ class ActionBus:
         actor: str = "system",
         reason: str = "",
         executor: Callable[[dict], Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict:
         """Emit an action.
 
@@ -161,6 +168,33 @@ class ActionBus:
                     "error": str(exc),
                     "result": None,
                 }
+        else:
+            try:
+                secure_result = self._get_engine().execute(
+                    action_name=action_type,
+                    payload=payload,
+                    skill=actor,
+                    idempotency_key=idempotency_key,
+                )
+                if secure_result.get("status") == "executed":
+                    result = secure_result.get("result")
+                elif secure_result.get("status") == "error":
+                    return {
+                        "action_id": action_id,
+                        "status": "error",
+                        "action_type": action_type,
+                        "error": secure_result.get("failure", {}).get("reason", "Execution failed"),
+                        "failure": secure_result.get("failure", {}),
+                        "result": None,
+                    }
+            except Exception as exc:
+                return {
+                    "action_id": action_id,
+                    "status": "error",
+                    "action_type": action_type,
+                    "error": str(exc),
+                    "result": None,
+                }
 
         return {
             "action_id": action_id,
@@ -196,6 +230,25 @@ class ActionBus:
                 result = executor(record["payload"])
             except Exception:
                 _log.exception("Executor failed for approved action %s", action_id)
+                return {"status": "error", "action_id": action_id, "error": "Execution failed"}
+        else:
+            try:
+                secure_result = self._get_engine().execute(
+                    action_name=record["action_type"],
+                    payload=record["payload"],
+                    skill=record.get("actor", "system"),
+                )
+                if secure_result.get("status") == "executed":
+                    result = secure_result.get("result")
+                else:
+                    return {
+                        "status": "error",
+                        "action_id": action_id,
+                        "error": secure_result.get("failure", {}).get("reason", "Execution failed"),
+                        "failure": secure_result.get("failure", {}),
+                    }
+            except Exception:
+                _log.exception("Secure execution failed for approved action %s", action_id)
                 return {"status": "error", "action_id": action_id, "error": "Execution failed"}
 
         try:
@@ -234,6 +287,21 @@ class ActionBus:
             pass
 
         return {"status": "rejected", "action_id": action_id}
+
+    # ------------------------------------------------------------------
+    # Secure action management
+    # ------------------------------------------------------------------
+
+    def register_action(self, name: str, action: Any) -> None:
+        """Register a standardized external action in the secure engine."""
+        self._get_engine().register_action(name, action)
+
+    def metrics(self) -> dict:
+        """Return execution metrics for registered actions."""
+        try:
+            return self._get_engine().metrics()
+        except Exception:
+            return {}
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
