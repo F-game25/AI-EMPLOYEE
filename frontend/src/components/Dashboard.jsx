@@ -13,9 +13,9 @@ const PIPELINE_DEFAULTS = {
     endpoint: '/api/money/lead-pipeline',
     body: { source: 'crm_dataset', audience: 'SaaS founders', channels: ['email'], dry_run: false },
   },
-  opportunity: {
+  outreach: {
     endpoint: '/api/money/opportunity-pipeline',
-    body: { opportunity: 'retainer upgrade campaign', budget: 500, dry_run: false },
+    body: { opportunity: 'retainer upgrade outreach', budget: 500, dry_run: false },
   },
 }
 
@@ -113,8 +113,8 @@ export default function Dashboard() {
   const kpis = useMemo(() => ([
     { label: 'Tasks Executed', value: productMetrics?.tasks?.tasks_executed ?? 0 },
     { label: 'Success Rate', value: `${Math.round((productMetrics?.tasks?.success_rate ?? 0) * 100)}%` },
-    { label: 'Revenue', value: `$${(productMetrics?.revenue?.total_revenue ?? 0).toFixed(2)}` },
-    { label: 'Pipeline Runs', value: productMetrics?.pipelines?.runs ?? 0 },
+    { label: 'Value Generated', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(2)}` },
+    { label: 'Top Skill', value: (productMetrics?.top_skills?.[0]?.skill || 'N/A').toUpperCase() },
   ]), [productMetrics])
 
   return (
@@ -142,8 +142,8 @@ export default function Dashboard() {
             <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('lead')} disabled={running}>
               RUN LEAD PIPELINE
             </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('opportunity')} disabled={running}>
-              RUN OPPORTUNITY PIPELINE
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('outreach')} disabled={running}>
+              RUN OUTREACH PIPELINE
             </button>
 
             <select className="tier-2-btn font-mono text-xs px-2 py-2" value={mode} onChange={(e) => setModeRemote(e.target.value)}>
@@ -208,15 +208,15 @@ export default function Dashboard() {
           </article>
 
           <article className="ds-card p-3 min-h-0 flex flex-col">
-            <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>TOP STRATEGIES & EARNINGS</h2>
+            <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>TOP PERFORMING SKILLS</h2>
             <div className="overflow-y-auto space-y-1 min-h-0">
-              {(productMetrics?.top_strategies || []).slice(0, 8).map((s, idx) => (
-                <div key={`${s.strategy_id || idx}`} className="tier-3-surface p-2 font-mono text-[11px]">
-                  {s.agent} · {(s.outcome_score || 0).toFixed(2)} · {s.outcome_status || 'success'}
+              {(productMetrics?.top_skills || []).slice(0, 8).map((s, idx) => (
+                <div key={`${s.skill || idx}`} className="tier-3-surface p-2 font-mono text-[11px]">
+                  {s.skill} · {Math.round((s.success_rate || 0) * 100)}% success · {s.runs || 0} runs
                 </div>
               ))}
               <div className="tier-3-surface p-2 font-mono text-[11px]">
-                Earnings Today: ${(productMetrics?.revenue?.total_revenue || 0).toFixed(2)}
+                Revenue: ${(productMetrics?.revenue?.total_revenue || 0).toFixed(2)} · Pipeline Value: ${(productMetrics?.pipelines?.total_estimated_roi || 0).toFixed(2)}
               </div>
             </div>
           </article>
