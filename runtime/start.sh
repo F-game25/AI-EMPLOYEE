@@ -355,6 +355,10 @@ cleanup() {
   log "Stopping services..."
   if [[ -x "$AI_HOME/bin/ai-employee" ]]; then
     "$AI_HOME/bin/ai-employee" stop --all >/dev/null 2>&1 || true
+    # stop --all excludes infra agents; stop them explicitly so UI truly goes offline
+    for infra in problem-solver-ui problem-solver scheduler-runner status-reporter auto-updater discovery; do
+      "$AI_HOME/bin/ai-employee" stop "$infra" >/dev/null 2>&1 || true
+    done
   fi
   [[ -f "$AI_HOME/run/gateway.pid" ]] && kill "$(cat "$AI_HOME/run/gateway.pid")" 2>/dev/null || true
   [[ -f "$AI_HOME/run/dashboard.pid" ]] && kill "$(cat "$AI_HOME/run/dashboard.pid")" 2>/dev/null || true
