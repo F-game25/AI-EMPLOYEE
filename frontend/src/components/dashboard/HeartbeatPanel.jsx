@@ -24,13 +24,13 @@ export default function HeartbeatPanel() {
       className="flex flex-col h-full"
       style={{
         background: 'var(--bg-panel)',
-        borderRight: '1px solid var(--border-gold-dim)',
+        borderRight: '1px solid var(--border-subtle)',
       }}
     >
       {/* Header */}
       <div
         className="flex items-center justify-between px-3 py-2.5 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border-gold-dim)' }}
+        style={{ borderBottom: '1px solid var(--border-subtle)' }}
       >
         <span className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
           HEARTBEAT
