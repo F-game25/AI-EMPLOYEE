@@ -1250,6 +1250,8 @@ _STOP_FORCE_WAIT_SECONDS = float(os.environ.get("AI_EMPLOYEE_STOP_FORCE_WAIT_SEC
 
 
 def _agent_pid_file(agent_name: str) -> Path:
+    if not _BOT_NAME_RE.match(agent_name):
+        raise ValueError("Invalid agent name for pid path")
     return AI_HOME / "run" / f"{agent_name}.pid"
 
 
@@ -1264,6 +1266,8 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _read_pid_file(agent_name: str) -> Optional[int]:
+    if not _BOT_NAME_RE.match(agent_name):
+        return None
     pid_file = _agent_pid_file(agent_name)
     if not pid_file.exists():
         return None
@@ -1324,6 +1328,8 @@ def _pid_owned_by_current_user(pid: int) -> bool:
 
 
 def _safe_to_control_pid(pid: int, agent_name: str) -> bool:
+    if not _BOT_NAME_RE.match(agent_name):
+        return False
     if pid <= 1 or pid == os.getpid():
         return False
     if not _pid_alive(pid):
@@ -1341,6 +1347,8 @@ def _safe_to_control_pid(pid: int, agent_name: str) -> bool:
 
 
 def _discover_agent_pids(agent_name: str) -> set[int]:
+    if not _BOT_NAME_RE.match(agent_name):
+        return set()
     pids: set[int] = set()
     pid_from_file = _read_pid_file(agent_name)
     if pid_from_file:
@@ -1384,6 +1392,8 @@ def _signal_pid_and_group(pid: int, sig: int) -> bool:
 
 
 def _cleanup_agent_runtime_files(agent_name: str) -> None:
+    if not _BOT_NAME_RE.match(agent_name):
+        return
     for suffix in (".pid", ".lock", ".pid.lock"):
         p = AI_HOME / "run" / f"{agent_name}{suffix}"
         try:
@@ -1394,6 +1404,8 @@ def _cleanup_agent_runtime_files(agent_name: str) -> None:
 
 
 def _write_stopped_state(agent_name: str, remaining_pids: list[int]) -> None:
+    if not _BOT_NAME_RE.match(agent_name):
+        return
     state_file = STATE_DIR / f"{agent_name}.state.json"
     payload: dict = {
         "bot": agent_name,
@@ -1410,6 +1422,7 @@ def _write_stopped_state(agent_name: str, remaining_pids: list[int]) -> None:
 
 
 def _stop_agents_enterprise(targets: list[str]) -> dict:
+    targets = [t for t in targets if isinstance(t, str) and _BOT_NAME_RE.match(t)]
     started = time.monotonic()
     per_agent_pids: dict[str, set[int]] = {}
     all_pids: set[int] = set()
