@@ -65,9 +65,11 @@ function memoryUsagePercent() {
 function sampleSystemStatus() {
   const cpu = cpuUsagePercent();
   const memory = memoryUsagePercent();
+  const randomSwing = Math.random() * GPU_RANDOM_SWING - GPU_SWING_OFFSET;
+  const cpuInfluence = (cpu - GPU_CPU_BASELINE) * GPU_CPU_INFLUENCE;
   // Intentionally mutates currentGpuUsage to simulate gradual GPU trend across snapshots.
   currentGpuUsage = clamp(
-    Math.round(currentGpuUsage + (Math.random() * GPU_RANDOM_SWING - GPU_SWING_OFFSET) + (cpu - GPU_CPU_BASELINE) * GPU_CPU_INFLUENCE),
+    Math.round(currentGpuUsage + randomSwing + cpuInfluence),
     4,
     97,
   );

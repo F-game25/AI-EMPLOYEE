@@ -12,7 +12,8 @@ const AGENT_CATALOG = [
 ];
 
 // Simulated task processing duration bounds (per task execution).
-// 1000-2800ms keeps UI feedback responsive while still showing visible "busy" agent state.
+// 1000-2800ms intentionally keeps end-to-end response under ~3s while remaining
+// long enough for operators to observe queueing and state transitions in the UI.
 const PROCESS_MS_MIN = 1000;
 const PROCESS_MS_MAX = 2800;
 // How long an inactive running agent waits before being scaled back to idle.
@@ -235,7 +236,6 @@ function enqueueTask({ message, subsystem = 'general' }) {
 
   let selected = _findBestAgent(subsystem);
   if (!selected) {
-    _activateForDemand(subsystem);
     selected = _findBestAgent(subsystem);
   }
   if (!selected) {
