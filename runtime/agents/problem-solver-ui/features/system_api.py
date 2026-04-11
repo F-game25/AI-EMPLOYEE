@@ -228,7 +228,7 @@ class LeadPipelineRequest(BaseModel):
 
 @router.post("/money/lead-pipeline")
 def run_lead_pipeline(body: LeadPipelineRequest):
-    """Run data → leads → outreach → conversion pipeline."""
+    """Run data scraping → lead filtering → storage pipeline."""
     try:
         from core.money_mode import get_money_mode
         result = get_money_mode().run_lead_pipeline(
@@ -251,7 +251,7 @@ class OpportunityPipelineRequest(BaseModel):
 
 @router.post("/money/opportunity-pipeline")
 def run_opportunity_pipeline(body: OpportunityPipelineRequest):
-    """Run opportunity → execution → ROI tracking pipeline."""
+    """Run outreach → response tracking → conversion pipeline."""
     try:
         from core.money_mode import get_money_mode
         result = get_money_mode().run_opportunity_pipeline(
@@ -337,6 +337,8 @@ def product_dashboard(
         "mode": {},
         "tasks": {"tasks_executed": 0, "success_rate": 0.0},
         "revenue": {"total_revenue": 0.0, "events": 0},
+        "value": {"value_generated": 0.0, "revenue_component": 0.0, "pipeline_component": 0.0},
+        "top_skills": [],
         "top_strategies": [],
         "activity_feed": [],
         "execution_logs": [],
@@ -353,6 +355,7 @@ def product_dashboard(
         engine = get_task_engine()
         response["tasks"] = engine.daily_stats()
         response["execution_logs"] = engine.recent_runs(limit=task_limit)
+        response["top_skills"] = engine.top_skills(limit=5)
     except Exception:
         pass
     try:
@@ -381,4 +384,13 @@ def product_dashboard(
         response["pending_actions"] = get_action_bus().list_pending()
     except Exception:
         response["pending_actions"] = []
+    response["value"] = {
+        "revenue_component": round(float(response.get("revenue", {}).get("total_revenue", 0.0) or 0.0), 3),
+        "pipeline_component": round(float(response.get("pipelines", {}).get("total_estimated_roi", 0.0) or 0.0), 3),
+        "value_generated": round(
+            float(response.get("revenue", {}).get("total_revenue", 0.0) or 0.0)
+            + float(response.get("pipelines", {}).get("total_estimated_roi", 0.0) or 0.0),
+            3,
+        ),
+    }
     return JSONResponse(response)
