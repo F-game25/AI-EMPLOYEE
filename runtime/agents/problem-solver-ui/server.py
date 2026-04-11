@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import secrets
+import signal
 import socket
 import subprocess
 import sys
@@ -611,6 +612,50 @@ def _mode_agent_targets(mode: Optional[str] = None) -> list[str]:
     if resolved and resolved not in targets:
       targets.append(resolved)
   return targets
+
+
+_RUNTIME_PATHS_LOCK = threading.Lock()
+_RUNTIME_RUN_FILE_MAP: dict[str, dict[str, Path]] = {}
+_RUNTIME_STATE_FILE_MAP: dict[str, Path] = {}
+
+
+def _build_runtime_path_maps() -> None:
+  run_dir = (AI_HOME / "run").resolve()
+  state_dir = STATE_DIR.resolve()
+  managed_agents: set[str] = set()
+  for mode_name in AGENTS_BY_MODE:
+    managed_agents.update(_mode_agent_targets(mode_name))
+  managed_agents.update(a for a in INFRA_AGENTS if _agent_dir_exists(a))
+  for agent_name in sorted(managed_agents):
+    if not _BOT_NAME_RE.match(agent_name):
+      continue
+    _RUNTIME_RUN_FILE_MAP[agent_name] = {
+      ".pid": run_dir / f"{agent_name}.pid",
+      ".lock": run_dir / f"{agent_name}.lock",
+      ".pid.lock": run_dir / f"{agent_name}.pid.lock",
+    }
+    _RUNTIME_STATE_FILE_MAP[agent_name] = state_dir / f"{agent_name}.state.json"
+
+
+def _ensure_runtime_path_maps() -> None:
+  if _RUNTIME_RUN_FILE_MAP and _RUNTIME_STATE_FILE_MAP:
+    return
+  with _RUNTIME_PATHS_LOCK:
+    if _RUNTIME_RUN_FILE_MAP and _RUNTIME_STATE_FILE_MAP:
+      return
+    _build_runtime_path_maps()
+
+
+def _normalize_managed_agent_name(agent_name: str) -> Optional[str]:
+  if not isinstance(agent_name, str) or not _BOT_NAME_RE.match(agent_name):
+    return None
+  _ensure_runtime_path_maps()
+  if agent_name in _RUNTIME_RUN_FILE_MAP:
+    return agent_name
+  resolved = _resolve_agent_target(agent_name)
+  if resolved and resolved in _RUNTIME_RUN_FILE_MAP:
+    return resolved
+  return None
 
 
 def route_to_agent(message: str) -> str:
@@ -1228,6 +1273,8 @@ def _trim_jsonl(path: Path, max_lines: int = 1000) -> None:
 
 
 def ai_employee(*args: str) -> tuple:
+    if args and args[0] == "start" and _SHUTDOWN_IN_PROGRESS.is_set():
+        return 1, "Start blocked: shutdown is currently in progress."
     try:
         p = subprocess.run(
             [str(AI_HOME / "bin" / "ai-employee"), *args],
@@ -1237,6 +1284,283 @@ def ai_employee(*args: str) -> tuple:
     except Exception as e:
         logger.warning("ai_employee command error: %s", e)
         return 1, "Command execution failed."
+
+
+# ── Enterprise lifecycle management (start/stop hardening) ────────────────────
+_START_STOP_LOCK = threading.Lock()
+_SHUTDOWN_IN_PROGRESS = threading.Event()
+_STOP_GRACE_SECONDS = float(os.environ.get("AI_EMPLOYEE_STOP_GRACE_SECONDS", "1.5"))
+_STOP_FORCE_WAIT_SECONDS = float(os.environ.get("AI_EMPLOYEE_STOP_FORCE_WAIT_SECONDS", "0.8"))
+
+
+def _agent_pid_file(agent_name: str) -> Path:
+    pid_file = _safe_run_file(agent_name, ".pid")
+    if pid_file is None:
+        raise ValueError("Invalid agent name for pid path")
+    return pid_file
+
+
+def _safe_run_file(agent_name: str, suffix: str) -> Optional[Path]:
+    if suffix not in (".pid", ".lock", ".pid.lock"):
+        return None
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
+        return None
+    return _RUNTIME_RUN_FILE_MAP.get(normalized, {}).get(suffix)
+
+
+def _safe_state_file(agent_name: str) -> Optional[Path]:
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
+        return None
+    return _RUNTIME_STATE_FILE_MAP.get(normalized)
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 1:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _read_pid_file(agent_name: str) -> Optional[int]:
+    try:
+        pid_file = _agent_pid_file(agent_name)
+    except ValueError:
+        return None
+    if not pid_file.exists():
+        return None
+    try:
+        pid = int(pid_file.read_text().strip())
+        return pid if pid > 1 else None
+    except Exception:
+        return None
+
+
+def _pid_context(pid: int) -> tuple[str, str]:
+    cmdline = ""
+    cwd = ""
+    if _PSUTIL_OK and _psutil is not None:
+        try:
+            proc = _psutil.Process(pid)
+            cmdline = " ".join(proc.cmdline())
+            cwd = proc.cwd()
+            return cmdline, cwd
+        except Exception:
+            pass
+    proc_cmd = Path("/proc") / str(pid) / "cmdline"
+    proc_cwd = Path("/proc") / str(pid) / "cwd"
+    try:
+        if proc_cmd.exists():
+            raw = proc_cmd.read_bytes().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+            cmdline = raw.strip()
+    except Exception:
+        pass
+    try:
+        if proc_cwd.exists():
+            cwd = str(proc_cwd.resolve())
+    except Exception:
+        pass
+    return cmdline, cwd
+
+
+def _pid_owned_by_current_user(pid: int) -> bool:
+    if not hasattr(os, "getuid"):
+        return True
+    current_uid = os.getuid()
+    if _PSUTIL_OK and _psutil is not None:
+        try:
+            uids = _psutil.Process(pid).uids()
+            return int(getattr(uids, "real", current_uid)) == current_uid
+        except Exception:
+            return False
+    proc_status = Path("/proc") / str(pid) / "status"
+    try:
+        for line in proc_status.read_text().splitlines():
+            if line.startswith("Uid:"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    return int(parts[1]) == current_uid
+    except Exception:
+        return False
+    return False
+
+
+def _safe_to_control_pid(pid: int, agent_name: str) -> bool:
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
+        return False
+    if pid <= 1 or pid == os.getpid():
+        return False
+    if not _pid_alive(pid):
+        return False
+    if not _pid_owned_by_current_user(pid):
+        return False
+    cmdline, cwd = _pid_context(pid)
+    ai_home = str(AI_HOME)
+    marker = f"/agents/{normalized}/"
+    if ai_home not in (cmdline + " " + cwd):
+        return False
+    if marker not in cmdline and marker not in cwd:
+        return False
+    return True
+
+
+def _discover_agent_pids(agent_name: str) -> set[int]:
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
+        return set()
+    pids: set[int] = set()
+    pid_from_file = _read_pid_file(normalized)
+    if pid_from_file:
+        pids.add(pid_from_file)
+    marker = f"/agents/{normalized}/"
+    if _PSUTIL_OK and _psutil is not None:
+        try:
+            for proc in _psutil.process_iter(["pid", "cmdline", "cwd"]):
+                try:
+                    pid = int(proc.info.get("pid") or 0)
+                    if pid <= 1:
+                        continue
+                    cmdline = " ".join(proc.info.get("cmdline") or [])
+                    cwd = str(proc.info.get("cwd") or "")
+                    if marker in cmdline or marker in cwd:
+                        pids.add(pid)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    return {pid for pid in pids if _safe_to_control_pid(pid, normalized)}
+
+
+def _signal_pid_and_group(pid: int, sig: int) -> bool:
+    sent = False
+    if pid <= 1:
+        return False
+    try:
+        pgid = os.getpgid(pid)
+        if pgid > 1 and pgid != os.getpgrp():
+            os.killpg(pgid, sig)
+            sent = True
+    except Exception:
+        pass
+    try:
+        os.kill(pid, sig)
+        sent = True
+    except Exception:
+        pass
+    return sent
+
+
+def _cleanup_agent_runtime_files(agent_name: str) -> None:
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
+        return
+    for suffix in (".pid", ".lock", ".pid.lock"):
+        p = _safe_run_file(normalized, suffix)
+        if p is None:
+            continue
+        try:
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+
+def _write_stopped_state(agent_name: str, remaining_pids: list[int]) -> None:
+    normalized = _normalize_managed_agent_name(agent_name)
+    if normalized is None:
+        return
+    state_file = _safe_state_file(normalized)
+    if state_file is None:
+        return
+    payload: dict = {
+        "bot": normalized,
+        "status": "stopped" if not remaining_pids else "stopping_failed",
+        "stopped_at": now_iso(),
+    }
+    if remaining_pids:
+        payload["remaining_pids"] = remaining_pids
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(payload))
+    except Exception:
+        pass
+
+
+def _stop_agents_enterprise(targets: list[str]) -> dict:
+    targets = [t for t in targets if isinstance(t, str) and _BOT_NAME_RE.match(t)]
+    started = time.monotonic()
+    per_agent_pids: dict[str, set[int]] = {}
+    all_pids: set[int] = set()
+    for agent_name in targets:
+        pids = _discover_agent_pids(agent_name)
+        per_agent_pids[agent_name] = pids
+        all_pids.update(pids)
+
+    graceful_signaled = 0
+    for pid in sorted(all_pids):
+        if _signal_pid_and_group(pid, signal.SIGTERM):
+            graceful_signaled += 1
+
+    graceful_deadline = time.monotonic() + max(0.1, _STOP_GRACE_SECONDS)
+    while time.monotonic() < graceful_deadline:
+        if not any(_pid_alive(pid) for pid in all_pids):
+            break
+        time.sleep(0.05)
+
+    survivors = {pid for pid in all_pids if _pid_alive(pid)}
+    force_signaled = 0
+    for pid in sorted(survivors):
+        if _signal_pid_and_group(pid, signal.SIGKILL):
+            force_signaled += 1
+
+    force_deadline = time.monotonic() + max(0.1, _STOP_FORCE_WAIT_SECONDS)
+    while time.monotonic() < force_deadline:
+        if not any(_pid_alive(pid) for pid in survivors):
+            break
+        time.sleep(0.03)
+
+    remaining = {pid for pid in survivors if _pid_alive(pid)}
+    failures: list[str] = []
+    details: list[dict] = []
+    stopped = 0
+    for agent_name in targets:
+        agent_remaining = sorted(pid for pid in per_agent_pids.get(agent_name, set()) if pid in remaining)
+        if agent_remaining:
+            failures.append(agent_name)
+        else:
+            stopped += 1
+        _cleanup_agent_runtime_files(agent_name)
+        _write_stopped_state(agent_name, agent_remaining)
+        details.append({
+            "agent": agent_name,
+            "found_pids": sorted(per_agent_pids.get(agent_name, set())),
+            "remaining_pids": agent_remaining,
+            "stopped": len(agent_remaining) == 0,
+        })
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    logger.info(
+        "AGENT_SHUTDOWN: targets=%s found_pids=%s graceful=%s forced=%s remaining=%s duration_ms=%s failures=%s",
+        len(targets), len(all_pids), graceful_signaled, force_signaled, len(remaining), duration_ms, failures
+    )
+    return {
+        "stopped": stopped,
+        "failed": failures,
+        "details": details,
+        "graceful_signaled": graceful_signaled,
+        "force_signaled": force_signaled,
+        "remaining_pids": sorted(remaining),
+        "duration_ms": duration_ms,
+    }
+
+
+def _agent_has_live_process(agent_name: str) -> bool:
+    return bool(_discover_agent_pids(agent_name))
 
 
 # ─── HTML Dashboard ────────────────────────────────────────────────────────────
@@ -7856,20 +8180,22 @@ async function applyGatewayProvider() {
 
 async function startAll() {
   _setStartStopDisabled(true);
-  // Update hero button text to show loading state
   const heroBtn = document.getElementById('hero-start-btn');
   if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Starting…';
-  const res = await api('/api/agents/start-all', {method:'POST'});
-  if (res.ok) {
-    toast(`▶ Starting ${res.started || 0} agents (${res.mode || 'mode'})…`);
-  } else {
-    toast(`⚠ Started ${res.started || 0}, failed: ${(res.failed || []).join(', ')}`, 'info');
-  }
-  setTimeout(() => {
-    loadDashboard();
+  try {
+    const res = await api('/api/agents/start-all', {method:'POST'});
+    if (res.ok) {
+      const dup = (res.already_running || []).length;
+      const extra = dup ? ` · ${dup} already running` : '';
+      toast(`▶ Started ${res.started || 0} agents (${res.mode || 'mode'})${extra}`, 'success');
+    } else {
+      toast(`⚠ Start issue: ${res.error || `failed: ${(res.failed || []).join(', ') || 'unknown'}`}`, 'error');
+    }
+    await loadDashboard();
+  } finally {
     _setStartStopDisabled(false);
     if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">▶</span> Start All Agents';
-  }, 2500);
+  }
 }
 
 async function stopAll() {
@@ -7877,17 +8203,19 @@ async function stopAll() {
   _setStartStopDisabled(true);
   const heroBtn = document.getElementById('hero-stop-btn');
   if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Stopping…';
-  const res = await api('/api/agents/stop-all', {method:'POST'});
-  if (res.ok) {
-    toast(`■ Stopping ${res.stopped || 0} agents…`, 'error');
-  } else {
-    toast(`⚠ Stopped ${res.stopped || 0}, failed: ${(res.failed || []).join(', ')}`, 'info');
-  }
-  setTimeout(() => {
-    loadDashboard();
+  try {
+    const res = await api('/api/agents/stop-all', {method:'POST'});
+    const dur = (res.shutdown && Number.isFinite(res.shutdown.duration_ms)) ? `${res.shutdown.duration_ms}ms` : 'n/a';
+    if (res.ok) {
+      toast(`■ Stopped ${res.stopped || 0} agents in ${dur}`, 'success');
+    } else {
+      toast(`⚠ Stop issue: stopped ${res.stopped || 0}, failed: ${(res.failed || []).join(', ') || 'unknown'} (${dur})`, 'error');
+    }
+    await loadDashboard();
+  } finally {
     _setStartStopDisabled(false);
     if (heroBtn) heroBtn.innerHTML = '<span class="btn-icon">■</span> Stop All Agents';
-  }, 2000);
+  }
 }
 
 async function runOnboard() {
@@ -8492,16 +8820,20 @@ async function deleteBundle(id) {
 }
 
 async function startBot(name) {
-  await api('/api/agents/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
-  toast(`Starting ${name}…`);
-  setTimeout(loadWorkers, 1800);
+  const r = await api('/api/agents/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
+  if (r.ok && r.already_running) toast(`${name} is already running`, 'info');
+  else if (r.ok) toast(`Starting ${name}…`, 'success');
+  else toast(`Failed to start ${name}: ${r.error || 'unknown error'}`, 'error');
+  setTimeout(loadWorkers, 1200);
 }
 
 async function stopBot(name) {
   if (!confirm(`Stop ${name}?`)) return;
-  await api('/api/agents/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
-  toast(`Stopping ${name}…`, 'error');
-  setTimeout(loadWorkers, 1800);
+  const r = await api('/api/agents/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({bot: name})});
+  const dur = (r.shutdown && Number.isFinite(r.shutdown.duration_ms)) ? `${r.shutdown.duration_ms}ms` : '';
+  if (r.ok) toast(`Stopped ${name}${dur ? ` in ${dur}` : ''}`, 'success');
+  else toast(`Failed to fully stop ${name}${dur ? ` (${dur})` : ''}`, 'error');
+  setTimeout(loadWorkers, 1200);
 }
 
 // ── Improvements ────────────────────────────────────────────────────────────
@@ -16397,76 +16729,90 @@ def gateway_status():
 
 @app.post("/api/agents/start-all")
 def start_all_agents(_auth: None = Depends(require_auth)):
-    mode = _current_mode()
-    targets = _mode_agent_targets(mode)
-    outputs = []
-    failures = []
-    skipped_agents: list = []        # agents skipped by governor or circuit breaker
-    skipped_by_governor: list = []   # agents skipped specifically by the cap
-    skipped_by_breaker: list = []    # agents skipped by an open circuit breaker
-    # Check governor before starting agents
-    with _AGENT_GOVERNOR_LOCK:
-        gov_enabled = _AGENT_GOVERNOR["enabled"]
-        gov_max = _AGENT_GOVERNOR["max_agents"]
-    running_count = _count_running_agents() if gov_enabled else 0
-    for agent_name in targets:
-      if agent_name in INFRA_AGENTS:
-        continue
-      # Governor: skip start if cap already reached
-      if gov_enabled and running_count >= gov_max:
-        skipped_agents.append(agent_name)
-        skipped_by_governor.append(agent_name)
-        outputs.append(f"[{agent_name}] skipped — agent governor cap ({gov_max}) reached")
-        continue
-      # Circuit breaker: skip agents whose breaker is open
-      if circuit_breaker_is_open(agent_name):
-        skipped_agents.append(agent_name)
-        skipped_by_breaker.append(agent_name)
-        outputs.append(f"[{agent_name}] skipped — circuit breaker is open (too many recent failures)")
-        continue
-      rc, out = ai_employee("start", agent_name)
-      outputs.append(f"[{agent_name}] {out.strip()}")
-      if rc != 0:
-        failures.append(agent_name)
-        circuit_breaker_record_failure(agent_name)
-      else:
-        running_count += 1
-        circuit_breaker_record_success(agent_name)
-    _invalidate_status_cache()
-    return JSONResponse({
-      "ok": len(failures) == 0,
-      "mode": mode,
-      "targets": targets,
-      "started": len(targets) - len(failures) - len(skipped_agents),
-      "failed": failures,
-      "skipped_by_governor": skipped_by_governor,
-      "skipped_by_breaker": skipped_by_breaker,
-      "output": "\n".join(outputs),
-    })
+    if _SHUTDOWN_IN_PROGRESS.is_set():
+        return JSONResponse({"ok": False, "error": "Shutdown is in progress. Start is temporarily blocked."}, status_code=409)
+    with _START_STOP_LOCK:
+        if _SHUTDOWN_IN_PROGRESS.is_set():
+            return JSONResponse({"ok": False, "error": "Shutdown is in progress. Start is temporarily blocked."}, status_code=409)
+        mode = _current_mode()
+        targets = _mode_agent_targets(mode)
+        outputs = []
+        failures = []
+        skipped_agents: list = []        # agents skipped by governor or circuit breaker
+        skipped_by_governor: list = []   # agents skipped specifically by the cap
+        skipped_by_breaker: list = []    # agents skipped by an open circuit breaker
+        already_running: list = []       # duplicate-start prevention
+        # Check governor before starting agents
+        with _AGENT_GOVERNOR_LOCK:
+            gov_enabled = _AGENT_GOVERNOR["enabled"]
+            gov_max = _AGENT_GOVERNOR["max_agents"]
+        running_count = _count_running_agents() if gov_enabled else 0
+        for agent_name in targets:
+          if agent_name in INFRA_AGENTS:
+            continue
+          if _agent_has_live_process(agent_name):
+            already_running.append(agent_name)
+            outputs.append(f"[{agent_name}] skipped — already running (duplicate prevented)")
+            continue
+          # Governor: skip start if cap already reached
+          if gov_enabled and running_count >= gov_max:
+            skipped_agents.append(agent_name)
+            skipped_by_governor.append(agent_name)
+            outputs.append(f"[{agent_name}] skipped — agent governor cap ({gov_max}) reached")
+            continue
+          # Circuit breaker: skip agents whose breaker is open
+          if circuit_breaker_is_open(agent_name):
+            skipped_agents.append(agent_name)
+            skipped_by_breaker.append(agent_name)
+            outputs.append(f"[{agent_name}] skipped — circuit breaker is open (too many recent failures)")
+            continue
+          rc, out = ai_employee("start", agent_name)
+          outputs.append(f"[{agent_name}] {out.strip()}")
+          if rc != 0:
+            failures.append(agent_name)
+            circuit_breaker_record_failure(agent_name)
+          else:
+            running_count += 1
+            circuit_breaker_record_success(agent_name)
+        _invalidate_status_cache()
+        return JSONResponse({
+          "ok": len(failures) == 0,
+          "mode": mode,
+          "targets": targets,
+          "started": len(targets) - len(failures) - len(skipped_agents) - len(already_running),
+          "failed": failures,
+          "already_running": already_running,
+          "skipped_by_governor": skipped_by_governor,
+          "skipped_by_breaker": skipped_by_breaker,
+          "output": "\n".join(outputs),
+        })
 
 
 @app.post("/api/agents/stop-all")
 def stop_all_agents(_auth: None = Depends(require_auth)):
-    mode = _current_mode()
-    targets = _mode_agent_targets(mode)
-    outputs = []
-    failures = []
-    for agent_name in targets:
-      if agent_name in INFRA_AGENTS:
-        continue
-      rc, out = ai_employee("stop", agent_name)
-      outputs.append(f"[{agent_name}] {out.strip()}")
-      if rc != 0:
-        failures.append(agent_name)
-    _invalidate_status_cache()
-    return JSONResponse({
-      "ok": len(failures) == 0,
-      "mode": mode,
-      "targets": targets,
-      "stopped": len(targets) - len(failures),
-      "failed": failures,
-      "output": "\n".join(outputs),
-    })
+    with _START_STOP_LOCK:
+        _SHUTDOWN_IN_PROGRESS.set()
+        try:
+            mode = _current_mode()
+            targets = [a for a in _mode_agent_targets(mode) if a not in INFRA_AGENTS]
+            result = _stop_agents_enterprise(targets)
+            _invalidate_status_cache()
+            return JSONResponse({
+              "ok": len(result["failed"]) == 0,
+              "mode": mode,
+              "targets": targets,
+              "stopped": result["stopped"],
+              "failed": result["failed"],
+              "details": result["details"],
+              "shutdown": {
+                "graceful_signaled": result["graceful_signaled"],
+                "force_signaled": result["force_signaled"],
+                "remaining_pids": result["remaining_pids"],
+                "duration_ms": result["duration_ms"],
+              },
+            })
+        finally:
+            _SHUTDOWN_IN_PROGRESS.clear()
 
 
 @app.post("/api/quick-actions/onboard")
@@ -16483,16 +16829,40 @@ def run_onboard_quick_action():
 def start_bot(payload: dict, _auth: None = Depends(require_auth)):
     bot = payload.get("bot") or payload.get("agent") or ""
     _validate_bot_name(bot)
-    rc, out = ai_employee("start", bot)
-    return JSONResponse({"ok": rc == 0, "output": out})
+    if _SHUTDOWN_IN_PROGRESS.is_set():
+        return JSONResponse({"ok": False, "error": "Shutdown is in progress. Start is temporarily blocked."}, status_code=409)
+    with _START_STOP_LOCK:
+        if _SHUTDOWN_IN_PROGRESS.is_set():
+            return JSONResponse({"ok": False, "error": "Shutdown is in progress. Start is temporarily blocked."}, status_code=409)
+        if _agent_has_live_process(bot):
+            return JSONResponse({"ok": True, "already_running": True, "output": f"Already running: {bot}"})
+        rc, out = ai_employee("start", bot)
+        return JSONResponse({"ok": rc == 0, "already_running": False, "output": out})
 
 
 @app.post("/api/agents/stop")
 def stop_bot(payload: dict, _auth: None = Depends(require_auth)):
     bot = payload.get("bot") or payload.get("agent") or ""
     _validate_bot_name(bot)
-    rc, out = ai_employee("stop", bot)
-    return JSONResponse({"ok": rc == 0, "output": out})
+    with _START_STOP_LOCK:
+        _SHUTDOWN_IN_PROGRESS.set()
+        try:
+            result = _stop_agents_enterprise([bot])
+            _invalidate_status_cache()
+            return JSONResponse({
+                "ok": len(result["failed"]) == 0,
+                "output": f"Stopped {bot}" if not result["failed"] else f"Failed to fully stop {bot}",
+                "failed": result["failed"],
+                "details": result["details"],
+                "shutdown": {
+                    "graceful_signaled": result["graceful_signaled"],
+                    "force_signaled": result["force_signaled"],
+                    "remaining_pids": result["remaining_pids"],
+                    "duration_ms": result["duration_ms"],
+                },
+            })
+        finally:
+            _SHUTDOWN_IN_PROGRESS.clear()
 
 
 @app.get("/api/workers")
@@ -17839,7 +18209,7 @@ def submit_task(payload: dict):
     _save_task_plans(plans[:50])  # keep last 50
 
     # Auto-start assigned agents if they're not running
-    if agents:
+    if agents and not _SHUTDOWN_IN_PROGRESS.is_set():
         for agent_id in agents:
             # Validate agent_id to prevent path traversal
             if not isinstance(agent_id, str) or not _SAFE_AGENT_ID_PAT.match(agent_id):

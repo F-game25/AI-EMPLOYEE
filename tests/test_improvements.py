@@ -114,6 +114,79 @@ class TestAgentGovernor:
         assert r.json()["headroom"] is None  # headroom is None when disabled
 
 
+class TestEnterpriseLifecycle:
+    def test_start_all_blocked_during_shutdown(self, server):
+        mod, client = server
+        mod._SHUTDOWN_IN_PROGRESS.set()
+        try:
+            r = client.post("/api/agents/start-all")
+            assert r.status_code == 409
+            body = r.json()
+            assert body["ok"] is False
+            assert "Shutdown is in progress" in body["error"]
+        finally:
+            mod._SHUTDOWN_IN_PROGRESS.clear()
+
+    def test_start_bot_prevents_duplicate_instance(self, server):
+        mod, client = server
+        with patch.object(mod, "_agent_has_live_process", return_value=True), patch.object(mod, "ai_employee") as ai_cmd:
+            r = client.post("/api/agents/start", json={"bot": "lead-generator"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["already_running"] is True
+        assert "Already running" in body["output"]
+        ai_cmd.assert_not_called()
+
+    def test_stop_agents_enterprise_batch_report(self, server):
+        mod, _ = server
+        with patch.object(
+            mod,
+            "_discover_agent_pids",
+            side_effect=[{101, 102}, {201}],
+        ), patch.object(
+            mod,
+            "_signal_pid_and_group",
+            return_value=True,
+        ), patch.object(
+            mod,
+            "_pid_alive",
+            return_value=False,
+        ), patch.object(
+            mod,
+            "_cleanup_agent_runtime_files",
+            return_value=None,
+        ), patch.object(
+            mod,
+            "_write_stopped_state",
+            return_value=None,
+        ):
+            result = mod._stop_agents_enterprise(["lead-generator", "offer-agent"])
+
+        assert result["failed"] == []
+        assert result["stopped"] == 2
+        assert result["graceful_signaled"] == 3
+        assert result["force_signaled"] == 0
+        assert result["remaining_pids"] == []
+
+    def test_stop_agents_enterprise_reports_failure_for_persistent_pid(self, server):
+        mod, _ = server
+        with patch.object(mod, "_discover_agent_pids", return_value={999}), patch.object(
+            mod, "_signal_pid_and_group", return_value=True
+        ), patch.object(mod, "_pid_alive", return_value=True), patch.object(
+            mod, "_cleanup_agent_runtime_files", return_value=None
+        ), patch.object(mod, "_write_stopped_state", return_value=None), patch.object(
+            mod, "_STOP_GRACE_SECONDS", 0.01
+        ), patch.object(mod, "_STOP_FORCE_WAIT_SECONDS", 0.01), patch.object(
+            mod.time, "sleep", return_value=None
+        ):
+            result = mod._stop_agents_enterprise(["lead-generator"])
+
+        assert result["stopped"] == 0
+        assert result["failed"] == ["lead-generator"]
+        assert result["remaining_pids"] == [999]
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. Dashboard Status Cache
 # ═══════════════════════════════════════════════════════════════════════════
