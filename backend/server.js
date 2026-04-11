@@ -29,7 +29,8 @@ app.use(express.json());
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
 
-let currentGpuUsage = 18;
+const GPU_USAGE_INITIAL = 18;
+let currentGpuUsage = GPU_USAGE_INITIAL;
 // Incremented by broadcaster heartbeat loop; sampled into system status.
 let currentHeartbeatSeq = 0;
 
