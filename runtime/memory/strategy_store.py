@@ -27,6 +27,7 @@ from typing import Any
 
 
 _DEFAULT_PATH = Path.home() / ".ai-employee" / "strategies.json"
+_SUCCESS_SCORE_THRESHOLD = 0.6
 
 
 class StrategyStore:
@@ -61,15 +62,25 @@ class StrategyStore:
         agent: str,
         config: dict | None = None,
         outcome_score: float = 0.0,
+        outcome_status: str | None = None,
+        context: dict | None = None,
+        outcome: dict | None = None,
         notes: str = "",
     ) -> dict:
         """Record a strategy result and return the stored entry."""
+        score = max(0.0, min(1.0, outcome_score))
+        status = (outcome_status or ("success" if score >= _SUCCESS_SCORE_THRESHOLD else "failed")).lower()
+        if status not in ("success", "failed"):
+            status = "failed"
         entry = {
             "strategy_id": str(uuid.uuid4())[:8],
             "goal_type": goal_type,
             "agent": agent,
             "config": config or {},
-            "outcome_score": max(0.0, min(1.0, outcome_score)),
+            "outcome_score": score,
+            "outcome_status": status,
+            "context": context or {},
+            "outcome": outcome or {},
             "notes": notes,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
@@ -84,7 +95,15 @@ class StrategyStore:
         with self._lock:
             data = self._read()
         filtered = [d for d in data if d.get("goal_type") == goal_type]
-        return sorted(filtered, key=lambda d: d.get("outcome_score", 0.0), reverse=True)[:top_n]
+        weighted = sorted(
+            filtered,
+            key=lambda d: (
+                1 if d.get("outcome_status", "success") == "success" else 0,
+                d.get("outcome_score", 0.0),
+            ),
+            reverse=True,
+        )
+        return weighted[:top_n]
 
     def all_strategies(self) -> list[dict]:
         """Return all recorded strategies."""
@@ -95,7 +114,56 @@ class StrategyStore:
         """Return globally best-performing strategies across all goal types."""
         with self._lock:
             data = self._read()
-        return sorted(data, key=lambda d: d.get("outcome_score", 0.0), reverse=True)[:limit]
+        ranked = sorted(
+            data,
+            key=lambda d: (
+                1 if d.get("outcome_status", "success") == "success" else 0,
+                d.get("outcome_score", 0.0),
+            ),
+            reverse=True,
+        )
+        return ranked[:limit]
+
+    def performance_summary(self, *, goal_type: str | None = None, limit: int = 5) -> dict:
+        """Return compact success/failure summary with top and weak strategies."""
+        with self._lock:
+            data = self._read()
+        if goal_type:
+            data = [d for d in data if d.get("goal_type") == goal_type]
+
+        total = len(data)
+        successful = [d for d in data if d.get("outcome_status", "") == "success"]
+        failed = [d for d in data if d.get("outcome_status", "") != "success"]
+        success_rate = round(len(successful) / max(total, 1), 3)
+
+        top = sorted(successful, key=lambda d: d.get("outcome_score", 0.0), reverse=True)[:limit]
+        weak = sorted(failed, key=lambda d: d.get("outcome_score", 0.0))[:limit]
+        return {
+            "goal_type": goal_type or "all",
+            "total_attempts": total,
+            "successful_attempts": len(successful),
+            "failed_attempts": len(failed),
+            "success_rate": success_rate,
+            "top_strategies": top,
+            "failed_strategies": weak,
+        }
+
+    def learn_for_goal(self, goal_type: str) -> dict:
+        """Return learning insights that can influence planning decisions."""
+        summary = self.performance_summary(goal_type=goal_type, limit=10)
+        winners = [s.get("agent", "") for s in summary["top_strategies"] if s.get("agent")]
+        losers = [s.get("agent", "") for s in summary["failed_strategies"] if s.get("agent")]
+        return {
+            "goal_type": goal_type,
+            "success_rate": summary["success_rate"],
+            "promote_agents": list(dict.fromkeys(winners[:3])),
+            "deprioritize_agents": list(dict.fromkeys(losers[:3])),
+            "insight": (
+                "Promote agents with successful outcomes and deprioritize repeated failures."
+                if summary["total_attempts"] > 0
+                else "No prior outcomes yet; use default planning."
+            ),
+        }
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────

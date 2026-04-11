@@ -282,6 +282,9 @@ class TestModeManager:
         assert s["mode"] == "MANUAL"
         assert s["requires_approval"] is True
         assert s["auto_execution"] is False
+        assert "decision_threshold" in s
+        assert "execution_frequency" in s
+        assert "risk_tolerance" in s
 
     def test_case_insensitive(self, tmp_path):
         from core.mode_manager import ModeManager
@@ -400,6 +403,33 @@ class TestStrategyStore:
         store = StrategyStore(path=tmp_path / "strategies.json")
         assert store.get_best_strategy("nothing") == []
         assert store.all_strategies() == []
+
+    def test_record_with_context_and_outcome(self, tmp_path):
+        from memory.strategy_store import StrategyStore
+        store = StrategyStore(path=tmp_path / "strategies.json")
+        entry = store.record(
+            goal_type="lead_generation",
+            agent="lead-generator",
+            outcome_score=0.7,
+            outcome_status="success",
+            context={"channel": "email"},
+            outcome={"leads": 8},
+        )
+        assert entry["outcome_status"] == "success"
+        assert entry["context"]["channel"] == "email"
+        assert entry["outcome"]["leads"] == 8
+
+    def test_performance_summary_and_learning(self, tmp_path):
+        from memory.strategy_store import StrategyStore
+        store = StrategyStore(path=tmp_path / "strategies.json")
+        store.record(goal_type="analytics", agent="ceo-briefing", outcome_score=0.9, outcome_status="success")
+        store.record(goal_type="analytics", agent="problem-solver", outcome_score=0.2, outcome_status="failed")
+        summary = store.performance_summary(goal_type="analytics")
+        learn = store.learn_for_goal("analytics")
+        assert summary["total_attempts"] == 2
+        assert summary["failed_attempts"] == 1
+        assert "promote_agents" in learn
+        assert "deprioritize_agents" in learn
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1133,6 +1163,31 @@ class TestMoneyMode:
         drafts = [s for s in result["steps"] if s.get("step") == "draft_content"]
         assert any("Notion" in s["content"] for s in drafts)
 
+    def test_lead_pipeline_dry_run(self):
+        from core.money_mode import MoneyMode
+        mm = MoneyMode()
+        result = mm.run_lead_pipeline(
+            source="crm_export",
+            audience="SaaS founders",
+            channels=["email", "linkedin"],
+            dry_run=True,
+        )
+        assert result["pipeline"] == "data_leads_outreach_conversion"
+        assert result["status"] == "dry_run"
+        assert len(result["steps"]) >= 3
+
+    def test_opportunity_pipeline_dry_run(self):
+        from core.money_mode import MoneyMode
+        mm = MoneyMode()
+        result = mm.run_opportunity_pipeline(
+            opportunity="new affiliate offer",
+            budget=100.0,
+            dry_run=True,
+        )
+        assert result["pipeline"] == "opportunity_execution_roi"
+        assert result["status"] == "dry_run"
+        assert "risk_tolerance" in result
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # system_api feature endpoints
@@ -1224,6 +1279,48 @@ class TestSystemApiFeature:
         assert r.status_code == 200
         data = r.json()
         assert data.get("requires_review") is True
+
+    def test_lead_pipeline_endpoint(self, client):
+        r = client.post("/api/money/lead-pipeline", json={
+            "source": "crm",
+            "audience": "agency owners",
+            "channels": ["email"],
+            "dry_run": True,
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["pipeline"] == "data_leads_outreach_conversion"
+
+    def test_opportunity_pipeline_endpoint(self, client):
+        r = client.post("/api/money/opportunity-pipeline", json={
+            "opportunity": "retainer upsell",
+            "budget": 500,
+            "dry_run": True,
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["pipeline"] == "opportunity_execution_roi"
+
+    def test_memory_insights_endpoint(self, client):
+        r = client.get("/api/memory/insights?goal_type=analytics")
+        assert r.status_code == 200
+        data = r.json()
+        assert "insights" in data
+        assert "summary" in data
+
+    def test_product_dashboard_endpoint(self, client):
+        r = client.get("/api/product/dashboard")
+        assert r.status_code == 200
+        data = r.json()
+        assert "tasks" in data
+        assert "revenue" in data
+        assert "top_strategies" in data
+        assert "pipelines" in data
+
+    def test_automation_control_stop(self, client):
+        r = client.post("/api/automation/control", json={"action": "stop"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "stopped"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

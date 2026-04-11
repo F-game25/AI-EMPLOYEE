@@ -57,6 +57,11 @@ def get_skill_registry():
     return _f()
 
 
+def get_pipeline_store():
+    from core.pipeline_store import get_pipeline_store as _f
+    return _f()
+
+
 # Optional — only available when runtime/brain is on sys.path
 def get_brain():
     from brain.brain import get_brain as _f
@@ -81,6 +86,7 @@ __all__ = [
     "get_task_engine",
     "get_agent_controller",
     "get_skill_registry",
+    "get_pipeline_store",
     "get_brain",
     "get_intelligence",
     "get_hybrid_mode",
