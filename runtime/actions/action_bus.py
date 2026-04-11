@@ -59,6 +59,13 @@ class ActionBus:
         # Pending approvals: action_id -> record dict
         self._pending: dict[str, dict] = {}
         self._pending_lock = threading.Lock()
+        self._secure_engine = None
+
+    def _get_or_create_secure_engine(self):
+        if self._secure_engine is None:
+            from actions.execution_engine import SecureExecutionEngine
+            self._secure_engine = SecureExecutionEngine()
+        return self._secure_engine
 
     # ------------------------------------------------------------------
     # Configuration
@@ -134,6 +141,7 @@ class ActionBus:
         actor: str = "system",
         reason: str = "",
         executor: Callable[[dict], Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict:
         """Emit an action.
 
@@ -150,6 +158,10 @@ class ActionBus:
         executor:
             Optional callable that actually performs the action.  If *None*,
             the bus records the action but does not execute it.
+        idempotency_key:
+            Optional replay-safe key used by secure registered actions to
+            deduplicate retries and return cached outcomes. Provide this when
+            callers might retry the same external action request.
 
         Returns a result dict with ``status``, ``action_id``, and any
         ``result`` produced by *executor*.
@@ -212,6 +224,37 @@ class ActionBus:
                     "error": str(exc),
                     "result": None,
                 }
+        else:
+            try:
+                engine = self._get_or_create_secure_engine()
+                if engine.has_action(action_type):
+                    secure_result = engine.execute(
+                        action_name=action_type,
+                        payload=payload,
+                        skill=actor,
+                        idempotency_key=idempotency_key,
+                    )
+                    if secure_result.get("status") == "executed":
+                        result = secure_result.get("result")
+                    elif secure_result.get("status") == "error":
+                        return {
+                            "action_id": action_id,
+                            "status": "error",
+                            "action_type": action_type,
+                            "error": secure_result.get(
+                                "failure", {}
+                            ).get("reason", f"Execution failed for action {action_type}"),
+                            "failure": secure_result.get("failure", {}),
+                            "result": None,
+                        }
+            except Exception as exc:
+                return {
+                    "action_id": action_id,
+                    "status": "error",
+                    "action_type": action_type,
+                    "error": str(exc),
+                    "result": None,
+                }
 
         return {
             "action_id": action_id,
@@ -254,6 +297,30 @@ class ActionBus:
             except Exception:
                 _log.exception("Executor failed for approved action %s", action_id)
                 return {"status": "error", "action_id": action_id, "error": "Execution failed"}
+        else:
+            try:
+                engine = self._get_or_create_secure_engine()
+                if engine.has_action(record["action_type"]):
+                    secure_result = engine.execute(
+                        action_name=record["action_type"],
+                        payload=record["payload"],
+                        skill=record.get("actor", "system"),
+                    )
+                    if secure_result.get("status") == "executed":
+                        result = secure_result.get("result")
+                    else:
+                        return {
+                            "status": "error",
+                            "action_id": action_id,
+                            "error": secure_result.get("failure", {}).get(
+                                "reason",
+                                f"Execution failed for action {record['action_type']}",
+                            ),
+                            "failure": secure_result.get("failure", {}),
+                        }
+            except Exception:
+                _log.exception("Secure execution failed for approved action %s", action_id)
+                return {"status": "error", "action_id": action_id, "error": "Execution failed"}
 
         self._record_audit(
             "approval_workflow",
@@ -283,6 +350,21 @@ class ActionBus:
         )
 
         return {"status": "rejected", "action_id": action_id}
+
+    # ------------------------------------------------------------------
+    # Secure action management
+    # ------------------------------------------------------------------
+
+    def register_action(self, name: str, action: Any) -> None:
+        """Register a standardized external action in the secure engine."""
+        self._get_or_create_secure_engine().register_action(name, action)
+
+    def metrics(self) -> dict:
+        """Return execution metrics for registered actions."""
+        try:
+            return self._get_or_create_secure_engine().metrics()
+        except Exception:
+            return {}
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
