@@ -217,3 +217,168 @@ def affiliate_draft(body: AffiliateDraftRequest):
     except Exception:
         _log.exception("affiliate_draft failed")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class LeadPipelineRequest(BaseModel):
+    source: str
+    audience: str
+    channels: list[str] = ["email"]
+    dry_run: bool = False
+
+
+@router.post("/money/lead-pipeline")
+def run_lead_pipeline(body: LeadPipelineRequest):
+    """Run data → leads → outreach → conversion pipeline."""
+    try:
+        from core.money_mode import get_money_mode
+        result = get_money_mode().run_lead_pipeline(
+            source=body.source,
+            audience=body.audience,
+            channels=body.channels,
+            dry_run=body.dry_run,
+        )
+        return JSONResponse(result)
+    except Exception:
+        _log.exception("run_lead_pipeline failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class OpportunityPipelineRequest(BaseModel):
+    opportunity: str
+    budget: float = 0.0
+    dry_run: bool = False
+
+
+@router.post("/money/opportunity-pipeline")
+def run_opportunity_pipeline(body: OpportunityPipelineRequest):
+    """Run opportunity → execution → ROI tracking pipeline."""
+    try:
+        from core.money_mode import get_money_mode
+        result = get_money_mode().run_opportunity_pipeline(
+            opportunity=body.opportunity,
+            budget=body.budget,
+            dry_run=body.dry_run,
+        )
+        return JSONResponse(result)
+    except Exception:
+        _log.exception("run_opportunity_pipeline failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class AutomationControlRequest(BaseModel):
+    action: str
+    goal: str = "Execute monetization cycle"
+    override_action_id: str = ""
+
+
+@router.post("/automation/control")
+def control_automation(body: AutomationControlRequest):
+    """Start/stop automation cycles and allow manual override operations."""
+    action = body.action.lower().strip()
+    try:
+        from core.mode_manager import get_mode_manager
+        mode = get_mode_manager().current_mode
+        if action == "start":
+            if mode == "MANUAL":
+                return JSONResponse({
+                    "status": "blocked",
+                    "reason": "Switch to AUTO or BLACKLIGHT to start autonomous execution.",
+                })
+            from core.agent_controller import get_agent_controller
+            result = get_agent_controller().run_goal(body.goal)
+            return JSONResponse({"status": "started", "mode": mode, "result": result})
+        if action == "stop":
+            return JSONResponse({
+                "status": "stopped",
+                "mode": mode,
+                "message": "Automation stop acknowledged. New runs are paused by operator intent.",
+            })
+        if action == "override":
+            if not body.override_action_id:
+                raise HTTPException(status_code=400, detail="override_action_id required for override")
+            from actions.action_bus import get_action_bus
+            decision = get_action_bus().approve(body.override_action_id)
+            return JSONResponse({"status": "override_applied", "decision": decision})
+        raise HTTPException(status_code=400, detail="Unsupported action. Use start, stop, or override.")
+    except HTTPException:
+        raise
+    except Exception:
+        _log.exception("control_automation failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/memory/insights")
+def memory_insights(goal_type: str = Query("general")):
+    """Expose local-first learning insights from historical outcomes."""
+    try:
+        from memory.strategy_store import get_strategy_store
+        store = get_strategy_store()
+        return JSONResponse({
+            "goal_type": goal_type,
+            "insights": store.learn_for_goal(goal_type),
+            "summary": store.performance_summary(goal_type=goal_type),
+        })
+    except Exception:
+        _log.exception("memory_insights failed")
+        return JSONResponse({
+            "goal_type": goal_type,
+            "insights": {"insight": "Unable to read local memory."},
+            "summary": {"total_attempts": 0, "success_rate": 0.0},
+        })
+
+
+@router.get("/product/dashboard")
+def product_dashboard(
+    task_limit: int = Query(12, ge=1, le=100),
+    roi_limit: int = Query(12, ge=1, le=200),
+):
+    """Consolidated product metrics for a user-facing AI Employee dashboard."""
+    response: dict = {
+        "mode": {},
+        "tasks": {"tasks_executed": 0, "success_rate": 0.0},
+        "revenue": {"total_revenue": 0.0, "events": 0},
+        "top_strategies": [],
+        "activity_feed": [],
+        "execution_logs": [],
+        "pipelines": {"runs": 0, "success_rate": 0.0, "pipelines": []},
+        "learning": {},
+    }
+    try:
+        from core.mode_manager import get_mode_manager
+        response["mode"] = get_mode_manager().status()
+    except Exception:
+        pass
+    try:
+        from core.task_engine import get_task_engine
+        engine = get_task_engine()
+        response["tasks"] = engine.daily_stats()
+        response["execution_logs"] = engine.recent_runs(limit=task_limit)
+    except Exception:
+        pass
+    try:
+        from core.roi_tracker import get_roi_tracker
+        tracker = get_roi_tracker()
+        response["revenue"] = tracker.daily_summary()
+        response["activity_feed"] = tracker.recent(limit=roi_limit)
+    except Exception:
+        pass
+    try:
+        from memory.strategy_store import get_strategy_store
+        store = get_strategy_store()
+        response["top_strategies"] = store.top_performers(limit=5)
+        response["learning"] = store.performance_summary(limit=5)
+    except Exception:
+        pass
+    try:
+        from core.pipeline_store import get_pipeline_store
+        pstore = get_pipeline_store()
+        response["pipelines"] = pstore.overview()
+        response["pipeline_runs"] = pstore.recent_runs(limit=6)
+    except Exception:
+        pass
+    try:
+        from actions.action_bus import get_action_bus
+        response["pending_actions"] = get_action_bus().list_pending()
+    except Exception:
+        response["pending_actions"] = []
+    return JSONResponse(response)

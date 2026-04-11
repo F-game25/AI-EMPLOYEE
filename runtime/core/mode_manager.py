@@ -28,6 +28,23 @@ ModeType = Literal["AUTO", "MANUAL", "BLACKLIGHT"]
 _VALID_MODES: set[str] = {"AUTO", "MANUAL", "BLACKLIGHT"}
 _DEFAULT_MODE: ModeType = "MANUAL"
 _DEFAULT_PATH = Path.home() / ".ai-employee" / "mode.json"
+_MODE_PROFILES: dict[str, dict[str, float | str]] = {
+    "MANUAL": {
+        "decision_threshold": 0.75,
+        "execution_frequency": "low",
+        "risk_tolerance": "low",
+    },
+    "AUTO": {
+        "decision_threshold": 0.6,
+        "execution_frequency": "medium",
+        "risk_tolerance": "medium",
+    },
+    "BLACKLIGHT": {
+        "decision_threshold": 0.45,
+        "execution_frequency": "high",
+        "risk_tolerance": "high",
+    },
+}
 
 
 class ModeManager:
@@ -99,11 +116,15 @@ class ModeManager:
 
     def status(self) -> dict:
         mode = self.current_mode
+        profile = _MODE_PROFILES.get(mode, _MODE_PROFILES["MANUAL"])
         return {
             "mode": mode,
             "auto_execution": mode in ("AUTO", "BLACKLIGHT"),
             "requires_approval": mode == "MANUAL",
             "aggressive_profit": mode == "BLACKLIGHT",
+            "decision_threshold": profile["decision_threshold"],
+            "execution_frequency": profile["execution_frequency"],
+            "risk_tolerance": profile["risk_tolerance"],
             "description": {
                 "AUTO": "Task engine runs jobs autonomously from the scheduler.",
                 "MANUAL": "Every side-effecting action requires human approval.",
