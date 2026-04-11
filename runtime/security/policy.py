@@ -24,6 +24,14 @@ class SecurityPolicy:
                 f"action '{action}' is not allowed for skill '{skill_name}'"
             )
 
+    def validate_output(self, output: Any, required_keys: list[str]) -> None:
+        """Validate that output is a dict containing all required output keys."""
+        if not isinstance(output, dict):
+            raise ValueError("skill output must be a JSON object")
+        missing = [key for key in required_keys if key not in output]
+        if missing:
+            raise ValueError(f"skill output missing required fields: {missing}")
+
     def validate_task_input(self, data: Any, required_keys: list[str]) -> None:
         self.validate_payload(data)
         missing = [key for key in required_keys if key not in data]

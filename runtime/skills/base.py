@@ -6,12 +6,14 @@ from typing import Any, Callable
 
 
 class SkillBase(ABC):
-    """Base stateless skill interface with explicit schemas."""
+    """Base stateless skill interface with explicit schemas and metadata."""
 
     name: str = ""
     description: str = ""
+    version: str = "1.0"
+    capability_tags: list[str] = []
     input_schema: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
-    output_schema: dict[str, Any] = {"type": "object", "properties": {}}
+    output_schema: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
     allowed_actions: list[str] = ["skill_dispatch"]
 
     @abstractmethod
