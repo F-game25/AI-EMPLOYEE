@@ -91,6 +91,17 @@ def list_pending_actions():
         return JSONResponse({"pending": [], "error": "Unable to list pending actions"})
 
 
+@router.get("/actions/metrics")
+def action_metrics():
+    """Execution metrics for secure actions."""
+    try:
+        from actions.action_bus import get_action_bus
+        return JSONResponse({"metrics": get_action_bus().metrics()})
+    except Exception:
+        _log.exception("action_metrics failed")
+        return JSONResponse({"metrics": {}, "error": "Unable to read action metrics"})
+
+
 @router.post("/actions/{action_id}/approve")
 def approve_action(action_id: str):
     """Approve a pending action."""

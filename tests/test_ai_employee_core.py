@@ -507,6 +507,94 @@ class TestActionBus:
         assert bus.list_pending() == []
 
 
+class TestSecureExecutionEngine:
+    def test_permission_denied_by_default(self):
+        from actions.execution_engine import BrowserAction, SecureExecutionEngine
+
+        engine = SecureExecutionEngine()
+        engine.register_action("browser.open", BrowserAction(executor=lambda p: {"ok": True}))
+        result = engine.execute(
+            action_name="browser.open",
+            payload={"url": "https://example.com"},
+            skill="scraper",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["category"] == "fatal"
+
+    def test_permission_allow_and_idempotency(self):
+        from actions.execution_engine import BrowserAction, PermissionPolicy, SecureExecutionEngine
+
+        calls = []
+        action = BrowserAction(executor=lambda p: calls.append(p) or {"ok": True})
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"scraper": ["browser"]})
+        )
+        engine.register_action("browser.open", action)
+
+        r1 = engine.execute(
+            action_name="browser.open",
+            payload={"url": "https://example.com"},
+            skill="scraper",
+            idempotency_key="abc",
+        )
+        r2 = engine.execute(
+            action_name="browser.open",
+            payload={"url": "https://example.com"},
+            skill="scraper",
+            idempotency_key="abc",
+        )
+
+        assert r1["status"] == "executed"
+        assert r2["status"] == "executed"
+        assert len(calls) == 1
+
+    def test_retry_recoverable_timeout(self):
+        from actions.execution_engine import PermissionPolicy, SecureExecutionEngine, APIAction
+
+        state = {"n": 0}
+
+        def slow(_payload):
+            state["n"] += 1
+            if state["n"] == 1:
+                time.sleep(0.05)
+            return {"ok": True}
+
+        action = APIAction(
+            executor=slow,
+            timeout_s=0.01,
+            max_retries=2,
+            retry_backoff_s=0.001,
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"api_skill": ["api"]})
+        )
+        engine.register_action("api.call", action)
+
+        result = engine.execute(action_name="api.call", payload={}, skill="api_skill")
+        assert result["status"] == "executed"
+        assert state["n"] >= 2
+
+    def test_filesystem_sandbox_blocks_escape(self, tmp_path):
+        from actions.execution_engine import FileSystemAction, PermissionPolicy, SecureExecutionEngine
+
+        action = FileSystemAction(
+            executor=lambda p: {"path": p["path"]},
+            sandbox_dir=tmp_path / "sandbox",
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"fs_skill": ["filesystem"]})
+        )
+        engine.register_action("fs.write", action)
+
+        result = engine.execute(
+            action_name="fs.write",
+            payload={"path": "../escape.txt"},
+            skill="fs_skill",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["category"] == "fatal"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TaskEngine
 # ─────────────────────────────────────────────────────────────────────────────
@@ -677,6 +765,11 @@ class TestSystemApiFeature:
         r = client.get("/api/actions/pending")
         assert r.status_code == 200
         assert "pending" in r.json()
+
+    def test_action_metrics(self, client):
+        r = client.get("/api/actions/metrics")
+        assert r.status_code == 200
+        assert "metrics" in r.json()
 
     def test_skills_list(self, client):
         r = client.get("/api/skills")
