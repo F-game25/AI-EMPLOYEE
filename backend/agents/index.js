@@ -11,10 +11,19 @@ const AGENT_CATALOG = [
   { id: 'ai-6', name: 'ReportBuilder', type: 'reporting', skills: ['general', 'nn', 'doctor'] },
 ];
 
+// Simulated task processing duration bounds (per task execution).
 const PROCESS_MS_MIN = 1000;
 const PROCESS_MS_MAX = 2800;
+// How long an inactive running agent waits before being scaled back to idle.
 const IDLE_SCALE_DOWN_MS = 20000;
+// Agent runtime scheduler frequency (persistent event-driven loop tick).
 const LOOP_INTERVAL_MS = 250;
+
+const AUTO_MIN_ACTIVE = 3;
+const AUTO_ACTIVE_RATIO = 0.7;
+const MANUAL_MIN_ACTIVE = 2;
+const MANUAL_ACTIVE_RATIO = 0.4;
+const HEALTH_DEGRADED_QUEUE_THRESHOLD = 3;
 
 const events = new EventEmitter();
 let mode = 'MANUAL';
@@ -37,8 +46,8 @@ function _now() {
 
 function _modeMaxActive() {
   if (mode === 'BLACKLIGHT') return agents.length;
-  if (mode === 'AUTO') return Math.max(3, Math.ceil(agents.length * 0.7));
-  return Math.max(2, Math.ceil(agents.length * 0.4));
+  if (mode === 'AUTO') return Math.max(AUTO_MIN_ACTIVE, Math.ceil(agents.length * AUTO_ACTIVE_RATIO));
+  return Math.max(MANUAL_MIN_ACTIVE, Math.ceil(agents.length * MANUAL_ACTIVE_RATIO));
 }
 
 function _taskDurationMs() {
@@ -167,7 +176,7 @@ function _tick() {
       task.finishAt = now + _taskDurationMs();
       agent.currentTask = task;
       _setState(agent, 'busy');
-      agent.health = task.queueDepth > 3 ? 'degraded' : 'healthy';
+      agent.health = task.queueDepth > HEALTH_DEGRADED_QUEUE_THRESHOLD ? 'degraded' : 'healthy';
       events.emit('task:started', {
         agent: _snapshot(agent),
         task,
