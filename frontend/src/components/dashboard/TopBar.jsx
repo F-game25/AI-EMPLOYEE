@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 
+const MODE_ACTIVATION_COUNTS = {
+  MANUAL: 2,
+  AUTO: 4,
+  BLACKLIGHT: 6,
+}
+
 export default function TopBar() {
   const wsConnected = useAppStore(s => s.wsConnected)
   const systemStatus = useAppStore(s => s.systemStatus)
@@ -44,7 +50,7 @@ export default function TopBar() {
     fetch(`http://${window.location.hostname}:3001/agents/activate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ count: currentMode === 'BLACKLIGHT' ? 6 : currentMode === 'AUTO' ? 4 : 2 }),
+      body: JSON.stringify({ count: MODE_ACTIVATION_COUNTS[currentMode] || MODE_ACTIVATION_COUNTS.MANUAL }),
     })
       .catch(() => {})
       .finally(() => setActivating(false))

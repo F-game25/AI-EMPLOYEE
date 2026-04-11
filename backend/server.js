@@ -32,6 +32,17 @@ app.use('/orchestrator', orchestrator.router);
 let gpuUsage = 18;
 let heartbeat = 0;
 
+const GPU_RANDOM_SWING = 8;
+const GPU_SWING_OFFSET = 4;
+const GPU_CPU_BASELINE = 50;
+const GPU_CPU_INFLUENCE = 0.03;
+const CPU_TEMP_BASE = 35;
+const CPU_TEMP_CPU_FACTOR = 0.58;
+const CPU_TEMP_JITTER = 3;
+const GPU_TEMP_BASE = 34;
+const GPU_TEMP_GPU_FACTOR = 0.52;
+const GPU_TEMP_JITTER = 4;
+
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
 }
@@ -52,9 +63,13 @@ function memoryUsagePercent() {
 function sampleSystemStatus() {
   const cpu = cpuUsagePercent();
   const memory = memoryUsagePercent();
-  gpuUsage = clamp(Math.round(gpuUsage + (Math.random() * 8 - 4) + (cpu - 50) * 0.03), 4, 97);
-  const cpuTemp = clamp(Math.round(35 + cpu * 0.58 + Math.random() * 3), 32, 95);
-  const gpuTemp = clamp(Math.round(34 + gpuUsage * 0.52 + Math.random() * 4), 30, 90);
+  gpuUsage = clamp(
+    Math.round(gpuUsage + (Math.random() * GPU_RANDOM_SWING - GPU_SWING_OFFSET) + (cpu - GPU_CPU_BASELINE) * GPU_CPU_INFLUENCE),
+    4,
+    97,
+  );
+  const cpuTemp = clamp(Math.round(CPU_TEMP_BASE + cpu * CPU_TEMP_CPU_FACTOR + Math.random() * CPU_TEMP_JITTER), 32, 95);
+  const gpuTemp = clamp(Math.round(GPU_TEMP_BASE + gpuUsage * GPU_TEMP_GPU_FACTOR + Math.random() * GPU_TEMP_JITTER), 30, 90);
 
   const total = getAgents().length;
   const running = getRunningAgentCount();

@@ -9,6 +9,11 @@ const { enqueueTask, on: onAgentEvent } = require('../agents');
 const router = Router();
 const events = new EventEmitter();
 
+/**
+ * Build a subsystem-specific completion message for a processed task.
+ * @param {{subsystem?: string, message: string}} task
+ * @returns {string}
+ */
 function buildReply(task) {
   const target = task.subsystem;
   if (target === 'nn') {
