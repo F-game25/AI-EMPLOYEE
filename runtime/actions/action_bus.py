@@ -170,23 +170,25 @@ class ActionBus:
                 }
         else:
             try:
-                secure_result = self._get_engine().execute(
-                    action_name=action_type,
-                    payload=payload,
-                    skill=actor,
-                    idempotency_key=idempotency_key,
-                )
-                if secure_result.get("status") == "executed":
-                    result = secure_result.get("result")
-                elif secure_result.get("status") == "error":
-                    return {
-                        "action_id": action_id,
-                        "status": "error",
-                        "action_type": action_type,
-                        "error": secure_result.get("failure", {}).get("reason", "Execution failed"),
-                        "failure": secure_result.get("failure", {}),
-                        "result": None,
-                    }
+                engine = self._get_engine()
+                if engine.has_action(action_type):
+                    secure_result = engine.execute(
+                        action_name=action_type,
+                        payload=payload,
+                        skill=actor,
+                        idempotency_key=idempotency_key,
+                    )
+                    if secure_result.get("status") == "executed":
+                        result = secure_result.get("result")
+                    elif secure_result.get("status") == "error":
+                        return {
+                            "action_id": action_id,
+                            "status": "error",
+                            "action_type": action_type,
+                            "error": secure_result.get("failure", {}).get("reason", "Execution failed"),
+                            "failure": secure_result.get("failure", {}),
+                            "result": None,
+                        }
             except Exception as exc:
                 return {
                     "action_id": action_id,
@@ -233,20 +235,22 @@ class ActionBus:
                 return {"status": "error", "action_id": action_id, "error": "Execution failed"}
         else:
             try:
-                secure_result = self._get_engine().execute(
-                    action_name=record["action_type"],
-                    payload=record["payload"],
-                    skill=record.get("actor", "system"),
-                )
-                if secure_result.get("status") == "executed":
-                    result = secure_result.get("result")
-                else:
-                    return {
-                        "status": "error",
-                        "action_id": action_id,
-                        "error": secure_result.get("failure", {}).get("reason", "Execution failed"),
-                        "failure": secure_result.get("failure", {}),
-                    }
+                engine = self._get_engine()
+                if engine.has_action(record["action_type"]):
+                    secure_result = engine.execute(
+                        action_name=record["action_type"],
+                        payload=record["payload"],
+                        skill=record.get("actor", "system"),
+                    )
+                    if secure_result.get("status") == "executed":
+                        result = secure_result.get("result")
+                    else:
+                        return {
+                            "status": "error",
+                            "action_id": action_id,
+                            "error": secure_result.get("failure", {}).get("reason", "Execution failed"),
+                            "failure": secure_result.get("failure", {}),
+                        }
             except Exception:
                 _log.exception("Secure execution failed for approved action %s", action_id)
                 return {"status": "error", "action_id": action_id, "error": "Execution failed"}

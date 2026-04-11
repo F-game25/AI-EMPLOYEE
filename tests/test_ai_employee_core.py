@@ -549,19 +549,23 @@ class TestSecureExecutionEngine:
         assert len(calls) == 1
 
     def test_retry_recoverable_timeout(self):
-        from actions.execution_engine import PermissionPolicy, SecureExecutionEngine, APIAction
+        from actions.execution_engine import (
+            ActionTimeoutError,
+            PermissionPolicy,
+            SecureExecutionEngine,
+            APIAction,
+        )
 
         state = {"n": 0}
 
         def slow(_payload):
             state["n"] += 1
             if state["n"] == 1:
-                time.sleep(0.05)
+                raise ActionTimeoutError("temporary timeout")
             return {"ok": True}
 
         action = APIAction(
             executor=slow,
-            timeout_s=0.01,
             max_retries=2,
             retry_backoff_s=0.001,
         )

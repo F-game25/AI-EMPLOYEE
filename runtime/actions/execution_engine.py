@@ -304,6 +304,9 @@ class SecureExecutionEngine:
     def register_action(self, name: str, action: BaseAction) -> None:
         self._actions[name] = action
 
+    def has_action(self, name: str) -> bool:
+        return name in self._actions
+
     def register_lazy_resource(self, name: str, loader: Callable[[], Any]) -> None:
         self._lazy_resources[name] = (loader, None)
 
