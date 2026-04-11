@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 _DEFAULT_DB = Path.home() / ".ai-employee" / "pipeline.db"
+_SUCCESS_STATUSES = ("executed", "dry_run")
 
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS pipeline_runs (
@@ -101,9 +102,12 @@ class PipelineStore:
             with self._connect() as conn:
                 total_row = conn.execute(
                     """SELECT COUNT(*) AS runs,
-                              SUM(CASE WHEN status IN ('queued', 'executed', 'dry_run') THEN 1 ELSE 0 END) AS successful,
+                              SUM(CASE WHEN status IN (?, ?) THEN 1 ELSE 0 END) AS successful,
+                              SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS pending,
                               SUM(estimated_roi) AS total_roi
                        FROM pipeline_runs"""
+                    ,
+                    _SUCCESS_STATUSES,
                 ).fetchone()
                 by_pipe = conn.execute(
                     """SELECT pipeline,
@@ -118,6 +122,7 @@ class PipelineStore:
         return {
             "runs": runs,
             "success_rate": round(successful / max(runs, 1), 3),
+            "pending_runs": int(total_row["pending"] or 0),
             "total_estimated_roi": round(float(total_row["total_roi"] or 0.0), 3),
             "pipelines": [
                 {
@@ -140,4 +145,3 @@ def get_pipeline_store(db_path: Path | None = None) -> PipelineStore:
         if _instance is None:
             _instance = PipelineStore(db_path)
     return _instance
-

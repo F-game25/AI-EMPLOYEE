@@ -27,6 +27,7 @@ from typing import Any
 
 
 _DEFAULT_PATH = Path.home() / ".ai-employee" / "strategies.json"
+_SUCCESS_SCORE_THRESHOLD = 0.6
 
 
 class StrategyStore:
@@ -68,7 +69,7 @@ class StrategyStore:
     ) -> dict:
         """Record a strategy result and return the stored entry."""
         score = max(0.0, min(1.0, outcome_score))
-        status = (outcome_status or ("success" if score >= 0.6 else "failed")).lower()
+        status = (outcome_status or ("success" if score >= _SUCCESS_SCORE_THRESHOLD else "failed")).lower()
         if status not in ("success", "failed"):
             status = "failed"
         entry = {
@@ -131,8 +132,8 @@ class StrategyStore:
             data = [d for d in data if d.get("goal_type") == goal_type]
 
         total = len(data)
-        successful = [d for d in data if d.get("outcome_status", "success") == "success"]
-        failed = [d for d in data if d.get("outcome_status", "success") != "success"]
+        successful = [d for d in data if d.get("outcome_status", "") == "success"]
+        failed = [d for d in data if d.get("outcome_status", "") != "success"]
         success_rate = round(len(successful) / max(total, 1), 3)
 
         top = sorted(successful, key=lambda d: d.get("outcome_score", 0.0), reverse=True)[:limit]
