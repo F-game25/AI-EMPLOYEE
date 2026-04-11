@@ -58,13 +58,15 @@ class ActionFailure:
     stack_trace: str
     context: dict = field(default_factory=dict)
     category: str = "fatal"
+    error_type: str = ""
 
     def to_dict(self) -> dict:
         return {
-            "reason": self.reason,
-            "stack_trace": self.stack_trace,
-            "context": self.context,
+            "error_type": self.error_type,
             "category": self.category,
+            "reason": self.reason,
+            "context": self.context,
+            "stack_trace": self.stack_trace,
         }
 
 
@@ -77,6 +79,7 @@ class ActionConfigLoader:
         self.default_backoff_s = float(os.environ.get("ACTION_RETRY_BACKOFF_S", "0.5"))
         self.default_rate_limit_per_min = int(os.environ.get("ACTION_RATE_LIMIT_PER_MIN", "30"))
         self.cache_ttl_s = int(os.environ.get("ACTION_CACHE_TTL_S", "60"))
+        self.idempotency_ttl_s = int(os.environ.get("ACTION_IDEMPOTENCY_TTL_S", "300"))
         self.sandbox_dir = Path(
             os.environ.get("ACTION_SANDBOX_DIR", str(Path.home() / ".ai-employee" / "sandbox"))
         ).resolve()
@@ -91,8 +94,37 @@ class ActionConfigLoader:
 class PermissionPolicy:
     """Deny-by-default skill->action capability policy."""
 
+    _DEFAULT_ALERT_THRESHOLD = 3
+
     def __init__(self, mapping: dict[str, list[str]] | None = None):
         self._mapping = mapping if mapping is not None else self._load_env_mapping()
+        self._violation_counts: dict[str, int] = {}
+        self._violation_lock = threading.Lock()
+        self._alert_hook: Callable[[str, int], None] | None = None
+        self._alert_threshold: int = self._DEFAULT_ALERT_THRESHOLD
+
+    def set_alert_hook(
+        self,
+        hook: Callable[[str, int], None],
+        threshold: int = _DEFAULT_ALERT_THRESHOLD,
+    ) -> None:
+        """Register a callable that fires when a skill exceeds *threshold* violations.
+
+        Parameters
+        ----------
+        hook:
+            Called as ``hook(skill, violation_count)`` each time violations reach
+            or exceed *threshold*.
+        threshold:
+            Number of violations before the hook fires.
+        """
+        self._alert_hook = hook
+        self._alert_threshold = max(1, threshold)
+
+    def violation_count(self, skill: str) -> int:
+        """Return the total number of permission denials recorded for *skill*."""
+        with self._violation_lock:
+            return self._violation_counts.get(skill, 0)
 
     def _load_env_mapping(self) -> dict[str, list[str]]:
         raw = os.environ.get("ACTION_PERMISSION_MAP", "").strip()
@@ -115,6 +147,18 @@ class PermissionPolicy:
             return False
         return action_kind.lower() in {a.lower() for a in allowed}
 
+    def record_violation(self, skill: str) -> int:
+        """Increment violation counter for *skill* and fire alert if threshold reached."""
+        with self._violation_lock:
+            count = self._violation_counts.get(skill, 0) + 1
+            self._violation_counts[skill] = count
+        if self._alert_hook and count >= self._alert_threshold:
+            try:
+                self._alert_hook(skill, count)
+            except Exception:
+                pass
+        return count
+
 
 class BaseAction(ABC):
     """Standardized external action contract."""
@@ -125,6 +169,7 @@ class BaseAction(ABC):
         self,
         *,
         input_schema: dict[str, type] | None = None,
+        output_schema: dict[str, type] | None = None,
         timeout_s: int | None = None,
         max_retries: int | None = None,
         retry_backoff_s: float | None = None,
@@ -133,6 +178,7 @@ class BaseAction(ABC):
     ) -> None:
         cfg = ActionConfigLoader()
         self.input_schema = input_schema or {}
+        self.output_schema = output_schema or {}
         self.timeout_s = timeout_s if timeout_s is not None else cfg.default_timeout_s
         self.max_retries = max_retries if max_retries is not None else cfg.default_max_retries
         self.retry_backoff_s = retry_backoff_s if retry_backoff_s is not None else cfg.default_backoff_s
@@ -141,6 +187,7 @@ class BaseAction(ABC):
             if rate_limit_per_minute is not None
             else cfg.default_rate_limit_per_min
         )
+        # Non-positive values disable rate limiting for the action.
         self.idempotent = idempotent
 
     def validate(self, payload: dict) -> None:
@@ -154,6 +201,33 @@ class BaseAction(ABC):
             if not isinstance(payload[key], expected_type):
                 raise ActionValidationError(
                     f"Invalid type for {key}: expected {expected_type.__name__}",
+                    context={"field": key},
+                )
+
+    def validate_output(self, result: Any) -> None:
+        """Validate the output of ``execute()`` against *output_schema*.
+
+        Raises ``ActionValidationError`` (fatal) if any declared output field is
+        missing or has an unexpected type.  No-op when ``output_schema`` is empty.
+        """
+        if not self.output_schema:
+            return
+        if not isinstance(result, dict):
+            raise ActionValidationError(
+                "Action result must be a dict when output_schema is defined",
+                context={"result_type": type(result).__name__},
+            )
+        for key, expected_type in self.output_schema.items():
+            if key not in result:
+                raise ActionValidationError(
+                    f"Missing required output field: {key}",
+                    context={"field": key},
+                )
+            if expected_type is object:
+                continue
+            if not isinstance(result[key], expected_type):
+                raise ActionValidationError(
+                    f"Invalid output type for {key}: expected {expected_type.__name__}",
                     context={"field": key},
                 )
 
@@ -172,10 +246,11 @@ class BrowserAction(BaseAction):
         *,
         executor: Callable[[dict], Any],
         input_schema: dict[str, type] | None = None,
+        output_schema: dict[str, type] | None = None,
         **kwargs: Any,
     ) -> None:
         schema = {"url": str, **(input_schema or {})}
-        super().__init__(input_schema=schema, **kwargs)
+        super().__init__(input_schema=schema, output_schema=output_schema, **kwargs)
         self._executor = executor
 
     def validate(self, payload: dict) -> None:
@@ -199,9 +274,10 @@ class APIAction(BaseAction):
         executor: Callable[[dict], Any],
         batch_executor: Callable[[list[dict]], Any] | None = None,
         input_schema: dict[str, type] | None = None,
+        output_schema: dict[str, type] | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(input_schema=input_schema or {}, **kwargs)
+        super().__init__(input_schema=input_schema or {}, output_schema=output_schema, **kwargs)
         self._executor = executor
         self._batch_executor = batch_executor
 
@@ -223,12 +299,13 @@ class FileSystemAction(BaseAction):
         executor: Callable[[dict], Any],
         sandbox_dir: Path | None = None,
         input_schema: dict[str, type] | None = None,
+        output_schema: dict[str, type] | None = None,
         **kwargs: Any,
     ) -> None:
         cfg = ActionConfigLoader()
         self._sandbox_dir = (sandbox_dir or cfg.sandbox_dir).resolve()
         schema = {"path": str, **(input_schema or {})}
-        super().__init__(input_schema=schema, **kwargs)
+        super().__init__(input_schema=schema, output_schema=output_schema, **kwargs)
         self._executor = executor
 
     def _resolve(self, path_value: str) -> Path:
@@ -286,6 +363,11 @@ class FileSystemAction(BaseAction):
         return self._executor(patched)
 
 
+import logging as _logging
+
+_log = _logging.getLogger(__name__)
+
+
 @dataclass
 class ActionMetrics:
     """In-memory counters for action reliability and performance."""
@@ -312,6 +394,7 @@ class ActionMetrics:
             "success_rate": round(self.success / denom, 4),
             "avg_latency_s": round(avg, 4),
             "cache_hits": self.cache_hits,
+            "cache_hit_rate": round(self.cache_hits / denom, 4),
             "retries": self.retries,
             "timeouts": self.timeouts,
         }
@@ -330,10 +413,13 @@ class SecureExecutionEngine:
         self._policy = permission_policy or PermissionPolicy()
         self._actions: dict[str, BaseAction] = {}
         self._metrics = ActionMetrics()
+        self._per_action_metrics: dict[str, ActionMetrics] = {}
         self._lock = threading.Lock()
         self._rate_windows: dict[str, list[float]] = {}
-        self._idempotency_cache: dict[str, dict] = {}
-        self._result_cache: dict[str, tuple[float, dict]] = {}
+        # Idempotency cache: cache_key -> (timestamp, result)
+        self._idempotency_cache: dict[str, tuple[float, Any]] = {}
+        self._idempotency_ttl_s: int = self._config.idempotency_ttl_s
+        self._result_cache: dict[str, tuple[float, Any]] = {}
         self._lazy_resources: dict[str, tuple[Callable[[], Any], Any]] = {}
 
     def register_action(self, name: str, action: BaseAction) -> None:
@@ -353,6 +439,13 @@ class SecureExecutionEngine:
             value = loader()
             self._lazy_resources[name] = (loader, value)
         return value
+
+    def _action_metrics(self, action_name: str) -> ActionMetrics:
+        m = self._per_action_metrics.get(action_name)
+        if m is None:
+            m = ActionMetrics()
+            self._per_action_metrics[action_name] = m
+        return m
 
     def _check_rate_limit(self, action_name: str, limit_per_min: int) -> None:
         # Non-positive values explicitly disable rate limiting for this action.
@@ -378,9 +471,16 @@ class SecureExecutionEngine:
         return f"{action_name}::{idempotency_key or ''}::{stable_payload}"
 
     def metrics(self) -> dict:
-        return self._metrics.snapshot()
+        """Return global and per-action metrics snapshot."""
+        return {
+            "global": self._metrics.snapshot(),
+            "per_action": {
+                name: m.snapshot() for name, m in self._per_action_metrics.items()
+            },
+        }
 
     def _format_failure(self, exc: Exception, context: dict) -> ActionFailure:
+        error_type = type(exc).__name__
         if isinstance(exc, ActionError):
             category = "recoverable" if exc.recoverable else "fatal"
             merged = dict(context)
@@ -390,13 +490,38 @@ class SecureExecutionEngine:
                 stack_trace=traceback.format_exc(),
                 context=merged,
                 category=category,
+                error_type=error_type,
             )
         return ActionFailure(
             reason=str(exc),
             stack_trace=traceback.format_exc(),
             context=context,
             category="fatal",
+            error_type=error_type,
         )
+
+    def _record_permission_denial(self, skill: str, action_kind: str, action_name: str) -> None:
+        """Write a structured warning to the audit log for every permission denial."""
+        count = self._policy.record_violation(skill)
+        _log.warning(
+            "PERMISSION_DENIED skill=%s action_kind=%s action=%s violation_count=%d",
+            skill,
+            action_kind,
+            action_name,
+            count,
+        )
+        try:
+            from core.change_log import get_changelog
+            get_changelog().record(
+                actor=skill,
+                action_type="permission_denied",
+                reason=f"Skill '{skill}' attempted disallowed action '{action_kind}'",
+                before=None,
+                after={"action": action_name, "action_kind": action_kind, "violation_count": count},
+                outcome="denied",
+            )
+        except Exception:
+            pass
 
     def execute(
         self,
@@ -408,6 +533,13 @@ class SecureExecutionEngine:
     ) -> dict:
         start = time.time()
         self._metrics.total += 1
+        action_m = self._action_metrics(action_name)
+        action_m.total += 1
+
+        def _finish(latency: float) -> None:
+            elapsed = max(0.0, latency)
+            self._metrics.total_latency_s += elapsed
+            action_m.total_latency_s += elapsed
 
         action = self._actions.get(action_name)
         if action is None:
@@ -416,36 +548,52 @@ class SecureExecutionEngine:
                 stack_trace="",
                 context={"action": action_name},
                 category="fatal",
+                error_type="UnknownAction",
             )
             self._metrics.failures += 1
             self._metrics.fatal_failures += 1
-            self._metrics.total_latency_s += max(0.0, time.time() - start)
+            action_m.failures += 1
+            action_m.fatal_failures += 1
+            _finish(time.time() - start)
             return {"status": "error", "failure": failure.to_dict()}
 
         if not self._policy.is_allowed(skill, action.action_kind):
+            self._record_permission_denial(skill, action.action_kind, action_name)
             failure = ActionFailure(
                 reason=f"Permission denied for skill '{skill}' to run {action.action_kind}",
                 stack_trace="",
                 context={"skill": skill, "action_kind": action.action_kind, "action": action_name},
                 category="fatal",
+                error_type="ActionPermissionError",
             )
             self._metrics.failures += 1
             self._metrics.fatal_failures += 1
-            self._metrics.total_latency_s += max(0.0, time.time() - start)
+            action_m.failures += 1
+            action_m.fatal_failures += 1
+            _finish(time.time() - start)
             return {"status": "error", "failure": failure.to_dict()}
 
         cache_key = self._cache_key(action_name, payload, idempotency_key)
-        if idempotency_key and action.idempotent and cache_key in self._idempotency_cache:
-            self._metrics.cache_hits += 1
-            self._metrics.success += 1
-            self._metrics.total_latency_s += max(0.0, time.time() - start)
-            return {"status": "executed", "result": self._idempotency_cache[cache_key], "cached": True}
+        now = time.time()
+        if idempotency_key and action.idempotent:
+            cached_ts_result = self._idempotency_cache.get(cache_key)
+            if cached_ts_result is not None:
+                ts, cached_result = cached_ts_result
+                if (now - ts) <= self._idempotency_ttl_s:
+                    self._metrics.cache_hits += 1
+                    self._metrics.success += 1
+                    action_m.cache_hits += 1
+                    action_m.success += 1
+                    _finish(time.time() - start)
+                    return {"status": "executed", "result": cached_result, "cached": True}
 
         cached = self._result_cache.get(cache_key)
-        if cached and (time.time() - cached[0]) <= self._config.cache_ttl_s:
+        if cached and (now - cached[0]) <= self._config.cache_ttl_s:
             self._metrics.cache_hits += 1
             self._metrics.success += 1
-            self._metrics.total_latency_s += max(0.0, time.time() - start)
+            action_m.cache_hits += 1
+            action_m.success += 1
+            _finish(time.time() - start)
             return {"status": "executed", "result": cached[1], "cached": True}
 
         failure_payload: dict | None = None
@@ -461,16 +609,21 @@ class SecureExecutionEngine:
                         result = fut.result(timeout=max(action.timeout_s, 1))
                     except FutureTimeoutError as exc:
                         self._metrics.timeouts += 1
+                        action_m.timeouts += 1
                         raise ActionTimeoutError(
                             f"Action '{action_name}' timed out after {action.timeout_s}s",
                             context={"action": action_name, "timeout_s": action.timeout_s},
                         ) from exc
 
+                # Output validation
+                action.validate_output(result)
+
                 if idempotency_key and action.idempotent:
-                    self._idempotency_cache[cache_key] = result
+                    self._idempotency_cache[cache_key] = (time.time(), result)
                 self._result_cache[cache_key] = (time.time(), result)
                 self._metrics.success += 1
-                self._metrics.total_latency_s += max(0.0, time.time() - start)
+                action_m.success += 1
+                _finish(time.time() - start)
                 return {"status": "executed", "result": result, "attempts": attempt}
             except Exception as exc:
                 failure = self._format_failure(
@@ -485,10 +638,13 @@ class SecureExecutionEngine:
                 is_recoverable = failure.category == "recoverable"
                 if is_recoverable:
                     self._metrics.recoverable_failures += 1
+                    action_m.recoverable_failures += 1
                 else:
                     self._metrics.fatal_failures += 1
+                    action_m.fatal_failures += 1
                 if attempt < max_attempts and is_recoverable:
                     self._metrics.retries += 1
+                    action_m.retries += 1
                     # Exponential backoff: base * (2^(attempt-1)), capped at 30s.
                     backoff = action.retry_backoff_s * (1 << (attempt - 1))
                     time.sleep(min(backoff, 30.0))
@@ -496,5 +652,6 @@ class SecureExecutionEngine:
                 break
 
         self._metrics.failures += 1
-        self._metrics.total_latency_s += max(0.0, time.time() - start)
+        action_m.failures += 1
+        _finish(time.time() - start)
         return {"status": "error", "failure": failure_payload or {}}
