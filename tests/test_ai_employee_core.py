@@ -1172,9 +1172,13 @@ class TestMoneyMode:
             channels=["email", "linkedin"],
             dry_run=True,
         )
-        assert result["pipeline"] == "data_leads_outreach_conversion"
+        assert result["pipeline"] == "data_scrape_filter_store"
         assert result["status"] == "dry_run"
         assert len(result["steps"]) >= 3
+        step_types = {s["step"] for s in result["steps"]}
+        assert "scrape_data" in step_types
+        assert "filter_leads" in step_types
+        assert "store_leads" in step_types
 
     def test_opportunity_pipeline_dry_run(self):
         from core.money_mode import MoneyMode
@@ -1184,9 +1188,12 @@ class TestMoneyMode:
             budget=100.0,
             dry_run=True,
         )
-        assert result["pipeline"] == "opportunity_execution_roi"
+        assert result["pipeline"] == "outreach_response_conversion"
         assert result["status"] == "dry_run"
-        assert "risk_tolerance" in result
+        step_types = {s["step"] for s in result["steps"]}
+        assert "outreach" in step_types
+        assert "response_tracking" in step_types
+        assert "conversion" in step_types
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1289,7 +1296,7 @@ class TestSystemApiFeature:
         })
         assert r.status_code == 200
         data = r.json()
-        assert data["pipeline"] == "data_leads_outreach_conversion"
+        assert data["pipeline"] == "data_scrape_filter_store"
 
     def test_opportunity_pipeline_endpoint(self, client):
         r = client.post("/api/money/opportunity-pipeline", json={
@@ -1299,7 +1306,7 @@ class TestSystemApiFeature:
         })
         assert r.status_code == 200
         data = r.json()
-        assert data["pipeline"] == "opportunity_execution_roi"
+        assert data["pipeline"] == "outreach_response_conversion"
 
     def test_memory_insights_endpoint(self, client):
         r = client.get("/api/memory/insights?goal_type=analytics")
@@ -1314,6 +1321,8 @@ class TestSystemApiFeature:
         data = r.json()
         assert "tasks" in data
         assert "revenue" in data
+        assert "value" in data
+        assert "top_skills" in data
         assert "top_strategies" in data
         assert "pipelines" in data
 
