@@ -86,6 +86,9 @@ class TaskEngine:
     def daily_stats(self) -> dict:
         return self._store.daily_stats()
 
+    def top_skills(self, *, limit: int = 5) -> list[dict]:
+        return self._store.top_skills(limit=limit)
+
     def _to_spec(self, task: TaskNode) -> TaskSpec:
         return TaskSpec(
             id=task.task_id,

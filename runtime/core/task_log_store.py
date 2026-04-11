@@ -84,3 +84,29 @@ class TaskLogStore:
             "success_rate": round(succeeded / max(total, 1), 3),
             "avg_score": round(avg_score, 3),
         }
+
+    def top_skills(self, *, limit: int = 5) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT skill,
+                          COUNT(*) AS runs,
+                          SUM(success) AS succeeded,
+                          AVG(score) AS avg_score
+                   FROM task_log
+                   WHERE skill != ''
+                   GROUP BY skill
+                   ORDER BY (SUM(success) * 1.0 / MAX(COUNT(*), 1)) DESC, runs DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        output: list[dict] = []
+        for row in rows:
+            runs = int(row["runs"] or 0)
+            succeeded = int(row["succeeded"] or 0)
+            output.append({
+                "skill": row["skill"],
+                "runs": runs,
+                "success_rate": round(succeeded / max(runs, 1), 3),
+                "avg_score": round(float(row["avg_score"] or 0.0), 3),
+            })
+        return output
