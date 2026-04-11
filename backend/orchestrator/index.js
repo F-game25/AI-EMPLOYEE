@@ -22,7 +22,7 @@ const events = new EventEmitter();
  * @returns {string}
  */
 function buildReply(task) {
-  const moneyTemplate = task && task.metadata ? task.metadata.moneyTemplate : null;
+  const moneyTemplate = task?.metadata?.moneyTemplate ?? null;
   const moneyLine = moneyTemplate && moneyTemplate.enabled
     ? ` | [MONEYMODE] ${moneyTemplate.template} -> ${moneyTemplate.objective}`
     : '';

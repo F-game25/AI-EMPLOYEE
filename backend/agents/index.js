@@ -327,7 +327,7 @@ function getRobotSignal() {
       active = agent;
       break;
     }
-    if (!active && lastAgentId && agent.id === lastAgentId) {
+    if (!active && lastAgentId && agent.id === lastAgentId && (agent.state === 'running' || agent.state === 'busy')) {
       active = agent;
     }
   }
