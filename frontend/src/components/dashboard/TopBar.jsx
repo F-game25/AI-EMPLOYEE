@@ -52,7 +52,9 @@ export default function TopBar() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ count: MODE_ACTIVATION_COUNTS[currentMode] || MODE_ACTIVATION_COUNTS.MANUAL }),
     })
-      .catch(() => {})
+      .catch((err) => {
+        console.error('[TopBar] Failed to activate agents', err)
+      })
       .finally(() => setActivating(false))
   }
 

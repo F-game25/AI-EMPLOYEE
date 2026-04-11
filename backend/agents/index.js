@@ -24,9 +24,14 @@ const AUTO_ACTIVE_RATIO = 0.7;
 const MANUAL_MIN_ACTIVE = 2;
 const MANUAL_ACTIVE_RATIO = 0.4;
 const HEALTH_DEGRADED_QUEUE_THRESHOLD = 3;
+const MODES = {
+  MANUAL: 'MANUAL',
+  AUTO: 'AUTO',
+  BLACKLIGHT: 'BLACKLIGHT',
+};
 
 const events = new EventEmitter();
-let mode = 'MANUAL';
+let mode = MODES.MANUAL;
 let desiredActiveAgents = 0;
 let _seq = 0;
 
@@ -45,8 +50,8 @@ function _now() {
 }
 
 function _modeMaxActive() {
-  if (mode === 'BLACKLIGHT') return agents.length;
-  if (mode === 'AUTO') return Math.max(AUTO_MIN_ACTIVE, Math.ceil(agents.length * AUTO_ACTIVE_RATIO));
+  if (mode === MODES.BLACKLIGHT) return agents.length;
+  if (mode === MODES.AUTO) return Math.max(AUTO_MIN_ACTIVE, Math.ceil(agents.length * AUTO_ACTIVE_RATIO));
   return Math.max(MANUAL_MIN_ACTIVE, Math.ceil(agents.length * MANUAL_ACTIVE_RATIO));
 }
 
@@ -193,8 +198,8 @@ function _tick() {
 setInterval(_tick, LOOP_INTERVAL_MS);
 
 function setMode(nextMode) {
-  const allowed = new Set(['MANUAL', 'AUTO', 'BLACKLIGHT']);
-  mode = allowed.has(nextMode) ? nextMode : 'MANUAL';
+  const allowed = new Set(Object.values(MODES));
+  mode = allowed.has(nextMode) ? nextMode : MODES.MANUAL;
   if (desiredActiveAgents > _modeMaxActive()) {
     desiredActiveAgents = _modeMaxActive();
   }
@@ -233,7 +238,9 @@ function enqueueTask({ message, subsystem = 'general' }) {
     selected = _findBestAgent(subsystem);
   }
   if (!selected) {
-    selected = agents.find((a) => a.state !== 'busy') || agents[0];
+    selected = agents
+      .slice()
+      .sort((a, b) => ((a.currentTask ? 1 : 0) + a.taskQueue.length) - ((b.currentTask ? 1 : 0) + b.taskQueue.length))[0];
     _activateAgent(selected);
   }
 
