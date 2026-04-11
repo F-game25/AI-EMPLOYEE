@@ -209,8 +209,7 @@ start_agent() {
   fi
 
   if [[ ! -x "$entry" ]]; then
-    echo "ERROR: missing executable $entry"
-    return 1
+    chmod +x "$entry" 2>/dev/null || true
   fi
 
   # ── Log rotation (5 MB cap) ──────────────────────────────────────────────
@@ -222,7 +221,7 @@ start_agent() {
 
   echo "Starting agent: $bot ..."
   # setsid gives each agent its own process group so we can kill the entire tree
-  setsid "$entry" >>"$log" 2>&1 &
+  setsid bash "$entry" >>"$log" 2>&1 &
   echo $! > "$pid_file"
   echo "Started agent: $bot pid=$!"
 
@@ -424,7 +423,7 @@ EOF
 list_mode_agents() {
   while read -r agent; do
     [[ -n "$agent" ]] || continue
-    [[ -x "$AGENTS_DIR/$agent/run.sh" ]] || continue
+    [[ -f "$AGENTS_DIR/$agent/run.sh" ]] || continue
     echo "$agent"
   done < <(_mode_agents)
 }
