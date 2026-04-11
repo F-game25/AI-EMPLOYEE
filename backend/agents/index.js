@@ -25,6 +25,7 @@ const AUTO_MIN_ACTIVE = 3;
 const AUTO_ACTIVE_RATIO = 0.7;
 const MANUAL_MIN_ACTIVE = 2;
 const MANUAL_ACTIVE_RATIO = 0.4;
+// MONEYMODE keeps more workers hot to support aggressive monetization templates.
 const MONEYMODE_MIN_ACTIVE = 4;
 const MONEYMODE_ACTIVE_RATIO = 0.85;
 const HEALTH_DEGRADED_QUEUE_THRESHOLD = 3;
@@ -103,8 +104,8 @@ function _updateRobotSignal(agent, details = {}) {
   };
 }
 
-function _formatLocation(stage, subsystem) {
-  return `${stage}:${subsystem || 'general'}`;
+function _formatLocation(processingStage, subsystem) {
+  return `${processingStage}:${subsystem || 'general'}`;
 }
 
 function _setState(agent, nextState) {

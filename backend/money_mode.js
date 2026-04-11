@@ -24,6 +24,7 @@ const CONFIDENCE_MIN = 0.2;
 const CONFIDENCE_MAX = 0.97;
 const CONFIDENCE_BASE = 0.55;
 const CONFIDENCE_PRESSURE_WEIGHT = 0.05;
+const CONFIDENCE_ROUNDING_FACTOR = 1000;
 
 function _findFirstMatchingPattern(message, patterns, fallback) {
   const msg = String(message || '').toLowerCase();
@@ -46,10 +47,10 @@ function classifyMoneyIntent(message, subsystem = 'general') {
 function buildMoneyTemplate({ message, subsystem, mode, runningAgents, totalAgents }) {
   const intent = classifyMoneyIntent(message, subsystem);
   const base = TEMPLATE_LIBRARY[intent];
-  const pressure = Math.max(0, (Number(totalAgents) || 1) - (Number(runningAgents) || 0));
+  const availableAgentCount = Math.max(0, (Number(totalAgents) || 1) - (Number(runningAgents) || 0));
   const confidence = Math.max(
     CONFIDENCE_MIN,
-    Math.min(CONFIDENCE_MAX, CONFIDENCE_BASE + pressure * CONFIDENCE_PRESSURE_WEIGHT),
+    Math.min(CONFIDENCE_MAX, CONFIDENCE_BASE + availableAgentCount * CONFIDENCE_PRESSURE_WEIGHT),
   );
   return {
     enabled: mode === 'MONEYMODE',
@@ -60,8 +61,8 @@ function buildMoneyTemplate({ message, subsystem, mode, runningAgents, totalAgen
     cadence: base.cadence,
     adjustments: {
       subsystem_focus: subsystem || 'general',
-      execution_pressure: pressure,
-      confidence: Math.round(confidence * 1000) / 1000,
+      execution_pressure: availableAgentCount,
+      confidence: Math.round(confidence * CONFIDENCE_ROUNDING_FACTOR) / CONFIDENCE_ROUNDING_FACTOR,
     },
   };
 }
