@@ -1250,9 +1250,34 @@ _STOP_FORCE_WAIT_SECONDS = float(os.environ.get("AI_EMPLOYEE_STOP_FORCE_WAIT_SEC
 
 
 def _agent_pid_file(agent_name: str) -> Path:
-    if not _BOT_NAME_RE.match(agent_name):
+    pid_file = _safe_run_file(agent_name, ".pid")
+    if pid_file is None:
         raise ValueError("Invalid agent name for pid path")
-    return AI_HOME / "run" / f"{agent_name}.pid"
+    return pid_file
+
+
+def _safe_run_file(agent_name: str, suffix: str) -> Optional[Path]:
+    if not _BOT_NAME_RE.match(agent_name):
+        return None
+    run_dir = (AI_HOME / "run").resolve()
+    candidate = (run_dir / f"{agent_name}{suffix}").resolve()
+    try:
+        candidate.relative_to(run_dir)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _safe_state_file(agent_name: str) -> Optional[Path]:
+    if not _BOT_NAME_RE.match(agent_name):
+        return None
+    state_dir = STATE_DIR.resolve()
+    candidate = (state_dir / f"{agent_name}.state.json").resolve()
+    try:
+        candidate.relative_to(state_dir)
+    except ValueError:
+        return None
+    return candidate
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1395,7 +1420,9 @@ def _cleanup_agent_runtime_files(agent_name: str) -> None:
     if not _BOT_NAME_RE.match(agent_name):
         return
     for suffix in (".pid", ".lock", ".pid.lock"):
-        p = AI_HOME / "run" / f"{agent_name}{suffix}"
+        p = _safe_run_file(agent_name, suffix)
+        if p is None:
+            continue
         try:
             if p.exists():
                 p.unlink()
@@ -1406,7 +1433,9 @@ def _cleanup_agent_runtime_files(agent_name: str) -> None:
 def _write_stopped_state(agent_name: str, remaining_pids: list[int]) -> None:
     if not _BOT_NAME_RE.match(agent_name):
         return
-    state_file = STATE_DIR / f"{agent_name}.state.json"
+    state_file = _safe_state_file(agent_name)
+    if state_file is None:
+        return
     payload: dict = {
         "bot": agent_name,
         "status": "stopped" if not remaining_pids else "stopping_failed",
