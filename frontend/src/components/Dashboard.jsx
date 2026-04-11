@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import TopBar from './dashboard/TopBar'
 import { useAppStore } from '../store/appStore'
+import PrimaryButton from './ui/PrimaryButton'
+import SecondaryButton from './ui/SecondaryButton'
+import TertiaryPanel from './ui/TertiaryPanel'
 
 const BASE = `http://${window.location.hostname}:3001`
 const PIPELINE_DEFAULTS = {
@@ -22,12 +25,14 @@ const PIPELINE_DEFAULTS = {
 export default function Dashboard() {
   const setProductMetrics = useAppStore(s => s.setProductMetrics)
   const productMetrics = useAppStore(s => s.productMetrics)
+  const systemStatus = useAppStore(s => s.systemStatus)
   const automationStatus = useAppStore(s => s.automationStatus)
   const setAutomationStatus = useAppStore(s => s.setAutomationStatus)
   const [mode, setMode] = useState('MANUAL')
   const [overrideActionId, setOverrideActionId] = useState('')
   const [goal, setGoal] = useState('Run value generation cycle')
   const [running, setRunning] = useState(false)
+  const [activeAction, setActiveAction] = useState('')
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -70,6 +75,7 @@ export default function Dashboard() {
 
   const controlAutomation = async (action) => {
     setRunning(true)
+    setActiveAction(action)
     try {
       const res = await fetch(`${BASE}/api/automation/control`, {
         method: 'POST',
@@ -87,6 +93,7 @@ export default function Dashboard() {
       setAutomationStatus(`Automation ${action} failed.`)
     } finally {
       setRunning(false)
+      setActiveAction('')
     }
   }
 
@@ -94,6 +101,7 @@ export default function Dashboard() {
     const cfg = PIPELINE_DEFAULTS[kind]
     if (!cfg) return
     setRunning(true)
+    setActiveAction(`pipeline-${kind}`)
     try {
       const res = await fetch(`${BASE}${cfg.endpoint}`, {
         method: 'POST',
@@ -107,14 +115,23 @@ export default function Dashboard() {
       setAutomationStatus(`${kind} pipeline failed.`)
     } finally {
       setRunning(false)
+      setActiveAction('')
     }
   }
 
-  const kpis = useMemo(() => ([
+  const systemStats = useMemo(() => ([
+    { label: 'CPU', value: `${systemStatus?.cpu_usage ?? 0}%` },
+    { label: 'GPU', value: `${systemStatus?.gpu_usage ?? 0}%` },
+    { label: 'MEMORY', value: `${systemStatus?.memory ?? 0}%` },
+    { label: 'AGENTS', value: `${systemStatus?.running_agents ?? 0}/${systemStatus?.total_agents ?? 0}` },
+    { label: 'HEARTBEAT', value: `${systemStatus?.heartbeat ?? 0}` },
+  ]), [systemStatus])
+
+  const businessKpis = useMemo(() => ([
     { label: 'Tasks Executed', value: productMetrics?.tasks?.tasks_executed ?? 0 },
     { label: 'Success Rate', value: `${Math.round((productMetrics?.tasks?.success_rate ?? 0) * 100)}%` },
     { label: 'Value Generated', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(2)}` },
-    { label: 'Top Skill', value: productMetrics?.top_skills?.[0]?.skill?.toUpperCase() || 'N/A' },
+    { label: 'Revenue', value: `$${(productMetrics?.revenue?.total_revenue ?? 0).toFixed(2)}` },
   ]), [productMetrics])
 
   return (
@@ -129,24 +146,26 @@ export default function Dashboard() {
       <div className="flex-1 overflow-hidden px-4 py-3 flex flex-col gap-3">
         <section className="ds-card p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <button className="tier-1-btn font-mono text-xs px-4 py-2" onClick={() => controlAutomation('start')} disabled={running}>
-              START AUTOMATION
-            </button>
+            <PrimaryButton
+              onClick={() => controlAutomation(systemStatus?.running_agents > 0 ? 'stop' : 'start')}
+              disabled={running}
+            >
+              {running && (activeAction === 'start' || activeAction === 'stop')
+                ? 'PROCESSING...'
+                : systemStatus?.running_agents > 0 ? 'STOP AUTOMATION' : 'START AUTOMATION'}
+            </PrimaryButton>
 
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => controlAutomation('stop')} disabled={running}>
-              STOP
-            </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('content')} disabled={running}>
-              RUN CONTENT PIPELINE
-            </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('lead')} disabled={running}>
-              RUN LEAD PIPELINE
-            </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('outreach')} disabled={running}>
-              RUN OUTREACH PIPELINE
-            </button>
+            <SecondaryButton onClick={() => runPipeline('content')} disabled={running}>
+              {running && activeAction === 'pipeline-content' ? 'RUNNING...' : 'CONTENT PIPELINE'}
+            </SecondaryButton>
+            <SecondaryButton onClick={() => runPipeline('lead')} disabled={running}>
+              {running && activeAction === 'pipeline-lead' ? 'RUNNING...' : 'LEAD PIPELINE'}
+            </SecondaryButton>
+            <SecondaryButton onClick={() => runPipeline('outreach')} disabled={running}>
+              {running && activeAction === 'pipeline-outreach' ? 'RUNNING...' : 'OPPORTUNITY PIPELINE'}
+            </SecondaryButton>
 
-            <select className="tier-2-btn font-mono text-xs px-2 py-2" value={mode} onChange={(e) => setModeRemote(e.target.value)}>
+            <select className="tier-2-btn font-mono text-xs px-3 py-2" value={mode} onChange={(e) => setModeRemote(e.target.value)} aria-label="Execution mode">
               <option value="MANUAL">MANUAL</option>
               <option value="AUTO">AUTO</option>
               <option value="BLACKLIGHT">BLACKLIGHT</option>
@@ -167,57 +186,54 @@ export default function Dashboard() {
                 onChange={(e) => setOverrideActionId(e.target.value)}
                 placeholder="Pending action ID for manual override"
               />
-              <button className="tier-3-surface font-mono text-xs px-3 py-2" onClick={() => controlAutomation('override')}>
+              <SecondaryButton onClick={() => controlAutomation('override')} className="px-3 py-2">
                 OVERRIDE
-              </button>
+              </SecondaryButton>
             </div>
           </div>
-          <p className="font-mono text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>{automationStatus}</p>
-        </section>
-
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-          {kpis.map((kpi) => (
-            <article key={kpi.label} className="ds-card-secondary p-3">
-              <div className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{kpi.label}</div>
-              <div className="font-mono text-lg font-semibold" style={{ color: 'var(--gold)' }}>{kpi.value}</div>
-            </article>
-          ))}
+          <TertiaryPanel className="mt-2 p-2 font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
+            {automationStatus || 'No actions yet.'}
+          </TertiaryPanel>
         </section>
 
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-3 min-h-0 flex-1">
           <article className="ds-card p-3 min-h-0 flex flex-col">
+            <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>SYSTEM STATS</h2>
+            <div className="overflow-y-auto space-y-1 min-h-0">
+              {systemStats.map((stat) => (
+                <TertiaryPanel key={stat.label} className="p-2 font-mono text-[11px] flex justify-between gap-3">
+                  <span style={{ color: 'var(--text-muted)' }}>{stat.label}</span>
+                  <span style={{ color: 'var(--gold)' }}>{stat.value}</span>
+                </TertiaryPanel>
+              ))}
+            </div>
+          </article>
+
+          <article className="ds-card p-3 min-h-0 flex flex-col">
             <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>REAL-TIME ACTIVITY FEED</h2>
             <div className="overflow-y-auto space-y-1 min-h-0">
               {(productMetrics?.activity_feed || []).slice(0, 12).map((item, idx) => (
-                <div key={`${item.id || idx}`} className="tier-3-surface p-2 font-mono text-[11px]">
+                <TertiaryPanel key={`${item.id || idx}`} className="p-2 font-mono text-[11px]">
                   {item.notes || item.action_id || 'activity'}
-                </div>
+                </TertiaryPanel>
               ))}
             </div>
           </article>
 
           <article className="ds-card p-3 min-h-0 flex flex-col">
-            <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>EXECUTION LOGS</h2>
+            <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>BUSINESS METRICS</h2>
             <div className="overflow-y-auto space-y-1 min-h-0">
-              {(productMetrics?.execution_logs || []).slice(0, 12).map((log, idx) => (
-                <div key={`${log.id || idx}`} className="tier-3-surface p-2 font-mono text-[11px]">
+              {businessKpis.map((kpi) => (
+                <TertiaryPanel key={kpi.label} className="p-2 font-mono text-[11px] flex justify-between gap-3">
+                  <span style={{ color: 'var(--text-muted)' }}>{kpi.label}</span>
+                  <span style={{ color: 'var(--gold)' }}>{kpi.value}</span>
+                </TertiaryPanel>
+              ))}
+              {(productMetrics?.execution_logs || []).slice(0, 5).map((log, idx) => (
+                <TertiaryPanel key={`${log.id || idx}`} className="p-2 font-mono text-[11px]">
                   {log.task_id} · {log.skill} · {(log.status === 'success') ? 'SUCCESS' : 'FAILED'}
-                </div>
+                </TertiaryPanel>
               ))}
-            </div>
-          </article>
-
-          <article className="ds-card p-3 min-h-0 flex flex-col">
-            <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>TOP PERFORMING SKILLS</h2>
-            <div className="overflow-y-auto space-y-1 min-h-0">
-              {(productMetrics?.top_skills || []).slice(0, 8).map((s, idx) => (
-                <div key={`${s.skill || idx}`} className="tier-3-surface p-2 font-mono text-[11px]">
-                  {s.skill} · {Math.round((s.success_rate || 0) * 100)}% success · {s.runs || 0} runs
-                </div>
-              ))}
-              <div className="tier-3-surface p-2 font-mono text-[11px]">
-                Revenue: ${(productMetrics?.revenue?.total_revenue || 0).toFixed(2)} · Pipeline Value: ${(productMetrics?.pipelines?.total_estimated_roi || 0).toFixed(2)}
-              </div>
             </div>
           </article>
         </section>
