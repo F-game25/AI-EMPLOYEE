@@ -87,7 +87,10 @@ export default function ChatPanel() {
                     className="text-xs mb-1 font-semibold tracking-widest"
                     style={{ color: 'var(--text-muted)' }}
                   >
-                    ORCHESTRATOR
+                    {msg.subsystem === 'nn' ? 'NEURAL BRAIN' :
+                     msg.subsystem === 'memory' ? 'MEMORY TREE' :
+                     msg.subsystem === 'doctor' ? 'DOCTOR' :
+                     'ORCHESTRATOR'}
                   </div>
                 )}
                 {msg.content}
