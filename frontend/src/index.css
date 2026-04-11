@@ -128,3 +128,38 @@ body {
   white-space: nowrap;
   border: 0;
 }
+
+/* Product design system */
+.ds-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+}
+
+.ds-card-secondary {
+  background: rgba(245,196,0,0.06);
+  border: 1px solid rgba(245,196,0,0.15);
+  border-radius: 10px;
+}
+
+.tier-1-btn {
+  background: var(--gold);
+  color: #111;
+  border: 1px solid rgba(245,196,0,0.95);
+  border-radius: 8px;
+  font-weight: 700;
+  box-shadow: 0 0 20px rgba(245,196,0,0.35);
+}
+
+.tier-2-btn {
+  background: rgba(0,0,0,0.3);
+  color: var(--gold);
+  border: 1px solid rgba(245,196,0,0.45);
+  border-radius: 8px;
+}
+
+.tier-3-surface {
+  background: rgba(245,196,0,0.08);
+  border: 1px solid rgba(245,196,0,0.18);
+  border-radius: 8px;
+}

@@ -107,4 +107,22 @@ export const useAppStore = create((set) => ({
   // Error
   errorMessage: null,
   setError: (msg) => set({ errorMessage: msg, appState: 'error' }),
+
+  // Product dashboard
+  productMetrics: {
+    mode: {},
+    tasks: {},
+    revenue: {},
+    top_strategies: [],
+    activity_feed: [],
+    execution_logs: [],
+    pipelines: {},
+    pipeline_runs: [],
+    pending_actions: [],
+    learning: {},
+  },
+  setProductMetrics: (m) => set({ productMetrics: m }),
+
+  automationStatus: '',
+  setAutomationStatus: (v) => set({ automationStatus: v }),
 }))

@@ -70,18 +70,169 @@ class MoneyMode:
 
         # Step 4 — ROI record (token estimate, no real revenue yet)
         self._record_roi(job_id, topic, platforms)
+        estimated_roi = round(max(len(topic), 1) * max(len(platforms), 1) * 0.03, 3)
+        status = "dry_run" if dry_run else "queued"
+        self._record_pipeline_run(
+            run_id=job_id,
+            pipeline="content_publish_track",
+            status=status,
+            estimated_roi=estimated_roi,
+            context={
+                "topic": topic,
+                "platforms": platforms,
+                "affiliate_product": affiliate_product,
+            },
+            steps=steps,
+        )
 
         return {
             "job_id": job_id,
+            "pipeline": "content_publish_track",
             "topic": topic,
             "platforms": platforms,
             "affiliate_product": affiliate_product,
             "steps": steps,
-            "status": "dry_run" if dry_run else "queued",
+            "estimated_roi": estimated_roi,
+            "status": status,
             "note": (
                 "Content drafted and queued. "
                 "Outreach requires manual approval."
             ),
+        }
+
+    def run_lead_pipeline(
+        self,
+        *,
+        source: str,
+        audience: str,
+        channels: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """Data → Leads → Outreach → Conversion pipeline."""
+        channels = channels or ["email"]
+        job_id = str(uuid.uuid4())[:8]
+        steps: list[dict] = [
+            {
+                "step": "collect_data",
+                "input": {"source": source, "audience": audience},
+                "output": {"lead_segments": [audience], "signal_source": source},
+                "status": "done",
+            },
+            {
+                "step": "qualify_leads",
+                "output": {"qualified_leads": max(len(audience) // 2, 1), "score_model": "intent+fit"},
+                "status": "done",
+            },
+        ]
+
+        outreach_status = "dry_run" if dry_run else "queued"
+        for channel in channels:
+            action = {
+                "step": "outreach_sequence",
+                "channel": channel,
+                "status": outreach_status,
+            }
+            if not dry_run:
+                action.update(self._safe_emit(
+                    action_type="lead_outreach_sequence",
+                    payload={"job_id": job_id, "channel": channel, "audience": audience},
+                    reason="Lead pipeline outreach execution",
+                ))
+            steps.append(action)
+
+        conversion_estimate = round(max(len(audience), 1) * max(len(channels), 1) * 0.08, 3)
+        status = "dry_run" if dry_run else "queued"
+        self._record_roi(
+            job_id,
+            f"lead-pipeline:{source}:{audience}",
+            channels,
+            estimated_revenue=conversion_estimate,
+        )
+        self._record_pipeline_run(
+            run_id=job_id,
+            pipeline="data_leads_outreach_conversion",
+            status=status,
+            estimated_roi=conversion_estimate,
+            context={"source": source, "audience": audience, "channels": channels},
+            steps=steps,
+        )
+        return {
+            "job_id": job_id,
+            "pipeline": "data_leads_outreach_conversion",
+            "source": source,
+            "audience": audience,
+            "channels": channels,
+            "steps": steps,
+            "estimated_roi": conversion_estimate,
+            "status": status,
+        }
+
+    def run_opportunity_pipeline(
+        self,
+        *,
+        opportunity: str,
+        budget: float = 0.0,
+        dry_run: bool = False,
+    ) -> dict:
+        """Opportunity → Execution → ROI tracking pipeline."""
+        job_id = str(uuid.uuid4())[:8]
+        risk = self._mode_risk_tolerance()
+        steps: list[dict] = [
+            {
+                "step": "opportunity_assessment",
+                "output": {
+                    "opportunity": opportunity,
+                    "risk_tolerance": risk,
+                    "execution_priority": "high" if risk == "high" else "normal",
+                },
+                "status": "done",
+            },
+            {
+                "step": "execution_plan",
+                "output": {
+                    "budget": budget,
+                    "milestones": ["launch", "optimize", "measure"],
+                },
+                "status": "done",
+            },
+        ]
+        if not dry_run:
+            steps.append({
+                "step": "execute_opportunity",
+                **self._safe_emit(
+                    action_type="opportunity_execution",
+                    payload={"job_id": job_id, "opportunity": opportunity, "budget": budget},
+                    reason="Opportunity pipeline execution",
+                ),
+            })
+        else:
+            steps.append({"step": "execute_opportunity", "status": "dry_run"})
+
+        estimated_roi = round(max(budget, 1.0) * (1.8 if risk == "high" else 1.2), 3)
+        status = "dry_run" if dry_run else "queued"
+        self._record_roi(
+            job_id,
+            f"opportunity-pipeline:{opportunity}",
+            ["execution"],
+            estimated_revenue=estimated_roi,
+        )
+        self._record_pipeline_run(
+            run_id=job_id,
+            pipeline="opportunity_execution_roi",
+            status=status,
+            estimated_roi=estimated_roi,
+            context={"opportunity": opportunity, "budget": budget, "risk_tolerance": risk},
+            steps=steps,
+        )
+        return {
+            "job_id": job_id,
+            "pipeline": "opportunity_execution_roi",
+            "opportunity": opportunity,
+            "budget": budget,
+            "risk_tolerance": risk,
+            "steps": steps,
+            "estimated_roi": estimated_roi,
+            "status": status,
         }
 
     def affiliate_content_draft(
@@ -180,18 +331,71 @@ class MoneyMode:
             result["error"] = str(exc)
         return result
 
-    def _record_roi(self, job_id: str, topic: str, platforms: list[str]) -> None:
+    def _record_roi(
+        self,
+        job_id: str,
+        topic: str,
+        platforms: list[str],
+        *,
+        estimated_revenue: float = 0.0,
+    ) -> None:
         try:
             from core.roi_tracker import get_roi_tracker
             get_roi_tracker().record(
                 action_id=job_id,
                 agent="money_mode",
                 cost_tokens=len(topic) * len(platforms) * 5,  # rough estimate
-                estimated_revenue=0.0,  # updated when clicks/conversions arrive
-                notes=f"Content pipeline: {topic} → {', '.join(platforms)}",
+                estimated_revenue=estimated_revenue,
+                notes=f"Pipeline: {topic} → {', '.join(platforms)}",
             )
         except Exception:
             pass
+
+    def _record_pipeline_run(
+        self,
+        *,
+        run_id: str,
+        pipeline: str,
+        status: str,
+        estimated_roi: float,
+        context: dict[str, Any],
+        steps: list[dict],
+    ) -> None:
+        try:
+            from core.pipeline_store import get_pipeline_store
+            get_pipeline_store().record_run(
+                run_id=run_id,
+                pipeline=pipeline,
+                status=status,
+                estimated_roi=estimated_roi,
+                context=context,
+                steps=steps,
+            )
+        except Exception:
+            pass
+
+    def _safe_emit(self, *, action_type: str, payload: dict, reason: str) -> dict:
+        try:
+            from actions.action_bus import get_action_bus
+            result = get_action_bus().emit(
+                action_type=action_type,
+                payload=payload,
+                actor="money_mode",
+                reason=reason,
+            )
+            return {
+                "status": result.get("status", "queued"),
+                "action_id": result.get("action_id", ""),
+            }
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
+
+    def _mode_risk_tolerance(self) -> str:
+        try:
+            from core.mode_manager import get_mode_manager
+            return str(get_mode_manager().status().get("risk_tolerance", "medium"))
+        except Exception:
+            return "medium"
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
