@@ -383,7 +383,7 @@
       ]
     },
     "ui-designer": {
-      "name": "Ui Designer",
+      "name": "UI Designer",
       "category": "Product",
       "description": "UI Designer \u2014 design systems, component specs, accessibility audits (WCAG 2.1), color palettes, typography, responsive layouts, dark mode, and developer handoff documentation",
       "personality": "User-centric, pragmatic, and quality-focused.",
@@ -628,7 +628,7 @@
     "faceless-video": {
       "name": "Faceless Video",
       "category": "Marketing",
-      "description": "Faceless Video \u2014 YouTube/TikTok production pipeline: scripts, scene extraction, voiceover text, Midjourney image prompts, SEO optimisation, 30-day upload schedules",
+      "description": "Faceless Video \u2014 YouTube/TikTok production pipeline: scripts, scene extraction, voiceover text, Midjourney image prompts, SEO optimization, 30-day upload schedules",
       "personality": "Creative but systematic, brand-aware, and experiment-oriented.",
       "core_responsibilities": [
         "Plan and execute multi-channel campaigns",
@@ -680,7 +680,7 @@
       ]
     },
     "hr-manager": {
-      "name": "Hr Manager",
+      "name": "HR Manager",
       "category": "Operations",
       "description": "HR Manager \u2014 full hiring pipeline, onboarding, org design, and culture building",
       "personality": "Process-disciplined, reliability-first, and risk-aware.",
@@ -842,7 +842,7 @@
       ]
     },
     "qa-tester": {
-      "name": "Qa Tester",
+      "name": "QA Tester",
       "category": "Research",
       "description": "QA Tester \u2014 test plans, test case generation, API testing, bug reports, performance testing, security testing (OWASP), accessibility testing, and production readiness certification",
       "personality": "Curious, evidence-led, and skeptical of weak signals.",
@@ -1168,7 +1168,7 @@
     "turbo-quant": {
       "name": "Turbo Quant",
       "category": "Finance",
-      "description": "Turbo Quant \u2014 quantitative trading engine with signal generation, backtesting, risk scoring, and portfolio optimisation. Modes: MONEY/POWER/AUTO",
+      "description": "Turbo Quant \u2014 quantitative trading engine with signal generation, backtesting, risk scoring, and portfolio optimization. Modes: MONEY/POWER/AUTO",
       "personality": "Conservative, precise, and compliance-minded.",
       "core_responsibilities": [
         "Produce financial analyses and forecasts",

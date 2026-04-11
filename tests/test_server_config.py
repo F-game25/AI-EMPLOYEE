@@ -1,7 +1,7 @@
 """Tests for server.py configuration correctness.
 
 Validates agent count constants, mode lists, and agent_capabilities.json
-stay in sync so count drift is caught early.
+stay in sync so "56 agents" count drift is caught early.
 """
 from __future__ import annotations
 
