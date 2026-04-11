@@ -2,23 +2,14 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 
-const MODE_COLORS = {
-  AUTO: 'var(--success)',
-  MANUAL: 'var(--warning)',
-  BLACKLIGHT: '#c084fc',
-}
-
-const MODE_LABELS = {
-  AUTO: 'AUTO',
-  MANUAL: 'MANUAL',
-  BLACKLIGHT: 'BLACKLIGHT',
-}
-
 export default function TopBar() {
-  const { wsConnected, systemStatus, user } = useAppStore()
+  const wsConnected = useAppStore(s => s.wsConnected)
+  const systemStatus = useAppStore(s => s.systemStatus)
+  const user = useAppStore(s => s.user)
   const [time, setTime] = useState(new Date())
   const [mode, setMode] = useState('MANUAL')
   const [modePending, setModePending] = useState(false)
+  const [activating, setActivating] = useState(false)
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000)
@@ -33,9 +24,11 @@ export default function TopBar() {
       .catch(() => {})
   }, [])
 
-  const cycleMode = () => {
-    const modes = ['MANUAL', 'AUTO', 'BLACKLIGHT']
-    const next = modes[(modes.indexOf(mode) + 1) % modes.length]
+  useEffect(() => {
+    if (systemStatus?.mode) setMode(systemStatus.mode)
+  }, [systemStatus.mode])
+
+  const setModeRemote = (next) => {
     setModePending(true)
     fetch(`http://${window.location.hostname}:3001/api/mode`, {
       method: 'POST',
@@ -48,61 +41,100 @@ export default function TopBar() {
       .finally(() => setModePending(false))
   }
 
+  const activateAgents = () => {
+    setActivating(true)
+    fetch(`http://${window.location.hostname}:3001/agents/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count: mode === 'BLACKLIGHT' ? 6 : mode === 'AUTO' ? 4 : 2 }),
+    })
+      .catch(() => {})
+      .finally(() => setActivating(false))
+  }
+
   return (
     <header
-      className="flex items-center justify-between px-4 flex-shrink-0"
+      className="flex items-center justify-between px-4 py-2 gap-4 flex-shrink-0"
       style={{
-        height: '44px',
-        background: 'rgba(10,10,10,0.97)',
-        borderBottom: '1px solid var(--border-gold-dim)',
+        minHeight: '70px',
+        background: 'linear-gradient(180deg, rgba(14,14,14,0.98), rgba(7,7,7,0.96))',
+        borderBottom: '1px solid var(--border-gold)',
         backdropFilter: 'blur(10px)',
         zIndex: 'var(--z-topbar)',
+        boxShadow: '0 0 22px rgba(245,196,0,0.14)',
       }}
     >
-      {/* Left: logo */}
-      <div className="flex items-center gap-3">
-        <span
-          className="font-mono text-xs font-bold tracking-widest"
-          style={{ color: 'var(--gold)' }}
-        >
-          AI-EMPLOYEE
-        </span>
-        {/* Vertical divider */}
-        <div
-          aria-hidden="true"
-          style={{ width: '1px', height: '12px', background: 'var(--text-dim)' }}
-        />
-        <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>OS v2.0</span>
-      </div>
-
-      {/* Center: system metrics + mode switcher */}
-      <div className="flex items-center gap-6" role="status" aria-label="System metrics">
-        <Metric label="CPU" value={`${systemStatus.cpu || 0}%`} warn={systemStatus.cpu > 70} />
-        <Metric label="MEM" value={`${systemStatus.memory || 0}%`} warn={systemStatus.memory > 70} />
-        <Metric label="CONN" value={systemStatus.connections || 0} />
-
-        {/* Mode switcher */}
+      <div className="flex items-center gap-3 min-w-0">
         <button
-          onClick={cycleMode}
-          disabled={modePending}
-          title={`Current mode: ${mode}. Click to cycle.`}
-          aria-label={`Operating mode: ${mode}. Click to switch.`}
-          className="font-mono text-xs px-2 py-0.5"
+          onClick={activateAgents}
+          disabled={activating}
+          className="font-mono text-xs font-semibold px-3 py-2"
           style={{
-            color: MODE_COLORS[mode] || 'var(--text-secondary)',
-            background: 'rgba(255,255,255,0.05)',
-            border: `1px solid ${MODE_COLORS[mode] || 'var(--border-subtle)'}`,
-            borderRadius: '3px',
-            cursor: modePending ? 'wait' : 'pointer',
-            opacity: modePending ? 0.6 : 1,
+            color: '#111',
+            background: 'var(--gold)',
+            border: '1px solid rgba(245,196,0,0.9)',
+            borderRadius: '6px',
+            boxShadow: '0 0 18px rgba(245,196,0,0.35)',
+            opacity: activating ? 0.8 : 1,
+            cursor: activating ? 'wait' : 'pointer',
           }}
         >
-          {modePending ? '…' : MODE_LABELS[mode] || mode}
+          {activating ? 'ACTIVATING…' : 'START / ACTIVATE AGENTS'}
         </button>
+
+        <select
+          value={mode}
+          onChange={(e) => setModeRemote(e.target.value)}
+          disabled={modePending}
+          className="font-mono text-xs px-2 py-2"
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border-gold-dim)',
+            borderRadius: '6px',
+            minWidth: '128px',
+          }}
+          aria-label="Operating mode selector"
+        >
+          <option value="MANUAL">MANUAL</option>
+          <option value="AUTO">AUTO</option>
+          <option value="BLACKLIGHT">BLACKLIGHT</option>
+        </select>
+
+        <div
+          className="font-mono text-xs px-2 py-2"
+          style={{
+            color: 'var(--gold)',
+            background: 'rgba(245,196,0,0.08)',
+            border: '1px solid rgba(245,196,0,0.2)',
+            borderRadius: '6px',
+          }}
+          aria-live="polite"
+        >
+          RUNNING {systemStatus.running_agents || 0}/{systemStatus.total_agents || 0}
+        </div>
       </div>
 
-      {/* Right: time + connection + user */}
-      <div className="flex items-center gap-4">
+      <div
+        className="flex items-center gap-2 px-2 py-1 rounded-md overflow-x-auto"
+        style={{
+          border: '1px solid var(--border-gold-dim)',
+          background: 'rgba(0,0,0,0.28)',
+        }}
+        role="status"
+        aria-label="Unified system stats"
+      >
+        <Metric label="CPU" value={`${systemStatus.cpu_usage || 0}%`} warn={(systemStatus.cpu_usage || 0) > 80} />
+        <Metric label="GPU" value={`${systemStatus.gpu_usage || 0}%`} warn={(systemStatus.gpu_usage || 0) > 80} />
+        <Metric label="CPU °C" value={systemStatus.cpu_temperature || 0} warn={(systemStatus.cpu_temperature || 0) > 80} />
+        <Metric label="GPU °C" value={systemStatus.gpu_temperature || 0} warn={(systemStatus.gpu_temperature || 0) > 80} />
+        <Metric label="HEARTBEAT" value={systemStatus.heartbeat || 0} subtle />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-xs font-bold tracking-widest" style={{ color: 'var(--gold)' }}>
+          AI-EMPLOYEE
+        </span>
         <time
           className="font-mono text-xs"
           style={{ color: 'var(--text-muted)' }}
@@ -149,13 +181,13 @@ export default function TopBar() {
   )
 }
 
-function Metric({ label, value, warn }) {
+function Metric({ label, value, warn, subtle }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>{label}</span>
+    <div className="flex flex-col px-2 min-w-[64px]">
+      <span className="font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>{label}</span>
       <span
         className="font-mono text-xs font-medium"
-        style={{ color: warn ? 'var(--warning)' : 'var(--text-secondary)' }}
+        style={{ color: subtle ? 'var(--gold-dim)' : (warn ? 'var(--warning)' : 'var(--text-secondary)') }}
       >
         {value}
       </span>
