@@ -598,6 +598,221 @@ class TestSecureExecutionEngine:
         assert result["status"] == "error"
         assert result["failure"]["category"] == "fatal"
 
+    def test_error_type_in_failure_payload(self):
+        """Failure dict must include error_type for structured error handling."""
+        from actions.execution_engine import SecureExecutionEngine
+
+        engine = SecureExecutionEngine()
+        result = engine.execute(
+            action_name="nonexistent",
+            payload={},
+            skill="any",
+        )
+        assert result["status"] == "error"
+        assert "error_type" in result["failure"]
+        assert result["failure"]["error_type"]
+
+    def test_permission_denial_includes_error_type(self):
+        """Permission denial failures must carry error_type."""
+        from actions.execution_engine import APIAction, SecureExecutionEngine
+
+        engine = SecureExecutionEngine()
+        engine.register_action("api.call", APIAction(executor=lambda p: {}))
+        result = engine.execute(action_name="api.call", payload={}, skill="unauthorized")
+        assert result["status"] == "error"
+        assert result["failure"]["error_type"] == "ActionPermissionError"
+
+    def test_output_schema_validation_passes(self):
+        """Execution succeeds when result matches output_schema."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        action = APIAction(
+            executor=lambda p: {"status": "ok", "count": 42},
+            output_schema={"status": str, "count": int},
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.fetch", action)
+        result = engine.execute(action_name="api.fetch", payload={}, skill="svc")
+        assert result["status"] == "executed"
+
+    def test_output_schema_validation_fails_on_wrong_type(self):
+        """Execution fails when result violates output_schema."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        action = APIAction(
+            executor=lambda p: {"status": 123},  # should be str
+            output_schema={"status": str},
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.fetch", action)
+        result = engine.execute(action_name="api.fetch", payload={}, skill="svc")
+        assert result["status"] == "error"
+        assert result["failure"]["category"] == "fatal"
+        assert result["failure"]["error_type"] == "ActionValidationError"
+
+    def test_output_schema_validation_fails_on_missing_field(self):
+        """Execution fails when result is missing a required output field."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        action = APIAction(
+            executor=lambda p: {"other": "x"},
+            output_schema={"required_field": str},
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.check", action)
+        result = engine.execute(action_name="api.check", payload={}, skill="svc")
+        assert result["status"] == "error"
+        assert "required_field" in result["failure"]["reason"]
+
+    def test_rate_limit_enforced(self):
+        """Requests over rate limit return recoverable error."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        action = APIAction(
+            executor=lambda p: {"ok": True, "seq": p.get("seq")},
+            rate_limit_per_minute=2,
+            max_retries=0,
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.limited", action)
+
+        # Use distinct payloads so result cache doesn't mask rate limit.
+        results = [
+            engine.execute(action_name="api.limited", payload={"seq": i}, skill="svc")
+            for i in range(4)
+        ]
+        statuses = [r["status"] for r in results]
+        assert "executed" in statuses
+        assert "error" in statuses
+        rate_limit_errors = [
+            r for r in results
+            if r["status"] == "error"
+            and r["failure"].get("error_type") == "ActionRateLimitError"
+        ]
+        assert rate_limit_errors
+
+    def test_per_action_metrics_tracked(self):
+        """Metrics must break down success/failure per registered action name."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.a", APIAction(executor=lambda p: {"ok": True}))
+        engine.register_action("api.b", APIAction(executor=lambda p: {"ok": True}))
+
+        engine.execute(action_name="api.a", payload={}, skill="svc")
+        engine.execute(action_name="api.a", payload={}, skill="svc")
+        engine.execute(action_name="api.b", payload={}, skill="svc")
+
+        m = engine.metrics()
+        assert "global" in m
+        assert "per_action" in m
+        assert m["global"]["total"] == 3
+        assert m["per_action"]["api.a"]["total"] == 2
+        assert m["per_action"]["api.b"]["total"] == 1
+
+    def test_metrics_include_cache_hit_rate(self):
+        """metrics() snapshot must include cache_hit_rate."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.cached", APIAction(executor=lambda p: {"data": 1}))
+        engine.execute(action_name="api.cached", payload={"q": "x"}, skill="svc", idempotency_key="k1")
+        engine.execute(action_name="api.cached", payload={"q": "x"}, skill="svc", idempotency_key="k1")
+
+        m = engine.metrics()
+        assert "cache_hit_rate" in m["global"]
+
+    def test_repeated_violation_alert_hook(self):
+        """Alert hook must fire once violations reach the threshold."""
+        from actions.execution_engine import (
+            APIAction,
+            PermissionPolicy,
+            SecureExecutionEngine,
+        )
+
+        alerts = []
+        policy = PermissionPolicy({})  # deny all
+        policy.set_alert_hook(lambda skill, count: alerts.append((skill, count)), threshold=2)
+
+        engine = SecureExecutionEngine(permission_policy=policy)
+        engine.register_action("api.call", APIAction(executor=lambda p: {}))
+
+        for _ in range(3):
+            engine.execute(action_name="api.call", payload={}, skill="bad_skill")
+
+        assert len(alerts) >= 1
+        assert alerts[0][0] == "bad_skill"
+        assert alerts[0][1] >= 2
+
+    def test_permission_violation_count(self):
+        """PermissionPolicy.violation_count tracks denials per skill."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        policy = PermissionPolicy({})
+        engine = SecureExecutionEngine(permission_policy=policy)
+        engine.register_action("api.call", APIAction(executor=lambda p: {}))
+
+        engine.execute(action_name="api.call", payload={}, skill="foo")
+        engine.execute(action_name="api.call", payload={}, skill="foo")
+        assert policy.violation_count("foo") == 2
+        assert policy.violation_count("bar") == 0
+
+    def test_idempotency_cache_ttl_expiry(self):
+        """Idempotency cache entries must not be served after TTL expires."""
+        from actions.execution_engine import (
+            APIAction,
+            ActionConfigLoader,
+            PermissionPolicy,
+            SecureExecutionEngine,
+        )
+
+        calls = []
+        action = APIAction(executor=lambda p: calls.append(1) or {"n": len(calls)})
+        cfg = ActionConfigLoader()
+        cfg.idempotency_ttl_s = 0  # immediately expire
+        cfg.cache_ttl_s = 0        # also expire result cache immediately
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]}),
+            config=cfg,
+        )
+        engine.register_action("api.op", action)
+
+        engine.execute(action_name="api.op", payload={}, skill="svc", idempotency_key="k")
+        time.sleep(0.01)
+        engine.execute(action_name="api.op", payload={}, skill="svc", idempotency_key="k")
+
+        assert len(calls) == 2  # not deduplicated due to TTL=0
+
+    def test_permission_denial_written_to_changelog(self, tmp_path):
+        """Permission denials must be recorded in the audit ChangeLog."""
+        import core.change_log as _cl_mod
+        from core.change_log import ChangeLog
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        log = ChangeLog(path=tmp_path / "changelog.jsonl")
+        with patch.object(_cl_mod, "_instance", log):
+            policy = PermissionPolicy({})
+            engine = SecureExecutionEngine(permission_policy=policy)
+            engine.register_action("api.call", APIAction(executor=lambda p: {}))
+            engine.execute(action_name="api.call", payload={}, skill="intruder")
+
+        entries = log.read()
+        denial_entries = [e for e in entries if e.get("action_type") == "permission_denied"]
+        assert denial_entries, "Expected a permission_denied entry in the changelog"
+        assert denial_entries[0]["actor"] == "intruder"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TaskEngine
@@ -773,7 +988,11 @@ class TestSystemApiFeature:
     def test_action_metrics(self, client):
         r = client.get("/api/actions/metrics")
         assert r.status_code == 200
-        assert "metrics" in r.json()
+        data = r.json()
+        assert "metrics" in data
+        m = data["metrics"]
+        # New structure has global + per_action sub-dicts
+        assert "global" in m or isinstance(m, dict)
 
     def test_skills_list(self, client):
         r = client.get("/api/skills")

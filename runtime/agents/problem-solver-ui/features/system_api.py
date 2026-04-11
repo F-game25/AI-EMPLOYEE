@@ -93,7 +93,7 @@ def list_pending_actions():
 
 @router.get("/actions/metrics")
 def action_metrics():
-    """Execution metrics for secure actions."""
+    """Execution metrics for secure actions (global + per-action breakdown)."""
     try:
         from actions.action_bus import get_action_bus
         return JSONResponse({"metrics": get_action_bus().metrics()})
