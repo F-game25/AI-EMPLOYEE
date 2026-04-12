@@ -74,6 +74,15 @@ function connectSingleton() {
         case 'doctor:check':
           store.setDoctorStatus(data)
           break
+        case 'brain:insights':
+          store.setBrainInsights(data)
+          break
+        case 'workflow:snapshot':
+          store.setWorkflowSnapshot(data)
+          break
+        case 'workflow:update':
+          store.upsertWorkflowRun(data)
+          break
       }
     } catch (e) { /* ignore */ }
   }
