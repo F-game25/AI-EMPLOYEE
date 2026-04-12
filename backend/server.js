@@ -49,6 +49,7 @@ const GPU_TEMP_GPU_FACTOR = 0.52;
 const GPU_TEMP_JITTER = 4;
 const MAX_ACTIVITY_ITEMS = 50;
 const MAX_EXECUTION_LOGS = 100;
+const MAX_DECISION_LOG_ENTRIES = 30;
 const BASE_PIPELINE_ROI = 250;
 const PIPELINE_ROI_SWING = 400;
 const REVENUE_CONVERSION_RATE = 0.45;
@@ -109,6 +110,11 @@ function createWorkflowRun({ name, source = 'automation', goal = '' }) {
   return run;
 }
 
+function appendDecision(run, entry) {
+  run.decision_log.unshift(entry);
+  run.decision_log = run.decision_log.slice(0, MAX_DECISION_LOG_ENTRIES);
+}
+
 function getWorkflowRun(runId) {
   return runtimeState.workflowRuns.find((run) => run.run_id === runId) || null;
 }
@@ -135,13 +141,12 @@ function attachWorkflowNode({ runId, queued, taskName, parentTaskId = null }) {
     result: null,
   };
   run.nodes.push(node);
-  run.decision_log.unshift({
+  appendDecision(run, {
     ts: new Date().toISOString(),
     task_id: node.task_id,
     type: 'brain_decision',
     summary: node.reasoning || `Strategy ${node.strategy || 'default'} selected`,
   });
-  run.decision_log = run.decision_log.slice(0, 30);
   runtimeState.workflowIndex[node.task_id] = runId;
   run.updated_at = new Date().toISOString();
   run.status = 'running';
@@ -161,7 +166,7 @@ function recalcWorkflowProgress(run) {
   });
   run.progress_percent = Math.round(acc / total);
   if (failed > 0) {
-    run.status = 'failed';
+    run.status = completed > 0 ? 'completed_with_failures' : 'failed';
   } else if (completed === run.nodes.length && run.nodes.length > 0) {
     run.status = 'completed';
     run.progress_percent = 100;
@@ -614,13 +619,12 @@ onAgentEvent('task:started', ({ agent, task }) => {
     node.progress_percent = 45;
     node.started_at = task.startedAt || new Date().toISOString();
     node.agent = agent.name;
-    run.decision_log.unshift({
+    appendDecision(run, {
       ts: new Date().toISOString(),
       task_id: task.id,
       type: 'execution_start',
       summary: `Agent ${agent.name} started with strategy ${node.strategy || 'default'}`,
     });
-    run.decision_log = run.decision_log.slice(0, 30);
   });
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] started ${task.id}`,
@@ -646,13 +650,12 @@ onAgentEvent('task:completed', ({ agent, task }) => {
       status: 'success',
       summary: task.message,
     };
-    run.decision_log.unshift({
+    appendDecision(run, {
       ts: new Date().toISOString(),
       task_id: task.id,
       type: 'result',
       summary: `Result success • ${task.message}`,
     });
-    run.decision_log = run.decision_log.slice(0, 30);
   });
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] completed ${task.id}`,
@@ -678,13 +681,12 @@ onAgentEvent('task:failed', ({ agent, task }) => {
       status: 'failed',
       summary: task.error || task.message || 'Execution failed',
     };
-    run.decision_log.unshift({
+    appendDecision(run, {
       ts: new Date().toISOString(),
       task_id: task.id,
       type: 'result',
       summary: `Result failed • ${task.error || 'execution error'}`,
     });
-    run.decision_log = run.decision_log.slice(0, 30);
   });
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] failed ${task.id}`,

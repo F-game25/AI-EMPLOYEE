@@ -206,10 +206,7 @@ function _tick() {
         location: agent.location,
       });
       agent.health = 'healthy';
-      const shouldFail = Boolean(
-        completedTask?.metadata?.forceFail
-        || /\[fail\]/i.test(String(completedTask.message || '')),
-      );
+      const shouldFail = Boolean(completedTask?.metadata?.forceFail);
       if (shouldFail) {
         events.emit('task:failed', {
           agent: _snapshot(agent),

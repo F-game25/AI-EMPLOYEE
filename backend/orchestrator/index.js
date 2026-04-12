@@ -2,6 +2,7 @@
 
 const { Router } = require('express');
 const { EventEmitter } = require('events');
+const crypto = require('crypto');
 const subsystems = require('../subsystems');
 const { classifyMessage } = require('../routing');
 const brain = require('../brain/active_brain');
@@ -51,13 +52,29 @@ function buildReply(task) {
 function submitTask(message, options = {}) {
   const userId = options.userId || 'user:default';
   const subsystemHint = classifyMessage(message) || 'general';
-  const seedTaskId = `planning-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-  const plan = brain.consult({
-    taskId: seedTaskId,
-    message,
-    subsystemHint,
-    userId,
-  });
+  const seedTaskId = `planning-${crypto.randomUUID()}`;
+  let plan;
+  try {
+    plan = brain.consult({
+      taskId: seedTaskId,
+      message,
+      subsystemHint,
+      userId,
+    });
+  } catch (err) {
+    plan = {
+      taskId: seedTaskId,
+      intent: 'general',
+      subsystem: subsystemHint,
+      strategy: 'fallback_balanced_execution',
+      alternatives: [],
+      confidence: 0.5,
+      reasoning: `Brain consult fallback: ${(err && err.message) || 'unavailable'}`,
+      brain_assisted: false,
+      execution_flow: 'task->strategy->agent->action->result',
+      plannedAt: new Date().toISOString(),
+    };
+  }
   const subsystem = plan.subsystem || subsystemHint;
   const mode = getMode();
   const moneyTemplate = buildMoneyTemplate({
@@ -78,7 +95,11 @@ function submitTask(message, options = {}) {
       requestedBy: userId,
     },
   });
-  const taskBrainPlan = brain.rebindPlan(seedTaskId, assignment.taskId) || { ...plan, taskId: assignment.taskId };
+  const rebound = brain.rebindPlan(seedTaskId, assignment.taskId);
+  const taskBrainPlan = rebound || { ...plan, taskId: assignment.taskId };
+  if (!rebound && taskBrainPlan.brain_assisted) {
+    taskBrainPlan.reasoning = `${taskBrainPlan.reasoning} | plan_rebind=fallback`;
+  }
   return {
     ...assignment,
     subsystem,

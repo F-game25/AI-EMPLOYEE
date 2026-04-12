@@ -83,8 +83,9 @@ export default function WorkflowTreePanel() {
   }, [workflow])
 
   const selectedNode = useMemo(() => {
-    if (!activeRun || !selectedTask) return activeRun?.nodes?.[0] || null
-    return activeRun.nodes.find((n) => n.task_id === selectedTask) || activeRun.nodes[0] || null
+    if (!activeRun) return null
+    if (!selectedTask) return activeRun?.nodes?.[0] || null
+    return activeRun?.nodes?.find((n) => n.task_id === selectedTask) || activeRun?.nodes?.[0] || null
   }, [activeRun, selectedTask])
 
   return (
