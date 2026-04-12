@@ -123,6 +123,25 @@ export const useAppStore = create((set) => ({
   },
   setBrainInsights: (insights) => set({ brainInsights: insights }),
 
+  brainStatus: {
+    status: 'inactive',
+    active: false,
+    available: false,
+    memory_size: 0,
+    last_update: null,
+    recent_decisions: [],
+  },
+  setBrainStatus: (status) => set({ brainStatus: status }),
+
+  brainActivity: {
+    status: 'inactive',
+    memory_size: 0,
+    last_update: null,
+    recent_decisions: [],
+    items: [],
+  },
+  setBrainActivity: (activity) => set({ brainActivity: activity }),
+
   // Error
   errorMessage: null,
   setError: (msg) => set({ errorMessage: msg, appState: 'error' }),
