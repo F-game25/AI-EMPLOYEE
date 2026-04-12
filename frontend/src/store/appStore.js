@@ -63,6 +63,11 @@ export const useAppStore = create((set) => ({
     running_agents: 0,
     total_agents: 0,
     mode: 'MANUAL',
+    robot_location: 'idle',
+    active_robot: 'none',
+    active_subsystem: 'general',
+    thinking_mode: '',
+    money_template: null,
   },
   setSystemStatus: (s) => set({ systemStatus: s }),
 

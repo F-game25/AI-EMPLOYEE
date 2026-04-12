@@ -154,47 +154,42 @@ export default function Dashboard() {
     >
       <TopBar />
 
-      {/* Main layout: left content area + centre chat + right panels */}
-      <div className="flex-1 min-h-0 flex overflow-hidden">
+      <div className="flex-1 overflow-hidden px-4 py-3 flex flex-col gap-3">
+        <section className="ds-card p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="tier-1-btn font-mono text-xs px-4 py-2" onClick={() => controlAutomation('start')} disabled={running}>
+              START AUTOMATION
+            </button>
 
-        {/* LEFT: controls + live feeds */}
-        <div className="flex flex-col flex-1 min-w-0 overflow-hidden px-3 py-3 gap-3">
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => controlAutomation('stop')} disabled={running}>
+              STOP
+            </button>
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('content')} disabled={running}>
+              RUN CONTENT PIPELINE
+            </button>
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('lead')} disabled={running}>
+              RUN LEAD PIPELINE
+            </button>
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('outreach')} disabled={running}>
+              RUN OUTREACH PIPELINE
+            </button>
 
-          {/* Control bar */}
-          <section className="ds-card p-3 flex-shrink-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <PrimaryButton
-                onClick={() => controlAutomation(isAutomationRunning ? 'stop' : 'start')}
-                disabled={running}
-              >
-                {running && (activeAction === 'start' || activeAction === 'stop')
-                  ? 'PROCESSING...'
-                  : isAutomationRunning ? 'STOP AUTOMATION' : 'START AUTOMATION'}
-              </PrimaryButton>
+            <select className="tier-2-btn font-mono text-xs px-2 py-2" value={mode} onChange={(e) => setModeRemote(e.target.value)}>
+              <option value="MANUAL">MANUAL</option>
+              <option value="AUTO">AUTO</option>
+              <option value="BLACKLIGHT">BLACKLIGHT</option>
+              <option value="MONEYMODE">MONEYMODE</option>
+            </select>
+          </div>
 
-              <SecondaryButton onClick={() => runPipeline('content')} disabled={running}>
-                {running && activeAction === 'pipeline-content' ? 'RUNNING...' : 'CONTENT PIPELINE'}
-              </SecondaryButton>
-              <SecondaryButton onClick={() => runPipeline('lead')} disabled={running}>
-                {running && activeAction === 'pipeline-lead' ? 'RUNNING...' : 'LEAD PIPELINE'}
-              </SecondaryButton>
-              <SecondaryButton onClick={() => runPipeline('opportunity')} disabled={running}>
-                {running && activeAction === 'pipeline-opportunity' ? 'RUNNING...' : 'OPPORTUNITY PIPELINE'}
-              </SecondaryButton>
-
-              <select
-                className="tier-2-btn font-mono text-xs px-3 py-2"
-                value={mode}
-                onChange={(e) => setModeRemote(e.target.value)}
-                aria-label="Execution mode"
-              >
-                <option value="MANUAL">MANUAL</option>
-                <option value="AUTO">AUTO</option>
-                <option value="BLACKLIGHT">BLACKLIGHT</option>
-              </select>
-            </div>
-
-            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+            <input
+              className="tier-3-surface font-mono text-xs px-3 py-2 outline-none bg-transparent"
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="Automation goal"
+            />
+            <div className="flex gap-2">
               <input
                 className="tier-3-surface font-mono text-xs px-3 py-2 outline-none bg-transparent"
                 value={goal}
