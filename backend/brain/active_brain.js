@@ -2,6 +2,8 @@
 
 const MAX_RECENT = 40;
 const MAX_FAILURES = 50;
+const MIN_CONFIDENCE = 0.35;
+const MAX_CONFIDENCE = 0.97;
 
 function nowIso() {
   return new Date().toISOString();
@@ -25,10 +27,11 @@ function messageIntent(message) {
 }
 
 function normalizeLatencyMs(startedAt, finishedAt, fallback = 0) {
-  if (!startedAt || !finishedAt) return Math.max(0, Number(fallback) || 0);
+  const fallbackLatency = Math.max(0, Number(fallback) || 0);
+  if (!startedAt || !finishedAt) return fallbackLatency;
   const start = Date.parse(startedAt);
   const end = Date.parse(finishedAt);
-  if (Number.isNaN(start) || Number.isNaN(end)) return Math.max(0, Number(fallback) || 0);
+  if (Number.isNaN(start) || Number.isNaN(end)) return fallbackLatency;
   return Math.max(0, end - start);
 }
 
@@ -161,7 +164,7 @@ function consult({
   const pattern = getPattern(intent);
   const priorRuns = pattern.runs || 0;
   const historicalConfidence = priorRuns ? (pattern.success / priorRuns) : 0.5;
-  const confidence = clamp((confidenceBase + historicalConfidence) / 2, 0.35, 0.97);
+  const confidence = clamp((confidenceBase + historicalConfidence) / 2, MIN_CONFIDENCE, MAX_CONFIDENCE);
   const pref = updatePreference(userId, message, chosenStrategy);
   const reason = [
     `intent=${intent}`,
@@ -206,7 +209,18 @@ function feedback({
   notes = '',
 }) {
   const plan = state.planIndex.get(taskId);
-  if (!plan) return null;
+  if (!plan) {
+    state.decisionHistory.unshift({
+      taskId,
+      intent: 'unknown',
+      strategy: 'unknown',
+      confidence: 0,
+      reasoning: 'feedback_ignored:missing_plan',
+      plannedAt: nowIso(),
+    });
+    state.decisionHistory = state.decisionHistory.slice(0, MAX_RECENT);
+    return null;
+  }
 
   const intent = toKey(plan.intent);
   const strategy = toKey(plan.strategy);
