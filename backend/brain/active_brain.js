@@ -404,8 +404,9 @@ function activity(limit = 20) {
     ts: d.plannedAt,
   }));
   const normalized = [];
-  state.decisionHistory.forEach((d) => {
+  state.decisionHistory.slice(0, 40).forEach((d) => {
     normalized.push({
+      id: `${d.taskId || 'task'}-${d.plannedAt || nowIso()}-decision`,
       ts: d.plannedAt || nowIso(),
       type: 'decision',
       task_id: d.taskId,
@@ -415,8 +416,9 @@ function activity(limit = 20) {
       detail: d.reasoning || '',
     });
   });
-  state.recentImprovements.forEach((i) => {
+  state.recentImprovements.slice(0, 40).forEach((i) => {
     normalized.push({
+      id: `${i.task_id || 'task'}-${i.ts || nowIso()}-learning_update`,
       ts: i.ts || nowIso(),
       type: 'learning_update',
       task_id: i.task_id,
@@ -426,8 +428,9 @@ function activity(limit = 20) {
       detail: i.improvement,
     });
   });
-  state.failedAttempts.forEach((f) => {
+  state.failedAttempts.slice(0, 40).forEach((f) => {
     normalized.push({
+      id: `${f.task_id || 'task'}-${f.ts || nowIso()}-failure`,
       ts: f.ts || nowIso(),
       type: 'failure',
       task_id: f.task_id,
