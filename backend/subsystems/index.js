@@ -22,7 +22,7 @@ const FETCH_TIMEOUT_MS = 2000;
 
 const state = {
   nn: {
-    available: false,
+    available: true,
     active: true,
     mode: 'OFFLINE',
     learn_step: 0,
@@ -93,10 +93,15 @@ const _simActions = [
 
 const SIM_BUFFER_GROWTH_RATE = 7; // simulated experiences added per learn step
 const MAX_SIM_BUFFER_SIZE = 10000; // cap for simulated replay buffer
+const SIM_CONFIDENCE_BASE = 0.55;
+const SIM_CONFIDENCE_AMPLITUDE = 0.3;
 
 function _simulateNN() {
   _simStep += 1;
-  const confidence = 0.55 + (Math.sin(_simStep * 0.3) * 0.3 + 0.3);
+  const confidence = Math.max(
+    0,
+    Math.min(1, SIM_CONFIDENCE_BASE + (Math.sin(_simStep * 0.3) * SIM_CONFIDENCE_AMPLITUDE)),
+  );
   const loss = Math.max(0.001, 0.08 - _simStep * 0.0002 + Math.random() * 0.01);
   const action = _simActions[_simStep % _simActions.length];
 
@@ -116,6 +121,7 @@ function _simulateNN() {
   state.nn.bg_running = true;
   state.nn.mode = 'OFFLINE';
   state.nn.active = true;
+  state.nn.available = true;
   state.nn.recent_outputs = [output, ...state.nn.recent_outputs].slice(0, 5);
   state.nn.updated_at = now();
 }
