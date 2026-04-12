@@ -237,6 +237,13 @@ def load_agent_capabilities() -> dict:
 
     raw_agents = data.get("agents", {}) if isinstance(data, dict) else {}
     normalized_agents: dict[str, dict] = {}
+    # Pass 1: keep canonical runnable IDs exactly as defined in capabilities.
+    for agent_id, info in raw_agents.items():
+        if not _agent_has_run_script(agent_id):
+            continue
+        normalized_agents[agent_id] = info if isinstance(info, dict) else {}
+    # Pass 2: backfill canonical IDs from legacy aliases only when missing.
+    # Multiple legacy aliases may map to one canonical ID (intentional dedupe).
     for agent_id, info in raw_agents.items():
         canonical_id = _LEGACY_AGENT_ID_MAP.get(agent_id, agent_id)
         if not _agent_has_run_script(canonical_id):
