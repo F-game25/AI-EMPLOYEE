@@ -112,6 +112,17 @@ export const useAppStore = create((set) => ({
   },
   setDoctorStatus: (d) => set({ doctorStatus: d }),
 
+  brainInsights: {
+    active: false,
+    learned_strategies: [],
+    task_patterns: [],
+    recent_improvements: [],
+    performance_metrics: {},
+    decisions: [],
+    updated_at: null,
+  },
+  setBrainInsights: (insights) => set({ brainInsights: insights }),
+
   // Error
   errorMessage: null,
   setError: (msg) => set({ errorMessage: msg, appState: 'error' }),
@@ -148,4 +159,25 @@ export const useAppStore = create((set) => ({
     executionLogs: [log, ...state.executionLogs].slice(0, MAX_EXECUTION_LOGS),
   })),
   setExecutionSnapshot: (logs) => set({ executionLogs: logs.slice(0, MAX_EXECUTION_LOGS) }),
+
+  workflowState: {
+    active_run: null,
+    runs: [],
+  },
+  setWorkflowSnapshot: (payload) => set({
+    workflowState: {
+      active_run: payload?.active_run ?? null,
+      runs: Array.isArray(payload?.runs) ? payload.runs : [],
+    },
+  }),
+  upsertWorkflowRun: (run) => set((state) => {
+    const prevRuns = state.workflowState?.runs || []
+    const nextRuns = [run, ...prevRuns.filter((r) => r.run_id !== run.run_id)].slice(0, 50)
+    return {
+      workflowState: {
+        active_run: run?.run_id || state.workflowState?.active_run || null,
+        runs: nextRuns,
+      },
+    }
+  }),
 }))

@@ -4,9 +4,10 @@ import TopBar from './dashboard/TopBar'
 import ChatPanel from './dashboard/ChatPanel'
 import SecondaryPanels from './dashboard/SecondaryPanels'
 import { useAppStore } from '../store/appStore'
-import PrimaryButton from './ui/PrimaryButton'
 import SecondaryButton from './ui/SecondaryButton'
 import TertiaryPanel from './ui/TertiaryPanel'
+import WorkflowTreePanel from './dashboard/WorkflowTreePanel'
+import BrainInsightsPanel from './dashboard/BrainInsightsPanel'
 
 const BASE = `http://${window.location.hostname}:3001`
 const PIPELINE_DEFAULTS = {
@@ -37,6 +38,8 @@ export default function Dashboard() {
   const systemStatus = useAppStore(s => s.systemStatus)
   const automationStatus = useAppStore(s => s.automationStatus)
   const setAutomationStatus = useAppStore(s => s.setAutomationStatus)
+  const setBrainInsights = useAppStore(s => s.setBrainInsights)
+  const setWorkflowSnapshot = useAppStore(s => s.setWorkflowSnapshot)
   // Real-time feeds from WebSocket
   const activityFeed = useAppStore(s => s.activityFeed)
   const executionLogs = useAppStore(s => s.executionLogs)
@@ -56,10 +59,17 @@ export default function Dashboard() {
       const dashData = await dashRes.json()
       if (modeData?.mode) setMode(modeData.mode)
       setProductMetrics(dashData || {})
+      if (dashData?.learning?.brain) setBrainInsights(dashData.learning.brain)
+      if (Array.isArray(dashData?.workflow_runs)) {
+        setWorkflowSnapshot({
+          active_run: dashData?.workflow_focus || null,
+          runs: dashData.workflow_runs,
+        })
+      }
     } catch {
       setAutomationStatus('Unable to refresh dashboard data.')
     }
-  }, [setAutomationStatus, setProductMetrics])
+  }, [setAutomationStatus, setProductMetrics, setBrainInsights, setWorkflowSnapshot])
 
   useEffect(() => {
     refreshDashboard()
@@ -203,7 +213,7 @@ export default function Dashboard() {
         </section>
 
           {/* Three info columns */}
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-3 min-h-0 flex-1">
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-h-0 flex-1">
 
             {/* System stats — single source of truth */}
             <article className="ds-card p-3 min-h-0 flex flex-col">
@@ -276,6 +286,9 @@ export default function Dashboard() {
                 )}
               </div>
             </article>
+
+            <WorkflowTreePanel />
+            <BrainInsightsPanel />
 
           </section>
         </div>
