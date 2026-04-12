@@ -269,8 +269,17 @@ class TestActionBusInjection:
         from actions.action_bus import ActionBus
 
         bus = ActionBus(mode_checker=lambda: False)  # never require approval
-        result = bus.emit("test_action", {"x": 1})
+        result = bus.emit("test_action", {"x": 1}, executor=lambda p: {"done": True})
         assert result["status"] == "executed"
+
+    def test_unregistered_action_without_executor_returns_unknown_action(self):
+        """No executor + unregistered action must not silently succeed."""
+        from actions.action_bus import ActionBus
+
+        bus = ActionBus(mode_checker=lambda: False)
+        result = bus.emit("nonexistent_action_xyz", {"x": 1})
+        assert result["status"] == "unknown_action"
+        assert "error" in result
 
     def test_injected_audit_func_is_called(self):
         from actions.action_bus import ActionBus
@@ -281,7 +290,7 @@ class TestActionBusInjection:
             audit_calls.append((actor, action_type, outcome))
 
         bus = ActionBus(mode_checker=lambda: False, audit_func=audit)
-        bus.emit("audit_test", {"k": "v"}, actor="tester")
+        bus.emit("audit_test", {"k": "v"}, actor="tester", executor=lambda p: None)
         assert len(audit_calls) == 1
         assert audit_calls[0][1] == "audit_test"
 
@@ -294,7 +303,7 @@ class TestActionBusInjection:
             audit_calls.append((actor, action_type, outcome))
 
         bus = ActionBus(mode_checker=lambda: True, audit_func=audit)
-        result = bus.emit("pending_action", {})
+        result = bus.emit("pending_action", {}, executor=lambda p: {"done": True})
         action_id = result["action_id"]
         bus.approve(action_id)
         outcomes = [c[2] for c in audit_calls]

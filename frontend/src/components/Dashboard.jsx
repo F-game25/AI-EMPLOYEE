@@ -45,7 +45,6 @@ export default function Dashboard() {
   const [overrideActionId, setOverrideActionId] = useState('')
   const [goal, setGoal] = useState('Run value generation cycle')
   const [running, setRunning] = useState(false)
-  const [activeAction, setActiveAction] = useState('')
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -88,7 +87,6 @@ export default function Dashboard() {
 
   const controlAutomation = async (action) => {
     setRunning(true)
-    setActiveAction(action)
     try {
       const res = await fetch(`${BASE}/api/automation/control`, {
         method: 'POST',
@@ -102,7 +100,6 @@ export default function Dashboard() {
       setAutomationStatus(`Automation ${action} failed.`)
     } finally {
       setRunning(false)
-      setActiveAction('')
     }
   }
 
@@ -110,7 +107,6 @@ export default function Dashboard() {
     const cfg = PIPELINE_DEFAULTS[kind]
     if (!cfg) return
     setRunning(true)
-    setActiveAction(`pipeline-${kind}`)
     try {
       const res = await fetch(`${BASE}${cfg.endpoint}`, {
         method: 'POST',
@@ -124,7 +120,6 @@ export default function Dashboard() {
       setAutomationStatus(`${kind} pipeline failed.`)
     } finally {
       setRunning(false)
-      setActiveAction('')
     }
   }
 
@@ -143,8 +138,6 @@ export default function Dashboard() {
     { label: 'Revenue', value: `$${(productMetrics?.revenue?.total_revenue ?? 0).toFixed(2)}` },
   ]), [productMetrics])
 
-  const isAutomationRunning = Boolean(productMetrics?.mode?.automation_running)
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -154,8 +147,12 @@ export default function Dashboard() {
     >
       <TopBar />
 
-      <div className="flex-1 overflow-hidden px-4 py-3 flex flex-col gap-3">
-        <section className="ds-card p-3">
+      {/* Three-panel row: LEFT main content | CENTRE chat | RIGHT secondary */}
+      <div className="flex-1 overflow-hidden flex">
+
+        {/* LEFT: Controls + metrics (flex column, scrollable) */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
+          <section className="ds-card p-3">
           <div className="flex flex-wrap items-center gap-2">
             <button className="tier-1-btn font-mono text-xs px-4 py-2" onClick={() => controlAutomation('start')} disabled={running}>
               START AUTOMATION
@@ -170,7 +167,7 @@ export default function Dashboard() {
             <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('lead')} disabled={running}>
               RUN LEAD PIPELINE
             </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('outreach')} disabled={running}>
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('opportunity')} disabled={running}>
               RUN OUTREACH PIPELINE
             </button>
 
@@ -178,7 +175,6 @@ export default function Dashboard() {
               <option value="MANUAL">MANUAL</option>
               <option value="AUTO">AUTO</option>
               <option value="BLACKLIGHT">BLACKLIGHT</option>
-              <option value="MONEYMODE">MONEYMODE</option>
             </select>
           </div>
 
@@ -191,27 +187,20 @@ export default function Dashboard() {
             />
             <div className="flex gap-2">
               <input
-                className="tier-3-surface font-mono text-xs px-3 py-2 outline-none bg-transparent"
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                placeholder="Automation goal"
+                className="tier-3-surface flex-1 font-mono text-xs px-3 py-2 outline-none bg-transparent"
+                value={overrideActionId}
+                onChange={(e) => setOverrideActionId(e.target.value)}
+                placeholder="Pending action ID for manual override"
               />
-              <div className="flex gap-2">
-                <input
-                  className="tier-3-surface flex-1 font-mono text-xs px-3 py-2 outline-none bg-transparent"
-                  value={overrideActionId}
-                  onChange={(e) => setOverrideActionId(e.target.value)}
-                  placeholder="Pending action ID for manual override"
-                />
-                <SecondaryButton onClick={() => controlAutomation('override')}>
-                  OVERRIDE
-                </SecondaryButton>
-              </div>
+              <SecondaryButton onClick={() => controlAutomation('override')}>
+                OVERRIDE
+              </SecondaryButton>
             </div>
-            <TertiaryPanel className="mt-2 p-2 font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
-              {automationStatus || 'No actions yet.'}
-            </TertiaryPanel>
-          </section>
+          </div>
+          <TertiaryPanel className="mt-2 p-2 font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
+            {automationStatus || 'No actions yet.'}
+          </TertiaryPanel>
+        </section>
 
           {/* Three info columns */}
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-3 min-h-0 flex-1">
