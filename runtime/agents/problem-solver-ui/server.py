@@ -7614,7 +7614,7 @@ function _switchTabBase(tab, btn) {
 function toast(msg, type='success') {
   const icons = {success:'✅', error:'❌', info:'ℹ️'};
   const el = document.getElementById('toast');
-  el.innerHTML = `<span style="font-size:1.1em">${icons[type]||'✅'}</span><span>${msg}</span>`;
+  el.innerHTML = `<span style="font-size:1.1em">${icons[type]||'✅'}</span><span>${escHtml(String(msg))}</span>`;
   el.className = '';
   el.classList.add(type, 'show');
   clearTimeout(el._t);
@@ -7916,7 +7916,7 @@ async function loadDashboard() {
   const mc = modeColors[d.mode] || 'var(--gold)';
   document.getElementById('header-sub').innerHTML =
     `${running}/${capacity} agents running` +
-    (d.mode ? ` <span style="background:${mc}22;color:${mc};border:1px solid ${mc}44;border-radius:8px;padding:1px 8px;font-size:.8em;font-weight:700;margin-left:4px">${d.mode.toUpperCase()}</span>` : '');
+    (d.mode ? ` <span style="background:${mc}22;color:${mc};border:1px solid ${mc}44;border-radius:8px;padding:1px 8px;font-size:.8em;font-weight:700;margin-left:4px">${escHtml(d.mode).toUpperCase()}</span>` : '');
 
   // Update system control hero
   const pct = total > 0 ? Math.round((running / total) * 100) : 0;
@@ -9479,7 +9479,7 @@ async function submitTask() {
     mode: _taskMode
   })});
   if (r.ok) {
-    resultEl.innerHTML = `<span style="color:var(--success)">✅ Task launched! ID: <code>${r.task_id||'?'}</code> | ${agents.length || 'auto'} agent${agents.length!==1?'s':''} | mode: ${_taskMode}</span>`;
+    resultEl.innerHTML = `<span style="color:var(--success)">✅ Task launched! ID: <code>${escHtml(String(r.task_id||'?'))}</code> | ${agents.length || 'auto'} agent${agents.length!==1?'s':''} | mode: ${escHtml(_taskMode)}</span>`;
     document.getElementById('task-input').value = '';
     _selectedAgentIds.clear();
     _autoSelectedIds.clear();
