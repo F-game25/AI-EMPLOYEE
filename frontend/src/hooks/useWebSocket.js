@@ -77,6 +77,9 @@ function connectSingleton() {
         case 'brain:insights':
           store.setBrainInsights(data)
           break
+        case 'brain:activity':
+          store.setBrainActivity(data)
+          break
         case 'workflow:snapshot':
           store.setWorkflowSnapshot(data)
           break
