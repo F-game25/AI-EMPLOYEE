@@ -78,6 +78,11 @@ def get_hybrid_mode():
     return _f()
 
 
+def get_brain_registry():
+    from core.brain_registry import brain as _brain
+    return _brain
+
+
 __all__ = [
     "get_changelog",
     "get_roi_tracker",
@@ -90,4 +95,5 @@ __all__ = [
     "get_brain",
     "get_intelligence",
     "get_hybrid_mode",
+    "get_brain_registry",
 ]
