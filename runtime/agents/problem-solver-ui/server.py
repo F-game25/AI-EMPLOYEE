@@ -517,15 +517,15 @@ AGENT_ALIASES = {
 }
 
 CAPS_ID_ALIASES = {
-  "task-orchestrator": ["orchestrator", "task-orchestrator"],
-  "lead-generator": ["lead-hunter", "lead-generator"],
-  "offer-agent": ["email-ninja", "offer-agent"],
-  "social-media-manager": ["social-guru", "social-poster", "social-media-manager"],
-  "web-researcher": ["intel-agent", "web-researcher"],
-  "ecom-agent": ["product-scout", "ecom-dashboard", "ecom-agent", "order-processor"],
-  "chatbot-builder": ["support-bot", "chatbot-builder"],
-  "creator-agency": ["creative-studio", "creator-agency"],
-  "recruiter": ["hr-manager", "recruiter"],
+  "task-orchestrator": ["task-orchestrator", "orchestrator"],
+  "lead-generator": ["lead-generator", "lead-hunter"],
+  "offer-agent": ["offer-agent", "email-ninja"],
+  "social-media-manager": ["social-media-manager", "social-guru", "social-poster"],
+  "web-researcher": ["web-researcher", "intel-agent"],
+  "ecom-agent": ["ecom-agent", "product-scout", "ecom-dashboard", "order-processor"],
+  "chatbot-builder": ["chatbot-builder", "support-bot"],
+  "creator-agency": ["creator-agency", "creative-studio"],
+  "recruiter": ["recruiter", "hr-manager"],
   "conversion-rate-optimizer": ["conversion-rate-optimizer"],
   "ad-campaign-wizard": ["ad-campaign-wizard"],
   "cold-outreach-assassin": ["cold-outreach-assassin"],
@@ -533,10 +533,10 @@ CAPS_ID_ALIASES = {
   "linkedin-growth-hacker": ["linkedin-growth-hacker"],
   "referral-rocket": ["referral-rocket"],
   "sales-closer-pro": ["sales-closer-pro"],
-  "financial-deepsearch": ["data-analyst", "financial-deepsearch"],
-  "mirofish-researcher": ["product-researcher", "mirofish-researcher"],
+  "financial-deepsearch": ["financial-deepsearch", "data-analyst"],
+  "mirofish-researcher": ["mirofish-researcher", "product-researcher"],
   "skills-manager": ["skills-manager"],
-  "arbitrage-bot": ["bot-dev", "arbitrage-bot"],
+  "arbitrage-bot": ["arbitrage-bot", "bot-dev"],
 }
 
 INFRA_AGENTS = {
