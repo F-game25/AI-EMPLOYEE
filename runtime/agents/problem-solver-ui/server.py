@@ -516,6 +516,29 @@ AGENT_ALIASES = {
   "lead-hunter": ["lead-hunter", "lead-generator", "lead-hunter-elite"],
 }
 
+CAPS_ID_ALIASES = {
+  "task-orchestrator": ["orchestrator", "task-orchestrator"],
+  "lead-generator": ["lead-hunter", "lead-generator"],
+  "offer-agent": ["email-ninja", "offer-agent"],
+  "social-media-manager": ["social-guru", "social-poster", "social-media-manager"],
+  "web-researcher": ["intel-agent", "web-researcher"],
+  "ecom-agent": ["product-scout", "ecom-dashboard", "ecom-agent", "order-processor"],
+  "chatbot-builder": ["support-bot", "chatbot-builder"],
+  "creator-agency": ["creative-studio", "creator-agency"],
+  "recruiter": ["hr-manager", "recruiter"],
+  "conversion-rate-optimizer": ["conversion-rate-optimizer"],
+  "ad-campaign-wizard": ["ad-campaign-wizard"],
+  "cold-outreach-assassin": ["cold-outreach-assassin"],
+  "partnership-matchmaker": ["partnership-matchmaker"],
+  "linkedin-growth-hacker": ["linkedin-growth-hacker"],
+  "referral-rocket": ["referral-rocket"],
+  "sales-closer-pro": ["sales-closer-pro"],
+  "financial-deepsearch": ["data-analyst", "financial-deepsearch"],
+  "mirofish-researcher": ["product-researcher", "mirofish-researcher"],
+  "skills-manager": ["skills-manager"],
+  "arbitrage-bot": ["bot-dev", "arbitrage-bot"],
+}
+
 INFRA_AGENTS = {
   "problem-solver-ui",
   "problem-solver",
@@ -18263,13 +18286,38 @@ def run_worker_bundle(bundle_id: str, _auth: None = Depends(require_auth)):
 
 
 def _load_agent_capabilities() -> dict:
-    for candidate in (AGENT_CAPS_FILE, _REPO_CAPS_FILE):
-        if candidate.exists():
-            try:
-                return json.loads(candidate.read_text())
-            except Exception:
-                pass
-    return {}
+  for candidate in (AGENT_CAPS_FILE, _REPO_CAPS_FILE):
+    if not candidate.exists():
+      continue
+    try:
+      data = json.loads(candidate.read_text())
+    except Exception:
+      continue
+
+    raw_agents = data.get("agents", {}) if isinstance(data, dict) else {}
+    normalized_agents: dict[str, dict] = {}
+    seen_ids: set[str] = set()
+    for mode_name in AGENTS_BY_MODE:
+      for agent_id in AGENTS_BY_MODE[mode_name]:
+        if agent_id in seen_ids:
+          continue
+        seen_ids.add(agent_id)
+        if not _resolve_agent_target(agent_id):
+          continue
+        candidates = CAPS_ID_ALIASES.get(agent_id, [agent_id]) + _agent_aliases(agent_id)
+        info = {}
+        for candidate_id in candidates:
+          candidate_info = raw_agents.get(candidate_id)
+          if isinstance(candidate_info, dict):
+            info = candidate_info
+            break
+        normalized_agents[agent_id] = info
+
+    if isinstance(data, dict):
+      data["agents"] = normalized_agents
+      return data
+    return {"agents": normalized_agents}
+  return {"agents": {}}
 
 
 def _load_task_plans() -> list:
@@ -18632,35 +18680,11 @@ def get_all_agents():
   agents_config = capabilities.get("agents", {})
   mode = _current_mode()
 
-  # Map dashboard agent IDs → capabilities file IDs
-  _CAPS_ID_MAP = {
-    "task-orchestrator": ["orchestrator", "task-orchestrator"],
-    "lead-generator": ["lead-hunter", "lead-generator"],
-    "offer-agent": ["email-ninja", "offer-agent"],
-    "social-media-manager": ["social-guru", "social-poster", "social-media-manager"],
-    "web-researcher": ["intel-agent", "web-researcher"],
-    "ecom-agent": ["product-scout", "ecom-dashboard", "ecom-agent", "order-processor"],
-    "chatbot-builder": ["support-bot", "chatbot-builder"],
-    "creator-agency": ["creative-studio", "creator-agency"],
-    "recruiter": ["hr-manager", "recruiter"],
-    "conversion-rate-optimizer": ["conversion-rate-optimizer"],
-    "ad-campaign-wizard": ["ad-campaign-wizard"],
-    "cold-outreach-assassin": ["cold-outreach-assassin"],
-    "partnership-matchmaker": ["partnership-matchmaker"],
-    "linkedin-growth-hacker": ["linkedin-growth-hacker"],
-    "referral-rocket": ["referral-rocket"],
-    "sales-closer-pro": ["sales-closer-pro"],
-    "financial-deepsearch": ["data-analyst", "financial-deepsearch"],
-    "mirofish-researcher": ["product-researcher", "mirofish-researcher"],
-    "skills-manager": ["skills-manager"],
-    "arbitrage-bot": ["bot-dev", "arbitrage-bot"],
-  }
-
   result = []
   for agent_id in _available_agent_ids(mode):
     canonical_ids = _agent_aliases(agent_id)
     # Try direct lookup, then _CAPS_ID_MAP aliases, then existing AGENT_ALIASES
-    caps_ids_to_try = _CAPS_ID_MAP.get(agent_id, [agent_id]) + canonical_ids
+    caps_ids_to_try = CAPS_ID_ALIASES.get(agent_id, [agent_id]) + canonical_ids
     info = None
     for caps_id in caps_ids_to_try:
       if caps_id in agents_config:
