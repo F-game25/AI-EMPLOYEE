@@ -54,6 +54,7 @@ const MAX_DECISION_LOG_ENTRIES = 30;
 const BASE_PIPELINE_ROI = 250;
 const PIPELINE_ROI_SWING = 400;
 const REVENUE_CONVERSION_RATE = 0.45;
+const CANCELLATION_ERROR_PREFIX = 'cancelled:';
 
 const runtimeState = {
   automationRunning: false,
@@ -193,6 +194,27 @@ function updateWorkflowNode(taskId, updater) {
   broadcaster.broadcast('workflow:update', run);
 }
 
+function markWorkflowsStopped() {
+  runtimeState.workflowRuns.forEach((run) => {
+    if (!['running', 'pending'].includes(run.status)) return;
+    run.nodes.forEach((node) => {
+      if (node.status === 'pending' || node.status === 'active') {
+        node.status = 'failed';
+        node.progress_percent = 100;
+        node.completed_at = new Date().toISOString();
+        node.result = {
+          status: 'cancelled',
+          summary: 'Cancelled by STOP ALL command',
+        };
+      }
+    });
+    run.updated_at = new Date().toISOString();
+    recalcWorkflowProgress(run);
+    run.status = 'stopped';
+    broadcaster.broadcast('workflow:update', run);
+  });
+}
+
 function queueWorkflowStep({
   runId,
   message,
@@ -222,6 +244,10 @@ function queueWorkflowStep({
     retries,
     maxRetries,
   };
+  const seq = runtimeState.workflowSequencers[runId];
+  if (seq) {
+    seq.stepTaskIds[stepIndex] = queued.taskId;
+  }
   addActivity(`[BRAIN] Strategy ${queued.brain?.strategy || 'default'} selected for ${queued.taskId}`, 'task');
   return queued;
 }
@@ -231,6 +257,7 @@ function queueNextWorkflowStep(completedTaskId) {
   if (!meta) return;
   const seq = runtimeState.workflowSequencers[meta.runId];
   if (!seq || seq.stopped) return;
+  if (seq.stepTaskIds[meta.stepIndex] !== completedTaskId) return;
   seq.completedSteps.add(meta.stepIndex);
   const nextIndex = meta.stepIndex + 1;
   const nextMessage = seq.messages[nextIndex];
@@ -248,8 +275,10 @@ function queueNextWorkflowStep(completedTaskId) {
 function retryWorkflowStep(failedTaskId) {
   const meta = runtimeState.workflowTaskMeta[failedTaskId];
   if (!meta) return false;
+  if (meta.error?.startsWith(CANCELLATION_ERROR_PREFIX)) return false;
   const seq = runtimeState.workflowSequencers[meta.runId];
   if (!seq || seq.stopped) return false;
+  if (seq.stepTaskIds[meta.stepIndex] !== failedTaskId) return false;
   if (meta.retries >= meta.maxRetries) return false;
   const retryNumber = meta.retries + 1;
   addActivity(`[RETRY] ${failedTaskId} retry ${retryNumber}/${meta.maxRetries}`, 'task');
@@ -533,6 +562,7 @@ app.post('/api/automation/control', (req, res) => {
       messages: taskMessages,
       queuedSteps: new Set([0]),
       completedSteps: new Set(),
+      stepTaskIds: {},
       stopped: false,
     };
     queueWorkflowStep({
@@ -546,11 +576,12 @@ app.post('/api/automation/control', (req, res) => {
   }
 
   if (action === 'stop') {
-    const stopResult = stopAllAgents('automation_stop');
-    runtimeState.automationRunning = false;
     Object.values(runtimeState.workflowSequencers).forEach((seq) => {
       seq.stopped = true;
     });
+    runtimeState.automationRunning = false;
+    const stopResult = stopAllAgents('automation_stop');
+    markWorkflowsStopped();
     addActivity('[AUTOMATION] stopped', 'automation');
     return res.json({
       status: 'stopped',
@@ -751,6 +782,9 @@ onAgentEvent('task:failed', ({ agent, task }) => {
     notes: task.error || task.message || 'Task failed',
   });
   addActivity(`[TASK] ${task.id} failed on ${agent.name}: ${task.error || 'execution error'}`, 'task');
+  if (runtimeState.workflowTaskMeta[task.id]) {
+    runtimeState.workflowTaskMeta[task.id].error = task.error || null;
+  }
   updateWorkflowNode(task.id, (node, run) => {
     node.status = 'failed';
     node.progress_percent = 100;

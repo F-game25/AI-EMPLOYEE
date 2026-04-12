@@ -7,8 +7,8 @@ import HeartbeatPanel from './HeartbeatPanel'
 
 const TABS = [
   { id: 'systems', label: 'Systems', hint: 'Neural brain, memory, and diagnostics' },
-  { id: 'power', label: 'Agents', hint: 'Runtime agent roster and status' },
-  { id: 'heartbeat', label: 'Activity Log', hint: 'Heartbeat stream and runtime events' },
+  { id: 'agents', label: 'Agents', hint: 'Runtime agent roster and status' },
+  { id: 'activity', label: 'Activity Log', hint: 'Heartbeat stream and runtime events' },
 ]
 
 export default function SecondaryPanels() {
@@ -54,13 +54,13 @@ export default function SecondaryPanels() {
           </div>
         )}
 
-        {activeTab === 'power' && (
+        {activeTab === 'agents' && (
           <div className="h-full overflow-hidden">
             <AgentsPanel />
           </div>
         )}
 
-        {activeTab === 'heartbeat' && (
+        {activeTab === 'activity' && (
           <div className="h-full overflow-hidden">
             <HeartbeatPanel />
           </div>
