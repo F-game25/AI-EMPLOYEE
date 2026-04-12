@@ -18304,7 +18304,10 @@ def _load_agent_capabilities() -> dict:
         seen_ids.add(agent_id)
         if not _resolve_agent_target(agent_id):
           continue
-        candidates = CAPS_ID_ALIASES.get(agent_id, [agent_id]) + _agent_aliases(agent_id)
+        candidates = list(CAPS_ID_ALIASES.get(agent_id, [agent_id]))
+        for alias_id in _agent_aliases(agent_id):
+          if alias_id not in candidates:
+            candidates.append(alias_id)
         info = {}
         for candidate_id in candidates:
           candidate_info = raw_agents.get(candidate_id)

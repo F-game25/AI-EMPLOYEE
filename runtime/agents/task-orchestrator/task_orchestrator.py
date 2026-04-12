@@ -248,6 +248,7 @@ def load_agent_capabilities() -> dict:
         canonical_id = _LEGACY_AGENT_ID_MAP.get(agent_id, agent_id)
         if not _agent_has_run_script(canonical_id):
             continue
+        # Preserve canonical metadata from pass 1; use aliases as fallback only.
         if canonical_id in normalized_agents:
             continue
         normalized_agents[canonical_id] = info if isinstance(info, dict) else {}
