@@ -18,6 +18,7 @@ for _p in [
     str(_RUNTIME_DIR / "core"),
     str(_RUNTIME_DIR / "actions"),
     str(_RUNTIME_DIR / "memory"),
+    str(_RUNTIME_DIR / "brain"),
 ]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -158,6 +159,67 @@ def run_goal(body: RunGoalRequest):
     except Exception:
         _log.exception("run_goal failed")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+def _brain_status_payload() -> dict:
+    try:
+        import server as _server  # type: ignore
+
+        if hasattr(_server, "_load_brain"):
+            _brain = _server._load_brain()
+            if _brain is None:
+                if hasattr(_server, "_brain_fallback_status"):
+                    payload = dict(_server._brain_fallback_status())
+                else:
+                    payload = {"available": False}
+            else:
+                payload = dict(_brain.stats())
+                cfg = getattr(_brain, "cfg", {})
+                payload.update(
+                    {
+                        "available": True,
+                        "cfg_input_size": cfg.get("model", {}).get("input_size"),
+                        "cfg_output_size": cfg.get("model", {}).get("output_size"),
+                        "cfg_hidden": str(cfg.get("model", {}).get("hidden_sizes", "")),
+                        "cfg_batch_size": cfg.get("training", {}).get("batch_size"),
+                        "cfg_update_freq": cfg.get("training", {}).get("update_frequency"),
+                    }
+                )
+            from core.brain_registry import brain as _brain_registry
+
+            payload["status"] = "active" if payload.get("available") else "unavailable"
+            payload["memory_size"] = _brain_registry.memory_size()
+            payload["last_updated"] = _brain_registry.last_updated()
+            payload["recent_learning_events"] = _brain_registry.insights().get("recent_learning_events", [])
+            return payload
+    except Exception:
+        pass
+
+    from core.brain_registry import brain as _brain_registry
+
+    return _brain_registry.status()
+
+
+@router.get("/brain/status")
+def brain_status():
+    """Return global brain status for UI visibility."""
+    try:
+        return JSONResponse(_brain_status_payload())
+    except Exception:
+        _log.exception("brain_status failed")
+        return JSONResponse({"status": "unavailable", "available": False, "memory_size": 0, "error": "Unable to load brain status"})
+
+
+@router.get("/brain/insights")
+def brain_insights():
+    """Return brain learning/decision insights."""
+    try:
+        from core.brain_registry import brain as _brain_registry
+
+        return JSONResponse(_brain_registry.insights())
+    except Exception:
+        _log.exception("brain_insights failed")
+        return JSONResponse({"active": False, "recent_learning_events": [], "performance_metrics": {}, "error": "Unable to load brain insights"})
 
 
 @router.get("/tasks/recent")

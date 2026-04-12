@@ -7,6 +7,7 @@ import threading
 from typing import Callable
 
 from analytics.structured_logger import StructuredLogger, get_structured_logger
+from core.brain_registry import brain
 from core.contracts import TaskGraph, TaskNode
 from core.executor import Executor
 from core.planner import Planner
@@ -39,6 +40,7 @@ class AgentController:
             action_emitter=self._emit_action,
         )
         self._validator = validator or Validator(logger=self._logger)
+        self.brain = brain
 
     @property
     def planner(self) -> Planner:
@@ -53,7 +55,23 @@ class AgentController:
         return self._validator
 
     def build_task_graph(self, *, goal: str, run_id: str) -> TaskGraph:
+        goal_type = self._planner.classify_goal(goal)
+        brain_strategy = self.brain.get_strategy(goal=goal, goal_type=goal_type)
         best = self._best_strategies(goal)
+        best = [brain_strategy, *best]
+        self._logger.log_event(
+            component="controller",
+            action="brain_used",
+            result="strategy_selected",
+            latency_ms=0.0,
+            meta={
+                "run_id": run_id,
+                "goal_type": goal_type,
+                "skill": brain_strategy.get("agent", "problem-solver"),
+                "bucket": brain_strategy.get("brain", {}).get("bucket", 7),
+                "source": brain_strategy.get("brain", {}).get("source", "fallback"),
+            },
+        )
         return self._planner.plan(goal=goal, run_id=run_id, best_strategies=best)
 
     def run_goal(
@@ -147,6 +165,20 @@ class AgentController:
                     "error": task.error,
                 },
                 notes=task.error or "ok",
+            )
+            learning = self.brain.learn_from_task(goal=goal, task=task)
+            self._logger.log_event(
+                component="controller",
+                action="brain_used",
+                result="feedback_recorded",
+                latency_ms=0.0,
+                meta={
+                    "task_id": task.task_id,
+                    "skill": task.skill,
+                    "status": task.status,
+                    "learned": learning.get("learned", False),
+                    "reward": learning.get("reward", 0.0),
+                },
             )
         except Exception as exc:
             self._logger.log_event(

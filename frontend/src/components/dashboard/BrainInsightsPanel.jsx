@@ -1,40 +1,57 @@
+import { useEffect, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import TertiaryPanel from '../ui/TertiaryPanel'
+
+const API_BASE = `http://${window.location.hostname}:3001`
 
 function asPercent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`
 }
 
 export default function BrainInsightsPanel() {
-  const insights = useAppStore((s) => s.brainInsights)
-  const brainStatus = useAppStore((s) => s.brainStatus)
-  const brainActivity = useAppStore((s) => s.brainActivity)
+  const storeInsights = useAppStore((s) => s.brainInsights)
+  const [insights, setInsights] = useState(storeInsights)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadInsights = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/brain/insights`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        if (cancelled) return
+        setInsights(data || {})
+        setError('')
+      } catch (e) {
+        if (cancelled) return
+        setInsights(storeInsights || {})
+        setError('Brain insights unavailable')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    loadInsights()
+    const timer = setInterval(loadInsights, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [storeInsights])
+
   const metrics = insights?.performance_metrics || {}
   const strategies = insights?.learned_strategies || []
   const improvements = insights?.recent_improvements || []
-  const activityItems = brainActivity?.items || []
-  const activeState = (brainStatus?.status || '').toLowerCase() === 'active' || brainStatus?.active
+  const events = insights?.recent_learning_events || []
 
   return (
     <article className="ds-card p-3 min-h-0 flex flex-col">
       <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>BRAIN INSIGHTS</h2>
-      <div className="grid grid-cols-3 gap-2 mb-2">
-        <TertiaryPanel className="p-2 font-mono text-[10px]">
-          <div style={{ color: 'var(--text-muted)' }}>STATUS</div>
-          <div style={{ color: activeState ? 'var(--success)' : 'var(--error)' }}>
-            {activeState ? 'ACTIVE' : 'INACTIVE'}
-          </div>
-        </TertiaryPanel>
-        <TertiaryPanel className="p-2 font-mono text-[10px]">
-          <div style={{ color: 'var(--text-muted)' }}>MEMORY SIZE</div>
-          <div style={{ color: 'var(--gold)' }}>{(brainStatus?.memory_size || 0).toLocaleString()}</div>
-        </TertiaryPanel>
-        <TertiaryPanel className="p-2 font-mono text-[10px]">
-          <div style={{ color: 'var(--text-muted)' }}>LAST ACTIVITY</div>
-          <div style={{ color: 'var(--text-secondary)' }}>
-            {brainStatus?.last_update ? new Date(brainStatus.last_update).toLocaleTimeString() : '—'}
-          </div>
-        </TertiaryPanel>
+      <div className="font-mono text-[10px] mb-2" style={{ color: error ? 'var(--warning)' : 'var(--text-muted)' }}>
+        {loading ? 'Loading brain insights…' : (error || `Brain ${insights?.active ? 'active' : 'unavailable'}`)}
       </div>
       <div className="grid grid-cols-2 gap-2 mb-2">
         <TertiaryPanel className="p-2 font-mono text-[10px]">
@@ -74,16 +91,17 @@ export default function BrainInsightsPanel() {
           </TertiaryPanel>
         ))}
       </div>
+
       <div className="font-mono text-[10px] mt-2 mb-1" style={{ color: 'var(--text-muted)' }}>
-        BRAIN ACTIVITY FEED
+        RECENT LEARNING EVENTS
       </div>
-      <div className="space-y-1 overflow-y-auto" style={{ maxHeight: '88px' }}>
-        {activityItems.length === 0 ? (
-          <div className="font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>No activity yet.</div>
-        ) : activityItems.slice(0, 4).map((item, index) => (
-          <TertiaryPanel key={item.id || `${item.task_id || 'task'}-${item.ts || 'ts'}-${index}`} className="p-2 font-mono text-[10px]">
-            <div style={{ color: 'var(--text-secondary)' }}>{item.type} • {item.strategy || item.intent || 'general'}</div>
-            <div style={{ color: 'var(--text-muted)' }}>{item.detail || 'Brain activity update'}</div>
+      <div className="space-y-1 overflow-y-auto" style={{ maxHeight: '80px' }}>
+        {events.length === 0 ? (
+          <div className="font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>No learning events yet.</div>
+        ) : events.slice(0, 3).map((event, index) => (
+          <TertiaryPanel key={`${event.ts || 'ts'}-${event.event || 'event'}-${index}`} className="p-2 font-mono text-[10px]">
+            <div style={{ color: 'var(--text-secondary)' }}>{(event.event || 'update').replaceAll('_', ' ')}</div>
+            <div style={{ color: 'var(--text-muted)' }}>{event.skill || event.goal_type || 'brain'}</div>
           </TertiaryPanel>
         ))}
       </div>

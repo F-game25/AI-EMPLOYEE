@@ -33,8 +33,10 @@ const state = {
     device: 'cpu',
     total_actions: 8,
     experiences: 0,
+    memory_size: 0,
     bg_running: false,
     recent_outputs: [],
+    recent_learning_events: [],
     updated_at: null,
   },
   memory: {
@@ -194,11 +196,15 @@ async function syncNNFromPython() {
       state.nn.learn_step = data.learn_step || 0;
       state.nn.buffer_size = data.buffer_size || 0;
       state.nn.max_buffer_size = data.replay_buffer_size || data.max_buffer_size || 10000;
-      state.nn.experiences = data.experiences || 0;
+      state.nn.experiences = data.experiences || data.experience_count || 0;
       state.nn.last_loss = data.last_loss !== undefined ? data.last_loss : null;
       state.nn.confidence = data.avg_reward || 0;
       state.nn.device = data.device || 'cpu';
       state.nn.bg_running = data.bg_running || false;
+      state.nn.memory_size = data.memory_size || 0;
+      state.nn.recent_learning_events = Array.isArray(data.recent_learning_events)
+        ? data.recent_learning_events.slice(0, 10)
+        : [];
       state.nn.updated_at = now();
       return true;
     }
