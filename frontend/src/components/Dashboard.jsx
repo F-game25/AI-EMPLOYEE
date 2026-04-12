@@ -153,6 +153,8 @@ export default function Dashboard() {
     { label: 'Value Generated', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(2)}` },
     { label: 'Revenue', value: `$${(productMetrics?.revenue?.total_revenue ?? 0).toFixed(2)}` },
   ]), [productMetrics])
+  // `running` is request-in-flight; `automationActive` is backend-reported execution state.
+  const automationActive = Boolean(productMetrics?.mode?.automation_running)
 
   return (
     <motion.div
@@ -170,11 +172,11 @@ export default function Dashboard() {
         <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3 dashboard-left">
           <section className="ds-card p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <button className="tier-1-btn font-mono text-xs px-4 py-2" onClick={() => controlAutomation('start')} disabled={running} title="Start full automation workflow">
+            <button className="tier-1-btn font-mono text-xs px-4 py-2" onClick={() => controlAutomation('start')} disabled={running || automationActive} title="Start full automation workflow">
               START AUTOMATION
             </button>
 
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => controlAutomation('stop')} disabled={running} title="Stop all agent execution and clear queued tasks">
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => controlAutomation('stop')} disabled={running || !automationActive} title="Stop all agent execution and clear queued tasks">
               STOP ALL
             </button>
             <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('content')} disabled={running} title="Run content generation pipeline">

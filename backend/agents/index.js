@@ -115,6 +115,10 @@ function _setState(agent, nextState) {
   }
 }
 
+function createCancellationError(reason) {
+  return `cancelled:${reason}`;
+}
+
 function _activateAgent(agent) {
   if (agent.state === 'idle') {
     _setState(agent, 'running');
@@ -273,7 +277,7 @@ function getMode() {
 function activateAgents(count) {
   const maxActive = _modeMaxActive();
   const target = typeof count === 'number'
-    ? Math.max(0, Math.min(count, maxActive))
+    ? Math.max(1, Math.min(count, maxActive))
     : Math.max(1, Math.min(3, maxActive));
   desiredActiveAgents = target;
   _rebalance();
@@ -293,7 +297,7 @@ function stopAllAgents(reason = 'manual_stop') {
         agent: _snapshot(agent),
         task: {
           ...agent.currentTask,
-          error: `cancelled:${reason}`,
+          error: createCancellationError(reason),
         },
         finishedAt: new Date().toISOString(),
       });
@@ -302,7 +306,8 @@ function stopAllAgents(reason = 'manual_stop') {
     agent.taskQueue = [];
     agent.currentTask = null;
     agent.location = 'idle';
-    _deactivateAgent(agent);
+    _setState(agent, 'idle');
+    agent.health = 'offline';
   }
   desiredActiveAgents = 0;
   lastRobotSignal = {
