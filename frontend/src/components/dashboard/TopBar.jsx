@@ -27,9 +27,18 @@ export default function TopBar() {
         <span className="font-mono text-xs tier-3-surface px-2 py-1">
           MODE: {systemStatus?.mode || 'MANUAL'}
         </span>
+        <span className="font-mono text-xs tier-3-surface px-2 py-1">
+          ROBOT: {systemStatus?.active_robot || 'none'}
+        </span>
+        <span className="font-mono text-xs tier-3-surface px-2 py-1">
+          LOCATION: {systemStatus?.robot_location || 'idle'}
+        </span>
       </div>
 
       <div className="flex items-center gap-2">
+        <span className="font-mono text-xs tier-3-surface px-2 py-1 max-w-md truncate" title={systemStatus?.thinking_mode || ''}>
+          THINKING: {systemStatus?.thinking_mode || 'Awaiting workload'}
+        </span>
         <span className="font-mono text-xs tier-3-surface px-2 py-1">
           RUNNING {systemStatus.running_agents || 0}/{systemStatus.total_agents || 0}
         </span>
@@ -43,4 +52,3 @@ export default function TopBar() {
     </header>
   )
 }
-
