@@ -1767,8 +1767,8 @@ INDEX_HTML = r"""<!doctype html>
       background:linear-gradient(90deg,transparent,var(--gold),transparent);
       filter:blur(1.5px);box-shadow:0 0 10px var(--gold);
     }
-    /* Power group special styling */
-    .nav-group-btn.power-group{
+    /* Labs group special styling */
+    .nav-group-btn.labs-group{
       color:var(--gold);border:1px solid rgba(212,175,55,.3)!important;
       border-bottom-color:transparent!important;
       text-shadow:0 0 12px rgba(212,175,55,.5);
@@ -1776,8 +1776,8 @@ INDEX_HTML = r"""<!doctype html>
       margin:5px 4px;border-radius:6px;padding:9px 14px 7px;
       background:rgba(212,175,55,.05);
     }
-    .nav-group-btn.power-group:hover{background:rgba(212,175,55,.1)!important;box-shadow:0 0 20px rgba(212,175,55,.3)!important}
-    .nav-group-btn.power-group.active{
+    .nav-group-btn.labs-group:hover{background:rgba(212,175,55,.1)!important;box-shadow:0 0 20px rgba(212,175,55,.3)!important}
+    .nav-group-btn.labs-group.active{
       background:rgba(212,175,55,.12)!important;border-color:rgba(212,175,55,.6)!important;
       box-shadow:0 0 20px rgba(212,175,55,.35),inset 0 0 20px rgba(212,175,55,.05)!important;
     }
@@ -3701,78 +3701,74 @@ INDEX_HTML = r"""<!doctype html>
   <button class="nav-scroll-btn left hidden" id="nav-scroll-left" style="display:none"></button>
   <!-- Primary group nav -->
   <nav id="main-nav">
-    <button class="nav-group-btn active" data-group="overview" onclick="switchGroup('overview',this)">◈ Overview</button>
-    <button class="nav-group-btn" data-group="intel" id="nav-btn-chat-group" onclick="switchGroup('intel',this)">◈ Intel <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn active" data-group="overview" onclick="switchGroup('overview',this)">◈ Command Center</button>
+    <button class="nav-group-btn" data-group="intelligence" id="nav-btn-chat-group" onclick="switchGroup('intelligence',this)">◈ Intelligence <span class="nav-arrow">▾</span></button>
     <button class="nav-group-btn" data-group="operations" onclick="switchGroup('operations',this)">◈ Operations <span class="nav-arrow">▾</span></button>
-    <button class="nav-group-btn" data-group="forces" onclick="switchGroup('forces',this)">◈ Forces <span class="nav-arrow">▾</span></button>
-    <button class="nav-group-btn" data-group="analytics" onclick="switchGroup('analytics',this)">◈ Analytics <span class="nav-arrow">▾</span></button>
-    <button class="nav-group-btn" data-group="library" onclick="switchGroup('library',this)">◈ Library <span class="nav-arrow">▾</span></button>
-    <button class="nav-group-btn" data-group="systems" onclick="switchGroup('systems',this)">◈ Systems <span class="nav-arrow">▾</span></button>
-    <button class="nav-group-btn power-group" data-group="power" onclick="switchGroup('power',this)">⚡ Power <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn" data-group="workforce" onclick="switchGroup('workforce',this)">◈ Workforce <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn" data-group="growth" onclick="switchGroup('growth',this)">◈ Growth &amp; Revenue <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn" data-group="governance" onclick="switchGroup('governance',this)">◈ Governance &amp; System <span class="nav-arrow">▾</span></button>
+    <button class="nav-group-btn labs-group" data-group="labs" onclick="switchGroup('labs',this)">🧪 Labs <span class="nav-arrow">▾</span></button>
   </nav>
   <button class="nav-scroll-btn right hidden" id="nav-scroll-right" style="display:none"></button>
 </div>
 <!-- Sub-navigation rows (one per group) -->
 <div class="sub-nav active" id="subnav-overview">
-  <button class="active" onclick="switchTab('dashboard',this)">◈ Overview</button>
+  <button class="active" onclick="switchTab('dashboard',this)">◈ Dashboard</button>
 </div>
-<div class="sub-nav" id="subnav-intel">
+<div class="sub-nav" id="subnav-intelligence">
   <button onclick="switchTab('chat',this)" id="nav-btn-chat">💬 Chat</button>
   <button onclick="switchTab('history',this)">🕐 History</button>
+  <button onclick="switchTab('briefing',this)">📰 Briefing</button>
+  <button onclick="switchTab('meetings',this)">📅 Meetings</button>
+  <button onclick="switchTab('competitors',this)">🔍 Competitors</button>
 </div>
 <div class="sub-nav" id="subnav-operations">
   <button onclick="switchTab('tasks',this)">🚀 Tasks</button>
-  <button onclick="switchTab('swarm',this)">🐝 Swarm</button>
-  <button onclick="switchTab('live-office',this)">🏢 Live Office</button>
   <button onclick="switchTab('scheduler',this)">📅 Scheduler</button>
+  <button onclick="switchTab('workflows',this)">⚙️ Workflows</button>
+  <button onclick="switchTab('templates',this)">📋 Templates</button>
+  <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
 </div>
-<div class="sub-nav" id="subnav-forces">
+<div class="sub-nav" id="subnav-workforce">
+  <button onclick="switchTab('swarm',this)">🐝 Swarm</button>
   <button onclick="switchTab('workers',this)">👷 Agents</button>
+  <button onclick="switchTab('live-office',this)">🏢 Live Office</button>
   <button onclick="switchTab('skills',this)">🛠️ Skills</button>
   <button onclick="switchTab('improvements',this)">💡 Improvements</button>
   <button onclick="switchTab('commands',this)">📜 Commands</button>
+  <button onclick="switchTab('org',this)">🏢 Org Chart</button>
+  <button onclick="switchTab('team',this)">👥 Team</button>
 </div>
-<div class="sub-nav" id="subnav-analytics">
-  <button onclick="switchTab('metrics',this)">📈 ROI & Metrics</button>
+<div class="sub-nav" id="subnav-growth">
+  <button onclick="switchTab('crm',this)">🎯 CRM</button>
+  <button onclick="switchTab('email-mkt',this)">📧 Email</button>
+  <button onclick="switchTab('social',this)">📱 Social</button>
+  <button onclick="switchTab('content-calendar',this)">📅 Content Cal</button>
+  <button onclick="switchTab('metrics',this)">📈 ROI &amp; Metrics</button>
   <button onclick="switchTab('budget',this)">💰 Budget</button>
+  <button onclick="switchTab('invoicing',this)">💳 Invoicing</button>
+  <button onclick="switchTab('financial',this)">💰 Financial</button>
+  <button onclick="switchTab('analytics-bi',this)">📊 Analytics</button>
 </div>
-<div class="sub-nav" id="subnav-library">
-  <button onclick="switchTab('templates',this)">📋 Templates</button>
-  <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
-  <button onclick="switchTab('memory',this)">🧠 Memory</button>
-</div>
-<div class="sub-nav" id="subnav-systems">
+<div class="sub-nav" id="subnav-governance">
   <button onclick="switchTab('guardrails',this)" id="nav-btn-guardrails">🔒 Guardrails <span id="guardrail-pending-badge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:1px 6px;font-size:.7em;font-weight:700;margin-left:3px;animation:blink 1.5s infinite"></span></button>
+  <button onclick="switchTab('memory',this)">🧠 Memory</button>
   <button onclick="switchTab('integrations',this)">🔌 Integrations</button>
   <button onclick="switchTab('options',this)">⚙️ Options</button>
-  <button onclick="switchTab('org',this)">🏢 Org Chart</button>
   <button onclick="switchTab('goals',this)">🎯 Goals</button>
   <button onclick="switchTab('tickets',this)">🎫 Tickets</button>
   <button onclick="switchTab('boardroom',this)">🛡️ Boardroom</button>
   <button onclick="switchTab('companies',this)">🏗️ Companies</button>
+  <button onclick="switchTab('export',this)">📤 Export</button>
 </div>
-<div class="sub-nav" id="subnav-power">
+<div class="sub-nav" id="subnav-labs">
   <button onclick="switchTab('blacklight',this)" id="nav-blacklight-btn">⚡ BLACKLIGHT</button>
   <button onclick="switchTab('ascend',this)" id="nav-ascend-btn">🔥 ASCEND FORGE</button>
   <button onclick="switchTab('neural-brain',this)" id="nav-neural-brain-btn">🧠 Neural Brain</button>
-  <button onclick="switchTab('artifacts',this)">📦 Outputs</button>
-  <button onclick="switchTab('crm',this)">🎯 CRM</button>
-  <button onclick="switchTab('email-mkt',this)">📧 Email Mkt</button>
-  <button onclick="switchTab('meetings',this)">📅 Meetings</button>
-  <button onclick="switchTab('social',this)">📱 Social</button>
-  <button onclick="switchTab('briefing',this)">📰 Briefing</button>
-  <button onclick="switchTab('invoicing',this)">💳 Invoicing</button>
-  <button onclick="switchTab('analytics-bi',this)">📊 Analytics</button>
-  <button onclick="switchTab('workflows',this)">⚙️ Workflows</button>
-  <button onclick="switchTab('team',this)">👥 Team</button>
-  <button onclick="switchTab('support-desk',this)">🎫 Support</button>
-  <button onclick="switchTab('website-builder',this)">🌐 Website</button>
-  <button onclick="switchTab('competitors',this)">🔍 Competitors</button>
-  <button onclick="switchTab('brand',this)">🎨 Brand</button>
   <button onclick="switchTab('health',this)">🏥 Health</button>
-  <button onclick="switchTab('export',this)">📤 Export</button>
-  <button onclick="switchTab('content-calendar',this)">📅 Content Cal</button>
-  <button onclick="switchTab('financial',this)">💰 Financial</button>
+  <button onclick="switchTab('brand',this)">🎨 Brand</button>
+  <button onclick="switchTab('website-builder',this)">🌐 Website</button>
+  <button onclick="switchTab('support-desk',this)">🎫 Support</button>
 </div>
 
 <main>
@@ -6200,20 +6196,30 @@ INDEX_HTML = r"""<!doctype html>
 // ── Nav scroll arrows ──
 /* ── Group ↔ Tab navigation ── */
 const _TAB_TO_GROUP = {
+  // Command Center
   dashboard:'overview',
-  chat:'intel', history:'intel',
-  tasks:'operations', swarm:'operations', 'live-office':'operations', scheduler:'operations',
-  workers:'forces', skills:'forces', improvements:'forces', commands:'forces',
-  metrics:'analytics', budget:'analytics', roi:'analytics',
-  templates:'library', artifacts:'library', memory:'library',
-  guardrails:'systems', integrations:'systems', options:'systems', org:'systems',
-  goals:'systems', tickets:'systems', boardroom:'systems', companies:'systems',
-  blacklight:'power', ascend:'power',
-  crm:'power', 'email-mkt':'power', 'email-marketing':'power', meetings:'power',
-  social:'power', briefing:'power', invoicing:'power', financial:'power',
-  'analytics-bi':'power', workflows:'power', team:'power', 'support-desk':'power',
-  'website-builder':'power', competitors:'power', brand:'power', health:'power',
-  export:'power', 'content-calendar':'power'
+  // Intelligence
+  chat:'intelligence', history:'intelligence', briefing:'intelligence',
+  meetings:'intelligence', competitors:'intelligence',
+  // Operations
+  tasks:'operations', scheduler:'operations', workflows:'operations',
+  templates:'operations', artifacts:'operations',
+  // Workforce
+  swarm:'workforce', workers:'workforce', 'live-office':'workforce',
+  skills:'workforce', improvements:'workforce', commands:'workforce',
+  org:'workforce', team:'workforce',
+  // Growth & Revenue
+  crm:'growth', 'email-mkt':'growth', 'email-marketing':'growth',
+  social:'growth', 'content-calendar':'growth', invoicing:'growth',
+  financial:'growth', metrics:'growth', budget:'growth', roi:'growth',
+  'analytics-bi':'growth',
+  // Governance & System
+  guardrails:'governance', memory:'governance', integrations:'governance',
+  options:'governance', goals:'governance', tickets:'governance',
+  boardroom:'governance', companies:'governance', export:'governance',
+  // Labs
+  blacklight:'labs', ascend:'labs', 'neural-brain':'labs',
+  health:'labs', brand:'labs', 'website-builder':'labs', 'support-desk':'labs',
 };
 
 function switchGroup(group, btn) {
