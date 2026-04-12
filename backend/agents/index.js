@@ -206,11 +206,26 @@ function _tick() {
         location: agent.location,
       });
       agent.health = 'healthy';
-      events.emit('task:completed', {
-        agent: _snapshot(agent),
-        task: completedTask,
-        finishedAt: new Date().toISOString(),
-      });
+      const shouldFail = Boolean(
+        completedTask?.metadata?.forceFail
+        || /\[fail\]/i.test(String(completedTask.message || '')),
+      );
+      if (shouldFail) {
+        events.emit('task:failed', {
+          agent: _snapshot(agent),
+          task: {
+            ...completedTask,
+            error: 'forced_failure',
+          },
+          finishedAt: new Date().toISOString(),
+        });
+      } else {
+        events.emit('task:completed', {
+          agent: _snapshot(agent),
+          task: completedTask,
+          finishedAt: new Date().toISOString(),
+        });
+      }
       changed = true;
     }
 
