@@ -81,7 +81,7 @@ export default function BrainInsightsPanel() {
         {activityItems.length === 0 ? (
           <div className="font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>No activity yet.</div>
         ) : activityItems.slice(0, 4).map((item) => (
-          <TertiaryPanel key={`${item.task_id}-${item.ts}-${item.type}`} className="p-2 font-mono text-[10px]">
+          <TertiaryPanel key={`${item.task_id}-${item.ts}-${item.type}-${item.detail || ''}`} className="p-2 font-mono text-[10px]">
             <div style={{ color: 'var(--text-secondary)' }}>{item.type} • {item.strategy || item.intent || 'general'}</div>
             <div style={{ color: 'var(--text-muted)' }}>{item.detail || 'Brain activity update'}</div>
           </TertiaryPanel>

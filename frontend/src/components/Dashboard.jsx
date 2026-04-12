@@ -88,8 +88,9 @@ export default function Dashboard() {
       if (statusData) setBrainStatus(statusData)
       if (insightsData) setBrainInsights(insightsData)
       if (activityData) setBrainActivity(activityData)
-    } catch {
-      // keep current data; WebSocket updates continue
+    } catch (error) {
+      // Keep current state; WebSocket updates continue in real time.
+      console.debug('Brain runtime refresh failed:', error)
     }
   }, [setBrainActivity, setBrainInsights, setBrainStatus])
 

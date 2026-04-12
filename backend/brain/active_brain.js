@@ -396,6 +396,13 @@ function status() {
 }
 
 function activity(limit = 20) {
+  const recentDecisions = state.decisionHistory.slice(0, 8).map((d) => ({
+    task_id: d.taskId,
+    strategy: d.strategy,
+    confidence: d.confidence,
+    intent: d.intent,
+    ts: d.plannedAt,
+  }));
   const normalized = [];
   state.decisionHistory.forEach((d) => {
     normalized.push({
@@ -430,7 +437,7 @@ function activity(limit = 20) {
       detail: f.notes || 'Execution failed',
     });
   });
-  const max = Math.max(1, Number(limit) || 20);
+  const max = Math.max(1, Number(limit));
   const items = normalized
     .sort((a, b) => Date.parse(b.ts || 0) - Date.parse(a.ts || 0))
     .slice(0, max);
@@ -438,7 +445,7 @@ function activity(limit = 20) {
     status: 'active',
     memory_size: memorySize(),
     last_update: state.lastUpdatedAt || nowIso(),
-    recent_decisions: status().recent_decisions,
+    recent_decisions: recentDecisions,
     items,
   };
 }
