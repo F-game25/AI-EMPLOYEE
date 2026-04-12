@@ -300,10 +300,22 @@ except ImportError:
             except Exception:
                 return None
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_RUNTIME_DIR = _REPO_ROOT / "runtime"
+_REPO_AGENTS_DIR = _REPO_RUNTIME_DIR / "agents"
+_REPO_BIN_FILE = _REPO_RUNTIME_DIR / "bin" / "ai-employee"
+
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_DIR = AI_HOME / "state"
 CONFIG_DIR = AI_HOME / "config"
 BOTS_DIR = AI_HOME / "agents"
+if not BOTS_DIR.exists() and _REPO_AGENTS_DIR.exists():
+    # Fresh-repo developer mode: use bundled runtime agents when ~/.ai-employee
+    # is not installed yet.
+    BOTS_DIR = _REPO_AGENTS_DIR
+AI_EMPLOYEE_BIN = AI_HOME / "bin" / "ai-employee"
+if not AI_EMPLOYEE_BIN.exists() and _REPO_BIN_FILE.exists():
+    AI_EMPLOYEE_BIN = _REPO_BIN_FILE
 CHATLOG = STATE_DIR / "chatlog.jsonl"
 ACTIVITY_LOG = STATE_DIR / "activity_log.jsonl"
 SCHEDULES_FILE = CONFIG_DIR / "schedules.json"
@@ -1002,7 +1014,7 @@ def _log_activity(
         logger.warning("Failed to write activity log: %s", _exc)
 
 
-_ai_router_path = AI_HOME / "agents" / "ai-router"
+_ai_router_path = BOTS_DIR / "ai-router"
 if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
@@ -1277,7 +1289,7 @@ def ai_employee(*args: str) -> tuple:
         return 1, "Start blocked: shutdown is currently in progress."
     try:
         p = subprocess.run(
-            [str(AI_HOME / "bin" / "ai-employee"), *args],
+            [str(AI_EMPLOYEE_BIN), *args],
             capture_output=True, text=True, timeout=10
         )
         return p.returncode, p.stdout + p.stderr
@@ -16736,6 +16748,13 @@ def start_all_agents(_auth: None = Depends(require_auth)):
             return JSONResponse({"ok": False, "error": "Shutdown is in progress. Start is temporarily blocked."}, status_code=409)
         mode = _current_mode()
         targets = _mode_agent_targets(mode)
+        if not targets:
+            err = (
+                "No runnable agents found. Set AI_HOME to a valid installation or keep runtime/agents "
+                "available in the repository."
+            )
+            _log_activity("worker", err, details={"mode": mode}, source="dashboard")
+            return JSONResponse({"ok": False, "mode": mode, "targets": [], "started": 0, "failed": [], "error": err}, status_code=503)
         outputs = []
         failures = []
         skipped_agents: list = []        # agents skipped by governor or circuit breaker
@@ -20241,10 +20260,9 @@ def _load_blacklight_module():
     global _blacklight_mod
     if _blacklight_mod is not None:
         return _blacklight_mod
-    _bl_path = AI_HOME / "agents" / "blacklight"
+    _bl_path = BOTS_DIR / "blacklight"
     if str(_bl_path) not in sys.path:
         sys.path.insert(0, str(_bl_path))
-    import importlib
     _blacklight_mod = importlib.import_module("blacklight")
     return _blacklight_mod
 
@@ -20317,7 +20335,7 @@ def _load_ascend_module():
     global _ascend_mod
     if _ascend_mod is not None:
         return _ascend_mod
-    _af_path = AI_HOME / "agents" / "ascend-forge"
+    _af_path = BOTS_DIR / "ascend-forge"
     if str(_af_path) not in sys.path:
         sys.path.insert(0, str(_af_path))
     _ascend_mod = importlib.import_module("ascend_forge")
@@ -20458,7 +20476,22 @@ _af_current_task: dict = {
     "result": "",
     "started_at": "",
     "finished_at": "",
+    "events": [],
 }
+
+
+def _af_append_event(status: str, progress: int, message: str) -> None:
+    event = {
+        "ts": now_iso(),
+        "status": status,
+        "progress": max(0, min(100, int(progress))),
+        "message": message,
+        "agent_id": "ascend-forge",
+        "task_id": _af_current_task.get("task_id", ""),
+    }
+    events = _af_current_task.get("events", [])
+    events.append(event)
+    _af_current_task["events"] = events[-50:]
 
 
 def _run_ascend_task(task_id: str, task: str) -> None:
@@ -20472,15 +20505,20 @@ def _run_ascend_task(task_id: str, task: str) -> None:
             "result": "",
             "started_at": now_iso(),
             "finished_at": "",
+            "events": [],
         })
+        _af_append_event("running", 5, "Task accepted by Ascend Forge")
+    _log_activity("task_run", f"Ascend Forge task started: {task}", details={"task_id": task_id, "status": "running", "agent_id": "ascend-forge"}, source="ascend")
     try:
         af = _load_ascend_module()
         # Step 1 – analyze intent (20%)
         with _af_task_lock:
             _af_current_task["progress"] = 20
+            _af_append_event("running", 20, "Analyzing task intent")
         # Step 2 – plan and execute (60%)
         with _af_task_lock:
             _af_current_task["progress"] = 60
+            _af_append_event("running", 60, "Executing plan")
         result = af.handle_complex_task(task)
         with _af_task_lock:
             _af_current_task.update({
@@ -20489,6 +20527,8 @@ def _run_ascend_task(task_id: str, task: str) -> None:
                 "result": result,
                 "finished_at": now_iso(),
             })
+            _af_append_event("done", 100, "Task completed successfully")
+        _log_activity("task_run", "Ascend Forge task completed", details={"task_id": task_id, "status": "done", "agent_id": "ascend-forge"}, source="ascend")
     except Exception as exc:
         logger.error("ascend task error: %s", exc)
         with _af_task_lock:
@@ -20498,6 +20538,8 @@ def _run_ascend_task(task_id: str, task: str) -> None:
                 "result": str(exc),
                 "finished_at": now_iso(),
             })
+            _af_append_event("error", 0, f"Task failed: {exc}")
+        _log_activity("task_run", "Ascend Forge task failed", details={"task_id": task_id, "status": "error", "agent_id": "ascend-forge", "error": str(exc)}, source="ascend")
 
 
 @app.post("/api/ascend/task")
@@ -20506,6 +20548,9 @@ def ascend_run_task(payload: dict, _auth: None = Depends(require_auth)):
     task = (payload.get("task") or "").strip()
     if not task:
         raise HTTPException(400, "task is required")
+    with _af_task_lock:
+        if _af_current_task.get("status") == "running":
+            raise HTTPException(409, "another Ascend Forge task is already running")
     task_id = str(_uuid_mod.uuid4())[:8]
     t = threading.Thread(target=_run_ascend_task, args=(task_id, task), daemon=True)
     t.start()
@@ -22270,7 +22315,7 @@ async def social_stats():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _ceo_briefing():
-    _p = AI_HOME / "agents" / "ceo-briefing"
+    _p = BOTS_DIR / "ceo-briefing"
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
     import ceo_briefing  # type: ignore
