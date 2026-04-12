@@ -42,6 +42,9 @@ except ImportError:
     _FCNTL_AVAILABLE = False  # Windows / environments without fcntl
 
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
+_RUNTIME_DIR = Path(__file__).resolve().parents[2]
+_REPO_CAPS_FILE = _RUNTIME_DIR / "config" / "agent_capabilities.json"
+_REPO_AGENTS_DIR = _RUNTIME_DIR / "agents"
 STATE_FILE = AI_HOME / "state" / "task-orchestrator.state.json"
 TASK_PLANS_FILE = AI_HOME / "config" / "task_plans.json"
 AGENT_CAPS_FILE = AI_HOME / "config" / "agent_capabilities.json"
@@ -197,13 +200,63 @@ def append_chatlog(entry: dict) -> None:
 
 # ── Agent Capabilities ────────────────────────────────────────────────────────
 
+_LEGACY_AGENT_ID_MAP = {
+    "orchestrator": "task-orchestrator",
+    "lead-hunter": "lead-generator",
+    "email-ninja": "offer-agent",
+    "social-guru": "social-media-manager",
+    "social-poster": "social-media-manager",
+    "intel-agent": "web-researcher",
+    "product-scout": "ecom-agent",
+    "ecom-dashboard": "ecom-agent",
+    "order-processor": "ecom-agent",
+    "support-bot": "chatbot-builder",
+    "creative-studio": "creator-agency",
+    "product-researcher": "mirofish-researcher",
+    "data-analyst": "financial-deepsearch",
+    "bot-dev": "arbitrage-bot",
+    "lead-hunter-elite": "lead-generator",
+}
+
+
+def _agent_has_run_script(agent_id: str) -> bool:
+    return (
+        (AI_HOME / "agents" / agent_id / "run.sh").exists()
+        or (_REPO_AGENTS_DIR / agent_id / "run.sh").exists()
+    )
+
+
 def load_agent_capabilities() -> dict:
-    if not AGENT_CAPS_FILE.exists():
-        return {}
+    src = AGENT_CAPS_FILE if AGENT_CAPS_FILE.exists() else _REPO_CAPS_FILE
+    if not src.exists():
+        return {"agents": {}}
     try:
-        return json.loads(AGENT_CAPS_FILE.read_text())
+        data = json.loads(src.read_text())
     except Exception:
-        return {}
+        return {"agents": {}}
+
+    raw_agents = data.get("agents", {}) if isinstance(data, dict) else {}
+    normalized_agents: dict[str, dict] = {}
+    # Pass 1: keep canonical runnable IDs exactly as defined in capabilities.
+    for agent_id, info in raw_agents.items():
+        if not _agent_has_run_script(agent_id):
+            continue
+        normalized_agents[agent_id] = info if isinstance(info, dict) else {}
+    # Pass 2: backfill canonical IDs from legacy aliases only when missing.
+    # Multiple legacy aliases may map to one canonical ID (intentional dedupe).
+    for agent_id, info in raw_agents.items():
+        canonical_id = _LEGACY_AGENT_ID_MAP.get(agent_id, agent_id)
+        if not _agent_has_run_script(canonical_id):
+            continue
+        # Preserve canonical metadata from pass 1; use aliases as fallback only.
+        if canonical_id in normalized_agents:
+            continue
+        normalized_agents[canonical_id] = info if isinstance(info, dict) else {}
+
+    if isinstance(data, dict):
+        data["agents"] = normalized_agents
+        return data
+    return {"agents": normalized_agents}
 
 
 # ── Task Plans ────────────────────────────────────────────────────────────────
