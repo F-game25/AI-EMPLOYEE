@@ -50,6 +50,7 @@ const state = {
   recentImprovements: [],
   decisionHistory: [],
   planIndex: new Map(),
+  lastUpdatedAt: nowIso(),
 };
 
 function getPattern(intent) {
@@ -191,6 +192,7 @@ function consult({
   state.planIndex.set(taskId, plan);
   state.decisionHistory.unshift(plan);
   state.decisionHistory = state.decisionHistory.slice(0, MAX_RECENT);
+  state.lastUpdatedAt = nowIso();
   return plan;
 }
 
@@ -292,6 +294,7 @@ function feedback({
 
   updatePreference(userId, notes || '', strategy);
   state.planIndex.delete(taskId);
+  state.lastUpdatedAt = nowIso();
   return plan;
 }
 
@@ -364,10 +367,98 @@ function insights() {
   };
 }
 
+function memorySize() {
+  return (
+    state.planIndex.size
+    + state.decisionHistory.length
+    + state.failedAttempts.length
+    + state.recentImprovements.length
+    + state.userPreferences.size
+    + state.taskPatterns.size
+  );
+}
+
+function status() {
+  return {
+    status: 'active',
+    active: true,
+    available: true,
+    memory_size: memorySize(),
+    last_update: state.lastUpdatedAt || nowIso(),
+    recent_decisions: state.decisionHistory.slice(0, 8).map((d) => ({
+      task_id: d.taskId,
+      strategy: d.strategy,
+      confidence: d.confidence,
+      intent: d.intent,
+      ts: d.plannedAt,
+    })),
+  };
+}
+
+function activity(limit = 20) {
+  const recentDecisions = state.decisionHistory.slice(0, 8).map((d) => ({
+    task_id: d.taskId,
+    strategy: d.strategy,
+    confidence: d.confidence,
+    intent: d.intent,
+    ts: d.plannedAt,
+  }));
+  const normalized = [];
+  state.decisionHistory.slice(0, 40).forEach((d) => {
+    normalized.push({
+      id: `${d.taskId || 'task'}-${d.plannedAt || nowIso()}-decision`,
+      ts: d.plannedAt || nowIso(),
+      type: 'decision',
+      task_id: d.taskId,
+      strategy: d.strategy,
+      intent: d.intent,
+      confidence: d.confidence,
+      detail: d.reasoning || '',
+    });
+  });
+  state.recentImprovements.slice(0, 40).forEach((i) => {
+    normalized.push({
+      id: `${i.task_id || 'task'}-${i.ts || nowIso()}-learning_update`,
+      ts: i.ts || nowIso(),
+      type: 'learning_update',
+      task_id: i.task_id,
+      strategy: i.strategy,
+      intent: i.intent,
+      confidence: i.confidence,
+      detail: i.improvement,
+    });
+  });
+  state.failedAttempts.slice(0, 40).forEach((f) => {
+    normalized.push({
+      id: `${f.task_id || 'task'}-${f.ts || nowIso()}-failure`,
+      ts: f.ts || nowIso(),
+      type: 'failure',
+      task_id: f.task_id,
+      strategy: f.strategy,
+      intent: f.intent,
+      confidence: 0,
+      detail: f.notes || 'Execution failed',
+    });
+  });
+  const max = Math.max(1, Number(limit));
+  const items = normalized
+    .sort((a, b) => Date.parse(b.ts || 0) - Date.parse(a.ts || 0))
+    .slice(0, max);
+  return {
+    status: 'active',
+    memory_size: memorySize(),
+    last_update: state.lastUpdatedAt || nowIso(),
+    recent_decisions: recentDecisions,
+    items,
+  };
+}
+
 module.exports = {
   consult,
   feedback,
   insights,
+  status,
+  activity,
   taskInfluence,
   rebindPlan,
   normalizeLatencyMs,

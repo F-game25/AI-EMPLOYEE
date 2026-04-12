@@ -39,6 +39,8 @@ export default function Dashboard() {
   const automationStatus = useAppStore(s => s.automationStatus)
   const setAutomationStatus = useAppStore(s => s.setAutomationStatus)
   const setBrainInsights = useAppStore(s => s.setBrainInsights)
+  const setBrainStatus = useAppStore(s => s.setBrainStatus)
+  const setBrainActivity = useAppStore(s => s.setBrainActivity)
   const setWorkflowSnapshot = useAppStore(s => s.setWorkflowSnapshot)
   // Real-time feeds from WebSocket
   const activityFeed = useAppStore(s => s.activityFeed)
@@ -71,11 +73,38 @@ export default function Dashboard() {
     }
   }, [setAutomationStatus, setProductMetrics, setBrainInsights, setWorkflowSnapshot])
 
+  const refreshBrainRuntime = useCallback(async () => {
+    try {
+      const [statusRes, insightsRes, activityRes] = await Promise.all([
+        fetch(`${BASE}/api/brain/status`),
+        fetch(`${BASE}/api/brain/insights`),
+        fetch(`${BASE}/api/brain/activity?limit=20`),
+      ])
+      const [statusData, insightsData, activityData] = await Promise.all([
+        statusRes.json(),
+        insightsRes.json(),
+        activityRes.json(),
+      ])
+      if (statusData) setBrainStatus(statusData)
+      if (insightsData) setBrainInsights(insightsData)
+      if (activityData) setBrainActivity(activityData)
+    } catch (error) {
+      // Keep current state; WebSocket updates continue in real time.
+      console.debug('Brain runtime refresh failed:', error)
+    }
+  }, [setBrainActivity, setBrainInsights, setBrainStatus])
+
   useEffect(() => {
     refreshDashboard()
     const i = setInterval(refreshDashboard, 8000)
     return () => clearInterval(i)
   }, [refreshDashboard])
+
+  useEffect(() => {
+    refreshBrainRuntime()
+    const i = setInterval(refreshBrainRuntime, 2000)
+    return () => clearInterval(i)
+  }, [refreshBrainRuntime])
 
   const setModeRemote = async (nextMode) => {
     try {

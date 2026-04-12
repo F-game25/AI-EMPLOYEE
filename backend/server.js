@@ -409,11 +409,22 @@ app.post('/api/mode', (req, res) => {
 });
 
 app.get('/api/brain/status', (req, res) => {
-  res.json(subsystems.getNNStatus());
+  const nn = subsystems.getNNStatus();
+  const core = brain.status();
+  res.json({
+    ...nn,
+    ...core,
+    updated_at: nn.updated_at || core.last_update || new Date().toISOString(),
+  });
 });
 
 app.get('/api/brain/insights', (req, res) => {
   res.json(brain.insights());
+});
+
+app.get('/api/brain/activity', (req, res) => {
+  const limit = Number(req.query.limit || 20);
+  res.json(brain.activity(limit));
 });
 
 app.get('/api/memory/tree', (req, res) => {
@@ -546,6 +557,7 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ event: 'memory:update', data: subsystems.getMemoryTree(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'doctor:check', data: subsystems.getDoctorStatus(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'brain:insights', data: brain.insights(), timestamp: new Date().toISOString() }));
+  ws.send(JSON.stringify({ event: 'brain:activity', data: brain.activity(20), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({
     event: 'workflow:snapshot',
     data: { active_run: runtimeState.selectedWorkflowRun, runs: runtimeState.workflowRuns },
@@ -705,6 +717,7 @@ setInterval(() => {
   broadcaster.broadcast('memory:update', subsystems.getMemoryTree());
   broadcaster.broadcast('doctor:check', subsystems.getDoctorStatus());
   broadcaster.broadcast('brain:insights', brain.insights());
+  broadcaster.broadcast('brain:activity', brain.activity(20));
   broadcaster.broadcast('workflow:snapshot', {
     active_run: runtimeState.selectedWorkflowRun,
     runs: runtimeState.workflowRuns,
