@@ -300,10 +300,22 @@ except ImportError:
             except Exception:
                 return None
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_RUNTIME_DIR = _REPO_ROOT / "runtime"
+_REPO_AGENTS_DIR = _REPO_RUNTIME_DIR / "agents"
+_REPO_BIN_FILE = _REPO_RUNTIME_DIR / "bin" / "ai-employee"
+
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_DIR = AI_HOME / "state"
 CONFIG_DIR = AI_HOME / "config"
 BOTS_DIR = AI_HOME / "agents"
+if not BOTS_DIR.exists() and _REPO_AGENTS_DIR.exists():
+    # Fresh-repo developer mode: use bundled runtime agents when ~/.ai-employee
+    # is not installed yet.
+    BOTS_DIR = _REPO_AGENTS_DIR
+AI_EMPLOYEE_BIN = AI_HOME / "bin" / "ai-employee"
+if not AI_EMPLOYEE_BIN.exists() and _REPO_BIN_FILE.exists():
+    AI_EMPLOYEE_BIN = _REPO_BIN_FILE
 CHATLOG = STATE_DIR / "chatlog.jsonl"
 ACTIVITY_LOG = STATE_DIR / "activity_log.jsonl"
 SCHEDULES_FILE = CONFIG_DIR / "schedules.json"
@@ -1002,7 +1014,7 @@ def _log_activity(
         logger.warning("Failed to write activity log: %s", _exc)
 
 
-_ai_router_path = AI_HOME / "agents" / "ai-router"
+_ai_router_path = BOTS_DIR / "ai-router"
 if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
 
@@ -1277,7 +1289,7 @@ def ai_employee(*args: str) -> tuple:
         return 1, "Start blocked: shutdown is currently in progress."
     try:
         p = subprocess.run(
-            [str(AI_HOME / "bin" / "ai-employee"), *args],
+            [str(AI_EMPLOYEE_BIN), *args],
             capture_output=True, text=True, timeout=10
         )
         return p.returncode, p.stdout + p.stderr
@@ -3423,23 +3435,114 @@ INDEX_HTML = r"""<!doctype html>
       100%{clip-path:inset(0 0 0 0);transform:none}
     }
 
+    /* ── JS-generated dynamic card hover (replaces inline onmouseenter) ── */
+    .js-card-hover{transition:all .25s}
+    .js-card-hover:hover{transform:translateY(-3px);border-color:rgba(212,175,55,.5)!important;box-shadow:0 12px 40px rgba(0,0,0,.6),0 0 0 1px rgba(212,175,55,.1)}
+    .js-card-row-hover{transition:all .2s}
+    .js-card-row-hover:hover{border-color:rgba(212,175,55,.3)!important}
+    .js-item-hover{transition:background .15s;cursor:default}
+    .js-item-hover:hover{background:rgba(212,175,55,.04)!important}
+    .js-agent-card{transition:all .25s}
+    .js-agent-card:hover{transform:translateY(-3px);border-color:rgba(212,175,55,.3)!important;box-shadow:0 8px 32px rgba(0,0,0,.5),0 0 0 1px rgba(212,175,55,.08)}
+    .btn-approve{padding:8px 16px;background:linear-gradient(135deg,#064e3b,#065f46);color:#34d399;border:2px solid rgba(52,211,153,.4);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap}
+    .btn-approve:hover{background:linear-gradient(135deg,#065f46,#047857);box-shadow:0 0 16px rgba(52,211,153,.4)}
+    .btn-reject{padding:8px 16px;background:linear-gradient(135deg,#450a0a,#7f1d1d);color:#f87171;border:2px solid rgba(248,113,113,.4);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap}
+    .btn-reject:hover{background:linear-gradient(135deg,#7f1d1d,#991b1b);box-shadow:0 0 16px rgba(248,113,113,.4)}
+    .btn-approve-sm{padding:6px 16px;background:linear-gradient(135deg,#14532d,#15803d);border:1px solid rgba(74,222,128,.3);border-radius:7px;color:#4ade80;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s}
+    .btn-approve-sm:hover{box-shadow:0 0 12px rgba(74,222,128,.25)}
+    .btn-reject-sm{padding:6px 16px;background:linear-gradient(135deg,#450a0a,#7f1d1d);border:1px solid rgba(239,68,68,.3);border-radius:7px;color:#f87171;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s}
+    .btn-reject-sm:hover{box-shadow:0 0 12px rgba(239,68,68,.2)}
+    .btn-rollback{padding:4px 12px;background:rgba(127,29,29,.6);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;font-size:.75em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s}
+    .btn-rollback:hover{background:rgba(127,29,29,.9)}
+    .btn-deploy{width:100%;padding:12px;background:linear-gradient(135deg,var(--primary-dark),var(--primary));border:none;border-radius:9px;color:#000;font-weight:700;font-size:.88em;cursor:pointer;transition:all .2s;letter-spacing:.02em;font-family:inherit}
+    .btn-deploy:hover{box-shadow:0 6px 24px rgba(212,175,55,.5);filter:brightness(1.08)}
+    .btn-cmd-run{flex-shrink:0;padding:3px 10px;font-size:.72em;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.3);color:var(--gold);border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s}
+    .btn-cmd-run:hover{background:rgba(212,175,55,.2)}
+    .btn-cmd-copy{flex-shrink:0;padding:3px 8px;font-size:.7em;background:transparent;border:1px solid rgba(148,163,184,.12);color:var(--text-muted);border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s}
+    .btn-cmd-copy:hover{border-color:rgba(212,175,55,.3);color:var(--gold)}
+    .cmd-code{cursor:pointer;min-width:160px;max-width:220px;background:rgba(10,15,30,.9);padding:4px 9px;border-radius:5px;font-size:.8em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color .15s}
+    .cmd-code:hover{border-color:rgba(212,175,55,.5)}
+    .btn-assign-task{width:100%;font-size:.78em;border:1px solid rgba(212,175,55,.3);color:var(--gold);padding:6px;border-radius:6px;transition:all .2s;background:transparent;cursor:pointer;font-family:inherit}
+    .btn-assign-task:hover{background:rgba(212,175,55,.1);border-color:rgba(212,175,55,.6)}
+    .color-swatch{width:34px;height:34px;border-radius:50%;border:2px solid rgba(255,255,255,.3);cursor:pointer;transition:transform .15s}
+    .color-swatch:hover{transform:scale(1.15)}
+
     @media(max-width:900px){.right-panel{display:none}}
+
+    /* ═══════════════════════════════════════════════════════
+       DESIGN SYSTEM — UTILITY CLASSES  (Pass 2 additions)
+       These replace scattered inline styles for consistency.
+       ═══════════════════════════════════════════════════════ */
+
+    /* ── Preset / power-preset cards ── */
+    .preset-card{
+      padding:14px 16px;
+      background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));
+      border:1px solid rgba(212,175,55,.28);
+      border-radius:12px;
+      color:var(--gold);
+      text-align:left;cursor:pointer;font-family:inherit;
+      transition:border-color .2s,background .2s,box-shadow .2s;
+      display:flex;flex-direction:column;gap:4px;
+    }
+    .preset-card:hover{
+      border-color:rgba(212,175,55,.55);
+      background:linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09));
+      box-shadow:0 4px 18px rgba(212,175,55,.18);
+    }
+    .preset-card .pc-icon{font-size:1.3em}
+    .preset-card .pc-name{font-weight:700;font-size:.9em}
+    .preset-card .pc-desc{font-size:.74em;color:var(--text-muted)}
+
+    /* ── Full-width form fields (replaces repeated inline styles) ── */
+    .field-full{
+      width:100%;background:var(--surface2);
+      border:1px solid var(--border);border-radius:var(--radius-sm);
+      color:var(--text);padding:8px;font-family:inherit;
+    }
+    textarea.field-full{resize:vertical}
+
+    /* ── Gold outline button (Tier-2 important action) ── */
+    .btn-gold{
+      background:transparent;
+      color:var(--gold);
+      border:1px solid rgba(212,175,55,.45);
+      border-radius:var(--radius-sm);
+      padding:9px 20px;font-weight:700;font-size:.84em;
+      cursor:pointer;font-family:inherit;
+      transition:all .2s;
+    }
+    .btn-gold:hover{
+      background:rgba(212,175,55,.12);
+      border-color:var(--gold);
+      box-shadow:0 4px 18px rgba(212,175,55,.3);
+      transform:translateY(-1px);
+    }
+
+    /* ── Send-to-swarm/primary action button ── */
+    .btn-swarm{
+      padding:9px 20px;
+      background:linear-gradient(135deg,var(--primary-dark),var(--primary));
+      border:none;border-radius:10px;
+      color:#000;font-weight:800;font-size:.84em;
+      cursor:pointer;font-family:inherit;
+      transition:all .2s;
+      box-shadow:0 4px 14px rgba(212,175,55,.25);
+    }
+    .btn-swarm:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(212,175,55,.4)}
+
+    /* ── Card with gold-tinted accent border ── */
+    .card-gold{border:1px solid rgba(212,175,55,.25)!important}
+    .card-ai{
+      border:1px solid rgba(212,175,55,.2)!important;
+      background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))!important;
+    }
+    /* ── Card with subtle accent border variants ── */
+    .card-accent{border:1px solid rgba(212,175,55,.3)!important}
+
   </style>
 </head>
 <body>
-
-<!-- ══ BOOT SCREEN (legacy — hidden, superseded by #boot-overlay) ══ -->
-<div id="boot" style="display:none">
-  <div id="boot-log"></div>
-  <div id="boot-center">
-    <div class="boot-box">
-      <div class="boot-logo">AI EMPLOYEE</div>
-      <div class="boot-sub">Autonomous Workforce Interface v4.0</div>
-      <div class="boot-status" id="boot-status-text">INITIALIZING SYSTEMS...</div>
-      <div class="boot-bar"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
-    </div>
-  </div>
-</div>
 
 <!-- ══ BOOT OVERLAY (used by runBootSequence / hideBoot) ══ -->
 <div id="boot-overlay">
@@ -3982,7 +4085,7 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <!-- Live Agent Activity Map -->
-  <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+  <div class="card card-ai">
     <div class="card-header">
       <div class="card-title"><span style="color:var(--gold)">◈</span> Live Agent Activity Map</div>
       <div style="display:flex;align-items:center;gap:8px">
@@ -4159,20 +4262,20 @@ INDEX_HTML = r"""<!doctype html>
     <div id="gw-ollama-section" style="margin-bottom:14px">
       <div style="font-size:.78em;font-weight:600;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Ollama Model</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap" id="gw-model-pills">
-        <button class="btn btn-primary btn-sm gw-model-pill" onclick="setOllamaModel('llama3.2',this)" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#000;border:none">🦙 llama3.2 (default)</button>
+        <button class="btn btn-primary btn-sm gw-model-pill" onclick="setOllamaModel('llama3.2',this)">🦙 llama3.2 (default)</button>
         <button class="btn btn-ghost btn-sm gw-model-pill" onclick="setOllamaModel('gemma4',this)">💎 gemma4</button>
         <button class="btn btn-ghost btn-sm gw-model-pill" onclick="setOllamaModel('mistral',this)">🌟 mistral</button>
         <button class="btn btn-ghost btn-sm gw-model-pill" onclick="setOllamaModel('qwen2.5',this)">⚡ qwen2.5</button>
       </div>
       <div id="gw-pull-section" style="margin-top:10px;display:none">
         <div style="font-size:.78em;color:var(--warning);margin-bottom:6px">⚠️ Model not found locally. Pull it now?</div>
-        <button class="btn btn-primary btn-sm" id="gw-pull-btn" onclick="pullOllamaModel()" style="background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700">⬇️ Pull Model (ollama pull)</button>
+        <button class="btn btn-primary btn-sm" id="gw-pull-btn" onclick="pullOllamaModel()">⬇️ Pull Model (ollama pull)</button>
       </div>
     </div>
     <div id="gw-current-provider" style="font-size:.82em;padding:10px 14px;background:rgba(212,175,55,.06);border:1px solid rgba(212,175,55,.2);border-radius:8px;margin-bottom:14px">
       <span style="color:var(--text-muted)">Active provider: </span><span id="gw-provider-label" style="color:var(--gold);font-weight:700">–</span>
     </div>
-    <button class="btn btn-success" onclick="applyGatewayProvider()" style="width:100%;background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700;padding:12px">✓ Apply &amp; Save Gateway Settings</button>
+    <button class="btn btn-primary" onclick="applyGatewayProvider()" style="width:100%;padding:12px">✓ Apply &amp; Save Gateway Settings</button>
     <div id="gw-result" style="margin-top:8px;font-size:.84em;min-height:20px"></div>
   </div>
 </div>
@@ -4216,7 +4319,7 @@ INDEX_HTML = r"""<!doctype html>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div class="form-group" style="grid-column:1/-1">
           <label>Task Goal / Objective</label>
-          <textarea id="sched-goal" rows="3" placeholder="What should this task achieve? e.g. Generate and send weekly performance report to all stakeholders…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
+          <textarea id="sched-goal" rows="3" placeholder="What should this task achieve? e.g. Generate and send weekly performance report to all stakeholders…" class="field-full"></textarea>
         </div>
         <div class="form-group">
           <label>Task ID (unique)</label>
@@ -4282,7 +4385,7 @@ INDEX_HTML = r"""<!doctype html>
           <input id="sched-msg" placeholder="Additional instructions or context for this task"/>
         </div>
       </div>
-      <button class="btn btn-success" onclick="addSchedule()" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#B8960C,#D4AF37);color:#000;border:none;font-weight:700">◈ Schedule Task</button>
+      <button class="btn btn-primary" onclick="addSchedule()" style="width:100%;margin-top:8px">◈ Schedule Task</button>
     </div>
   </div>
 </div>
@@ -4296,52 +4399,44 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <!-- ── Quick Presets ── -->
-  <div class="card" style="margin-bottom:18px;border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.04),var(--surface2))">
+  <div class="card card-ai" style="margin-bottom:18px">
     <div class="card-header">
       <div class="card-title"><span style="color:var(--gold)">⚡</span> One-Click Power Presets</div>
       <span style="font-size:.78em;color:var(--text-muted)">Select agents → bundle → send to swarm</span>
     </div>
     <p style="color:var(--text-muted);font-size:.84em;margin-bottom:14px">Click a preset to instantly configure and launch a coordinated agent bundle. Then click <strong style="color:var(--gold)">Send Bundle to Swarm</strong> to deploy.</p>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px">
-      <button onclick="applyAgentPreset('business_automator')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
-        <span style="font-size:1.3em">🏢</span>
-        <span style="font-weight:700;font-size:.9em">Business Automator</span>
-        <span style="font-size:.74em;color:var(--text-muted)">Automate ops, admin & scheduling</span>
+      <button onclick="applyAgentPreset('business_automator')" class="preset-card">
+        <span class="pc-icon">🏢</span><span class="pc-name">Business Automator</span>
+        <span class="pc-desc">Automate ops, admin & scheduling</span>
       </button>
-      <button onclick="applyAgentPreset('money_printer')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.12),rgba(212,175,55,.06));border:1px solid rgba(212,175,55,.3);border-radius:12px;color:#fbbf24;text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.6)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.2),rgba(212,175,55,.1))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.3)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.12),rgba(212,175,55,.06))'">
-        <span style="font-size:1.3em">💰</span>
-        <span style="font-weight:700;font-size:.9em">Money Printer</span>
-        <span style="font-size:.74em;color:var(--text-muted)">Revenue, upsells & monetization</span>
+      <button onclick="applyAgentPreset('money_printer')" class="preset-card">
+        <span class="pc-icon">💰</span><span class="pc-name">Money Printer</span>
+        <span class="pc-desc">Revenue, upsells & monetization</span>
       </button>
-      <button onclick="applyAgentPreset('research_team')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
-        <span style="font-size:1.3em">🔬</span>
-        <span style="font-weight:700;font-size:.9em">Research Team</span>
-        <span style="font-size:.74em;color:var(--text-muted)">Deep research & competitive intel</span>
+      <button onclick="applyAgentPreset('research_team')" class="preset-card">
+        <span class="pc-icon">🔬</span><span class="pc-name">Research Team</span>
+        <span class="pc-desc">Deep research & competitive intel</span>
       </button>
-      <button onclick="applyAgentPreset('lead_gen_swarm')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
-        <span style="font-size:1.3em">🎯</span>
-        <span style="font-weight:700;font-size:.9em">Lead Generation Swarm</span>
-        <span style="font-size:.74em;color:var(--text-muted)">Hunt, score & convert leads</span>
+      <button onclick="applyAgentPreset('lead_gen_swarm')" class="preset-card">
+        <span class="pc-icon">🎯</span><span class="pc-name">Lead Generation Swarm</span>
+        <span class="pc-desc">Hunt, score & convert leads</span>
       </button>
-      <button onclick="applyAgentPreset('content_empire')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
-        <span style="font-size:1.3em">✍️</span>
-        <span style="font-weight:700;font-size:.9em">Content Empire</span>
-        <span style="font-size:.74em;color:var(--text-muted)">Content, SEO & brand building</span>
+      <button onclick="applyAgentPreset('content_empire')" class="preset-card">
+        <span class="pc-icon">✍️</span><span class="pc-name">Content Empire</span>
+        <span class="pc-desc">Content, SEO & brand building</span>
       </button>
-      <button onclick="applyAgentPreset('ecom_powerhouse')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
-        <span style="font-size:1.3em">🛒</span>
-        <span style="font-weight:700;font-size:.9em">E-com Powerhouse</span>
-        <span style="font-size:.74em;color:var(--text-muted)">Orders, inventory & fulfillment</span>
+      <button onclick="applyAgentPreset('ecom_powerhouse')" class="preset-card">
+        <span class="pc-icon">🛒</span><span class="pc-name">E-com Powerhouse</span>
+        <span class="pc-desc">Orders, inventory & fulfillment</span>
       </button>
-      <button onclick="applyAgentPreset('outreach_machine')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
-        <span style="font-size:1.3em">📣</span>
-        <span style="font-weight:700;font-size:.9em">Outreach Machine</span>
-        <span style="font-size:.74em;color:var(--text-muted)">Email, calls & social DMs</span>
+      <button onclick="applyAgentPreset('outreach_machine')" class="preset-card">
+        <span class="pc-icon">📣</span><span class="pc-name">Outreach Machine</span>
+        <span class="pc-desc">Email, calls & social DMs</span>
       </button>
-      <button onclick="applyAgentPreset('analytics_squad')" style="padding:14px 16px;background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05));border:1px solid rgba(212,175,55,.28);border-radius:12px;color:var(--gold);text-align:left;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;flex-direction:column;gap:4px" onmouseenter="this.style.borderColor='rgba(212,175,55,.55)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.18),rgba(212,175,55,.09))'" onmouseleave="this.style.borderColor='rgba(212,175,55,.28)';this.style.background='linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.05))'">
-        <span style="font-size:1.3em">📊</span>
-        <span style="font-weight:700;font-size:.9em">Analytics Squad</span>
-        <span style="font-size:.74em;color:var(--text-muted)">Reports, KPIs & insights</span>
+      <button onclick="applyAgentPreset('analytics_squad')" class="preset-card">
+        <span class="pc-icon">📊</span><span class="pc-name">Analytics Squad</span>
+        <span class="pc-desc">Reports, KPIs & insights</span>
       </button>
     </div>
     <!-- Bundle builder row -->
@@ -4354,7 +4449,7 @@ INDEX_HTML = r"""<!doctype html>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="swarmSelectAll()">All</button>
           <button class="btn btn-ghost btn-sm" onclick="swarmClearAll()">None</button>
-          <button onclick="sendBundleToSwarm()" id="btn-send-bundle" style="padding:9px 20px;background:linear-gradient(135deg,#B8960C,#D4AF37);border:none;border-radius:10px;color:#000;font-weight:800;font-size:.84em;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 14px rgba(212,175,55,.25)" onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 20px rgba(212,175,55,.4)'" onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 14px rgba(212,175,55,.25)'">🚀 Send Bundle to Swarm</button>
+          <button onclick="sendBundleToSwarm()" id="btn-send-bundle" class="btn-swarm">🚀 Send Bundle to Swarm</button>
         </div>
       </div>
       <div style="margin-bottom:8px">
@@ -4396,7 +4491,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="form-group">
           <label>Recurring Task / Role Description</label>
           <textarea id="wf-task" rows="3" placeholder="e.g. Monitor new Shopify orders, validate payments, place Printful orders, send customer tracking emails"
-            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
+            class="field-full"></textarea>
         </div>
         <div class="form-group">
           <label>Schedule</label>
@@ -4618,7 +4713,7 @@ INDEX_HTML = r"""<!doctype html>
     <div id="goals-mission-display" style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;font-size:.9em;color:var(--text-secondary);min-height:40px">
       <em style="color:var(--text-muted)">No mission set yet. Set one below.</em>
     </div>
-    <div class="form-group"><label>Mission Statement</label><textarea id="goals-mission-input" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical" placeholder="e.g. Build the #1 AI note-taking app to $1M MRR"></textarea></div>
+    <div class="form-group"><label>Mission Statement</label><textarea id="goals-mission-input" rows="2" class="field-full" placeholder="e.g. Build the #1 AI note-taking app to $1M MRR"></textarea></div>
     <div class="form-group"><label>Vision (optional)</label><input id="goals-vision-input" placeholder="Long-term company vision"/></div>
     <button class="btn btn-primary" onclick="saveCompanyMission()">💾 Save Mission</button>
   </div>
@@ -4642,7 +4737,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="card-header">
         <div class="card-title"><span class="icon">🎫</span> Tickets</div>
         <div style="display:flex;gap:6px">
-          <select id="tkt-filter-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadTickets()">
+          <select id="tkt-filter-status" style="font-size:.8em" onchange="loadTickets()">
             <option value="">All</option>
             <option value="open">Open</option>
             <option value="in_progress">In Progress</option>
@@ -4659,9 +4754,9 @@ INDEX_HTML = r"""<!doctype html>
       <div class="card">
         <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Ticket</div></div>
         <div class="form-group"><label>Title</label><input id="tkt-new-title" placeholder="Describe the task"/></div>
-        <div class="form-group"><label>Description (optional)</label><textarea id="tkt-new-desc" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Details…"></textarea></div>
+        <div class="form-group"><label>Description (optional)</label><textarea id="tkt-new-desc" rows="2" class="field-full" placeholder="Details…"></textarea></div>
         <div class="form-group"><label>Priority</label>
-          <select id="tkt-new-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="tkt-new-priority" >
             <option value="high">🔴 High</option>
             <option value="medium" selected>🟡 Medium</option>
             <option value="low">🟢 Low</option>
@@ -4739,7 +4834,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="form-group"><label>Action</label><input id="gov-test-action" placeholder="e.g. send_email_blast"/></div>
         <div class="form-group"><label>Description</label><input id="gov-test-desc" placeholder="Send 1000 emails to customer list"/></div>
         <div class="form-group"><label>Risk Level</label>
-          <select id="gov-test-risk" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="gov-test-risk" >
             <option value="low">🟢 Low (auto-approved)</option>
             <option value="medium" selected>🟡 Medium</option>
             <option value="high">🔴 High</option>
@@ -4795,7 +4890,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
       <div class="form-group"><label>Import Template (JSON)</label>
-        <textarea id="co-import-json" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='{"company": {"name": "My Company"}, ...}'></textarea>
+        <textarea id="co-import-json" rows="4" class="field-full" placeholder='{"company": {"name": "My Company"}, ...}'></textarea>
       </div>
       <button class="btn btn-primary" onclick="importCompany()">📥 Import</button>
     </div>
@@ -4829,7 +4924,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="card-header">
           <div class="card-title"><span class="icon">📦</span> Artifacts</div>
           <div style="display:flex;gap:6px">
-            <select id="art-filter-type" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadArtifacts()">
+            <select id="art-filter-type" style="font-size:.8em" onchange="loadArtifacts()">
               <option value="">All Types</option>
               <option value="code">Code</option>
               <option value="report">Report</option>
@@ -4849,7 +4944,7 @@ INDEX_HTML = r"""<!doctype html>
         <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Manually create an artifact from existing content.</p>
         <div class="form-group"><label>Title</label><input id="art-new-title" placeholder="e.g. Marketing Plan Q2"/></div>
         <div class="form-group"><label>Type</label>
-          <select id="art-new-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="art-new-type" >
             <option value="report">Report</option>
             <option value="code">Code</option>
             <option value="campaign">Campaign</option>
@@ -4859,7 +4954,7 @@ INDEX_HTML = r"""<!doctype html>
           </select>
         </div>
         <div class="form-group"><label>Content</label>
-          <textarea id="art-new-content" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder="Artifact content…"></textarea>
+          <textarea id="art-new-content" rows="5" class="field-full" placeholder="Artifact content…"></textarea>
         </div>
         <button class="btn btn-primary" onclick="createArtifact()">📦 Create Artifact</button>
       </div>
@@ -4906,7 +5001,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="form-group"><label>Agent ID</label><input id="ses-new-agent" placeholder="e.g. engineering-assistant"/></div>
           <div class="form-group"><label>Title</label><input id="ses-new-title" placeholder="e.g. MVP feature development"/></div>
           <div class="form-group"><label>Initial Context (JSON)</label>
-            <textarea id="ses-new-ctx" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.82em;resize:vertical" placeholder='{"goal": "Build login feature", "stack": "React + FastAPI"}'></textarea>
+            <textarea id="ses-new-ctx" rows="3" class="field-full" placeholder='{"goal": "Build login feature", "stack": "React + FastAPI"}'></textarea>
           </div>
           <button class="btn btn-primary" onclick="createSession()">💾 Create Session</button>
         </div>
@@ -4970,7 +5065,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="form-group"><label>Description</label><input id="fi-exp-desc" placeholder="SaaS subscription…"/></div>
         <div class="form-group"><label>Amount ($)</label><input id="fi-exp-amount" type="number" placeholder="99"/></div>
         <div class="form-group"><label>Category</label>
-          <select id="fi-exp-cat" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="fi-exp-cat" >
             <option value="software">Software</option><option value="marketing">Marketing</option>
             <option value="payroll">Payroll</option><option value="office">Office</option>
             <option value="travel">Travel</option><option value="other">Other</option>
@@ -5042,7 +5137,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="form-group"><label>Workflow Name</label><input id="wf-name" placeholder="Welcome new leads"/></div>
       <div class="form-group"><label>Description</label><input id="wf-desc" placeholder="Auto-send welcome email when new lead added"/></div>
       <div class="form-group"><label>Trigger</label>
-        <select id="wf-trigger" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+        <select id="wf-trigger" >
           <option value="manual">Manual</option><option value="new_lead">New Lead Added</option>
           <option value="email_opened">Email Opened</option><option value="deal_stage_change">Deal Stage Change</option>
           <option value="invoice_paid">Invoice Paid</option><option value="schedule">Schedule</option>
@@ -5050,7 +5145,7 @@ INDEX_HTML = r"""<!doctype html>
         </select>
       </div>
       <div class="form-group"><label>Actions (one per line)</label>
-        <textarea id="wf-steps" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="send_email: Welcome email&#10;wait: 1 day&#10;create_task: Follow up call"></textarea>
+        <textarea id="wf-steps" rows="4" class="field-full" placeholder="send_email: Welcome email&#10;wait: 1 day&#10;create_task: Follow up call"></textarea>
       </div>
       <button class="btn btn-primary" onclick="createWorkflow()">⚙️ Create Workflow</button>
     </div>
@@ -5082,7 +5177,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="card-header"><div class="card-title"><span class="icon">✉️</span> Invite Member</div></div>
       <div class="form-group"><label>Email Address</label><input id="team-email" placeholder="colleague@company.com"/></div>
       <div class="form-group"><label>Role</label>
-        <select id="team-role" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+        <select id="team-role" >
           <option value="admin">Admin — Full access</option>
           <option value="manager">Manager — Manage agents</option>
           <option value="member" selected>Member — Read &amp; Write</option>
@@ -5119,7 +5214,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="card">
         <div class="card-header"><div class="card-title"><span class="icon">🎫</span> Tickets</div><button class="btn btn-ghost btn-sm" onclick="loadTickets()">↻</button></div>
         <div style="display:flex;gap:6px;margin-bottom:10px">
-          <select id="sup-f-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadTickets()">
+          <select id="sup-f-status" style="font-size:.8em" onchange="loadTickets()">
             <option value="">All</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option>
           </select>
         </div>
@@ -5131,19 +5226,19 @@ INDEX_HTML = r"""<!doctype html>
         <div class="form-group"><label>Customer Email</label><input id="sup-cust-email" placeholder="customer@example.com"/></div>
         <div class="form-group"><label>Customer Name</label><input id="sup-cust-name" placeholder="Jane Doe"/></div>
         <div class="form-group"><label>Priority</label>
-          <select id="sup-priority" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="sup-priority" >
             <option value="low">Low</option><option value="medium" selected>Medium</option>
             <option value="high">High</option><option value="urgent">Urgent</option>
           </select>
         </div>
         <div class="form-group"><label>Category</label>
-          <select id="sup-cat" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="sup-cat" >
             <option value="general">General</option><option value="billing">Billing</option>
             <option value="technical">Technical</option><option value="feature_request">Feature Request</option><option value="bug">Bug</option>
           </select>
         </div>
         <div class="form-group"><label>Description</label>
-          <textarea id="sup-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Describe the issue…"></textarea>
+          <textarea id="sup-desc" rows="3" class="field-full" placeholder="Describe the issue…"></textarea>
         </div>
         <button class="btn btn-primary" onclick="createTicket()">🎫 Submit Ticket</button>
       </div>
@@ -5161,13 +5256,13 @@ INDEX_HTML = r"""<!doctype html>
         <div class="card-header"><div class="card-title"><span class="icon">➕</span> New Article</div></div>
         <div class="form-group"><label>Title</label><input id="kb-title" placeholder="How to reset your password"/></div>
         <div class="form-group"><label>Category</label>
-          <select id="kb-cat" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="kb-cat" >
             <option value="general">General</option><option value="billing">Billing</option>
             <option value="technical">Technical</option><option value="feature_request">Features</option>
           </select>
         </div>
         <div class="form-group"><label>Content</label>
-          <textarea id="kb-content" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="Write the article content…"></textarea>
+          <textarea id="kb-content" rows="6" class="field-full" placeholder="Write the article content…"></textarea>
         </div>
         <button class="btn btn-primary" onclick="createKBArticle()">📚 Save Article</button>
       </div>
@@ -5192,14 +5287,14 @@ INDEX_HTML = r"""<!doctype html>
       <div class="form-group"><label>Business Name</label><input id="wb-biz" placeholder="Acme SaaS"/></div>
       <div class="form-group"><label>Industry</label><input id="wb-industry" placeholder="B2B Software"/></div>
       <div class="form-group"><label>Page Type</label>
-        <select id="wb-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+        <select id="wb-type" >
           <option value="landing">Landing Page</option><option value="sales">Sales Page</option>
           <option value="portfolio">Portfolio</option><option value="product">Product Page</option>
           <option value="coming_soon">Coming Soon</option>
         </select>
       </div>
       <div class="form-group"><label>Description</label>
-        <textarea id="wb-desc" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;resize:vertical" placeholder="We help B2B companies automate their sales process…"></textarea>
+        <textarea id="wb-desc" rows="3" class="field-full" placeholder="We help B2B companies automate their sales process…"></textarea>
       </div>
       <button class="btn btn-primary" onclick="generateWebPage()">🌐 Generate Page</button>
     </div>
@@ -5231,7 +5326,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="card-header"><div class="card-title"><span class="icon">✍️</span> Generate Content</div></div>
         <div class="form-group"><label>Topic</label><input id="br-topic" placeholder="Why AI is transforming sales…"/></div>
         <div class="form-group"><label>Content Type</label>
-          <select id="br-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="br-type" >
             <option value="linkedin_post">LinkedIn Post</option><option value="twitter_thread">Twitter/X Thread</option>
             <option value="newsletter">Newsletter Section</option><option value="blog_intro">Blog Intro</option>
           </select>
@@ -5254,7 +5349,7 @@ INDEX_HTML = r"""<!doctype html>
         <div>
           <div class="form-group"><label>Target Audience</label><input id="br-p-audience" placeholder="Sales leaders at mid-market companies"/></div>
           <div class="form-group"><label>Tone</label>
-            <select id="br-p-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+            <select id="br-p-tone" >
               <option value="professional">Professional</option><option value="casual">Casual</option>
               <option value="inspirational">Inspirational</option><option value="educational">Educational</option>
             </select>
@@ -5335,7 +5430,7 @@ INDEX_HTML = r"""<!doctype html>
     <div class="card" style="min-height:600px;display:flex;flex-direction:column">
       <div class="card-header">
         <div class="card-title"><span class="icon">🛠️</span> Skills Library <span id="skill-total-badge" style="font-size:.8em;color:var(--text-muted)"></span></div>
-        <button class="btn btn-primary btn-sm" onclick="toggleNewSkillForm()" id="new-skill-btn" style="background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;letter-spacing:.03em;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">＋ New Skill</button>
+        <button class="btn btn-gold btn-sm" onclick="toggleNewSkillForm()" id="new-skill-btn">＋ New Skill</button>
       </div>
       <input id="skill-search" placeholder="🔍 Search skills by name, category, or tag…" oninput="filterSkills()" />
       <div id="category-pills" style="margin:10px 0"></div>
@@ -5359,10 +5454,10 @@ INDEX_HTML = r"""<!doctype html>
             <option>Automation &amp; Productivity</option>
           </select>
         </div>
-        <div class="form-group"><label>Description</label><textarea id="new-skill-desc" rows="3" placeholder="Describe what this skill does and when to use it…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea></div>
+        <div class="form-group"><label>Description</label><textarea id="new-skill-desc" rows="3" placeholder="Describe what this skill does and when to use it…" class="field-full"></textarea></div>
         <div class="form-group"><label>Tags (comma-separated)</label><input id="new-skill-tags" placeholder="e.g. email, sales, conversion"/></div>
-        <div class="form-group"><label>How it works (steps, one per line)</label><textarea id="new-skill-steps" rows="3" placeholder="Step 1: Analyze the target audience&#10;Step 2: Draft personalized subject line&#10;Step 3: Write compelling body copy" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea></div>
-        <button class="btn btn-success" onclick="saveNewSkill()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">◈ Save Skill to Library</button>
+        <div class="form-group"><label>How it works (steps, one per line)</label><textarea id="new-skill-steps" rows="3" placeholder="Step 1: Analyze the target audience&#10;Step 2: Draft personalized subject line&#10;Step 3: Write compelling body copy" class="field-full"></textarea></div>
+        <button class="btn btn-gold" onclick="saveNewSkill()" style="width:100%">◈ Save Skill to Library</button>
         <div id="new-skill-result" style="margin-top:8px;font-size:.84em"></div>
       </div>
       <!-- Create Custom Agent -->
@@ -5377,7 +5472,7 @@ INDEX_HTML = r"""<!doctype html>
           <label>Selected Skills <span id="selected-count" style="color:var(--primary)">(0)</span></label>
           <div id="selected-skills-list" style="font-size:.82em;color:var(--text-muted);min-height:24px">No skills selected. Click cards on the left.</div>
         </div>
-        <button class="btn btn-success" onclick="createAgent()" style="background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">➕ Create Agent</button>
+        <button class="btn btn-gold" onclick="createAgent()" style="width:100%;padding:9px">➕ Create Agent</button>
       </div>
       <div class="card">
         <div class="card-header">
@@ -5415,7 +5510,7 @@ INDEX_HTML = r"""<!doctype html>
             <label>Task Description</label>
             <textarea id="task-input" rows="4"
               placeholder="e.g. Build a SaaS company for remote team management — create business plan, brand identity, hiring plan, financial model, and go-to-market strategy"
-              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"
+              class="field-full"
               oninput="onTaskInputChange()"></textarea>
           </div>
           <div style="display:flex;gap:8px">
@@ -5890,7 +5985,7 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <!-- Custom Guardrails -->
-  <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+  <div class="card card-ai">
     <div class="card-header">
       <div class="card-title"><span style="color:var(--gold)">◈</span> Custom Guardrails</div>
       <button class="btn btn-ghost btn-sm" onclick="loadGuardrails()">↻ Refresh</button>
@@ -5916,7 +6011,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="form-group">
           <label>Rule Description</label>
           <textarea id="gr-custom-rule" rows="3" placeholder="e.g. Never send emails to competitors' domains&#10;e.g. Always require approval before posting on LinkedIn&#10;e.g. Never share customer pricing data externally"
-            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-family:inherit;resize:vertical"></textarea>
+            class="field-full"></textarea>
         </div>
         <div class="form-group">
           <label>Severity</label>
@@ -5927,7 +6022,7 @@ INDEX_HTML = r"""<!doctype html>
             <option value="low">🟢 Low (log only)</option>
           </select>
         </div>
-        <button class="btn btn-primary" onclick="addCustomGuardrail()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">🔒 Add Guardrail Rule</button>
+        <button class="btn btn-gold" onclick="addCustomGuardrail()" style="width:100%">🔒 Add Guardrail Rule</button>
         <div id="gr-custom-result" style="margin-top:8px;font-size:.84em"></div>
       </div>
     </div>
@@ -5952,7 +6047,7 @@ INDEX_HTML = r"""<!doctype html>
     <div id="submit-action-form" style="display:none;margin-top:16px;border-top:1px solid rgba(239,68,68,.2);padding-top:16px">
       <div style="font-size:.84em;font-weight:600;color:var(--text);margin-bottom:10px">Submit Action for Review</div>
       <div class="form-group"><label>Action Type</label>
-        <select id="pa-action-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+        <select id="pa-action-type" >
           <option value="send_email">Send Bulk Email</option>
           <option value="social_post">Social Media Post</option>
           <option value="purchase">Make Purchase</option>
@@ -5961,9 +6056,9 @@ INDEX_HTML = r"""<!doctype html>
           <option value="other">Other</option>
         </select>
       </div>
-      <div class="form-group"><label>Description *</label><textarea id="pa-description" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Describe exactly what this action will do…"></textarea></div>
+      <div class="form-group"><label>Description *</label><textarea id="pa-description" rows="3" class="field-full" placeholder="Describe exactly what this action will do…"></textarea></div>
       <div class="form-group"><label>Risk Level</label>
-        <select id="pa-risk-level" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+        <select id="pa-risk-level" >
           <option value="low">🟢 Low</option>
           <option value="medium" selected>🟡 Medium</option>
           <option value="high">🟠 High</option>
@@ -5971,7 +6066,7 @@ INDEX_HTML = r"""<!doctype html>
         </select>
       </div>
       <div class="form-group"><label>Payload (JSON, optional)</label>
-        <textarea id="pa-payload" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='{"recipients": 150, "subject": "..."}'></textarea>
+        <textarea id="pa-payload" rows="2" class="field-full" placeholder='{"recipients": 150, "subject": "..."}'></textarea>
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary" onclick="submitPendingAction()" style="flex:1">⚠️ Submit for Review</button>
@@ -6022,14 +6117,14 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <p style="color:var(--text-muted);font-size:.82em;margin-bottom:10px">Closed chat sessions with AI summary and date. Click any to view details.</p>
         <input id="conv-search" placeholder="🔍 Search conversations…" oninput="filterConversations()"
-          style="width:100%;background:var(--surface2);border:1px solid rgba(212,175,55,.2);border-radius:8px;color:var(--text);padding:8px 12px;font-family:inherit;font-size:.84em;outline:none;margin-bottom:10px"
+          style="margin-bottom:10px"
           onfocus="this.style.borderColor='rgba(212,175,55,.5)'" onblur="this.style.borderColor='rgba(212,175,55,.2)'" />
         <div id="memory-conversations"><div class="empty"><div class="icon">💬</div><p style="font-size:.84em">No conversations recorded yet. Chat sessions are saved here automatically.</p></div></div>
       </div>
     </div>
     <!-- Right: Add Client + Recent Interactions -->
     <div style="width:320px;flex-shrink:0;display:flex;flex-direction:column;gap:14px">
-      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+      <div class="card card-ai">
         <div class="card-header">
           <div class="card-title"><span style="color:var(--gold)">◈</span> Add Client</div>
         </div>
@@ -6051,7 +6146,7 @@ INDEX_HTML = r"""<!doctype html>
           </select>
         </div>
         <div class="form-group"><label>Notes</label><textarea id="mem-notes" rows="3" placeholder="Any important context about this client…"></textarea></div>
-        <button class="btn btn-success" onclick="addClient()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4);font-weight:700;transition:all .2s" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)'">➕ Add Client</button>
+        <button class="btn btn-gold" onclick="addClient()" style="width:100%">➕ Add Client</button>
       </div>
 
       <div class="card">
@@ -6421,17 +6516,17 @@ function switchTab(tab, btn) {
         <div style="font-size:.78em;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Accent Color</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="theme-accent-btn" onclick="setAccentColor('#D4AF37','#B8960C')" title="Gold (default)"
-            style="width:34px;height:34px;border-radius:50%;background:#D4AF37;border:2px solid rgba(255,255,255,.3);cursor:pointer;transition:transform .15s" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform=''"></button>
+            class="color-swatch" style="background:#D4AF37"></button>
           <button class="theme-accent-btn" onclick="setAccentColor('#00f0ff','#00c0d0')" title="Cyan"
-            style="width:34px;height:34px;border-radius:50%;background:#00f0ff;border:2px solid rgba(255,255,255,.2);cursor:pointer;transition:transform .15s" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform=''"></button>
+            class="color-swatch" style="background:#00f0ff"></button>
           <button class="theme-accent-btn" onclick="setAccentColor('#f59e0b','#d97706')" title="Amber"
-            style="width:34px;height:34px;border-radius:50%;background:#f59e0b;border:2px solid rgba(255,255,255,.2);cursor:pointer;transition:transform .15s" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform=''"></button>
+            class="color-swatch" style="background:#f59e0b"></button>
           <button class="theme-accent-btn" onclick="setAccentColor('#a78bfa','#7c3aed')" title="Purple"
-            style="width:34px;height:34px;border-radius:50%;background:#a78bfa;border:2px solid rgba(255,255,255,.2);cursor:pointer;transition:transform .15s" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform=''"></button>
+            class="color-swatch" style="background:#a78bfa"></button>
           <button class="theme-accent-btn" onclick="setAccentColor('#34d399','#059669')" title="Emerald"
-            style="width:34px;height:34px;border-radius:50%;background:#34d399;border:2px solid rgba(255,255,255,.2);cursor:pointer;transition:transform .15s" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform=''"></button>
+            class="color-swatch" style="background:#34d399"></button>
           <button class="theme-accent-btn" onclick="setAccentColor('#f87171','#dc2626')" title="Red"
-            style="width:34px;height:34px;border-radius:50%;background:#f87171;border:2px solid rgba(255,255,255,.2);cursor:pointer;transition:transform .15s" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform=''"></button>
+            class="color-swatch" style="background:#f87171"></button>
         </div>
       </div>
 
@@ -6541,7 +6636,7 @@ function switchTab(tab, btn) {
         onfocus="this.style.borderColor='rgba(0,240,255,.7)'" onblur="this.style.borderColor='rgba(0,240,255,.25)'"
         onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();blSendTask();}"></textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button onclick="blSendTask()" style="padding:10px 24px;background:linear-gradient(135deg,#004466,#006688,#00a0c0);border:none;border-radius:10px;color:#fff;font-weight:800;font-size:.9em;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 16px rgba(0,240,255,.2);letter-spacing:.03em" onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 24px rgba(0,240,255,.4)'" onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(0,240,255,.2)'">⚡ Launch BLACKLIGHT Task <kbd style="background:rgba(255,255,255,.15);padding:1px 5px;border-radius:4px;font-size:.75em">Ctrl+↵</kbd></button>
+        <button onclick="blSendTask()" class="btn btn-swarm">⚡ Launch BLACKLIGHT Task <kbd style="background:rgba(0,0,0,.2);padding:1px 5px;border-radius:4px;font-size:.75em">Ctrl+↵</kbd></button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(0,240,255,.3);color:#00f0ff" onclick="blFillTask('find local businesses struggling with digital marketing and generate cold outreach sequences')">📣 Lead Outreach</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(0,240,255,.3);color:#00f0ff" onclick="blFillTask('identify high-value e-commerce opportunities and generate monetization strategies')">💰 Money Finder</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(0,240,255,.3);color:#00f0ff" onclick="blFillTask('research the top 5 competitors in my niche and generate a competitive advantage report')">🔬 Research</button>
@@ -6605,7 +6700,7 @@ function switchTab(tab, btn) {
     <div style="display:flex;align-items:center;gap:10px;position:relative;z-index:1">
       <div id="af-pulse" style="width:11px;height:11px;border-radius:50%;background:#d97706;animation:afPulse 2s ease-in-out infinite"></div>
       <span id="af-mode-badge" style="font-size:.75em;font-weight:800;padding:4px 14px;border-radius:20px;background:linear-gradient(135deg,#92400e,#b45309,#d97706);color:#fff1c6;letter-spacing:.1em;text-transform:uppercase;box-shadow:0 0 14px rgba(217,119,6,.45)">AUTO</span>
-      <button onclick="switchTab('chat',null)" style="padding:6px 14px;background:rgba(245,196,0,.08);border:1px solid rgba(245,196,0,.25);border-radius:8px;color:var(--gold);font-size:.75em;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.04em;transition:all .2s" onmouseenter="this.style.background='rgba(245,196,0,.16)';this.style.borderColor='rgba(245,196,0,.5)'" onmouseleave="this.style.background='rgba(245,196,0,.08)';this.style.borderColor='rgba(245,196,0,.25)'">← Overview</button>
+      <button onclick="switchTab('chat',null)" class="btn btn-gold btn-sm">← Overview</button>
     </div>
   </div>
 
@@ -6624,7 +6719,7 @@ function switchTab(tab, btn) {
         onfocus="this.style.borderColor='rgba(251,191,36,.7)'" onblur="this.style.borderColor='rgba(251,191,36,.3)'"
         onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();afSendTask();}"></textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button onclick="afSendTask()" style="padding:10px 24px;background:linear-gradient(135deg,#92400e,#d97706,#f59e0b);border:none;border-radius:10px;color:#fff;font-weight:800;font-size:.9em;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 16px rgba(217,119,6,.3);letter-spacing:.03em" onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 24px rgba(217,119,6,.5)'" onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(217,119,6,.3)'">🔥 Send to Ascend Forge <kbd style="background:rgba(255,255,255,.15);padding:1px 5px;border-radius:4px;font-size:.75em">Ctrl+↵</kbd></button>
+        <button onclick="afSendTask()" class="btn btn-swarm">🔥 Send to Ascend Forge <kbd style="background:rgba(0,0,0,.2);padding:1px 5px;border-radius:4px;font-size:.75em">Ctrl+↵</kbd></button>
         <button onclick="afAnalyzeOnly()" class="btn btn-ghost btn-sm" style="border-color:rgba(251,191,36,.45);color:#fbbf24;font-weight:700" title="Analyze the prompt and show a structured plan — without queuing any patches">🗺 Plan Only</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('optimize all AI prompts for higher revenue and better output quality')">💰 Optimize Prompts</button>
         <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afFillTask('scan system for improvements and automatically apply all low-risk patches')">🔍 Auto-Improve</button>
@@ -6664,7 +6759,7 @@ function switchTab(tab, btn) {
       </div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button onclick="afScan()" style="padding:8px 16px;background:linear-gradient(135deg,#92400e,#d97706);border:none;border-radius:8px;color:#fff;font-weight:700;font-size:.82em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.filter='brightness(1.1)';this.style.boxShadow='0 4px 16px rgba(217,119,6,.4)'" onmouseleave="this.style.filter='';this.style.boxShadow=''">🔍 Scan System</button>
+      <button onclick="afScan()" class="btn btn-swarm btn-sm">🔍 Scan System</button>
       <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afShowPending()">📋 Show Pending</button>
       <button class="btn btn-ghost btn-sm" style="border-color:rgba(217,119,6,.3);color:#f59e0b" onclick="afApplyAllLow()">✅ Apply All LOW</button>
       <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="afCancelAll()">🗑 Cancel All</button>
@@ -6703,7 +6798,7 @@ function switchTab(tab, btn) {
       <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:12px;opacity:.6">
         <div style="font-size:2.2em">📋</div>
         <div style="font-size:.88em;color:var(--text-muted);text-align:center">No pending patches — run a scan to find improvements.</div>
-        <button onclick="afScan()" style="margin-top:4px;padding:7px 18px;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.35);border-radius:8px;color:#d97706;font-size:.8em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(217,119,6,.22)'" onmouseleave="this.style.background='rgba(217,119,6,.12)'">🔍 Run Scan Now</button>
+        <button onclick="afScan()" class="btn btn-gold btn-sm" style="margin-top:4px">🔍 Run Scan Now</button>
       </div>
     </div>
   </div>
@@ -6767,7 +6862,7 @@ function switchTab(tab, btn) {
     </div>
     <!-- Add lead form + lead list -->
     <div style="display:flex;flex-direction:column;gap:14px">
-      <div class="card" style="border:1px solid rgba(245,158,11,.3)">
+      <div class="card card-accent">
         <div class="card-header">
           <div class="card-title"><span class="icon">➕</span> Add Lead</div>
         </div>
@@ -6777,7 +6872,7 @@ function switchTab(tab, btn) {
         <div class="form-group"><label>Phone</label><input id="crm-phone" placeholder="+1 555-0000"/></div>
         <div class="form-group"><label>Deal Value ($)</label><input id="crm-value" type="number" min="0" placeholder="0"/></div>
         <div class="form-group"><label>Source</label><input id="crm-source" placeholder="LinkedIn, Referral, Website…"/></div>
-        <div class="form-group"><label>Notes</label><textarea id="crm-notes" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Initial notes…"></textarea></div>
+        <div class="form-group"><label>Notes</label><textarea id="crm-notes" rows="2" class="field-full" placeholder="Initial notes…"></textarea></div>
         <button class="btn btn-primary" onclick="addCRMLead()" style="width:100%">➕ Add Lead</button>
         <div id="crm-add-result" style="margin-top:8px;font-size:.84em"></div>
       </div>
@@ -6824,28 +6919,28 @@ function switchTab(tab, btn) {
         <div id="em-stats-body"></div>
       </div>
       <!-- Deliverability tips -->
-      <div class="card" style="border:1px solid rgba(6,182,212,.2)">
+      <div class="card card-gold">
         <div class="card-header"><div class="card-title"><span class="icon">🛡️</span> Deliverability Tips</div></div>
         <div id="em-tips-list" style="font-size:.84em"></div>
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:14px">
       <!-- Create campaign form -->
-      <div class="card" style="border:1px solid rgba(6,182,212,.3)">
+      <div class="card card-gold">
         <div class="card-header"><div class="card-title"><span class="icon">➕</span> Create Campaign</div></div>
         <div class="form-group"><label>Campaign Name *</label><input id="em-camp-name" placeholder="e.g. Q1 Outreach"/></div>
         <div class="form-group"><label>From Name</label><input id="em-from-name" placeholder="Your Name / Company"/></div>
         <div class="form-group"><label>Subject Line *</label><input id="em-subject" placeholder="Email subject line"/></div>
-        <div class="form-group"><label>Email Body *</label><textarea id="em-body" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Email body content…"></textarea></div>
+        <div class="form-group"><label>Email Body *</label><textarea id="em-body" rows="5" class="field-full" placeholder="Email body content…"></textarea></div>
         <button class="btn btn-primary" onclick="createEmailCampaign()" style="width:100%">📧 Create Campaign</button>
         <div id="em-create-result" style="margin-top:8px;font-size:.84em"></div>
       </div>
       <!-- AI Email Writer -->
-      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+      <div class="card card-ai">
         <div class="card-header"><div class="card-title"><span style="color:var(--gold)">◈</span> AI Email Writer</div></div>
         <div class="form-group"><label>Campaign Goal</label><input id="em-write-goal" placeholder="e.g. Book a discovery call"/></div>
         <div class="form-group"><label>Tone</label>
-          <select id="em-write-tone" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="em-write-tone" >
             <option value="professional">Professional</option>
             <option value="friendly">Friendly</option>
             <option value="urgent">Urgent</option>
@@ -6853,7 +6948,7 @@ function switchTab(tab, btn) {
           </select>
         </div>
         <div class="form-group"><label>Target Audience</label><input id="em-write-audience" placeholder="e.g. SaaS founders"/></div>
-        <button class="btn btn-primary" onclick="aiWriteEmail()" style="width:100%;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);color:var(--gold);border:1px solid rgba(212,175,55,.4)">◈ Generate Email</button>
+        <button class="btn btn-gold" onclick="aiWriteEmail()" style="width:100%">◈ Generate Email</button>
         <div id="em-write-result" style="margin-top:10px;font-size:.84em"></div>
       </div>
     </div>
@@ -6886,13 +6981,13 @@ function switchTab(tab, btn) {
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:14px">
-      <div class="card" style="border:1px solid rgba(167,139,250,.3)">
+      <div class="card card-gold">
         <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Meeting</div></div>
         <div class="form-group"><label>Title *</label><input id="mtg-title" placeholder="e.g. Q1 Strategy Review"/></div>
         <div class="form-group"><label>Date</label><input id="mtg-date" type="datetime-local"/></div>
         <div class="form-group"><label>Participants (comma-separated)</label><input id="mtg-participants" placeholder="Alice, Bob, Carol"/></div>
         <div class="form-group"><label>Meeting Type</label>
-          <select id="mtg-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="mtg-type" >
             <option value="general">General</option>
             <option value="sales">Sales</option>
             <option value="strategy">Strategy</option>
@@ -6901,7 +6996,7 @@ function switchTab(tab, btn) {
             <option value="kickoff">Kickoff</option>
           </select>
         </div>
-        <div class="form-group"><label>Transcript / Notes</label><textarea id="mtg-transcript" rows="6" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Paste meeting transcript or notes here…"></textarea></div>
+        <div class="form-group"><label>Transcript / Notes</label><textarea id="mtg-transcript" rows="6" class="field-full" placeholder="Paste meeting transcript or notes here…"></textarea></div>
         <button class="btn btn-primary" onclick="addMeeting()" style="width:100%">🗓️ Save Meeting</button>
         <div id="mtg-add-result" style="margin-top:8px;font-size:.84em"></div>
       </div>
@@ -6928,7 +7023,7 @@ function switchTab(tab, btn) {
         <div class="card-header">
           <div class="card-title"><span class="icon">📅</span> Scheduled Posts</div>
           <div style="display:flex;gap:6px">
-            <select id="soc-filter-platform" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadSocialPosts()">
+            <select id="soc-filter-platform" style="font-size:.8em" onchange="loadSocialPosts()">
               <option value="">All Platforms</option>
               <option value="twitter">Twitter/X</option>
               <option value="instagram">Instagram</option>
@@ -6946,10 +7041,10 @@ function switchTab(tab, btn) {
     </div>
     <div style="display:flex;flex-direction:column;gap:14px">
       <!-- Schedule post form -->
-      <div class="card" style="border:1px solid rgba(236,72,153,.3)">
+      <div class="card card-gold">
         <div class="card-header"><div class="card-title"><span class="icon">➕</span> Schedule Post</div></div>
         <div class="form-group"><label>Platform *</label>
-          <select id="soc-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="soc-platform" >
             <option value="twitter">Twitter/X</option>
             <option value="instagram">Instagram</option>
             <option value="linkedin">LinkedIn</option>
@@ -6958,18 +7053,18 @@ function switchTab(tab, btn) {
             <option value="youtube">YouTube</option>
           </select>
         </div>
-        <div class="form-group"><label>Content *</label><textarea id="soc-content" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Post content…"></textarea></div>
+        <div class="form-group"><label>Content *</label><textarea id="soc-content" rows="4" class="field-full" placeholder="Post content…"></textarea></div>
         <div class="form-group"><label>Schedule At *</label><input id="soc-schedule-at" type="datetime-local"/></div>
         <div class="form-group"><label>Campaign (optional)</label><input id="soc-campaign" placeholder="Campaign name"/></div>
         <button class="btn btn-primary" onclick="schedulePost()" style="width:100%">📅 Schedule Post</button>
         <div id="soc-add-result" style="margin-top:8px;font-size:.84em"></div>
       </div>
       <!-- AI Content Generator -->
-      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+      <div class="card card-ai">
         <div class="card-header"><div class="card-title"><span style="color:var(--gold)">◈</span> AI Content Generator</div></div>
         <div class="form-group"><label>Topic / Goal</label><input id="soc-gen-topic" placeholder="e.g. Product launch announcement"/></div>
         <div class="form-group"><label>Platform</label>
-          <select id="soc-gen-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="soc-gen-platform" >
             <option value="twitter">Twitter/X</option><option value="instagram">Instagram</option>
             <option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option>
           </select>
@@ -7038,7 +7133,7 @@ function switchTab(tab, btn) {
           <div class="card-header">
             <div class="card-title"><span class="icon">🧾</span> Invoices</div>
             <div style="display:flex;gap:6px">
-              <select id="inv-filter-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadInvoices()">
+              <select id="inv-filter-status" style="font-size:.8em" onchange="loadInvoices()">
                 <option value="">All</option><option value="draft">Draft</option>
                 <option value="sent">Sent</option><option value="paid">Paid</option>
                 <option value="overdue">Overdue</option>
@@ -7055,7 +7150,7 @@ function switchTab(tab, btn) {
         <div class="form-group"><label>Client Name *</label><input id="inv-client" placeholder="Client name"/></div>
         <div class="form-group"><label>Client Email</label><input id="inv-email" type="email" placeholder="client@example.com"/></div>
         <div class="form-group"><label>Items (JSON)</label>
-          <textarea id="inv-items" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='[{"description":"Service","qty":1,"unit_price":500}]'></textarea>
+          <textarea id="inv-items" rows="4" class="field-full" placeholder='[{"description":"Service","qty":1,"unit_price":500}]'></textarea>
         </div>
         <div class="form-group"><label>Due Date</label><input id="inv-due" type="date"/></div>
         <div class="form-group"><label>Notes</label><input id="inv-notes" placeholder="Optional notes"/></div>
@@ -7080,7 +7175,7 @@ function switchTab(tab, btn) {
         <div class="form-group"><label>Client Name *</label><input id="quo-client" placeholder="Client name"/></div>
         <div class="form-group"><label>Client Email</label><input id="quo-email" type="email" placeholder="client@example.com"/></div>
         <div class="form-group"><label>Items (JSON)</label>
-          <textarea id="quo-items" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:monospace;font-size:.8em;resize:vertical" placeholder='[{"description":"Consulting","qty":10,"unit_price":150}]'></textarea>
+          <textarea id="quo-items" rows="4" class="field-full" placeholder='[{"description":"Consulting","qty":10,"unit_price":150}]'></textarea>
         </div>
         <div class="form-group"><label>Valid Until</label><input id="quo-valid" type="date"/></div>
         <button class="btn btn-primary" onclick="createQuote()" style="width:100%">📄 Create Quote</button>
@@ -7104,7 +7199,7 @@ function switchTab(tab, btn) {
         <div class="form-group"><label>Description *</label><input id="exp-desc" placeholder="e.g. AWS hosting"/></div>
         <div class="form-group"><label>Amount ($) *</label><input id="exp-amount" type="number" step="0.01" min="0" placeholder="0.00"/></div>
         <div class="form-group"><label>Category</label>
-          <select id="exp-category" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="exp-category" >
             <option value="general">General</option><option value="software">Software/SaaS</option>
             <option value="hosting">Hosting/Infrastructure</option><option value="marketing">Marketing</option>
             <option value="payroll">Payroll</option><option value="office">Office</option>
@@ -7161,7 +7256,7 @@ function switchTab(tab, btn) {
         <div class="form-group"><label>Website</label><input id="comp-website" placeholder="https://competitor.com"/></div>
         <div class="form-group"><label>Their Pricing</label><input id="comp-pricing" placeholder="e.g. $99/mo freemium"/></div>
         <div class="form-group"><label>Target Market</label><input id="comp-market" placeholder="e.g. SMB SaaS companies"/></div>
-        <div class="form-group"><label>Notes</label><textarea id="comp-notes" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Initial observations…"></textarea></div>
+        <div class="form-group"><label>Notes</label><textarea id="comp-notes" rows="3" class="field-full" placeholder="Initial observations…"></textarea></div>
         <button class="btn btn-primary" onclick="addCompetitor()" style="width:100%">🕵️ Track Competitor</button>
         <div id="comp-add-result" style="margin-top:8px;font-size:.84em"></div>
       </div>
@@ -7196,13 +7291,13 @@ function switchTab(tab, btn) {
         <div class="card-header">
           <div class="card-title"><span class="icon">🗃️</span> Content Calendar</div>
           <div style="display:flex;gap:6px">
-            <select id="cc-filter-platform" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadContentCalendar()">
+            <select id="cc-filter-platform" style="font-size:.8em" onchange="loadContentCalendar()">
               <option value="">All Platforms</option>
               <option value="instagram">Instagram</option><option value="twitter">Twitter</option>
               <option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option>
               <option value="youtube">YouTube</option><option value="blog">Blog</option>
             </select>
-            <select id="cc-filter-status" style="font-size:.8em;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:4px 8px" onchange="loadContentCalendar()">
+            <select id="cc-filter-status" style="font-size:.8em" onchange="loadContentCalendar()">
               <option value="">All Status</option>
               <option value="idea">Idea</option><option value="draft">Draft</option>
               <option value="scheduled">Scheduled</option><option value="published">Published</option>
@@ -7219,7 +7314,7 @@ function switchTab(tab, btn) {
         <div class="card-header"><div class="card-title"><span class="icon">➕</span> Add Entry</div></div>
         <div class="form-group"><label>Date *</label><input id="cc-date" type="date"/></div>
         <div class="form-group"><label>Platform *</label>
-          <select id="cc-platform" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="cc-platform" >
             <option value="instagram">Instagram</option><option value="twitter">Twitter/X</option>
             <option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option>
             <option value="youtube">YouTube</option><option value="blog">Blog</option>
@@ -7227,24 +7322,24 @@ function switchTab(tab, btn) {
           </select>
         </div>
         <div class="form-group"><label>Content Type</label>
-          <select id="cc-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="cc-type" >
             <option value="post">Post</option><option value="reel">Reel</option>
             <option value="story">Story</option><option value="article">Article</option>
             <option value="video">Video</option><option value="email">Email</option>
           </select>
         </div>
         <div class="form-group"><label>Title *</label><input id="cc-title" placeholder="Content title"/></div>
-        <div class="form-group"><label>Content</label><textarea id="cc-content" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-family:inherit;resize:vertical" placeholder="Content text (optional)"></textarea></div>
+        <div class="form-group"><label>Content</label><textarea id="cc-content" rows="3" class="field-full" placeholder="Content text (optional)"></textarea></div>
         <button class="btn btn-primary" onclick="addCalendarEntry()" style="width:100%">➕ Add Entry</button>
         <div id="cc-add-result" style="margin-top:8px;font-size:.84em"></div>
       </div>
       <!-- AI Calendar Generator -->
-      <div class="card" style="border:1px solid rgba(212,175,55,.2);background:linear-gradient(135deg,rgba(212,175,55,.03),var(--surface2))">
+      <div class="card card-ai">
         <div class="card-header"><div class="card-title"><span style="color:var(--gold)">◈</span> AI Calendar Generator</div></div>
         <p style="color:var(--text-muted);font-size:.84em;margin-bottom:12px">Let AI generate a full 30-day content calendar tailored to your niche.</p>
         <div class="form-group"><label>Your Niche / Business</label><input id="cc-gen-niche" placeholder="e.g. SaaS productivity tools"/></div>
         <div class="form-group"><label>Days to Generate</label>
-          <select id="cc-gen-days" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px">
+          <select id="cc-gen-days" >
             <option value="7">7 days</option><option value="14">14 days</option>
             <option value="30" selected>30 days</option>
           </select>
@@ -7519,7 +7614,7 @@ function _switchTabBase(tab, btn) {
 function toast(msg, type='success') {
   const icons = {success:'✅', error:'❌', info:'ℹ️'};
   const el = document.getElementById('toast');
-  el.innerHTML = `<span style="font-size:1.1em">${icons[type]||'✅'}</span><span>${msg}</span>`;
+  el.innerHTML = `<span style="font-size:1.1em">${icons[type]||'✅'}</span><span>${escHtml(String(msg))}</span>`;
   el.className = '';
   el.classList.add(type, 'show');
   clearTimeout(el._t);
@@ -7821,7 +7916,7 @@ async function loadDashboard() {
   const mc = modeColors[d.mode] || 'var(--gold)';
   document.getElementById('header-sub').innerHTML =
     `${running}/${capacity} agents running` +
-    (d.mode ? ` <span style="background:${mc}22;color:${mc};border:1px solid ${mc}44;border-radius:8px;padding:1px 8px;font-size:.8em;font-weight:700;margin-left:4px">${d.mode.toUpperCase()}</span>` : '');
+    (d.mode ? ` <span style="background:${mc}22;color:${mc};border:1px solid ${mc}44;border-radius:8px;padding:1px 8px;font-size:.8em;font-weight:700;margin-left:4px">${escHtml(d.mode).toUpperCase()}</span>` : '');
 
   // Update system control hero
   const pct = total > 0 ? Math.round((running / total) * 100) : 0;
@@ -8638,7 +8733,7 @@ async function loadWorkers() {
       const schedMap = {continuous:'🔄 Continuous', hourly:'⏰ Hourly', every6h:'⏰ Every 6h', daily:'🌙 Daily 2AM', '3x_daily':'☀️ 3× Daily', weekly:'📅 Weekly', manual:'🖱 Manual'};
       const schedLabel = schedMap[b.schedule] || b.schedule || 'manual';
       const lastRun = b.last_run ? `Last: ${b.last_run.split('T')[0]}` : 'Never run';
-      return `<div style="border:1px solid ${enabled ? 'rgba(16,185,129,.2)' : 'var(--border)'};border-radius:var(--radius);padding:16px;margin-bottom:10px;border-left:4px solid ${statusColor};background:var(--surface2);transition:all .2s" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)'" onmouseleave="this.style.borderColor='${enabled ? 'rgba(16,185,129,.2)' : 'var(--border)'}'">
+      return `<div style="border:1px solid ${enabled ? 'rgba(16,185,129,.2)' : 'var(--border)'};border-radius:var(--radius);padding:16px;margin-bottom:10px;border-left:4px solid ${statusColor};background:var(--surface2);transition:all .2s" class="js-card-row-hover">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
           <div style="flex:1">
             <div style="font-weight:700;font-size:.95em;display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
@@ -9384,7 +9479,7 @@ async function submitTask() {
     mode: _taskMode
   })});
   if (r.ok) {
-    resultEl.innerHTML = `<span style="color:var(--success)">✅ Task launched! ID: <code>${r.task_id||'?'}</code> | ${agents.length || 'auto'} agent${agents.length!==1?'s':''} | mode: ${_taskMode}</span>`;
+    resultEl.innerHTML = `<span style="color:var(--success)">✅ Task launched! ID: <code>${escHtml(String(r.task_id||'?'))}</code> | ${agents.length || 'auto'} agent${agents.length!==1?'s':''} | mode: ${escHtml(_taskMode)}</span>`;
     document.getElementById('task-input').value = '';
     _selectedAgentIds.clear();
     _autoSelectedIds.clear();
@@ -9469,7 +9564,7 @@ async function loadTasks() {
     const mode = p.mode ? ` · ${p.mode}` : '';
     return `<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:background .15s" 
       onclick="openTaskDetail(${JSON.stringify(tid)})"
-      onmouseenter="this.style.background='rgba(212,175,55,.05)'" onmouseleave="this.style.background=''">
+      class="js-item-hover">
       <div>
         <div style="font-weight:500">${e} ${escHtml(p.title||p.id)}</div>
         <div style="font-size:.78em;color:var(--text-muted)">${(p.subtasks||[]).length} subtasks${mode} | Agents: ${escHtml(agents)||'—'} | ${(p.created_at||'').split('T')[0]}</div>
@@ -9651,7 +9746,7 @@ function renderSwarmGrid(agents) {
     const statusLabel = isRunning ? '<span style="font-size:.7em;color:#34d399;font-weight:600;letter-spacing:.02em">ONLINE</span>' : '<span style="font-size:.7em;color:#4b5563;font-weight:600;letter-spacing:.02em">OFFLINE</span>';
     const skills = (a.skills||[]).slice(0,4).map(s => `<span style="background:rgba(212,175,55,.08);padding:2px 7px;border-radius:4px;font-size:.7em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18)">${escHtml(s)}</span>`).join('');
     const moreSkills = (a.skills||[]).length > 4 ? `<span style="font-size:.7em;color:var(--text-muted);padding:2px 6px">+${(a.skills||[]).length-4} more</span>` : '';
-    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid ${isRunning ? 'rgba(16,185,129,.2)' : 'var(--border)'};border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;transition:all .25s;${cardGlow}" onmouseenter="this.style.transform='translateY(-3px)';this.style.borderColor='rgba(212,175,55,.3)';this.style.boxShadow='0 8px 32px rgba(0,0,0,.5),0 0 0 1px rgba(212,175,55,.08)'" onmouseleave="this.style.transform='';this.style.borderColor='${isRunning ? 'rgba(16,185,129,.2)' : 'var(--border)'}';this.style.boxShadow='${cardGlow}'">
+    return `<div data-category="${escHtml(a.category||'')}" style="background:var(--surface2);border:1px solid ${isRunning ? 'rgba(16,185,129,.2)' : 'var(--border)'};border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;transition:all .25s;${cardGlow}" class="js-agent-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
           <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,${color}22,${color}11);border:1px solid ${color}44;display:flex;align-items:center;justify-content:center;font-size:1.1em;flex-shrink:0">🤖</div>
@@ -9667,7 +9762,7 @@ function renderSwarmGrid(agents) {
       </div>
       <div style="font-size:.8em;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;flex:1">${escHtml((a.description||'No description available.').slice(0,100))}${(a.description||'').length>100?'…':''}</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">${skills}${moreSkills}</div>
-      <button class="btn btn-ghost btn-sm" onclick="assignTaskToAgent('${escHtml(a.id)}')" style="width:100%;font-size:.78em;border:1px solid rgba(212,175,55,.3);color:var(--gold);padding:6px;border-radius:6px;transition:all .2s" onmouseenter="this.style.background='rgba(212,175,55,.1)';this.style.borderColor='rgba(212,175,55,.6)'" onmouseleave="this.style.background='';this.style.borderColor='rgba(212,175,55,.3)'">⚡ Assign Task</button>
+      <button class="btn btn-ghost btn-sm" onclick="assignTaskToAgent('${escHtml(a.id)}')" class="btn-assign-task">⚡ Assign Task</button>
     </div>`;
   }).join('');
 }
@@ -9999,15 +10094,15 @@ function renderCommands() {
         const [cmdStr, desc, waOnly] = cmd;
         let execBtn = '';
         if (!isWA && !waOnly) {
-          execBtn = `<button onclick="executeCmd('${escHtml(cmdStr)}')" style="flex-shrink:0;padding:3px 10px;font-size:.72em;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.3);color:var(--gold);border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s" onmouseenter="this.style.background='rgba(212,175,55,.2)'" onmouseleave="this.style.background='rgba(212,175,55,.1)'" title="Execute in Chat">▶ Run</button>`;
+          execBtn = `<button onclick="executeCmd('${escHtml(cmdStr)}')" class="btn-cmd-run" title="Execute in Chat">▶ Run</button>`;
         } else if (!isWA && waOnly) {
           execBtn = `<span style="flex-shrink:0;padding:3px 8px;font-size:.7em;opacity:.4;color:var(--text-muted)">📱 WA only</span>`;
         }
         const waShort = isWA ? `<span style="font-size:.68em;color:var(--text-muted);margin-left:4px">→ send via WhatsApp</span>` : '';
-        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;transition:background .15s;cursor:default" onmouseenter="this.style.background='rgba(212,175,55,.04)'" onmouseleave="this.style.background=''">
-          <code onclick="copyCmd('${escHtml(cmdStr)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();copyCmd('${escHtml(cmdStr)}')}" tabindex="0" role="button" aria-label="Copy command: ${escHtml(cmdStr)}" title="Click to copy" style="cursor:pointer;min-width:160px;max-width:220px;background:rgba(10,15,30,.9);padding:4px 9px;border-radius:5px;font-size:.8em;color:var(--gold-light);border:1px solid rgba(212,175,55,.18);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color .15s" onmouseenter="this.style.borderColor='rgba(212,175,55,.5)'" onmouseleave="this.style.borderColor='rgba(212,175,55,.18)'">${escHtml(cmdStr)}</code>
+        return `<div class="js-item-hover" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px">
+          <code onclick="copyCmd('${escHtml(cmdStr)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();copyCmd('${escHtml(cmdStr)}')}" tabindex="0" role="button" aria-label="Copy command: ${escHtml(cmdStr)}" title="Click to copy" class="cmd-code">${escHtml(cmdStr)}</code>
           <div style="flex:1;font-size:.83em;color:var(--text-secondary);line-height:1.4">${escHtml(desc)}${waShort}</div>
-          <button onclick="copyCmd('${escHtml(cmdStr)}')" style="flex-shrink:0;padding:3px 8px;font-size:.7em;background:transparent;border:1px solid rgba(148,163,184,.12);color:var(--text-muted);border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)';this.style.color='var(--gold)'" onmouseleave="this.style.borderColor='rgba(148,163,184,.12)';this.style.color='var(--text-muted)'" title="Copy">Copy</button>
+          <button onclick="copyCmd('${escHtml(cmdStr)}')" class="btn-cmd-copy" title="Copy">Copy</button>
           ${execBtn}
         </div>`;
       }).join('');
@@ -10271,7 +10366,7 @@ function renderTemplatesGrid() {
     const expected = t.expected_results || {};
     const roi = expected.estimated_monthly_revenue || expected.estimated_monthly_savings || expected.estimated_monthly_value || '';
     const steps = (t.setup_steps||[]).map(s => `<li style="margin-bottom:4px">${escHtml(s)}</li>`).join('');
-    return `<div style="border:1px solid ${bdr};border-radius:var(--radius);padding:20px;background:linear-gradient(135deg,var(--surface2) 0%,rgba(12,18,36,.98) 100%);display:flex;flex-direction:column;gap:14px;transition:all .25s;position:relative;overflow:hidden" onmouseenter="this.style.transform='translateY(-3px)';this.style.borderColor='rgba(212,175,55,.5)';this.style.boxShadow='0 12px 40px rgba(0,0,0,.6),0 0 0 1px rgba(212,175,55,.1)'" onmouseleave="this.style.transform='';this.style.borderColor='${bdr}';this.style.boxShadow=''">
+    return `<div style="border:1px solid ${bdr};border-radius:var(--radius);padding:20px;background:linear-gradient(135deg,var(--surface2) 0%,rgba(12,18,36,.98) 100%);display:flex;flex-direction:column;gap:14px;transition:all .25s;position:relative;overflow:hidden" class="js-card-hover">
       <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,${bdr},transparent);pointer-events:none"></div>
       <div style="display:flex;align-items:center;gap:12px">
         <div style="width:52px;height:52px;border-radius:14px;background:${col};border:1px solid ${bdr};display:flex;align-items:center;justify-content:center;font-size:1.8em;flex-shrink:0">${escHtml(t.icon||'📋')}</div>
@@ -10287,7 +10382,7 @@ function renderTemplatesGrid() {
         <div style="display:flex;flex-wrap:wrap;gap:4px">${agents}</div>
       </div>
       ${steps ? `<details style="font-size:.8em"><summary style="cursor:pointer;color:var(--gold);font-weight:600;list-style:none;display:flex;align-items:center;gap:5px"><span>▶</span> Setup Steps</summary><ol style="color:var(--text-muted);margin:8px 0 0 16px;line-height:1.7;padding:0">${steps}</ol></details>` : ''}
-      <button onclick="deployTemplate('${jsEsc(t.id)}','${jsEsc(t.name)}')" style="width:100%;padding:12px;background:linear-gradient(135deg,#0d0d0d,#1a1a1a);border:1px solid rgba(212,175,55,.4);border-radius:9px;color:var(--gold);font-weight:700;font-size:.88em;cursor:pointer;transition:all .2s;letter-spacing:.02em;font-family:inherit" onmouseenter="this.style.background='linear-gradient(135deg,var(--primary-dark),var(--primary))';this.style.color='#000';this.style.boxShadow='0 6px 24px rgba(212,175,55,.5)'" onmouseleave="this.style.background='linear-gradient(135deg,#0d0d0d,#1a1a1a)';this.style.color='var(--gold)';this.style.boxShadow=''">🚀 Deploy Template</button>
+      <button onclick="deployTemplate('${jsEsc(t.id)}','${jsEsc(t.name)}')" class="btn-deploy">🚀 Deploy Template</button>
     </div>`;
   }).join('');
 }
@@ -10358,8 +10453,8 @@ async function loadGuardrails() {
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
-            <button onclick="approveAction('${jsEsc(a.id)}')" style="padding:8px 16px;background:linear-gradient(135deg,#064e3b,#065f46);color:#34d399;border:2px solid rgba(52,211,153,.4);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap" onmouseenter="this.style.background='linear-gradient(135deg,#065f46,#047857)';this.style.boxShadow='0 0 16px rgba(52,211,153,.4)'" onmouseleave="this.style.background='linear-gradient(135deg,#064e3b,#065f46)';this.style.boxShadow=''">✅ Accept</button>
-            <button onclick="rejectAction('${jsEsc(a.id)}')" style="padding:8px 16px;background:linear-gradient(135deg,#450a0a,#7f1d1d);color:#f87171;border:2px solid rgba(248,113,113,.4);border-radius:8px;cursor:pointer;font-weight:700;font-size:.84em;font-family:inherit;transition:all .2s;white-space:nowrap" onmouseenter="this.style.background='linear-gradient(135deg,#7f1d1d,#991b1b)';this.style.boxShadow='0 0 16px rgba(248,113,113,.4)'" onmouseleave="this.style.background='linear-gradient(135deg,#450a0a,#7f1d1d)';this.style.boxShadow=''">🚫 Reject</button>
+            <button onclick="approveAction('${jsEsc(a.id)}')" class="btn-approve">✅ Accept</button>
+            <button onclick="rejectAction('${jsEsc(a.id)}')" class="btn-reject">🚫 Reject</button>
           </div>
         </div>
       </div>`;
@@ -10532,7 +10627,7 @@ function renderMemoryClients(clients) {
   cEl.innerHTML = clients.map(c => {
     const col = statusColor[c.status] || 'var(--surface)';
     const lastContact = c.last_contact || (c.updated_at||c.added_at||'').split('T')[0] || '–';
-    return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;background:var(--surface2);transition:all .2s" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)'" onmouseleave="this.style.borderColor='var(--border)'">
+    return `<div class="js-card-row-hover" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;background:var(--surface2)">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
           <div style="font-weight:600;font-size:.9em">${escHtml(c.name)}</div>
@@ -10582,7 +10677,7 @@ function renderConversations(conversations) {
     const date = (c.date||c.ts||'').split('T')[0] || '–';
     const summary = (c.summary||c.message||'Chat session').slice(0,120);
     const msgCount = c.message_count || c.messages || 0;
-    return `<div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;background:var(--surface2);cursor:pointer;transition:all .2s" onclick="toggleConversationDetail(${idx})" onmouseenter="this.style.borderColor='rgba(212,175,55,.3)'" onmouseleave="this.style.borderColor='var(--border)'">
+    return `<div class="js-card-row-hover" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;background:var(--surface2);cursor:pointer" onclick="toggleConversationDetail(${idx})">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
         <div style="flex:1">
           <div style="font-size:.85em;font-weight:600;color:var(--text)">${escHtml(c.title||'Chat Session #'+(idx+1))}</div>
@@ -11627,7 +11722,7 @@ async function afLoadPatches() {
       el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:12px;opacity:.6">
         <div style="font-size:2.2em">📋</div>
         <div style="font-size:.88em;color:var(--text-muted);text-align:center">No pending patches — run a scan to find improvements.</div>
-        <button onclick="afScan()" style="margin-top:4px;padding:7px 18px;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.35);border-radius:8px;color:#d97706;font-size:.8em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(217,119,6,.22)'" onmouseleave="this.style.background='rgba(217,119,6,.12)'">🔍 Run Scan Now</button>
+        <button onclick="afScan()" class="btn btn-gold btn-sm" style="margin-top:4px">🔍 Run Scan Now</button>
       </div>`;
       return;
     }
@@ -11644,8 +11739,8 @@ async function afLoadPatches() {
         <div style="font-size:.79em;color:rgba(217,119,6,.6);margin-bottom:10px;line-height:1.5">${escHtml(p.reason||'')}</div>
         ${p.diff_preview ? `<details style="margin-bottom:10px"><summary style="font-size:.76em;cursor:pointer;color:rgba(217,119,6,.55);user-select:none">▶ View diff / code changes</summary><pre style="font-size:.73em;background:rgba(6,3,0,.95);border:1px solid rgba(217,119,6,.15);border-radius:6px;padding:10px;overflow-x:auto;color:#c9d1d9;margin-top:6px;line-height:1.5">${escHtml(p.diff_preview)}</pre></details>` : ''}
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button style="padding:6px 16px;background:linear-gradient(135deg,#14532d,#15803d);border:1px solid rgba(74,222,128,.3);border-radius:7px;color:#4ade80;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 12px rgba(74,222,128,.25)'" onmouseleave="this.style.boxShadow=''" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
-          <button style="padding:6px 16px;background:linear-gradient(135deg,#450a0a,#7f1d1d);border:1px solid rgba(239,68,68,.3);border-radius:7px;color:#f87171;font-weight:700;font-size:.78em;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.boxShadow='0 0 12px rgba(239,68,68,.2)'" onmouseleave="this.style.boxShadow=''" onclick="afReject('${p.patch_id}')">❌ Reject</button>
+          <button class="btn-approve-sm" onclick="afApprove('${p.patch_id}')">✅ Approve</button>
+          <button class="btn-reject-sm" onclick="afReject('${p.patch_id}')">❌ Reject</button>
         </div>
       </div>`;
     }).join('');
@@ -11719,7 +11814,7 @@ async function afLoadChangelog() {
         <div style="font-size:.85em;font-weight:700;color:#fef3c7;margin-bottom:3px">${escHtml(p.description)}</div>
         <div style="font-size:.77em;color:rgba(217,119,6,.55);line-height:1.5;margin-bottom:6px">${escHtml(p.reason||'')}</div>
         ${p.diff_preview ? `<details style="margin-bottom:6px"><summary style="font-size:.74em;cursor:pointer;color:rgba(217,119,6,.45);user-select:none">▶ View diff</summary><pre style="font-size:.71em;background:rgba(6,3,0,.95);border:1px solid rgba(217,119,6,.12);border-radius:6px;padding:10px;overflow-x:auto;color:#c9d1d9;margin-top:5px;line-height:1.5">${escHtml(p.diff_preview)}</pre></details>` : ''}
-        ${p.status==='approved' ? `<button style="padding:4px 12px;background:rgba(127,29,29,.6);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;font-size:.75em;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s" onmouseenter="this.style.background='rgba(127,29,29,.9)'" onmouseleave="this.style.background='rgba(127,29,29,.6)'" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
+        ${p.status==='approved' ? `<button class="btn-rollback" onclick="afRollback('${p.patch_id}')">↩️ Rollback</button>` : ''}
       </div>`;
     }).join('');
   } catch(e) { console.warn('afLoadChangelog', e); }
@@ -16736,6 +16831,13 @@ def start_all_agents(_auth: None = Depends(require_auth)):
             return JSONResponse({"ok": False, "error": "Shutdown is in progress. Start is temporarily blocked."}, status_code=409)
         mode = _current_mode()
         targets = _mode_agent_targets(mode)
+        if not targets:
+            err = (
+                "No runnable agents found. Set AI_HOME to a valid installation or keep runtime/agents "
+                "available in the repository."
+            )
+            _log_activity("worker", err, details={"mode": mode}, source="dashboard")
+            return JSONResponse({"ok": False, "mode": mode, "targets": [], "started": 0, "failed": [], "error": err}, status_code=503)
         outputs = []
         failures = []
         skipped_agents: list = []        # agents skipped by governor or circuit breaker
@@ -20241,10 +20343,9 @@ def _load_blacklight_module():
     global _blacklight_mod
     if _blacklight_mod is not None:
         return _blacklight_mod
-    _bl_path = AI_HOME / "agents" / "blacklight"
+    _bl_path = BOTS_DIR / "blacklight"
     if str(_bl_path) not in sys.path:
         sys.path.insert(0, str(_bl_path))
-    import importlib
     _blacklight_mod = importlib.import_module("blacklight")
     return _blacklight_mod
 
@@ -20317,7 +20418,7 @@ def _load_ascend_module():
     global _ascend_mod
     if _ascend_mod is not None:
         return _ascend_mod
-    _af_path = AI_HOME / "agents" / "ascend-forge"
+    _af_path = BOTS_DIR / "ascend-forge"
     if str(_af_path) not in sys.path:
         sys.path.insert(0, str(_af_path))
     _ascend_mod = importlib.import_module("ascend_forge")
@@ -20458,7 +20559,22 @@ _af_current_task: dict = {
     "result": "",
     "started_at": "",
     "finished_at": "",
+    "events": [],
 }
+
+
+def _af_append_event(status: str, progress: int, message: str) -> None:
+    event = {
+        "ts": now_iso(),
+        "status": status,
+        "progress": max(0, min(100, int(progress))),
+        "message": message,
+        "agent_id": "ascend-forge",
+        "task_id": _af_current_task.get("task_id", ""),
+    }
+    events = _af_current_task.get("events", [])
+    events.append(event)
+    _af_current_task["events"] = events[-50:]
 
 
 def _run_ascend_task(task_id: str, task: str) -> None:
@@ -20472,15 +20588,20 @@ def _run_ascend_task(task_id: str, task: str) -> None:
             "result": "",
             "started_at": now_iso(),
             "finished_at": "",
+            "events": [],
         })
+        _af_append_event("running", 5, "Task accepted by Ascend Forge")
+    _log_activity("task_run", f"Ascend Forge task started: {task}", details={"task_id": task_id, "status": "running", "agent_id": "ascend-forge"}, source="ascend")
     try:
         af = _load_ascend_module()
         # Step 1 – analyze intent (20%)
         with _af_task_lock:
             _af_current_task["progress"] = 20
+            _af_append_event("running", 20, "Analyzing task intent")
         # Step 2 – plan and execute (60%)
         with _af_task_lock:
             _af_current_task["progress"] = 60
+            _af_append_event("running", 60, "Executing plan")
         result = af.handle_complex_task(task)
         with _af_task_lock:
             _af_current_task.update({
@@ -20489,6 +20610,8 @@ def _run_ascend_task(task_id: str, task: str) -> None:
                 "result": result,
                 "finished_at": now_iso(),
             })
+            _af_append_event("done", 100, "Task completed successfully")
+        _log_activity("task_run", "Ascend Forge task completed", details={"task_id": task_id, "status": "done", "agent_id": "ascend-forge"}, source="ascend")
     except Exception as exc:
         logger.error("ascend task error: %s", exc)
         with _af_task_lock:
@@ -20498,6 +20621,8 @@ def _run_ascend_task(task_id: str, task: str) -> None:
                 "result": str(exc),
                 "finished_at": now_iso(),
             })
+            _af_append_event("error", 0, f"Task failed: {exc}")
+        _log_activity("task_run", "Ascend Forge task failed", details={"task_id": task_id, "status": "error", "agent_id": "ascend-forge", "error": str(exc)}, source="ascend")
 
 
 @app.post("/api/ascend/task")
@@ -20506,6 +20631,9 @@ def ascend_run_task(payload: dict, _auth: None = Depends(require_auth)):
     task = (payload.get("task") or "").strip()
     if not task:
         raise HTTPException(400, "task is required")
+    with _af_task_lock:
+        if _af_current_task.get("status") == "running":
+            raise HTTPException(409, "another Ascend Forge task is already running")
     task_id = str(_uuid_mod.uuid4())[:8]
     t = threading.Thread(target=_run_ascend_task, args=(task_id, task), daemon=True)
     t.start()
@@ -22270,7 +22398,7 @@ async def social_stats():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _ceo_briefing():
-    _p = AI_HOME / "agents" / "ceo-briefing"
+    _p = BOTS_DIR / "ceo-briefing"
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
     import ceo_briefing  # type: ignore
