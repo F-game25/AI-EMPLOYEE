@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 
@@ -45,7 +45,38 @@ function MiniBar({ pct, color }) {
 
 export default function NeuralNetworkPanel() {
   const nn = useAppStore(s => s.nnStatus)
+  const setNnStatus = useAppStore(s => s.setNnStatus)
   const [expanded, setExpanded] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    const base = `http://${window.location.hostname}:3001`
+
+    const loadBrainStatus = async () => {
+      try {
+        const res = await fetch(`${base}/api/brain/status`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        if (cancelled) return
+        setNnStatus(data || {})
+        setError('')
+      } catch (e) {
+        if (cancelled) return
+        setError('Unable to load brain status')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    loadBrainStatus()
+    const timer = setInterval(loadBrainStatus, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [setNnStatus])
 
   const modeColor = MODE_COLORS[nn.mode] || 'var(--text-muted)'
   const confPct = Math.round((nn.confidence || 0) * 100)
@@ -136,12 +167,24 @@ export default function NeuralNetworkPanel() {
                 <StatRow label="LEARN STEP" value={learnStep.toLocaleString()} highlight />
                 <StatRow label="EXPERIENCES" value={experiences.toLocaleString()} />
                 <StatRow
+                  label="STATUS"
+                  value={loading ? 'LOADING' : (error ? 'ERROR' : (nn.available === false ? 'UNAVAILABLE' : 'ACTIVE'))}
+                  highlight={!error && !loading}
+                />
+                <StatRow
                   label="LOSS"
                   value={nn.last_loss !== null && nn.last_loss !== undefined ? nn.last_loss.toFixed(4) : '—'}
                 />
                 <StatRow label="DEVICE" value={(nn.device || 'cpu').toUpperCase()} />
                 <StatRow label="BG LOOP" value={nn.bg_running ? '● ACTIVE' : '○ IDLE'} />
+                <StatRow label="MEMORY SIZE" value={(nn.memory_size || 0).toLocaleString()} />
               </div>
+
+              {error && (
+                <div className="font-mono mt-2" style={{ fontSize: '10px', color: 'var(--warning)' }}>
+                  {error}
+                </div>
+              )}
 
               {/* Recent outputs */}
               {nn.recent_outputs && nn.recent_outputs.length > 0 && (
@@ -160,6 +203,24 @@ export default function NeuralNetworkPanel() {
                       {o.confidence !== undefined && (
                         <span style={{ color: 'var(--text-muted)' }}> ({(o.confidence * 100).toFixed(0)}%)</span>
                       )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {nn.recent_learning_events && nn.recent_learning_events.length > 0 && (
+                <div style={{ marginTop: '6px', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: '6px' }}>
+                  <div className="font-mono" style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '3px' }}>
+                    RECENT LEARNING EVENTS
+                  </div>
+                  {nn.recent_learning_events.slice(0, 3).map((event, i) => (
+                    <div
+                      key={`${event.ts || i}-${event.event || 'event'}`}
+                      className="font-mono truncate"
+                      style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.6' }}
+                    >
+                      <span style={{ color: 'var(--gold)', opacity: 0.6 }}>›</span>{' '}
+                      {(event.event || 'update').replaceAll('_', ' ')}
                     </div>
                   ))}
                 </div>
