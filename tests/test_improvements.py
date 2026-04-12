@@ -138,6 +138,60 @@ class TestEnterpriseLifecycle:
         assert "Already running" in body["output"]
         ai_cmd.assert_not_called()
 
+    def test_start_all_reports_diagnostics_and_live_start_failures(self, server):
+        mod, client = server
+        started_live: set[str] = set()
+
+        def _fake_start(_cmd, agent_name):
+            if agent_name == "alpha":
+                started_live.add(agent_name)
+            return 0, f"start attempted: {agent_name}"
+
+        def _fake_live(agent_name):
+            return agent_name in started_live
+
+        with patch.object(mod, "_current_mode", return_value="power"), \
+             patch.object(mod, "_available_agent_ids", return_value=["alpha", "beta", "gamma"]), \
+             patch.object(mod, "_mode_agent_targets", return_value=["alpha", "beta"]), \
+             patch.object(mod, "_resolve_agent_target", side_effect=lambda a: a if a in ("alpha", "beta") else None), \
+             patch.object(mod, "_sync_missing_mode_agents", return_value={"provisioned": [], "still_missing": ["gamma"], "errors": {}}), \
+             patch.object(mod, "_count_running_agents", return_value=0), \
+             patch.object(mod, "_agent_has_live_process", side_effect=_fake_live), \
+             patch.object(mod, "ai_employee", side_effect=_fake_start):
+            mod._AGENT_GOVERNOR["enabled"] = False
+            r = client.post("/api/agents/start-all")
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["configured_count"] == 3
+        assert body["runnable_count"] == 2
+        assert body["started"] == 1
+        assert body["missing_agents"] == ["gamma"]
+        assert body["failed"] == ["beta"]
+        assert "beta" in body["failed_reasons"]
+        assert body["ok"] is False
+
+    def test_sync_missing_mode_agents_copies_from_repo_agents(self, server, tmp_path):
+        mod, _ = server
+        ai_home = tmp_path / "custom-home"
+        target_agents = ai_home / "agents"
+        target_agents.mkdir(parents=True, exist_ok=True)
+        repo_agents = tmp_path / "repo-agents"
+        (repo_agents / "alpha").mkdir(parents=True, exist_ok=True)
+        run_file = repo_agents / "alpha" / "run.sh"
+        run_file.write_text("#!/usr/bin/env bash\necho alpha\n")
+
+        with patch.object(mod, "AI_HOME", ai_home), \
+             patch.object(mod, "BOTS_DIR", target_agents), \
+             patch.object(mod, "_REPO_AGENTS_DIR", repo_agents), \
+             patch.object(mod, "_available_agent_ids", return_value=["alpha"]):
+            result = mod._sync_missing_mode_agents("power")
+
+        copied_run = target_agents / "alpha" / "run.sh"
+        assert copied_run.exists()
+        assert "alpha" in result["provisioned"]
+        assert result["still_missing"] == []
+
     def test_stop_agents_enterprise_batch_report(self, server):
         mod, _ = server
         with patch.object(
