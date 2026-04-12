@@ -248,6 +248,29 @@ class ActionBus:
                             "failure": secure_result.get("failure", {}),
                             "result": None,
                         }
+                else:
+                    # No executor provided and action is not registered in the
+                    # secure engine — nothing was run.  Return an explicit error
+                    # so callers are never misled by a false "executed" status.
+                    _log.warning(
+                        "ActionBus.emit: no executor and action '%s' is not registered "
+                        "(actor=%s). Returning unknown_action error.",
+                        action_type,
+                        actor,
+                    )
+                    self._record_audit(
+                        actor, action_type, reason, None, payload, "unknown_action"
+                    )
+                    return {
+                        "action_id": action_id,
+                        "status": "unknown_action",
+                        "action_type": action_type,
+                        "error": (
+                            f"Action '{action_type}' is not registered and no executor "
+                            "was provided. Nothing was executed."
+                        ),
+                        "result": None,
+                    }
             except Exception as exc:
                 return {
                     "action_id": action_id,
@@ -320,6 +343,21 @@ class ActionBus:
                             ),
                             "failure": secure_result.get("failure", {}),
                         }
+                else:
+                    _log.warning(
+                        "ActionBus.approve: action '%s' (id=%s) is not registered in "
+                        "the secure engine and has no inline executor — nothing executed.",
+                        record["action_type"],
+                        action_id,
+                    )
+                    return {
+                        "status": "unknown_action",
+                        "action_id": action_id,
+                        "error": (
+                            f"Action '{record['action_type']}' is not registered and no "
+                            "executor was stored. Nothing was executed."
+                        ),
+                    }
             except Exception:
                 _log.exception("Secure execution failed for approved action %s", action_id)
                 return {"status": "error", "action_id": action_id, "error": "Execution failed"}

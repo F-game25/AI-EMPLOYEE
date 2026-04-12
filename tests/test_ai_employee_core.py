@@ -450,16 +450,11 @@ class TestActionBus:
 
     def test_emit_executed(self):
         bus = self._make_bus()
-        with patch("actions.action_bus.ActionBus.emit.__wrapped__", None, create=True):
-            pass
-        # Patch mode_manager to return AUTO so action executes immediately
-        with patch("actions.action_bus.ActionBus._get_requires_approval", return_value=False, create=True):
-            pass
-        # Directly mock the module-level import inside emit()
-        import actions.action_bus as _ab_mod
-        with patch.object(_ab_mod, "_get_mode_approval", return_value=False, create=True):
-            result = bus.emit("test_action", {"x": 1}, actor="tester")
-        # Status could be executed or pending_approval depending on singleton state
+        # Emit with an inline executor so we're actually exercising the
+        # "executed" path rather than relying on the now-removed fallback that
+        # silently returned "executed" for unregistered/executor-less actions.
+        result = bus.emit("test_action", {"x": 1}, actor="tester", executor=lambda p: {"ok": True})
+        # Status is "executed" when auto, or "pending_approval" when manual.
         assert result["status"] in ("executed", "pending_approval")
         assert result["action_type"] == "test_action"
 
