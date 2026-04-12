@@ -20,6 +20,7 @@ const {
 } = require('./agents');
 const subsystems = require('./subsystems');
 const { buildMoneyTemplate, buildThinkingSummary } = require('./money_mode');
+const brain = require('./brain/active_brain');
 
 const PORT = process.env.PORT || 3001;
 
@@ -48,6 +49,7 @@ const GPU_TEMP_GPU_FACTOR = 0.52;
 const GPU_TEMP_JITTER = 4;
 const MAX_ACTIVITY_ITEMS = 50;
 const MAX_EXECUTION_LOGS = 100;
+const MAX_DECISION_LOG_ENTRIES = 30;
 const BASE_PIPELINE_ROI = 250;
 const PIPELINE_ROI_SWING = 400;
 const REVENUE_CONVERSION_RATE = 0.45;
@@ -63,6 +65,9 @@ const runtimeState = {
   pipelineRoiTotal: 0,
   activityFeed: [],
   executionLogs: [],
+  workflowRuns: [],
+  workflowIndex: {},
+  selectedWorkflowRun: null,
   skillStats: {},
   _seq: 0,
 };
@@ -82,6 +87,107 @@ function addActivity(notes, kind = 'system') {
   runtimeState.activityFeed = runtimeState.activityFeed.slice(0, MAX_ACTIVITY_ITEMS);
   // Broadcast immediately so UI gets real-time updates without polling
   broadcaster.broadcast('activity:item', item);
+}
+
+function createWorkflowRun({ name, source = 'automation', goal = '' }) {
+  const runId = `wf-${++runtimeState._seq}`;
+  const run = {
+    run_id: runId,
+    name: name || `Workflow ${runId}`,
+    source,
+    goal,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    progress_percent: 0,
+    nodes: [],
+    decision_log: [],
+  };
+  runtimeState.workflowRuns.unshift(run);
+  runtimeState.workflowRuns = runtimeState.workflowRuns.slice(0, MAX_ACTIVITY_ITEMS);
+  runtimeState.selectedWorkflowRun = runId;
+  broadcaster.broadcast('workflow:update', run);
+  return run;
+}
+
+function appendDecision(run, entry) {
+  run.decision_log.unshift(entry);
+  run.decision_log = run.decision_log.slice(0, MAX_DECISION_LOG_ENTRIES);
+}
+
+function getWorkflowRun(runId) {
+  return runtimeState.workflowRuns.find((run) => run.run_id === runId) || null;
+}
+
+function attachWorkflowNode({ runId, queued, taskName, parentTaskId = null }) {
+  const run = getWorkflowRun(runId);
+  if (!run || !queued || !queued.taskId) return;
+  const node = {
+    task_id: queued.taskId,
+    task_name: taskName || queued.subsystem || 'Task',
+    status: 'pending',
+    progress_percent: 5,
+    subsystem: queued.subsystem || 'general',
+    agent: queued.agentId || 'pending',
+    queued_at: queued.queuedAt || new Date().toISOString(),
+    started_at: null,
+    completed_at: null,
+    parent_task_id: parentTaskId,
+    brain: queued.brain || null,
+    strategy: queued.brain ? queued.brain.strategy : null,
+    confidence: queued.brain ? queued.brain.confidence : null,
+    reasoning: queued.brain ? queued.brain.reasoning : '',
+    execution_flow: queued.brain ? queued.brain.execution_flow : 'task->strategy->agent->action->result',
+    result: null,
+  };
+  run.nodes.push(node);
+  appendDecision(run, {
+    ts: new Date().toISOString(),
+    task_id: node.task_id,
+    type: 'brain_decision',
+    summary: node.reasoning || `Strategy ${node.strategy || 'default'} selected`,
+  });
+  runtimeState.workflowIndex[node.task_id] = runId;
+  run.updated_at = new Date().toISOString();
+  run.status = 'running';
+  recalcWorkflowProgress(run);
+  broadcaster.broadcast('workflow:update', run);
+}
+
+function recalcWorkflowProgress(run) {
+  const total = run.nodes.length || 1;
+  let acc = 0;
+  let completed = 0;
+  let failed = 0;
+  run.nodes.forEach((node) => {
+    acc += Number(node.progress_percent || 0);
+    if (node.status === 'completed') completed += 1;
+    if (node.status === 'failed') failed += 1;
+  });
+  run.progress_percent = Math.round(acc / total);
+  if (failed > 0) {
+    run.status = completed > 0 ? 'completed_with_failures' : 'failed';
+  } else if (completed === run.nodes.length && run.nodes.length > 0) {
+    run.status = 'completed';
+    run.progress_percent = 100;
+  } else if (run.nodes.length > 0) {
+    run.status = 'running';
+  } else {
+    run.status = 'pending';
+  }
+}
+
+function updateWorkflowNode(taskId, updater) {
+  const runId = runtimeState.workflowIndex[taskId];
+  if (!runId) return;
+  const run = getWorkflowRun(runId);
+  if (!run) return;
+  const node = run.nodes.find((n) => n.task_id === taskId);
+  if (!node) return;
+  updater(node, run);
+  run.updated_at = new Date().toISOString();
+  recalcWorkflowProgress(run);
+  broadcaster.broadcast('workflow:update', run);
 }
 
 function recordExecution({ taskId, skill, status, notes }) {
@@ -163,6 +269,8 @@ function buildDashboardPayload() {
     top_skills: topSkills,
     activity_feed: runtimeState.activityFeed,
     execution_logs: runtimeState.executionLogs,
+    workflow_runs: runtimeState.workflowRuns,
+    workflow_focus: runtimeState.selectedWorkflowRun,
     pipelines: {
       total_estimated_roi: runtimeState.pipelineRoiTotal,
       runs: runtimeState.pipelineRuns.length,
@@ -171,6 +279,7 @@ function buildDashboardPayload() {
     pending_actions: [],
     learning: {
       mode: getMode(),
+      brain: brain.insights(),
     },
   };
 }
@@ -303,6 +412,10 @@ app.get('/api/brain/status', (req, res) => {
   res.json(subsystems.getNNStatus());
 });
 
+app.get('/api/brain/insights', (req, res) => {
+  res.json(brain.insights());
+});
+
 app.get('/api/memory/tree', (req, res) => {
   res.json(subsystems.getMemoryTree());
 });
@@ -315,6 +428,13 @@ app.get('/api/product/dashboard', (req, res) => {
   res.json(buildDashboardPayload());
 });
 
+app.get('/api/workflows/live', (req, res) => {
+  res.json({
+    active_run: runtimeState.selectedWorkflowRun,
+    runs: runtimeState.workflowRuns,
+  });
+});
+
 app.post('/api/automation/control', (req, res) => {
   const action = String((req.body || {}).action || '').toLowerCase();
   const goal = String((req.body || {}).goal || '').trim();
@@ -324,14 +444,35 @@ app.post('/api/automation/control', (req, res) => {
     activateAgents(3);
     runtimeState.automationRunning = true;
     addActivity(`[AUTOMATION] started${goal ? ` • goal: ${goal}` : ''}`, 'automation');
+    const run = createWorkflowRun({
+      name: 'Automation Goal Workflow',
+      source: 'automation',
+      goal: goal || 'Execute automation cycle',
+    });
     // Submit initial tasks so the agent execution loop becomes visible immediately
     const taskMessages = [
       goal || 'Analyze current market conditions',
       'Generate value opportunities',
       'Route prioritized tasks to agents',
     ];
-    const queued = taskMessages.map(msg => orchestrator.submitTask(msg));
-    return res.json({ status: 'running', message: 'Automation started.', tasks_queued: queued.length });
+    let parentTaskId = null;
+    const queued = taskMessages.map((msg, idx) => {
+      const task = orchestrator.submitTask(msg, {
+        userId: 'user:default',
+        workflow: { runId: run.run_id, parentTaskId },
+        labels: ['automation', `step-${idx + 1}`],
+      });
+      attachWorkflowNode({
+        runId: run.run_id,
+        queued: task,
+        taskName: msg,
+        parentTaskId,
+      });
+      parentTaskId = task.taskId;
+      addActivity(`[BRAIN] Strategy ${task.brain?.strategy || 'default'} selected for ${task.taskId}`, 'task');
+      return task;
+    });
+    return res.json({ status: 'running', message: 'Automation started.', tasks_queued: queued.length, workflow_run: run.run_id });
   }
 
   if (action === 'stop') {
@@ -371,9 +512,23 @@ app.post('/api/money/opportunity-pipeline', (req, res) => {
 
 app.post('/api/tasks/run', (req, res) => {
   const message = String((req.body || {}).message || 'Execute task').trim();
-  const result = orchestrator.submitTask(message);
+  const run = createWorkflowRun({
+    name: 'Ad-hoc Task Workflow',
+    source: 'manual',
+    goal: message,
+  });
+  const result = orchestrator.submitTask(message, {
+    userId: 'user:default',
+    workflow: { runId: run.run_id, parentTaskId: null },
+    labels: ['manual'],
+  });
+  attachWorkflowNode({
+    runId: run.run_id,
+    queued: result,
+    taskName: message,
+  });
   addActivity(`[TASK] Submitted: ${message}`, 'task');
-  res.json({ ok: true, ...result });
+  res.json({ ok: true, workflow_run: run.run_id, ...result });
 });
 
 // ── WebSocket server ──────────────────────────────────────────────────────────
@@ -390,6 +545,12 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ event: 'nn:status', data: subsystems.getNNStatus(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'memory:update', data: subsystems.getMemoryTree(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'doctor:check', data: subsystems.getDoctorStatus(), timestamp: new Date().toISOString() }));
+  ws.send(JSON.stringify({ event: 'brain:insights', data: brain.insights(), timestamp: new Date().toISOString() }));
+  ws.send(JSON.stringify({
+    event: 'workflow:snapshot',
+    data: { active_run: runtimeState.selectedWorkflowRun, runs: runtimeState.workflowRuns },
+    timestamp: new Date().toISOString(),
+  }));
 
   // Send existing activity feed so newly connected clients are up to date
   if (runtimeState.activityFeed.length > 0) {
@@ -403,7 +564,22 @@ wss.on('connection', (ws) => {
     try {
       const parsed = JSON.parse(raw);
       if (parsed.type === 'chat' && parsed.message) {
-        const queued = orchestrator.submitTask(parsed.message);
+        const run = createWorkflowRun({
+          name: 'Chat Workflow',
+          source: 'chat',
+          goal: parsed.message,
+        });
+        const queued = orchestrator.submitTask(parsed.message, {
+          userId: 'user:default',
+          workflow: { runId: run.run_id, parentTaskId: null },
+          labels: ['chat'],
+        });
+        attachWorkflowNode({
+          runId: run.run_id,
+          queued,
+          taskName: parsed.message,
+          parentTaskId: null,
+        });
         broadcaster.broadcast('orchestrator:queued', queued);
         broadcaster.broadcast('heartbeat', {
           message: `[QUEUE] ${queued.taskId} assigned to ${queued.agentId} (${queued.subsystem})`,
@@ -438,6 +614,18 @@ onAgentEvent('agent:update', (agents) => {
 
 onAgentEvent('task:started', ({ agent, task }) => {
   addActivity(`[TASK] ${task.id} started on ${agent.name}`, 'task');
+  updateWorkflowNode(task.id, (node, run) => {
+    node.status = 'active';
+    node.progress_percent = 45;
+    node.started_at = task.startedAt || new Date().toISOString();
+    node.agent = agent.name;
+    appendDecision(run, {
+      ts: new Date().toISOString(),
+      task_id: task.id,
+      type: 'execution_start',
+      summary: `Agent ${agent.name} started with strategy ${node.strategy || 'default'}`,
+    });
+  });
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] started ${task.id}`,
     level: 'info',
@@ -453,9 +641,56 @@ onAgentEvent('task:completed', ({ agent, task }) => {
     notes: task.message,
   });
   addActivity(`[TASK] ${task.id} completed by ${agent.name}`, 'task');
+  updateWorkflowNode(task.id, (node, run) => {
+    node.status = 'completed';
+    node.progress_percent = 100;
+    node.completed_at = new Date().toISOString();
+    node.agent = agent.name;
+    node.result = {
+      status: 'success',
+      summary: task.message,
+    };
+    appendDecision(run, {
+      ts: new Date().toISOString(),
+      task_id: task.id,
+      type: 'result',
+      summary: `Result success • ${task.message}`,
+    });
+  });
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] completed ${task.id}`,
     level: 'success',
+    heartbeat: heartbeatCounter,
+  });
+});
+
+onAgentEvent('task:failed', ({ agent, task }) => {
+  recordExecution({
+    taskId: task.id,
+    skill: task.subsystem || 'general',
+    status: 'failed',
+    notes: task.error || task.message || 'Task failed',
+  });
+  addActivity(`[TASK] ${task.id} failed on ${agent.name}: ${task.error || 'execution error'}`, 'task');
+  updateWorkflowNode(task.id, (node, run) => {
+    node.status = 'failed';
+    node.progress_percent = 100;
+    node.completed_at = new Date().toISOString();
+    node.agent = agent.name;
+    node.result = {
+      status: 'failed',
+      summary: task.error || task.message || 'Execution failed',
+    };
+    appendDecision(run, {
+      ts: new Date().toISOString(),
+      task_id: task.id,
+      type: 'result',
+      summary: `Result failed • ${task.error || 'execution error'}`,
+    });
+  });
+  broadcaster.broadcast('heartbeat', {
+    message: `[${agent.name}] failed ${task.id}`,
+    level: 'warning',
     heartbeat: heartbeatCounter,
   });
 });
@@ -469,6 +704,11 @@ setInterval(() => {
   broadcaster.broadcast('nn:status', subsystems.getNNStatus());
   broadcaster.broadcast('memory:update', subsystems.getMemoryTree());
   broadcaster.broadcast('doctor:check', subsystems.getDoctorStatus());
+  broadcaster.broadcast('brain:insights', brain.insights());
+  broadcaster.broadcast('workflow:snapshot', {
+    active_run: runtimeState.selectedWorkflowRun,
+    runs: runtimeState.workflowRuns,
+  });
 }, 2000);
 
 server.listen(PORT, () => {
