@@ -7,6 +7,7 @@ const MODE_COLORS = {
   OFFLINE: 'var(--warning)',
   AUTO: 'var(--gold)',
 }
+const API_BASE = `http://${window.location.hostname}:3001`
 
 function StatRow({ label, value, highlight }) {
   return (
@@ -43,6 +44,12 @@ function MiniBar({ pct, color }) {
   )
 }
 
+function statusLabel({ loading, error, available }) {
+  if (loading) return 'LOADING'
+  if (error) return 'ERROR'
+  return available === false ? 'UNAVAILABLE' : 'ACTIVE'
+}
+
 export default function NeuralNetworkPanel() {
   const nn = useAppStore(s => s.nnStatus)
   const setNnStatus = useAppStore(s => s.setNnStatus)
@@ -52,11 +59,10 @@ export default function NeuralNetworkPanel() {
 
   useEffect(() => {
     let cancelled = false
-    const base = `http://${window.location.hostname}:3001`
 
     const loadBrainStatus = async () => {
       try {
-        const res = await fetch(`${base}/api/brain/status`)
+        const res = await fetch(`${API_BASE}/api/brain/status`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
         if (cancelled) return
@@ -168,7 +174,7 @@ export default function NeuralNetworkPanel() {
                 <StatRow label="EXPERIENCES" value={experiences.toLocaleString()} />
                 <StatRow
                   label="STATUS"
-                  value={loading ? 'LOADING' : (error ? 'ERROR' : (nn.available === false ? 'UNAVAILABLE' : 'ACTIVE'))}
+                  value={statusLabel({ loading, error, available: nn.available })}
                   highlight={!error && !loading}
                 />
                 <StatRow

@@ -15,6 +15,7 @@ _BUCKET_TO_SKILL: dict[int, str] = {
     0: "lead-generator",
     1: "email-marketing",
     2: "content-calendar",
+    # 3/4 are strategy/exec-heavy buckets; both route to executive planning.
     3: "ceo-briefing",
     4: "ceo-briefing",
     5: "problem-solver",
@@ -205,4 +206,3 @@ class BrainRegistry:
 
 
 brain = BrainRegistry()
-
