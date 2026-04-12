@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import TertiaryPanel from '../ui/TertiaryPanel'
 
+const API_BASE = `http://${window.location.hostname}:3001`
+
 function asPercent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`
 }
@@ -14,11 +16,10 @@ export default function BrainInsightsPanel() {
 
   useEffect(() => {
     let cancelled = false
-    const base = `http://${window.location.hostname}:3001`
 
     const loadInsights = async () => {
       try {
-        const res = await fetch(`${base}/api/brain/insights`)
+        const res = await fetch(`${API_BASE}/api/brain/insights`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
         if (cancelled) return
@@ -97,8 +98,8 @@ export default function BrainInsightsPanel() {
       <div className="space-y-1 overflow-y-auto" style={{ maxHeight: '80px' }}>
         {events.length === 0 ? (
           <div className="font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>No learning events yet.</div>
-        ) : events.slice(0, 3).map((event) => (
-          <TertiaryPanel key={`${event.ts}-${event.event}`} className="p-2 font-mono text-[10px]">
+        ) : events.slice(0, 3).map((event, index) => (
+          <TertiaryPanel key={`${event.ts || 'ts'}-${event.event || 'event'}-${index}`} className="p-2 font-mono text-[10px]">
             <div style={{ color: 'var(--text-secondary)' }}>{(event.event || 'update').replaceAll('_', ' ')}</div>
             <div style={{ color: 'var(--text-muted)' }}>{event.skill || event.goal_type || 'brain'}</div>
           </TertiaryPanel>

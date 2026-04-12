@@ -58,20 +58,20 @@ class AgentController:
         goal_type = self._planner.classify_goal(goal)
         brain_strategy = self.brain.get_strategy(goal=goal, goal_type=goal_type)
         best = self._best_strategies(goal)
-        if brain_strategy:
-            best = [brain_strategy, *best]
-            self._logger.log_event(
-                component="controller",
-                action="brain_used",
-                result="strategy_selected",
-                latency_ms=0.0,
-                meta={
-                    "run_id": run_id,
-                    "goal_type": goal_type,
-                    "skill": brain_strategy.get("agent", "problem-solver"),
-                    "bucket": brain_strategy.get("brain", {}).get("bucket", 7),
-                },
-            )
+        best = [brain_strategy, *best]
+        self._logger.log_event(
+            component="controller",
+            action="brain_used",
+            result="strategy_selected",
+            latency_ms=0.0,
+            meta={
+                "run_id": run_id,
+                "goal_type": goal_type,
+                "skill": brain_strategy.get("agent", "problem-solver"),
+                "bucket": brain_strategy.get("brain", {}).get("bucket", 7),
+                "source": brain_strategy.get("brain", {}).get("source", "fallback"),
+            },
+        )
         return self._planner.plan(goal=goal, run_id=run_id, best_strategies=best)
 
     def run_goal(
