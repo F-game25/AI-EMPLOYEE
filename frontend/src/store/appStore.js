@@ -1,5 +1,8 @@
 import { create } from 'zustand'
 
+const MAX_ACTIVITY_ITEMS = 50
+const MAX_EXECUTION_LOGS = 100
+
 export const useAppStore = create((set) => ({
   // State machine
   appState: 'boot', // boot | connecting | login | dashboard | error
@@ -113,11 +116,12 @@ export const useAppStore = create((set) => ({
   errorMessage: null,
   setError: (msg) => set({ errorMessage: msg, appState: 'error' }),
 
-  // Product dashboard
+  // Product dashboard (HTTP-polled snapshot for KPIs)
   productMetrics: {
     mode: {},
     tasks: {},
     revenue: {},
+    value: {},
     top_strategies: [],
     activity_feed: [],
     execution_logs: [],
@@ -130,4 +134,18 @@ export const useAppStore = create((set) => ({
 
   automationStatus: '',
   setAutomationStatus: (v) => set({ automationStatus: v }),
+
+  // Real-time activity feed — driven by WebSocket events
+  activityFeed: [],
+  addActivityItem: (item) => set((state) => ({
+    activityFeed: [item, ...state.activityFeed].slice(0, MAX_ACTIVITY_ITEMS),
+  })),
+  setActivitySnapshot: (items) => set({ activityFeed: items.slice(0, MAX_ACTIVITY_ITEMS) }),
+
+  // Real-time execution log — driven by WebSocket events
+  executionLogs: [],
+  addExecutionLog: (log) => set((state) => ({
+    executionLogs: [log, ...state.executionLogs].slice(0, MAX_EXECUTION_LOGS),
+  })),
+  setExecutionSnapshot: (logs) => set({ executionLogs: logs.slice(0, MAX_EXECUTION_LOGS) }),
 }))

@@ -46,9 +46,133 @@ const CPU_TEMP_JITTER = 3;
 const GPU_TEMP_BASE = 34;
 const GPU_TEMP_GPU_FACTOR = 0.52;
 const GPU_TEMP_JITTER = 4;
+const MAX_ACTIVITY_ITEMS = 50;
+const MAX_EXECUTION_LOGS = 100;
+const BASE_PIPELINE_ROI = 250;
+const PIPELINE_ROI_SWING = 400;
+const REVENUE_CONVERSION_RATE = 0.45;
+
+const runtimeState = {
+  automationRunning: false,
+  tasksExecuted: 0,
+  successfulTasks: 0,
+  failedTasks: 0,
+  valueGenerated: 0,
+  revenueCents: 0,
+  pipelineRuns: [],
+  pipelineRoiTotal: 0,
+  activityFeed: [],
+  executionLogs: [],
+  skillStats: {},
+  _seq: 0,
+};
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
+}
+
+function addActivity(notes, kind = 'system') {
+  const item = {
+    id: `activity-${++runtimeState._seq}`,
+    kind,
+    notes,
+    ts: new Date().toISOString(),
+  };
+  runtimeState.activityFeed.unshift(item);
+  runtimeState.activityFeed = runtimeState.activityFeed.slice(0, MAX_ACTIVITY_ITEMS);
+  // Broadcast immediately so UI gets real-time updates without polling
+  broadcaster.broadcast('activity:item', item);
+}
+
+function recordExecution({ taskId, skill, status, notes }) {
+  const logItem = {
+    id: `exec-${++runtimeState._seq}`,
+    task_id: taskId,
+    skill,
+    status,
+    notes,
+    ts: new Date().toISOString(),
+  };
+  runtimeState.executionLogs.unshift(logItem);
+  runtimeState.executionLogs = runtimeState.executionLogs.slice(0, MAX_EXECUTION_LOGS);
+  runtimeState.tasksExecuted += 1;
+  if (status === 'success') runtimeState.successfulTasks += 1;
+  if (status === 'failed') runtimeState.failedTasks += 1;
+  runtimeState.skillStats[skill] = runtimeState.skillStats[skill] || { runs: 0, success: 0 };
+  runtimeState.skillStats[skill].runs += 1;
+  if (status === 'success') runtimeState.skillStats[skill].success += 1;
+  // Broadcast so the UI execution log updates in real time
+  broadcaster.broadcast('execution:log', logItem);
+}
+
+function estimatePipelineRoi() {
+  return BASE_PIPELINE_ROI + Math.floor(Math.random() * PIPELINE_ROI_SWING);
+}
+
+function runPipeline(pipelineName) {
+  const estimatedRoi = estimatePipelineRoi();
+  const run = {
+    id: `pipeline-${++runtimeState._seq}`,
+    pipeline: pipelineName,
+    status: 'completed',
+    estimated_roi: estimatedRoi,
+    executed_at: new Date().toISOString(),
+  };
+  runtimeState.pipelineRuns.unshift(run);
+  runtimeState.pipelineRuns = runtimeState.pipelineRuns.slice(0, MAX_ACTIVITY_ITEMS);
+  runtimeState.pipelineRoiTotal += estimatedRoi;
+  runtimeState.valueGenerated += estimatedRoi;
+  runtimeState.revenueCents += Math.round(estimatedRoi * REVENUE_CONVERSION_RATE * 100);
+  addActivity(`[PIPELINE] ${pipelineName} completed • ROI $${estimatedRoi}`, 'pipeline');
+  return run;
+}
+
+function buildDashboardPayload() {
+  const successRate = runtimeState.tasksExecuted > 0
+    ? runtimeState.successfulTasks / runtimeState.tasksExecuted
+    : 0;
+  const topSkills = Object.entries(runtimeState.skillStats)
+    .map(([skill, stats]) => ({
+      skill,
+      runs: stats.runs,
+      success_rate: stats.runs > 0 ? stats.success / stats.runs : 0,
+    }))
+    .sort((a, b) => b.runs - a.runs)
+    .slice(0, 8);
+
+  return {
+    mode: {
+      current: getMode(),
+      automation_running: runtimeState.automationRunning,
+    },
+    tasks: {
+      tasks_executed: runtimeState.tasksExecuted,
+      success_rate: successRate,
+      successful_tasks: runtimeState.successfulTasks,
+      failed_tasks: runtimeState.failedTasks,
+    },
+    value: {
+      value_generated: runtimeState.valueGenerated,
+      components: {
+        pipelines: runtimeState.pipelineRoiTotal,
+      },
+    },
+    revenue: {
+      total_revenue: runtimeState.revenueCents / 100,
+    },
+    top_skills: topSkills,
+    activity_feed: runtimeState.activityFeed,
+    execution_logs: runtimeState.executionLogs,
+    pipelines: {
+      total_estimated_roi: runtimeState.pipelineRoiTotal,
+      runs: runtimeState.pipelineRuns.length,
+    },
+    pipeline_runs: runtimeState.pipelineRuns,
+    pending_actions: [],
+    learning: {
+      mode: getMode(),
+    },
+  };
 }
 
 function cpuUsagePercent() {
@@ -187,6 +311,71 @@ app.get('/api/doctor/status', (req, res) => {
   res.json(subsystems.getDoctorStatus());
 });
 
+app.get('/api/product/dashboard', (req, res) => {
+  res.json(buildDashboardPayload());
+});
+
+app.post('/api/automation/control', (req, res) => {
+  const action = String((req.body || {}).action || '').toLowerCase();
+  const goal = String((req.body || {}).goal || '').trim();
+  const overrideActionId = String((req.body || {}).override_action_id || '').trim();
+
+  if (action === 'start') {
+    activateAgents(3);
+    runtimeState.automationRunning = true;
+    addActivity(`[AUTOMATION] started${goal ? ` • goal: ${goal}` : ''}`, 'automation');
+    // Submit initial tasks so the agent execution loop becomes visible immediately
+    const taskMessages = [
+      goal || 'Analyze current market conditions',
+      'Generate value opportunities',
+      'Route prioritized tasks to agents',
+    ];
+    const queued = taskMessages.map(msg => orchestrator.submitTask(msg));
+    return res.json({ status: 'running', message: 'Automation started.', tasks_queued: queued.length });
+  }
+
+  if (action === 'stop') {
+    activateAgents(1);
+    runtimeState.automationRunning = false;
+    addActivity('[AUTOMATION] stopped', 'automation');
+    return res.json({ status: 'stopped', message: 'Automation stopped.' });
+  }
+
+  if (action === 'override') {
+    if (!overrideActionId) {
+      return res.status(400).json({ status: 'error', reason: 'override_action_id is required.' });
+    }
+    addActivity(`[AUTOMATION] manual override executed for ${overrideActionId}`, 'automation');
+    return res.json({ status: 'ok', message: `Override applied to ${overrideActionId}.` });
+  }
+
+  return res.status(400).json({ status: 'error', reason: 'Invalid automation action.' });
+});
+
+app.post('/api/money/content-pipeline', (req, res) => {
+  const run = runPipeline('content');
+  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
+});
+
+app.post('/api/money/lead-pipeline', (req, res) => {
+  const run = runPipeline('lead');
+  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
+});
+
+app.post('/api/money/opportunity-pipeline', (req, res) => {
+  const run = runPipeline('opportunity');
+  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
+});
+
+// ── Task execution endpoint ───────────────────────────────────────────────────
+
+app.post('/api/tasks/run', (req, res) => {
+  const message = String((req.body || {}).message || 'Execute task').trim();
+  const result = orchestrator.submitTask(message);
+  addActivity(`[TASK] Submitted: ${message}`, 'task');
+  res.json({ ok: true, ...result });
+});
+
 // ── WebSocket server ──────────────────────────────────────────────────────────
 
 const server = http.createServer(app);
@@ -201,6 +390,14 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ event: 'nn:status', data: subsystems.getNNStatus(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'memory:update', data: subsystems.getMemoryTree(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'doctor:check', data: subsystems.getDoctorStatus(), timestamp: new Date().toISOString() }));
+
+  // Send existing activity feed so newly connected clients are up to date
+  if (runtimeState.activityFeed.length > 0) {
+    ws.send(JSON.stringify({ event: 'activity:snapshot', data: runtimeState.activityFeed, timestamp: new Date().toISOString() }));
+  }
+  if (runtimeState.executionLogs.length > 0) {
+    ws.send(JSON.stringify({ event: 'execution:snapshot', data: runtimeState.executionLogs, timestamp: new Date().toISOString() }));
+  }
 
   ws.on('message', (raw) => {
     try {
@@ -240,6 +437,7 @@ onAgentEvent('agent:update', (agents) => {
 });
 
 onAgentEvent('task:started', ({ agent, task }) => {
+  addActivity(`[TASK] ${task.id} started on ${agent.name}`, 'task');
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] started ${task.id}`,
     level: 'info',
@@ -248,6 +446,13 @@ onAgentEvent('task:started', ({ agent, task }) => {
 });
 
 onAgentEvent('task:completed', ({ agent, task }) => {
+  recordExecution({
+    taskId: task.id,
+    skill: task.subsystem || 'general',
+    status: 'success',
+    notes: task.message,
+  });
+  addActivity(`[TASK] ${task.id} completed by ${agent.name}`, 'task');
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] completed ${task.id}`,
     level: 'success',
