@@ -1033,6 +1033,16 @@ app = FastAPI(title="AI Employee Dashboard")
 _REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "0").strip() in ("1", "true", "yes")
 _bearer_scheme = HTTPBearer(auto_error=False)
 
+if not _REQUIRE_AUTH:
+    print(
+        "\n⚠️  SECURITY WARNING: REQUIRE_AUTH is disabled (default).\n"
+        "   All API endpoints — including task submission and automation control —\n"
+        "   are accessible WITHOUT a token from any localhost client.\n"
+        "   Set REQUIRE_AUTH=1 in ~/.ai-employee/.env before exposing this server\n"
+        "   to a network or production environment.\n",
+        flush=True,
+    )
+
 
 def _verify_any_token(token_str: str) -> bool:
     """Return True if the token is valid using the configured AuthManager."""

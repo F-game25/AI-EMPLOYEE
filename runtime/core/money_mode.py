@@ -76,7 +76,11 @@ class MoneyMode:
         # Step 4 — ROI record (token estimate, no real revenue yet)
         self._record_roi(job_id, topic, platforms)
         estimated_roi = round(max(len(topic), 1) * max(len(platforms), 1) * _CONTENT_ROI_MULTIPLIER, 3)
-        status = "dry_run" if dry_run else "queued"
+        # The pipeline runs synchronously and completes in full — all steps are
+        # internally processed before we return.  Record status as "executed"
+        # (not "queued") so that PipelineStore.overview() counts it as a
+        # successful run and success-rate KPIs reflect reality.
+        status = "dry_run" if dry_run else "executed"
         self._record_pipeline_run(
             run_id=job_id,
             pipeline="content_publish_track",
@@ -150,7 +154,7 @@ class MoneyMode:
             max(filtered_leads, 1) * _LEAD_CONVERSION_MULTIPLIER,
             3,
         )
-        status = "dry_run" if dry_run else "queued"
+        status = "dry_run" if dry_run else "executed"
         self._record_roi(
             job_id,
             f"lead-pipeline:{source}:{audience}",
@@ -191,7 +195,9 @@ class MoneyMode:
     ) -> dict:
         """Outreach → response tracking → conversion pipeline."""
         job_id = str(uuid.uuid4())[:8]
-        outreach_status = "dry_run" if dry_run else "queued"
+        # The step-level outreach action is queued through the ActionBus; the
+        # pipeline itself completes synchronously regardless.
+        outreach_step_status = "dry_run" if dry_run else "queued"
         target_contacts = max(int(budget // _OUTREACH_COST_PER_CONTACT), 5)
         expected_responses = max(int(target_contacts * _OUTREACH_RESPONSE_RATE), 1)
         expected_conversions = max(int(expected_responses * _OUTREACH_CONVERSION_RATE), 1)
@@ -203,7 +209,7 @@ class MoneyMode:
                     "target_contacts": target_contacts,
                     "channel": "email",
                 },
-                "status": outreach_status,
+                "status": outreach_step_status,
             },
             {
                 "step": "response_tracking",
@@ -233,7 +239,7 @@ class MoneyMode:
             max(expected_conversions, 1) * max(budget / max(target_contacts, 1), 10.0) * _OUTREACH_CONVERSION_MULTIPLIER,
             3,
         )
-        status = "dry_run" if dry_run else "queued"
+        status = "dry_run" if dry_run else "executed"
         self._record_roi(
             job_id,
             f"outreach-pipeline:{opportunity}",
