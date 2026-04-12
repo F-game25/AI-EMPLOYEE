@@ -53,6 +53,18 @@ function connectSingleton() {
             ts: Date.now(),
           })
           break
+        case 'activity:item':
+          store.addActivityItem(data)
+          break
+        case 'activity:snapshot':
+          if (Array.isArray(data)) store.setActivitySnapshot(data)
+          break
+        case 'execution:log':
+          store.addExecutionLog(data)
+          break
+        case 'execution:snapshot':
+          if (Array.isArray(data)) store.setExecutionSnapshot(data)
+          break
         case 'nn:status':
           store.setNnStatus(data)
           break
