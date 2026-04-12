@@ -13,14 +13,14 @@ export default function TopBar() {
 
   return (
     <header
-      className="flex items-center justify-between px-4 py-3 gap-4 flex-shrink-0"
+      className="flex items-center justify-between px-4 py-3 gap-3 flex-shrink-0 flex-wrap"
       style={{
         borderBottom: '1px solid var(--border-gold-dim)',
         background: 'linear-gradient(180deg, rgba(8,8,8,0.98), rgba(6,6,6,0.96))',
         zIndex: 'var(--z-topbar)',
       }}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="font-mono text-sm font-bold tracking-widest" style={{ color: 'var(--gold)' }}>
           AI EMPLOYEE COMMAND
         </span>
@@ -35,7 +35,7 @@ export default function TopBar() {
         </span>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap justify-end">
         <span className="font-mono text-xs tier-3-surface px-2 py-1 max-w-md truncate" title={systemStatus?.thinking_mode || ''}>
           THINKING: {systemStatus?.thinking_mode || 'Awaiting workload'}
         </span>

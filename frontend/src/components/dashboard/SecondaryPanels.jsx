@@ -6,9 +6,9 @@ import AgentsPanel from './AgentsPanel'
 import HeartbeatPanel from './HeartbeatPanel'
 
 const TABS = [
-  { id: 'systems', label: 'SYSTEMS' },
-  { id: 'power', label: 'POWER' },
-  { id: 'heartbeat', label: 'HEARTBEAT' },
+  { id: 'systems', label: 'Systems', hint: 'Neural brain, memory, and diagnostics' },
+  { id: 'power', label: 'Agents', hint: 'Runtime agent roster and status' },
+  { id: 'heartbeat', label: 'Activity Log', hint: 'Heartbeat stream and runtime events' },
 ]
 
 export default function SecondaryPanels() {
@@ -16,28 +16,31 @@ export default function SecondaryPanels() {
 
   return (
     <section
-      className="flex flex-col h-full"
+      className="flex flex-col h-full dashboard-right-rail"
       style={{
-        width: '320px',
         borderLeft: '1px solid var(--border-gold-dim)',
         background: 'var(--bg-panel)',
       }}
       aria-label="Secondary control panels"
     >
-      <div className="flex items-center gap-1 px-2 py-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+      <div className="grid grid-cols-1 gap-2 px-2 py-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className="font-mono text-[11px] px-2 py-1"
+            className="font-mono text-[11px] px-2 py-2 text-left"
+            title={tab.hint}
             style={{
-              borderRadius: '4px',
+              borderRadius: '8px',
               border: activeTab === tab.id ? '1px solid var(--border-gold)' : '1px solid var(--border-subtle)',
               background: activeTab === tab.id ? 'rgba(245,196,0,0.08)' : 'rgba(255,255,255,0.02)',
               color: activeTab === tab.id ? 'var(--gold)' : 'var(--text-secondary)',
             }}
           >
-            {tab.label}
+            <div>{tab.label}</div>
+            <div className="mt-1" style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+              {tab.hint}
+            </div>
           </button>
         ))}
       </div>

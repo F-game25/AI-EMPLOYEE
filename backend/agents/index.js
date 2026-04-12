@@ -273,13 +273,49 @@ function getMode() {
 function activateAgents(count) {
   const maxActive = _modeMaxActive();
   const target = typeof count === 'number'
-    ? Math.max(1, Math.min(count, maxActive))
+    ? Math.max(0, Math.min(count, maxActive))
     : Math.max(1, Math.min(3, maxActive));
   desiredActiveAgents = target;
   _rebalance();
   _broadcastAgentUpdate();
   return {
     desiredActiveAgents,
+    runningAgents: getRunningAgentCount(),
+  };
+}
+
+function stopAllAgents(reason = 'manual_stop') {
+  let cancelledTasks = 0;
+  for (const agent of agents) {
+    if (agent.currentTask) {
+      cancelledTasks += 1;
+      events.emit('task:failed', {
+        agent: _snapshot(agent),
+        task: {
+          ...agent.currentTask,
+          error: `cancelled:${reason}`,
+        },
+        finishedAt: new Date().toISOString(),
+      });
+    }
+    cancelledTasks += agent.taskQueue.length;
+    agent.taskQueue = [];
+    agent.currentTask = null;
+    agent.location = 'idle';
+    _deactivateAgent(agent);
+  }
+  desiredActiveAgents = 0;
+  lastRobotSignal = {
+    agentId: null,
+    agentName: null,
+    taskId: null,
+    subsystem: null,
+    location: 'idle',
+    updatedAt: new Date().toISOString(),
+  };
+  _broadcastAgentUpdate();
+  return {
+    cancelledTasks,
     runningAgents: getRunningAgentCount(),
   };
 }
@@ -373,5 +409,6 @@ module.exports = {
   setMode,
   getMode,
   getRobotSignal,
+  stopAllAgents,
   on,
 };
