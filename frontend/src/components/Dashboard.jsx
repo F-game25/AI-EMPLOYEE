@@ -32,6 +32,12 @@ const KIND_COLORS = {
   system: 'var(--text-muted)',
 }
 
+const MODE_OPTIONS = [
+  { id: 'MANUAL', label: 'Manual Control', help: 'Operator-guided execution' },
+  { id: 'AUTO', label: 'Auto Ops', help: 'Autonomous scheduling and routing' },
+  { id: 'BLACKLIGHT', label: 'Blacklight', help: 'Maximum activation and throughput' },
+]
+
 export default function Dashboard() {
   const setProductMetrics = useAppStore(s => s.setProductMetrics)
   const productMetrics = useAppStore(s => s.productMetrics)
@@ -158,34 +164,54 @@ export default function Dashboard() {
       <TopBar />
 
       {/* Three-panel row: LEFT main content | CENTRE chat | RIGHT secondary */}
-      <div className="flex-1 overflow-hidden flex">
+      <div className="flex-1 overflow-hidden flex dashboard-main">
 
         {/* LEFT: Controls + metrics (flex column, scrollable) */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
+        <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3 dashboard-left">
           <section className="ds-card p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <button className="tier-1-btn font-mono text-xs px-4 py-2" onClick={() => controlAutomation('start')} disabled={running}>
+            <button className="tier-1-btn font-mono text-xs px-4 py-2" onClick={() => controlAutomation('start')} disabled={running} title="Start full automation workflow">
               START AUTOMATION
             </button>
 
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => controlAutomation('stop')} disabled={running}>
-              STOP
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => controlAutomation('stop')} disabled={running} title="Stop all agent execution and clear queued tasks">
+              STOP ALL
             </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('content')} disabled={running}>
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('content')} disabled={running} title="Run content generation pipeline">
               RUN CONTENT PIPELINE
             </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('lead')} disabled={running}>
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('lead')} disabled={running} title="Run lead generation and scoring pipeline">
               RUN LEAD PIPELINE
             </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('opportunity')} disabled={running}>
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('opportunity')} disabled={running} title="Run opportunity conversion pipeline">
               RUN OUTREACH PIPELINE
             </button>
-
-            <select className="tier-2-btn font-mono text-xs px-2 py-2" value={mode} onChange={(e) => setModeRemote(e.target.value)}>
-              <option value="MANUAL">MANUAL</option>
-              <option value="AUTO">AUTO</option>
-              <option value="BLACKLIGHT">BLACKLIGHT</option>
-            </select>
+          </div>
+          <div className="mt-2 font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            Hint: start automation to render a live Task → Agent → Action → Result chain in Workflow Tree.
+          </div>
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
+            {MODE_OPTIONS.map((modeOption) => (
+              <button
+                key={modeOption.id}
+                type="button"
+                onClick={() => setModeRemote(modeOption.id)}
+                className="text-left p-2"
+                title={modeOption.help}
+                style={{
+                  background: mode === modeOption.id ? 'rgba(245,196,0,0.09)' : 'rgba(255,255,255,0.02)',
+                  border: mode === modeOption.id ? '1px solid rgba(245,196,0,0.45)' : '1px solid var(--border-subtle)',
+                  borderRadius: '8px',
+                }}
+              >
+                <div className="font-mono text-[11px]" style={{ color: mode === modeOption.id ? 'var(--gold)' : 'var(--text-secondary)' }}>
+                  {modeOption.id}
+                </div>
+                <div className="font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  {modeOption.label}
+                </div>
+              </button>
+            ))}
           </div>
 
           <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -295,9 +321,8 @@ export default function Dashboard() {
 
         {/* CENTRE: Orchestrator Chat */}
         <div
-          className="flex-shrink-0 flex flex-col"
+          className="flex-shrink-0 flex flex-col dashboard-chat-rail"
           style={{
-            width: '300px',
             borderLeft: '1px solid var(--border-gold-dim)',
             borderRight: '1px solid var(--border-gold-dim)',
             background: 'var(--bg-panel)',

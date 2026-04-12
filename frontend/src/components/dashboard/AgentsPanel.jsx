@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion'
+import { useMemo, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 
 const STATUS_CONFIG = {
@@ -9,7 +10,13 @@ const STATUS_CONFIG = {
 
 export default function AgentsPanel() {
   const agents = useAppStore(s => s.agents)
+  const [filter, setFilter] = useState('all')
   const activeCount = agents.filter(a => a.state === 'running' || a.state === 'busy').length
+  const visibleAgents = useMemo(() => {
+    if (filter === 'all') return agents
+    if (filter === 'active') return agents.filter((agent) => agent.state === 'running' || agent.state === 'busy')
+    return agents.filter((agent) => agent.state === filter)
+  }, [agents, filter])
 
   return (
     <div
@@ -40,6 +47,32 @@ export default function AgentsPanel() {
         aria-label="Agent status list"
         className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5"
       >
+        <div className="grid grid-cols-2 gap-1.5 mb-2">
+          {[
+            { id: 'all', label: 'All Agents', hint: 'Full roster' },
+            { id: 'active', label: 'Active', hint: 'Running + busy only' },
+            { id: 'busy', label: 'Busy', hint: 'Agents currently executing' },
+            { id: 'idle', label: 'Idle', hint: 'Available for new work' },
+          ].map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setFilter(opt.id)}
+              title={opt.hint}
+              className="font-mono text-[10px] px-2 py-1.5 text-left"
+              style={{
+                borderRadius: '6px',
+                border: filter === opt.id ? '1px solid rgba(245,196,0,0.5)' : '1px solid var(--border-subtle)',
+                background: filter === opt.id ? 'rgba(245,196,0,0.08)' : 'rgba(255,255,255,0.02)',
+                color: filter === opt.id ? 'var(--gold)' : 'var(--text-secondary)',
+              }}
+            >
+              <div>{opt.label}</div>
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{opt.hint}</div>
+            </button>
+          ))}
+        </div>
+
         {agents.length === 0 && (
           <p
             className="font-mono text-xs text-center mt-4"
@@ -50,7 +83,7 @@ export default function AgentsPanel() {
         )}
 
         <AnimatePresence>
-          {agents.map((agent) => {
+          {visibleAgents.map((agent) => {
             const cfg = STATUS_CONFIG[agent.state] || STATUS_CONFIG.idle
             return (
               <motion.div
