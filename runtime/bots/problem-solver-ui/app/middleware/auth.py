@@ -65,6 +65,8 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(_bearer)) 
 
 
 def verify_login(username: str, password: str) -> bool:
-    env_user = os.environ.get("AI_EMPLOYEE_USER", "admin")
-    env_pass = os.environ.get("AI_EMPLOYEE_PASS", "admin")
+    env_user = os.environ.get("AI_EMPLOYEE_USER", "").strip()
+    env_pass = os.environ.get("AI_EMPLOYEE_PASS", "").strip()
+    if not env_user or not env_pass:
+        return False
     return username == env_user and password == env_pass
