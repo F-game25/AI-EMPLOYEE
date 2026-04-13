@@ -483,7 +483,7 @@ def si_queue_task(body: _ImprovementTaskRequest):
         return JSONResponse(task.to_dict())
     except Exception as exc:
         _log.exception("si_queue_task failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/self-improvement/queue")
@@ -494,7 +494,7 @@ def si_list_queue(status: str = Query(default="")):
         return JSONResponse(get_queue().list_all(status=status or None))
     except Exception as exc:
         _log.exception("si_list_queue failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/self-improvement/queue/summary")
@@ -505,7 +505,7 @@ def si_queue_summary():
         return JSONResponse(get_queue().summary())
     except Exception as exc:
         _log.exception("si_queue_summary failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/self-improvement/task/{task_id}")
@@ -521,7 +521,7 @@ def si_get_task(task_id: str):
         raise
     except Exception as exc:
         _log.exception("si_get_task failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/self-improvement/task/{task_id}/run")
@@ -542,7 +542,7 @@ def si_run_task(task_id: str):
         raise
     except Exception as exc:
         _log.exception("si_run_task failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/self-improvement/task/{task_id}/approve")
@@ -563,7 +563,7 @@ def si_approve_task(task_id: str):
         raise
     except Exception as exc:
         _log.exception("si_approve_task failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class _RejectRequest(BaseModel):
@@ -588,7 +588,7 @@ def si_reject_task(task_id: str, body: _RejectRequest = _RejectRequest()):
         raise
     except Exception as exc:
         _log.exception("si_reject_task failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/self-improvement/task/{task_id}/deploy")
@@ -609,7 +609,7 @@ def si_deploy_task(task_id: str):
         raise
     except Exception as exc:
         _log.exception("si_deploy_task failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/self-improvement/task/{task_id}/rollback")
@@ -630,7 +630,7 @@ def si_rollback_task(task_id: str):
         raise
     except Exception as exc:
         _log.exception("si_rollback_task failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/self-improvement/telemetry")
@@ -641,7 +641,7 @@ def si_telemetry():
         return JSONResponse(get_telemetry().dashboard_payload())
     except Exception as exc:
         _log.exception("si_telemetry failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/self-improvement/learning")
@@ -652,4 +652,4 @@ def si_learning_insights():
         return JSONResponse(LearningModule().get_insights())
     except Exception as exc:
         _log.exception("si_learning_insights failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error")
