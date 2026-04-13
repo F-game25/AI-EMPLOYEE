@@ -84,6 +84,10 @@ const PROCESS_MS_MIN = 800;
 const PROCESS_MS_MAX = 2400;
 // Additional complexity multiplier range for tasks outside agent specialty.
 const MISMATCH_PENALTY_MS = 600;
+// Default assumed message length when task has no message (baseline complexity).
+const DEFAULT_MSG_LENGTH = 40;
+// Message length at which tasks are considered maximally complex.
+const MSG_LENGTH_NORMALIZATION = 200;
 // How long an inactive running agent waits before being scaled back to idle.
 const IDLE_SCALE_DOWN_MS = 20000;
 // Agent runtime scheduler frequency (persistent event-driven loop tick).
@@ -143,9 +147,9 @@ function _modeMaxActive() {
 // Factors: base time + message length influence + subsystem affinity.
 // Agent with matching skill → faster; mismatch → penalty.
 function _taskDurationMs(agent, task) {
-  const msgLen = (task && task.message) ? task.message.length : 40;
+  const msgLen = (task && task.message) ? task.message.length : DEFAULT_MSG_LENGTH;
   // Base duration: scales linearly with message length (longer = more complex)
-  const lengthFactor = Math.min(msgLen / 200, 1); // 0..1
+  const lengthFactor = Math.min(msgLen / MSG_LENGTH_NORMALIZATION, 1); // 0..1
   const base = PROCESS_MS_MIN + Math.round(lengthFactor * (PROCESS_MS_MAX - PROCESS_MS_MIN));
   // Affinity check: agent has relevant skill for this subsystem?
   const subsystem = (task && task.subsystem) || 'general';

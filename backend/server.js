@@ -56,6 +56,11 @@ const BASE_PIPELINE_ROI = 250;
 const PIPELINE_ROI_SWING = 400;
 const REVENUE_CONVERSION_RATE = 0.45;
 const CANCELLATION_ERROR_PREFIX = 'cancelled:';
+// Experience scaling: tasks needed to reach maximum multiplier.
+const EXPERIENCE_TASK_THRESHOLD = 20;
+const MAX_EXPERIENCE_MULTIPLIER = 1.5;
+// Deterministic variation seed for pipeline ROI (avoids Math.random).
+const VARIATION_SEED = 41;
 
 const runtimeState = {
   automationRunning: false,
@@ -352,10 +357,10 @@ function estimatePipelineRoi(pipelineName) {
     : 0.5;
   const multiplier = PIPELINE_MULTIPLIER[pipelineName] || 1.0;
   // Base ROI scales with actual success rate and cumulative experience
-  const experienceFactor = Math.min(runtimeState.tasksExecuted / 20, 1.5); // improves with usage, caps at 1.5x
+  const experienceFactor = Math.min(runtimeState.tasksExecuted / EXPERIENCE_TASK_THRESHOLD, MAX_EXPERIENCE_MULTIPLIER); // improves with usage
   const baseRoi = BASE_PIPELINE_ROI * successRate * multiplier * Math.max(experienceFactor, 0.5);
   // Deterministic variation based on pipeline run count (no Math.random)
-  const variation = ((runtimeState.pipelineRuns.length * 41) % PIPELINE_ROI_SWING) - (PIPELINE_ROI_SWING / 4);
+  const variation = ((runtimeState.pipelineRuns.length * VARIATION_SEED) % PIPELINE_ROI_SWING) - (PIPELINE_ROI_SWING / 4);
   return Math.max(50, Math.round(baseRoi + variation));
 }
 
