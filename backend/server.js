@@ -447,19 +447,25 @@ function memoryUsagePercent() {
   return clamp(Math.round(((total - free) / total) * 100), 0, 100);
 }
 
+let _sampleSeq = 0; // Monotonic counter for deterministic GPU/temp estimation.
 function sampleSystemStatus() {
+  _sampleSeq += 1;
   const cpu = cpuUsagePercent();
   const memory = memoryUsagePercent();
-  const randomSwing = Math.random() * GPU_RANDOM_SWING - GPU_SWING_OFFSET;
+  // Deterministic swing using sinusoidal wave (no Math.random).
+  const deterministicSwing = Math.sin(_sampleSeq * 0.7) * GPU_SWING_OFFSET;
   const cpuInfluence = (cpu - GPU_CPU_BASELINE) * GPU_CPU_INFLUENCE;
   // Intentionally mutates currentGpuUsage to simulate gradual GPU trend across snapshots.
   currentGpuUsage = clamp(
-    Math.round(currentGpuUsage + randomSwing + cpuInfluence),
+    Math.round(currentGpuUsage + deterministicSwing + cpuInfluence),
     4,
     97,
   );
-  const cpuTemp = clamp(Math.round(CPU_TEMP_BASE + cpu * CPU_TEMP_CPU_FACTOR + Math.random() * CPU_TEMP_JITTER), 32, 95);
-  const gpuTemp = clamp(Math.round(GPU_TEMP_BASE + currentGpuUsage * GPU_TEMP_GPU_FACTOR + Math.random() * GPU_TEMP_JITTER), 30, 90);
+  // Deterministic temperature jitter via modular arithmetic (no Math.random).
+  const cpuTempJitter = ((_sampleSeq * 31) % (CPU_TEMP_JITTER + 1));
+  const gpuTempJitter = ((_sampleSeq * 47) % (GPU_TEMP_JITTER + 1));
+  const cpuTemp = clamp(Math.round(CPU_TEMP_BASE + cpu * CPU_TEMP_CPU_FACTOR + cpuTempJitter), 32, 95);
+  const gpuTemp = clamp(Math.round(GPU_TEMP_BASE + currentGpuUsage * GPU_TEMP_GPU_FACTOR + gpuTempJitter), 30, 90);
 
   const total = getAgents().length;
   const running = getRunningAgentCount();
