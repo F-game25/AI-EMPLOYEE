@@ -71,9 +71,12 @@ def verify_login(username: str, password: str) -> bool:
     env_user = os.environ.get("AI_EMPLOYEE_USER", "").strip()
     env_pass = os.environ.get("AI_EMPLOYEE_PASS", "")
     env_pass_hashed = os.environ.get("AI_EMPLOYEE_PASS_BCRYPT", "").strip()
-    # Backward-compatibility: AI_EMPLOYEE_PASS_HASH may still be configured as bcrypt.
+    hash_source = "AI_EMPLOYEE_PASS_BCRYPT"
+    # Backward-compatibility: AI_EMPLOYEE_PASS_HASH is accepted only when it contains
+    # a bcrypt hash. Legacy SHA-256 values must be migrated to bcrypt.
     if not env_pass_hashed:
         env_pass_hashed = os.environ.get("AI_EMPLOYEE_PASS_HASH", "").strip()
+        hash_source = "AI_EMPLOYEE_PASS_HASH"
     if not env_user:
         return False
     user_ok = hmac.compare_digest(username, env_user)
@@ -81,7 +84,7 @@ def verify_login(username: str, password: str) -> bool:
         try:
             pass_ok = bcrypt.checkpw(password.encode("utf-8"), env_pass_hashed.encode("utf-8"))
         except ValueError:
-            logger.warning("Invalid bcrypt hash configured for dashboard login credentials")
+            logger.warning("Invalid bcrypt hash configured in %s for dashboard login", hash_source)
             pass_ok = False
     else:
         if not env_pass:
