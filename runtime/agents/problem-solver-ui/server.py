@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import signal
 import socket
 import subprocess
@@ -616,19 +617,98 @@ def _agent_allowed_in_mode(agent_id: str, mode: Optional[str] = None) -> bool:
 _SAFE_AGENT_ID_PAT = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
 
 
-def _agent_dir_exists(agent_id: str) -> bool:
+def _agent_source_dirs() -> list[Path]:
+  dirs: list[Path] = []
+  for candidate in (BOTS_DIR, _REPO_AGENTS_DIR):
+    try:
+      resolved = candidate.resolve()
+    except Exception:
+      continue
+    if not resolved.exists():
+      continue
+    if resolved not in dirs:
+      dirs.append(resolved)
+  return dirs
+
+
+def _agent_run_script(agent_id: str) -> Optional[Path]:
   if not isinstance(agent_id, str) or not _SAFE_AGENT_ID_PAT.match(agent_id):
-    return False
-  return (BOTS_DIR / agent_id / "run.sh").exists()
+    return None
   if not _BOT_NAME_RE.match(agent_id):
-    return False
-  agent_path = (BOTS_DIR / agent_id).resolve()
-  # Ensure the resolved path stays within BOTS_DIR (prevent path traversal)
+    return None
+  for agents_root in _agent_source_dirs():
+    run_script = (agents_root / agent_id / "run.sh")
+    if run_script.exists():
+      return run_script
+  return None
+
+
+def _agent_dir_exists(agent_id: str) -> bool:
+  return _agent_run_script(agent_id) is not None
+
+
+def _sync_missing_mode_agents(mode: Optional[str] = None) -> dict[str, object]:
+  """Copy missing mode agents from bundled runtime into AI_HOME/agents if needed."""
+  provisioned: list[str] = []
+  still_missing: list[str] = []
+  errors: dict[str, str] = {}
+
+  if not _REPO_AGENTS_DIR.exists():
+    return {"provisioned": provisioned, "still_missing": still_missing, "errors": errors}
+
   try:
-    agent_path.relative_to(BOTS_DIR.resolve())
-  except ValueError:
-    return False
-  return (agent_path / "run.sh").exists()
+    bots_dir_resolved = BOTS_DIR.resolve()
+    repo_agents_resolved = _REPO_AGENTS_DIR.resolve()
+  except Exception:
+    return {"provisioned": provisioned, "still_missing": still_missing, "errors": errors}
+
+  # If already running directly from bundled runtime agents, nothing to copy.
+  if bots_dir_resolved == repo_agents_resolved:
+    return {"provisioned": provisioned, "still_missing": still_missing, "errors": errors}
+
+  target_agents_dir = (AI_HOME / "agents")
+  target_agents_dir.mkdir(parents=True, exist_ok=True)
+  configured_agents = _available_agent_ids(mode)
+
+  for agent_id in configured_agents:
+    if not isinstance(agent_id, str) or not _BOT_NAME_RE.match(agent_id):
+      continue
+    target_dir = target_agents_dir / agent_id
+    target_run = target_dir / "run.sh"
+    if target_run.exists():
+      continue
+
+    source_dir = _REPO_AGENTS_DIR / agent_id
+    source_run = source_dir / "run.sh"
+    if not source_run.exists():
+      still_missing.append(agent_id)
+      continue
+
+    try:
+      if target_dir.exists() and not target_dir.is_dir():
+        raise RuntimeError(f"target path exists and is not a directory: {target_dir}")
+      if not target_dir.exists():
+        shutil.copytree(source_dir, target_dir)
+      else:
+        # Keep existing user files; only copy missing entries.
+        for item in source_dir.iterdir():
+          dst = target_dir / item.name
+          if dst.exists():
+            continue
+          if item.is_dir():
+            shutil.copytree(item, dst)
+          else:
+            shutil.copy2(item, dst)
+      if target_run.exists():
+        target_run.chmod(target_run.stat().st_mode | 0o111)
+        provisioned.append(agent_id)
+      else:
+        still_missing.append(agent_id)
+    except Exception as exc:
+      errors[agent_id] = str(exc)
+      still_missing.append(agent_id)
+
+  return {"provisioned": provisioned, "still_missing": still_missing, "errors": errors}
 
 
 def _resolve_agent_target(agent_id: str) -> Optional[str]:
@@ -8318,12 +8398,26 @@ async function startAll() {
   if (heroBtn) heroBtn.innerHTML = '<span class="spinner">⟳</span> Starting…';
   try {
     const res = await api('/api/agents/start-all', {method:'POST'});
+    const failed = (res.failed || []).length;
+    const missing = (res.missing_agents || []).length;
+    const skippedGov = (res.skipped_by_governor || []).length;
+    const skippedBreaker = (res.skipped_by_breaker || []).length;
+    const provisioned = (res.provisioned_from_repo || []).length;
+    const dup = (res.already_running || []).length;
     if (res.ok) {
-      const dup = (res.already_running || []).length;
-      const extra = dup ? ` · ${dup} already running` : '';
-      toast(`▶ Started ${res.started || 0} agents (${res.mode || 'mode'})${extra}`, 'success');
+      const parts = [];
+      if (dup) parts.push(`${dup} already running`);
+      if (provisioned) parts.push(`${provisioned} provisioned`);
+      const extra = parts.length ? ` · ${parts.join(' · ')}` : '';
+      toast(`▶ Started ${res.started || 0}/${res.configured_count || 0} agents (${res.mode || 'mode'})${extra}`, 'success');
     } else {
-      toast(`⚠ Start issue: ${res.error || `failed: ${(res.failed || []).join(', ') || 'unknown'}`}`, 'error');
+      const details = [];
+      if (failed) details.push(`${failed} failed`);
+      if (missing) details.push(`${missing} missing`);
+      if (skippedGov) details.push(`${skippedGov} governor-skipped`);
+      if (skippedBreaker) details.push(`${skippedBreaker} breaker-skipped`);
+      const suffix = details.length ? ` (${details.join(' · ')})` : '';
+      toast(`⚠ Start issue: ${res.error || `started ${res.started || 0}/${res.configured_count || 0}${suffix}`}`, 'error');
     }
     await loadDashboard();
   } finally {
@@ -16869,7 +16963,21 @@ def start_all_agents(_auth: None = Depends(require_auth)):
         if _SHUTDOWN_IN_PROGRESS.is_set():
             return JSONResponse({"ok": False, "error": "Shutdown is in progress. Start is temporarily blocked."}, status_code=409)
         mode = _current_mode()
+        configured_agents = _available_agent_ids(mode)
+        sync_result = _sync_missing_mode_agents(mode)
+        provisioned = list(sync_result.get("provisioned", []))
+        provisioning_errors = dict(sync_result.get("errors", {}))
         targets = _mode_agent_targets(mode)
+        missing_agents = [agent_id for agent_id in configured_agents if not _resolve_agent_target(agent_id)]
+        logger.info(
+          "START_ALL_REQUEST: mode=%s configured=%s runnable=%s provisioned=%s missing=%s provisioning_errors=%s",
+          mode,
+          len(configured_agents),
+          len(targets),
+          len(provisioned),
+          missing_agents,
+          provisioning_errors,
+        )
         if not targets:
             err = (
                 "No runnable agents found. Set AI_HOME to a valid installation or keep runtime/agents "
@@ -16883,6 +16991,11 @@ def start_all_agents(_auth: None = Depends(require_auth)):
         skipped_by_governor: list = []   # agents skipped specifically by the cap
         skipped_by_breaker: list = []    # agents skipped by an open circuit breaker
         already_running: list = []       # duplicate-start prevention
+        failed_reasons: dict[str, str] = {}
+        for agent_name in provisioned:
+          outputs.append(f"[{agent_name}] provisioned from bundled runtime into AI_HOME")
+        for agent_name in missing_agents:
+          outputs.append(f"[{agent_name}] missing — no agent folder/run.sh found in AI_HOME or bundled runtime")
         # Check governor before starting agents
         with _AGENT_GOVERNOR_LOCK:
             gov_enabled = _AGENT_GOVERNOR["enabled"]
@@ -16908,20 +17021,48 @@ def start_all_agents(_auth: None = Depends(require_auth)):
             outputs.append(f"[{agent_name}] skipped — circuit breaker is open (too many recent failures)")
             continue
           rc, out = ai_employee("start", agent_name)
-          outputs.append(f"[{agent_name}] {out.strip()}")
+          start_msg = (out or "").strip()
+          outputs.append(f"[{agent_name}] {start_msg}")
           if rc != 0:
             failures.append(agent_name)
+            failed_reasons[agent_name] = start_msg or "start command returned non-zero exit code"
             circuit_breaker_record_failure(agent_name)
           else:
-            running_count += 1
-            circuit_breaker_record_success(agent_name)
+            time.sleep(0.05)
+            if not _agent_has_live_process(agent_name):
+              failures.append(agent_name)
+              failed_reasons[agent_name] = start_msg or "start command returned success but no live process was detected"
+              outputs.append(f"[{agent_name}] failed — no live process detected after start")
+              circuit_breaker_record_failure(agent_name)
+            else:
+              running_count += 1
+              circuit_breaker_record_success(agent_name)
+        logger.info(
+          "START_ALL_RESULT: mode=%s configured=%s runnable=%s started=%s failed=%s skipped_by_governor=%s skipped_by_breaker=%s already_running=%s missing=%s",
+          mode,
+          len(configured_agents),
+          len(targets),
+          len(targets) - len(failures) - len(skipped_agents) - len(already_running),
+          failures,
+          skipped_by_governor,
+          skipped_by_breaker,
+          already_running,
+          missing_agents,
+        )
         _invalidate_status_cache()
         return JSONResponse({
-          "ok": len(failures) == 0,
+          "ok": len(failures) == 0 and len(missing_agents) == 0,
           "mode": mode,
+          "configured_count": len(configured_agents),
+          "configured_agents": configured_agents,
+          "runnable_count": len(targets),
           "targets": targets,
           "started": len(targets) - len(failures) - len(skipped_agents) - len(already_running),
           "failed": failures,
+          "failed_reasons": failed_reasons,
+          "missing_agents": missing_agents,
+          "provisioned_from_repo": provisioned,
+          "provisioning_errors": provisioning_errors,
           "already_running": already_running,
           "skipped_by_governor": skipped_by_governor,
           "skipped_by_breaker": skipped_by_breaker,
