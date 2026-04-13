@@ -66,7 +66,16 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(_bearer)) 
 
 def verify_login(username: str, password: str) -> bool:
     env_user = os.environ.get("AI_EMPLOYEE_USER", "").strip()
-    env_pass = os.environ.get("AI_EMPLOYEE_PASS", "").strip()
-    if not env_user or not env_pass:
+    env_pass = os.environ.get("AI_EMPLOYEE_PASS", "")
+    env_pass_hash = os.environ.get("AI_EMPLOYEE_PASS_HASH", "").strip().lower()
+    if not env_user:
         return False
-    return username == env_user and password == env_pass
+    user_ok = hmac.compare_digest(username, env_user)
+    if env_pass_hash:
+        provided_hash = hashlib.sha256(password.encode("utf-8")).hexdigest().lower()
+        pass_ok = hmac.compare_digest(provided_hash, env_pass_hash)
+    else:
+        if not env_pass:
+            return False
+        pass_ok = hmac.compare_digest(password, env_pass)
+    return user_ok and pass_ok
