@@ -73,9 +73,9 @@ export const useAppStore = create((set) => ({
 
   // Neural Network status
   nnStatus: {
-    available: false,
-    active: false,
-    mode: 'OFFLINE',
+    available: true,
+    active: true,
+    mode: 'INITIALIZING',
     learn_step: 0,
     buffer_size: 0,
     max_buffer_size: 10000,
@@ -115,7 +115,7 @@ export const useAppStore = create((set) => ({
   setDoctorStatus: (d) => set({ doctorStatus: d }),
 
   brainInsights: {
-    active: false,
+    active: true,
     learned_strategies: [],
     task_patterns: [],
     recent_improvements: [],
@@ -126,9 +126,9 @@ export const useAppStore = create((set) => ({
   setBrainInsights: (insights) => set({ brainInsights: insights }),
 
   brainStatus: {
-    status: 'inactive',
-    active: false,
-    available: false,
+    status: 'active',
+    active: true,
+    available: true,
     memory_size: 0,
     last_update: null,
     recent_decisions: [],
@@ -136,7 +136,7 @@ export const useAppStore = create((set) => ({
   setBrainStatus: (status) => set({ brainStatus: status }),
 
   brainActivity: {
-    status: 'inactive',
+    status: 'active',
     memory_size: 0,
     last_update: null,
     recent_decisions: [],
