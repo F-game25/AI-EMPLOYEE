@@ -383,6 +383,7 @@ function status() {
     status: 'active',
     active: true,
     available: true,
+    mode: 'ONLINE',
     memory_size: memorySize(),
     last_update: state.lastUpdatedAt || nowIso(),
     recent_decisions: state.decisionHistory.slice(0, 8).map((d) => ({
