@@ -4,7 +4,7 @@ import { useAppStore } from '../../store/appStore'
 
 const GRADE_COLORS = {
   A: 'var(--success)',
-  B: '#60a5fa',
+  B: 'var(--info)',
   C: 'var(--warning)',
   D: 'var(--error)',
 }
@@ -27,7 +27,7 @@ const SCORE_LABELS = {
 }
 
 function ScoreBar({ label, score }) {
-  const color = score >= 80 ? 'var(--success)' : score >= 60 ? '#60a5fa' : score >= 40 ? 'var(--warning)' : 'var(--error)'
+  const color = score >= 80 ? 'var(--success)' : score >= 60 ? 'var(--info)' : score >= 40 ? 'var(--warning)' : 'var(--error)'
   return (
     <div className="mb-1.5">
       <div className="flex justify-between mb-0.5">

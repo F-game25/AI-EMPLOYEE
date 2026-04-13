@@ -4,24 +4,24 @@
 
 :root {
   /* Brand */
-  --gold: #F5C400;
+  --gold: #D4AF37;
   --gold-bright: #FFCC00;
   --gold-dim: #a38600;
 
   /* Backgrounds */
-  --bg-base: #050505;
-  --bg-panel: #0a0a0a;
-  --bg-panel-2: #0f0f0f;
+  --bg-base: #0B0B0F;
+  --bg-panel: #111118;
+  --bg-panel-2: #16161E;
   --bg-hover: rgba(255, 255, 255, 0.04);
 
   /* Borders */
-  --border-gold: rgba(245, 196, 0, 0.3);
-  --border-gold-dim: rgba(245, 196, 0, 0.1);
+  --border-gold: rgba(212, 175, 55, 0.3);
+  --border-gold-dim: rgba(212, 175, 55, 0.1);
   --border-subtle: rgba(255, 255, 255, 0.06);
 
   /* Text — all meet WCAG AA (4.5:1) on --bg-base */
-  --text-primary: #e8e8e8;   /* ~14:1 */
-  --text-secondary: #aaaaaa; /* ~7:1  */
+  --text-primary: #EAEAF0;   /* ~14:1 */
+  --text-secondary: #A0A0B0; /* ~7:1  */
   --text-muted: #777777;     /* ~4.6:1 */
   --text-dim: #555555;       /* ~3:1 — large text / decorative only */
 
@@ -80,11 +80,11 @@ body {
 }
 
 .glow-gold {
-  box-shadow: 0 0 10px rgba(245, 196, 0, 0.3), 0 0 30px rgba(245, 196, 0, 0.1);
+  box-shadow: 0 0 10px rgba(212, 175, 55, 0.3), 0 0 30px rgba(212, 175, 55, 0.1);
 }
 
 .glow-gold-text {
-  text-shadow: 0 0 10px rgba(245, 196, 0, 0.5);
+  text-shadow: 0 0 10px rgba(212, 175, 55, 0.5);
 }
 
 /* Screen scanlines — decorative overlay, non-interactive */
@@ -105,12 +105,12 @@ body {
 
 /* Login input field wrapper — border controlled via CSS, not inline JS */
 .input-field-wrap {
-  border: 1px solid rgba(245, 196, 0, 0.2);
+  border: 1px solid rgba(212, 175, 55, 0.2);
   border-radius: 4px;
   transition: border-color 0.2s ease;
 }
 .input-field-wrap:focus-within {
-  border-color: rgba(245, 196, 0, 0.6);
+  border-color: rgba(212, 175, 55, 0.6);
 }
 .input-field-wrap input {
   display: block;
@@ -137,30 +137,30 @@ body {
 }
 
 .ds-card-secondary {
-  background: rgba(245,196,0,0.06);
-  border: 1px solid rgba(245,196,0,0.15);
+  background: rgba(212,175,55,0.06);
+  border: 1px solid rgba(212,175,55,0.15);
   border-radius: 10px;
 }
 
 .tier-1-btn {
   background: var(--gold);
   color: #111;
-  border: 1px solid rgba(245,196,0,0.95);
+  border: 1px solid rgba(212,175,55,0.95);
   border-radius: 8px;
   font-weight: 700;
-  box-shadow: 0 0 20px rgba(245,196,0,0.35);
+  box-shadow: 0 0 20px rgba(212,175,55,0.35);
 }
 
 .tier-2-btn {
   background: rgba(0,0,0,0.3);
   color: var(--gold);
-  border: 1px solid rgba(245,196,0,0.45);
+  border: 1px solid rgba(212,175,55,0.45);
   border-radius: 8px;
 }
 
 .tier-3-surface {
-  background: rgba(245,196,0,0.08);
-  border: 1px solid rgba(245,196,0,0.18);
+  background: rgba(212,175,55,0.08);
+  border: 1px solid rgba(212,175,55,0.18);
   border-radius: 8px;
 }
 

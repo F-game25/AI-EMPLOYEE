@@ -2,12 +2,12 @@ import { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 
-const API_BASE = `http://${window.location.hostname}:3001`
+const API_BASE = window.location.origin
 
 const MODE_CONFIG = {
-  OFF: { color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.35)', label: 'PAUSED', icon: '⏸' },
-  ON: { color: '#eab308', bg: 'rgba(234,179,8,0.08)', border: 'rgba(234,179,8,0.35)', label: 'LIMITED', icon: '⚡' },
-  AUTO: { color: '#22c55e', bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.35)', label: 'AUTONOMOUS', icon: '🔄' },
+  OFF: { color: 'var(--error)', bg: 'rgba(255,68,102,0.08)', border: 'rgba(255,68,102,0.35)', label: 'PAUSED', icon: '⏸' },
+  ON: { color: 'var(--warning)', bg: 'rgba(255,170,0,0.08)', border: 'rgba(255,170,0,0.35)', label: 'LIMITED', icon: '⚡' },
+  AUTO: { color: 'var(--success)', bg: 'rgba(0,230,118,0.08)', border: 'rgba(0,230,118,0.35)', label: 'AUTONOMOUS', icon: '🔄' },
 }
 
 export default function SystemModeToggle() {
@@ -53,7 +53,7 @@ export default function SystemModeToggle() {
             {cfg.icon} {cfg.label}
           </span>
         </div>
-        <span className="font-mono text-[10px]" style={{ color: daemonRunning ? '#22c55e' : 'var(--text-muted)' }}>
+        <span className="font-mono text-[10px]" style={{ color: daemonRunning ? 'var(--success)' : 'var(--text-muted)' }}>
           {daemonRunning ? '● DAEMON ACTIVE' : '○ DAEMON IDLE'}
         </span>
       </div>
@@ -89,9 +89,9 @@ export default function SystemModeToggle() {
         disabled={busy || currentMode === 'OFF'}
         className="w-full font-mono text-[10px] py-1.5 rounded"
         style={{
-          background: 'rgba(239,68,68,0.08)',
-          border: '1px solid rgba(239,68,68,0.35)',
-          color: '#ef4444',
+          background: 'rgba(255,68,102,0.08)',
+          border: '1px solid rgba(255,68,102,0.35)',
+          color: 'var(--error)',
           cursor: busy || currentMode === 'OFF' ? 'not-allowed' : 'pointer',
           opacity: busy || currentMode === 'OFF' ? 0.4 : 1,
         }}
