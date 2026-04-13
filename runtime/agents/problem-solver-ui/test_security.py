@@ -17,7 +17,6 @@ import json
 import os
 import sys
 import time
-import hashlib
 import secrets
 from datetime import datetime, timezone, timedelta
 
@@ -454,12 +453,30 @@ class TestAuthRegisterEndpoint:
 
 
 class TestAuthSessionHardening:
+    class FakeClient:
+        def __init__(self, host: str):
+            self.host = host
+
+    class FakeRequest:
+        def __init__(self, host: str, user_agent: str):
+            self.client = TestAuthSessionHardening.FakeClient(host)
+            self.headers = {"user-agent": user_agent, "accept-language": ""}
+
     @staticmethod
     def _seed_user(username: str, password: str) -> None:
         import server
         users_file = server.STATE_DIR / "users.json"
         users = json.loads(users_file.read_text()) if users_file.exists() else {}
-        auth = server.AuthManager(secret_key=server._jwt_secret_env, algorithm="HS256", expire_minutes=15)
+        expire_minutes = (
+            server._security_config.security.access_token_expire_minutes
+            if server._security_config
+            else 15
+        )
+        auth = server.AuthManager(
+            secret_key=server._jwt_secret_env,
+            algorithm="HS256",
+            expire_minutes=expire_minutes,
+        )
         users[username] = {"password_hash": auth.hash_password(password)}
         users_file.parent.mkdir(parents=True, exist_ok=True)
         users_file.write_text(json.dumps(users, indent=2))
@@ -468,20 +485,22 @@ class TestAuthSessionHardening:
     def _seed_refresh_token(username: str, user_agent: str = "testclient") -> str:
         import server
         auth_state_file = server.STATE_DIR / "auth_state.json"
-        state = json.loads(auth_state_file.read_text()) if auth_state_file.exists() else {
-            "failed_logins": {},
-            "refresh_tokens": {},
-            "revoked_jti": {},
-        }
+        state = server._load_auth_state()
         token = secrets.token_urlsafe(48)
-        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        fingerprint = hashlib.sha256(f"testclient|{user_agent}|".encode("utf-8")).hexdigest()
+        token_hash = server._hash_refresh_token(token)
+        fake_request = TestAuthSessionHardening.FakeRequest("testclient", user_agent)
+        fingerprint = server._request_fingerprint(fake_request)
         now = datetime.now(timezone.utc)
+        refresh_days = (
+            server._security_config.security.refresh_token_expire_days
+            if server._security_config
+            else 7
+        )
         state.setdefault("refresh_tokens", {})[token_hash] = {
             "username": username,
             "fingerprint": fingerprint,
             "issued_at": now.isoformat(),
-            "expires_at": (now + timedelta(days=7)).isoformat(),
+            "expires_at": (now + timedelta(days=refresh_days)).isoformat(),
             "revoked": False,
             "replaced_by": None,
         }
