@@ -665,3 +665,92 @@ def si_learning_insights():
     except Exception as exc:
         _log.exception("si_learning_insights failed")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── Autonomy daemon & system mode endpoints ────────────────────────────────────
+
+class SystemModeBody(BaseModel):
+    mode: str  # "OFF" | "ON" | "AUTO"
+
+
+@router.get("/autonomy/mode")
+def get_autonomy_mode():
+    """Return the current system autonomy mode."""
+    try:
+        from core.system_mode import get_system_mode
+        return JSONResponse(get_system_mode().status())
+    except Exception as exc:
+        _log.exception("get_autonomy_mode failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/autonomy/mode")
+def set_autonomy_mode(body: SystemModeBody):
+    """Set the system autonomy mode (OFF / ON / AUTO)."""
+    try:
+        from core.system_mode import get_system_mode
+        sm = get_system_mode()
+        new_mode = sm.set_mode(body.mode)
+        return JSONResponse(sm.status())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _log.exception("set_autonomy_mode failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/autonomy/emergency-stop")
+def emergency_stop():
+    """Immediately halt all autonomous execution."""
+    try:
+        from core.system_mode import get_system_mode
+        from core.autonomy_daemon import get_daemon
+        sm = get_system_mode()
+        sm.emergency_stop()
+        daemon = get_daemon()
+        daemon.stop()
+        return JSONResponse({
+            "status": "stopped",
+            "message": "Emergency stop executed. Daemon halted, mode set to OFF.",
+            **sm.status(),
+        })
+    except Exception as exc:
+        _log.exception("emergency_stop failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/autonomy/status")
+def get_autonomy_status():
+    """Return full autonomy daemon status for the dashboard."""
+    try:
+        from core.autonomy_daemon import get_daemon
+        return JSONResponse(get_daemon().status())
+    except Exception as exc:
+        _log.exception("get_autonomy_status failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/autonomy/start")
+def start_daemon():
+    """Start the autonomy daemon background loop."""
+    try:
+        from core.autonomy_daemon import get_daemon
+        daemon = get_daemon()
+        daemon.start()
+        return JSONResponse(daemon.status())
+    except Exception as exc:
+        _log.exception("start_daemon failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/autonomy/stop")
+def stop_daemon():
+    """Gracefully stop the autonomy daemon."""
+    try:
+        from core.autonomy_daemon import get_daemon
+        daemon = get_daemon()
+        daemon.stop()
+        return JSONResponse(daemon.status())
+    except Exception as exc:
+        _log.exception("stop_daemon failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
