@@ -456,3 +456,200 @@ def product_dashboard(
         ),
     }
     return JSONResponse(response)
+
+
+# ── Self-Improvement Loop endpoints ───────────────────────────────────────────
+
+class _ImprovementTaskRequest(BaseModel):
+    description: str
+    target_area: str = "general"
+    constraints: list[str] = []
+    risk_class: str = "medium"
+    approval_policy: str = "manual"
+
+
+@router.post("/self-improvement/queue")
+def si_queue_task(body: _ImprovementTaskRequest):
+    """Queue a new self-improvement task."""
+    try:
+        from core.self_improvement.queue import get_queue
+        task = get_queue().enqueue(
+            description=body.description,
+            target_area=body.target_area,
+            constraints=body.constraints,
+            risk_class=body.risk_class,
+            approval_policy=body.approval_policy,
+        )
+        return JSONResponse(task.to_dict())
+    except Exception as exc:
+        _log.exception("si_queue_task failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/self-improvement/queue")
+def si_list_queue(status: str = Query(default="")):
+    """List all tasks in the improvement queue."""
+    try:
+        from core.self_improvement.queue import get_queue
+        return JSONResponse(get_queue().list_all(status=status or None))
+    except Exception as exc:
+        _log.exception("si_list_queue failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/self-improvement/queue/summary")
+def si_queue_summary():
+    """Return queue summary for dashboard."""
+    try:
+        from core.self_improvement.queue import get_queue
+        return JSONResponse(get_queue().summary())
+    except Exception as exc:
+        _log.exception("si_queue_summary failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/self-improvement/task/{task_id}")
+def si_get_task(task_id: str):
+    """Get a specific improvement task with all artifacts."""
+    try:
+        from core.self_improvement.queue import get_queue
+        task = get_queue().get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        return JSONResponse(task.to_dict())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_get_task failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/self-improvement/task/{task_id}/run")
+def si_run_task(task_id: str):
+    """Run the full improvement pipeline for a queued task."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.run_pipeline(task)
+        queue.update(result)
+        return JSONResponse(result.to_dict())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_run_task failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/self-improvement/task/{task_id}/approve")
+def si_approve_task(task_id: str):
+    """Manually approve a task awaiting approval."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.approve_task(task)
+        queue.update(result)
+        return JSONResponse(result.to_dict())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_approve_task failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class _RejectRequest(BaseModel):
+    reason: str = ""
+
+
+@router.post("/self-improvement/task/{task_id}/reject")
+def si_reject_task(task_id: str, body: _RejectRequest = _RejectRequest()):
+    """Manually reject a task awaiting approval."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.reject_task(task, reason=body.reason)
+        queue.update(result)
+        return JSONResponse(result.to_dict())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_reject_task failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/self-improvement/task/{task_id}/deploy")
+def si_deploy_task(task_id: str):
+    """Deploy an approved task."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.deploy_approved(task)
+        queue.update(result)
+        return JSONResponse(result.to_dict())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_deploy_task failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/self-improvement/task/{task_id}/rollback")
+def si_rollback_task(task_id: str):
+    """Rollback a deploying/deployed task."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.rollback_task(task)
+        queue.update(result)
+        return JSONResponse(result.to_dict())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_rollback_task failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/self-improvement/telemetry")
+def si_telemetry():
+    """Return self-improvement telemetry for the dashboard."""
+    try:
+        from core.self_improvement.telemetry import get_telemetry
+        return JSONResponse(get_telemetry().dashboard_payload())
+    except Exception as exc:
+        _log.exception("si_telemetry failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/self-improvement/learning")
+def si_learning_insights():
+    """Return learning insights from the improvement feedback loop."""
+    try:
+        from core.self_improvement.learning import LearningModule
+        return JSONResponse(LearningModule().get_insights())
+    except Exception as exc:
+        _log.exception("si_learning_insights failed")
+        raise HTTPException(status_code=500, detail=str(exc))
