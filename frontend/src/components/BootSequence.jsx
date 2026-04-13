@@ -1,16 +1,18 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-const BOOT_LINES = [
-  { text: '> INITIALIZING AI-EMPLOYEE OS v2.0...', delay: 0 },
-  { text: '> Loading neural core modules...', delay: 320 },
-  { text: '> Establishing secure channels...', delay: 640 },
-  { text: '> Calibrating agent network [57 agents]...', delay: 960 },
-  { text: '> Scanning for anomalies... [CLEAR]', delay: 1280 },
-  { text: '> Synchronizing orchestrator...', delay: 1600 },
-  { text: '> Verifying memory integrity... [OK]', delay: 1920 },
-  { text: '> All systems nominal. BOOT COMPLETE.', delay: 2240 },
-]
+function buildBootLines(agentCount) {
+  return [
+    { text: '> INITIALIZING AI-EMPLOYEE OS v2.0...', delay: 0 },
+    { text: '> Loading neural core modules...', delay: 320 },
+    { text: '> Establishing secure channels...', delay: 640 },
+    { text: `> Calibrating agent network [${agentCount} agents]...`, delay: 960 },
+    { text: '> Scanning for anomalies... [CLEAR]', delay: 1280 },
+    { text: '> Synchronizing orchestrator...', delay: 1600 },
+    { text: '> Verifying memory integrity... [OK]', delay: 1920 },
+    { text: '> All systems nominal. BOOT COMPLETE.', delay: 2240 },
+  ]
+}
 
 function GlitchText({ children, style, className }) {
   const [glitch, setGlitch] = useState(false)
@@ -71,23 +73,39 @@ export default function BootSequence({ onComplete }) {
   useLayoutEffect(() => { onCompleteRef.current = onComplete })
 
   useEffect(() => {
+    let cancelled = false
     const timers = []
 
-    BOOT_LINES.forEach((line, i) => {
-      timers.push(
-        setTimeout(() => {
-          setVisibleLines(prev => [...prev, line.text])
-          setProgress(Math.round(((i + 1) / BOOT_LINES.length) * 100))
-        }, line.delay)
-      )
-    })
+    // Fetch actual agent count from backend, fall back to 57
+    const startBoot = (agentCount) => {
+      if (cancelled) return
+      const BOOT_LINES = buildBootLines(agentCount)
 
-    const lastDelay = BOOT_LINES[BOOT_LINES.length - 1].delay
-    timers.push(setTimeout(() => setShowLogo(true), lastDelay + 300))
-    timers.push(setTimeout(() => setLogoReady(true), lastDelay + 700))
-    timers.push(setTimeout(() => onCompleteRef.current?.(), lastDelay + 1400))
+      BOOT_LINES.forEach((line, i) => {
+        timers.push(
+          setTimeout(() => {
+            if (cancelled) return
+            setVisibleLines(prev => [...prev, line.text])
+            setProgress(Math.round(((i + 1) / BOOT_LINES.length) * 100))
+          }, line.delay)
+        )
+      })
 
-    return () => timers.forEach(clearTimeout)
+      const lastDelay = BOOT_LINES[BOOT_LINES.length - 1].delay
+      timers.push(setTimeout(() => { if (!cancelled) setShowLogo(true) }, lastDelay + 300))
+      timers.push(setTimeout(() => { if (!cancelled) setLogoReady(true) }, lastDelay + 700))
+      timers.push(setTimeout(() => { if (!cancelled) onCompleteRef.current?.() }, lastDelay + 1400))
+    }
+
+    fetch('/agents')
+      .then(r => r.json())
+      .then(data => startBoot(data?.agents?.length || 57))
+      .catch(() => startBoot(57))
+
+    return () => {
+      cancelled = true
+      timers.forEach(clearTimeout)
+    }
   }, []) // empty deps — run once on mount; onComplete accessed via stable ref
 
   return (
