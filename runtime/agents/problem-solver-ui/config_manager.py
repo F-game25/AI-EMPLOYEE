@@ -14,7 +14,10 @@ class SecurityConfig(BaseModel):
     """Security configuration."""
     jwt_secret_key: str = Field(min_length=32)
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
+    max_login_attempts: int = 5
+    progressive_lockout_seconds: list[int] = [60, 300, 900, 1800]
     min_password_length: int = 12
     require_special_chars: bool = True
     require_numbers: bool = True

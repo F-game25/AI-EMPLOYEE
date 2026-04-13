@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 try:
     import psutil as _psutil
@@ -1140,7 +1140,7 @@ if not _REQUIRE_AUTH:
     print(
         "\n⚠️  SECURITY WARNING: REQUIRE_AUTH is disabled (default).\n"
         "   All API endpoints — including task submission and automation control —\n"
-        "   are accessible WITHOUT a token from any localhost client.\n"
+        "   are accessible WITHOUT a token.\n"
         "   Set REQUIRE_AUTH=1 in ~/.ai-employee/.env before exposing this server\n"
         "   to a network or production environment.\n",
         flush=True,
@@ -1149,6 +1149,11 @@ if not _REQUIRE_AUTH:
 
 def _verify_any_token(token_str: str) -> bool:
     """Return True if the token is valid using the configured AuthManager."""
+    return _decode_any_token(token_str) is not None
+
+
+def _decode_any_token(token_str: str) -> Optional[dict[str, Any]]:
+    """Return decoded token payload if valid, else None."""
     cfg = _security_config
     try:
         if _SECURITY_AVAILABLE:
@@ -1158,8 +1163,9 @@ def _verify_any_token(token_str: str) -> bool:
                 algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
                 expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
             )
-            payload = _am.verify_token(token_str)
-            return payload is not None and "sub" in payload
+            payload: Optional[dict[str, Any]] = _am.verify_token(token_str)
+            if payload is not None and "sub" in payload:
+                return payload
     except Exception:
         pass
     # Fallback: try stdlib HMAC token
@@ -1170,9 +1176,178 @@ def _verify_any_token(token_str: str) -> bool:
             expire_minutes=30,
         )
         payload = auth_fb.verify_token(token_str)
-        return payload is not None and "sub" in payload
+        if payload is not None and "sub" in payload:
+            return payload
     except Exception:
+        return None
+    return None
+
+
+_AUTH_STATE_FILE = STATE_DIR / "auth_state.json"
+_AUTH_STATE_LOCK = threading.RLock()
+_MAX_LOGIN_ATTEMPTS = (
+    int(_security_config.security.max_login_attempts)
+    if _security_config
+    else int(os.environ.get("AUTH_MAX_LOGIN_ATTEMPTS", "5"))
+)
+_LOCKOUT_STEPS_SECONDS = (
+    [int(x) for x in _security_config.security.progressive_lockout_seconds]
+    if _security_config
+    else [60, 300, 900, 1800]
+)
+if not _LOCKOUT_STEPS_SECONDS:
+    _LOCKOUT_STEPS_SECONDS = [60, 300, 900, 1800]
+_REFRESH_TOKEN_TTL_SECONDS = (
+    int(_security_config.security.refresh_token_expire_days) * 24 * 3600
+    if _security_config
+    else int(os.environ.get("AUTH_REFRESH_TOKEN_TTL_SECONDS", str(7 * 24 * 3600)))
+)
+_REVOKED_JTI_TTL_SECONDS = int(os.environ.get("AUTH_REVOKED_JTI_TTL_SECONDS", str(24 * 3600)))
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_iso_ts(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _request_fingerprint(request: Request) -> str:
+    host = (request.client.host if request.client else "unknown") or "unknown"
+    ua = request.headers.get("user-agent", "")
+    lang = request.headers.get("accept-language", "")
+    material = f"{host}|{ua}|{lang}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _load_auth_state() -> dict[str, Any]:
+    default_state: dict[str, Any] = {
+        "failed_logins": {},
+        "refresh_tokens": {},
+        "revoked_jti": {},
+    }
+    try:
+        if _AUTH_STATE_FILE.exists():
+            raw = json.loads(_AUTH_STATE_FILE.read_text())
+            if isinstance(raw, dict):
+                default_state.update(raw)
+    except Exception:
+        pass
+    for key in ("failed_logins", "refresh_tokens", "revoked_jti"):
+        if not isinstance(default_state.get(key), dict):
+            default_state[key] = {}
+    return default_state
+
+
+def _save_auth_state(state: dict[str, Any]) -> None:
+    now = _now_utc()
+    refresh_tokens = state.get("refresh_tokens", {})
+    revoked_jti = state.get("revoked_jti", {})
+
+    if isinstance(refresh_tokens, dict):
+        for token_hash, record in list(refresh_tokens.items()):
+            if not isinstance(record, dict):
+                refresh_tokens.pop(token_hash, None)
+                continue
+            expires_at = _parse_iso_ts(str(record.get("expires_at", "")))
+            if expires_at is None or expires_at <= now:
+                refresh_tokens.pop(token_hash, None)
+
+    if isinstance(revoked_jti, dict):
+        for jti, ts in list(revoked_jti.items()):
+            revoked_at = _parse_iso_ts(str(ts))
+            if revoked_at is None or (now - revoked_at).total_seconds() > _REVOKED_JTI_TTL_SECONDS:
+                revoked_jti.pop(jti, None)
+
+    _AUTH_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _AUTH_STATE_FILE.write_text(json.dumps(state, indent=2))
+    try:
+        _AUTH_STATE_FILE.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _login_attempt_key(request: Request, username: str) -> str:
+    client_ip = (request.client.host if request.client else "unknown") or "unknown"
+    return f"{client_ip}:{username.lower()}"
+
+
+def _record_revoked_jti(state: dict[str, Any], payload: Optional[dict[str, Any]]) -> None:
+    if not payload:
+        return
+    jti = payload.get("jti")
+    if not isinstance(jti, str) or not jti:
+        return
+    state.setdefault("revoked_jti", {})[jti] = _now_utc().isoformat()
+
+
+def _issue_token_pair(
+    auth: AuthManager,
+    username: str,
+    request: Request,
+    state: Optional[dict[str, Any]] = None,
+) -> tuple[str, str]:
+    now = _now_utc()
+    fingerprint = _request_fingerprint(request)
+    access_token = auth.create_access_token(
+        {
+            "sub": username,
+            "type": "user",
+            "jti": secrets.token_hex(16),
+            "fp": fingerprint,
+        }
+    )
+    refresh_token = secrets.token_urlsafe(48)
+    refresh_hash = _hash_refresh_token(refresh_token)
+    expires_at = (now + timedelta(seconds=_REFRESH_TOKEN_TTL_SECONDS)).isoformat()
+
+    if state is None:
+        with _AUTH_STATE_LOCK:
+            loaded = _load_auth_state()
+            loaded.setdefault("refresh_tokens", {})[refresh_hash] = {
+                "username": username,
+                "fingerprint": fingerprint,
+                "issued_at": now.isoformat(),
+                "expires_at": expires_at,
+                "revoked": False,
+                "replaced_by": None,
+            }
+            _save_auth_state(loaded)
+    else:
+        state.setdefault("refresh_tokens", {})[refresh_hash] = {
+            "username": username,
+            "fingerprint": fingerprint,
+            "issued_at": now.isoformat(),
+            "expires_at": expires_at,
+            "revoked": False,
+            "replaced_by": None,
+        }
+
+    return access_token, refresh_token
+
+
+def _is_jti_revoked(payload: Optional[dict[str, Any]]) -> bool:
+    if not payload:
+        return True
+    jti = payload.get("jti")
+    if not isinstance(jti, str) or not jti:
         return False
+    with _AUTH_STATE_LOCK:
+        state = _load_auth_state()
+        return jti in state.get("revoked_jti", {})
 
 
 def _is_localhost(request: Request) -> bool:
@@ -1188,25 +1363,43 @@ async def require_auth(
     """FastAPI dependency that enforces auth when REQUIRE_AUTH=1.
 
     - When REQUIRE_AUTH is off (default): allows all requests.
-    - When REQUIRE_AUTH=1: allows localhost without a token (dev mode),
-      but requires a valid JWT for all other origins.
+    - When REQUIRE_AUTH=1: requires a valid JWT and context match.
     """
     if not _REQUIRE_AUTH:
         return  # auth not enforced globally
-    if _is_localhost(request):
-        return  # always allow local access
     if not credentials or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required. Provide a Bearer token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if not _verify_any_token(credentials.credentials):
+    payload = _decode_any_token(credentials.credentials)
+    if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if _is_jti_revoked(payload):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session is no longer valid. Please re-authenticate.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    expected_fp = payload.get("fp")
+    if isinstance(expected_fp, str) and expected_fp:
+        actual_fp = _request_fingerprint(request)
+        if not hmac.compare_digest(expected_fp, actual_fp):
+            _audit_logger.warning(json.dumps({
+                "event": "auth_context_mismatch",
+                "sub": payload.get("sub", "unknown"),
+                "timestamp": _now_utc().isoformat(),
+            }))
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session context changed. Re-authentication required.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
 
 # ── Rate limiter (openclaw-2) ─────────────────────────────────────────────────
@@ -1275,10 +1468,7 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    # HSTS is only meaningful over TLS; omit it on plain HTTP to avoid browser
-    # caching a broken policy that prevents future access on port changes.
-    if request.url.scheme == "https":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     # Only set the fallback CSP when the index route has not already applied
     # its own policy for the dashboard HTML.
     if "Content-Security-Policy" not in response.headers:
@@ -16352,6 +16542,8 @@ class _UserCreate(BaseModel):
 class _TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    refresh_token: Optional[str] = None
+    access_token_expires_minutes: int = 0
 
 
 @app.get("/health", response_model=_HealthResponse)
@@ -16438,18 +16630,25 @@ def auth_register(request: Request, user_data: _UserCreate):
         algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
         expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
     )
-    users[username] = {"password_hash": auth.hash_password(user_data.password)}
+    users[username] = {
+        "password_hash": auth.hash_password(user_data.password),
+        "created_at": _now_utc().isoformat(),
+    }
     _users_file.parent.mkdir(parents=True, exist_ok=True)
     _users_file.write_text(json.dumps(users, indent=2))
     _users_file.chmod(0o600)
 
-    token = auth.create_access_token({"sub": username, "type": "user"})
+    access_token, refresh_token = _issue_token_pair(auth, username, request)
     _audit_logger.info(json.dumps({
         "event": "user_registered",
         "username": username,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }))
-    return _TokenResponse(access_token=token)
+    return _TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        access_token_expires_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+    )
 
 
 class _LoginRequest(BaseModel):
@@ -16492,23 +16691,172 @@ def auth_login(request: Request, login_data: _LoginRequest):
         expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
     )
 
+    attempt_key = _login_attempt_key(request, username)
+    with _AUTH_STATE_LOCK:
+        state = _load_auth_state()
+        failed_logins = state.setdefault("failed_logins", {})
+        attempt_entry = failed_logins.get(attempt_key, {})
+        lockout_until_dt = _parse_iso_ts(str(attempt_entry.get("lockout_until", "")))
+        now = _now_utc()
+        if lockout_until_dt and lockout_until_dt > now:
+            retry_after = int((lockout_until_dt - now).total_seconds())
+            _audit_logger.warning(json.dumps({
+                "event": "login_locked",
+                "username": username,
+                "retry_after_seconds": retry_after,
+                "timestamp": now.isoformat(),
+            }))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Account temporarily locked. Retry in {retry_after} seconds.",
+            )
+
     if not user_record or not auth.verify_password(
         login_data.password, user_record.get("password_hash", "")
     ):
+        with _AUTH_STATE_LOCK:
+            state = _load_auth_state()
+            failed_logins = state.setdefault("failed_logins", {})
+            current = failed_logins.get(attempt_key, {})
+            failure_count = int(current.get("count", 0)) + 1
+            lockout_until = None
+            if failure_count >= _MAX_LOGIN_ATTEMPTS:
+                step_idx = min(
+                    failure_count - _MAX_LOGIN_ATTEMPTS,
+                    len(_LOCKOUT_STEPS_SECONDS) - 1,
+                )
+                lockout_until = (_now_utc() + timedelta(seconds=_LOCKOUT_STEPS_SECONDS[step_idx])).isoformat()
+            failed_logins[attempt_key] = {
+                "count": failure_count,
+                "last_failure": _now_utc().isoformat(),
+                "lockout_until": lockout_until,
+            }
+            _save_auth_state(state)
         _audit_logger.warning(json.dumps({
             "event": "login_failed",
             "username": username,
+            "failure_count": failure_count,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }))
         raise _generic_fail
 
-    token = auth.create_access_token({"sub": username, "type": "user"})
+    with _AUTH_STATE_LOCK:
+        state = _load_auth_state()
+        state.setdefault("failed_logins", {}).pop(attempt_key, None)
+        _save_auth_state(state)
+
+    access_token, refresh_token = _issue_token_pair(auth, username, request)
     _audit_logger.info(json.dumps({
         "event": "login_success",
         "username": username,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }))
-    return _TokenResponse(access_token=token)
+    return _TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        access_token_expires_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+    )
+
+
+class _RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=32)
+
+
+@app.post("/auth/refresh", response_model=_TokenResponse)
+@_auth_rate_limit
+def auth_refresh(request: Request, body: _RefreshRequest):
+    cfg = _security_config
+    auth = AuthManager(
+        secret_key=(cfg.security.jwt_secret_key if cfg else _jwt_secret_env),
+        algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
+        expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+    )
+    refresh_hash = _hash_refresh_token(body.refresh_token)
+    now = _now_utc()
+    current_fp = _request_fingerprint(request)
+
+    with _AUTH_STATE_LOCK:
+        state = _load_auth_state()
+        refresh_record = state.get("refresh_tokens", {}).get(refresh_hash)
+        if not isinstance(refresh_record, dict):
+            raise HTTPException(status_code=401, detail="Invalid refresh token.")
+        if refresh_record.get("revoked") is True:
+            raise HTTPException(status_code=401, detail="Refresh token has been revoked.")
+
+        expires_at = _parse_iso_ts(str(refresh_record.get("expires_at", "")))
+        if expires_at is None or expires_at <= now:
+            state.get("refresh_tokens", {}).pop(refresh_hash, None)
+            _save_auth_state(state)
+            raise HTTPException(status_code=401, detail="Refresh token expired.")
+
+        expected_fp = str(refresh_record.get("fingerprint", ""))
+        if expected_fp and not hmac.compare_digest(expected_fp, current_fp):
+            refresh_record["revoked"] = True
+            refresh_record["revoked_at"] = now.isoformat()
+            _save_auth_state(state)
+            _audit_logger.warning(json.dumps({
+                "event": "refresh_context_mismatch",
+                "username": refresh_record.get("username", "unknown"),
+                "timestamp": now.isoformat(),
+            }))
+            raise HTTPException(
+                status_code=401,
+                detail="Session context changed. Please log in again.",
+            )
+
+        username = str(refresh_record.get("username", "")).strip()
+        if not username:
+            raise HTTPException(status_code=401, detail="Invalid refresh token.")
+
+        access_token, new_refresh = _issue_token_pair(auth, username, request, state=state)
+        new_hash = _hash_refresh_token(new_refresh)
+        refresh_record["revoked"] = True
+        refresh_record["revoked_at"] = now.isoformat()
+        refresh_record["replaced_by"] = new_hash
+        _save_auth_state(state)
+
+    _audit_logger.info(json.dumps({
+        "event": "refresh_rotated",
+        "username": username,
+        "timestamp": now.isoformat(),
+    }))
+    return _TokenResponse(
+        access_token=access_token,
+        refresh_token=new_refresh,
+        access_token_expires_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
+    )
+
+
+class _LogoutRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
+
+@app.post("/auth/logout")
+def auth_logout(
+    request: Request,
+    body: Optional[_LogoutRequest] = None,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    payload: Optional[dict[str, Any]] = None
+    if credentials and credentials.credentials:
+        payload = _decode_any_token(credentials.credentials)
+    with _AUTH_STATE_LOCK:
+        state = _load_auth_state()
+        _record_revoked_jti(state, payload)
+        if body and body.refresh_token:
+            refresh_hash = _hash_refresh_token(body.refresh_token)
+            refresh_record = state.setdefault("refresh_tokens", {}).get(refresh_hash)
+            if isinstance(refresh_record, dict):
+                refresh_record["revoked"] = True
+                refresh_record["revoked_at"] = _now_utc().isoformat()
+        _save_auth_state(state)
+    _audit_logger.info(json.dumps({
+        "event": "logout",
+        "subject": payload.get("sub", "unknown") if isinstance(payload, dict) else "unknown",
+        "client": request.client.host if request.client else "unknown",
+        "timestamp": _now_utc().isoformat(),
+    }))
+    return JSONResponse({"ok": True})
 
 # ── End security endpoints ─────────────────────────────────────────────────────
 
