@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import urllib.error
@@ -21,6 +22,7 @@ INTENT_CATEGORIES = (
     "finance",
     "ops",
 )
+logger = logging.getLogger("task_orchestrator_core")
 
 
 class LLMClient:
@@ -156,7 +158,8 @@ class TaskOrchestrator:
         )
         try:
             label = self.client.complete(prompt=prompt, system="You are a strict intent classifier.")["output"].strip().lower()
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Intent classification failed; defaulting to ops: %s", exc)
             label = "ops"
         if label not in INTENT_CATEGORIES:
             label = "ops"
@@ -196,6 +199,6 @@ class TaskOrchestrator:
         }
         try:
             get_message_bus().publish_sync("results", final)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to publish result on message bus: %s", exc)
         return final

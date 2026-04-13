@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter
 
 from app.schemas import MetricRecord, MetricsHistoryResponse, MetricsRecordRequest, ROIResponse
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/metrics", tags=["metrics"])
 def record_metrics(req: MetricsRecordRequest) -> MetricRecord:
     roi = ((req.revenue - req.cost) / req.cost) if req.cost else req.revenue
     item = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "revenue": req.revenue,
         "cost": req.cost,
         "roi": roi,

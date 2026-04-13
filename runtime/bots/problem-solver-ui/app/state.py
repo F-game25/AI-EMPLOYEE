@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import uuid
@@ -53,7 +52,7 @@ class JsonStore:
             "result": None,
         }
         self.append("tasks", item)
-        asyncio.run(self.bus.publish("tasks", item))
+        self.bus.publish_sync("tasks", item)
         return item
 
 

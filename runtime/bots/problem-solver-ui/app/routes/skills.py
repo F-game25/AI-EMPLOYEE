@@ -16,7 +16,7 @@ def list_skills(category: str | None = Query(default=None), query: str | None = 
     elif query:
         items = mgr.search(query)
     else:
-        items = [v for v in mgr._skills.values()]
+        items = mgr.list_all()
     return [SkillResponse(**i) for i in items]
 
 
