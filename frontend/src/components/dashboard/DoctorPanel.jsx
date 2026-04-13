@@ -125,6 +125,14 @@ export default function DoctorPanel() {
             style={{ overflow: 'hidden' }}
           >
             <div className="px-3 pb-3">
+              {doctor.data_source === 'simulated' && (
+                <div
+                  className="font-mono mb-2 px-2 py-1 rounded"
+                  style={{ fontSize: '9px', color: 'var(--warning)', background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.15)' }}
+                >
+                  ⚠ DEGRADED — showing simulated diagnostics (no live backend)
+                </div>
+              )}
               {/* Score bars */}
               {scoreEntries.length > 0 && (
                 <div className="mb-2">

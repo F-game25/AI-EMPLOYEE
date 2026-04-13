@@ -11,6 +11,25 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/api", tags=["system"])
 _log = logging.getLogger(__name__)
 
+
+def _sanitize_task_response(task_dict: dict) -> dict:
+    """Build a safe response dict — error field is always redacted to prevent stack trace exposure."""
+    # Construct a new dict from scratch with only the safe fields
+    safe = {}
+    for key, value in task_dict.items():
+        if key == "error":
+            # Never forward raw error strings — they may contain stack traces
+            raw = value or ""
+            if raw:
+                first_line = str(raw).split("\n")[0]
+                safe["error"] = first_line if first_line and "Traceback" not in first_line else "Task processing error"
+            else:
+                safe["error"] = ""
+        else:
+            safe[key] = value
+    return safe
+
+
 # Ensure runtime/ packages are importable from within features/
 _RUNTIME_DIR = Path(__file__).parent.parent.parent.parent
 for _p in [
@@ -49,7 +68,7 @@ def set_mode(body: SetModeRequest):
         new_mode = get_mode_manager().set_mode(body.mode)
         return JSONResponse({"mode": new_mode, "status": "ok"})
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail="Invalid mode value")
     except Exception:
         _log.exception("set_mode failed")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -446,6 +465,18 @@ def product_dashboard(
         response["pending_actions"] = get_action_bus().list_pending()
     except Exception:
         response["pending_actions"] = []
+    try:
+        from core.self_improvement.telemetry import get_telemetry
+        response["self_improvement"] = get_telemetry().dashboard_payload().get(
+            "self_improvement", {}
+        )
+    except Exception:
+        response["self_improvement"] = {"active": False}
+    try:
+        from core.self_improvement.learning import LearningModule
+        response["improvement_learning"] = LearningModule().get_insights()
+    except Exception:
+        response["improvement_learning"] = {}
     response["value"] = {
         "revenue_component": round(float(response.get("revenue", {}).get("total_revenue", 0.0) or 0.0), 3),
         "pipeline_component": round(float(response.get("pipelines", {}).get("total_estimated_roi", 0.0) or 0.0), 3),
@@ -456,3 +487,289 @@ def product_dashboard(
         ),
     }
     return JSONResponse(response)
+
+
+# ── Self-Improvement Loop endpoints ───────────────────────────────────────────
+
+class _ImprovementTaskRequest(BaseModel):
+    description: str
+    target_area: str = "general"
+    constraints: list[str] = []
+    risk_class: str = "medium"
+    approval_policy: str = "manual"
+
+
+@router.post("/self-improvement/queue")
+def si_queue_task(body: _ImprovementTaskRequest):
+    """Queue a new self-improvement task."""
+    try:
+        from core.self_improvement.queue import get_queue
+        task = get_queue().enqueue(
+            description=body.description,
+            target_area=body.target_area,
+            constraints=body.constraints,
+            risk_class=body.risk_class,
+            approval_policy=body.approval_policy,
+        )
+        return JSONResponse(_sanitize_task_response(task.to_dict()))
+    except Exception as exc:
+        _log.exception("si_queue_task failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/self-improvement/queue")
+def si_list_queue(status: str = Query(default="")):
+    """List all tasks in the improvement queue."""
+    try:
+        from core.self_improvement.queue import get_queue
+        return JSONResponse(get_queue().list_all(status=status or None))
+    except Exception as exc:
+        _log.exception("si_list_queue failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/self-improvement/queue/summary")
+def si_queue_summary():
+    """Return queue summary for dashboard."""
+    try:
+        from core.self_improvement.queue import get_queue
+        return JSONResponse(get_queue().summary())
+    except Exception as exc:
+        _log.exception("si_queue_summary failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/self-improvement/task/{task_id}")
+def si_get_task(task_id: str):
+    """Get a specific improvement task with all artifacts."""
+    try:
+        from core.self_improvement.queue import get_queue
+        task = get_queue().get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        return JSONResponse(_sanitize_task_response(task.to_dict()))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_get_task failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/self-improvement/task/{task_id}/run")
+def si_run_task(task_id: str):
+    """Run the full improvement pipeline for a queued task."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.run_pipeline(task)
+        queue.update(result)
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_run_task failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/self-improvement/task/{task_id}/approve")
+def si_approve_task(task_id: str):
+    """Manually approve a task awaiting approval."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.approve_task(task)
+        queue.update(result)
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_approve_task failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class _RejectRequest(BaseModel):
+    reason: str = ""
+
+
+@router.post("/self-improvement/task/{task_id}/reject")
+def si_reject_task(task_id: str, body: _RejectRequest = _RejectRequest()):
+    """Manually reject a task awaiting approval."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.reject_task(task, reason=body.reason)
+        queue.update(result)
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_reject_task failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/self-improvement/task/{task_id}/deploy")
+def si_deploy_task(task_id: str):
+    """Deploy an approved task."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.deploy_approved(task)
+        queue.update(result)
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_deploy_task failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/self-improvement/task/{task_id}/rollback")
+def si_rollback_task(task_id: str):
+    """Rollback a deploying/deployed task."""
+    try:
+        from core.self_improvement.queue import get_queue
+        from core.self_improvement.controller import get_controller
+        queue = get_queue()
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        controller = get_controller()
+        result = controller.rollback_task(task)
+        queue.update(result)
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("si_rollback_task failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/self-improvement/telemetry")
+def si_telemetry():
+    """Return self-improvement telemetry for the dashboard."""
+    try:
+        from core.self_improvement.telemetry import get_telemetry
+        return JSONResponse(get_telemetry().dashboard_payload())
+    except Exception as exc:
+        _log.exception("si_telemetry failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/self-improvement/learning")
+def si_learning_insights():
+    """Return learning insights from the improvement feedback loop."""
+    try:
+        from core.self_improvement.learning import LearningModule
+        return JSONResponse(LearningModule().get_insights())
+    except Exception as exc:
+        _log.exception("si_learning_insights failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── Autonomy daemon & system mode endpoints ────────────────────────────────────
+
+class SystemModeBody(BaseModel):
+    mode: str  # "OFF" | "ON" | "AUTO"
+
+
+@router.get("/autonomy/mode")
+def get_autonomy_mode():
+    """Return the current system autonomy mode."""
+    try:
+        from core.system_mode import get_system_mode
+        return JSONResponse(get_system_mode().status())
+    except Exception as exc:
+        _log.exception("get_autonomy_mode failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/autonomy/mode")
+def set_autonomy_mode(body: SystemModeBody):
+    """Set the system autonomy mode (OFF / ON / AUTO)."""
+    try:
+        from core.system_mode import get_system_mode
+        sm = get_system_mode()
+        new_mode = sm.set_mode(body.mode)
+        return JSONResponse(sm.status())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid mode value")
+    except Exception as exc:
+        _log.exception("set_autonomy_mode failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/autonomy/emergency-stop")
+def emergency_stop():
+    """Immediately halt all autonomous execution."""
+    try:
+        from core.system_mode import get_system_mode
+        from core.autonomy_daemon import get_daemon
+        sm = get_system_mode()
+        sm.emergency_stop()
+        daemon = get_daemon()
+        daemon.stop()
+        return JSONResponse({
+            "status": "stopped",
+            "message": "Emergency stop executed. Daemon halted, mode set to OFF.",
+            **sm.status(),
+        })
+    except Exception as exc:
+        _log.exception("emergency_stop failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/autonomy/status")
+def get_autonomy_status():
+    """Return full autonomy daemon status for the dashboard."""
+    try:
+        from core.autonomy_daemon import get_daemon
+        return JSONResponse(get_daemon().status())
+    except Exception as exc:
+        _log.exception("get_autonomy_status failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/autonomy/start")
+def start_daemon():
+    """Start the autonomy daemon background loop."""
+    try:
+        from core.autonomy_daemon import get_daemon
+        daemon = get_daemon()
+        daemon.start()
+        return JSONResponse(daemon.status())
+    except Exception as exc:
+        _log.exception("start_daemon failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/autonomy/stop")
+def stop_daemon():
+    """Gracefully stop the autonomy daemon."""
+    try:
+        from core.autonomy_daemon import get_daemon
+        daemon = get_daemon()
+        daemon.stop()
+        return JSONResponse(daemon.status())
+    except Exception as exc:
+        _log.exception("stop_daemon failed")
+        raise HTTPException(status_code=500, detail="Internal server error")

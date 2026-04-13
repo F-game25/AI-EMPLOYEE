@@ -80,6 +80,9 @@ function connectSingleton() {
         case 'brain:activity':
           store.setBrainActivity(data)
           break
+        case 'autonomy:status':
+          store.setAutonomyStatus(data)
+          break
         case 'workflow:snapshot':
           store.setWorkflowSnapshot(data)
           break
