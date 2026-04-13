@@ -385,6 +385,7 @@ function buildDashboardPayload() {
       mode: getMode(),
       brain: brain.insights(),
     },
+    self_improvement: subsystems.getSelfImprovementStatus(),
   };
 }
 
@@ -435,8 +436,10 @@ function sampleSystemStatus() {
     connections: wss ? wss.clients.size : 0,
     cpu_usage: cpu,
     gpu_usage: currentGpuUsage,
+    gpu_estimated: true,
     cpu_temperature: cpuTemp,
     gpu_temperature: gpuTemp,
+    temperature_estimated: true,
     heartbeat: heartbeatCounter,
     running_agents: running,
     total_agents: total,
@@ -537,6 +540,74 @@ app.get('/api/memory/tree', (req, res) => {
 
 app.get('/api/doctor/status', (req, res) => {
   res.json(subsystems.getDoctorStatus());
+});
+
+app.get('/api/self-improvement/status', (req, res) => {
+  res.json(subsystems.getSelfImprovementStatus());
+});
+
+// ── Autonomy daemon endpoints ─────────────────────────────────────────────────
+
+app.get('/api/autonomy/status', (req, res) => {
+  res.json(subsystems.getAutonomyStatus());
+});
+
+app.get('/api/autonomy/mode', (req, res) => {
+  const auto = subsystems.getAutonomyStatus();
+  res.json(auto.mode || { mode: 'OFF', active: false });
+});
+
+app.post('/api/autonomy/mode', async (req, res) => {
+  const nextMode = String((req.body || {}).mode || '').toUpperCase();
+  if (!['OFF', 'ON', 'AUTO'].includes(nextMode)) {
+    return res.status(400).json({ error: 'Invalid mode. Use OFF, ON, or AUTO.' });
+  }
+  // Proxy to Python backend
+  try {
+    const data = await new Promise((resolve, reject) => {
+      const payload = JSON.stringify({ mode: nextMode });
+      const url = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}/api/autonomy/mode`;
+      const httpLib = require('http');
+      const r = httpLib.request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+        timeout: 3000,
+      }, (response) => {
+        let body = '';
+        response.on('data', (chunk) => { body += chunk; });
+        response.on('end', () => {
+          try { resolve(JSON.parse(body)); } catch { resolve({ mode: nextMode, active: nextMode !== 'OFF' }); }
+        });
+      });
+      r.on('timeout', () => { r.destroy(); resolve({ mode: nextMode, active: nextMode !== 'OFF' }); });
+      r.on('error', () => resolve({ mode: nextMode, active: nextMode !== 'OFF' }));
+      r.write(payload);
+      r.end();
+    });
+    addActivity(`[AUTONOMY] Mode → ${nextMode}`, 'system');
+    res.json(data);
+  } catch {
+    res.json({ mode: nextMode, active: nextMode !== 'OFF' });
+  }
+});
+
+app.post('/api/autonomy/emergency-stop', (req, res) => {
+  // Proxy emergency stop to Python backend
+  const httpLib = require('http');
+  const url = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}/api/autonomy/emergency-stop`;
+  const r = httpLib.request(url, { method: 'POST', timeout: 3000 }, (response) => {
+    let body = '';
+    response.on('data', (chunk) => { body += chunk; });
+    response.on('end', () => {
+      try {
+        addActivity('[AUTONOMY] ⚠ EMERGENCY STOP executed', 'system');
+        res.json(JSON.parse(body));
+      } catch { res.json({ status: 'stopped', message: 'Emergency stop sent.' }); }
+    });
+  });
+  r.on('timeout', () => { r.destroy(); res.json({ status: 'stopped', message: 'Emergency stop sent (timeout).' }); });
+  r.on('error', () => res.json({ status: 'stopped', message: 'Emergency stop sent (backend unreachable).' }));
+  r.end();
 });
 
 app.get('/api/product/dashboard', (req, res) => {
@@ -667,6 +738,7 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ event: 'doctor:check', data: subsystems.getDoctorStatus(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'brain:insights', data: brain.insights(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'brain:activity', data: brain.activity(20), timestamp: new Date().toISOString() }));
+  ws.send(JSON.stringify({ event: 'autonomy:status', data: subsystems.getAutonomyStatus(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({
     event: 'workflow:snapshot',
     data: { active_run: runtimeState.selectedWorkflowRun, runs: runtimeState.workflowRuns },
@@ -685,6 +757,59 @@ wss.on('connection', (ws) => {
     try {
       const parsed = JSON.parse(raw);
       if (parsed.type === 'chat' && parsed.message) {
+        const msg = parsed.message.trim().toLowerCase();
+
+        // ── Autonomy chat commands ─────────────────────────────────────
+        const autonomyCmds = {
+          'system on': 'ON',
+          'system off': 'OFF',
+          'system auto': 'AUTO',
+          'halt system': '_HALT',
+          'emergency stop': '_HALT',
+          'status system': '_STATUS',
+        };
+        const cmdMatch = autonomyCmds[msg];
+        if (cmdMatch) {
+          if (cmdMatch === '_HALT') {
+            const httpLib = require('http');
+            const url = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}/api/autonomy/emergency-stop`;
+            const r = httpLib.request(url, { method: 'POST', timeout: 3000 }, () => {});
+            r.on('error', () => {});
+            r.end();
+            addActivity('[AUTONOMY] ⚠ EMERGENCY STOP via chat', 'system');
+            broadcaster.broadcast('orchestrator:message', {
+              taskId: 'system',
+              reply: '⚠️ **EMERGENCY STOP** executed. All autonomous execution halted. Mode set to OFF.',
+            });
+          } else if (cmdMatch === '_STATUS') {
+            const auto = subsystems.getAutonomyStatus();
+            broadcaster.broadcast('orchestrator:message', {
+              taskId: 'system',
+              reply: `**System Status**\n- Mode: ${auto.mode?.mode || 'OFF'}\n- Daemon running: ${auto.daemon?.running || false}\n- Queue depth: ${auto.queue?.active || 0}\n- Tasks processed: ${auto.daemon?.tasks_processed || 0}`,
+            });
+          } else {
+            // Set mode
+            const httpLib = require('http');
+            const payload = JSON.stringify({ mode: cmdMatch });
+            const url = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}/api/autonomy/mode`;
+            const r = httpLib.request(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+              timeout: 3000,
+            }, () => {});
+            r.on('error', () => {});
+            r.write(payload);
+            r.end();
+            addActivity(`[AUTONOMY] Mode → ${cmdMatch} (via chat)`, 'system');
+            broadcaster.broadcast('orchestrator:message', {
+              taskId: 'system',
+              reply: `✅ System mode set to **${cmdMatch}**.`,
+            });
+          }
+          return; // handled — don't route to orchestrator
+        }
+
+        // ── Normal chat routing ────────────────────────────────────────
         const run = createWorkflowRun({
           name: 'Chat Workflow',
           source: 'chat',
@@ -832,6 +957,7 @@ setInterval(() => {
   broadcaster.broadcast('doctor:check', subsystems.getDoctorStatus());
   broadcaster.broadcast('brain:insights', brain.insights());
   broadcaster.broadcast('brain:activity', brain.activity(20));
+  broadcaster.broadcast('autonomy:status', subsystems.getAutonomyStatus());
   broadcaster.broadcast('workflow:snapshot', {
     active_run: runtimeState.selectedWorkflowRun,
     runs: runtimeState.workflowRuns,

@@ -118,6 +118,14 @@ export default function MemoryTreePanel() {
             style={{ overflow: 'hidden' }}
           >
             <div className="px-3 pb-2">
+              {mem.data_source === 'simulated' && (
+                <div
+                  className="font-mono mb-2 px-2 py-1 rounded"
+                  style={{ fontSize: '9px', color: 'var(--warning)', background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.15)' }}
+                >
+                  ⚠ DEGRADED — showing simulated data (no live backend)
+                </div>
+              )}
               {/* Recent activity */}
               {recentUpdate && (
                 <div
@@ -125,7 +133,9 @@ export default function MemoryTreePanel() {
                   style={{ background: 'rgba(212,175,55,0.05)', border: '1px solid rgba(212,175,55,0.1)' }}
                   aria-label={`Recent update: ${recentUpdate.entity_id} modified ${recentUpdate.key}`}
                 >
-                  <span style={{ fontSize: '9px', color: 'var(--gold)' }}>● LIVE</span>
+                  <span style={{ fontSize: '9px', color: mem.data_source === 'simulated' ? 'var(--warning)' : 'var(--gold)' }}>
+                    {mem.data_source === 'simulated' ? '○ SIM' : '● LIVE'}
+                  </span>
                   <span
                     className="font-mono truncate"
                     style={{ fontSize: '9px', color: 'var(--text-muted)' }}

@@ -8,6 +8,9 @@ import SecondaryButton from './ui/SecondaryButton'
 import TertiaryPanel from './ui/TertiaryPanel'
 import WorkflowTreePanel from './dashboard/WorkflowTreePanel'
 import BrainInsightsPanel from './dashboard/BrainInsightsPanel'
+import SelfImprovementPanel from './dashboard/SelfImprovementPanel'
+import SystemModeToggle from './dashboard/SystemModeToggle'
+import AutonomyPanel from './dashboard/AutonomyPanel'
 
 const BASE = window.location.origin
 const PIPELINE_DEFAULTS = {
@@ -170,7 +173,7 @@ export default function Dashboard() {
 
   const systemStats = useMemo(() => ([
     { label: 'CPU', value: `${systemStatus?.cpu_usage ?? 0}%` },
-    { label: 'GPU', value: `${systemStatus?.gpu_usage ?? 0}%` },
+    { label: 'GPU (est.)', value: `${systemStatus?.gpu_usage ?? 0}%` },
     { label: 'MEMORY', value: `${systemStatus?.memory ?? 0}%` },
     { label: 'AGENTS', value: `${systemStatus?.running_agents ?? 0}/${systemStatus?.total_agents ?? 0}` },
     { label: 'HEARTBEAT', value: `${systemStatus?.heartbeat ?? 0}` },
@@ -272,6 +275,10 @@ export default function Dashboard() {
           {/* Three info columns */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-h-0 flex-1">
 
+            {/* Autonomy controls */}
+            <SystemModeToggle />
+            <AutonomyPanel />
+
             {/* System stats — single source of truth */}
             <article className="ds-card p-3 min-h-0 flex flex-col">
               <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>SYSTEM STATS</h2>
@@ -346,6 +353,7 @@ export default function Dashboard() {
 
             <WorkflowTreePanel />
             <BrainInsightsPanel />
+            <SelfImprovementPanel />
 
           </section>
         </div>

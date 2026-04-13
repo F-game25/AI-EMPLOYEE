@@ -83,6 +83,21 @@ def get_brain_registry():
     return _brain
 
 
+def get_improvement_queue():
+    from core.self_improvement.queue import get_queue as _f
+    return _f()
+
+
+def get_improvement_controller():
+    from core.self_improvement.controller import get_controller as _f
+    return _f()
+
+
+def get_improvement_telemetry():
+    from core.self_improvement.telemetry import get_telemetry as _f
+    return _f()
+
+
 __all__ = [
     "get_changelog",
     "get_roi_tracker",
@@ -96,4 +111,7 @@ __all__ = [
     "get_intelligence",
     "get_hybrid_mode",
     "get_brain_registry",
+    "get_improvement_queue",
+    "get_improvement_controller",
+    "get_improvement_telemetry",
 ]

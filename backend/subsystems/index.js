@@ -24,7 +24,8 @@ const state = {
   nn: {
     available: true,
     active: true,
-    mode: 'SIMULATED',
+    mode: 'INITIALIZING',
+    data_source: 'initializing',
     learn_step: 0,
     buffer_size: 0,
     max_buffer_size: 10000,
@@ -41,18 +42,47 @@ const state = {
   },
   memory: {
     total_entities: 0,
+    data_source: 'initializing',
     nodes: [],
     recent_updates: [],
     updated_at: null,
   },
   doctor: {
     available: false,
+    data_source: 'initializing',
     grade: null,
     overall_score: 0,
     scores: {},
     issues: [],
     strengths: [],
     last_run: null,
+    updated_at: null,
+  },
+  selfImprovement: {
+    active: false,
+    data_source: 'initializing',
+    total_tasks_processed: 0,
+    queue_depth: 0,
+    pass_rate: 0,
+    fail_rate: 0,
+    approval_ratio: 0,
+    rejection_ratio: 0,
+    rollback_ratio: 0,
+    deployed: 0,
+    rolled_back: 0,
+    rejected: 0,
+    test_failures: 0,
+    policy_violations: 0,
+    errors: 0,
+    top_failure_causes: [],
+    recent_events: [],
+    updated_at: null,
+  },
+  autonomy: {
+    mode: { mode: 'OFF', active: false, auto: false, limited: false, paused: true, emergency_stopped: false, changed_at: null },
+    daemon: { running: false, started_at: null, cycles: 0, tasks_processed: 0, tasks_succeeded: 0, tasks_failed: 0, consecutive_errors: 0, last_cycle_at: null, last_task_id: null, current_task_id: null, cycle_interval_s: 2 },
+    queue: { total: 0, active: 0, by_status: {} },
+    data_source: 'initializing',
     updated_at: null,
   },
 };
@@ -120,9 +150,9 @@ function _simulateNN() {
   state.nn.last_loss = Math.round(loss * 10000) / 10000;
   state.nn.bg_running = true;
   state.nn.mode = 'SIMULATED';
+  state.nn.data_source = 'simulated';
   state.nn.available = true;
   state.nn.active = true;
-  state.nn.available = true;
   state.nn.recent_outputs = [output, ...state.nn.recent_outputs].slice(0, 5);
   state.nn.updated_at = now();
 }
@@ -156,6 +186,7 @@ function _simulateMemory() {
 
   state.memory.recent_updates = [update, ...state.memory.recent_updates].slice(0, 8);
   state.memory.total_entities = state.memory.nodes.length;
+  state.memory.data_source = 'simulated';
   state.memory.updated_at = now();
 }
 
@@ -182,6 +213,7 @@ function _simulateDoctor() {
   state.doctor.strengths = overall > 50 ? ['Neural brain is active', 'Memory system online'] : [];
   state.doctor.last_run = now();
   state.doctor.available = true;
+  state.doctor.data_source = 'simulated';
   state.doctor.updated_at = now();
 }
 
@@ -206,6 +238,7 @@ async function syncNNFromPython() {
       state.nn.recent_learning_events = Array.isArray(data.recent_learning_events)
         ? data.recent_learning_events.slice(0, 10)
         : [];
+      state.nn.data_source = 'live';
       state.nn.updated_at = now();
       return true;
     }
@@ -226,6 +259,7 @@ async function syncMemoryFromPython() {
         last_updated: e.updated_at || now(),
         score: e.score || 0,
       }));
+      state.memory.data_source = 'live';
       state.memory.updated_at = now();
       return true;
     }
@@ -244,7 +278,52 @@ async function syncDoctorFromPython() {
       state.doctor.issues = data.issues || [];
       state.doctor.strengths = data.strengths || [];
       state.doctor.last_run = data.generated_at || now();
+      state.doctor.data_source = 'live';
       state.doctor.updated_at = now();
+      return true;
+    }
+  } catch (_) { /* offline */ }
+  return false;
+}
+
+async function syncSelfImprovementFromPython() {
+  try {
+    const data = await fetchJSON('/api/self-improvement/telemetry');
+    if (data && data.self_improvement) {
+      const si = data.self_improvement;
+      state.selfImprovement.active = si.active || false;
+      state.selfImprovement.total_tasks_processed = si.total_tasks_processed || 0;
+      state.selfImprovement.queue_depth = si.queue_depth || 0;
+      state.selfImprovement.pass_rate = si.pass_rate || 0;
+      state.selfImprovement.fail_rate = si.fail_rate || 0;
+      state.selfImprovement.approval_ratio = si.approval_ratio || 0;
+      state.selfImprovement.rejection_ratio = si.rejection_ratio || 0;
+      state.selfImprovement.rollback_ratio = si.rollback_ratio || 0;
+      state.selfImprovement.deployed = si.deployed || 0;
+      state.selfImprovement.rolled_back = si.rolled_back || 0;
+      state.selfImprovement.rejected = si.rejected || 0;
+      state.selfImprovement.test_failures = si.test_failures || 0;
+      state.selfImprovement.policy_violations = si.policy_violations || 0;
+      state.selfImprovement.errors = si.errors || 0;
+      state.selfImprovement.top_failure_causes = si.top_failure_causes || [];
+      state.selfImprovement.recent_events = (si.recent_events || []).slice(0, 10);
+      state.selfImprovement.data_source = 'live';
+      state.selfImprovement.updated_at = now();
+      return true;
+    }
+  } catch (_) { /* offline */ }
+  return false;
+}
+
+async function syncAutonomyFromPython() {
+  try {
+    const data = await fetchJSON('/api/autonomy/status');
+    if (data && data.daemon) {
+      state.autonomy.daemon = data.daemon;
+      state.autonomy.mode = data.mode || state.autonomy.mode;
+      state.autonomy.queue = data.queue || state.autonomy.queue;
+      state.autonomy.data_source = 'live';
+      state.autonomy.updated_at = now();
       return true;
     }
   } catch (_) { /* offline */ }
@@ -259,6 +338,8 @@ async function _pollCycle() {
   const nnOk = await syncNNFromPython();
   const memOk = await syncMemoryFromPython();
   const drOk = await syncDoctorFromPython();
+  await syncSelfImprovementFromPython();
+  await syncAutonomyFromPython();
 
   if (!nnOk) _simulateNN();
   if (!memOk) _simulateMemory();
@@ -297,10 +378,20 @@ function getDoctorStatus() {
   return { ...state.doctor };
 }
 
+function getSelfImprovementStatus() {
+  return { ...state.selfImprovement };
+}
+
+function getAutonomyStatus() {
+  return JSON.parse(JSON.stringify(state.autonomy));
+}
+
 module.exports = {
   startPolling,
   stopPolling,
   getNNStatus,
   getMemoryTree,
   getDoctorStatus,
+  getSelfImprovementStatus,
+  getAutonomyStatus,
 };
