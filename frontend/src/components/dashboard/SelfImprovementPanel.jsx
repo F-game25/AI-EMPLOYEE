@@ -44,12 +44,22 @@ export default function SelfImprovementPanel() {
   const events = data?.recent_events || []
   const failures = data?.top_failure_causes || []
   const isActive = data?.active || false
+  const isSimulated = data?.data_source === 'simulated'
 
   return (
     <article className="ds-card p-3 min-h-0 flex flex-col">
       <h2 className="font-mono text-xs mb-2" style={{ color: 'var(--gold)' }}>
         SELF-IMPROVEMENT PIPELINE
       </h2>
+
+      {isSimulated && (
+        <div
+          className="font-mono mb-2 px-2 py-1 rounded"
+          style={{ fontSize: '9px', color: 'var(--warning)', background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.15)' }}
+        >
+          ⚠ DEGRADED — showing cached data (no live backend)
+        </div>
+      )}
 
       <div className="font-mono text-[10px] mb-2" style={{ color: error ? 'var(--warning)' : 'var(--text-muted)' }}>
         {loading ? 'Loading pipeline status…' : (error || (isActive ? '● Pipeline active' : '○ Pipeline idle'))}

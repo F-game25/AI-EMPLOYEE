@@ -171,7 +171,7 @@ export default function Dashboard() {
 
   const systemStats = useMemo(() => ([
     { label: 'CPU', value: `${systemStatus?.cpu_usage ?? 0}%` },
-    { label: 'GPU', value: `${systemStatus?.gpu_usage ?? 0}%` },
+    { label: 'GPU (est.)', value: `${systemStatus?.gpu_usage ?? 0}%` },
     { label: 'MEMORY', value: `${systemStatus?.memory ?? 0}%` },
     { label: 'AGENTS', value: `${systemStatus?.running_agents ?? 0}/${systemStatus?.total_agents ?? 0}` },
     { label: 'HEARTBEAT', value: `${systemStatus?.heartbeat ?? 0}` },

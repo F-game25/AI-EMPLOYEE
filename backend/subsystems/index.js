@@ -24,7 +24,8 @@ const state = {
   nn: {
     available: true,
     active: true,
-    mode: 'SIMULATED',
+    mode: 'INITIALIZING',
+    data_source: 'initializing',
     learn_step: 0,
     buffer_size: 0,
     max_buffer_size: 10000,
@@ -41,12 +42,14 @@ const state = {
   },
   memory: {
     total_entities: 0,
+    data_source: 'initializing',
     nodes: [],
     recent_updates: [],
     updated_at: null,
   },
   doctor: {
     available: false,
+    data_source: 'initializing',
     grade: null,
     overall_score: 0,
     scores: {},
@@ -57,6 +60,7 @@ const state = {
   },
   selfImprovement: {
     active: false,
+    data_source: 'initializing',
     total_tasks_processed: 0,
     queue_depth: 0,
     pass_rate: 0,
@@ -139,9 +143,9 @@ function _simulateNN() {
   state.nn.last_loss = Math.round(loss * 10000) / 10000;
   state.nn.bg_running = true;
   state.nn.mode = 'SIMULATED';
+  state.nn.data_source = 'simulated';
   state.nn.available = true;
   state.nn.active = true;
-  state.nn.available = true;
   state.nn.recent_outputs = [output, ...state.nn.recent_outputs].slice(0, 5);
   state.nn.updated_at = now();
 }
@@ -175,6 +179,7 @@ function _simulateMemory() {
 
   state.memory.recent_updates = [update, ...state.memory.recent_updates].slice(0, 8);
   state.memory.total_entities = state.memory.nodes.length;
+  state.memory.data_source = 'simulated';
   state.memory.updated_at = now();
 }
 
@@ -201,6 +206,7 @@ function _simulateDoctor() {
   state.doctor.strengths = overall > 50 ? ['Neural brain is active', 'Memory system online'] : [];
   state.doctor.last_run = now();
   state.doctor.available = true;
+  state.doctor.data_source = 'simulated';
   state.doctor.updated_at = now();
 }
 
@@ -225,6 +231,7 @@ async function syncNNFromPython() {
       state.nn.recent_learning_events = Array.isArray(data.recent_learning_events)
         ? data.recent_learning_events.slice(0, 10)
         : [];
+      state.nn.data_source = 'live';
       state.nn.updated_at = now();
       return true;
     }
@@ -245,6 +252,7 @@ async function syncMemoryFromPython() {
         last_updated: e.updated_at || now(),
         score: e.score || 0,
       }));
+      state.memory.data_source = 'live';
       state.memory.updated_at = now();
       return true;
     }
@@ -263,6 +271,7 @@ async function syncDoctorFromPython() {
       state.doctor.issues = data.issues || [];
       state.doctor.strengths = data.strengths || [];
       state.doctor.last_run = data.generated_at || now();
+      state.doctor.data_source = 'live';
       state.doctor.updated_at = now();
       return true;
     }
@@ -291,6 +300,7 @@ async function syncSelfImprovementFromPython() {
       state.selfImprovement.errors = si.errors || 0;
       state.selfImprovement.top_failure_causes = si.top_failure_causes || [];
       state.selfImprovement.recent_events = (si.recent_events || []).slice(0, 10);
+      state.selfImprovement.data_source = 'live';
       state.selfImprovement.updated_at = now();
       return true;
     }
