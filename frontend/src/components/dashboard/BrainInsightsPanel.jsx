@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import TertiaryPanel from '../ui/TertiaryPanel'
 
-const API_BASE = `http://${window.location.hostname}:3001`
+const API_BASE = window.location.origin
 
 function asPercent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`

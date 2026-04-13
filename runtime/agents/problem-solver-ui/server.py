@@ -11,6 +11,7 @@ State files are read from ~/.ai-employee/state/
 Config is read/written in ~/.ai-employee/config/
 """
 import json
+import asyncio
 import hashlib
 import hmac
 import importlib
@@ -65,7 +66,7 @@ if sys.version_info < (3, 10):
           f"{sys.version_info.major}.{sys.version_info.minor}")
     sys.exit(1)
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -17575,11 +17576,63 @@ def _sanitize_for_log(text: str) -> str:
     """Replace any API key patterns with [REDACTED] before writing to chatlog."""
     return _API_KEY_PATTERN.sub("[REDACTED_API_KEY]", text)
 
+_WS_CLIENTS: set[WebSocket] = set()
+_WS_CLIENTS_LOCK = asyncio.Lock()
+
+
+async def _ws_broadcast(event: str, data: dict) -> None:
+    payload = json.dumps({"event": event, "data": data, "ts": now_iso()})
+    async with _WS_CLIENTS_LOCK:
+        clients = list(_WS_CLIENTS)
+    stale: list[WebSocket] = []
+    for ws in clients:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            stale.append(ws)
+    if stale:
+        async with _WS_CLIENTS_LOCK:
+            for ws in stale:
+                _WS_CLIENTS.discard(ws)
+
+
+@app.websocket("/ws")
+async def websocket_stream(websocket: WebSocket):
+    await websocket.accept()
+    async with _WS_CLIENTS_LOCK:
+        _WS_CLIENTS.add(websocket)
+    await _ws_broadcast("system:status", {"service": "problem-solver-ui", "port": PORT, "status": "connected"})
+    try:
+        while True:
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=0.8)
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    parsed = {}
+                if parsed.get("type") == "chat" and str(parsed.get("message") or "").strip():
+                    await _ws_broadcast(
+                        "chat:input_rejected",
+                        {"reason": "Use POST /chat (or /api/chat) as the control entrypoint."},
+                    )
+            except asyncio.TimeoutError:
+                await websocket.send_text(json.dumps({"event": "heartbeat", "data": {"status": "ok"}, "ts": now_iso()}))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        async with _WS_CLIENTS_LOCK:
+            _WS_CLIENTS.discard(websocket)
+
 
 @app.get("/api/chat")
 def get_chat():
     messages = _read_last_n_lines(CHATLOG, 100)
     return JSONResponse({"messages": messages})
+
+
+@app.get("/chat")
+def get_chat_alias():
+    return get_chat()
 
 
 @app.post("/api/chat")
@@ -17598,6 +17651,7 @@ async def post_chat(payload: dict, request: Request):
 
     entry = {"ts": now_iso(), "type": "user", "message": message, "model_route": model_route}
     append_chatlog(entry)
+    await _ws_broadcast("chat:user", {"message": message, "model_route": model_route})
 
     # Identify the user — use JWT sub if authenticated, else IP-based default
     user_id = _DEFAULT_USER
@@ -17629,6 +17683,7 @@ async def post_chat(payload: dict, request: Request):
     safe_response = _sanitize_for_log(response)
     resp_entry = {"ts": now_iso(), "type": "agent", "message": safe_response, "model_route": model_route}
     append_chatlog(resp_entry)
+    await _ws_broadcast("orchestrator:message", {"message": safe_response, "subsystem": "orchestrator"})
 
     # ── Post-exchange intelligence update (memory + brain training) ────────────
     if intel is not None:
@@ -17650,6 +17705,11 @@ async def post_chat(payload: dict, request: Request):
         source="chat",
     )
     return JSONResponse({"ok": True, "response": response})
+
+
+@app.post("/chat")
+async def post_chat_alias(payload: dict, request: Request):
+    return await post_chat(payload, request)
 
 
 def handle_command(
