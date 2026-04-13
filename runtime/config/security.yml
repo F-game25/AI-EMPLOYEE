@@ -17,7 +17,15 @@ security:
   # Generate a strong secret: python -c "import secrets; print(secrets.token_hex(32))"
   jwt_secret_key: "CHANGE_THIS_IN_SECURITY_LOCAL_YML_OR_SET_JWT_SECRET_KEY_ENV_VAR"
   jwt_algorithm: "HS256"
-  access_token_expire_minutes: 30
+  # Short-lived access tokens reduce replay window.
+  access_token_expire_minutes: 15
+  # Refresh token rotation window (days).
+  refresh_token_expire_days: 7
+  # Brute-force controls.
+  max_login_attempts: 5
+  # Progressive lockout durations (seconds) after threshold is exceeded:
+  # 1st, 2nd, 3rd, 4th+ lockout windows.
+  progressive_lockout_seconds: [60, 300, 900, 1800]
 
   # Password requirements
   min_password_length: 12

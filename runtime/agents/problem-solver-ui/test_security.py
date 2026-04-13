@@ -13,8 +13,12 @@ Covers:
   - Security headers
   - Rate limiting (slowapi integration)
 """
+import json
 import os
 import sys
+import time
+import secrets
+from datetime import datetime, timezone, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,6 +42,17 @@ def client():
     """TestClient for the AI Employee FastAPI dashboard."""
     import server  # noqa: F401 — import triggers app construction
     return TestClient(server.app)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _reset_auth_state():
+    import server
+    for path in (server.STATE_DIR / "users.json", server.STATE_DIR / "auth_state.json"):
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -435,6 +450,103 @@ class TestAuthRegisterEndpoint:
         })
         assert resp.status_code == 400
         assert "uppercase" in resp.json()["detail"]
+
+
+class TestAuthSessionHardening:
+    class FakeClient:
+        def __init__(self, host: str):
+            self.host = host
+
+    class FakeRequest:
+        def __init__(self, host: str, user_agent: str):
+            self.client = TestAuthSessionHardening.FakeClient(host)
+            self.headers = {"user-agent": user_agent, "accept-language": ""}
+
+    @staticmethod
+    def _seed_user(username: str, password: str) -> None:
+        import server
+        users_file = server.STATE_DIR / "users.json"
+        users = json.loads(users_file.read_text()) if users_file.exists() else {}
+        expire_minutes = (
+            server._security_config.security.access_token_expire_minutes
+            if server._security_config
+            else 15
+        )
+        auth = server.AuthManager(
+            secret_key=server._jwt_secret_env,
+            algorithm="HS256",
+            expire_minutes=expire_minutes,
+        )
+        users[username] = {"password_hash": auth.hash_password(password)}
+        users_file.parent.mkdir(parents=True, exist_ok=True)
+        users_file.write_text(json.dumps(users, indent=2))
+
+    @staticmethod
+    def _seed_refresh_token(username: str, user_agent: str = "testclient") -> str:
+        import server
+        auth_state_file = server.STATE_DIR / "auth_state.json"
+        state = server._load_auth_state()
+        token = secrets.token_urlsafe(48)
+        token_hash = server._hash_refresh_token(token)
+        fake_request = TestAuthSessionHardening.FakeRequest("testclient", user_agent)
+        fingerprint = server._request_fingerprint(fake_request)
+        now = datetime.now(timezone.utc)
+        refresh_days = (
+            server._security_config.security.refresh_token_expire_days
+            if server._security_config
+            else 7
+        )
+        state.setdefault("refresh_tokens", {})[token_hash] = {
+            "username": username,
+            "fingerprint": fingerprint,
+            "issued_at": now.isoformat(),
+            "expires_at": (now + timedelta(days=refresh_days)).isoformat(),
+            "revoked": False,
+            "replaced_by": None,
+        }
+        auth_state_file.parent.mkdir(parents=True, exist_ok=True)
+        auth_state_file.write_text(json.dumps(state, indent=2))
+        return token
+
+    def test_login_progressive_lockout_after_repeated_failures(self, client):
+        username = f"lockuser_{int(time.time() * 1000)}"
+        password = "StrongPass1!"
+        self._seed_user(username, password)
+
+        for _ in range(5):
+            failed = client.post("/auth/login", json={"username": username, "password": "WrongPass1!"})
+            assert failed.status_code == 401
+
+        locked = client.post("/auth/login", json={"username": username, "password": "WrongPass1!"})
+        assert locked.status_code == 429
+
+    def test_refresh_token_rotation_rejects_reuse(self, client):
+        username = f"refreshuser_{int(time.time() * 1000)}"
+        password = "StrongPass1!"
+        self._seed_user(username, password)
+        old_refresh = self._seed_refresh_token(username)
+
+        refreshed = client.post("/auth/refresh", json={"refresh_token": old_refresh})
+        assert refreshed.status_code == 200
+        new_refresh = refreshed.json().get("refresh_token")
+        assert new_refresh
+        assert new_refresh != old_refresh
+
+        reused = client.post("/auth/refresh", json={"refresh_token": old_refresh})
+        assert reused.status_code == 401
+
+    def test_refresh_requires_same_context_fingerprint(self, client):
+        username = f"ctxuser_{int(time.time() * 1000)}"
+        password = "StrongPass1!"
+        self._seed_user(username, password)
+        refresh_token = self._seed_refresh_token(username)
+
+        mismatch = client.post(
+            "/auth/refresh",
+            json={"refresh_token": refresh_token},
+            headers={"User-Agent": "totally-different-agent"},
+        )
+        assert mismatch.status_code == 401
 
 
 class TestRootEndpoint:
