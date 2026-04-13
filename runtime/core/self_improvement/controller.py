@@ -13,9 +13,12 @@ All policies reject if any test gate fails.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 from core.self_improvement.contracts import (
     ImprovementTask,

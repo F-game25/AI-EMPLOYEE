@@ -124,7 +124,7 @@ class AutonomyDaemon:
                     continue
 
                 # Mode gating
-                if mode == "ON" and task.risk_class not in ("low",):
+                if mode == "ON" and task.risk_class != "low":
                     # ON mode: only low-risk tasks
                     time.sleep(_CYCLE_SLEEP_S)
                     continue
