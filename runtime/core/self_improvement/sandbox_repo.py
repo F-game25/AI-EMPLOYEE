@@ -6,6 +6,7 @@ the live working tree.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -57,7 +58,6 @@ class SandboxRepo:
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "repo_root": str(self._repo_root),
         }
-        import json
         (sandbox_dir / ".sandbox_meta.json").write_text(
             json.dumps(meta, indent=2), encoding="utf-8"
         )
@@ -92,7 +92,6 @@ class SandboxRepo:
 
     def list_sandboxes(self) -> list[dict[str, Any]]:
         """Return metadata for all existing sandboxes."""
-        import json
         result: list[dict[str, Any]] = []
         if not self._sandbox_base.exists():
             return result

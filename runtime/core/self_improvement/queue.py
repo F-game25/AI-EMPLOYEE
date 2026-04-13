@@ -14,8 +14,11 @@ from typing import Any
 
 from core.self_improvement.contracts import (
     TERMINAL_STATES,
+    ImprovementPlan,
     ImprovementTask,
+    PatchArtifact,
     RiskLevel,
+    TestResult,
 )
 
 _AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
@@ -158,12 +161,6 @@ class ImprovementQueue:
 
     @staticmethod
     def _dict_to_task(d: dict) -> ImprovementTask:
-        from core.self_improvement.contracts import (
-            ImprovementPlan,
-            PatchArtifact,
-            TestResult,
-        )
-
         plan_data = d.get("plan")
         patch_data = d.get("patch")
         test_data = d.get("test_result")

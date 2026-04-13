@@ -249,8 +249,7 @@ class DiffPolicy:
                 total_original = 0
             elif line.startswith("@@ "):
                 # Parse hunk header for original line count
-                import re as _re
-                m = _re.search(r"-\d+(?:,(\d+))?", line)
+                m = re.search(r"-\d+(?:,(\d+))?", line)
                 if m:
                     total_original += int(m.group(1) or 1)
             elif line.startswith("+") and not line.startswith("+++"):
