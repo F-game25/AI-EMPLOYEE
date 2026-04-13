@@ -22,6 +22,7 @@ const {
 const subsystems = require('./subsystems');
 const { buildMoneyTemplate, buildThinkingSummary } = require('./money_mode');
 const brain = require('./brain/active_brain');
+const persistence = require('./persistence');
 
 const PORT = process.env.PORT || 3001;
 
@@ -55,6 +56,11 @@ const BASE_PIPELINE_ROI = 250;
 const PIPELINE_ROI_SWING = 400;
 const REVENUE_CONVERSION_RATE = 0.45;
 const CANCELLATION_ERROR_PREFIX = 'cancelled:';
+// Experience scaling: tasks needed to reach maximum multiplier.
+const EXPERIENCE_TASK_THRESHOLD = 20;
+const MAX_EXPERIENCE_MULTIPLIER = 1.5;
+// Deterministic variation seed for pipeline ROI (avoids Math.random).
+const VARIATION_SEED = 41;
 
 const runtimeState = {
   automationRunning: false,
@@ -75,6 +81,28 @@ const runtimeState = {
   skillStats: {},
   _seq: 0,
 };
+
+// ── Restore persisted state on startup ────────────────────────────────────────
+const _savedState = persistence.loadRuntimeState();
+if (_savedState) {
+  runtimeState.tasksExecuted = _savedState.tasksExecuted || 0;
+  runtimeState.successfulTasks = _savedState.successfulTasks || 0;
+  runtimeState.failedTasks = _savedState.failedTasks || 0;
+  runtimeState.valueGenerated = _savedState.valueGenerated || 0;
+  runtimeState.revenueCents = _savedState.revenueCents || 0;
+  runtimeState.pipelineRoiTotal = _savedState.pipelineRoiTotal || 0;
+  runtimeState.pipelineRuns = _savedState.pipelineRuns || [];
+  runtimeState.activityFeed = _savedState.activityFeed || [];
+  runtimeState.executionLogs = _savedState.executionLogs || [];
+  runtimeState.skillStats = _savedState.skillStats || {};
+  console.log(`[PERSISTENCE] Restored state: ${runtimeState.tasksExecuted} tasks, $${(runtimeState.revenueCents / 100).toFixed(2)} revenue`);
+}
+
+const _savedBrain = persistence.loadBrainState();
+if (_savedBrain) {
+  brain.restoreState(_savedBrain);
+  console.log('[PERSISTENCE] Restored brain state');
+}
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
@@ -315,12 +343,29 @@ function recordExecution({ taskId, skill, status, notes }) {
   broadcaster.broadcast('execution:log', logItem);
 }
 
-function estimatePipelineRoi() {
-  return BASE_PIPELINE_ROI + Math.floor(Math.random() * PIPELINE_ROI_SWING);
+// Pipeline ROI estimation based on actual execution metrics.
+// Uses: success rate, tasks completed, pipeline type multiplier.
+const PIPELINE_MULTIPLIER = {
+  content: 1.0,      // Content pipelines: moderate, steady ROI
+  lead: 1.4,         // Lead gen: high value per qualified lead
+  opportunity: 1.8,  // Opportunity conversion: highest value per close
+};
+
+function estimatePipelineRoi(pipelineName) {
+  const successRate = runtimeState.tasksExecuted > 0
+    ? runtimeState.successfulTasks / runtimeState.tasksExecuted
+    : 0.5;
+  const multiplier = PIPELINE_MULTIPLIER[pipelineName] || 1.0;
+  // Base ROI scales with actual success rate and cumulative experience
+  const experienceFactor = Math.min(runtimeState.tasksExecuted / EXPERIENCE_TASK_THRESHOLD, MAX_EXPERIENCE_MULTIPLIER); // improves with usage
+  const baseRoi = BASE_PIPELINE_ROI * successRate * multiplier * Math.max(experienceFactor, 0.5);
+  // Deterministic variation based on pipeline run count (no Math.random)
+  const variation = ((runtimeState.pipelineRuns.length * VARIATION_SEED) % PIPELINE_ROI_SWING) - (PIPELINE_ROI_SWING / 4);
+  return Math.max(50, Math.round(baseRoi + variation));
 }
 
 function runPipeline(pipelineName) {
-  const estimatedRoi = estimatePipelineRoi();
+  const estimatedRoi = estimatePipelineRoi(pipelineName);
   const run = {
     id: `pipeline-${++runtimeState._seq}`,
     pipeline: pipelineName,
@@ -966,4 +1011,9 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   console.log(`[SERVER] AI Employee backend running on port ${PORT}`);
+  // Start periodic state persistence (every 30s)
+  persistence.startAutoSave(
+    () => runtimeState,
+    () => brain.exportState(),
+  );
 });

@@ -33,7 +33,7 @@ export default function SecondaryPanels() {
             style={{
               borderRadius: '8px',
               border: activeTab === tab.id ? '1px solid var(--border-gold)' : '1px solid var(--border-subtle)',
-              background: activeTab === tab.id ? 'rgba(245,196,0,0.08)' : 'rgba(255,255,255,0.02)',
+              background: activeTab === tab.id ? 'rgba(212,175,55,0.08)' : 'rgba(255,255,255,0.02)',
               color: activeTab === tab.id ? 'var(--gold)' : 'var(--text-secondary)',
             }}
           >

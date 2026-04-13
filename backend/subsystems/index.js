@@ -115,6 +115,7 @@ function now() {
 
 // ── Simulation helpers (used when Python backend is offline) ─────────────────
 
+let _simStep = 0; // Simulation tick counter — incremented each poll cycle
 const MAX_SIM_BUFFER_SIZE = 10000; // cap for replay buffer display
 
 function _populateFromActiveBrain() {
@@ -323,6 +324,7 @@ async function syncAutonomyFromPython() {
 let _pollInterval = null;
 
 async function _pollCycle() {
+  _simStep += 1;
   const nnOk = await syncNNFromPython();
   const memOk = await syncMemoryFromPython();
   const drOk = await syncDoctorFromPython();

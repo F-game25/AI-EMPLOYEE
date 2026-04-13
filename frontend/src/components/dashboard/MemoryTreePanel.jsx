@@ -4,10 +4,10 @@ import { useAppStore } from '../../store/appStore'
 
 const TYPE_COLORS = {
   user: 'var(--gold)',
-  lead: '#60a5fa',
-  customer: '#34d399',
-  agent: '#a78bfa',
-  task: '#fb923c',
+  lead: 'var(--info)',
+  customer: 'var(--success)',
+  agent: 'var(--warning)',
+  task: 'var(--gold-dim)',
   unknown: 'var(--text-muted)',
 }
 
