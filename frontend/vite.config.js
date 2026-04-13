@@ -8,13 +8,8 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
-    port: 3000,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
-      },
-    },
+    // Single-port runtime contract: frontend and backend share 127.0.0.1:8787.
+    port: 8787,
+    strictPort: true,
   },
 })
