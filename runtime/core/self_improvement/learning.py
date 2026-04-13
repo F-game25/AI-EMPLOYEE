@@ -222,7 +222,8 @@ class LearningModule:
         reward = (score * 2) - 1.0  # Map [0,1] → [-1,1]
 
         try:
-            # Create a synthetic TaskNode-like object for the brain
+            # Delayed import: TaskNode lives in core.contracts which may not be
+            # available at module-load time in all deployment configurations.
             from core.contracts import TaskNode
             synthetic_task = TaskNode(
                 task_id=task.task_id,
