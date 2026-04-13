@@ -182,8 +182,8 @@ export default function Dashboard() {
   const businessKpis = useMemo(() => ([
     { label: 'Tasks Executed', value: productMetrics?.tasks?.tasks_executed ?? 0 },
     { label: 'Success Rate', value: `${Math.round((productMetrics?.tasks?.success_rate ?? 0) * 100)}%` },
-    { label: 'Value Generated (est.)', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(2)}`, simulated: true },
-    { label: 'Revenue (est.)', value: `$${(productMetrics?.revenue?.total_revenue ?? 0).toFixed(2)}`, simulated: true },
+    { label: 'Value Generated', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(2)}`, simulated: true },
+    { label: 'Revenue', value: `$${(productMetrics?.revenue?.total_revenue ?? 0).toFixed(2)}`, simulated: true },
   ]), [productMetrics])
   // `running` is request-in-flight; `automationActive` is backend-reported execution state.
   const automationActive = Boolean(productMetrics?.mode?.automation_running)
