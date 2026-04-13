@@ -454,6 +454,55 @@ function activity(limit = 20) {
   };
 }
 
+/**
+ * Export brain state for persistence.
+ * Converts Maps to plain objects so they survive JSON serialization.
+ */
+function exportState() {
+  return {
+    taskPatterns: Object.fromEntries(state.taskPatterns),
+    strategies: Object.fromEntries(state.strategies),
+    failedAttempts: state.failedAttempts.slice(0, MAX_FAILURES),
+    performance: { ...state.performance },
+    recentImprovements: state.recentImprovements.slice(0, MAX_RECENT),
+    decisionHistory: state.decisionHistory.slice(0, MAX_RECENT),
+    lastUpdatedAt: state.lastUpdatedAt,
+  };
+}
+
+/**
+ * Restore brain state from a persisted snapshot.
+ * Rebuilds Maps from plain objects.
+ */
+function restoreState(saved) {
+  if (!saved || typeof saved !== 'object') return;
+  try {
+    if (saved.taskPatterns && typeof saved.taskPatterns === 'object') {
+      state.taskPatterns = new Map(Object.entries(saved.taskPatterns));
+    }
+    if (saved.strategies && typeof saved.strategies === 'object') {
+      state.strategies = new Map(Object.entries(saved.strategies));
+    }
+    if (Array.isArray(saved.failedAttempts)) {
+      state.failedAttempts = saved.failedAttempts.slice(0, MAX_FAILURES);
+    }
+    if (saved.performance && typeof saved.performance === 'object') {
+      Object.assign(state.performance, saved.performance);
+    }
+    if (Array.isArray(saved.recentImprovements)) {
+      state.recentImprovements = saved.recentImprovements.slice(0, MAX_RECENT);
+    }
+    if (Array.isArray(saved.decisionHistory)) {
+      state.decisionHistory = saved.decisionHistory.slice(0, MAX_RECENT);
+    }
+    if (saved.lastUpdatedAt) {
+      state.lastUpdatedAt = saved.lastUpdatedAt;
+    }
+  } catch {
+    // Partial restore is fine — brain continues with whatever loaded
+  }
+}
+
 module.exports = {
   consult,
   feedback,
@@ -463,4 +512,6 @@ module.exports = {
   taskInfluence,
   rebindPlan,
   normalizeLatencyMs,
+  exportState,
+  restoreState,
 };

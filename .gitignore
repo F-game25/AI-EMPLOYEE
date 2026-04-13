@@ -32,6 +32,7 @@ venv/
 
 # Runtime secrets — never commit live state/user data
 state/users.json
+.data/
 
 # Test coverage artifacts
 .coverage

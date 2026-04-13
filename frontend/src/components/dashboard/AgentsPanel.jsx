@@ -146,7 +146,18 @@ export default function AgentsPanel() {
                   style={{ fontSize: '11px', color: 'var(--text-muted)' }}
                 >
                   {agent.type} · {agent.health || 'healthy'}
+                  {agent.tasksCompleted > 0 && ` · ${agent.tasksCompleted} done`}
                 </div>
+
+                {agent.description && !agent.task && (
+                  <div
+                    className="font-mono leading-snug truncate"
+                    style={{ fontSize: '9px', color: 'var(--text-dim)', marginTop: '2px' }}
+                    title={agent.description}
+                  >
+                    {agent.description}
+                  </div>
+                )}
               </motion.div>
             )
           })}
