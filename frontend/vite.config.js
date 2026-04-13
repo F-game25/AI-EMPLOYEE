@@ -8,6 +8,7 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
+    // Single-port runtime contract: frontend and backend share 127.0.0.1:8787.
     port: 8787,
     strictPort: true,
   },
