@@ -5,7 +5,7 @@ One failure = automatic reject.  No exceptions.
 
 Gates:
   1. Lint check   — ``npm run lint`` (py_compile all agents)
-  2. Test suite   — ``npm test`` (pytest + agent selftest)
+  2. Test suite   — ``python3 -m pytest tests/`` (unit + integration tests)
   3. Security     — basic static checks (no secrets in diff, no unsafe patterns)
 """
 from __future__ import annotations
