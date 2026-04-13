@@ -20,8 +20,10 @@ function broadcast(event, data) {
   });
 }
 
-function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+// Deterministic jitter based on heartbeat sequence (avoids Math.random).
+function deterministicJitter(seq, min, max) {
+  const range = max - min + 1;
+  return min + ((seq * 37) % range);
 }
 
 function startHeartbeat({
@@ -33,7 +35,7 @@ function startHeartbeat({
     heartbeatSeq += 1;
     const msg = messageFactory({ seq: heartbeatSeq });
     broadcast('heartbeat', { message: msg, level: 'info', heartbeat: heartbeatSeq });
-  }, intervalMs + randomInt(-300, 300));
+  }, intervalMs + deterministicJitter(heartbeatSeq, -300, 300));
 }
 
 function getHeartbeatSeq() {
