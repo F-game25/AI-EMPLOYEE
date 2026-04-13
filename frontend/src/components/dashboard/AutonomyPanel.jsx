@@ -100,10 +100,10 @@ export default function AutonomyPanel() {
               <StatRow label="QUEUE TOTAL" value={queue.total || 0} />
               <StatRow label="QUEUE ACTIVE" value={queue.active || 0} color={queue.active > 0 ? 'var(--gold)' : 'var(--text-muted)'} />
               {daemon.current_task_id && (
-                <StatRow label="PROCESSING" value={daemon.current_task_id} color="var(--gold)" />
+                <StatRow label="PROCESSING" value={daemon.current_task_id.slice(0, 12)} color="var(--gold)" />
               )}
               {daemon.last_task_id && (
-                <StatRow label="LAST TASK" value={daemon.last_task_id} />
+                <StatRow label="LAST TASK" value={daemon.last_task_id.slice(0, 12)} />
               )}
             </div>
 
