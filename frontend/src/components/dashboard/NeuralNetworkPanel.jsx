@@ -7,7 +7,7 @@ const MODE_COLORS = {
   OFFLINE: 'var(--warning)',
   AUTO: 'var(--gold)',
 }
-const API_BASE = `http://${window.location.hostname}:3001`
+const API_BASE = window.location.origin
 
 function StatRow({ label, value, highlight }) {
   return (

@@ -9,7 +9,7 @@ import TertiaryPanel from './ui/TertiaryPanel'
 import WorkflowTreePanel from './dashboard/WorkflowTreePanel'
 import BrainInsightsPanel from './dashboard/BrainInsightsPanel'
 
-const BASE = `http://${window.location.hostname}:3001`
+const BASE = window.location.origin
 const PIPELINE_DEFAULTS = {
   content: {
     endpoint: '/api/money/content-pipeline',
