@@ -62,8 +62,8 @@ export default function AgentsPanel() {
               className="font-mono text-[10px] px-2 py-1.5 text-left"
               style={{
                 borderRadius: '6px',
-                border: filter === opt.id ? '1px solid rgba(245,196,0,0.5)' : '1px solid var(--border-subtle)',
-                background: filter === opt.id ? 'rgba(245,196,0,0.08)' : 'rgba(255,255,255,0.02)',
+                border: filter === opt.id ? '1px solid rgba(212,175,55,0.5)' : '1px solid var(--border-subtle)',
+                background: filter === opt.id ? 'rgba(212,175,55,0.08)' : 'rgba(255,255,255,0.02)',
                 color: filter === opt.id ? 'var(--gold)' : 'var(--text-secondary)',
               }}
             >
@@ -96,10 +96,10 @@ export default function AgentsPanel() {
                 className="px-3 py-2 rounded"
                 style={{
                   background: agent.state === 'busy'
-                    ? 'rgba(245,196,0,0.04)'
+                    ? 'rgba(212,175,55,0.04)'
                     : 'rgba(255,255,255,0.02)',
                   border: `1px solid ${agent.state === 'busy'
-                    ? 'rgba(245,196,0,0.18)'
+                    ? 'rgba(212,175,55,0.18)'
                     : 'var(--border-subtle)'}`,
                   cursor: 'default',
                   transition: 'background 0.2s, border-color 0.2s',

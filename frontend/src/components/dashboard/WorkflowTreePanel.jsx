@@ -4,7 +4,7 @@ import { useAppStore } from '../../store/appStore'
 import TertiaryPanel from '../ui/TertiaryPanel'
 
 const STATUS_STYLE = {
-  pending: { color: 'var(--text-muted)', dot: '#6b7280' },
+  pending: { color: 'var(--text-muted)', dot: 'var(--text-muted)' },
   active: { color: 'var(--gold)', dot: 'var(--gold)' },
   completed: { color: 'var(--success)', dot: 'var(--success)' },
   failed: { color: 'var(--error)', dot: 'var(--error)' },
@@ -22,8 +22,8 @@ function NodeCard({ node, selected, onSelect }) {
       onClick={() => onSelect(node.task_id)}
       className="w-full text-left"
       style={{
-        background: selected ? 'rgba(245,196,0,0.08)' : 'rgba(255,255,255,0.02)',
-        border: selected ? '1px solid rgba(245,196,0,0.4)' : '1px solid var(--border-subtle)',
+        background: selected ? 'rgba(212,175,55,0.08)' : 'rgba(255,255,255,0.02)',
+        border: selected ? '1px solid rgba(212,175,55,0.4)' : '1px solid var(--border-subtle)',
         borderRadius: '8px',
         padding: '8px',
       }}
@@ -37,7 +37,7 @@ function NodeCard({ node, selected, onSelect }) {
               height: '8px',
               borderRadius: '999px',
               background: state.dot,
-              boxShadow: node.status === 'active' ? '0 0 8px rgba(245,196,0,.7)' : 'none',
+              boxShadow: node.status === 'active' ? '0 0 8px rgba(212,175,55,.7)' : 'none',
               flexShrink: 0,
             }}
           />
@@ -125,7 +125,7 @@ export default function WorkflowTreePanel() {
                       top: '-10px',
                       width: '1px',
                       height: '10px',
-                      background: 'rgba(245,196,0,0.25)',
+                      background: 'rgba(212,175,55,0.25)',
                     }}
                   />
                 )}
