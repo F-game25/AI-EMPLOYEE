@@ -5,10 +5,12 @@ import json
 import os
 from collections import deque
 from datetime import datetime, timezone
+import logging
 from pathlib import Path
 from threading import Lock
 from typing import Any
 
+logger = logging.getLogger("simple_message_bus")
 
 class SimpleMessageBus:
     """Lightweight in-process message bus with persistent JSONL history."""
@@ -45,6 +47,20 @@ class SimpleMessageBus:
         return queue
 
     def publish_sync(self, channel: str, message: dict[str, Any]) -> dict[str, Any]:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.publish(channel, message))
+        if loop.is_running():
+            logger.debug("publish_sync called inside running loop; scheduling background publish")
+            envelope = {
+                "channel": channel,
+                "message": message,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "queued": True,
+            }
+            loop.create_task(self.publish(channel, message))
+            return envelope
         return asyncio.run(self.publish(channel, message))
 
     def _persist(self, envelope: dict[str, Any]) -> None:

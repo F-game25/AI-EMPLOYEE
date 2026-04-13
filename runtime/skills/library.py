@@ -42,6 +42,9 @@ class SkillsManager:
     def get(self, skill_id: str) -> dict[str, Any] | None:
         return self._skills.get(skill_id)
 
+    def list_all(self) -> list[dict[str, Any]]:
+        return list(self._skills.values())
+
     def list_by_category(self, cat: str) -> list[dict[str, Any]]:
         return [s for s in self._skills.values() if s.get("category") == cat]
 
@@ -70,7 +73,12 @@ class SkillsManager:
         self.custom_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def create_custom_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        agent_id = str(payload.get("id", "")).strip()
+        if not agent_id:
+            raise ValueError("Custom agent id is required")
         items = self._read_custom()
+        if any(str(i.get("id", "")).strip() == agent_id for i in items):
+            raise ValueError(f"Custom agent with id '{agent_id}' already exists")
         items.append(payload)
         self._write_custom(items)
         return payload
