@@ -11,7 +11,7 @@ router = APIRouter(prefix="/metrics", tags=["metrics"])
 
 @router.post("/record", response_model=MetricRecord)
 def record_metrics(req: MetricsRecordRequest) -> MetricRecord:
-    roi = ((req.revenue - req.cost) / req.cost) if req.cost else 0.0
+    roi = ((req.revenue - req.cost) / req.cost) if req.cost > 0 else (0.0 if req.revenue == 0 else None)
     item = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "revenue": req.revenue,
@@ -34,5 +34,9 @@ def roi() -> ROIResponse:
     records = store.read("metrics", [])
     total_revenue = sum(float(r.get("revenue", 0)) for r in records)
     total_cost = sum(float(r.get("cost", 0)) for r in records)
-    roi_val = ((total_revenue - total_cost) / total_cost) if total_cost else 0.0
+    roi_val = (
+        ((total_revenue - total_cost) / total_cost)
+        if total_cost > 0
+        else (0.0 if total_revenue == 0 else None)
+    )
     return ROIResponse(roi=roi_val, total_revenue=total_revenue, total_cost=total_cost)

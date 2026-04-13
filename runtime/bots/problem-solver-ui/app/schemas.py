@@ -51,7 +51,7 @@ class MetricRecord(BaseModel):
     timestamp: datetime
     revenue: float
     cost: float
-    roi: float
+    roi: float | None
     notes: str = ""
 
 
@@ -60,7 +60,7 @@ class MetricsHistoryResponse(BaseModel):
 
 
 class ROIResponse(BaseModel):
-    roi: float
+    roi: float | None
     total_revenue: float
     total_cost: float
 
