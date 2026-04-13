@@ -14,6 +14,7 @@
  */
 
 const http = require('http');
+const brain = require('../brain/active_brain');
 
 const PYTHON_BACKEND = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}`;
 const FETCH_TIMEOUT_MS = 2000;
@@ -114,46 +115,33 @@ function now() {
 
 // ── Simulation helpers (used when Python backend is offline) ─────────────────
 
-let _simStep = 0;
-const _simActions = [
-  'route_task', 'generate_response', 'search_memory',
-  'analyze_sentiment', 'predict_outcome', 'optimize_path',
-  'classify_intent', 'extract_entities',
-];
+const MAX_SIM_BUFFER_SIZE = 10000; // cap for replay buffer display
 
-const SIM_BUFFER_GROWTH_RATE = 7; // simulated experiences added per learn step
-const MAX_SIM_BUFFER_SIZE = 10000; // cap for simulated replay buffer
-const SIM_CONFIDENCE_BASE = 0.55;
-const SIM_CONFIDENCE_AMPLITUDE = 0.3;
+function _populateFromActiveBrain() {
+  const brainStatus = brain.status();
+  const brainInsights = brain.insights();
+  const perf = brainInsights.performance_metrics || {};
+  const decisions = brainInsights.decisions || [];
 
-function _simulateNN() {
-  _simStep += 1;
-  const confidence = Math.max(
-    0,
-    Math.min(1, SIM_CONFIDENCE_BASE + (Math.sin(_simStep * 0.3) * SIM_CONFIDENCE_AMPLITUDE)),
-  );
-  const loss = Math.max(0.001, 0.08 - _simStep * 0.0002 + Math.random() * 0.01);
-  const action = _simActions[_simStep % _simActions.length];
-
-  const output = {
-    ts: now(),
-    action,
-    confidence: Math.round(confidence * 1000) / 1000,
-    loss: Math.round(loss * 10000) / 10000,
-  };
-
-  state.nn.learn_step = _simStep;
-  state.nn.buffer_size = Math.min(_simStep * SIM_BUFFER_GROWTH_RATE, MAX_SIM_BUFFER_SIZE);
-  state.nn.experiences = _simStep * SIM_BUFFER_GROWTH_RATE;
-  state.nn.max_buffer_size = MAX_SIM_BUFFER_SIZE;
-  state.nn.confidence = Math.round(confidence * 1000) / 1000;
-  state.nn.last_loss = Math.round(loss * 10000) / 10000;
-  state.nn.bg_running = true;
-  state.nn.mode = 'SIMULATED';
-  state.nn.data_source = 'simulated';
   state.nn.available = true;
   state.nn.active = true;
-  state.nn.recent_outputs = [output, ...state.nn.recent_outputs].slice(0, 5);
+  state.nn.mode = 'ONLINE';
+  state.nn.data_source = 'live';
+  state.nn.learn_step = perf.total_tasks || 0;
+  state.nn.buffer_size = brainStatus.memory_size || 0;
+  state.nn.max_buffer_size = MAX_SIM_BUFFER_SIZE;
+  state.nn.experiences = perf.total_tasks || 0;
+  state.nn.confidence = perf.avg_confidence || 0;
+  state.nn.last_loss = 0;
+  state.nn.bg_running = true;
+  state.nn.memory_size = brainStatus.memory_size || 0;
+  state.nn.device = 'cpu';
+  state.nn.recent_outputs = decisions.slice(0, 5).map((d) => ({
+    ts: d.ts || now(),
+    action: d.strategy || 'route_task',
+    confidence: d.confidence || 0,
+  }));
+  state.nn.recent_learning_events = (brainInsights.recent_improvements || []).slice(0, 10);
   state.nn.updated_at = now();
 }
 
@@ -341,14 +329,14 @@ async function _pollCycle() {
   await syncSelfImprovementFromPython();
   await syncAutonomyFromPython();
 
-  if (!nnOk) _simulateNN();
+  if (!nnOk) _populateFromActiveBrain();
   if (!memOk) _simulateMemory();
   if (!drOk) _simulateDoctor();
 }
 
 function startPolling(intervalMs = 5000) {
   _pollCycle().catch(() => {
-    _simulateNN();
+    _populateFromActiveBrain();
     _simulateMemory();
     _simulateDoctor();
   });

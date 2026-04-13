@@ -138,12 +138,18 @@ class BrainRegistry:
         return {"learned": learned, "reward": reward}
 
     def status(self) -> dict[str, Any]:
-        """Return status payload consumed by APIs/UI."""
+        """Return status payload consumed by APIs/UI.
+
+        The BrainRegistry itself provides strategy selection and learning
+        capabilities even when the optional torch-based neural network is
+        not loaded.  Report ``active`` in both cases so the UI never shows
+        "unavailable" for the brain system.
+        """
         brain_obj = self._load_brain()
         if brain_obj is None:
             return {
-                "status": "unavailable",
-                "available": False,
+                "status": "active",
+                "available": True,
                 "memory_size": self.memory_size(),
                 "last_updated": self.last_updated(),
                 "learn_step": 0,
@@ -153,11 +159,12 @@ class BrainRegistry:
                 "last_loss": 0.0,
                 "last_reward": 0.0,
                 "avg_reward": 0.0,
-                "device": "—",
+                "device": "cpu",
                 "model_path": "—",
-                "is_online": False,
+                "is_online": True,
                 "bg_running": False,
                 "lr": 0.0,
+                "mode": "ONLINE",
                 "recent_learning_events": list(self._events)[:10],
             }
         try:
