@@ -78,6 +78,13 @@ const state = {
     recent_events: [],
     updated_at: null,
   },
+  autonomy: {
+    mode: { mode: 'OFF', active: false, auto: false, limited: false, paused: true, emergency_stopped: false, changed_at: null },
+    daemon: { running: false, started_at: null, cycles: 0, tasks_processed: 0, tasks_succeeded: 0, tasks_failed: 0, consecutive_errors: 0, last_cycle_at: null, last_task_id: null, current_task_id: null, cycle_interval_s: 2 },
+    queue: { total: 0, active: 0, by_status: {} },
+    data_source: 'initializing',
+    updated_at: null,
+  },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -308,6 +315,21 @@ async function syncSelfImprovementFromPython() {
   return false;
 }
 
+async function syncAutonomyFromPython() {
+  try {
+    const data = await fetchJSON('/api/autonomy/status');
+    if (data && data.daemon) {
+      state.autonomy.daemon = data.daemon;
+      state.autonomy.mode = data.mode || state.autonomy.mode;
+      state.autonomy.queue = data.queue || state.autonomy.queue;
+      state.autonomy.data_source = 'live';
+      state.autonomy.updated_at = now();
+      return true;
+    }
+  } catch (_) { /* offline */ }
+  return false;
+}
+
 // ── Polling loop ──────────────────────────────────────────────────────────────
 
 let _pollInterval = null;
@@ -317,6 +339,7 @@ async function _pollCycle() {
   const memOk = await syncMemoryFromPython();
   const drOk = await syncDoctorFromPython();
   await syncSelfImprovementFromPython();
+  await syncAutonomyFromPython();
 
   if (!nnOk) _simulateNN();
   if (!memOk) _simulateMemory();
@@ -359,6 +382,10 @@ function getSelfImprovementStatus() {
   return { ...state.selfImprovement };
 }
 
+function getAutonomyStatus() {
+  return JSON.parse(JSON.stringify(state.autonomy));
+}
+
 module.exports = {
   startPolling,
   stopPolling,
@@ -366,4 +393,5 @@ module.exports = {
   getMemoryTree,
   getDoctorStatus,
   getSelfImprovementStatus,
+  getAutonomyStatus,
 };
