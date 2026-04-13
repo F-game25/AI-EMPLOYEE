@@ -4,15 +4,18 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import bcrypt
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 _bearer = HTTPBearer(auto_error=True)
+logger = logging.getLogger("dashboard_auth")
 
 
 def _b64url(data: bytes) -> str:
@@ -67,13 +70,19 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(_bearer)) 
 def verify_login(username: str, password: str) -> bool:
     env_user = os.environ.get("AI_EMPLOYEE_USER", "").strip()
     env_pass = os.environ.get("AI_EMPLOYEE_PASS", "")
-    env_pass_hash = os.environ.get("AI_EMPLOYEE_PASS_HASH", "").strip().lower()
+    env_pass_hashed = os.environ.get("AI_EMPLOYEE_PASS_BCRYPT", "").strip()
+    # Backward-compatibility: AI_EMPLOYEE_PASS_HASH may still be configured as bcrypt.
+    if not env_pass_hashed:
+        env_pass_hashed = os.environ.get("AI_EMPLOYEE_PASS_HASH", "").strip()
     if not env_user:
         return False
     user_ok = hmac.compare_digest(username, env_user)
-    if env_pass_hash:
-        provided_hash = hashlib.sha256(password.encode("utf-8")).hexdigest().lower()
-        pass_ok = hmac.compare_digest(provided_hash, env_pass_hash)
+    if env_pass_hashed:
+        try:
+            pass_ok = bcrypt.checkpw(password.encode("utf-8"), env_pass_hashed.encode("utf-8"))
+        except ValueError:
+            logger.warning("Invalid bcrypt hash configured for dashboard login credentials")
+            pass_ok = False
     else:
         if not env_pass:
             return False
