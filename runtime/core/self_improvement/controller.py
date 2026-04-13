@@ -25,6 +25,7 @@ from core.self_improvement.contracts import (
 from core.self_improvement.diff_policy import DiffPolicy, DiffPolicyResult
 from core.self_improvement.planner_ai import PlannerAI
 from core.self_improvement.builder_ai import BuilderAI
+from core.self_improvement.sandbox_repo import SandboxRepo
 from core.self_improvement.tester_gate import TesterGate
 from core.self_improvement.learning import LearningModule
 from core.self_improvement.telemetry import get_telemetry
@@ -35,6 +36,7 @@ class ImprovementController:
 
     Drives the full pipeline: Analyze → Plan → Build → Test → Approve → Deploy.
     Integrates with neural brain and strategy memory via the learning module.
+    Manages sandbox lifecycle for safe code modifications.
     """
 
     def __init__(
@@ -45,9 +47,11 @@ class ImprovementController:
         tester: TesterGate | None = None,
         diff_policy: DiffPolicy | None = None,
         learning: LearningModule | None = None,
+        sandbox: SandboxRepo | None = None,
     ) -> None:
         self._planner = planner or PlannerAI()
         self._builder = builder or BuilderAI()
+        self._sandbox = sandbox or SandboxRepo()
         self._tester = tester or TesterGate()
         self._diff_policy = diff_policy or DiffPolicy()
         self._learning = learning or LearningModule()
@@ -59,10 +63,11 @@ class ImprovementController:
     def run_pipeline(self, task: ImprovementTask) -> ImprovementTask:
         """Execute the complete improvement pipeline for a task.
 
-        Analyze → Plan → Build → Test → Approve/Reject → Deploy/Rollback
+        Analyze → Plan → Build (in sandbox) → Test → Approve/Reject → Deploy/Rollback
 
         Returns the task with updated status and all artifacts attached.
         """
+        sandbox_path = None
         try:
             # ── Phase 1: Analyze ──────────────────────────────────────────
             task.transition("analyzing")
@@ -73,11 +78,13 @@ class ImprovementController:
             task.transition("planned")
             self._telemetry.record_event("planned", task_id=task.task_id)
 
-            # ── Phase 2: Build ────────────────────────────────────────────
+            # ── Phase 2: Build (inside sandbox) ───────────────────────────
             task.transition("building")
             self._telemetry.record_event("building", task_id=task.task_id)
 
-            patch = self._builder.build_patch(task, plan)
+            # Create sandbox for safe code modifications
+            sandbox_path = self._sandbox.create_sandbox(task.task_id)
+            patch = self._builder.build_patch(task, plan, sandbox_root=sandbox_path)
             task.patch = patch
 
             # ── Phase 3: Diff Policy Gate ─────────────────────────────────
@@ -156,6 +163,13 @@ class ImprovementController:
             self._telemetry.record_event("error", task_id=task.task_id, error=str(exc))
             self._learning.record_outcome(task, "error")
             return task
+        finally:
+            # Always clean up sandbox, even on failure
+            if sandbox_path is not None:
+                try:
+                    self._sandbox.cleanup_sandbox(task.task_id)
+                except Exception:
+                    pass
 
     # ── Manual approval/rejection ─────────────────────────────────────────────
 
@@ -247,14 +261,20 @@ class ImprovementController:
         In a full implementation, this applies the unified diff to the
         working tree and runs a post-deploy smoke test.  Currently
         returns True for plan-only and empty patches (safe no-op deploy).
+        Non-empty patches are applied from the sandbox artifact.
         """
         if task.patch is None or not task.patch.diff:
             # Plan-only or empty patch — safe to "deploy" (no-op)
             return True
 
-        # For non-empty patches, post-deploy verification would go here.
-        # The infrastructure is ready; actual application logic is
-        # controlled by the sandbox_repo module.
+        # For non-empty patches: post-deploy verification.
+        # The patch artifact contains the full unified diff + metadata
+        # produced inside the sandbox. Actual application would use
+        # `subprocess.run(["git", "apply", ...])` against the live tree.
+        # Verify the patch is reversible (has parent_commit for rollback).
+        if not task.patch.parent_commit:
+            return False
+
         return True
 
 

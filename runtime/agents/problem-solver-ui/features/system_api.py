@@ -446,6 +446,18 @@ def product_dashboard(
         response["pending_actions"] = get_action_bus().list_pending()
     except Exception:
         response["pending_actions"] = []
+    try:
+        from core.self_improvement.telemetry import get_telemetry
+        response["self_improvement"] = get_telemetry().dashboard_payload().get(
+            "self_improvement", {}
+        )
+    except Exception:
+        response["self_improvement"] = {"active": False}
+    try:
+        from core.self_improvement.learning import LearningModule
+        response["improvement_learning"] = LearningModule().get_insights()
+    except Exception:
+        response["improvement_learning"] = {}
     response["value"] = {
         "revenue_component": round(float(response.get("revenue", {}).get("total_revenue", 0.0) or 0.0), 3),
         "pipeline_component": round(float(response.get("pipelines", {}).get("total_estimated_roi", 0.0) or 0.0), 3),
