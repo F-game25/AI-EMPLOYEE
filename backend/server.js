@@ -385,6 +385,7 @@ function buildDashboardPayload() {
       mode: getMode(),
       brain: brain.insights(),
     },
+    self_improvement: subsystems.getSelfImprovementStatus(),
   };
 }
 
@@ -537,6 +538,10 @@ app.get('/api/memory/tree', (req, res) => {
 
 app.get('/api/doctor/status', (req, res) => {
   res.json(subsystems.getDoctorStatus());
+});
+
+app.get('/api/self-improvement/status', (req, res) => {
+  res.json(subsystems.getSelfImprovementStatus());
 });
 
 app.get('/api/product/dashboard', (req, res) => {

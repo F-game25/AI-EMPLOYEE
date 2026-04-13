@@ -144,6 +144,27 @@ export const useAppStore = create((set) => ({
   },
   setBrainActivity: (activity) => set({ brainActivity: activity }),
 
+  // Self-improvement pipeline (HTTP-polled from Python runtime)
+  selfImprovement: {
+    active: false,
+    total_tasks_processed: 0,
+    queue_depth: 0,
+    pass_rate: 0,
+    fail_rate: 0,
+    approval_ratio: 0,
+    rejection_ratio: 0,
+    rollback_ratio: 0,
+    deployed: 0,
+    rolled_back: 0,
+    rejected: 0,
+    test_failures: 0,
+    policy_violations: 0,
+    errors: 0,
+    top_failure_causes: [],
+    recent_events: [],
+  },
+  setSelfImprovement: (si) => set({ selfImprovement: si }),
+
   // Error
   errorMessage: null,
   setError: (msg) => set({ errorMessage: msg, appState: 'error' }),

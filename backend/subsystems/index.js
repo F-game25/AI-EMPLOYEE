@@ -55,6 +55,25 @@ const state = {
     last_run: null,
     updated_at: null,
   },
+  selfImprovement: {
+    active: false,
+    total_tasks_processed: 0,
+    queue_depth: 0,
+    pass_rate: 0,
+    fail_rate: 0,
+    approval_ratio: 0,
+    rejection_ratio: 0,
+    rollback_ratio: 0,
+    deployed: 0,
+    rolled_back: 0,
+    rejected: 0,
+    test_failures: 0,
+    policy_violations: 0,
+    errors: 0,
+    top_failure_causes: [],
+    recent_events: [],
+    updated_at: null,
+  },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -251,6 +270,34 @@ async function syncDoctorFromPython() {
   return false;
 }
 
+async function syncSelfImprovementFromPython() {
+  try {
+    const data = await fetchJSON('/api/self-improvement/telemetry');
+    if (data && data.self_improvement) {
+      const si = data.self_improvement;
+      state.selfImprovement.active = si.active || false;
+      state.selfImprovement.total_tasks_processed = si.total_tasks_processed || 0;
+      state.selfImprovement.queue_depth = si.queue_depth || 0;
+      state.selfImprovement.pass_rate = si.pass_rate || 0;
+      state.selfImprovement.fail_rate = si.fail_rate || 0;
+      state.selfImprovement.approval_ratio = si.approval_ratio || 0;
+      state.selfImprovement.rejection_ratio = si.rejection_ratio || 0;
+      state.selfImprovement.rollback_ratio = si.rollback_ratio || 0;
+      state.selfImprovement.deployed = si.deployed || 0;
+      state.selfImprovement.rolled_back = si.rolled_back || 0;
+      state.selfImprovement.rejected = si.rejected || 0;
+      state.selfImprovement.test_failures = si.test_failures || 0;
+      state.selfImprovement.policy_violations = si.policy_violations || 0;
+      state.selfImprovement.errors = si.errors || 0;
+      state.selfImprovement.top_failure_causes = si.top_failure_causes || [];
+      state.selfImprovement.recent_events = (si.recent_events || []).slice(0, 10);
+      state.selfImprovement.updated_at = now();
+      return true;
+    }
+  } catch (_) { /* offline */ }
+  return false;
+}
+
 // ── Polling loop ──────────────────────────────────────────────────────────────
 
 let _pollInterval = null;
@@ -259,6 +306,7 @@ async function _pollCycle() {
   const nnOk = await syncNNFromPython();
   const memOk = await syncMemoryFromPython();
   const drOk = await syncDoctorFromPython();
+  await syncSelfImprovementFromPython();
 
   if (!nnOk) _simulateNN();
   if (!memOk) _simulateMemory();
@@ -297,10 +345,15 @@ function getDoctorStatus() {
   return { ...state.doctor };
 }
 
+function getSelfImprovementStatus() {
+  return { ...state.selfImprovement };
+}
+
 module.exports = {
   startPolling,
   stopPolling,
   getNNStatus,
   getMemoryTree,
   getDoctorStatus,
+  getSelfImprovementStatus,
 };

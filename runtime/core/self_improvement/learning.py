@@ -95,14 +95,18 @@ class LearningModule:
             "error": 0.0,
         }
         score = score_map.get(outcome, 0.0)
+        reward = (score * 2) - 1.0  # Map [0,1] → [-1,1]
         is_success = outcome in ("deployed", "approved")
 
         record = {
             "task_id": task.task_id,
+            "agent": "self_improvement_loop",
             "description": task.description,
             "target_area": task.target_area,
             "risk_class": task.risk_class,
             "outcome": outcome,
+            "decision_reason": self._decision_reason(task, outcome),
+            "neural_input": task.brain_strategy or {},
             "score": score,
             "is_success": is_success,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -117,6 +121,7 @@ class LearningModule:
         brain_result = self._feed_brain(task, outcome, score)
         record["brain_learned"] = brain_result.get("learned", False)
         record["brain_reward"] = brain_result.get("reward", 0.0)
+        record["reward_signal"] = reward
 
         # ── 3. Update intelligence profile ────────────────────────────────
         intel_result = self._update_intelligence(task, outcome, score)
@@ -171,6 +176,23 @@ class LearningModule:
         }
 
     # ── Internal: Strategy Store ──────────────────────────────────────────────
+
+    @staticmethod
+    def _decision_reason(task: ImprovementTask, outcome: str) -> str:
+        """Build a human-readable explanation for why the outcome happened."""
+        if outcome == "deployed":
+            return "All gates passed; patch deployed successfully."
+        if outcome == "approved":
+            return "Patch approved by policy."
+        if outcome == "rejected":
+            return task.error or "Approval policy rejected this risk level."
+        if outcome == "rolled_back":
+            return task.error or "Post-deploy verification failed; rolled back."
+        if outcome == "test_failed":
+            return task.error or "One or more test gates failed."
+        if outcome == "policy_rejected":
+            return task.error or "Diff policy violation detected."
+        return task.error or f"Outcome: {outcome}"
 
     def _record_to_strategy_store(
         self,

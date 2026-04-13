@@ -8,6 +8,7 @@ import SecondaryButton from './ui/SecondaryButton'
 import TertiaryPanel from './ui/TertiaryPanel'
 import WorkflowTreePanel from './dashboard/WorkflowTreePanel'
 import BrainInsightsPanel from './dashboard/BrainInsightsPanel'
+import SelfImprovementPanel from './dashboard/SelfImprovementPanel'
 
 const BASE = `http://${window.location.hostname}:3001`
 const PIPELINE_DEFAULTS = {
@@ -346,6 +347,7 @@ export default function Dashboard() {
 
             <WorkflowTreePanel />
             <BrainInsightsPanel />
+            <SelfImprovementPanel />
 
           </section>
         </div>
