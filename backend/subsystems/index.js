@@ -161,7 +161,8 @@ function _simulateMemory() {
 
   const idx = _simStep % state.memory.nodes.length;
   const node = state.memory.nodes[idx];
-  node.facts += Math.random() > 0.7 ? 1 : 0;
+  // Deterministic: increment facts every ~3 ticks (replaces Math.random() > 0.7)
+  node.facts += (_simStep % 3 === 0) ? 1 : 0;
   node.last_updated = now();
 
   const key = _memKeys[_simStep % _memKeys.length];
@@ -198,7 +199,8 @@ function _simulateDoctor() {
     agents: Math.round(Math.max(0, overall - 10)),
     system: Math.round(Math.min(100, overall + 20)),
   };
-  state.doctor.issues = _doctorIssues.slice(0, Math.max(1, Math.floor(Math.random() * 3)));
+  // Deterministic issue count: cycles 1→2→3→1… (replaces Math.random() * 3)
+  state.doctor.issues = _doctorIssues.slice(0, Math.max(1, (_simStep % 3) + 1));
   state.doctor.strengths = overall > 50 ? ['Neural brain is active', 'Memory system online'] : [];
   state.doctor.last_run = now();
   state.doctor.available = true;
