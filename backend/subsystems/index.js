@@ -132,7 +132,7 @@ function _populateFromActiveBrain() {
   state.nn.max_buffer_size = MAX_SIM_BUFFER_SIZE;
   state.nn.experiences = perf.total_tasks || 0;
   state.nn.confidence = perf.avg_confidence || 0;
-  state.nn.last_loss = 0;
+  state.nn.last_loss = null;
   state.nn.bg_running = true;
   state.nn.memory_size = brainStatus.memory_size || 0;
   state.nn.device = 'cpu';
