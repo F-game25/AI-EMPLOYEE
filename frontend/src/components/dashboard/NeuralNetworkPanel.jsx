@@ -85,6 +85,7 @@ export default function NeuralNetworkPanel() {
   }, [setNnStatus])
 
   const modeColor = MODE_COLORS[nn.mode] || 'var(--text-muted)'
+  const isSimulated = nn.data_source === 'simulated'
   const confPct = Math.round((nn.confidence || 0) * 100)
   const bufferSize = nn.buffer_size || 0
   const maxBufferSize = nn.max_buffer_size || 10000
@@ -142,6 +143,14 @@ export default function NeuralNetworkPanel() {
             style={{ overflow: 'hidden' }}
           >
             <div className="px-3 pb-2">
+              {isSimulated && (
+                <div
+                  className="font-mono mb-2 px-2 py-1 rounded"
+                  style={{ fontSize: '9px', color: 'var(--warning)', background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.15)' }}
+                >
+                  ⚠ DEGRADED — showing simulated data (no live backend)
+                </div>
+              )}
               {/* Confidence bar */}
               <div className="mb-2">
                 <div className="flex justify-between mb-0.5">
