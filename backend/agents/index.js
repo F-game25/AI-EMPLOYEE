@@ -115,6 +115,10 @@ function _setState(agent, nextState) {
   }
 }
 
+function createCancellationError(reason) {
+  return `cancelled:${reason}`;
+}
+
 function _activateAgent(agent) {
   if (agent.state === 'idle') {
     _setState(agent, 'running');
@@ -284,6 +288,43 @@ function activateAgents(count) {
   };
 }
 
+function stopAllAgents(reason = 'manual_stop') {
+  let cancelledTasks = 0;
+  for (const agent of agents) {
+    if (agent.currentTask) {
+      cancelledTasks += 1;
+      events.emit('task:failed', {
+        agent: _snapshot(agent),
+        task: {
+          ...agent.currentTask,
+          error: createCancellationError(reason),
+        },
+        finishedAt: new Date().toISOString(),
+      });
+    }
+    cancelledTasks += agent.taskQueue.length;
+    agent.taskQueue = [];
+    agent.currentTask = null;
+    agent.location = 'idle';
+    _setState(agent, 'idle');
+    agent.health = 'offline';
+  }
+  desiredActiveAgents = 0;
+  lastRobotSignal = {
+    agentId: null,
+    agentName: null,
+    taskId: null,
+    subsystem: null,
+    location: 'idle',
+    updatedAt: new Date().toISOString(),
+  };
+  _broadcastAgentUpdate();
+  return {
+    cancelledTasks,
+    runningAgents: getRunningAgentCount(),
+  };
+}
+
 function enqueueTask({ message, subsystem = 'general', metadata = {} }) {
   _activateForDemand(subsystem);
   if (_runningAgents().length === 0) {
@@ -373,5 +414,6 @@ module.exports = {
   setMode,
   getMode,
   getRobotSignal,
+  stopAllAgents,
   on,
 };

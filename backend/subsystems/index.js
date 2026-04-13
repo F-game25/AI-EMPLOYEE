@@ -24,7 +24,7 @@ const state = {
   nn: {
     available: true,
     active: true,
-    mode: 'OFFLINE',
+    mode: 'SIMULATED',
     learn_step: 0,
     buffer_size: 0,
     max_buffer_size: 10000,
@@ -119,7 +119,8 @@ function _simulateNN() {
   state.nn.confidence = Math.round(confidence * 1000) / 1000;
   state.nn.last_loss = Math.round(loss * 10000) / 10000;
   state.nn.bg_running = true;
-  state.nn.mode = 'OFFLINE';
+  state.nn.mode = 'SIMULATED';
+  state.nn.available = true;
   state.nn.active = true;
   state.nn.available = true;
   state.nn.recent_outputs = [output, ...state.nn.recent_outputs].slice(0, 5);
