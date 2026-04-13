@@ -62,6 +62,11 @@ class LearningModule:
 
     # ── Core API ──────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _score_to_reward(score: float) -> float:
+        """Map a score in [0, 1] to a reward signal in [-1, 1]."""
+        return (score * 2) - 1.0
+
     def record_outcome(
         self,
         task: ImprovementTask,
@@ -95,7 +100,7 @@ class LearningModule:
             "error": 0.0,
         }
         score = score_map.get(outcome, 0.0)
-        reward = (score * 2) - 1.0  # Map [0,1] → [-1,1]
+        reward = self._score_to_reward(score)
         is_success = outcome in ("deployed", "approved")
 
         record = {
@@ -241,7 +246,7 @@ class LearningModule:
         if brain is None:
             return {"learned": False, "reward": 0.0}
 
-        reward = (score * 2) - 1.0  # Map [0,1] → [-1,1]
+        reward = self._score_to_reward(score)
 
         try:
             # Delayed import: TaskNode lives in core.contracts which may not be

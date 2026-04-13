@@ -168,8 +168,8 @@ class ImprovementController:
             if sandbox_path is not None:
                 try:
                     self._sandbox.cleanup_sandbox(task.task_id)
-                except Exception:
-                    pass
+                except Exception as cleanup_exc:
+                    _log.debug("Sandbox cleanup failed for %s: %s", task.task_id, cleanup_exc)
 
     # ── Manual approval/rejection ─────────────────────────────────────────────
 

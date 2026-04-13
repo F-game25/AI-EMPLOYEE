@@ -69,7 +69,7 @@ class ImprovementTelemetry:
                 "active": True,
                 "started_at": self._started_at,
                 "total_tasks_processed": total_tasks,
-                "queue_depth": counters.get("analyzing", 0) - total_outcomes,
+                "queue_depth": max(0, counters.get("analyzing", 0) - total_outcomes),
                 "pass_rate": round(deployed / max(total_outcomes, 1), 3),
                 "fail_rate": round(
                     (test_failed + policy_rejected + errors) / max(total_outcomes, 1),
