@@ -629,7 +629,7 @@ case "$cmd" in
     fi
     ;;
   do)
-    # Send any task to your AI employee via the Problem Solver UI API
+    # Publish task to internal message bus, then mirror to UI API.
     task_text="${*}"
     if [[ -z "${task_text:-}" ]]; then
       echo "Usage: ai-employee do <task description>"
@@ -655,6 +655,35 @@ case "$cmd" in
     echo "🤖 Sending task to your AI employee..."
     echo "   Task: $task_text"
     echo ""
+
+    # Publish to internal tasks channel (best-effort).
+    if command -v python3 >/dev/null 2>&1; then
+      TASK_TEXT="$task_text" python3 - <<PY >/dev/null 2>&1 || true
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+ai_home = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
+runtime_dir = Path("${AI_HOME}") / "runtime"
+repo_runtime = Path("${AI_HOME}").parent / "AI-EMPLOYEE" / "runtime"
+for p in (runtime_dir, repo_runtime):
+    if p.exists() and str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+try:
+    from core.bus import get_message_bus
+    payload = {
+        "task": os.environ.get("TASK_TEXT", ""),
+        "source": "cli",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    get_message_bus().publish_sync("tasks", payload)
+except Exception:
+    pass
+PY
+    fi
 
     if command -v curl >/dev/null 2>&1; then
       _resp=$(curl -sf --max-time 30 \

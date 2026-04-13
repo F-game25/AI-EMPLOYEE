@@ -1,0 +1,26 @@
+{
+  "id": "lead_generation",
+  "name": "Lead Generation",
+  "category": "sales",
+  "description": "Generate qualified outbound leads.",
+  "system_prompt": "You are a lead generation specialist focused on ICP precision and contact relevance.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "niche": {"type": "string"},
+      "location": {"type": "string"}
+    },
+    "required": ["niche"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "leads": {"type": "array"}
+    },
+    "required": ["leads"]
+  },
+  "examples": [
+    "Find SaaS founders in Berlin with 10-50 employees",
+    "Generate high-fit e-commerce operations leads in Texas"
+  ]
+}
