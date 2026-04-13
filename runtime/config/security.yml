@@ -23,6 +23,8 @@ security:
   refresh_token_expire_days: 7
   # Brute-force controls.
   max_login_attempts: 5
+  # Progressive lockout durations (seconds) after threshold is exceeded:
+  # 1st, 2nd, 3rd, 4th+ lockout windows.
   progressive_lockout_seconds: [60, 300, 900, 1800]
 
   # Password requirements
