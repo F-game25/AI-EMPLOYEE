@@ -1,21 +1,93 @@
 'use strict';
 
 const { EventEmitter } = require('events');
+const path = require('path');
+const fs = require('fs');
 
-const AGENT_CATALOG = [
-  { id: 'ai-1', name: 'LeadAnalyzer', type: 'analysis', skills: ['general', 'memory'] },
-  { id: 'ai-2', name: 'ResponseGen', type: 'generation', skills: ['general', 'nn'] },
-  { id: 'ai-3', name: 'KnowledgeSearch', type: 'search', skills: ['general', 'memory'] },
-  { id: 'ai-4', name: 'TaskRouter', type: 'routing', skills: ['general', 'doctor'] },
-  { id: 'ai-5', name: 'DataExtractor', type: 'extraction', skills: ['general', 'memory', 'doctor'] },
-  { id: 'ai-6', name: 'ReportBuilder', type: 'reporting', skills: ['general', 'nn', 'doctor'] },
-];
+// ── Category → subsystem skill mapping ────────────────────────────────────────
+// Maps agent_capabilities.json categories to internal subsystem skill tokens
+// so agents can be routed by the orchestrator's subsystem-based routing.
+const CATEGORY_SKILLS = {
+  sales: ['general', 'memory'],
+  marketing: ['general', 'memory'],
+  content: ['general', 'nn'],
+  analytics: ['general', 'nn', 'doctor'],
+  research: ['general', 'memory', 'nn'],
+  finance: ['general', 'doctor'],
+  trading: ['general', 'nn'],
+  ecommerce: ['general', 'memory'],
+  social: ['general', 'nn'],
+  operations: ['general', 'doctor'],
+  coordination: ['general', 'memory', 'nn', 'doctor'],
+  strategy: ['general', 'nn', 'doctor'],
+  intelligence: ['general', 'memory', 'nn'],
+  engineering: ['general', 'nn'],
+  development: ['general', 'nn'],
+  coding: ['general', 'nn'],
+  design: ['general', 'nn'],
+  hr: ['general', 'memory'],
+  management: ['general', 'doctor'],
+  support: ['general', 'memory'],
+  testing: ['general', 'doctor'],
+  communication: ['general', 'memory'],
+  growth: ['general', 'nn', 'memory'],
+  creative: ['general', 'nn'],
+  crypto: ['general', 'nn'],
+  orchestrator: ['general', 'memory', 'nn', 'doctor'],
+};
 
-// Simulated task processing duration bounds (per task execution).
-// 1000-2800ms intentionally keeps end-to-end response under ~3s while remaining
-// long enough for operators to observe queueing and state transitions in the UI.
-const PROCESS_MS_MIN = 1000;
-const PROCESS_MS_MAX = 2800;
+// ── Load agent catalog from runtime/config/agent_capabilities.json ────────────
+// Falls back to a minimal built-in catalog if the config file is missing.
+function loadAgentCatalog() {
+  const configPath = path.resolve(__dirname, '../../runtime/config/agent_capabilities.json');
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const data = JSON.parse(raw);
+    const agentsMap = data.agents || {};
+    const catalog = [];
+    for (const [agentId, info] of Object.entries(agentsMap)) {
+      const category = info.category || 'general';
+      const skills = CATEGORY_SKILLS[category] || ['general'];
+      catalog.push({
+        id: agentId,
+        name: agentId
+          .split('-')
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(''),
+        type: category,
+        skills,
+        description: info.description || '',
+        capabilities: (info.skills || []).slice(0, 6),
+      });
+    }
+    if (catalog.length === 0) throw new Error('empty catalog');
+    return catalog;
+  } catch {
+    // Fallback: minimal built-in catalog
+    return [
+      { id: 'orchestrator', name: 'Orchestrator', type: 'coordination', skills: ['general', 'memory', 'nn', 'doctor'], description: 'Master task router', capabilities: [] },
+      { id: 'lead-hunter', name: 'LeadHunter', type: 'sales', skills: ['general', 'memory'], description: 'B2B lead generation', capabilities: [] },
+      { id: 'content-master', name: 'ContentMaster', type: 'content', skills: ['general', 'nn'], description: 'SEO content specialist', capabilities: [] },
+      { id: 'data-analyst', name: 'DataAnalyst', type: 'analytics', skills: ['general', 'nn', 'doctor'], description: 'Data analysis and reporting', capabilities: [] },
+      { id: 'social-guru', name: 'SocialGuru', type: 'social', skills: ['general', 'nn'], description: 'Social media management', capabilities: [] },
+      { id: 'support-bot', name: 'SupportBot', type: 'support', skills: ['general', 'memory'], description: 'Customer support automation', capabilities: [] },
+    ];
+  }
+}
+
+const AGENT_CATALOG = loadAgentCatalog();
+
+// Task processing duration bounds (per task execution).
+// Base range 800-2400ms, scaled by agent–task affinity.
+// More specialized agents execute faster within their domain.
+const PROCESS_MS_MIN = 800;
+const PROCESS_MS_MAX = 2400;
+// Additional complexity multiplier range for tasks outside agent specialty.
+const MISMATCH_PENALTY_MS = 600;
+// Default assumed message length when task has no message (baseline complexity).
+const DEFAULT_MSG_LENGTH = 40;
+// Message length at which tasks are considered maximally complex.
+const MSG_LENGTH_NORMALIZATION = 200;
 // How long an inactive running agent waits before being scaled back to idle.
 const IDLE_SCALE_DOWN_MS = 20000;
 // Agent runtime scheduler frequency (persistent event-driven loop tick).
@@ -71,8 +143,21 @@ function _modeMaxActive() {
   return Math.max(MANUAL_MIN_ACTIVE, Math.ceil(agents.length * MANUAL_ACTIVE_RATIO));
 }
 
-function _taskDurationMs() {
-  return Math.floor(Math.random() * (PROCESS_MS_MAX - PROCESS_MS_MIN + 1)) + PROCESS_MS_MIN;
+// Deterministic task duration model.
+// Factors: base time + message length influence + subsystem affinity.
+// Agent with matching skill → faster; mismatch → penalty.
+function _taskDurationMs(agent, task) {
+  const msgLen = (task && task.message) ? task.message.length : DEFAULT_MSG_LENGTH;
+  // Base duration: scales linearly with message length (longer = more complex)
+  const lengthFactor = Math.min(msgLen / MSG_LENGTH_NORMALIZATION, 1); // 0..1
+  const base = PROCESS_MS_MIN + Math.round(lengthFactor * (PROCESS_MS_MAX - PROCESS_MS_MIN));
+  // Affinity check: agent has relevant skill for this subsystem?
+  const subsystem = (task && task.subsystem) || 'general';
+  const hasSkill = agent && agent.skills && agent.skills.includes(subsystem);
+  const penalty = hasSkill ? 0 : MISMATCH_PENALTY_MS;
+  // Small deterministic jitter based on task sequence to avoid identical timings
+  const jitter = ((_seq * 37) % 200) - 100; // -100..+100ms
+  return Math.max(PROCESS_MS_MIN, base + penalty + jitter);
 }
 
 function _snapshot(agent) {
@@ -86,6 +171,8 @@ function _snapshot(agent) {
     queueSize: agent.taskQueue.length,
     tasksCompleted: agent.tasksCompleted,
     location: agent.location || 'idle',
+    description: agent.description || '',
+    capabilities: agent.capabilities || [],
   };
 }
 
@@ -234,7 +321,7 @@ function _tick() {
     if (!agent.currentTask && agent.taskQueue.length > 0 && agent.state !== 'idle') {
       const task = agent.taskQueue.shift();
       task.startedAt = new Date().toISOString();
-      task.finishAt = now + _taskDurationMs();
+      task.finishAt = now + _taskDurationMs(agent, task);
       agent.currentTask = task;
       _setState(agent, 'busy');
       agent.location = _formatLocation('processing', task.subsystem);

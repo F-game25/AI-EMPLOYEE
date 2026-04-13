@@ -30,7 +30,7 @@ const PIPELINE_DEFAULTS = {
 
 const KIND_COLORS = {
   automation: 'var(--gold)',
-  pipeline: '#60a5fa',
+  pipeline: 'var(--info)',
   task: 'var(--success)',
   system: 'var(--text-muted)',
 }
@@ -182,8 +182,8 @@ export default function Dashboard() {
   const businessKpis = useMemo(() => ([
     { label: 'Tasks Executed', value: productMetrics?.tasks?.tasks_executed ?? 0 },
     { label: 'Success Rate', value: `${Math.round((productMetrics?.tasks?.success_rate ?? 0) * 100)}%` },
-    { label: 'Value Generated', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(2)}` },
-    { label: 'Revenue', value: `$${(productMetrics?.revenue?.total_revenue ?? 0).toFixed(2)}` },
+    { label: 'Value Generated', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(2)}`, simulated: true },
+    { label: 'Revenue', value: `$${(productMetrics?.revenue?.total_revenue ?? 0).toFixed(2)}`, simulated: true },
   ]), [productMetrics])
   // `running` is request-in-flight; `automationActive` is backend-reported execution state.
   const automationActive = Boolean(productMetrics?.mode?.automation_running)
@@ -204,21 +204,21 @@ export default function Dashboard() {
         <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3 dashboard-left">
           <section className="ds-card p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <button className="tier-1-btn font-mono text-xs px-4 py-2" onClick={() => controlAutomation('start')} disabled={running || automationActive} title="Start full automation workflow">
-              START AUTOMATION
+            <button className="tier-1-btn font-mono text-xs px-4 py-2" onClick={() => controlAutomation('start')} disabled={running || automationActive} title="Start full automation workflow" style={{ opacity: running || automationActive ? 0.5 : 1 }}>
+              {running ? '⏳ STARTING…' : automationActive ? '● RUNNING' : 'START AUTOMATION'}
             </button>
 
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => controlAutomation('stop')} disabled={running || !automationActive} title="Stop all agent execution and clear queued tasks">
-              STOP ALL
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => controlAutomation('stop')} disabled={running || !automationActive} title="Stop all agent execution and clear queued tasks" style={{ opacity: running || !automationActive ? 0.5 : 1 }}>
+              {running ? '⏳ STOPPING…' : 'STOP ALL'}
             </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('content')} disabled={running} title="Run content generation pipeline">
-              RUN CONTENT PIPELINE
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('content')} disabled={running} title="Run content generation pipeline" style={{ opacity: running ? 0.5 : 1 }}>
+              {running ? '⏳…' : 'RUN CONTENT PIPELINE'}
             </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('lead')} disabled={running} title="Run lead generation and scoring pipeline">
-              RUN LEAD PIPELINE
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('lead')} disabled={running} title="Run lead generation and scoring pipeline" style={{ opacity: running ? 0.5 : 1 }}>
+              {running ? '⏳…' : 'RUN LEAD PIPELINE'}
             </button>
-            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('opportunity')} disabled={running} title="Run opportunity conversion pipeline">
-              RUN OUTREACH PIPELINE
+            <button className="tier-2-btn font-mono text-xs px-3 py-2" onClick={() => runPipeline('opportunity')} disabled={running} title="Run opportunity conversion pipeline" style={{ opacity: running ? 0.5 : 1 }}>
+              {running ? '⏳…' : 'RUN OUTREACH PIPELINE'}
             </button>
           </div>
           <div className="mt-2 font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>
@@ -233,8 +233,8 @@ export default function Dashboard() {
                 className="text-left p-2"
                 title={modeOption.help}
                 style={{
-                  background: mode === modeOption.id ? 'rgba(245,196,0,0.09)' : 'rgba(255,255,255,0.02)',
-                  border: mode === modeOption.id ? '1px solid rgba(245,196,0,0.45)' : '1px solid var(--border-subtle)',
+                  background: mode === modeOption.id ? 'rgba(212,175,55,0.09)' : 'rgba(255,255,255,0.02)',
+                  border: mode === modeOption.id ? '1px solid rgba(212,175,55,0.45)' : '1px solid var(--border-subtle)',
                   borderRadius: '8px',
                 }}
               >
@@ -328,7 +328,10 @@ export default function Dashboard() {
               <div className="overflow-y-auto space-y-1 min-h-0 flex-1">
                 {businessKpis.map((kpi) => (
                   <TertiaryPanel key={kpi.label} className="p-2 font-mono text-[11px] flex justify-between gap-3">
-                    <span style={{ color: 'var(--text-muted)' }}>{kpi.label}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      {kpi.label}
+                      {kpi.simulated && <span style={{ color: 'var(--warning)', fontSize: '9px', marginLeft: '4px' }}>SIM</span>}
+                    </span>
                     <span style={{ color: 'var(--gold)' }}>{kpi.value}</span>
                   </TertiaryPanel>
                 ))}

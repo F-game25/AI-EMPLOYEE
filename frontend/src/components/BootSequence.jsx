@@ -1,16 +1,18 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-const BOOT_LINES = [
-  { text: '> INITIALIZING AI-EMPLOYEE OS v2.0...', delay: 0 },
-  { text: '> Loading neural core modules...', delay: 320 },
-  { text: '> Establishing secure channels...', delay: 640 },
-  { text: '> Calibrating agent network [74 agents]...', delay: 960 },
-  { text: '> Scanning for anomalies... [CLEAR]', delay: 1280 },
-  { text: '> Synchronizing orchestrator...', delay: 1600 },
-  { text: '> Verifying memory integrity... [OK]', delay: 1920 },
-  { text: '> All systems nominal. BOOT COMPLETE.', delay: 2240 },
-]
+function buildBootLines(agentCount) {
+  return [
+    { text: '> INITIALIZING AI-EMPLOYEE OS v2.0...', delay: 0 },
+    { text: '> Loading neural core modules...', delay: 320 },
+    { text: '> Establishing secure channels...', delay: 640 },
+    { text: `> Calibrating agent network [${agentCount} agents]...`, delay: 960 },
+    { text: '> Scanning for anomalies... [CLEAR]', delay: 1280 },
+    { text: '> Synchronizing orchestrator...', delay: 1600 },
+    { text: '> Verifying memory integrity... [OK]', delay: 1920 },
+    { text: '> All systems nominal. BOOT COMPLETE.', delay: 2240 },
+  ]
+}
 
 function GlitchText({ children, style, className }) {
   const [glitch, setGlitch] = useState(false)
@@ -30,7 +32,7 @@ function GlitchText({ children, style, className }) {
           style={{
             position: 'absolute',
             inset: 0,
-            color: '#ff3366',
+            color: 'var(--error)',
             clipPath: 'inset(30% 0 40% 0)',
             transform: 'translate(-3px, 0)',
             opacity: 0.7,
@@ -45,7 +47,7 @@ function GlitchText({ children, style, className }) {
           style={{
             position: 'absolute',
             inset: 0,
-            color: '#00ff88',
+            color: '#00e676',
             clipPath: 'inset(55% 0 10% 0)',
             transform: 'translate(3px, 0)',
             opacity: 0.7,
@@ -71,29 +73,45 @@ export default function BootSequence({ onComplete }) {
   useLayoutEffect(() => { onCompleteRef.current = onComplete })
 
   useEffect(() => {
+    let cancelled = false
     const timers = []
 
-    BOOT_LINES.forEach((line, i) => {
-      timers.push(
-        setTimeout(() => {
-          setVisibleLines(prev => [...prev, line.text])
-          setProgress(Math.round(((i + 1) / BOOT_LINES.length) * 100))
-        }, line.delay)
-      )
-    })
+    // Fetch actual agent count from backend, fall back to 57
+    const startBoot = (agentCount) => {
+      if (cancelled) return
+      const BOOT_LINES = buildBootLines(agentCount)
 
-    const lastDelay = BOOT_LINES[BOOT_LINES.length - 1].delay
-    timers.push(setTimeout(() => setShowLogo(true), lastDelay + 300))
-    timers.push(setTimeout(() => setLogoReady(true), lastDelay + 700))
-    timers.push(setTimeout(() => onCompleteRef.current?.(), lastDelay + 1400))
+      BOOT_LINES.forEach((line, i) => {
+        timers.push(
+          setTimeout(() => {
+            if (cancelled) return
+            setVisibleLines(prev => [...prev, line.text])
+            setProgress(Math.round(((i + 1) / BOOT_LINES.length) * 100))
+          }, line.delay)
+        )
+      })
 
-    return () => timers.forEach(clearTimeout)
+      const lastDelay = BOOT_LINES[BOOT_LINES.length - 1].delay
+      timers.push(setTimeout(() => { if (!cancelled) setShowLogo(true) }, lastDelay + 300))
+      timers.push(setTimeout(() => { if (!cancelled) setLogoReady(true) }, lastDelay + 700))
+      timers.push(setTimeout(() => { if (!cancelled) onCompleteRef.current?.() }, lastDelay + 1400))
+    }
+
+    fetch('/agents')
+      .then(r => r.json())
+      .then(data => startBoot(data?.agents?.length || 57))
+      .catch(() => startBoot(57))
+
+    return () => {
+      cancelled = true
+      timers.forEach(clearTimeout)
+    }
   }, []) // empty deps — run once on mount; onComplete accessed via stable ref
 
   return (
     <motion.div
       className="fixed inset-0 flex flex-col items-center justify-center"
-      style={{ background: '#050505' }}
+      style={{ background: 'var(--bg-base)' }}
       initial={{ opacity: 1 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -105,7 +123,7 @@ export default function BootSequence({ onComplete }) {
         animate={{ opacity: [0.03, 0.06, 0.03] }}
         transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
         style={{
-          background: 'radial-gradient(ellipse at 50% 50%, rgba(245,196,0,1) 0%, transparent 65%)',
+          background: 'radial-gradient(ellipse at 50% 50%, rgba(212,175,55,1) 0%, transparent 65%)',
         }}
       />
 
@@ -121,7 +139,7 @@ export default function BootSequence({ onComplete }) {
               className="font-mono text-xs mb-1"
               style={{
                 color: line.includes('COMPLETE') || line.includes('OK') || line.includes('CLEAR')
-                  ? '#F5C400'
+                  ? '#D4AF37'
                   : '#888',
               }}
             >
@@ -135,7 +153,7 @@ export default function BootSequence({ onComplete }) {
           className="w-full mb-8"
           style={{
             height: '2px',
-            background: 'rgba(245,196,0,0.1)',
+            background: 'rgba(212,175,55,0.1)',
             borderRadius: '1px',
           }}
         >
@@ -143,9 +161,9 @@ export default function BootSequence({ onComplete }) {
             initial={{ width: '0%' }}
             style={{
               height: '100%',
-              background: 'linear-gradient(90deg, rgba(245,196,0,0.4), #F5C400)',
+              background: 'linear-gradient(90deg, rgba(212,175,55,0.4), #D4AF37)',
               borderRadius: '1px',
-              boxShadow: '0 0 8px rgba(245,196,0,0.6)',
+              boxShadow: '0 0 8px rgba(212,175,55,0.6)',
             }}
             animate={{ width: `${progress}%` }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
@@ -161,12 +179,12 @@ export default function BootSequence({ onComplete }) {
               transition={{ duration: 0.4, ease: 'easeOut' }}
               className="flex items-center justify-center"
               style={{
-                border: '1px solid rgba(245,196,0,0.4)',
+                border: '1px solid rgba(212,175,55,0.4)',
                 padding: '18px 60px',
                 borderRadius: '4px',
-                background: 'rgba(245,196,0,0.03)',
+                background: 'rgba(212,175,55,0.03)',
                 boxShadow: logoReady
-                  ? '0 0 60px rgba(245,196,0,0.25), inset 0 0 40px rgba(245,196,0,0.04)'
+                  ? '0 0 60px rgba(212,175,55,0.25), inset 0 0 40px rgba(212,175,55,0.04)'
                   : 'none',
                 transition: 'box-shadow 0.4s ease',
               }}
@@ -176,7 +194,7 @@ export default function BootSequence({ onComplete }) {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.25, duration: 0.3 }}
                 className="font-mono text-2xl font-bold tracking-widest"
-                style={{ color: '#F5C400' }}
+                style={{ color: '#D4AF37' }}
               >
                 <GlitchText>AI-EMPLOYEE</GlitchText>
               </motion.div>
@@ -199,10 +217,10 @@ export default function BootSequence({ onComplete }) {
             ...pos,
             width: 12,
             height: 12,
-            borderTop: pos.top !== undefined ? '1px solid rgba(245,196,0,0.3)' : 'none',
-            borderBottom: pos.bottom !== undefined ? '1px solid rgba(245,196,0,0.3)' : 'none',
-            borderLeft: pos.left !== undefined ? '1px solid rgba(245,196,0,0.3)' : 'none',
-            borderRight: pos.right !== undefined ? '1px solid rgba(245,196,0,0.3)' : 'none',
+            borderTop: pos.top !== undefined ? '1px solid rgba(212,175,55,0.3)' : 'none',
+            borderBottom: pos.bottom !== undefined ? '1px solid rgba(212,175,55,0.3)' : 'none',
+            borderLeft: pos.left !== undefined ? '1px solid rgba(212,175,55,0.3)' : 'none',
+            borderRight: pos.right !== undefined ? '1px solid rgba(212,175,55,0.3)' : 'none',
           }}
         />
       ))}

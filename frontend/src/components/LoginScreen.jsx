@@ -21,7 +21,7 @@ export default function LoginScreen() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 flex items-center justify-center"
-      style={{ background: '#050505' }}
+      style={{ background: 'var(--bg-base)' }}
     >
       {/* Scanlines */}
       <div className="scanlines" />
@@ -30,7 +30,7 @@ export default function LoginScreen() {
       <div
         className="absolute inset-0"
         style={{
-          background: 'radial-gradient(ellipse at 50% 50%, rgba(245,196,0,0.04) 0%, transparent 70%)',
+          background: 'radial-gradient(ellipse at 50% 50%, rgba(212,175,55,0.04) 0%, transparent 70%)',
         }}
       />
 
@@ -41,17 +41,17 @@ export default function LoginScreen() {
         className="relative w-full max-w-md p-8"
         style={{
           background: 'rgba(10,10,10,0.95)',
-          border: '1px solid rgba(245,196,0,0.3)',
+          border: '1px solid rgba(212,175,55,0.3)',
           borderRadius: '8px',
-          boxShadow: '0 0 60px rgba(245,196,0,0.15), 0 0 120px rgba(245,196,0,0.05)',
+          boxShadow: '0 0 60px rgba(212,175,55,0.15), 0 0 120px rgba(212,175,55,0.05)',
         }}
       >
         {/* Header */}
         <div className="mb-8 text-center">
-          <div className="font-mono text-xs mb-3" style={{ color: '#F5C400', letterSpacing: '4px' }}>
+          <div className="font-mono text-xs mb-3" style={{ color: '#D4AF37', letterSpacing: '4px' }}>
             AI-EMPLOYEE OS
           </div>
-          <h1 className="text-2xl font-semibold mb-1" style={{ color: '#e8e8e8' }}>
+          <h1 className="text-2xl font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
             Welcome back
           </h1>
           <p className="text-sm" style={{ color: '#555' }}>
@@ -74,7 +74,7 @@ export default function LoginScreen() {
                 style={{
                   background: 'rgba(255,255,255,0.03)',
                   borderRadius: '4px',
-                  color: '#e8e8e8',
+                  color: 'var(--text-primary)',
                 }}
               />
             </div>
@@ -93,7 +93,7 @@ export default function LoginScreen() {
                 style={{
                   background: 'rgba(255,255,255,0.03)',
                   borderRadius: '4px',
-                  color: '#e8e8e8',
+                  color: 'var(--text-primary)',
                 }}
               />
             </div>
@@ -106,12 +106,12 @@ export default function LoginScreen() {
             whileTap={{ scale: 0.99 }}
             className="w-full font-mono text-sm py-3 mt-2 font-semibold tracking-widest transition-all duration-200"
             style={{
-              background: loading ? 'rgba(245,196,0,0.1)' : 'rgba(245,196,0,0.15)',
-              border: '1px solid rgba(245,196,0,0.5)',
+              background: loading ? 'rgba(212,175,55,0.1)' : 'rgba(212,175,55,0.15)',
+              border: '1px solid rgba(212,175,55,0.5)',
               borderRadius: '4px',
-              color: '#F5C400',
+              color: '#D4AF37',
               cursor: loading ? 'not-allowed' : 'pointer',
-              boxShadow: loading ? 'none' : '0 0 20px rgba(245,196,0,0.2)',
+              boxShadow: loading ? 'none' : '0 0 20px rgba(212,175,55,0.2)',
             }}
           >
             {loading ? 'AUTHENTICATING...' : 'ACCESS SYSTEM'}
@@ -119,10 +119,10 @@ export default function LoginScreen() {
         </form>
 
         {/* Corner decorations */}
-        <div className="absolute top-3 left-3 w-3 h-3" style={{ borderTop: '1px solid #F5C400', borderLeft: '1px solid #F5C400' }} />
-        <div className="absolute top-3 right-3 w-3 h-3" style={{ borderTop: '1px solid #F5C400', borderRight: '1px solid #F5C400' }} />
-        <div className="absolute bottom-3 left-3 w-3 h-3" style={{ borderBottom: '1px solid #F5C400', borderLeft: '1px solid #F5C400' }} />
-        <div className="absolute bottom-3 right-3 w-3 h-3" style={{ borderBottom: '1px solid #F5C400', borderRight: '1px solid #F5C400' }} />
+        <div className="absolute top-3 left-3 w-3 h-3" style={{ borderTop: '1px solid #D4AF37', borderLeft: '1px solid #D4AF37' }} />
+        <div className="absolute top-3 right-3 w-3 h-3" style={{ borderTop: '1px solid #D4AF37', borderRight: '1px solid #D4AF37' }} />
+        <div className="absolute bottom-3 left-3 w-3 h-3" style={{ borderBottom: '1px solid #D4AF37', borderLeft: '1px solid #D4AF37' }} />
+        <div className="absolute bottom-3 right-3 w-3 h-3" style={{ borderBottom: '1px solid #D4AF37', borderRight: '1px solid #D4AF37' }} />
       </motion.div>
     </motion.div>
   )

@@ -71,8 +71,8 @@ export default function ChatPanel() {
               <div
                 className="max-w-sm lg:max-w-lg px-3 py-2 font-mono text-xs leading-relaxed"
                 style={msg.role === 'user' ? {
-                  background: 'rgba(245,196,0,0.08)',
-                  border: '1px solid rgba(245,196,0,0.25)',
+                  background: 'rgba(212,175,55,0.08)',
+                  border: '1px solid rgba(212,175,55,0.25)',
                   borderRadius: '6px 6px 2px 6px',
                   color: 'var(--gold)',
                 } : {
@@ -176,9 +176,9 @@ export default function ChatPanel() {
           disabled={!input.trim()}
           className="font-mono text-xs px-3 py-1.5 flex-shrink-0"
           style={{
-            border: '1px solid rgba(245,196,0,0.3)',
+            border: '1px solid rgba(212,175,55,0.3)',
             color: 'var(--gold)',
-            background: 'rgba(245,196,0,0.06)',
+            background: 'rgba(212,175,55,0.06)',
             borderRadius: '3px',
             cursor: input.trim() ? 'pointer' : 'not-allowed',
             opacity: input.trim() ? 1 : 0.5,

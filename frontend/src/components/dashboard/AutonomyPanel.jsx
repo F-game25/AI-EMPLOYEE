@@ -4,9 +4,9 @@ import { useAppStore } from '../../store/appStore'
 import TertiaryPanel from '../ui/TertiaryPanel'
 
 const MODE_COLORS = {
-  OFF: '#ef4444',
-  ON: '#eab308',
-  AUTO: '#22c55e',
+  OFF: 'var(--error)',
+  ON: 'var(--warning)',
+  AUTO: 'var(--success)',
 }
 
 function StatRow({ label, value, color }) {
@@ -25,7 +25,7 @@ export default function AutonomyPanel() {
   const mode = autonomy?.mode?.mode || 'OFF'
   const daemon = autonomy?.daemon || {}
   const queue = autonomy?.queue || {}
-  const mColor = MODE_COLORS[mode] || '#ef4444'
+  const mColor = MODE_COLORS[mode] || 'var(--error)'
   const isSimulated = autonomy?.data_source === 'simulated' || autonomy?.data_source === 'initializing'
 
   return (
@@ -77,7 +77,7 @@ export default function AutonomyPanel() {
 
             {/* Daemon status */}
             <div style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '6px', marginBottom: '6px' }}>
-              <StatRow label="DAEMON" value={daemon.running ? '● RUNNING' : '○ STOPPED'} color={daemon.running ? '#22c55e' : '#ef4444'} />
+              <StatRow label="DAEMON" value={daemon.running ? '● RUNNING' : '○ STOPPED'} color={daemon.running ? 'var(--success)' : 'var(--error)'} />
               <StatRow label="CYCLES" value={(daemon.cycles || 0).toLocaleString()} />
               <StatRow label="INTERVAL" value={`${daemon.cycle_interval_s || 2}s`} />
               {daemon.last_cycle_at && (
@@ -88,10 +88,10 @@ export default function AutonomyPanel() {
             {/* Task stats */}
             <div style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '6px', marginBottom: '6px' }}>
               <StatRow label="PROCESSED" value={daemon.tasks_processed || 0} color="var(--gold)" />
-              <StatRow label="SUCCEEDED" value={daemon.tasks_succeeded || 0} color="#22c55e" />
-              <StatRow label="FAILED" value={daemon.tasks_failed || 0} color={daemon.tasks_failed > 0 ? '#ef4444' : 'var(--text-secondary)'} />
+              <StatRow label="SUCCEEDED" value={daemon.tasks_succeeded || 0} color="var(--success)" />
+              <StatRow label="FAILED" value={daemon.tasks_failed || 0} color={daemon.tasks_failed > 0 ? 'var(--error)' : 'var(--text-secondary)'} />
               {daemon.consecutive_errors > 0 && (
-                <StatRow label="CONSEC ERRORS" value={daemon.consecutive_errors} color="#ef4444" />
+                <StatRow label="CONSEC ERRORS" value={daemon.consecutive_errors} color="var(--error)" />
               )}
             </div>
 
@@ -109,7 +109,7 @@ export default function AutonomyPanel() {
 
             {/* Emergency stop state */}
             {autonomy?.mode?.emergency_stopped && (
-              <TertiaryPanel className="mt-2 p-2 font-mono text-[10px]" style={{ color: '#ef4444' }}>
+              <TertiaryPanel className="mt-2 p-2 font-mono text-[10px]" style={{ color: 'var(--error)' }}>
                 ⚠ EMERGENCY STOPPED — set mode to ON or AUTO to resume
               </TertiaryPanel>
             )}
