@@ -228,7 +228,7 @@ def brain_status():
         return JSONResponse(_brain_status_payload())
     except Exception:
         _log.exception("brain_status failed")
-        return JSONResponse({"status": "active", "available": True, "memory_size": 0, "mode": "ONLINE"})
+        return JSONResponse({"status": "active", "available": True, "memory_size": 0, "mode": "ONLINE", "error": "Brain status load failed; showing default state"})
 
 
 @router.get("/brain/insights")
@@ -240,7 +240,7 @@ def brain_insights():
         return JSONResponse(_brain_registry.insights())
     except Exception:
         _log.exception("brain_insights failed")
-        return JSONResponse({"active": True, "recent_learning_events": [], "performance_metrics": {}})
+        return JSONResponse({"active": True, "recent_learning_events": [], "performance_metrics": {}, "error": "Brain insights load failed; showing default state"})
 
 
 @router.get("/tasks/recent")
