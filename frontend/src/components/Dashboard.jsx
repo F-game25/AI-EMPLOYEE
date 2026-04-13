@@ -9,6 +9,8 @@ import TertiaryPanel from './ui/TertiaryPanel'
 import WorkflowTreePanel from './dashboard/WorkflowTreePanel'
 import BrainInsightsPanel from './dashboard/BrainInsightsPanel'
 import SelfImprovementPanel from './dashboard/SelfImprovementPanel'
+import SystemModeToggle from './dashboard/SystemModeToggle'
+import AutonomyPanel from './dashboard/AutonomyPanel'
 
 const BASE = `http://${window.location.hostname}:3001`
 const PIPELINE_DEFAULTS = {
@@ -272,6 +274,10 @@ export default function Dashboard() {
 
           {/* Three info columns */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-h-0 flex-1">
+
+            {/* Autonomy controls */}
+            <SystemModeToggle />
+            <AutonomyPanel />
 
             {/* System stats — single source of truth */}
             <article className="ds-card p-3 min-h-0 flex flex-col">

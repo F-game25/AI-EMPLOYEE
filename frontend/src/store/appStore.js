@@ -165,6 +165,16 @@ export const useAppStore = create((set) => ({
   },
   setSelfImprovement: (si) => set({ selfImprovement: si }),
 
+  // Autonomy daemon state (WebSocket-driven)
+  autonomyStatus: {
+    mode: { mode: 'OFF', active: false, auto: false, limited: false, paused: true, emergency_stopped: false, changed_at: null },
+    daemon: { running: false, started_at: null, cycles: 0, tasks_processed: 0, tasks_succeeded: 0, tasks_failed: 0, consecutive_errors: 0, last_cycle_at: null, last_task_id: null, current_task_id: null, cycle_interval_s: 2 },
+    queue: { total: 0, active: 0, by_status: {} },
+    data_source: 'initializing',
+    updated_at: null,
+  },
+  setAutonomyStatus: (a) => set({ autonomyStatus: a }),
+
   // Error
   errorMessage: null,
   setError: (msg) => set({ errorMessage: msg, appState: 'error' }),
