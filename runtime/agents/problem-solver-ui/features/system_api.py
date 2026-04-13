@@ -11,6 +11,25 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/api", tags=["system"])
 _log = logging.getLogger(__name__)
 
+
+def _sanitize_task_response(task_dict: dict) -> dict:
+    """Build a safe response dict — error field is always redacted to prevent stack trace exposure."""
+    # Construct a new dict from scratch with only the safe fields
+    safe = {}
+    for key, value in task_dict.items():
+        if key == "error":
+            # Never forward raw error strings — they may contain stack traces
+            raw = value or ""
+            if raw:
+                first_line = str(raw).split("\n")[0]
+                safe["error"] = first_line if first_line and "Traceback" not in first_line else "Task processing error"
+            else:
+                safe["error"] = ""
+        else:
+            safe[key] = value
+    return safe
+
+
 # Ensure runtime/ packages are importable from within features/
 _RUNTIME_DIR = Path(__file__).parent.parent.parent.parent
 for _p in [
@@ -49,7 +68,7 @@ def set_mode(body: SetModeRequest):
         new_mode = get_mode_manager().set_mode(body.mode)
         return JSONResponse({"mode": new_mode, "status": "ok"})
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail="Invalid mode value")
     except Exception:
         _log.exception("set_mode failed")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -492,7 +511,7 @@ def si_queue_task(body: _ImprovementTaskRequest):
             risk_class=body.risk_class,
             approval_policy=body.approval_policy,
         )
-        return JSONResponse(task.to_dict())
+        return JSONResponse(_sanitize_task_response(task.to_dict()))
     except Exception as exc:
         _log.exception("si_queue_task failed")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -528,7 +547,7 @@ def si_get_task(task_id: str):
         task = get_queue().get(task_id)
         if task is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-        return JSONResponse(task.to_dict())
+        return JSONResponse(_sanitize_task_response(task.to_dict()))
     except HTTPException:
         raise
     except Exception as exc:
@@ -549,7 +568,7 @@ def si_run_task(task_id: str):
         controller = get_controller()
         result = controller.run_pipeline(task)
         queue.update(result)
-        return JSONResponse(result.to_dict())
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
     except HTTPException:
         raise
     except Exception as exc:
@@ -570,7 +589,7 @@ def si_approve_task(task_id: str):
         controller = get_controller()
         result = controller.approve_task(task)
         queue.update(result)
-        return JSONResponse(result.to_dict())
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
     except HTTPException:
         raise
     except Exception as exc:
@@ -595,7 +614,7 @@ def si_reject_task(task_id: str, body: _RejectRequest = _RejectRequest()):
         controller = get_controller()
         result = controller.reject_task(task, reason=body.reason)
         queue.update(result)
-        return JSONResponse(result.to_dict())
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
     except HTTPException:
         raise
     except Exception as exc:
@@ -616,7 +635,7 @@ def si_deploy_task(task_id: str):
         controller = get_controller()
         result = controller.deploy_approved(task)
         queue.update(result)
-        return JSONResponse(result.to_dict())
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
     except HTTPException:
         raise
     except Exception as exc:
@@ -637,7 +656,7 @@ def si_rollback_task(task_id: str):
         controller = get_controller()
         result = controller.rollback_task(task)
         queue.update(result)
-        return JSONResponse(result.to_dict())
+        return JSONResponse(_sanitize_task_response(result.to_dict()))
     except HTTPException:
         raise
     except Exception as exc:
@@ -693,7 +712,7 @@ def set_autonomy_mode(body: SystemModeBody):
         new_mode = sm.set_mode(body.mode)
         return JSONResponse(sm.status())
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail="Invalid mode value")
     except Exception as exc:
         _log.exception("set_autonomy_mode failed")
         raise HTTPException(status_code=500, detail="Internal server error")
