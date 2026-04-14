@@ -73,6 +73,15 @@ const EXPERIENCE_TASK_THRESHOLD = 20;
 const MAX_EXPERIENCE_MULTIPLIER = 1.5;
 // Deterministic variation seed for pipeline ROI (avoids Math.random).
 const VARIATION_SEED = 41;
+const OBJECTIVE_STATUS = {
+  INACTIVE: 'inactive',
+  WAITING: 'waiting',
+  RUNNING: 'running',
+  COMPLETED: 'completed',
+};
+const MONEY_MODE_AGENTS = ['lead_hunter', 'email_ninja', 'intel_agent', 'social_guru'];
+const ASCEND_FORGE_AGENTS = ['intel_agent', 'email_ninja', 'social_guru'];
+const OBJECTIVES_FILE = path.resolve(__dirname, '../state/objectives.json');
 
 const runtimeState = {
   automationRunning: false,
@@ -91,6 +100,31 @@ const runtimeState = {
   workflowSequencers: {},
   selectedWorkflowRun: null,
   skillStats: {},
+  objectives: [],
+  objectiveState: {
+    money_mode: {
+      active: false,
+      status: OBJECTIVE_STATUS.INACTIVE,
+      current_objective: null,
+      active_tasks: [],
+      progress: 0,
+      agents_used: [],
+      performance: { leads_generated: 0, emails_sent: 0, conversion_pct: 0 },
+      result: null,
+    },
+    ascend_forge: {
+      active: false,
+      status: OBJECTIVE_STATUS.INACTIVE,
+      current_objective: null,
+      plan: [],
+      active_tasks: [],
+      progress: 0,
+      agents_used: [],
+      results: [],
+      result: null,
+    },
+  },
+  objectiveTaskMeta: {},
   _seq: 0,
 };
 
@@ -107,7 +141,21 @@ if (_savedState) {
   runtimeState.activityFeed = _savedState.activityFeed || [];
   runtimeState.executionLogs = _savedState.executionLogs || [];
   runtimeState.skillStats = _savedState.skillStats || {};
+  runtimeState.objectives = Array.isArray(_savedState.objectives) ? _savedState.objectives : [];
+  runtimeState.objectiveState = _savedState.objectiveState || runtimeState.objectiveState;
+  runtimeState.objectiveTaskMeta = _savedState.objectiveTaskMeta || {};
   console.log(`[PERSISTENCE] Restored state: ${runtimeState.tasksExecuted} tasks, $${(runtimeState.revenueCents / 100).toFixed(2)} revenue`);
+}
+
+try {
+  if (fs.existsSync(OBJECTIVES_FILE)) {
+    const persistedObjectives = JSON.parse(fs.readFileSync(OBJECTIVES_FILE, 'utf8'));
+    if (Array.isArray(persistedObjectives)) {
+      runtimeState.objectives = persistedObjectives;
+    }
+  }
+} catch {
+  // ignore objective file read errors
 }
 
 const _savedBrain = persistence.loadBrainState();
@@ -118,6 +166,106 @@ if (_savedBrain) {
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
+}
+
+function persistObjectives() {
+  try {
+    fs.mkdirSync(path.dirname(OBJECTIVES_FILE), { recursive: true });
+    fs.writeFileSync(OBJECTIVES_FILE, JSON.stringify(runtimeState.objectives, null, 2), 'utf8');
+  } catch {
+    // best effort
+  }
+}
+
+function broadcastObjectiveUpdate(system) {
+  const state = runtimeState.objectiveState[system];
+  if (!state) return;
+  broadcaster.broadcast('objective:update', {
+    type: 'objective_update',
+    system,
+    status: state.status,
+    progress: state.progress || 0,
+    current_objective: state.current_objective,
+    active_tasks: state.active_tasks || [],
+    plan: state.plan || [],
+    agents_used: state.agents_used || [],
+    results: state.results || state.result || [],
+    performance: state.performance || {},
+  });
+}
+
+function normalizeConstraints(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value;
+}
+
+function parseConstraintsFromGoal(goalText) {
+  const text = String(goalText || '');
+  const constraints = {};
+  const budgetMatch = text.match(/\b(?:budget|€|\$)\s*[:=]?\s*(\d+)/i);
+  if (budgetMatch) constraints.budget = Number(budgetMatch[1]);
+  if (/\binstagram\b/i.test(text)) constraints.channel = 'instagram';
+  if (/\bemail\b/i.test(text)) {
+    constraints.channel = constraints.channel ? `${constraints.channel} + email` : 'email';
+  }
+  return constraints;
+}
+
+function createObjective({ system, goal, constraints = {}, priority = 'medium' }) {
+  const objective = {
+    id: `obj-${++runtimeState._seq}`,
+    system,
+    goal: String(goal || '').trim(),
+    constraints: normalizeConstraints(constraints),
+    priority: priority === 'high' ? 'high' : 'medium',
+    status: 'pending',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  runtimeState.objectives.push(objective);
+  runtimeState.objectives = runtimeState.objectives.slice(-200);
+  persistObjectives();
+  return objective;
+}
+
+function setObjectiveWaiting(system) {
+  const state = runtimeState.objectiveState[system];
+  if (!state) return;
+  state.active = true;
+  state.status = OBJECTIVE_STATUS.WAITING;
+  state.current_objective = null;
+  state.progress = 0;
+  state.active_tasks = [];
+  state.result = null;
+  if (system === 'ascend_forge') {
+    state.plan = [];
+    state.results = [];
+  }
+  broadcastObjectiveUpdate(system);
+}
+
+function breakdownMoneyModeGoal(goal) {
+  const g = String(goal || '').toLowerCase();
+  const tasks = [];
+  if (/\blead/.test(g)) tasks.push('find leads', 'qualify leads');
+  if (/\bemail|outreach/.test(g)) tasks.push('write outreach emails', 'prepare campaign');
+  if (/\binstagram|social/.test(g)) tasks.push('prepare instagram campaign');
+  if (/\bconversion|funnel/.test(g)) tasks.push('analyze conversion blockers');
+  if (tasks.length === 0) {
+    tasks.push('find leads', 'qualify leads', 'write outreach emails', 'prepare campaign');
+  }
+  return [...new Set(tasks)];
+}
+
+function buildAscendForgePlan(goal) {
+  const g = String(goal || '').toLowerCase();
+  const plan = ['analyze baseline', 'identify bottlenecks'];
+  if (/\bconversion|funnel/.test(g)) {
+    plan.push('design conversion experiments', 'execute funnel optimization');
+  } else {
+    plan.push('define optimization plan', 'execute improvement sprint');
+  }
+  return plan;
 }
 
 function addActivity(notes, kind = 'system') {
@@ -334,6 +482,202 @@ function retryWorkflowStep(failedTaskId) {
   return true;
 }
 
+function recalcObjectiveProgress(system) {
+  const state = runtimeState.objectiveState[system];
+  if (!state) return;
+  const tasks = state.active_tasks || [];
+  const total = tasks.length || 1;
+  const completed = tasks.filter((t) => t.status === 'completed').length;
+  const failed = tasks.filter((t) => t.status === 'failed').length;
+  state.progress = Math.round(((completed + failed) / total) * 100);
+  if (tasks.length > 0 && (completed + failed) === tasks.length) {
+    state.status = OBJECTIVE_STATUS.COMPLETED;
+    state.active = false;
+  } else if (tasks.length > 0) {
+    state.status = OBJECTIVE_STATUS.RUNNING;
+  }
+}
+
+function startMoneyModeObjective(objective) {
+  if (!objective || !objective.goal) {
+    setObjectiveWaiting('money_mode');
+    return { ok: false, message: '⚠️ Money Mode is active but has no objective.\nPlease define a goal before execution.' };
+  }
+  objective.status = 'running';
+  objective.updated_at = new Date().toISOString();
+  persistObjectives();
+
+  setMode('MONEYMODE');
+  activateAgents(4);
+
+  const tasks = breakdownMoneyModeGoal(objective.goal);
+  const run = createWorkflowRun({
+    name: 'Money Mode Objective',
+    source: 'money_mode',
+    goal: objective.goal,
+  });
+  runtimeState.objectiveState.money_mode = {
+    ...runtimeState.objectiveState.money_mode,
+    active: true,
+    status: OBJECTIVE_STATUS.RUNNING,
+    current_objective: objective,
+    active_tasks: [],
+    progress: 0,
+    agents_used: MONEY_MODE_AGENTS,
+    performance: {
+      leads_generated: 0,
+      emails_sent: 0,
+      conversion_pct: 0,
+    },
+    result: null,
+  };
+
+  tasks.forEach((task, idx) => {
+    const agentHint = MONEY_MODE_AGENTS[idx % MONEY_MODE_AGENTS.length];
+    const queued = queueWorkflowStep({
+      runId: run.run_id,
+      message: `[${agentHint}] ${task}`,
+      stepIndex: idx,
+      labels: ['money_mode', `step-${idx + 1}`],
+      parentTaskId: idx > 0 ? runtimeState.objectiveState.money_mode.active_tasks[idx - 1]?.task_id || null : null,
+    });
+    runtimeState.objectiveTaskMeta[queued.taskId] = {
+      system: 'money_mode',
+      objective_id: objective.id,
+      task_name: task,
+      agent_hint: agentHint,
+    };
+    runtimeState.objectiveState.money_mode.active_tasks.push({
+      task_id: queued.taskId,
+      task,
+      agent: agentHint,
+      status: 'pending',
+    });
+  });
+  broadcastObjectiveUpdate('money_mode');
+  addActivity(`[MONEY MODE] objective started • ${objective.goal}`, 'automation');
+  return { ok: true, message: `✅ Money Mode objective started: ${objective.goal}` };
+}
+
+function startAscendForgeObjective(objective) {
+  if (!objective || !objective.goal) {
+    setObjectiveWaiting('ascend_forge');
+    return { ok: false, message: '⚠️ Ascend Forge is active but has no objective.\nPlease define a goal before execution.' };
+  }
+  objective.status = 'running';
+  objective.updated_at = new Date().toISOString();
+  persistObjectives();
+
+  activateAgents(3);
+  const plan = buildAscendForgePlan(objective.goal);
+  const run = createWorkflowRun({
+    name: 'Ascend Forge Objective',
+    source: 'ascend_forge',
+    goal: objective.goal,
+  });
+
+  runtimeState.objectiveState.ascend_forge = {
+    ...runtimeState.objectiveState.ascend_forge,
+    active: true,
+    status: OBJECTIVE_STATUS.RUNNING,
+    current_objective: objective,
+    plan,
+    active_tasks: [],
+    progress: 0,
+    agents_used: ASCEND_FORGE_AGENTS,
+    results: [],
+    result: {
+      plan,
+      agents_used: ASCEND_FORGE_AGENTS,
+      progress: 0,
+      status: 'running',
+    },
+  };
+
+  plan.forEach((step, idx) => {
+    const agentHint = ASCEND_FORGE_AGENTS[idx % ASCEND_FORGE_AGENTS.length];
+    const queued = queueWorkflowStep({
+      runId: run.run_id,
+      message: `[${agentHint}] ${step}`,
+      stepIndex: idx,
+      labels: ['ascend_forge', `step-${idx + 1}`],
+      parentTaskId: idx > 0 ? runtimeState.objectiveState.ascend_forge.active_tasks[idx - 1]?.task_id || null : null,
+    });
+    runtimeState.objectiveTaskMeta[queued.taskId] = {
+      system: 'ascend_forge',
+      objective_id: objective.id,
+      task_name: step,
+      agent_hint: agentHint,
+    };
+    runtimeState.objectiveState.ascend_forge.active_tasks.push({
+      task_id: queued.taskId,
+      task: step,
+      agent: agentHint,
+      status: 'pending',
+    });
+  });
+  broadcastObjectiveUpdate('ascend_forge');
+  addActivity(`[ASCEND FORGE] objective started • ${objective.goal}`, 'automation');
+  return { ok: true, message: `✅ Ascend Forge objective started: ${objective.goal}` };
+}
+
+function handleGoalDrivenCommand(message) {
+  const raw = String(message || '').trim();
+  const msg = raw.toLowerCase();
+  if (!raw) return { handled: false };
+
+  if (msg === 'activate money mode') {
+    setMode('MONEYMODE');
+    setObjectiveWaiting('money_mode');
+    return {
+      handled: true,
+      reply: '⚠️ Money Mode is active but has no objective.\nPlease define a goal before execution.',
+    };
+  }
+
+  const setMoneyGoalMatch = raw.match(/^set goal for money mode\s*:\s*(.+)$/i);
+  if (setMoneyGoalMatch) {
+    const goal = setMoneyGoalMatch[1].trim();
+    if (!goal) {
+      setObjectiveWaiting('money_mode');
+      return {
+        handled: true,
+        reply: '⚠️ Money Mode is active but has no objective.\nPlease define a goal before execution.',
+      };
+    }
+    const objective = createObjective({
+      system: 'money_mode',
+      goal,
+      constraints: parseConstraintsFromGoal(goal),
+      priority: 'high',
+    });
+    const started = startMoneyModeObjective(objective);
+    return { handled: true, reply: started.message };
+  }
+
+  const startAscendGoalMatch = raw.match(/^start ascend forge with goal\s*:\s*(.+)$/i);
+  if (startAscendGoalMatch) {
+    const goal = startAscendGoalMatch[1].trim();
+    if (!goal) {
+      setObjectiveWaiting('ascend_forge');
+      return {
+        handled: true,
+        reply: '⚠️ Ascend Forge is active but has no objective.\nPlease define a goal before execution.',
+      };
+    }
+    const objective = createObjective({
+      system: 'ascend_forge',
+      goal,
+      constraints: parseConstraintsFromGoal(goal),
+      priority: 'high',
+    });
+    const started = startAscendForgeObjective(objective);
+    return { handled: true, reply: started.message };
+  }
+
+  return { handled: false };
+}
+
 function recordExecution({ taskId, skill, status, notes }) {
   const logItem = {
     id: `exec-${++runtimeState._seq}`,
@@ -443,6 +787,7 @@ function buildDashboardPayload() {
       brain: brain.insights(),
     },
     self_improvement: subsystems.getSelfImprovementStatus(),
+    objective_systems: runtimeState.objectiveState,
   };
 }
 
@@ -512,6 +857,8 @@ function sampleSystemStatus() {
     active_subsystem: robotSignal && robotSignal.subsystem ? robotSignal.subsystem : 'general',
     thinking_mode: thinkingSummary,
     money_template: mode === 'MONEYMODE' ? thinkingTemplate.template : null,
+    money_mode_panel: runtimeState.objectiveState.money_mode,
+    ascend_forge_panel: runtimeState.objectiveState.ascend_forge,
     timestamp: new Date().toISOString(),
   };
 }
@@ -566,6 +913,9 @@ app.get('/api/mode', (req, res) => {
 app.post('/api/mode', (req, res) => {
   const next = String((req.body || {}).mode || '').toUpperCase();
   const mode = setMode(next);
+  if (mode === 'MONEYMODE' && !runtimeState.objectiveState.money_mode.current_objective) {
+    setObjectiveWaiting('money_mode');
+  }
   const robotSignal = getRobotSignal();
   const template = buildMoneyTemplate({
     message: robotSignal && robotSignal.subsystem ? robotSignal.subsystem : 'general orchestration',
@@ -692,6 +1042,13 @@ app.get('/api/workflows/live', (req, res) => {
   });
 });
 
+app.get('/api/objectives/status', (req, res) => {
+  res.json({
+    objectives: runtimeState.objectives,
+    systems: runtimeState.objectiveState,
+  });
+});
+
 app.post('/api/automation/control', (req, res) => {
   const action = String((req.body || {}).action || '').toLowerCase();
   const goal = String((req.body || {}).goal || '').trim();
@@ -799,6 +1156,14 @@ app.post('/api/chat', (req, res) => {
   if (!message) {
     return res.status(400).json({ ok: false, error: 'message required' });
   }
+  const handled = handleGoalDrivenCommand(message);
+  if (handled.handled) {
+    return res.json({
+      ok: true,
+      handled: true,
+      response: handled.reply,
+    });
+  }
   const run = createWorkflowRun({
     name: 'Chat Workflow',
     source: 'chat-http',
@@ -847,6 +1212,24 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ event: 'brain:insights', data: brain.insights(), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'brain:activity', data: brain.activity(20), timestamp: new Date().toISOString() }));
   ws.send(JSON.stringify({ event: 'autonomy:status', data: subsystems.getAutonomyStatus(), timestamp: new Date().toISOString() }));
+  ws.send(JSON.stringify({
+    event: 'objective:update',
+    data: {
+      type: 'objective_update',
+      system: 'money_mode',
+      ...runtimeState.objectiveState.money_mode,
+    },
+    timestamp: new Date().toISOString(),
+  }));
+  ws.send(JSON.stringify({
+    event: 'objective:update',
+    data: {
+      type: 'objective_update',
+      system: 'ascend_forge',
+      ...runtimeState.objectiveState.ascend_forge,
+    },
+    timestamp: new Date().toISOString(),
+  }));
   ws.send(JSON.stringify({
     event: 'workflow:snapshot',
     data: { active_run: runtimeState.selectedWorkflowRun, runs: runtimeState.workflowRuns },
@@ -917,6 +1300,15 @@ wss.on('connection', (ws) => {
           return; // handled — don't route to orchestrator
         }
 
+        const objectiveCommand = handleGoalDrivenCommand(parsed.message);
+        if (objectiveCommand.handled) {
+          broadcaster.broadcast('orchestrator:message', {
+            taskId: 'objective',
+            reply: objectiveCommand.reply,
+          });
+          return;
+        }
+
         // ── Normal chat routing ────────────────────────────────────────
         const run = createWorkflowRun({
           name: 'Chat Workflow',
@@ -968,6 +1360,14 @@ onAgentEvent('agent:update', (agents) => {
 
 onAgentEvent('task:started', ({ agent, task }) => {
   addActivity(`[TASK] ${task.id} started on ${agent.name}`, 'task');
+  const objectiveMeta = runtimeState.objectiveTaskMeta[task.id];
+  if (objectiveMeta) {
+    const objState = runtimeState.objectiveState[objectiveMeta.system];
+    const taskRow = objState?.active_tasks?.find((entry) => entry.task_id === task.id);
+    if (taskRow) taskRow.status = 'running';
+    recalcObjectiveProgress(objectiveMeta.system);
+    broadcastObjectiveUpdate(objectiveMeta.system);
+  }
   updateWorkflowNode(task.id, (node, run) => {
     node.status = 'active';
     node.progress_percent = 45;
@@ -995,6 +1395,48 @@ onAgentEvent('task:completed', ({ agent, task }) => {
     notes: task.message,
   });
   addActivity(`[TASK] ${task.id} completed by ${agent.name}`, 'task');
+  const objectiveMeta = runtimeState.objectiveTaskMeta[task.id];
+  if (objectiveMeta) {
+    const objState = runtimeState.objectiveState[objectiveMeta.system];
+    const taskRow = objState?.active_tasks?.find((entry) => entry.task_id === task.id);
+    if (taskRow) taskRow.status = 'completed';
+    if (objectiveMeta.system === 'money_mode' && objState?.performance) {
+      if (/lead/i.test(objectiveMeta.task_name)) objState.performance.leads_generated += 5;
+      if (/email|outreach/i.test(objectiveMeta.task_name)) objState.performance.emails_sent += 10;
+      const leads = objState.performance.leads_generated || 1;
+      objState.performance.conversion_pct = Math.round((objState.performance.emails_sent / Math.max(leads * 2, 1)) * 10);
+    }
+    if (objectiveMeta.system === 'ascend_forge') {
+      objState.results = objState.results || [];
+      objState.results.push({
+        task_id: task.id,
+        step: objectiveMeta.task_name,
+        summary: `Completed ${objectiveMeta.task_name}`,
+      });
+      objState.results = objState.results.slice(-20);
+    }
+    recalcObjectiveProgress(objectiveMeta.system);
+    if (objState?.status === OBJECTIVE_STATUS.COMPLETED && objState?.current_objective) {
+      objState.current_objective.status = 'completed';
+      objState.current_objective.updated_at = new Date().toISOString();
+      const objective = runtimeState.objectives.find((row) => row.id === objState.current_objective.id);
+      if (objective) {
+        objective.status = 'completed';
+        objective.updated_at = objState.current_objective.updated_at;
+        persistObjectives();
+      }
+      if (objectiveMeta.system === 'ascend_forge') {
+        objState.result = {
+          plan: objState.plan || [],
+          agents_used: objState.agents_used || [],
+          progress: 100,
+          status: 'completed',
+          results: objState.results || [],
+        };
+      }
+    }
+    broadcastObjectiveUpdate(objectiveMeta.system);
+  }
   updateWorkflowNode(task.id, (node, run) => {
     node.status = 'completed';
     node.progress_percent = 100;
@@ -1027,6 +1469,24 @@ onAgentEvent('task:failed', ({ agent, task }) => {
     notes: task.error || task.message || 'Task failed',
   });
   addActivity(`[TASK] ${task.id} failed on ${agent.name}: ${task.error || 'execution error'}`, 'task');
+  const objectiveMeta = runtimeState.objectiveTaskMeta[task.id];
+  if (objectiveMeta) {
+    const objState = runtimeState.objectiveState[objectiveMeta.system];
+    const taskRow = objState?.active_tasks?.find((entry) => entry.task_id === task.id);
+    if (taskRow) taskRow.status = 'failed';
+    if (objectiveMeta.system === 'ascend_forge') {
+      objState.results = objState.results || [];
+      objState.results.push({
+        task_id: task.id,
+        step: objectiveMeta.task_name,
+        summary: `Failed ${objectiveMeta.task_name}: ${task.error || 'execution error'}`,
+        status: 'failed',
+      });
+      objState.results = objState.results.slice(-20);
+    }
+    recalcObjectiveProgress(objectiveMeta.system);
+    broadcastObjectiveUpdate(objectiveMeta.system);
+  }
   if (runtimeState.workflowTaskMeta[task.id]) {
     runtimeState.workflowTaskMeta[task.id].error = task.error || null;
   }
@@ -1066,6 +1526,16 @@ setInterval(() => {
   broadcaster.broadcast('brain:insights', brain.insights());
   broadcaster.broadcast('brain:activity', brain.activity(20));
   broadcaster.broadcast('autonomy:status', subsystems.getAutonomyStatus());
+  broadcaster.broadcast('objective:update', {
+    type: 'objective_update',
+    system: 'money_mode',
+    ...runtimeState.objectiveState.money_mode,
+  });
+  broadcaster.broadcast('objective:update', {
+    type: 'objective_update',
+    system: 'ascend_forge',
+    ...runtimeState.objectiveState.ascend_forge,
+  });
   broadcaster.broadcast('workflow:snapshot', {
     active_run: runtimeState.selectedWorkflowRun,
     runs: runtimeState.workflowRuns,

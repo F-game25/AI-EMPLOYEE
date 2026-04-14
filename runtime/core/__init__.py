@@ -98,6 +98,16 @@ def get_improvement_telemetry():
     return _f()
 
 
+def get_objective_store():
+    from core.objectives import get_objective_store as _f
+    return _f()
+
+
+def get_ascend_forge_executor():
+    from core.ascend_forge import get_ascend_forge_executor as _f
+    return _f()
+
+
 __all__ = [
     "get_changelog",
     "get_roi_tracker",
@@ -114,4 +124,6 @@ __all__ = [
     "get_improvement_queue",
     "get_improvement_controller",
     "get_improvement_telemetry",
+    "get_objective_store",
+    "get_ascend_forge_executor",
 ]

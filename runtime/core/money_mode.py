@@ -19,6 +19,7 @@ _ENGAGEMENT_FACTOR = 0.6
 _OUTREACH_COST_PER_CONTACT = 25
 _OUTREACH_RESPONSE_RATE = 0.25
 _OUTREACH_CONVERSION_RATE = 0.35
+_MONEY_MODE_AGENTS = ("lead_hunter", "email_ninja", "intel_agent", "social_guru")
 
 
 class MoneyMode:
@@ -312,6 +313,76 @@ class MoneyMode:
             pass
 
         return draft
+
+    def breakdown_goal(self, goal: str, constraints: dict[str, Any] | None = None) -> list[str]:
+        """Split an objective into actionable execution tasks."""
+        text = str(goal or "").lower()
+        tasks: list[str] = []
+        if "lead" in text:
+            tasks.extend(["find leads", "qualify leads"])
+        if "email" in text or "outreach" in text:
+            tasks.extend(["write outreach emails", "schedule outreach campaign"])
+        if "instagram" in text or "social" in text:
+            tasks.extend(["prepare instagram campaign", "publish social outreach"])
+        if "conversion" in text or "funnel" in text:
+            tasks.extend(["audit conversion funnel", "deploy conversion experiments"])
+        if not tasks:
+            tasks = [
+                "find leads",
+                "qualify leads",
+                "write outreach emails",
+                "prepare campaign",
+            ]
+        # Preserve order while removing duplicates.
+        seen: set[str] = set()
+        ordered = [t for t in tasks if not (t in seen or seen.add(t))]
+        return ordered
+
+    def execute_objective(
+        self,
+        *,
+        objective_id: str,
+        goal: str,
+        constraints: dict[str, Any] | None = None,
+        priority: str = "medium",
+    ) -> dict[str, Any]:
+        """Objective-driven execution loop for Money Mode."""
+        constraints = constraints or {}
+        tasks = self.breakdown_goal(goal, constraints)
+        if priority == "high":
+            tasks = sorted(tasks, key=lambda t: 0 if "qualify" in t or "conversion" in t else 1)
+
+        published: list[dict[str, Any]] = []
+        try:
+            from core.bus import get_message_bus
+            bus = get_message_bus()
+            for idx, task in enumerate(tasks):
+                agent = _MONEY_MODE_AGENTS[idx % len(_MONEY_MODE_AGENTS)]
+                payload = {
+                    "objective_id": objective_id,
+                    "system": "money_mode",
+                    "goal": goal,
+                    "task": task,
+                    "agent": agent,
+                    "constraints": constraints,
+                    "priority": priority,
+                    "status": "pending",
+                }
+                published.append(bus.publish_sync("tasks", payload))
+        except Exception:
+            pass
+
+        return {
+            "objective_id": objective_id,
+            "system": "money_mode",
+            "goal": goal,
+            "constraints": constraints,
+            "priority": priority,
+            "tasks": tasks,
+            "agents_used": list(_MONEY_MODE_AGENTS),
+            "published": published,
+            "status": "running" if tasks else "pending",
+        }
 
     # --------------------------------------------------------------- internals
 

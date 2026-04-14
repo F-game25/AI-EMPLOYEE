@@ -187,6 +187,7 @@ export default function DashboardPage() {
   const wsConnected = useAppStore(s => s.wsConnected)
   const nnStatus = useAppStore(s => s.nnStatus)
   const brainInsights = useAppStore(s => s.brainInsights)
+  const objectivePanels = useAppStore(s => s.objectivePanels)
 
   const BASE = window.location.origin
 
@@ -232,6 +233,15 @@ export default function DashboardPage() {
     { label: 'GPU', value: systemStatus?.gpu_usage ?? 0, color: 'var(--neon-cyan)', ariaUnit: 'percent', displaySuffix: '%' },
     { label: 'Temp', value: Math.min(100, Math.round(systemStatus?.cpu_temperature ?? 0)), color: 'var(--warning)', ariaUnit: 'degrees celsius', displaySuffix: '°C' },
   ]
+  const moneyModePanel = objectivePanels?.money_mode || {}
+  const ascendForgePanel = objectivePanels?.ascend_forge || {}
+
+  const objectiveStatusLabel = (status) => {
+    if (status === 'running') return 'running'
+    if (status === 'waiting') return 'waiting'
+    if (status === 'completed') return 'completed'
+    return 'inactive'
+  }
 
   return (
     <div className="page-enter dashboard-overview">
@@ -392,24 +402,94 @@ export default function DashboardPage() {
                 sendChatMessage('Activating BLACKLIGHT mode — all agents online')
               }} />
               <QuickAction label="🔺 Ascend Forge" onClick={() => {
-                fetch(`${BASE}/api/self-improvement/queue`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ task_type: 'self_improvement', description: 'Ascend Forge: optimize strategies and evolve' }),
-                }).catch(() => {})
-                addChatMessage({ role: 'user', content: 'Launching Ascend Forge — self-improvement pipeline activated', ts: Date.now() })
-                sendChatMessage('Launching Ascend Forge — self-improvement pipeline activated')
+                const text = 'start ascend forge with goal: optimize conversion funnel'
+                addChatMessage({ role: 'user', content: text, ts: Date.now() })
+                sendChatMessage(text)
               }} />
               <QuickAction label="💰 Money Mode" onClick={() => {
-                fetch(`${BASE}/api/agents/mode`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ mode: 'MONEYMODE' }),
-                }).catch(() => {})
-                addChatMessage({ role: 'user', content: 'Engaging MONEYMODE — revenue-optimized operations', ts: Date.now() })
-                sendChatMessage('Engaging MONEYMODE — revenue-optimized operations')
+                const text = 'activate money mode'
+                addChatMessage({ role: 'user', content: text, ts: Date.now() })
+                sendChatMessage(text)
               }} />
             </div>
+          </div>
+
+          <div className="dashboard-glass-card dashboard-panel">
+            <div className="dashboard-panel-header">
+              <h2>💰 Money Mode</h2>
+              <span>{objectiveStatusLabel(moneyModePanel?.status)}</span>
+            </div>
+            {!moneyModePanel?.current_objective ? (
+              <div className="dashboard-empty">⚠️ No objective set</div>
+            ) : (
+              <div className="dashboard-brain-mini">
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Objective</span>
+                  <span className="dashboard-brain-value">{moneyModePanel.current_objective.goal}</span>
+                </div>
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Progress</span>
+                  <span className="dashboard-brain-value">{Math.round(moneyModePanel?.progress || 0)}%</span>
+                </div>
+                <div className="dashboard-brain-bar">
+                  <motion.div
+                    className="dashboard-brain-bar-fill"
+                    style={{ background: 'var(--success)' }}
+                    animate={{ width: `${Math.round(moneyModePanel?.progress || 0)}%` }}
+                    transition={{ duration: 0.5 }}
+                  />
+                </div>
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Active tasks</span>
+                  <span className="dashboard-brain-value">{(moneyModePanel?.active_tasks || []).length}</span>
+                </div>
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Leads generated</span>
+                  <span className="dashboard-brain-value">{moneyModePanel?.performance?.leads_generated || 0}</span>
+                </div>
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Emails sent</span>
+                  <span className="dashboard-brain-value">{moneyModePanel?.performance?.emails_sent || 0}</span>
+                </div>
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Conversion %</span>
+                  <span className="dashboard-brain-value">{moneyModePanel?.performance?.conversion_pct || 0}%</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="dashboard-glass-card dashboard-panel">
+            <div className="dashboard-panel-header">
+              <h2>⚙️ Ascend Forge</h2>
+              <span>{objectiveStatusLabel(ascendForgePanel?.status)}</span>
+            </div>
+            {!ascendForgePanel?.current_objective ? (
+              <div className="dashboard-empty">⚠️ No objective set</div>
+            ) : (
+              <div className="dashboard-brain-mini">
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Goal</span>
+                  <span className="dashboard-brain-value">{ascendForgePanel.current_objective.goal}</span>
+                </div>
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Plan steps</span>
+                  <span className="dashboard-brain-value">{(ascendForgePanel?.plan || []).length}</span>
+                </div>
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Progress</span>
+                  <span className="dashboard-brain-value">{Math.round(ascendForgePanel?.progress || 0)}%</span>
+                </div>
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Results</span>
+                  <span className="dashboard-brain-value">{(ascendForgePanel?.results || []).length}</span>
+                </div>
+                <div className="dashboard-brain-row">
+                  <span className="dashboard-brain-label">Active agents</span>
+                  <span className="dashboard-brain-value">{(ascendForgePanel?.agents_used || []).join(', ') || '—'}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="dashboard-glass-card dashboard-panel">
