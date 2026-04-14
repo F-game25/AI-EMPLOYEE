@@ -88,8 +88,7 @@ if [[ ! -d "$BACKEND_DIR/node_modules" ]]; then
     || npm --prefix "$BACKEND_DIR" install
   _ok "Backend packages installed"
 else
-  _PKG_COUNT=$(ls "$BACKEND_DIR/node_modules" 2>/dev/null | wc -l | tr -d ' ')
-  _ok "Backend packages ready  (${_PKG_COUNT} packages)"
+        _ok "Backend packages ready  ($(find "$BACKEND_DIR/node_modules" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ') packages)"
 fi
 
 # ── Step 4: Frontend bundle ────────────────────────────────────────────────────

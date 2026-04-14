@@ -543,7 +543,11 @@ install_runtime() {
     step "6/8 — Installing runtime files"
 
     local src="$RUNTIME_DIR"
-    local _DL_COUNT=0 _DL_TOTAL=252
+    local _DL_COUNT=0
+    # Compute total dynamically by counting dl() calls in this script
+    local _DL_TOTAL
+    _DL_TOTAL=$(grep -Ec '^\s+dl "' "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo 252)
+    [[ "$_DL_TOTAL" -lt 1 ]] && _DL_TOTAL=252
 
     if [[ ! -d "$src" ]]; then
         log "Runtime dir not found locally — downloading from GitHub..."
