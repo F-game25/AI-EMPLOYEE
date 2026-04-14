@@ -204,8 +204,14 @@ def start_evolution_controller() -> None:
         ctrl.start()
         _ok(f"Evolution controller started (mode={mode})")
     except Exception as exc:
-        # Non-fatal: log and continue; the rest of the stack still starts.
-        print(f"[!] Evolution controller failed to start: {exc}", flush=True)
+        # Non-fatal: print a prominent warning so operators know autonomous
+        # mode is NOT active even though EVOLUTION_MODE was requested.
+        print(
+            f"[!] WARNING: Evolution controller failed to start (EVOLUTION_MODE={mode}): {exc}\n"
+            "[!] The system is running WITHOUT autonomous self-healing. "
+            "Check PYTHONPATH and runtime dependencies.",
+            flush=True,
+        )
 
 
 def run_preflight() -> None:
