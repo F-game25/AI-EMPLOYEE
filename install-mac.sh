@@ -342,6 +342,20 @@ wizard() {
         info "Trading bot path: skipped"
     fi
 
+    # 5b) Trading bot risk disclosure
+    echo ""
+    echo -e "${Y}⚠ RISK NOTICE:${NC} This system includes trading bots (polymarket-trader, arbitrage-bot)."
+    echo "  • All trading bots default to PAPER/SIMULATION mode (no real money)."
+    echo "  • To enable live trading, you must manually set LIVE_TRADING=true in the config."
+    echo "  • Trading involves risk of financial loss. Use at your own discretion."
+    ask "I understand trading bots are in paper mode by default [Y/n]:"
+    read -r TRADING_ACK < "$tty_in"
+    TRADING_ACK="${TRADING_ACK:-y}"
+    if [[ "$TRADING_ACK" =~ ^[Nn] ]]; then
+        warn "Trading bots will still be installed in paper mode. No real money will be used."
+    fi
+    ok "Trading bots: paper/simulation mode (default)"
+
     # 6) Hourly status reports
     echo ""
     ask "Enable hourly WhatsApp status updates? [Y/n]:"
@@ -857,63 +871,125 @@ EOF
 install_skills() {
     log "Installing agent skills..."
 
-    local all_skills=(
-        "lead-hunter:linkedin_scraper:Find decision makers on LinkedIn"
-        "lead-hunter:email_finder:Find and verify email addresses"
-        "lead-hunter:lead_scorer:Score lead quality 0-100"
-        "lead-hunter:company_enrichment:Enrich company data"
-        "content-master:keyword_research:SEO keyword research"
-        "content-master:blog_writer:Write 2000+ word SEO articles"
-        "content-master:content_optimizer:Optimize existing content"
-        "social-guru:viral_finder:Find trending viral content"
-        "social-guru:caption_writer:Write platform-specific captions"
-        "social-guru:hashtag_generator:Generate relevant hashtags"
-        "social-guru:content_calendar:Create 30-day content calendar"
-        "intel-agent:pricing_tracker:Track competitor pricing"
-        "intel-agent:review_scraper:Scrape and analyze reviews"
-        "intel-agent:feature_comparison:Compare features with competitors"
-        "intel-agent:traffic_estimator:Estimate competitor traffic"
-        "product-scout:arbitrage_finder:Find AliExpress to Amazon arbitrage"
-        "product-scout:trend_spotter:Find trending products"
-        "product-scout:supplier_validator:Validate supplier reliability"
-        "product-scout:profit_calculator:Calculate true profit"
-        "email-ninja:sequence_builder:Build cold email sequences"
-        "email-ninja:deliverability_checker:Check email deliverability"
-        "email-ninja:personalization_engine:Personalize emails at scale"
-        "support-bot:faq_trainer:Extract FAQs from docs"
-        "support-bot:ticket_classifier:Classify support tickets"
-        "support-bot:sentiment_analyzer:Analyze customer sentiment"
-        "data-analyst:trend_analyzer:Analyze market trends"
-        "data-analyst:swot_generator:Generate SWOT analysis"
-        "data-analyst:survey_analyzer:Analyze survey responses"
-        "creative-studio:design_brief:Create design briefs"
-        "creative-studio:image_prompt:Generate AI image prompts"
-        "creative-studio:brand_voice:Define brand voice"
-        "creative-studio:ad_copy:Write ad copy"
-        "crypto-trader:technical_analysis:Full technical analysis"
-        "crypto-trader:pattern_recognition:Identify chart patterns"
-        "crypto-trader:whale_tracker:Track large wallet movements"
-        "crypto-trader:prediction_markets_research:Scan prediction markets for mispricing"
-        "bot-dev:code_review:Review code for issues"
-        "bot-dev:feature_implementation:Implement new features"
-        "bot-dev:bug_finder:Find bugs in code"
-        "web-sales:ux_audit:Audit website UX"
-        "web-sales:seo_audit:Technical SEO audit"
-        "web-sales:speed_test:Website speed analysis"
-        "orchestrator:complex_problem_solving:Complex problem solving for system issues"
-        "orchestrator:tool_language_selector:Select best tools and language for a task"
+    # Helper: writes a skill file with system prompt, input/output schema, and example
+    _write_skill() {
+        local skill_file="$1" skill_name="$2" desc="$3" system_prompt="$4" \
+              input_schema="$5" output_schema="$6" example_input="$7" example_output="$8"
+        [[ -f "$skill_file" ]] && return
+        cat > "$skill_file" << SKILL
+---
+name: $skill_name
+description: $desc
+---
+
+## System Prompt
+
+$system_prompt
+
+## Input Schema
+
+\`\`\`json
+$input_schema
+\`\`\`
+
+## Output Schema
+
+\`\`\`json
+$output_schema
+\`\`\`
+
+## Example
+
+**Input:**
+\`\`\`json
+$example_input
+\`\`\`
+
+**Output:**
+\`\`\`json
+$example_output
+\`\`\`
+SKILL
+    }
+
+    # ── Lead hunting skills ─────────────────────────────────────────────────────
+    local ws="$AI_HOME/workspace-lead-hunter-elite/skills"
+    mkdir -p "$ws"
+
+    _write_skill "$ws/linkedin_scraper.md" "linkedin_scraper" \
+        "Find decision makers on LinkedIn" \
+        "You are a B2B lead research specialist. Given a target company or industry, search LinkedIn for decision makers matching the specified criteria. Focus on C-level, VP, and Director roles. Return structured contact profiles with name, title, company, location, profile URL, and a relevance score (0-100) based on how well they match the search criteria. Prioritize recently active profiles. Exclude recruiters and sales people unless specifically requested. Always verify company match before including a result." \
+        '{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"Target company, industry, or role to search"},"role_filter":{"type":"string","description":"Role titles to filter (e.g. CTO, VP Engineering)"},"location":{"type":"string","description":"Geographic filter"},"limit":{"type":"integer","default":10}}}' \
+        '{"type":"object","properties":{"leads":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"title":{"type":"string"},"company":{"type":"string"},"location":{"type":"string"},"profile_url":{"type":"string"},"relevance_score":{"type":"integer","minimum":0,"maximum":100}}}},"total_found":{"type":"integer"}}}' \
+        '{"query":"SaaS companies in Netherlands","role_filter":"CTO","location":"Netherlands","limit":5}' \
+        '{"leads":[{"name":"Jan de Vries","title":"CTO","company":"CloudFlow BV","location":"Amsterdam","profile_url":"https://linkedin.com/in/jandevries","relevance_score":92}],"total_found":23}'
+
+    _write_skill "$ws/lead_scorer.md" "lead_scorer" \
+        "Score lead quality 0-100" \
+        "You are a lead qualification analyst. Given a lead profile with company data, evaluate the lead quality on a 0-100 scale using the BANT framework (Budget, Authority, Need, Timeline). Consider company size, industry fit, technology stack, growth indicators, recent funding, and job postings as signals. Provide a breakdown of sub-scores for each BANT dimension, a final composite score, and a recommended next action (e.g., immediate outreach, nurture, disqualify). Be specific about why each sub-score was assigned." \
+        '{"type":"object","required":["lead"],"properties":{"lead":{"type":"object","properties":{"name":{"type":"string"},"title":{"type":"string"},"company":{"type":"string"},"industry":{"type":"string"},"company_size":{"type":"string"},"tech_stack":{"type":"array","items":{"type":"string"}}}}}}' \
+        '{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":100},"breakdown":{"type":"object","properties":{"budget":{"type":"integer"},"authority":{"type":"integer"},"need":{"type":"integer"},"timeline":{"type":"integer"}}},"recommendation":{"type":"string","enum":["immediate_outreach","nurture","disqualify"]},"reasoning":{"type":"string"}}}' \
+        '{"lead":{"name":"Jan de Vries","title":"CTO","company":"CloudFlow BV","industry":"SaaS","company_size":"50-200","tech_stack":["Python","AWS","Kubernetes"]}}' \
+        '{"score":78,"breakdown":{"budget":70,"authority":95,"need":75,"timeline":72},"recommendation":"immediate_outreach","reasoning":"CTO at mid-size SaaS with modern tech stack indicates strong decision-making authority and likely budget."}'
+
+    # ── Task orchestrator skills ─────────────────────────────────────────────────
+    ws="$AI_HOME/workspace-task-orchestrator/skills"
+    mkdir -p "$ws"
+
+    _write_skill "$ws/complex_problem_solving.md" "complex_problem_solving" \
+        "Complex problem solving for system issues" \
+        "You are a systems problem-solving specialist. Given a complex problem description, break it down into sub-problems, identify root causes, evaluate possible solutions with trade-offs, and recommend an action plan. Use structured reasoning: (1) Problem decomposition, (2) Root cause analysis using the 5-Whys or Ishikawa method, (3) Solution brainstorming with pros/cons, (4) Recommended action plan with steps, owners, and timeline. Be specific and actionable." \
+        '{"type":"object","required":["problem"],"properties":{"problem":{"type":"string","description":"Detailed problem description"},"context":{"type":"string","description":"Additional context or constraints"},"urgency":{"type":"string","enum":["critical","high","medium","low"]}}}' \
+        '{"type":"object","properties":{"root_causes":{"type":"array","items":{"type":"string"}},"solutions":{"type":"array","items":{"type":"object","properties":{"description":{"type":"string"},"pros":{"type":"array","items":{"type":"string"}},"cons":{"type":"array","items":{"type":"string"}},"effort":{"type":"string"}}}},"recommended_plan":{"type":"array","items":{"type":"object","properties":{"step":{"type":"integer"},"action":{"type":"string"},"owner":{"type":"string"},"timeline":{"type":"string"}}}}}}' \
+        '{"problem":"API response times degraded from 200ms to 2s after deployment","context":"Deployed new feature with additional database queries","urgency":"high"}' \
+        '{"root_causes":["New feature adds N+1 query pattern","Missing database index on new join column"],"solutions":[{"description":"Add database index","pros":["Quick fix"],"cons":["May slow writes"],"effort":"30 minutes"}],"recommended_plan":[{"step":1,"action":"Add missing index immediately","owner":"DBA","timeline":"30 min"}]}'
+
+    # ── Remaining skills — generate with enhanced template ──────────────────────
+    local remaining_skills=(
+        "web-researcher:ux_audit:Audit website UX:You are a UX audit specialist. Analyze a website for usability issues including navigation clarity, mobile responsiveness, accessibility compliance (WCAG 2.1), page load performance, call-to-action effectiveness, and form usability. Provide severity ratings for each issue found, with specific recommendations."
+        "web-researcher:seo_audit:Technical SEO audit:You are a technical SEO analyst. Perform a comprehensive SEO audit covering meta tags, heading hierarchy, canonical URLs, robots.txt, sitemap.xml, Core Web Vitals, mobile-friendliness, structured data markup, internal linking, broken links, duplicate content, and page speed. Score each category 0-100."
+        "social-media-manager:viral_finder:Find trending viral content:You are a social media trend analyst. Monitor and identify currently trending content across platforms. Analyze virality signals including engagement velocity, share ratio, sentiment, and cross-platform spread. Return trending topics with relevance scores and suggested angles for content creation."
+        "social-media-manager:content_calendar:Create 30-day content calendar:You are a content strategist. Create a 30-day social media content calendar with daily posts. Balance content types: educational (40%), entertaining (30%), promotional (20%), community (10%). Include post topics, suggested formats, optimal posting times, and cross-promotion opportunities."
     )
 
-    for skill in "${all_skills[@]}"; do
-        IFS=':' read -r agent skill_name desc <<< "$skill"
+    for skill_entry in "${remaining_skills[@]}"; do
+        IFS=':' read -r agent skill_name desc system_prompt <<< "$skill_entry"
         local skill_file="$AI_HOME/workspace-$agent/skills/${skill_name}.md"
         if [[ ! -f "$skill_file" ]]; then
+            mkdir -p "$(dirname "$skill_file")"
             cat > "$skill_file" << SKILL
 ---
 name: $skill_name
 description: $desc
 ---
-Use this skill to $desc. Provide structured output with clear, actionable results.
+
+## System Prompt
+
+$system_prompt
+
+## Input Schema
+
+\`\`\`json
+{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"The search query or topic to analyze"},"options":{"type":"object","description":"Additional parameters for the analysis"}}}
+\`\`\`
+
+## Output Schema
+
+\`\`\`json
+{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"score":{"type":"number"},"details":{"type":"string"}}}},"summary":{"type":"string"},"recommendations":{"type":"array","items":{"type":"string"}}}}
+\`\`\`
+
+## Example
+
+**Input:**
+\`\`\`json
+{"query":"example $desc query"}
+\`\`\`
+
+**Output:**
+\`\`\`json
+{"results":[{"item":"Example result","score":85,"details":"Detailed analysis of the result"}],"summary":"Analysis complete with actionable findings","recommendations":["First recommended action","Second recommended action"]}
+\`\`\`
 SKILL
         fi
     done
