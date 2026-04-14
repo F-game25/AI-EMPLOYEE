@@ -22,6 +22,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import shutil
+import sys as _sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -263,9 +265,72 @@ def _restart_bot(bot_name: str) -> None:
     except Exception as e:
         logger.warning("restart %s failed: %s", bot_name, e)
 
+# ── Terminal progress bar ──────────────────────────────────────────────────────
+
+
+class TerminalProgress:
+    """A simple terminal progress bar for file downloads.
+
+    Usage::
+
+        bar = TerminalProgress(total=12, label="Downloading")
+        for i in range(12):
+            bar.update(i + 1, detail="runtime/agents/foo/bar.py")
+        bar.finish()
+    """
+
+    G = "\033[0;32m"
+    C = "\033[0;36m"
+    Y = "\033[1;33m"
+    NC = "\033[0m"
+    FILL = "█"
+    EMPTY = "░"
+
+    def __init__(self, total: int, label: str = "Downloading", width: int = 0):
+        self.total = max(total, 1)
+        self.label = label
+        # Auto-detect terminal width; cap bar at 40 chars.
+        if width <= 0:
+            try:
+                width = min(shutil.get_terminal_size((80, 24)).columns - 40, 40)
+            except Exception:
+                width = 30
+        self.width = max(width, 10)
+        self._stream = _sys.stderr
+
+    def update(self, current: int, detail: str = "") -> None:
+        pct = current / self.total
+        filled = int(self.width * pct)
+        bar = self.FILL * filled + self.EMPTY * (self.width - filled)
+        # Truncate detail to keep the line short
+        short = detail.rsplit("/", 1)[-1] if detail else ""
+        if len(short) > 25:
+            short = "…" + short[-24:]
+        line = (
+            f"\r  {self.C}{self.label}{self.NC} "
+            f"[{self.G}{bar}{self.NC}] "
+            f"{current}/{self.total} "
+            f"{self.Y}{short}{self.NC}"
+        )
+        self._stream.write(line)
+        self._stream.flush()
+
+    def finish(self, message: str = "") -> None:
+        pct_bar = self.FILL * self.width
+        done = message or "done"
+        line = (
+            f"\r  {self.C}{self.label}{self.NC} "
+            f"[{self.G}{pct_bar}{self.NC}] "
+            f"{self.total}/{self.total} "
+            f"{self.G}{done}{self.NC}"
+        )
+        self._stream.write(line + "\n")
+        self._stream.flush()
+
+
 # ── Core update logic ─────────────────────────────────────────────────────────
 
-def check_and_update(force: bool = False) -> dict:
+def check_and_update(force: bool = False, progress_cb: "callable | None" = None) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     state = _load_state()
 
@@ -326,12 +391,18 @@ def check_and_update(force: bool = False) -> dict:
     # ── Download updated files ────────────────────────────────────────────────
     downloaded: list = []
     skipped:    list = []
+    # Count only files that map to a local path (the ones we actually download).
+    total_dl = sum(1 for p in changed if _repo_path_to_local(p) is not None)
+    dl_idx = 0
 
     for repo_path in changed:
         dest = _repo_path_to_local(repo_path)
         if dest is None:
             skipped.append(repo_path)
             continue
+        dl_idx += 1
+        if progress_cb is not None:
+            progress_cb(dl_idx, total_dl, repo_path)
         if _download_raw(repo_path, dest):
             # Preserve execute bit for shell scripts and the CLI binary
             if dest.suffix == ".sh" or dest.name == "ai-employee":
@@ -407,14 +478,28 @@ def _once() -> None:
         ):
             h.setLevel(logging.ERROR)
 
+    # ── Progress bar for download phase ──────────────────────────────────────
+    _bar: "TerminalProgress | None" = None
+
+    def _progress(current: int, total: int, filename: str) -> None:
+        nonlocal _bar
+        if _bar is None:
+            _bar = TerminalProgress(total=total, label="Updating")
+        _bar.update(current, detail=filename)
+
     try:
-        result = check_and_update()
+        result = check_and_update(progress_cb=_progress)
     except Exception as e:
+        if _bar is not None:
+            _bar.finish("error")
         print(
             f"\033[1;33m⚠\033[0m Update check error: {type(e).__name__}: {e}",
             flush=True,
         )
         sys.exit(1)
+
+    if _bar is not None:
+        _bar.finish("✓ complete")
 
     status = result.get("status", "unknown")
     if status == "updated":
