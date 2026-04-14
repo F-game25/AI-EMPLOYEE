@@ -14,6 +14,7 @@ AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 _resolve_path() {
   local p="$1"
+  [[ -z "${p:-}" ]] && return 1
   if command -v realpath >/dev/null 2>&1; then
     realpath "$p" 2>/dev/null && return 0
   fi
@@ -75,9 +76,8 @@ _find_repo_root() {
   return 1
 }
 
-# When run from repo runtime/agents/problem-solver-ui/run.sh, repo root is 3 levels up.
 _REPO_CAND=""
-if _repo="$(_find_repo_root "$SCRIPT_DIR/../../.." 2>/dev/null)"; then
+if _repo="$(_find_repo_root "$SCRIPT_DIR" 2>/dev/null)"; then
   _REPO_CAND="$_repo"
 fi
 BACKEND_DIR=""
