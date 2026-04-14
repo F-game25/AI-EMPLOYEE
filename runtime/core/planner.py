@@ -4,6 +4,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from core.contracts import TaskGraph, TaskNode
+from core.knowledge_store import get_knowledge_store
+from core.memory_index import get_memory_index
 
 if TYPE_CHECKING:
     from analytics.structured_logger import StructuredLogger
@@ -46,7 +48,15 @@ class Planner:
     ) -> TaskGraph:
         import time
         start = time.perf_counter()
+        context = self._build_context(goal)
         tasks = self._build_tasks(goal=goal, run_id=run_id, best=best_strategies or [])
+        prompt = (
+            "You have learned the following relevant context:\n"
+            f"{context}\n\n"
+            "Use this to make better decisions."
+        )
+        for task in tasks:
+            task.input = {**task.input, "context": context, "context_prompt": prompt}
         graph = TaskGraph(run_id=run_id, goal=goal, tasks=tasks)
         graph.validate_no_cycles()
         latency_ms = (time.perf_counter() - start) * 1000
@@ -59,6 +69,24 @@ class Planner:
                 meta={"run_id": run_id, "tasks": len(tasks), "goal_type": self.classify_goal(goal)},
             )
         return graph
+
+    @staticmethod
+    def _build_context(goal: str) -> dict[str, Any]:
+        store = get_knowledge_store()
+        memories = get_memory_index().get_relevant_memories(goal, top_k=5)
+        return {
+            "knowledge": store.get_relevant_context(goal),
+            "memories": [
+                {
+                    "id": m.get("id"),
+                    "text": m.get("text"),
+                    "importance": m.get("importance", 0.0),
+                    "usage_count": m.get("usage_count", 0),
+                }
+                for m in memories
+            ],
+            "user_profile": store.snapshot().get("user_profile", {}),
+        }
 
     def _build_tasks(
         self,

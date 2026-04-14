@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from core.knowledge_store import get_knowledge_store
+from core.memory_index import get_memory_index
 from core.self_improvement.contracts import ImprovementPlan, ImprovementTask, RiskLevel
 
 
@@ -160,7 +161,7 @@ class PlannerAI:
         except Exception:
             return {"insight": "No prior data", "success_rate": 0.0}
 
-    def _build_why(self, task: ImprovementTask, learning: dict, context: str) -> str:
+    def _build_why(self, task: ImprovementTask, learning: dict, context: dict[str, Any]) -> str:
         """Build a human-readable 'why' explanation."""
         parts = [f"Improvement target: {task.description}"]
         rate = learning.get("success_rate", 0.0)
@@ -171,17 +172,33 @@ class PlannerAI:
             parts.append(f"Recommended approaches: {', '.join(promote)}")
         if context:
             parts.append(
-                "You have learned the following relevant knowledge: "
-                f"{context}. Use this to improve your decision."
+                "You have learned the following relevant context: "
+                f"{context}. Use this to make better decisions."
             )
         return ". ".join(parts) + "."
 
     @staticmethod
-    def _knowledge_context(task: ImprovementTask) -> str:
+    def _knowledge_context(task: ImprovementTask) -> dict[str, Any]:
         try:
-            return get_knowledge_store().get_relevant_context(task.description)
+            store = get_knowledge_store()
+            knowledge = store.get_relevant_context(task.description)
+            profile = store.snapshot().get("user_profile", {})
+            memories = get_memory_index().get_relevant_memories(task.description, top_k=5)
+            return {
+                "knowledge": knowledge,
+                "memories": [
+                    {
+                        "id": m.get("id"),
+                        "text": m.get("text"),
+                        "importance": m.get("importance", 0.0),
+                        "usage_count": m.get("usage_count", 0),
+                    }
+                    for m in memories
+                ],
+                "user_profile": profile,
+            }
         except Exception:
-            return ""
+            return {}
 
     def _estimate_lines(self, description: str, risk: RiskLevel) -> int:
         """Rough estimate of lines that will be changed."""
