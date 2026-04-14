@@ -459,9 +459,13 @@ function activity(limit = 20) {
  * Converts Maps to plain objects so they survive JSON serialization.
  */
 function exportState() {
+  const serializedStrategies = {};
+  state.strategies.forEach((byIntent, intentKey) => {
+    serializedStrategies[intentKey] = Object.fromEntries(byIntent);
+  });
   return {
     taskPatterns: Object.fromEntries(state.taskPatterns),
-    strategies: Object.fromEntries(state.strategies),
+    strategies: serializedStrategies,
     failedAttempts: state.failedAttempts.slice(0, MAX_FAILURES),
     performance: { ...state.performance },
     recentImprovements: state.recentImprovements.slice(0, MAX_RECENT),
@@ -481,7 +485,12 @@ function restoreState(saved) {
       state.taskPatterns = new Map(Object.entries(saved.taskPatterns));
     }
     if (saved.strategies && typeof saved.strategies === 'object') {
-      state.strategies = new Map(Object.entries(saved.strategies));
+      const restoredStrategies = new Map();
+      Object.entries(saved.strategies).forEach(([intentKey, byIntent]) => {
+        if (!byIntent || typeof byIntent !== 'object') return;
+        restoredStrategies.set(intentKey, new Map(Object.entries(byIntent)));
+      });
+      state.strategies = restoredStrategies;
     }
     if (Array.isArray(saved.failedAttempts)) {
       state.failedAttempts = saved.failedAttempts.slice(0, MAX_FAILURES);
