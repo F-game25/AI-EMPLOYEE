@@ -30,6 +30,7 @@ const PORT = process.env.PORT || 8787;
 const FRONTEND_DIST = path.resolve(__dirname, '../frontend/dist');
 const FRONTEND_INDEX = path.join(FRONTEND_DIST, 'index.html');
 const HAS_FRONTEND_DIST = fs.existsSync(FRONTEND_INDEX);
+const FRONTEND_INDEX_CONTENT = HAS_FRONTEND_DIST ? fs.readFileSync(FRONTEND_INDEX, 'utf8') : null;
 
 const app = express();
 
@@ -1071,7 +1072,7 @@ app.get('*', (req, res, next) => {
   if (!HAS_FRONTEND_DIST) return next();
   if (req.path.startsWith('/api/') || req.path === '/health') return next();
   if (req.path.startsWith('/gateway') || req.path.startsWith('/orchestrator')) return next();
-  res.sendFile(FRONTEND_INDEX);
+  res.type('html').send(FRONTEND_INDEX_CONTENT);
 });
 
 server.listen(PORT, () => {
