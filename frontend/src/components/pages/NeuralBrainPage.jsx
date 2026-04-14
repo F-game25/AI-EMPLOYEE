@@ -466,6 +466,8 @@ export default function NeuralBrainPage() {
   const learningUpdates = brainInsights?.learning_updates || []
   const lastDecision = brainInsights?.last_decision || null
   const lastReward = brainInsights?.last_reward ?? 0
+  const topMemories = brainInsights?.top_memories || []
+  const lastLearningUpdate = brainStatus?.last_learning_update || brainInsights?.last_learning_update || '—'
 
   return (
     <div className="page-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0' }}>
@@ -585,20 +587,40 @@ export default function NeuralBrainPage() {
               <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>No weight data yet</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {Object.entries(agentWeights).map(([agent, weight]) => (
-                  <div key={agent} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                {Object.entries(agentWeights).map(([agent, weights]) => (
+                  <div key={agent} style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11px', paddingBottom: '4px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                     <span style={{ color: 'var(--text-muted)' }}>{agent}</span>
-                    <span style={{ color: 'var(--gold)', fontVariantNumeric: 'tabular-nums' }}>{((weight || 0) * 100).toFixed(1)}%</span>
+                    {typeof weights === 'number' ? (
+                      <span style={{ color: 'var(--gold)', fontVariantNumeric: 'tabular-nums' }}>{((weights || 0) * 100).toFixed(1)}%</span>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px' }}>
+                        {Object.entries(weights || {}).map(([feature, value]) => (
+                          <div key={`${agent}-${feature}`} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>{feature}</span>
+                            <span style={{ color: 'var(--gold)', fontVariantNumeric: 'tabular-nums' }}>{((value || 0) * 100).toFixed(1)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
                 <div style={{ marginTop: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}>
                   Last reward: {lastReward}
                 </div>
                 {lastDecision && (
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                    Last decision: {lastDecision.agent || lastDecision.skill || '—'}
-                  </div>
+                  <>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                      Last decision: {lastDecision.agent || lastDecision.skill || '—'}
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--gold)' }}>
+                      Confidence: {Math.round((lastDecision.confidence || 0) * 100)}%
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                      Reasoning: {lastDecision.reasoning || lastDecision.decision_reasoning || '—'}
+                    </div>
+                  </>
                 )}
+                <div style={{ marginTop: '2px', fontSize: '10px', color: 'var(--text-muted)' }}>Last learning update: {lastLearningUpdate}</div>
               </div>
             )}
           </GlassPanel>
@@ -668,6 +690,18 @@ export default function NeuralBrainPage() {
               <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>No learned topics yet</span>
             ) : learnedTopics.slice(0, 6).map((topic) => (
               <span key={topic} style={{ color: 'var(--neon-teal)', fontSize: '11px' }}>{topic}</span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '6px' }}>
+            {topMemories.length === 0 ? (
+              <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>No ranked memories yet</span>
+            ) : topMemories.slice(0, 3).map((m) => (
+              <div key={m.id || m.text} style={{ fontSize: '10px', color: 'var(--text-secondary)', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: '4px' }}>
+                <div style={{ color: 'var(--text-primary)' }}>{(m.text || '').slice(0, 80) || 'memory'}</div>
+                <div>
+                  importance: {((m.importance || 0) * 100).toFixed(1)}% · usage: {m.usage_count || 0}
+                </div>
+              </div>
             ))}
           </div>
           <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
