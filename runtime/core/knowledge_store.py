@@ -170,4 +170,6 @@ def get_knowledge_store(path: Path | None = None) -> KnowledgeStore:
     with _instance_lock:
         if _instance is None:
             _instance = KnowledgeStore(path)
+        elif path is not None and _instance._path != path:
+            _instance = KnowledgeStore(path)
     return _instance
