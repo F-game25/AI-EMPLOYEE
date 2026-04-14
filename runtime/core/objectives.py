@@ -36,10 +36,13 @@ class Objective:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "Objective":
+        objective_id = str(payload.get("id") or "")
+        system = str(payload.get("system") or "")
+        goal = str(payload.get("goal") or "")
         return cls(
-            payload.get("id"),
-            payload.get("system"),
-            payload.get("goal"),
+            objective_id,
+            system,
+            goal,
             payload.get("constraints", {}),
             payload.get("priority", "medium"),
             payload.get("status", "pending"),
