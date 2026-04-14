@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
-import { useWebSocket } from '../../hooks/useWebSocket'
+import { sendChatMessage } from '../../hooks/useWebSocket'
 import PageHeader from '../layout/PageHeader'
 
 const STATUS_CONFIG = {
@@ -187,7 +187,6 @@ export default function DashboardPage() {
   const wsConnected = useAppStore(s => s.wsConnected)
   const nnStatus = useAppStore(s => s.nnStatus)
   const brainInsights = useAppStore(s => s.brainInsights)
-  const { sendMessage } = useWebSocket()
 
   const BASE = window.location.origin
 
@@ -199,7 +198,7 @@ export default function DashboardPage() {
     const text = input.trim()
     if (!text) return
     addChatMessage({ role: 'user', content: text, ts: Date.now() })
-    sendMessage(text)
+    sendChatMessage(text)
     setInput('')
   }
 
@@ -285,68 +284,79 @@ export default function DashboardPage() {
           <div
             className="dashboard-tab-content"
             role="tabpanel"
-            id={`orchestrator-panel-${activeTab}`}
-            aria-labelledby={`orchestrator-tab-${activeTab}`}
+            id="orchestrator-panel-chat"
+            aria-labelledby="orchestrator-tab-chat"
+            hidden={activeTab !== 'chat'}
           >
-            {activeTab === 'chat' && (
-              <div className="dashboard-chat-panel">
-                <div className="dashboard-chat-messages">
-                  {chatMessages.length === 0 && !isTyping && (
-                    <div className="dashboard-empty">Start the conversation with your orchestrator</div>
-                  )}
-                  <AnimatePresence initial={false}>
-                    {chatMessages.slice(-MAX_VISIBLE_CHAT_MESSAGES).map((msg, idx) => (
-                      <motion.div
-                        key={`${msg.ts || idx}-${idx}`}
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className={`dashboard-msg-row ${msg.role === 'user' ? 'dashboard-msg-row--user' : ''}`}
-                      >
-                        <div className={`dashboard-msg-bubble ${msg.role === 'user' ? 'dashboard-msg-bubble--user' : ''}`}>
-                          {msg.content}
-                        </div>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                  {isTyping && <div className="dashboard-msg-typing">Orchestrator is thinking…</div>}
-                  <div ref={messagesEndRef} />
-                </div>
-                <div className="dashboard-chat-input-wrap">
-                  <input
-                    type="text"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSend()
-                      }
-                    }}
-                    className="dashboard-chat-input"
-                    placeholder="Send instruction..."
-                    aria-label="Chat message input"
-                  />
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="dashboard-send-btn" onClick={handleSend} aria-label="Send message">
-                    Send
-                  </motion.button>
-                </div>
+            <div className="dashboard-chat-panel">
+              <div className="dashboard-chat-messages">
+                {chatMessages.length === 0 && !isTyping && (
+                  <div className="dashboard-empty">Start the conversation with your orchestrator</div>
+                )}
+                <AnimatePresence initial={false}>
+                  {chatMessages.slice(-MAX_VISIBLE_CHAT_MESSAGES).map((msg, idx) => (
+                    <motion.div
+                      key={`${msg.ts || idx}-${idx}`}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className={`dashboard-msg-row ${msg.role === 'user' ? 'dashboard-msg-row--user' : ''}`}
+                    >
+                      <div className={`dashboard-msg-bubble ${msg.role === 'user' ? 'dashboard-msg-bubble--user' : ''}`}>
+                        {msg.content}
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                {isTyping && <div className="dashboard-msg-typing">Orchestrator is thinking…</div>}
+                <div ref={messagesEndRef} />
               </div>
-            )}
+              <div className="dashboard-chat-input-wrap">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSend()
+                    }
+                  }}
+                  className="dashboard-chat-input"
+                  placeholder="Send instruction..."
+                  aria-label="Chat message input"
+                />
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="dashboard-send-btn" onClick={handleSend} aria-label="Send message">
+                  Send
+                </motion.button>
+              </div>
+            </div>
+          </div>
 
-            {activeTab === 'live-map' && (
-              <div style={{ height: '100%' }}>
-                <ParticleMap compact />
-              </div>
-            )}
+          <div
+            className="dashboard-tab-content"
+            role="tabpanel"
+            id="orchestrator-panel-live-map"
+            aria-labelledby="orchestrator-tab-live-map"
+            hidden={activeTab !== 'live-map'}
+          >
+            <div style={{ height: '100%' }}>
+              <ParticleMap compact />
+            </div>
+          </div>
 
-            {activeTab === 'logs' && (
-              <div className="dashboard-log-stream">
-                {executionLogs.length === 0
-                  ? <div className="dashboard-empty">No logs captured yet</div>
-                  : executionLogs.slice(0, MAX_VISIBLE_LOGS).map((item, idx) => <ActivityItem key={item.id || idx} item={item} index={idx} compact />)}
-              </div>
-            )}
+          <div
+            className="dashboard-tab-content"
+            role="tabpanel"
+            id="orchestrator-panel-logs"
+            aria-labelledby="orchestrator-tab-logs"
+            hidden={activeTab !== 'logs'}
+          >
+            <div className="dashboard-log-stream">
+              {executionLogs.length === 0
+                ? <div className="dashboard-empty">No logs captured yet</div>
+                : executionLogs.slice(0, MAX_VISIBLE_LOGS).map((item, idx) => <ActivityItem key={item.id || idx} item={item} index={idx} compact />)}
+            </div>
           </div>
         </section>
 
@@ -370,7 +380,7 @@ export default function DashboardPage() {
             <div className="dashboard-actions-grid">
               <QuickAction label="⚡ Hermes Agent" onClick={() => {
                 addChatMessage({ role: 'user', content: 'Activate Hermes agent for rapid task execution', ts: Date.now() })
-                sendMessage('Activate Hermes agent for rapid task execution')
+                sendChatMessage('Activate Hermes agent for rapid task execution')
               }} />
               <QuickAction label="◉ Blacklight Mode" onClick={() => {
                 fetch(`${BASE}/api/agents/mode`, {
@@ -379,7 +389,7 @@ export default function DashboardPage() {
                   body: JSON.stringify({ mode: 'BLACKLIGHT' }),
                 }).catch(() => {})
                 addChatMessage({ role: 'user', content: 'Activating BLACKLIGHT mode — all agents online', ts: Date.now() })
-                sendMessage('Activating BLACKLIGHT mode — all agents online')
+                sendChatMessage('Activating BLACKLIGHT mode — all agents online')
               }} />
               <QuickAction label="🔺 Ascend Forge" onClick={() => {
                 fetch(`${BASE}/api/self-improvement/queue`, {
@@ -388,7 +398,7 @@ export default function DashboardPage() {
                   body: JSON.stringify({ task_type: 'self_improvement', description: 'Ascend Forge: optimize strategies and evolve' }),
                 }).catch(() => {})
                 addChatMessage({ role: 'user', content: 'Launching Ascend Forge — self-improvement pipeline activated', ts: Date.now() })
-                sendMessage('Launching Ascend Forge — self-improvement pipeline activated')
+                sendChatMessage('Launching Ascend Forge — self-improvement pipeline activated')
               }} />
               <QuickAction label="💰 Money Mode" onClick={() => {
                 fetch(`${BASE}/api/agents/mode`, {
@@ -397,7 +407,7 @@ export default function DashboardPage() {
                   body: JSON.stringify({ mode: 'MONEYMODE' }),
                 }).catch(() => {})
                 addChatMessage({ role: 'user', content: 'Engaging MONEYMODE — revenue-optimized operations', ts: Date.now() })
-                sendMessage('Engaging MONEYMODE — revenue-optimized operations')
+                sendChatMessage('Engaging MONEYMODE — revenue-optimized operations')
               }} />
             </div>
           </div>

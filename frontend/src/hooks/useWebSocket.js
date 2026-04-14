@@ -134,3 +134,18 @@ export function useWebSocket() {
 
   return { sendMessage }
 }
+
+/**
+ * Standalone `sendMessage` — call without the hook to avoid
+ * duplicate cleanup / reconnect-timer interference.
+ * Safe to import in any component; the WebSocket singleton is
+ * initialised by `useWebSocket()` in App.jsx.
+ */
+export function sendChatMessage(message) {
+  if (_wsInstance?.readyState === WebSocket.OPEN) {
+    _wsInstance.send(JSON.stringify({ type: 'chat', message }))
+    getStore().setTyping(true)
+    clearTimeout(_typingTimeout)
+    _typingTimeout = setTimeout(() => getStore().setTyping(false), 30000)
+  }
+}
