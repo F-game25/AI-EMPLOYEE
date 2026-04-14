@@ -47,6 +47,105 @@ _prog_bar() {
 }
 _prog_bar_done() { [[ -t 2 ]] && printf "\n" >&2 || true; }
 
+_file_sha256() {
+    local f="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$f" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$f" | awk '{print $1}'
+    else
+        echo ""
+    fi
+}
+
+_verify_nonempty_file() {
+    local file="$1"
+    local label="${2:-$file}"
+    [[ -f "$file" ]] || err "$label is missing"
+    [[ -s "$file" ]] || err "$label is empty"
+}
+
+_copy_checked() {
+    local src="$1"
+    local dst="$2"
+    local src_hash dst_hash
+    cp -f "$src" "$dst" || err "Copy failed: $src -> $dst"
+    _verify_nonempty_file "$dst" "$dst"
+    src_hash="$(_file_sha256 "$src")"
+    dst_hash="$(_file_sha256 "$dst")"
+    if [[ -n "$src_hash" && -n "$dst_hash" && "$src_hash" != "$dst_hash" ]]; then
+        err "Checksum mismatch after copy: $src -> $dst"
+    fi
+}
+
+_download_checked() {
+    local url="$1"
+    local dest="$2"
+    curl --fail --show-error --silent "$url" -o "$dest" || err "Download failed: $url"
+    _verify_nonempty_file "$dest" "$dest"
+}
+
+_write_version_state() {
+    local commit_sha="$1"
+    local source="${2:-installer}"
+    local version_file="$AI_HOME/state/version.json"
+    local now
+    now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    mkdir -p "$AI_HOME/state"
+    cat > "$version_file" << EOF
+{
+  "last_installed_commit": "$commit_sha",
+  "last_installed_at": "$now",
+  "source": "$source"
+}
+EOF
+    _verify_nonempty_file "$version_file" "$version_file"
+}
+
+_kill_ui_process() {
+    local port="${UI_PORT:-8787}"
+    local pids=""
+    if command -v lsof >/dev/null 2>&1; then
+        pids="$(lsof -ti ":$port" 2>/dev/null || true)"
+    fi
+    if [[ -n "${pids// /}" ]]; then
+        warn "Stopping running process on port $port: $pids"
+        while IFS= read -r pid; do
+            [[ -n "$pid" ]] || continue
+            kill -9 "$pid" 2>/dev/null || true
+        done <<< "$pids"
+    fi
+}
+
+_restart_runtime_and_validate() {
+    local port="${UI_PORT:-8787}"
+    local health_url="http://127.0.0.1:${port}/health"
+    local agents_url="http://127.0.0.1:${port}/internal/agents"
+    local launcher_log="$AI_HOME/logs/launcher.log"
+    local max_tries=60
+    local i=0
+
+    echo "Restarting AI Employee with latest code..."
+    _kill_ui_process
+
+    [[ -x "$AI_HOME/start.sh" ]] || err "Missing executable start.sh at $AI_HOME/start.sh"
+    mkdir -p "$AI_HOME/logs"
+    (cd "$AI_HOME" && nohup ./start.sh >> "$launcher_log" 2>&1 &) || err "Failed to restart AI Employee"
+
+    while (( i < max_tries )); do
+        if curl --fail --show-error --silent --max-time 2 "$health_url" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 2
+        i=$(( i + 1 ))
+    done
+    (( i < max_tries )) || err "Update failed: /health is not responding on port $port"
+
+    curl --fail --show-error --silent --max-time 5 "$agents_url" >/dev/null 2>&1 \
+        || err "Update failed: /internal/agents validation failed"
+    ok "Runtime restart validated via /health and /internal/agents"
+}
+
 banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
@@ -549,6 +648,8 @@ install_runtime() {
     _DL_TOTAL=$(grep -Ec '^\s+dl "' "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo 252)
     [[ "$_DL_TOTAL" -lt 1 ]] && _DL_TOTAL=252
 
+    _kill_ui_process
+
     if [[ ! -d "$src" ]]; then
         log "Runtime dir not found locally — downloading from GitHub..."
         local TMP_RUNTIME
@@ -560,11 +661,7 @@ install_runtime() {
             _DL_COUNT=$(( _DL_COUNT + 1 ))
             _prog_bar "$_DL_COUNT" "$_DL_TOTAL" "$rel"
             mkdir -p "$TMP_RUNTIME/$(dirname "$rel")"
-            curl -fsSL "$BASE_URL/runtime/$rel" -o "$TMP_RUNTIME/$rel" 2>/dev/null \
-                || { _prog_bar_done; echo "FATAL: could not download $rel"; exit 1; }
-            if [[ ! -s "$TMP_RUNTIME/$rel" ]]; then
-                _prog_bar_done; echo "FATAL: downloaded $rel is empty"; exit 1
-            fi
+            _download_checked "$BASE_URL/runtime/$rel" "$TMP_RUNTIME/$rel"
         }
     else
         log "Using local runtime from $src"
@@ -849,7 +946,7 @@ install_runtime() {
 
     # bin/
     mkdir -p "$AI_HOME/bin"
-    cp -f "$src/bin/ai-employee" "$AI_HOME/bin/ai-employee"
+    _copy_checked "$src/bin/ai-employee" "$AI_HOME/bin/ai-employee"
     chmod +x "$AI_HOME/bin/ai-employee"
 
     # agents/ (overwrite code; never overwrite .env)
@@ -861,7 +958,7 @@ install_runtime() {
         for f in "$bot_dir"*; do
             [[ -f "$f" ]] || continue
             fname="$(basename "$f")"
-            cp -f "$f" "$AI_HOME/agents/$bot_name/$fname"
+            _copy_checked "$f" "$AI_HOME/agents/$bot_name/$fname"
             [[ "$fname" == *.sh ]] && chmod +x "$AI_HOME/agents/$bot_name/$fname"
         done
         # Copy subdirectories (e.g. problem-solver-ui/features/)
@@ -871,7 +968,7 @@ install_runtime() {
             mkdir -p "$AI_HOME/agents/$bot_name/$sub_name"
             for f in "$sub_dir"*; do
                 [[ -f "$f" ]] || continue
-                cp -f "$f" "$AI_HOME/agents/$bot_name/$sub_name/$(basename "$f")"
+                _copy_checked "$f" "$AI_HOME/agents/$bot_name/$sub_name/$(basename "$f")"
             done
         done
     done
@@ -881,22 +978,20 @@ install_runtime() {
     # Copy shared files at agents/ root (utils.py, agent_selftest.py)
     for f in "$src/agents"/*.py; do
         [[ -f "$f" ]] || continue
-        cp -f "$f" "$AI_HOME/agents/$(basename "$f")"
+        _copy_checked "$f" "$AI_HOME/agents/$(basename "$f")"
     done
 
     # start.sh / stop.sh
-    cp -f "$src/start.sh" "$AI_HOME/start.sh"
-    cp -f "$src/stop.sh"  "$AI_HOME/stop.sh"
+    _copy_checked "$src/start.sh" "$AI_HOME/start.sh"
+    _copy_checked "$src/stop.sh" "$AI_HOME/stop.sh"
     chmod +x "$AI_HOME/start.sh" "$AI_HOME/stop.sh"
 
-    # config templates (only if file does NOT yet exist)
+    # config templates (always overwrite to keep runtime in sync with latest code)
     mkdir -p "$AI_HOME/config"
     for f in "$src/config"/*; do
         [[ -f "$f" ]] || continue
         fname="$(basename "$f")"
-        if [[ ! -f "$AI_HOME/config/$fname" ]]; then
-            cp "$f" "$AI_HOME/config/$fname"
-        fi
+        _copy_checked "$f" "$AI_HOME/config/$fname"
     done
 
     # Python deps for UI helper agents (non-critical — UI now uses Node.js backend)
@@ -925,22 +1020,23 @@ install_runtime() {
         local _fe_dir="$SCRIPT_DIR/frontend"
         if [[ -f "$_be_dir/package.json" ]]; then
             log "Installing Node.js backend packages..."
-            npm --prefix "$_be_dir" install --silent 2>/dev/null \
+            npm --prefix "$_be_dir" install --silent \
                 && ok "Backend Node packages installed" \
-                || warn "npm install for backend failed — run: npm --prefix backend install"
+                || err "npm install for backend failed"
         fi
         if [[ -f "$_fe_dir/package.json" ]]; then
             log "Building React UI bundle..."
             if [[ ! -d "$_fe_dir/node_modules" ]]; then
-                npm --prefix "$_fe_dir" install --silent 2>/dev/null \
-                    || warn "npm install for frontend failed"
+                npm --prefix "$_fe_dir" install --silent \
+                    || err "npm install for frontend failed"
             fi
-            npm --prefix "$_fe_dir" run build 2>/dev/null \
-                && ok "React UI bundle built (frontend/dist)" \
-                || warn "Frontend build failed — run: cd frontend && npm run build"
+            npm --prefix "$_fe_dir" run build \
+                || err "Frontend build failed"
+            _verify_nonempty_file "$_fe_dir/dist/index.html" "$_fe_dir/dist/index.html"
+            ok "React UI bundle built (frontend/dist)"
         fi
     else
-        warn "npm not found — Node.js packages will be installed on first start of the UI"
+        err "npm not found — cannot build required frontend/dist bundle"
     fi
 
     # Python deps for ai-router (requests is needed for Ollama calls)
@@ -955,16 +1051,20 @@ install_runtime() {
     # ── Record the current GitHub commit SHA so the auto-updater has a baseline ─
     mkdir -p "$AI_HOME/state"
     local _commit_sha=""
-    if command -v curl >/dev/null 2>&1; then
-        _commit_sha=$(curl -sf --max-time 10 \
+    if command -v git >/dev/null 2>&1 && [[ -d "$SCRIPT_DIR/.git" ]]; then
+        _commit_sha="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || true)"
+    fi
+    if [[ -z "$_commit_sha" ]] && command -v curl >/dev/null 2>&1; then
+        _commit_sha="$(curl --fail --show-error --silent --max-time 10 \
             -H "Accept: application/vnd.github.v3+json" \
             -H "User-Agent: ai-employee-installer/4.0" \
             "https://api.github.com/repos/F-game25/AI-EMPLOYEE/commits/main" \
-            2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('sha',''))" \
-            2>/dev/null || true)
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('sha',''))" \
+            2>/dev/null || true)"
     fi
     if [[ -n "${_commit_sha:-}" ]]; then
         echo "$_commit_sha" > "$AI_HOME/state/installed_commit.txt"
+        _write_version_state "$_commit_sha" "install.sh"
         ok "Recorded install baseline: ${_commit_sha:0:8}"
     else
         warn "Could not record install commit SHA (offline install?) — auto-updater will bootstrap on first run"
@@ -1487,110 +1587,9 @@ except Exception:
 # ─── Static dashboard ─────────────────────────────────────────────────────────
 
 install_dashboard_ui() {
-    mkdir -p "$AI_HOME/ui"
-
-    cat > "$AI_HOME/ui/index.html" << 'HTMLEND'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Employee</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:20px}
-.container{max-width:1000px;margin:0 auto}
-header{background:#1e293b;padding:28px;border-radius:15px;margin-bottom:28px;text-align:center;border:1px solid #334155}
-h1{color:#fff;font-size:2.2em;margin-bottom:8px}
-.sub{color:rgba(255,255,255,.85)}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px}
-.card{background:#1e293b;padding:22px;border-radius:12px;border:1px solid #334155}
-.card h2{color:#D4AF37;margin-bottom:14px;font-size:1.1em}
-.btn{display:inline-block;background:#D4AF37;color:#0f172a;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:.9em;margin:4px;text-decoration:none;font-weight:600}
-.btn:hover{opacity:0.9}
-.stat{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #334155}
-.stat:last-child{border:none}
-.stat-val{font-weight:bold}
-.online{color:#10b981}
-.offline{color:#ef4444}
-.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px;background:#64748b}
-.dot.ok{background:#10b981;animation:pulse 2s infinite}
-.dot.fail{background:#ef4444}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-code{background:#334155;padding:2px 8px;border-radius:4px;font-family:monospace;color:#10b981;font-size:.9em}
-footer{text-align:center;margin-top:32px;color:#64748b;font-size:.9em}
-</style>
-</head>
-<body>
-<div class="container">
-<header>
-  <h1>🤖 AI Employee</h1>
-  <p class="sub">Autonomous Multi-Agent System</p>
-</header>
-<div class="grid">
-  <div class="card">
-    <h2>System Status</h2>
-    <div class="stat"><span><span class="dot" id="ui-dot"></span>Dashboard</span><span class="stat-val" id="ui-status">checking...</span></div>
-  </div>
-  <div class="card">
-    <h2>Quick Access</h2>
-    <a class="btn" href="http://127.0.0.1:8787" target="_blank">🛠️ Full Dashboard</a>
-  </div>
-</div>
-<div class="card">
-<h2>Quick Actions</h2>
-<button class="btn" onclick="window.open('http://127.0.0.1:8787','_blank')">🛠️ Problem Solver UI</button>
-<button class="btn" onclick="alert('Run in terminal: openclaw logs --follow')">📋 View Logs</button>
-</div>
-</div>
-
-<div class="card instruction" style="margin-top:16px">
-<h2>💬 How to Use</h2>
-<p style="margin-bottom:15px">Send WhatsApp message to yourself:</p>
-<p><code>switch to lead-hunter</code></p>
-<p style="margin:10px 0"><code>find 20 SaaS CTOs in Netherlands</code></p>
-<p style="margin:10px 0"><code>switch to claude-agent</code></p>
-<p style="margin:10px 0"><code>switch to ollama-agent</code></p>
-<p style="margin-top:15px;color:#94a3b8;font-size:0.9em">
-The agent will process your request and return results via WhatsApp.
-</p>
-  <h2>💬 WhatsApp Commands</h2>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
-    <div><code>status</code> — get status report</div>
-    <div><code>workers</code> — list active workers</div>
-    <div><code>switch to &lt;agent&gt;</code> — change agent</div>
-    <div><code>schedule</code> — list tasks</div>
-    <div><code>improvements</code> — pending proposals</div>
-    <div><code>help</code> — all commands</div>
-  </div>
-</div>
-<footer>
-  <p>🤖 AI Employee v4.0 • <a href="http://127.0.0.1:8787" style="color:#D4AF37">Open full dashboard →</a></p>
-</footer>
-</div>
-<script>
-async function checkService(url, statusId, dotId) {
-  try {
-    const resp = await fetch(url, {signal: AbortSignal.timeout(3000)});
-    if (resp.ok) {
-      document.getElementById(statusId).textContent = 'Online';
-      document.getElementById(statusId).className = 'stat-val online';
-      document.getElementById(dotId).className = 'dot ok';
-    } else {
-      throw new Error('not ok');
-    }
-  } catch {
-    document.getElementById(statusId).textContent = 'Offline';
-    document.getElementById(statusId).className = 'stat-val offline';
-    document.getElementById(dotId).className = 'dot fail';
-  }
-}
-checkService('http://127.0.0.1:8787', 'ui-status', 'ui-dot');
-</script>
-</body>
-</html>
-HTMLEND
-    ok "Dashboard UI installed"
+    local dist_index="$SCRIPT_DIR/frontend/dist/index.html"
+    _verify_nonempty_file "$dist_index" "$dist_index"
+    ok "Static dashboard overwrite disabled; runtime serves frontend/dist only"
 }
 
 # ─── Startup message ──────────────────────────────────────────────────────────
@@ -1897,6 +1896,7 @@ main() {
     queue_startup_message
     add_to_path
     create_desktop_launcher
+    _restart_runtime_and_validate
     done_message
 }
 
