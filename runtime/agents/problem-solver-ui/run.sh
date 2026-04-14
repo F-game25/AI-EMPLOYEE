@@ -64,6 +64,7 @@ _find_repo_root() {
     start="$(dirname "$start")"
   fi
   cur="$(cd "$start" 2>/dev/null && pwd)" || return 1
+  # Repo marker contract: backend/server.js + frontend/package.json must both exist.
   while [[ -n "$cur" && "$cur" != "/" ]]; do
     if [[ -f "$cur/backend/server.js" && -f "$cur/frontend/package.json" ]]; then
       echo "$cur"
@@ -75,9 +76,10 @@ _find_repo_root() {
 }
 
 # When run from repo runtime/agents/problem-solver-ui/run.sh, repo root is 3 levels up.
-_REPO_CAND="$(_find_repo_root "$SCRIPT_DIR/../../.." || true)"
-_GITHUB_WORKSPACE_REPO=""
-_PWD_REPO=""
+_REPO_CAND=""
+if _repo="$(_find_repo_root "$SCRIPT_DIR/../../.." 2>/dev/null)"; then
+  _REPO_CAND="$_repo"
+fi
 BACKEND_DIR=""
 FRONTEND_DIR=""
 
@@ -90,9 +92,8 @@ elif [[ -n "${AI_EMPLOYEE_REPO_DIR:-}" && -f "$AI_EMPLOYEE_REPO_DIR/backend/serv
   FRONTEND_DIR="$AI_EMPLOYEE_REPO_DIR/frontend"
   _info "Repo: $AI_EMPLOYEE_REPO_DIR  (AI_EMPLOYEE_REPO_DIR)"
 elif [[ -n "${GITHUB_WORKSPACE:-}" ]]; then
-  _GITHUB_WORKSPACE_REPO="$(_find_repo_root "$GITHUB_WORKSPACE" || true)"
-  if [[ -n "$_GITHUB_WORKSPACE_REPO" ]]; then
-    _REPO_CAND="$_GITHUB_WORKSPACE_REPO"
+  if _repo="$(_find_repo_root "$GITHUB_WORKSPACE" 2>/dev/null)"; then
+    _REPO_CAND="$_repo"
     BACKEND_DIR="$_REPO_CAND/backend"
     FRONTEND_DIR="$_REPO_CAND/frontend"
     _info "Repo: $_REPO_CAND  (GITHUB_WORKSPACE)"
@@ -100,9 +101,8 @@ elif [[ -n "${GITHUB_WORKSPACE:-}" ]]; then
 fi
 
 if [[ -z "$BACKEND_DIR" ]]; then
-  _PWD_REPO="$(_find_repo_root "$PWD" || true)"
-  if [[ -n "$_PWD_REPO" ]]; then
-    _REPO_CAND="$_PWD_REPO"
+  if _repo="$(_find_repo_root "$PWD" 2>/dev/null)"; then
+    _REPO_CAND="$_repo"
     BACKEND_DIR="$_REPO_CAND/backend"
     FRONTEND_DIR="$_REPO_CAND/frontend"
     _info "Repo: $_REPO_CAND  (current directory)"
