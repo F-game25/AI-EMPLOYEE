@@ -3,6 +3,7 @@ import { useAppStore } from '../../store/appStore'
 const NAV_ITEMS = [
   { id: 'dashboard', icon: '◆', label: 'Dashboard' },
   { id: 'ai-control', icon: '◉', label: 'AI Control' },
+  { id: 'neural-brain', icon: '🧠', label: 'Neural Brain' },
   { id: 'operations', icon: '▣', label: 'Operations' },
   { id: 'agents', icon: '⬡', label: 'Agents' },
   { id: 'system', icon: '⚙', label: 'System' },

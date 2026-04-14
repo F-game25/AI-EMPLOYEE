@@ -5,6 +5,7 @@ import Sidebar from './layout/Sidebar'
 import ContextPanel from './layout/ContextPanel'
 import DashboardPage from './pages/DashboardPage'
 import AIControlPage from './pages/AIControlPage'
+import NeuralBrainPage from './pages/NeuralBrainPage'
 import OperationsPage from './pages/OperationsPage'
 import AgentsPage from './pages/AgentsPage'
 import SystemPage from './pages/SystemPage'
@@ -14,6 +15,7 @@ const BASE = window.location.origin
 const PAGES = {
   'dashboard': DashboardPage,
   'ai-control': AIControlPage,
+  'neural-brain': NeuralBrainPage,
   'operations': OperationsPage,
   'agents': AgentsPage,
   'system': SystemPage,
