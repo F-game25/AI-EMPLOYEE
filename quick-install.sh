@@ -38,7 +38,7 @@ if [[ "$ZERO_CONFIG" == "1" ]]; then
   echo ""
   echo -e "${G}╔══════════════════════════════════════════════════════╗${NC}"
   echo -e "${G}║   Zero-config install — no questions asked           ║${NC}"
-  echo -e "${G}║   Defaults: Starter mode, Ollama local, 5 agents     ║${NC}"
+  echo -e "${G}║   Defaults: Starter mode, Ollama local               ║${NC}"
   echo -e "${G}╚══════════════════════════════════════════════════════╝${NC}"
   echo ""
 fi
@@ -64,6 +64,9 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 cd "$TEMP_DIR"
 
 # Download install.sh — the installer downloads all runtime files itself
+# NOTE: For maximum security, verify the commit SHA or pin a specific release tag
+# in the URL rather than using 'main'. Example:
+#   BASE_URL="https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/<commit-sha>"
 curl -fsSL "$BASE_URL/install.sh" -o install.sh || err "Failed to download install.sh"
 chmod +x install.sh
 
