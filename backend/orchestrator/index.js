@@ -4,7 +4,7 @@ const { Router } = require('express');
 const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const subsystems = require('../subsystems');
-const { classifyMessage } = require('../routing');
+const { classifyMessage, classifyCategory } = require('../routing');
 const brain = require('../brain/active_brain');
 const {
   enqueueTask,
@@ -52,6 +52,7 @@ function buildReply(task) {
 function submitTask(message, options = {}) {
   const userId = options.userId || 'user:default';
   const subsystemHint = classifyMessage(message) || 'general';
+  const categoryHint = classifyCategory(message);
   const seedTaskId = `planning-${crypto.randomUUID()}`;
   let plan;
   try {
@@ -87,6 +88,7 @@ function submitTask(message, options = {}) {
   const assignment = enqueueTask({
     message,
     subsystem,
+    categoryHint,
     metadata: {
       moneyTemplate,
       brain: plan,

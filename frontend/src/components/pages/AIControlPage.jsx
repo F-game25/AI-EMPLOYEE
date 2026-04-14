@@ -181,6 +181,105 @@ function DecisionFlowCard({ activity }) {
   )
 }
 
+function NeuralNetworkLive({ nnStatus }) {
+  const confidence = Math.round((nnStatus?.confidence ?? 0) * 100)
+  const bufferPct = nnStatus?.max_buffer_size
+    ? Math.round((nnStatus.buffer_size / nnStatus.max_buffer_size) * 100)
+    : 0
+  const recentOutputs = nnStatus?.recent_outputs || []
+  const recentLearning = nnStatus?.recent_learning_events || []
+
+  return (
+    <div className="ds-card" style={{ padding: 'var(--space-4)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
+        <h3 style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)' }}>
+          Neural Network
+        </h3>
+        <span style={{
+          fontSize: '11px',
+          padding: '2px 8px',
+          borderRadius: '4px',
+          background: nnStatus?.active ? 'rgba(34,197,94,0.1)' : 'rgba(102,102,112,0.1)',
+          color: nnStatus?.active ? 'var(--success)' : 'var(--text-muted)',
+        }}>
+          {nnStatus?.mode || 'UNKNOWN'}
+        </span>
+      </div>
+
+      {/* Confidence bar */}
+      <div style={{ marginBottom: 'var(--space-3)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
+          <span style={{ color: 'var(--text-muted)' }}>Confidence</span>
+          <span style={{ color: 'var(--gold)' }}>{confidence}%</span>
+        </div>
+        <div style={{ height: '6px', background: 'var(--bg-base)', borderRadius: '3px', overflow: 'hidden' }}>
+          <motion.div
+            animate={{ width: `${confidence}%` }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+            style={{ height: '100%', background: 'var(--gold)', borderRadius: '3px', boxShadow: '0 0 8px rgba(212,175,55,0.4)' }}
+          />
+        </div>
+      </div>
+
+      {/* Buffer bar */}
+      <div style={{ marginBottom: 'var(--space-3)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
+          <span style={{ color: 'var(--text-muted)' }}>Replay Buffer</span>
+          <span style={{ color: 'var(--neon-teal)' }}>{(nnStatus?.buffer_size ?? 0).toLocaleString()} / {(nnStatus?.max_buffer_size ?? 0).toLocaleString()}</span>
+        </div>
+        <div style={{ height: '6px', background: 'var(--bg-base)', borderRadius: '3px', overflow: 'hidden' }}>
+          <motion.div
+            animate={{ width: `${bufferPct}%` }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+            style={{ height: '100%', background: 'var(--neon-teal)', borderRadius: '3px', boxShadow: '0 0 8px rgba(32,214,199,0.3)' }}
+          />
+        </div>
+      </div>
+
+      {/* Stats grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+        {[
+          { label: 'Learn Step', value: (nnStatus?.learn_step ?? 0).toLocaleString() },
+          { label: 'Experiences', value: (nnStatus?.experiences ?? 0).toLocaleString() },
+          { label: 'Loss', value: nnStatus?.last_loss != null ? nnStatus.last_loss.toFixed(4) : '—', color: 'var(--neon-cyan)' },
+          { label: 'Device', value: (nnStatus?.device ?? 'cpu').toUpperCase() },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ padding: 'var(--space-2)', background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{label}</div>
+            <div style={{ fontSize: '14px', fontWeight: 500, color: color || 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Recent decisions */}
+      {recentOutputs.length > 0 && (
+        <div style={{ marginBottom: 'var(--space-2)' }}>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: 'var(--space-1)' }}>Recent Decisions</div>
+          {recentOutputs.slice(0, 3).map((item, i) => (
+            <div key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', padding: '3px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: 'var(--gold)', fontSize: '10px' }}>›</span>
+              {typeof item === 'string' ? item : item.action || item.decision || JSON.stringify(item)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Recent learning */}
+      {recentLearning.length > 0 && (
+        <div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: 'var(--space-1)' }}>Recent Learning</div>
+          {recentLearning.slice(0, 3).map((item, i) => (
+            <div key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', padding: '3px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: 'var(--neon-teal)', fontSize: '10px' }}>●</span>
+              {typeof item === 'string' ? item : item.event || item.type || JSON.stringify(item)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AIControlPage() {
   const chatMessages = useAppStore(s => s.chatMessages)
   const addChatMessage = useAppStore(s => s.addChatMessage)
@@ -189,9 +288,25 @@ export default function AIControlPage() {
   const ws = useAppStore(s => s.ws)
   const brainInsights = useAppStore(s => s.brainInsights)
   const brainActivity = useAppStore(s => s.brainActivity)
+  const nnStatus = useAppStore(s => s.nnStatus)
 
   const [input, setInput] = useState('')
   const scrollRef = useRef(null)
+
+  // Poll neural network status for live updates
+  useEffect(() => {
+    const controller = new AbortController()
+    const fetchNN = async () => {
+      try {
+        const res = await fetch(`${BASE}/api/brain/status`, { signal: controller.signal })
+        const data = await res.json()
+        if (data) useAppStore.getState().setNnStatus(data)
+      } catch { /* ignore */ }
+    }
+    fetchNN()
+    const i = setInterval(fetchNN, 3000)
+    return () => { clearInterval(i); controller.abort() }
+  }, [])
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -309,15 +424,16 @@ export default function AIControlPage() {
         </div>
       </div>
 
-      {/* Right rail — Brain insights */}
+      {/* Right rail — Brain insights + Neural Network live */}
       <div style={{
-        width: '320px',
+        width: '340px',
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
         gap: 'var(--space-3)',
         overflowY: 'auto',
       }}>
+        <NeuralNetworkLive nnStatus={nnStatus} />
         <BrainInsightCard insights={brainInsights} />
         <DecisionFlowCard activity={brainActivity} />
       </div>

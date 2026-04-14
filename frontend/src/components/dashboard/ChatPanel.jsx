@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
-import { useWebSocket } from '../../hooks/useWebSocket'
+import { sendChatMessage } from '../../hooks/useWebSocket'
 
 export default function ChatPanel() {
   const messages = useAppStore(s => s.chatMessages)
@@ -9,7 +9,6 @@ export default function ChatPanel() {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
   const addChatMessage = useAppStore(s => s.addChatMessage)
-  const { sendMessage } = useWebSocket()
   const inputId = useId()
 
   useEffect(() => {
@@ -20,7 +19,7 @@ export default function ChatPanel() {
     const text = input.trim()
     if (!text) return
     addChatMessage({ role: 'user', content: text, ts: Date.now() })
-    sendMessage(text)
+    sendChatMessage(text)
     setInput('')
   }
 
