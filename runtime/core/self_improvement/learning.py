@@ -87,7 +87,11 @@ class LearningModule:
 
     def learn(self, agent: str, result: Any) -> dict[str, Any]:
         reward = self.calculate_reward(result)
-        before, after = update_weight(agent, reward)
+        try:
+            before, after = update_weight(agent, reward)
+        except ValueError:
+            before, after = update_weight("task_orchestrator", reward)
+            agent = "task_orchestrator"
         return {
             "agent": agent,
             "reward": reward,
@@ -96,7 +100,7 @@ class LearningModule:
         }
 
     @staticmethod
-    def _brain_selected_agent(task: ImprovementTask) -> str | None:
+    def _get_selected_agent_from_task(task: ImprovementTask) -> str | None:
         brain_strategy = task.brain_strategy if isinstance(task.brain_strategy, dict) else {}
         selected = brain_strategy.get("selected_agent")
         return selected if isinstance(selected, str) else None
@@ -161,7 +165,7 @@ class LearningModule:
         record["brain_learned"] = brain_result.get("learned", False)
         record["brain_reward"] = brain_result.get("reward", 0.0)
         record["reward_signal"] = reward
-        selected_agent = self._brain_selected_agent(task)
+        selected_agent = self._get_selected_agent_from_task(task)
         reinforcement = self.learn(selected_agent or "task_orchestrator", {"outcome": outcome})
         record["reinforcement"] = reinforcement
 

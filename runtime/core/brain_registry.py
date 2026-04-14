@@ -35,6 +35,8 @@ _AGENT_KEYWORDS: dict[str, tuple[str, ...]] = {
     "data_analyst": ("analyze", "analyse", "metric", "data", "report"),
     "task_orchestrator": ("plan", "execute", "task", "workflow", "general"),
 }
+_SUCCESS_RATE_WEIGHT = 0.3
+_PRIORITY_WEIGHT = 0.2
 
 
 class BrainRegistry:
@@ -133,8 +135,8 @@ class BrainRegistry:
             features = task_features.get(agent, task_features)
             scores[agent] = (
                 current_weights[agent] * features["task_match"] +
-                features["success_rate"] * 0.3 +
-                features["priority"] * 0.2
+                features["success_rate"] * _SUCCESS_RATE_WEIGHT +
+                features["priority"] * _PRIORITY_WEIGHT
             )
 
         return max(scores, key=scores.get)
@@ -159,8 +161,8 @@ class BrainRegistry:
         confidence = min(
             1.0,
             current_weights.get(selected_agent, 0.0) * feature_row["task_match"] +
-            feature_row["success_rate"] * 0.3 +
-            feature_row["priority"] * 0.2,
+            feature_row["success_rate"] * _SUCCESS_RATE_WEIGHT +
+            feature_row["priority"] * _PRIORITY_WEIGHT,
         )
         source = "reinforcement_brain"
         skill = _AGENT_TO_SKILL.get(selected_agent, "problem-solver")

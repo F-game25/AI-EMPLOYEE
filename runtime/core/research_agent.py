@@ -8,16 +8,16 @@ from core.knowledge_store import get_knowledge_store
 
 
 class ResearchAgent:
-    _TRIGGERS = (
-        "learn about",
-        "learn how to run a business",
-        "research online product sales",
-        "research ",
+    _TRIGGER_PATTERNS = (
+        r"\blearn about\b",
+        r"\blearn how to run a business\b",
+        r"\bresearch online product sales\b",
+        r"\bresearch\b",
     )
 
     def is_learn_command(self, text: str) -> bool:
         lower = (text or "").strip().lower()
-        return any(trigger in lower for trigger in self._TRIGGERS)
+        return any(re.search(pattern, lower) for pattern in self._TRIGGER_PATTERNS)
 
     def extract_topic(self, text: str) -> str:
         lower = (text or "").strip().lower()

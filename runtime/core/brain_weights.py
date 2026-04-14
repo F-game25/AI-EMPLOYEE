@@ -65,7 +65,7 @@ def get_weights() -> dict[str, float]:
 def update_weight(agent: str, reward: float) -> tuple[float, float]:
     with _lock:
         if agent not in weights:
-            return (0.0, 0.0)
+            raise ValueError(f"Unknown brain weight agent: {agent}")
         before = weights[agent]
         weights[agent] = clamp(before + (learning_rate * float(reward)))
         save_weights()

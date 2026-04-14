@@ -25,6 +25,7 @@ _DEFAULT_STORE = {
         "updated_at": None,
     },
 }
+_MAX_PROFILE_ITEMS = 30
 
 
 class KnowledgeStore:
@@ -131,11 +132,11 @@ class KnowledgeStore:
         with self._lock:
             profile = self._state.setdefault("user_profile", dict(_DEFAULT_STORE["user_profile"]))
             if goals:
-                profile["goals"] = list(dict.fromkeys([*(profile.get("goals", [])), *goals]))[-30:]
+                profile["goals"] = list(dict.fromkeys([*(profile.get("goals", [])), *goals]))[-_MAX_PROFILE_ITEMS:]
             if business_type:
                 profile["business_type"] = business_type
             if preferences:
-                profile["preferences"] = list(dict.fromkeys([*(profile.get("preferences", [])), *preferences]))[-30:]
+                profile["preferences"] = list(dict.fromkeys([*(profile.get("preferences", [])), *preferences]))[-_MAX_PROFILE_ITEMS:]
             profile["updated_at"] = self._ts()
             self._write(self._state)
             return dict(profile)
@@ -151,7 +152,7 @@ class KnowledgeStore:
 
         if any(k in lower for k in ("goal", "need", "want", "plan", "strategy")):
             goals.append(msg[:160])
-        match = re.search(r"(?:business|company|store|brand)\s*(?:is|type|:)\s*([a-z0-9\-\s]+)", lower)
+        match = re.search(r"(?:business|company|store|brand)\s*(?:is|type|:)\s*([\w\-\s&]+)", lower)
         if match:
             business_type = match.group(1).strip()[:80]
         for key in ("budget", "tone", "audience", "industry", "market", "timeline"):

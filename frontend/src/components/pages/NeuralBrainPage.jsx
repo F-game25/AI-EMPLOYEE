@@ -588,7 +588,7 @@ export default function NeuralBrainPage() {
                 {Object.entries(agentWeights).map(([agent, weight]) => (
                   <div key={agent} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
                     <span style={{ color: 'var(--text-muted)' }}>{agent}</span>
-                    <span style={{ color: 'var(--gold)', fontVariantNumeric: 'tabular-nums' }}>{Math.round((weight || 0) * 100)}%</span>
+                    <span style={{ color: 'var(--gold)', fontVariantNumeric: 'tabular-nums' }}>{((weight || 0) * 100).toFixed(1)}%</span>
                   </div>
                 ))}
                 <div style={{ marginTop: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}>
