@@ -265,7 +265,11 @@ def brain_knowledge(query: str = Query("", min_length=0)):
 
 @router.post("/brain/learn-topic")
 def brain_learn_topic(body: dict):
-    """Ingest research knowledge for a requested topic prompt."""
+    """Ingest research knowledge for a requested topic prompt.
+
+    Preferred request field: ``topic``.
+    Backward-compatible fallback: ``prompt``.
+    """
     try:
         from core.research_agent import ResearchAgent
 

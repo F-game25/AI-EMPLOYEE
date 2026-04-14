@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 import uuid
 import threading
+import logging
 from typing import Callable
 
 from analytics.structured_logger import StructuredLogger, get_structured_logger
@@ -155,6 +156,7 @@ class AgentController:
         try:
             get_knowledge_store().learn_from_conversation(text)
         except Exception:
+            logging.getLogger(__name__).debug("conversation learning failed", exc_info=True)
             return
 
     def _build_summary(self, *, run_id: str, goal: str, graph: TaskGraph) -> dict:
