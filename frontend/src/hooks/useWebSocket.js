@@ -95,6 +95,17 @@ function connectSingleton() {
         case 'objective:update':
           if (data?.system) store.setObjectivePanel(data.system, data)
           break
+        case 'event_stream':
+          store.addActivityItem({
+            id: data.id || `evt-${Date.now()}`,
+            kind: data.event_type || 'event',
+            notes: `${data.event_type || 'event'}${data.payload?.task_id ? ` · ${data.payload.task_id}` : ''}`,
+            ts: data.ts || Date.now(),
+          })
+          break
+        case 'observability:snapshot':
+          store.setObservability(data)
+          break
       }
     } catch (e) { /* ignore */ }
   }

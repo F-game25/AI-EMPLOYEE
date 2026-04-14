@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import NeuralGraphPanel from '../dashboard/NeuralGraphPanel'
 import { API_URL } from '../../config/api'
 
 const BASE = API_URL
@@ -645,6 +646,10 @@ export default function NeuralBrainPage() {
             )}
           </GlassPanel>
         </div>
+      </div>
+
+      <div style={{ paddingTop: 'var(--space-3)' }}>
+        <NeuralGraphPanel />
       </div>
 
       {/* ── BOTTOM PANELS ── */}
