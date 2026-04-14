@@ -8,6 +8,15 @@ export const useAppStore = create((set) => ({
   appState: 'boot', // boot | connecting | login | dashboard | error
   setAppState: (s) => set({ appState: s }),
 
+  // Navigation — 5 core sections
+  activeSection: 'dashboard', // dashboard | ai-control | operations | agents | system
+  setActiveSection: (s) => set({ activeSection: s }),
+
+  // Context panel (slides in from right)
+  contextPanel: null, // null or { type, data }
+  setContextPanel: (panel) => set({ contextPanel: panel }),
+  closeContextPanel: () => set({ contextPanel: null }),
+
   // Auth
   user: null,
   login: (username) => set({ user: { username }, appState: 'dashboard' }),
