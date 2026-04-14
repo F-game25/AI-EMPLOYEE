@@ -32,6 +32,8 @@ venv/
 
 # Runtime secrets — never commit live state/user data
 state/users.json
+state/brain_weights.json
+state/learning_engine.json
 .data/
 
 # Test coverage artifacts

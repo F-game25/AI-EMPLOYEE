@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
+from pathlib import Path
+
+_RUNTIME = Path(__file__).parent.parent / "runtime"
+if str(_RUNTIME) not in sys.path:
+    sys.path.insert(0, str(_RUNTIME))
 
 
 def _reload(module_name: str):
@@ -32,6 +38,8 @@ def test_same_task_selection_improves_over_runs(tmp_path, monkeypatch):
     for i in range(5):
         strategy = registry.get_strategy(goal="find qualified sales leads", goal_type="lead_generation")
         confidences.append(float(strategy["brain"]["confidence"]))
+        assert "Based on previous similar tasks" in strategy["brain"]["decision_reasoning"]
+        assert isinstance(strategy["brain"].get("relevant_memory"), dict)
         task = TaskNode(
             task_id=f"t{i}",
             skill=strategy["agent"],
@@ -54,6 +62,10 @@ def test_learn_topic_is_reused_in_planner_context(tmp_path, monkeypatch):
 
     result = ra.ResearchAgent().learn_topic("learn about ecommerce")
     assert result["topic"] == "ecommerce"
+    assert "insights" in result
+    assert "strategies" in result
+    assert "mistakes_to_avoid" in result
+    assert "actionable_playbooks" in result
 
     task = ImprovementTask(
         description="create marketing strategy for ecommerce",
