@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { API_URL } from '../../config/api'
 
-const BASE = window.location.origin
+const BASE = API_URL
 
 /* ─── Neuron color by state ─── */
 const NEURON_COLORS = {
