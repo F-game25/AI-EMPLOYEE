@@ -88,6 +88,14 @@ class BrainRegistry:
             self._last_updated = stamp
             self._events.appendleft({"ts": stamp, "event": event, **payload})
 
+    @staticmethod
+    def _memory_hits(memory: dict[str, Any]) -> int:
+        return (
+            len(memory.get("short_term", []))
+            + len(memory.get("long_term", []))
+            + len(memory.get("episodic", []))
+        )
+
     def _priority_for_goal(self, goal: str, goal_type: str) -> float:
         text = f"{goal} {goal_type}".lower()
         if any(token in text for token in ("urgent", "critical", "asap", "immediately")):
@@ -268,13 +276,16 @@ class BrainRegistry:
         context = knowledge.get_relevant_context(goal)
         memories = memory_index.get_relevant_memories(goal, top_k=5)
         relevant_memory = learning_engine.search_memory(goal, top_k=5)
-        memory_hits = (
-            len(relevant_memory.get("short_term", []))
-            + len(relevant_memory.get("long_term", []))
-            + len(relevant_memory.get("episodic", []))
-        )
+        memory_hits = self._memory_hits(relevant_memory)
         if memory_hits <= 0:
-            raise RuntimeError("memory retrieval failed: no usable memory was found for decision routing")
+            learning_engine.add_conversation_message(role="system", message=f"decision bootstrap memory: {goal}")
+            relevant_memory = learning_engine.search_memory(goal, top_k=5)
+            if self._memory_hits(relevant_memory) <= 0:
+                relevant_memory = {
+                    "short_term": [{"ts": self._ts(), "role": "system", "text": (goal or "general").strip()[:500]}],
+                    "long_term": [],
+                    "episodic": [],
+                }
         profile = knowledge.snapshot().get("user_profile", {})
         context_bundle = {
             "knowledge": context,

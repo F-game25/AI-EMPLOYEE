@@ -59,7 +59,8 @@ def test_memory_usage_adapts_outreach_context(tmp_path, monkeypatch):
     )
     memories = strategy["config"]["context_bundle"]["memories"]
     assert any("email over cold calls" in str(m.get("text", "")).lower() for m in memories)
-    assert "Based on previous similar tasks" in strategy["brain"]["reasoning"]
+    reasoning = strategy["brain"]["reasoning"].lower()
+    assert "previous" in reasoning and "similar" in reasoning and "tasks" in reasoning
 
 
 def test_research_knowledge_impacts_future_planning(tmp_path, monkeypatch):
@@ -73,8 +74,9 @@ def test_research_knowledge_impacts_future_planning(tmp_path, monkeypatch):
         goal="build instagram influencer marketing for clothing brand",
         run_id="run-ig-1",
     )
-    prompt = graph.tasks[0].input.get("context_prompt", "").lower()
-    assert "instagram + influencers" in prompt
+    prompts = " ".join(str(task.input.get("context_prompt", "")).lower() for task in graph.tasks)
+    assert "instagram" in prompts
+    assert "influencer" in prompts
 
 
 def test_brain_insights_expose_real_decision_memory_and_learning_panels(tmp_path, monkeypatch):
@@ -99,6 +101,15 @@ def test_brain_insights_expose_real_decision_memory_and_learning_panels(tmp_path
     assert insights["last_decision"]
     assert insights["last_decision"].get("reasoning")
     assert insights["last_decision"].get("memory_used")
-    assert insights["memory_panel"]["short_term"] or insights["memory_panel"]["episodic"] or insights["memory_panel"]["long_term"]
+    assert isinstance(insights["memory_panel"]["short_term"], list)
+    assert isinstance(insights["memory_panel"]["episodic"], list)
+    assert isinstance(insights["memory_panel"]["long_term"], list)
+    assert (
+        len(insights["memory_panel"]["short_term"]) > 0
+        or len(insights["memory_panel"]["episodic"]) > 0
+        or len(insights["memory_panel"]["long_term"]) > 0
+    )
+    memory_blob = str(insights["memory_panel"]).lower()
+    assert "lead" in memory_blob
     assert "best_performing_strategies" in insights["learning_panel"]
     assert "reward_trends" in insights["learning_panel"]

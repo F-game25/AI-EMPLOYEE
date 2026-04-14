@@ -16,6 +16,15 @@ class ResearchAgent:
         r"\bresearch online product sales\b",
         r"\bresearch\b",
     )
+    _FASHION_RULE = {
+        "insight": "{root}: fashion brands rely heavily on Instagram + influencers for discovery.",
+        "strategy": "{root}: prioritize Instagram creative testing and influencer seeding before broad paid expansion.",
+    }
+    _TOPIC_INSIGHT_RULES = {
+        "fashion": _FASHION_RULE,
+        "clothing": _FASHION_RULE,
+        "apparel": _FASHION_RULE,
+    }
 
     def is_learn_command(self, text: str) -> bool:
         lower = (text or "").strip().lower()
@@ -61,9 +70,11 @@ class ResearchAgent:
             strategies.extend(row.get("strategies", []))
             mistakes.extend(row.get("mistakes_to_avoid", []))
             playbooks.extend(row.get("actionable_playbooks", []))
-        if any(token in root.lower() for token in ("fashion", "clothing", "apparel")):
-            insights.append(f"{root}: fashion brands rely heavily on Instagram + influencers for discovery.")
-            strategies.append(f"{root}: prioritize Instagram creative testing and influencer seeding before broad paid expansion.")
+        lowered = root.lower()
+        for token, rule in self._TOPIC_INSIGHT_RULES.items():
+            if re.search(rf"\b{re.escape(token)}\b", lowered):
+                insights.append(str(rule["insight"]).format(root=root))
+                strategies.append(str(rule["strategy"]).format(root=root))
         insights = list(dict.fromkeys(insights))
         strategies = list(dict.fromkeys(strategies))
         mistakes = list(dict.fromkeys(mistakes))
