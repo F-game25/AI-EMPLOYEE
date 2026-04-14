@@ -170,11 +170,10 @@ class PlannerAI:
         promote = learning.get("promote_agents", [])
         if promote:
             parts.append(f"Recommended approaches: {', '.join(promote)}")
-        if context:
-            parts.append(
-                "You have learned the following relevant context: "
-                f"{context}. Use this to make better decisions."
-            )
+        parts.append(
+            "You have learned the following relevant context: "
+            f"{context}. Use this to make better decisions."
+        )
         return ". ".join(parts) + "."
 
     @staticmethod
