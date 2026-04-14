@@ -234,9 +234,12 @@ def _runtime_files_at_sha(sha: str) -> "list | None":
     if not isinstance(commit, dict):
         return None
     commit_info = commit.get("commit")
-    tree_info = commit_info.get("tree") if isinstance(commit_info, dict) else None
-    tree_sha = (tree_info.get("sha") if isinstance(tree_info, dict) else "") or ""
-    tree_sha = tree_sha.strip()
+    if not isinstance(commit_info, dict):
+        return None
+    tree_info = commit_info.get("tree")
+    if not isinstance(tree_info, dict):
+        return None
+    tree_sha = str(tree_info.get("sha", "")).strip()
     if not tree_sha:
         return None
     tree = _gh_get(f"{API_BASE}/git/trees/{tree_sha}?recursive=1", label="repository tree")
@@ -413,7 +416,7 @@ def check_and_update(force: bool = False, progress_cb=None) -> dict:
 
     # GitHub compare API returns at most 300 changed files. For large updates,
     # use a conservative full runtime sync to avoid silently missing UI changes.
-    if len(changed) >= GITHUB_COMPARE_API_FILE_LIMIT:
+    if len(changed) == GITHUB_COMPARE_API_FILE_LIMIT:
         logger.warning(
             "Compare API returned %d files (likely capped). Falling back to full runtime sync.",
             len(changed),
