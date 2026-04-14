@@ -30,6 +30,7 @@ export default function SelfImprovementPanel() {
         setError('')
       } catch (e) {
         if (cancelled) return
+        console.error('Failed to load self-improvement status', e)
         setData(storeSI || {})
         setError('Self-improvement data unavailable')
       } finally {
