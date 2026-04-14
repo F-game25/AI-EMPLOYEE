@@ -1,0 +1,48 @@
+{
+  "version": 2,
+  "updated_at": "2026-04-14T20:04:58Z",
+  "agent_model": {
+    "lead_hunter": {
+      "task_match": 0.6,
+      "success_history": 0.5,
+      "speed": 0.4,
+      "complexity_fit": 0.5
+    },
+    "email_ninja": {
+      "task_match": 0.55,
+      "success_history": 0.5,
+      "speed": 0.5,
+      "complexity_fit": 0.45
+    },
+    "intel_agent": {
+      "task_match": 0.5,
+      "success_history": 0.55,
+      "speed": 0.35,
+      "complexity_fit": 0.7
+    },
+    "social_guru": {
+      "task_match": 0.55,
+      "success_history": 0.5,
+      "speed": 0.55,
+      "complexity_fit": 0.45
+    },
+    "data_analyst": {
+      "task_match": 0.5,
+      "success_history": 0.55,
+      "speed": 0.35,
+      "complexity_fit": 0.65
+    },
+    "task_orchestrator": {
+      "task_match": 0.45,
+      "success_history": 0.5,
+      "speed": 0.45,
+      "complexity_fit": 0.55
+    }
+  },
+  "feature_impact": {
+    "task_match": 1.0,
+    "success_history": 0.8,
+    "speed": 0.3,
+    "complexity_fit": 0.6
+  }
+}
