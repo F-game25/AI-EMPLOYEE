@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from core.contracts import TaskGraph, TaskNode
 from core.knowledge_store import get_knowledge_store
+from core.learning_engine import get_learning_engine
 from core.memory_index import get_memory_index
 
 if TYPE_CHECKING:
@@ -50,13 +51,28 @@ class Planner:
         start = time.perf_counter()
         context = self._build_context(goal)
         tasks = self._build_tasks(goal=goal, run_id=run_id, best=best_strategies or [])
+        strategy_hint = "general:task_orchestrator"
+        reason_hint = "Based on previous similar tasks, strategy general:task_orchestrator performed best because it produced the most reliable outcomes."
+        if best_strategies:
+            first = best_strategies[0] or {}
+            cfg = first.get("config", {}) if isinstance(first, dict) else {}
+            fallback_strategy = f"{self.classify_goal(goal)}:{first.get('agent', 'problem-solver')}"
+            strategy_hint = str(cfg.get("strategy_used") or fallback_strategy)
+            reason_hint = str(cfg.get("memory_usage_reason") or f"Based on previous similar tasks, strategy {strategy_hint} performed best because it produced stronger outcomes in this context.")
         prompt = (
             "You have learned the following relevant context:\n"
             f"{context}\n\n"
+            f"{reason_hint}\n"
             "Use this to make better decisions."
         )
         for task in tasks:
-            task.input = {**task.input, "context": context, "context_prompt": prompt}
+            task.input = {
+                **task.input,
+                "context": context,
+                "context_prompt": prompt,
+                "planner_memory_reasoning": reason_hint,
+                "planner_strategy_hint": strategy_hint,
+            }
         graph = TaskGraph(run_id=run_id, goal=goal, tasks=tasks)
         graph.validate_no_cycles()
         latency_ms = (time.perf_counter() - start) * 1000
@@ -74,8 +90,10 @@ class Planner:
     def _build_context(goal: str) -> dict[str, Any]:
         store = get_knowledge_store()
         memories = get_memory_index().get_relevant_memories(goal, top_k=5)
+        learned = get_learning_engine().search_memory(goal, top_k=5)
         return {
             "knowledge": store.get_relevant_context(goal),
+            "relevant_memory": learned,
             "memories": [
                 {
                     "id": m.get("id"),
