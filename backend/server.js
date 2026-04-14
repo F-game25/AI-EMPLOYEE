@@ -156,8 +156,8 @@ try {
       runtimeState.objectives = persistedObjectives;
     }
   }
-} catch {
-  // ignore objective file read errors
+} catch (error) {
+  console.warn('[OBJECTIVES] Failed to read objective state:', error && error.message ? error.message : error);
 }
 
 const _savedBrain = persistence.loadBrainState();
@@ -208,10 +208,14 @@ function parseConstraintsFromGoal(goalText) {
   const budgetTokenAt = lower.indexOf('budget');
   if (budgetTokenAt >= 0) {
     const numericBudget = lower.slice(budgetTokenAt).match(/\d+/);
-    if (numericBudget) constraints.budget = Number(numericBudget[0]);
+    if (numericBudget) {
+      constraints.budget = Math.min(Number(numericBudget[0]), Number.MAX_SAFE_INTEGER);
+    }
   }
   const currencyBudget = text.match(/[€$]\s*(\d+)/);
-  if (currencyBudget) constraints.budget = Number(currencyBudget[1]);
+  if (currencyBudget) {
+    constraints.budget = Math.min(Number(currencyBudget[1]), Number.MAX_SAFE_INTEGER);
+  }
   if (/\binstagram\b/i.test(text)) constraints.channel = 'instagram';
   if (/\bemail\b/i.test(text)) {
     constraints.channel = constraints.channel ? `${constraints.channel} + email` : 'email';
@@ -1411,7 +1415,9 @@ onAgentEvent('task:completed', ({ agent, task }) => {
     if (objectiveMeta.system === 'money_mode' && objState?.performance) {
       if (/lead/i.test(objectiveMeta.task_name)) objState.performance.leads_generated += MONEY_LEADS_PER_TASK;
       if (/email|outreach/i.test(objectiveMeta.task_name)) objState.performance.emails_sent += MONEY_EMAILS_PER_TASK;
-      // Lightweight estimate: emails-to-lead conversion ratio normalized to percentage.
+      // Lightweight estimate for UI feedback:
+      // assume roughly 2 outbound emails per potential converted lead,
+      // then scale the ratio by 10 to keep the indicator in a visible 0-100 range.
       const leads = objState.performance.leads_generated || 1;
       objState.performance.conversion_pct = Math.round((objState.performance.emails_sent / Math.max(leads * 2, 1)) * 10);
     }
