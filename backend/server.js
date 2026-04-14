@@ -524,6 +524,10 @@ app.get('/agents', (req, res) => {
   res.json({ agents: getAgents() });
 });
 
+app.get('/internal/agents', (req, res) => {
+  res.json({ agents: getAgents(), internal: true });
+});
+
 app.post('/agents/activate', (req, res) => {
   const { count } = req.body || {};
   const out = activateAgents(typeof count === 'number' ? count : undefined);
