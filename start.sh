@@ -19,7 +19,7 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 if ! python3 runtime/core/startup.py --preflight; then
-  echo "⚠️  Preflight failed; continuing with unified runtime startup."
+  echo "⚠️  Preflight checks failed; see runtime/core/startup.py output above for details. Continuing with unified runtime startup."
 fi
 
 echo "[1/3] Ensuring backend/frontend dependencies..."
@@ -50,4 +50,4 @@ fi
 echo "$BACKEND_PID" > backend.pid
 rm -f worker.pid
 
-echo "Tip: For live frontend reload during development, run: cd frontend && npm run dev (and run node backend/server.js separately)"
+echo "Tip: For live frontend reload during development, run: PORT=${UI_PORT} node backend/server.js (terminal 1), then cd frontend && npm run dev (terminal 2)"
