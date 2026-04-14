@@ -80,6 +80,9 @@ function saveRuntimeState(runtimeState) {
     activityFeed: (runtimeState.activityFeed || []).slice(0, 50),
     executionLogs: (runtimeState.executionLogs || []).slice(0, 100),
     skillStats: runtimeState.skillStats || {},
+    objectives: (runtimeState.objectives || []).slice(-100),
+    objectiveState: runtimeState.objectiveState || {},
+    objectiveTaskMeta: runtimeState.objectiveTaskMeta || {},
     savedAt: new Date().toISOString(),
   };
   return writeJsonSafe(STATE_FILE, snapshot);

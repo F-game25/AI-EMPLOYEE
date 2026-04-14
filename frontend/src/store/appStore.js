@@ -80,6 +80,39 @@ export const useAppStore = create((set) => ({
   },
   setSystemStatus: (s) => set({ systemStatus: s }),
 
+  objectivePanels: {
+    money_mode: {
+      active: false,
+      status: 'inactive',
+      current_objective: null,
+      active_tasks: [],
+      progress: 0,
+      agents_used: [],
+      performance: {},
+      result: null,
+    },
+    ascend_forge: {
+      active: false,
+      status: 'inactive',
+      current_objective: null,
+      plan: [],
+      active_tasks: [],
+      progress: 0,
+      agents_used: [],
+      results: [],
+      result: null,
+    },
+  },
+  setObjectivePanel: (system, payload) => set((state) => ({
+    objectivePanels: {
+      ...state.objectivePanels,
+      [system]: {
+        ...(state.objectivePanels?.[system] || {}),
+        ...(payload || {}),
+      },
+    },
+  })),
+
   // Neural Network status
   nnStatus: {
     available: true,
