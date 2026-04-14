@@ -15,6 +15,7 @@ import time
 import threading
 from typing import Any
 
+from core.brain_weights import update_weight
 from core.self_improvement.contracts import ImprovementTask
 
 _log = logging.getLogger(__name__)
@@ -66,6 +67,43 @@ class LearningModule:
     def _score_to_reward(score: float) -> float:
         """Map a score in [0, 1] to a reward signal in [-1, 1]."""
         return (score * 2) - 1.0
+
+    @staticmethod
+    def calculate_reward(result: Any) -> float:
+        if hasattr(result, "success") and getattr(result, "success"):
+            return 1.0
+        if hasattr(result, "partial") and getattr(result, "partial"):
+            return 0.0
+        if isinstance(result, dict):
+            if result.get("success"):
+                return 1.0
+            if result.get("partial"):
+                return 0.0
+            if result.get("outcome") in ("deployed", "approved"):
+                return 1.0
+            if result.get("outcome") in ("rolled_back",):
+                return 0.0
+        return -1.0
+
+    def learn(self, agent: str, result: Any) -> dict[str, Any]:
+        reward = self.calculate_reward(result)
+        try:
+            before, after = update_weight(agent, reward)
+        except ValueError:
+            before, after = update_weight("task_orchestrator", reward)
+            agent = "task_orchestrator"
+        return {
+            "agent": agent,
+            "reward": reward,
+            "weight_before": round(before, 4),
+            "weight_after": round(after, 4),
+        }
+
+    @staticmethod
+    def _get_selected_agent_from_task(task: ImprovementTask) -> str | None:
+        brain_strategy = task.brain_strategy if isinstance(task.brain_strategy, dict) else {}
+        selected = brain_strategy.get("selected_agent")
+        return selected if isinstance(selected, str) else None
 
     def record_outcome(
         self,
@@ -127,6 +165,9 @@ class LearningModule:
         record["brain_learned"] = brain_result.get("learned", False)
         record["brain_reward"] = brain_result.get("reward", 0.0)
         record["reward_signal"] = reward
+        selected_agent = self._get_selected_agent_from_task(task)
+        reinforcement = self.learn(selected_agent or "task_orchestrator", {"outcome": outcome})
+        record["reinforcement"] = reinforcement
 
         # ── 3. Update intelligence profile ────────────────────────────────
         intel_result = self._update_intelligence(task, outcome, score)

@@ -7,21 +7,36 @@ import time
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
+from core.brain_weights import get_weights, update_weight
+from core.knowledge_store import get_knowledge_store
+
 if TYPE_CHECKING:
     from core.contracts import TaskNode
 
-
-_BUCKET_TO_SKILL: dict[int, str] = {
-    0: "lead-generator",
-    1: "email-marketing",
-    2: "content-calendar",
-    # 3/4 are strategy/exec-heavy buckets; both route to executive planning.
-    3: "ceo-briefing",
-    4: "ceo-briefing",
-    5: "problem-solver",
-    6: "problem-solver",
-    7: "problem-solver",
+_AGENT_TO_SKILL: dict[str, str] = {
+    "lead_hunter": "lead-generator",
+    "email_ninja": "email-marketing",
+    "intel_agent": "ceo-briefing",
+    "social_guru": "social-media-manager",
+    "data_analyst": "ceo-briefing",
+    "task_orchestrator": "problem-solver",
 }
+_SKILL_TO_AGENT: dict[str, str] = {
+    "lead-generator": "lead_hunter",
+    "email-marketing": "email_ninja",
+    "social-media-manager": "social_guru",
+    "problem-solver": "task_orchestrator",
+}
+_AGENT_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "lead_hunter": ("lead", "prospect", "outreach", "pipeline"),
+    "email_ninja": ("email", "campaign", "newsletter"),
+    "intel_agent": ("research", "learn", "strategy", "business", "market"),
+    "social_guru": ("social", "content", "post", "brand"),
+    "data_analyst": ("analyze", "analyse", "metric", "data", "report"),
+    "task_orchestrator": ("plan", "execute", "task", "workflow", "general"),
+}
+_SUCCESS_RATE_WEIGHT = 0.3
+_PRIORITY_WEIGHT = 0.2
 
 
 class BrainRegistry:
@@ -70,42 +85,125 @@ class BrainRegistry:
             self._last_updated = stamp
             self._events.appendleft({"ts": stamp, "event": event, **payload})
 
+    def _priority_for_goal(self, goal: str, goal_type: str) -> float:
+        text = f"{goal} {goal_type}".lower()
+        if any(token in text for token in ("urgent", "critical", "asap", "immediately")):
+            return 1.0
+        if any(token in text for token in ("important", "priority", "high")):
+            return 0.8
+        return 0.5
+
+    def _task_match(self, *, agent: str, goal: str, goal_type: str, context: str) -> float:
+        keywords = _AGENT_KEYWORDS.get(agent, ())
+        text = f"{goal} {goal_type} {context}".lower()
+        hits = sum(1 for k in keywords if k in text)
+        if hits == 0:
+            return 0.35
+        return min(1.0, 0.4 + (hits * 0.2))
+
+    def _agent_success_rate(self, agent: str) -> float:
+        try:
+            from memory.strategy_store import get_strategy_store
+
+            skill = _AGENT_TO_SKILL.get(agent, "problem-solver")
+            rows = [r for r in get_strategy_store().all_strategies() if r.get("agent") == skill]
+            if not rows:
+                return 0.5
+            success = sum(1 for r in rows if r.get("outcome_status") == "success")
+            return round(success / max(len(rows), 1), 3)
+        except Exception:
+            return 0.5
+
+    def _build_features(self, *, goal: str, goal_type: str, context: str) -> dict[str, dict[str, float]]:
+        priority = self._priority_for_goal(goal, goal_type)
+        features: dict[str, dict[str, float]] = {}
+        for agent in get_weights():
+            features[agent] = {
+                "task_match": self._task_match(agent=agent, goal=goal, goal_type=goal_type, context=context),
+                "success_rate": self._agent_success_rate(agent),
+                "priority": priority,
+            }
+        return features
+
+    def select_agent(self, task_features: dict[str, Any]) -> str:
+        scores: dict[str, float] = {}
+        current_weights = get_weights()
+        if not current_weights:
+            return "task_orchestrator"
+
+        for agent in current_weights:
+            features = task_features.get(agent, task_features)
+            scores[agent] = (
+                current_weights[agent] * features["task_match"] +
+                features["success_rate"] * _SUCCESS_RATE_WEIGHT +
+                features["priority"] * _PRIORITY_WEIGHT
+            )
+
+        return max(scores, key=scores.get)
+
+    @staticmethod
+    def calculate_reward(result: TaskNode) -> float:
+        if result.status == "success":
+            return 1.0
+        output = result.output if isinstance(result.output, dict) else {}
+        if output.get("partial") is True:
+            return 0.0
+        return -1.0
+
     def get_strategy(self, *, goal: str, goal_type: str) -> dict[str, Any]:
         """Return brain-guided strategy metadata for planner injection."""
-        bucket = 7
-        confidence = 0.0
-        source = "fallback"
-        intel = self._load_intelligence()
-        if intel is not None:
-            try:
-                bucket = int(intel.suggest_agent_bucket("user:default", goal, mode="power")) % 8
-                confidence = 0.5
-                source = "brain"
-            except Exception:
-                bucket = 7
-        skill = _BUCKET_TO_SKILL.get(bucket, "problem-solver")
+        knowledge = get_knowledge_store()
+        context = knowledge.get_relevant_context(goal)
+        features = self._build_features(goal=goal, goal_type=goal_type, context=context)
+        selected_agent = self.select_agent(features)
+        current_weights = get_weights()
+        feature_row = features.get(selected_agent, {"task_match": 0.0, "success_rate": 0.0, "priority": 0.0})
+        confidence = min(
+            1.0,
+            current_weights.get(selected_agent, 0.0) * feature_row["task_match"] +
+            feature_row["success_rate"] * _SUCCESS_RATE_WEIGHT +
+            feature_row["priority"] * _PRIORITY_WEIGHT,
+        )
+        source = "reinforcement_brain"
+        skill = _AGENT_TO_SKILL.get(selected_agent, "problem-solver")
         strategy = {
             "agent": skill,
             "config": {
                 "goal": goal,
                 "goal_type": goal_type,
-                "brain_bucket": bucket,
+                "brain_agent": selected_agent,
                 "brain_confidence": confidence,
+                "knowledge_context": context,
             },
             "brain": {
                 "source": source,
-                "bucket": bucket,
+                "selected_agent": selected_agent,
                 "confidence": confidence,
                 "selected_skill": skill,
+                "weights": current_weights,
+                "task_features": features,
+                "knowledge_context": context,
             },
         }
-        self._remember_event("strategy_selected", {"goal_type": goal_type, "skill": skill, "bucket": bucket})
+        self._remember_event(
+            "strategy_selected",
+            {
+                "goal_type": goal_type,
+                "skill": skill,
+                "agent": selected_agent,
+                "confidence": round(confidence, 3),
+                "context": context[:200],
+            },
+        )
         return strategy
 
     def learn_from_task(self, *, goal: str, task: TaskNode) -> dict[str, Any]:
         """Send task outcome to the brain/intelligence feedback loop."""
-        reward = 1.0 if task.status == "success" else -1.0
+        reward = self.calculate_reward(task)
         learned = False
+        routed_agent = self._agent_for_skill(task.skill, goal)
+        weight_before, weight_after = update_weight(routed_agent, reward)
+
         intel = self._load_intelligence()
         if intel is not None:
             try:
@@ -125,17 +223,50 @@ class BrainRegistry:
                 learned = True
             except Exception:
                 learned = False
+
+        try:
+            get_knowledge_store().add_knowledge(
+                "task_outcomes",
+                {
+                    "task_id": task.task_id,
+                    "goal": goal,
+                    "skill": task.skill,
+                    "status": task.status,
+                    "reward": reward,
+                },
+            )
+        except Exception:
+            pass
         self._remember_event(
             "task_feedback",
             {
                 "task_id": task.task_id,
                 "skill": task.skill,
+                "agent": routed_agent,
                 "status": task.status,
                 "reward": reward,
                 "learned": learned,
+                "weight_before": round(weight_before, 4),
+                "weight_after": round(weight_after, 4),
             },
         )
-        return {"learned": learned, "reward": reward}
+        return {
+            "learned": learned,
+            "reward": reward,
+            "agent": routed_agent,
+            "weight_before": round(weight_before, 4),
+            "weight_after": round(weight_after, 4),
+        }
+
+    @staticmethod
+    def _agent_for_skill(skill: str, goal: str) -> str:
+        routed = _SKILL_TO_AGENT.get(skill, "task_orchestrator")
+        if skill == "ceo-briefing":
+            text = goal.lower()
+            if any(k in text for k in ("research", "learn", "business")):
+                return "intel_agent"
+            return "data_analyst"
+        return routed
 
     def status(self) -> dict[str, Any]:
         """Return status payload consumed by APIs/UI.
@@ -166,6 +297,7 @@ class BrainRegistry:
                 "lr": 0.0,
                 "mode": "ONLINE",
                 "recent_learning_events": list(self._events)[:10],
+                "agent_weights": get_weights(),
             }
         try:
             payload = dict(brain_obj.stats())
@@ -178,6 +310,7 @@ class BrainRegistry:
                 "memory_size": self.memory_size(),
                 "last_updated": self.last_updated(),
                 "recent_learning_events": list(self._events)[:10],
+                "agent_weights": get_weights(),
             }
         )
         return payload
@@ -195,6 +328,11 @@ class BrainRegistry:
             "status": status.get("status"),
             "memory_size": status.get("memory_size", 0),
             "recent_learning_events": events,
+            "agent_weights": get_weights(),
+            "last_decision": next((e for e in events if e.get("event") == "strategy_selected"), None),
+            "last_reward": next((e.get("reward") for e in events if e.get("event") == "task_feedback"), 0.0),
+            "learning_updates": [e for e in events if e.get("event") == "task_feedback"][:10],
+            "learned_topics": list(get_knowledge_store().snapshot().get("topics", {}).keys()),
             "performance_metrics": {
                 "total_feedback_events": total,
                 "success_rate": round(successes / total, 3) if total else 0.0,
