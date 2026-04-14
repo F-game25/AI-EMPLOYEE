@@ -334,8 +334,10 @@ class MoneyMode:
                 "prepare campaign",
             ]
         # Preserve order while removing duplicates.
-        seen: set[str] = set()
-        ordered = [t for t in tasks if not (t in seen or seen.add(t))]
+        ordered: list[str] = []
+        for task in tasks:
+            if task not in ordered:
+                ordered.append(task)
         return ordered
 
     def execute_objective(
