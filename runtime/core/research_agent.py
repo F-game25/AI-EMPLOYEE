@@ -16,6 +16,15 @@ class ResearchAgent:
         r"\bresearch online product sales\b",
         r"\bresearch\b",
     )
+    _FASHION_RULE = {
+        "insight": "{root}: fashion brands rely heavily on Instagram + influencers for discovery.",
+        "strategy": "{root}: prioritize Instagram creative testing and influencer seeding before broad paid expansion.",
+    }
+    _TOPIC_INSIGHT_RULES = {
+        "fashion": _FASHION_RULE,
+        "clothing": _FASHION_RULE,
+        "apparel": _FASHION_RULE,
+    }
 
     def is_learn_command(self, text: str) -> bool:
         lower = (text or "").strip().lower()
@@ -51,27 +60,25 @@ class ResearchAgent:
     def _structured_knowledge(self, topic: str) -> dict[str, Any]:
         subs = self._subtopics(topic)
         root = topic.replace("_", " ").strip()
-        insights = [
-            f"{root}: validate product-market fit before scaling paid acquisition.",
-            f"{root}: combine organic channels and paid ads to reduce CAC volatility.",
-            f"{root}: maintain contribution margin and repeat purchase tracking weekly.",
-            f"{root}: use creator/influencer partnerships where audience trust is high.",
-        ]
-        strategies = [
-            f"Build one repeatable {root} funnel per audience segment.",
-            f"Run weekly test loops on offer, pricing, creative, and retention flows for {root}.",
-            f"Prioritize channels with positive payback period for {root} growth.",
-        ]
-        mistakes = [
-            "Scaling ad spend before conversion and retention are stable.",
-            "Ignoring supply-chain reliability and stockout risk during growth.",
-            "Using unclear positioning that weakens brand recall and conversion.",
-        ]
-        playbooks = [
-            "90-day launch playbook: audience research → offer test → channel test → retention optimization.",
-            "Channel playbook: organic content calendar + paid ad testing matrix + weekly KPI review.",
-            "Pricing playbook: test entry offer, bundle upsell, and lifecycle email sequences.",
-        ]
+        by_subtopic = [self._research_subtopic(root=root, subtopic=sub) for sub in subs]
+        insights: list[str] = []
+        strategies: list[str] = []
+        mistakes: list[str] = []
+        playbooks: list[str] = []
+        for row in by_subtopic:
+            insights.extend(row.get("insights", []))
+            strategies.extend(row.get("strategies", []))
+            mistakes.extend(row.get("mistakes_to_avoid", []))
+            playbooks.extend(row.get("actionable_playbooks", []))
+        lowered = root.lower()
+        for token, rule in self._TOPIC_INSIGHT_RULES.items():
+            if re.search(rf"\b{re.escape(token)}\b", lowered):
+                insights.append(str(rule["insight"]).format(root=root))
+                strategies.append(str(rule["strategy"]).format(root=root))
+        insights = list(dict.fromkeys(insights))
+        strategies = list(dict.fromkeys(strategies))
+        mistakes = list(dict.fromkeys(mistakes))
+        playbooks = list(dict.fromkeys(playbooks))
         return {
             "topic": topic,
             "insights": insights,
@@ -79,6 +86,30 @@ class ResearchAgent:
             "mistakes_to_avoid": mistakes,
             "actionable_playbooks": playbooks,
             "subtopics": subs,
+            "research_tasks": by_subtopic,
+        }
+
+    @staticmethod
+    def _research_subtopic(*, root: str, subtopic: str) -> dict[str, Any]:
+        sub = subtopic.lower()
+        return {
+            "subtopic": subtopic,
+            "insights": [
+                f"{root}: {subtopic} decisions should be measured against contribution margin and payback period.",
+                f"{root}: {subtopic} should be tuned through weekly experiment loops with clear success criteria.",
+            ],
+            "strategies": [
+                f"{root}: create a repeatable {subtopic} operating cadence with KPI checkpoints.",
+                f"{root}: connect {subtopic} execution to segment-level funnel performance.",
+            ],
+            "mistakes_to_avoid": [
+                f"{subtopic}: scaling without validated unit economics.",
+                f"{subtopic}: making channel changes without attribution tracking.",
+            ],
+            "actionable_playbooks": [
+                f"{subtopic} playbook: hypothesis → test design → launch → weekly retrospective.",
+            ],
+            "source": "synthetic_research_loop",
         }
 
     def learn_topic(self, prompt: str) -> dict[str, Any]:
@@ -86,10 +117,17 @@ class ResearchAgent:
         payload = self._structured_knowledge(topic)
         get_knowledge_store().add_knowledge(topic, payload)
         get_knowledge_store().add_knowledge("research_strategies", {"topic": topic, "strategies": payload.get("strategies", [])})
+        for subtask in payload.get("research_tasks", []):
+            tag = str(subtask.get("subtopic", "research")).strip().lower().replace(" ", "_")
+            get_knowledge_store().add_knowledge(f"research:{tag}", {"topic": topic, **subtask})
         for item in payload.get("insights", [])[:5]:
             get_memory_index().add_memory(f"{topic}: {item}", importance=0.8)
         for item in payload.get("strategies", [])[:5]:
             get_memory_index().add_memory(f"{topic} strategy: {item}", importance=0.9)
+        for item in payload.get("mistakes_to_avoid", [])[:3]:
+            get_memory_index().add_memory(f"{topic} avoid: {item}", importance=0.75)
+        for item in payload.get("actionable_playbooks", [])[:3]:
+            get_memory_index().add_memory(f"{topic} playbook: {item}", importance=0.85)
         get_learning_engine().add_conversation_message(role="system", message=f"learned topic: {topic}")
         return payload
 
