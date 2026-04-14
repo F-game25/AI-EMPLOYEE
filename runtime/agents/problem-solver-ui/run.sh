@@ -58,6 +58,8 @@ _find_repo_root() {
 }
 
 _REPO_CAND="$(_find_repo_root "$SCRIPT_DIR/../../.." || true)"
+_GITHUB_WORKSPACE_REPO=""
+_PWD_REPO=""
 BACKEND_DIR=""
 FRONTEND_DIR=""
 
@@ -69,17 +71,27 @@ elif [[ -n "${AI_EMPLOYEE_REPO_DIR:-}" && -f "$AI_EMPLOYEE_REPO_DIR/backend/serv
   BACKEND_DIR="$AI_EMPLOYEE_REPO_DIR/backend"
   FRONTEND_DIR="$AI_EMPLOYEE_REPO_DIR/frontend"
   _info "Repo: $AI_EMPLOYEE_REPO_DIR  (AI_EMPLOYEE_REPO_DIR)"
-elif [[ -n "${GITHUB_WORKSPACE:-}" && -n "$(_find_repo_root "$GITHUB_WORKSPACE" || true)" ]]; then
-  _REPO_CAND="$(_find_repo_root "$GITHUB_WORKSPACE")"
-  BACKEND_DIR="$_REPO_CAND/backend"
-  FRONTEND_DIR="$_REPO_CAND/frontend"
-  _info "Repo: $_REPO_CAND  (GITHUB_WORKSPACE)"
-elif [[ -n "$(_find_repo_root "$PWD" || true)" ]]; then
-  _REPO_CAND="$(_find_repo_root "$PWD")"
-  BACKEND_DIR="$_REPO_CAND/backend"
-  FRONTEND_DIR="$_REPO_CAND/frontend"
-  _info "Repo: $_REPO_CAND  (current directory)"
-else
+elif [[ -n "${GITHUB_WORKSPACE:-}" ]]; then
+  _GITHUB_WORKSPACE_REPO="$(_find_repo_root "$GITHUB_WORKSPACE" || true)"
+  if [[ -n "$_GITHUB_WORKSPACE_REPO" ]]; then
+    _REPO_CAND="$_GITHUB_WORKSPACE_REPO"
+    BACKEND_DIR="$_REPO_CAND/backend"
+    FRONTEND_DIR="$_REPO_CAND/frontend"
+    _info "Repo: $_REPO_CAND  (GITHUB_WORKSPACE)"
+  fi
+fi
+
+if [[ -z "$BACKEND_DIR" ]]; then
+  _PWD_REPO="$(_find_repo_root "$PWD" || true)"
+  if [[ -n "$_PWD_REPO" ]]; then
+    _REPO_CAND="$_PWD_REPO"
+    BACKEND_DIR="$_REPO_CAND/backend"
+    FRONTEND_DIR="$_REPO_CAND/frontend"
+    _info "Repo: $_REPO_CAND  (current directory)"
+  fi
+fi
+
+if [[ -z "$BACKEND_DIR" ]]; then
   for _c in "$HOME/AI-EMPLOYEE" "$HOME/ai-employee" \
             "$HOME/code/AI-EMPLOYEE" "$HOME/projects/AI-EMPLOYEE" \
             "$HOME/Desktop/AI-EMPLOYEE"; do
