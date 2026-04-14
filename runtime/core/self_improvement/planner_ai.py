@@ -91,8 +91,6 @@ class PlannerAI:
         # ── 5. Consult strategy store for historical insights ─────────────
         learning = self._consult_memory(task)
         context = self._knowledge_context(task)
-        if isinstance(task.brain_strategy, dict):
-            task.brain_strategy["knowledge_context"] = context
 
         # ── 6. Estimate scope ─────────────────────────────────────────────
         estimated_lines = self._estimate_lines(task.description, risk)

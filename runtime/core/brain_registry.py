@@ -126,6 +126,8 @@ class BrainRegistry:
     def select_agent(self, task_features: dict[str, Any]) -> str:
         scores: dict[str, float] = {}
         current_weights = get_weights()
+        if not current_weights:
+            return "task_orchestrator"
 
         for agent in current_weights:
             features = task_features.get(agent, task_features)
@@ -197,9 +199,7 @@ class BrainRegistry:
         """Send task outcome to the brain/intelligence feedback loop."""
         reward = self.calculate_reward(task)
         learned = False
-        routed_agent = _SKILL_TO_AGENT.get(task.skill, "task_orchestrator")
-        if task.skill == "ceo-briefing":
-            routed_agent = "intel_agent" if any(k in goal.lower() for k in ("research", "learn", "business")) else "data_analyst"
+        routed_agent = self._agent_for_skill(task.skill, goal)
         weight_before, weight_after = update_weight(routed_agent, reward)
 
         intel = self._load_intelligence()
@@ -255,6 +255,16 @@ class BrainRegistry:
             "weight_before": round(weight_before, 4),
             "weight_after": round(weight_after, 4),
         }
+
+    @staticmethod
+    def _agent_for_skill(skill: str, goal: str) -> str:
+        routed = _SKILL_TO_AGENT.get(skill, "task_orchestrator")
+        if skill == "ceo-briefing":
+            text = goal.lower()
+            if any(k in text for k in ("research", "learn", "business")):
+                return "intel_agent"
+            return "data_analyst"
+        return routed
 
     def status(self) -> dict[str, Any]:
         """Return status payload consumed by APIs/UI.

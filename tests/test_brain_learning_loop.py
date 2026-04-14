@@ -72,5 +72,5 @@ def test_conversation_profile_learning(tmp_path, monkeypatch):
         "My business type is ecommerce. My goal is to grow revenue with a small budget."
     )
 
-    assert "ecommerce" in (profile.get("business_type") or "")
+    assert "ecommerce" in profile.get("business_type", "")
     assert profile.get("goals")

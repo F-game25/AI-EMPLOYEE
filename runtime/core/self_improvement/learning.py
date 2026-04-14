@@ -95,6 +95,12 @@ class LearningModule:
             "weight_after": round(after, 4),
         }
 
+    @staticmethod
+    def _brain_selected_agent(task: ImprovementTask) -> str | None:
+        brain_strategy = task.brain_strategy if isinstance(task.brain_strategy, dict) else {}
+        selected = brain_strategy.get("selected_agent")
+        return selected if isinstance(selected, str) else None
+
     def record_outcome(
         self,
         task: ImprovementTask,
@@ -155,7 +161,7 @@ class LearningModule:
         record["brain_learned"] = brain_result.get("learned", False)
         record["brain_reward"] = brain_result.get("reward", 0.0)
         record["reward_signal"] = reward
-        selected_agent = task.brain_strategy.get("selected_agent") if isinstance(task.brain_strategy, dict) else None
+        selected_agent = self._brain_selected_agent(task)
         reinforcement = self.learn(selected_agent or "task_orchestrator", {"outcome": outcome})
         record["reinforcement"] = reinforcement
 
