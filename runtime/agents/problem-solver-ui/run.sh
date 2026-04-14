@@ -11,7 +11,21 @@ _info() { printf "       ${C}▸${NC}  %s\n" "$1"; }
 _step() { printf "\n  ${B}[%s]${NC}  %s\n" "$1" "$2"; }
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+_resolve_path() {
+  local p="$1"
+  [[ -z "${p:-}" ]] && return 1
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$p" 2>/dev/null && return 0
+  fi
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f "$p" 2>/dev/null && return 0
+  fi
+  return 1
+}
+_SCRIPT_REALPATH="$(_resolve_path "$SCRIPT_SOURCE" || true)"
+[[ -n "${_SCRIPT_REALPATH:-}" ]] && SCRIPT_SOURCE="$_SCRIPT_REALPATH"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
 
 # ── Load env overrides ─────────────────────────────────────────────────────────
@@ -41,12 +55,35 @@ _step "1/5" "Locating backend & frontend..."
 # Priority order:
 # 1. SCRIPT_DIR/../../.. (running from within the cloned repo)
 # 2. AI_EMPLOYEE_REPO_DIR env var (set by installer for installed copies)
-# 3. Common clone locations (auto-detect)
-_REPO_CAND="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# 3. GITHUB_WORKSPACE / current working directory (dev and CI)
+# 4. Common clone locations (auto-detect)
+_find_repo_root() {
+  local start="$1"
+  local cur
+  [[ -z "${start:-}" ]] && return 1
+  if [[ -f "$start" ]]; then
+    start="$(dirname "$start")"
+  fi
+  cur="$(cd "$start" 2>/dev/null && pwd)" || return 1
+  # Repo marker contract: backend/server.js + frontend/package.json must both exist.
+  while [[ -n "$cur" && "$cur" != "/" ]]; do
+    if [[ -f "$cur/backend/server.js" && -f "$cur/frontend/package.json" ]]; then
+      echo "$cur"
+      return 0
+    fi
+    cur="$(dirname "$cur")"
+  done
+  return 1
+}
+
+_REPO_CAND=""
+if _repo="$(_find_repo_root "$SCRIPT_DIR" 2>/dev/null)"; then
+  _REPO_CAND="$_repo"
+fi
 BACKEND_DIR=""
 FRONTEND_DIR=""
 
-if [[ -f "$_REPO_CAND/backend/server.js" ]]; then
+if [[ -n "$_REPO_CAND" ]]; then
   BACKEND_DIR="$_REPO_CAND/backend"
   FRONTEND_DIR="$_REPO_CAND/frontend"
   _info "Repo root: $_REPO_CAND"
@@ -54,7 +91,25 @@ elif [[ -n "${AI_EMPLOYEE_REPO_DIR:-}" && -f "$AI_EMPLOYEE_REPO_DIR/backend/serv
   BACKEND_DIR="$AI_EMPLOYEE_REPO_DIR/backend"
   FRONTEND_DIR="$AI_EMPLOYEE_REPO_DIR/frontend"
   _info "Repo: $AI_EMPLOYEE_REPO_DIR  (AI_EMPLOYEE_REPO_DIR)"
-else
+elif [[ -n "${GITHUB_WORKSPACE:-}" ]]; then
+  if _repo="$(_find_repo_root "$GITHUB_WORKSPACE" 2>/dev/null)"; then
+    _REPO_CAND="$_repo"
+    BACKEND_DIR="$_REPO_CAND/backend"
+    FRONTEND_DIR="$_REPO_CAND/frontend"
+    _info "Repo: $_REPO_CAND  (GITHUB_WORKSPACE)"
+  fi
+fi
+
+if [[ -z "$BACKEND_DIR" ]]; then
+  if _repo="$(_find_repo_root "$PWD" 2>/dev/null)"; then
+    _REPO_CAND="$_repo"
+    BACKEND_DIR="$_REPO_CAND/backend"
+    FRONTEND_DIR="$_REPO_CAND/frontend"
+    _info "Repo: $_REPO_CAND  (current directory)"
+  fi
+fi
+
+if [[ -z "$BACKEND_DIR" ]]; then
   for _c in "$HOME/AI-EMPLOYEE" "$HOME/ai-employee" \
             "$HOME/code/AI-EMPLOYEE" "$HOME/projects/AI-EMPLOYEE" \
             "$HOME/Desktop/AI-EMPLOYEE"; do
