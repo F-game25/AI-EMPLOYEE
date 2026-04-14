@@ -11,6 +11,7 @@ from analytics.structured_logger import StructuredLogger, get_structured_logger
 from core.brain_registry import brain
 from core.contracts import TaskGraph, TaskNode
 from core.knowledge_store import get_knowledge_store
+from core.learning_engine import get_learning_engine
 from core.research_agent import ResearchAgent
 from core.executor import Executor
 from core.planner import Planner
@@ -155,6 +156,7 @@ class AgentController:
     def _learn_from_conversation(text: str) -> None:
         try:
             get_knowledge_store().learn_from_conversation(text)
+            get_learning_engine().add_conversation_message(role="user", message=text)
         except Exception:
             logging.getLogger(__name__).debug("conversation learning failed", exc_info=True)
             return
