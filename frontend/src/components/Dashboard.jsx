@@ -37,7 +37,9 @@ export default function Dashboard() {
       ])
       const modeData = await modeRes.json()
       const dashData = await dashRes.json()
-      void modeData // mode is tracked by store via WebSocket
+      // modeData is fetched for dashboard sync but mode state is primarily
+      // driven by WebSocket events stored in the Zustand store.
+      if (modeData?.mode) { /* tracked via WebSocket */ }
       setProductMetrics(dashData || {})
       if (dashData?.learning?.brain) setBrainInsights(dashData.learning.brain)
       if (Array.isArray(dashData?.workflow_runs)) {
