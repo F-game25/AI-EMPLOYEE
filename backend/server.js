@@ -585,6 +585,10 @@ app.get('/api/brain/activity', (req, res) => {
   res.json(brain.activity(limit));
 });
 
+app.get('/api/brain/neurons', (req, res) => {
+  res.json(brain.neurons());
+});
+
 app.get('/api/memory/tree', (req, res) => {
   res.json(subsystems.getMemoryTree());
 });
