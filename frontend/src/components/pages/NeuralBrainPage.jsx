@@ -369,6 +369,7 @@ export default function NeuralBrainPage() {
   const nnStatus = useAppStore(s => s.nnStatus)
   const brainInsights = useAppStore(s => s.brainInsights)
   const brainActivity = useAppStore(s => s.brainActivity)
+  const brainStatus = useAppStore(s => s.brainStatus)
 
   const [neuronData, setNeuronData] = useState({ nodes: [], connections: [], stats: {} })
   const [selectedNode, setSelectedNode] = useState(null)
@@ -460,6 +461,11 @@ export default function NeuralBrainPage() {
   const stats = neuronData.stats || {}
   const recentDecisions = brainActivity?.recent_decisions || brainActivity?.items?.filter(i => i.type === 'decision') || []
   const experiences = brainActivity?.items || []
+  const agentWeights = brainStatus?.agent_weights || brainInsights?.agent_weights || {}
+  const learnedTopics = brainInsights?.learned_topics || []
+  const learningUpdates = brainInsights?.learning_updates || []
+  const lastDecision = brainInsights?.last_decision || null
+  const lastReward = brainInsights?.last_reward ?? 0
 
   return (
     <div className="page-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0' }}>
@@ -573,6 +579,29 @@ export default function NeuralBrainPage() {
               if (found) setSelectedNode(found)
             }} />
           </GlassPanel>
+
+          <GlassPanel title="Agent Weights" badge="live RL">
+            {Object.keys(agentWeights).length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>No weight data yet</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {Object.entries(agentWeights).map(([agent, weight]) => (
+                  <div key={agent} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{agent}</span>
+                    <span style={{ color: 'var(--gold)', fontVariantNumeric: 'tabular-nums' }}>{((weight || 0) * 100).toFixed(1)}%</span>
+                  </div>
+                ))}
+                <div style={{ marginTop: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}>
+                  Last reward: {lastReward}
+                </div>
+                {lastDecision && (
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                    Last decision: {lastDecision.agent || lastDecision.skill || '—'}
+                  </div>
+                )}
+              </div>
+            )}
+          </GlassPanel>
         </div>
       </div>
 
@@ -630,6 +659,19 @@ export default function NeuralBrainPage() {
                 <span style={{ color: c || 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>{v}</span>
               </div>
             ))}
+          </div>
+        </GlassPanel>
+
+        <GlassPanel title="Memory Panel" badge={`${learnedTopics.length} topics`}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '6px' }}>
+            {learnedTopics.length === 0 ? (
+              <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>No learned topics yet</span>
+            ) : learnedTopics.slice(0, 6).map((topic) => (
+              <span key={topic} style={{ color: 'var(--neon-teal)', fontSize: '11px' }}>{topic}</span>
+            ))}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+            Updates: {learningUpdates.length}
           </div>
         </GlassPanel>
       </div>

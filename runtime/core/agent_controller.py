@@ -4,11 +4,14 @@ from __future__ import annotations
 import time
 import uuid
 import threading
+import logging
 from typing import Callable
 
 from analytics.structured_logger import StructuredLogger, get_structured_logger
 from core.brain_registry import brain
 from core.contracts import TaskGraph, TaskNode
+from core.knowledge_store import get_knowledge_store
+from core.research_agent import ResearchAgent
 from core.executor import Executor
 from core.planner import Planner
 from core.validator import Validator
@@ -41,6 +44,7 @@ class AgentController:
         )
         self._validator = validator or Validator(logger=self._logger)
         self.brain = brain
+        self._research = ResearchAgent()
 
     @property
     def planner(self) -> Planner:
@@ -82,6 +86,11 @@ class AgentController:
     ) -> dict:
         run_id = str(uuid.uuid4())[:8]
         start = time.perf_counter()
+        self._learn_from_conversation(goal)
+
+        if self._research.is_learn_command(goal):
+            return self._run_learn_topic_goal(goal=goal, run_id=run_id, start=start, persist_task=persist_task)
+
         graph = self.build_task_graph(goal=goal, run_id=run_id)
         tasks = self._executor.execute_graph(graph)
         for task in tasks:
@@ -100,6 +109,55 @@ class AgentController:
             meta={"run_id": run_id, "tasks": len(tasks)},
         )
         return summary
+
+    def _run_learn_topic_goal(
+        self,
+        *,
+        goal: str,
+        run_id: str,
+        start: float,
+        persist_task: Callable[[str, TaskNode], None] | None,
+    ) -> dict:
+        result = self._research.learn_topic(goal)
+        topic = result.get("topic", "general_research")
+        task = TaskNode(
+            task_id=f"{run_id}-t1",
+            skill="problem-solver",
+            input={"goal": goal, "intent": "task_learn_topic", "topic": topic},
+            expected_output={"status": "success", "topic": topic},
+            status="success",
+            output=result,
+            score=1.0,
+            passed=True,
+        )
+        graph = TaskGraph(run_id=run_id, goal=goal, tasks=[task])
+        if persist_task:
+            persist_task(run_id, task)
+        self._feedback_loop(goal=goal, task=task)
+        self._logger.log_event(
+            component="controller",
+            action="run_goal",
+            result="learn_topic",
+            latency_ms=(time.perf_counter() - start) * 1000,
+            meta={"run_id": run_id, "topic": topic},
+        )
+        return {
+            "run_id": run_id,
+            "goal": goal,
+            "task_graph": graph.to_contract(),
+            "tasks": [self._task_summary(task)],
+            "performance_score": 1.0,
+            "success_rate": 1.0,
+            "learned_topic": result,
+        }
+
+    @staticmethod
+    def _learn_from_conversation(text: str) -> None:
+        try:
+            get_knowledge_store().learn_from_conversation(text)
+        except Exception:
+            logging.getLogger(__name__).debug("conversation learning failed", exc_info=True)
+            return
 
     def _build_summary(self, *, run_id: str, goal: str, graph: TaskGraph) -> dict:
         rows = [self._task_summary(task) for task in graph.tasks]
