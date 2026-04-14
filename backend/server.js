@@ -1114,8 +1114,12 @@ app.get('/api/autonomy/mode', (req, res) => {
 function requestPythonJSON(pathname, method = 'GET', payload = null) {
   return new Promise((resolve, reject) => {
     const httpLib = require('http');
+    const safePath = String(pathname || '/').trim();
+    if (!safePath.startsWith('/api/') || safePath.includes('..')) {
+      return reject(new Error('invalid_path'));
+    }
     const body = payload ? JSON.stringify(payload) : null;
-    const req = httpLib.request(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}${pathname}`, {
+    const req = httpLib.request(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}${safePath}`, {
       method,
       headers: body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {},
       timeout: 3000,

@@ -63,12 +63,12 @@ class EventStream:
         }
         with self._lock:
             self._events.appendleft(event)
-            with self._conn() as conn:
-                conn.execute(
-                    "INSERT INTO event_stream (ts, event_type, trace_id, payload) VALUES (?, ?, ?, ?)",
-                    (event["ts"], event_type, trace_id, json.dumps(event["payload"], ensure_ascii=False)),
-                )
             subscribers = list(self._subs)
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO event_stream (ts, event_type, trace_id, payload) VALUES (?, ?, ?, ?)",
+                (event["ts"], event_type, trace_id, json.dumps(event["payload"], ensure_ascii=False)),
+            )
         for cb in subscribers:
             try:
                 cb(event)

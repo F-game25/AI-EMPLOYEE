@@ -174,6 +174,8 @@ class EvolutionController:
 
     @staticmethod
     def _pick_issue(issues: list[dict[str, str]]) -> dict[str, str]:
+        if not issues:
+            raise ValueError("No issues available for selection")
         rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         return sorted(issues, key=lambda item: rank.get((item.get("severity") or "medium").lower(), 4))[0]
 
