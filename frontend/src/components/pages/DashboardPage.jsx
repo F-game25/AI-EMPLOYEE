@@ -10,6 +10,15 @@ const STATUS_CONFIG = {
   idle: { color: 'var(--text-muted)', label: 'Idle', dot: 'dashboard-status-dot--idle' },
 }
 
+const DEFAULT_AGENT_HEALTH = {
+  running: 92,
+  busy: 78,
+  idle: 55,
+}
+const MAX_VISIBLE_AGENTS = 18
+const MAX_VISIBLE_CHAT_MESSAGES = 20
+const MAX_VISIBLE_LOGS = 14
+
 function MetricCard({ label, value, hint, highlighted = false }) {
   return (
     <motion.div
@@ -66,7 +75,8 @@ function ActivityItem({ item, index, compact = false }) {
 
 function AgentPill({ agent, index }) {
   const cfg = STATUS_CONFIG[agent.status] || STATUS_CONFIG.idle
-  const health = Math.max(0, Math.min(100, Math.round(agent.health ?? (agent.status === 'running' ? 92 : agent.status === 'busy' ? 78 : 55))))
+  const fallbackHealth = DEFAULT_AGENT_HEALTH[agent.status] ?? DEFAULT_AGENT_HEALTH.idle
+  const health = Math.max(0, Math.min(100, Math.round(agent.health ?? fallbackHealth)))
 
   return (
     <motion.div
@@ -89,7 +99,7 @@ function AgentPill({ agent, index }) {
   )
 }
 
-function RadialGauge({ label, value, color }) {
+function RadialGauge({ label, value, color, ariaUnit = 'percent', displaySuffix = '%' }) {
   const size = 110
   const stroke = 8
   const radius = (size - stroke) / 2
@@ -98,7 +108,7 @@ function RadialGauge({ label, value, color }) {
 
   return (
     <div className="dashboard-gauge">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${Math.round(value)} percent`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${Math.round(value)} ${ariaUnit}`}>
         <circle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(255,255,255,0.08)" strokeWidth={stroke} fill="none" />
         <motion.circle
           cx={size / 2}
@@ -117,7 +127,7 @@ function RadialGauge({ label, value, color }) {
         />
       </svg>
       <div className="dashboard-gauge-center">
-        <span className="dashboard-gauge-value">{Math.round(value)}%</span>
+        <span className="dashboard-gauge-value">{Math.round(value)}{displaySuffix}</span>
         <span className="dashboard-gauge-label">{label}</span>
       </div>
     </div>
@@ -205,13 +215,11 @@ export default function DashboardPage() {
   ]
 
   const healthItems = [
-    { label: 'CPU', value: systemStatus?.cpu_usage ?? 0, color: 'var(--neon-teal)' },
-    { label: 'RAM', value: systemStatus?.memory ?? 0, color: 'var(--neon-amber)' },
-    { label: 'GPU', value: systemStatus?.gpu_usage ?? 0, color: 'var(--neon-cyan)' },
-    { label: 'Temp', value: Math.min(100, Math.round(systemStatus?.cpu_temperature ?? 0)), color: 'var(--warning)' },
+    { label: 'CPU', value: systemStatus?.cpu_usage ?? 0, color: 'var(--neon-teal)', ariaUnit: 'percent', displaySuffix: '%' },
+    { label: 'RAM', value: systemStatus?.memory ?? 0, color: 'var(--neon-amber)', ariaUnit: 'percent', displaySuffix: '%' },
+    { label: 'GPU', value: systemStatus?.gpu_usage ?? 0, color: 'var(--neon-cyan)', ariaUnit: 'percent', displaySuffix: '%' },
+    { label: 'Temp', value: Math.min(100, Math.round(systemStatus?.cpu_temperature ?? 0)), color: 'var(--warning)', ariaUnit: 'degrees celsius', displaySuffix: '°C' },
   ]
-
-  const tabLogs = activeTab === 'logs' ? executionLogs : activityFeed
 
   return (
     <div className="page-enter dashboard-overview">
@@ -235,7 +243,7 @@ export default function DashboardPage() {
           <div className="dashboard-agents-scroll">
             {activeAgents.length === 0 ? (
               <div className="dashboard-empty">No active agents online</div>
-            ) : activeAgents.slice(0, 18).map((agent, idx) => (
+            ) : activeAgents.slice(0, MAX_VISIBLE_AGENTS).map((agent, idx) => (
               <AgentPill key={agent.id || agent.name || idx} agent={agent} index={idx} />
             ))}
           </div>
@@ -244,20 +252,29 @@ export default function DashboardPage() {
         <section className="dashboard-glass-card dashboard-panel dashboard-panel-center">
           <div className="dashboard-panel-header">
             <h2>Orchestrator</h2>
-            <div className="dashboard-tabs">
-              {['chat', 'live map', 'logs'].map((tab) => (
+            <div className="dashboard-tabs" role="tablist" aria-label="Orchestrator views">
+              {[{ id: 'chat', label: 'chat' }, { id: 'live-map', label: 'live map' }, { id: 'logs', label: 'logs' }].map((tab) => (
                 <button
-                  key={tab}
-                  className={`dashboard-tab-btn${activeTab === tab ? ' dashboard-tab-btn--active' : ''}`}
-                  onClick={() => setActiveTab(tab)}
+                  key={tab.id}
+                  className={`dashboard-tab-btn${activeTab === tab.id ? ' dashboard-tab-btn--active' : ''}`}
+                  onClick={() => setActiveTab(tab.id)}
+                  role="tab"
+                  aria-selected={activeTab === tab.id}
+                  aria-controls={`orchestrator-panel-${tab.id}`}
+                  id={`orchestrator-tab-${tab.id}`}
                 >
-                  {tab}
+                  {tab.label}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="dashboard-tab-content">
+          <div
+            className="dashboard-tab-content"
+            role="tabpanel"
+            id={`orchestrator-panel-${activeTab}`}
+            aria-labelledby={`orchestrator-tab-${activeTab}`}
+          >
             {activeTab === 'chat' && (
               <div className="dashboard-chat-panel">
                 <div className="dashboard-chat-messages">
@@ -265,7 +282,7 @@ export default function DashboardPage() {
                     <div className="dashboard-empty">Start the conversation with your orchestrator</div>
                   )}
                   <AnimatePresence initial={false}>
-                    {chatMessages.slice(-20).map((msg, idx) => (
+                    {chatMessages.slice(-MAX_VISIBLE_CHAT_MESSAGES).map((msg, idx) => (
                       <motion.div
                         key={`${msg.ts || idx}-${idx}`}
                         initial={{ opacity: 0, y: 6 }}
@@ -295,15 +312,16 @@ export default function DashboardPage() {
                     }}
                     className="dashboard-chat-input"
                     placeholder="Send instruction..."
+                    aria-label="Chat message input"
                   />
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="dashboard-send-btn" onClick={handleSend}>
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="dashboard-send-btn" onClick={handleSend} aria-label="Send message">
                     Send
                   </motion.button>
                 </div>
               </div>
             )}
 
-            {activeTab === 'live map' && (
+            {activeTab === 'live-map' && (
               <div style={{ height: '100%' }}>
                 <ParticleMap compact />
               </div>
@@ -311,9 +329,9 @@ export default function DashboardPage() {
 
             {activeTab === 'logs' && (
               <div className="dashboard-log-stream">
-                {tabLogs.length === 0
+                {executionLogs.length === 0
                   ? <div className="dashboard-empty">No logs captured yet</div>
-                  : tabLogs.slice(0, 14).map((item, idx) => <ActivityItem key={item.id || idx} item={item} index={idx} compact />)}
+                  : executionLogs.slice(0, MAX_VISIBLE_LOGS).map((item, idx) => <ActivityItem key={item.id || idx} item={item} index={idx} compact />)}
               </div>
             )}
           </div>
@@ -337,11 +355,11 @@ export default function DashboardPage() {
               <h2>System Health</h2>
               <span>Live</span>
             </div>
-            <div className="dashboard-health-grid">
-              {healthItems.map((item) => (
-                <RadialGauge key={item.label} label={item.label} value={item.value} color={item.color} />
-              ))}
-            </div>
+              <div className="dashboard-health-grid">
+                {healthItems.map((item) => (
+                  <RadialGauge key={item.label} label={item.label} value={item.value} color={item.color} ariaUnit={item.ariaUnit} displaySuffix={item.displaySuffix} />
+                ))}
+              </div>
           </div>
         </section>
       </div>
