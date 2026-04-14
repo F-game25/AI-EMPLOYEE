@@ -51,6 +51,7 @@ API_BASE = f"https://api.github.com/repos/{REPO}"
 TRIGGER_FILE = AI_HOME / "run"   / "updater.trigger"
 STATE_FILE   = AI_HOME / "state" / "updater.json"
 COMMIT_FILE  = AI_HOME / "state" / "installed_commit.txt"
+VERSION_FILE = AI_HOME / "state" / "version.json"
 LOG_FILE     = AI_HOME / "logs"  / "updater.log"
 GITHUB_COMPARE_API_FILE_LIMIT = 300
 
@@ -127,6 +128,8 @@ def _download_raw(repo_path: str, dest: Path, retries: int = 3) -> bool:
             req = urllib.request.Request(url, headers=raw_headers)
             with urllib.request.urlopen(req, timeout=30) as r:
                 data = r.read()
+            if not data:
+                raise ValueError("downloaded file is empty")
             dest.parent.mkdir(parents=True, exist_ok=True)
             tmp = dest.parent / f".{dest.name}.tmp"
             tmp.write_bytes(data)
@@ -197,6 +200,16 @@ def _installed_sha() -> str:
 def _save_sha(sha: str) -> None:
     COMMIT_FILE.parent.mkdir(parents=True, exist_ok=True)
     COMMIT_FILE.write_text(sha, encoding="utf-8")
+
+
+def _write_version_state(commit_sha: str, source: str = "auto-updater") -> None:
+    VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "last_installed_commit": commit_sha,
+        "last_installed_at": datetime.now(timezone.utc).isoformat(),
+        "source": source,
+    }
+    VERSION_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _latest_sha() -> str:
@@ -392,6 +405,7 @@ def check_and_update(force: bool = False, progress_cb=None) -> dict:
         # First run after install without a commit file — bootstrap
         logger.info("No baseline SHA found — recording current remote SHA (%s)", remote_sha[:8])
         _save_sha(remote_sha)
+        _write_version_state(remote_sha, source="auto-updater:init")
         state["status"] = "initialized"
         state["local_sha"] = remote_sha
         _save_state(state)
@@ -431,6 +445,7 @@ def check_and_update(force: bool = False, progress_cb=None) -> dict:
     if not changed:
         logger.info("No files changed between %s and %s — recording new SHA", local_sha[:8], remote_sha[:8])
         _save_sha(remote_sha)
+        _write_version_state(remote_sha, source="auto-updater:no-diff")
         state["status"] = "up_to_date"
         state["local_sha"] = remote_sha
         _save_state(state)
@@ -480,6 +495,7 @@ def check_and_update(force: bool = False, progress_cb=None) -> dict:
         restarted.append(bot)
 
     _save_sha(remote_sha)
+    _write_version_state(remote_sha, source="auto-updater:update")
     state.update({
         "status":           "updated",
         "last_update":      now,
