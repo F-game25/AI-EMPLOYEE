@@ -263,10 +263,18 @@ class BrainRegistry:
         knowledge = get_knowledge_store()
         memory_index = get_memory_index()
         learning_engine = get_learning_engine()
+        learning_engine.add_conversation_message(role="user", message=goal)
         memory_index.apply_decay()
         context = knowledge.get_relevant_context(goal)
         memories = memory_index.get_relevant_memories(goal, top_k=5)
         relevant_memory = learning_engine.search_memory(goal, top_k=5)
+        memory_hits = (
+            len(relevant_memory.get("short_term", []))
+            + len(relevant_memory.get("long_term", []))
+            + len(relevant_memory.get("episodic", []))
+        )
+        if memory_hits <= 0:
+            raise RuntimeError("memory retrieval failed: no usable memory was found for decision routing")
         profile = knowledge.snapshot().get("user_profile", {})
         context_bundle = {
             "knowledge": context,
