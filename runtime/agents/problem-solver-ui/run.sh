@@ -1,62 +1,74 @@
 #!/usr/bin/env bash
-# AI Employee — Problem Solver UI launcher
-# Auto-installs Python dependencies on every platform before starting the server.
+# AI Employee — Problem Solver UI launcher (single-port unified runtime)
+# Builds/serves the React UI and Node backend together on one port.
 set -euo pipefail
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-AGENT_HOME="$AI_HOME/agents/problem-solver-ui"
-REQ="$AGENT_HOME/requirements.txt"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+BACKEND_DIR="$REPO_ROOT/backend"
+FRONTEND_DIR="$REPO_ROOT/frontend"
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
 
-# ── Load config ────────────────────────────────────────────────────────────────
-# Load bot-specific env defaults first.
+# ── Load env overrides ─────────────────────────────────────────────────────────
 if [[ -f "$AI_HOME/config/problem-solver-ui.env" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$AI_HOME/config/problem-solver-ui.env"
   set +a
 fi
-
-# Load global AI Employee env last so runtime/user overrides win.
 if [[ -f "$AI_HOME/.env" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$AI_HOME/.env"
   set +a
 fi
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-$UI_PORT}"
 
-# ── Resolve python binary (python3 on Linux/macOS, python on Windows/Git Bash) ─
-PYTHON=""
-for _py in python3 python; do
-  if command -v "$_py" >/dev/null 2>&1 && "$_py" -c "import sys; assert sys.version_info >= (3,10)" 2>/dev/null; then
-    PYTHON="$_py"
-    break
-  fi
-done
-
-if [[ -z "$PYTHON" ]]; then
-  echo "[problem-solver-ui] ERROR: Python 3.10+ not found."
-  echo "  Install Python: https://www.python.org/downloads/"
+if ! command -v node >/dev/null 2>&1; then
+  echo "[problem-solver-ui] ERROR: node is required for unified UI runtime."
+  exit 1
+fi
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[problem-solver-ui] ERROR: npm is required for unified UI runtime."
+  exit 1
+fi
+if [[ ! -f "$BACKEND_DIR/server.js" ]]; then
+  echo "[problem-solver-ui] ERROR: backend/server.js not found at $BACKEND_DIR."
+  exit 1
+fi
+if [[ ! -f "$FRONTEND_DIR/package.json" ]]; then
+  echo "[problem-solver-ui] ERROR: frontend package not found at $FRONTEND_DIR."
   exit 1
 fi
 
-# ── Auto-install dependencies ──────────────────────────────────────────────────
-_need_install=0
-if ! "$PYTHON" -c "import fastapi, uvicorn" 2>/dev/null; then
-  _need_install=1
+echo "[problem-solver-ui] Ensuring backend dependencies..."
+if [[ ! -d "$BACKEND_DIR/node_modules" ]]; then
+  npm --prefix "$BACKEND_DIR" install --silent
 fi
 
-if [[ "$_need_install" -eq 1 ]]; then
-  echo "[problem-solver-ui] Installing Python dependencies (fastapi, uvicorn)..."
-  if [[ -f "$REQ" ]]; then
-    "$PYTHON" -m pip install --user -q -r "$REQ" 2>&1 \
-      || "$PYTHON" -m pip install --user -q fastapi "uvicorn[standard]" 2>&1 \
-      || { echo "[problem-solver-ui] ERROR: pip install failed. Run: pip install fastapi uvicorn"; exit 1; }
-  else
-    "$PYTHON" -m pip install --user -q fastapi "uvicorn[standard]" 2>&1 \
-      || { echo "[problem-solver-ui] ERROR: pip install failed. Run: pip install fastapi uvicorn"; exit 1; }
-  fi
-  echo "[problem-solver-ui] Dependencies installed."
+echo "[problem-solver-ui] Ensuring frontend dependencies..."
+if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+  npm --prefix "$FRONTEND_DIR" install --silent
 fi
 
-# ── Start server ───────────────────────────────────────────────────────────────
-exec "$PYTHON" "$AGENT_HOME/server.py"
+_needs_build=0
+if [[ ! -f "$FRONTEND_DIR/dist/index.html" ]]; then
+  _needs_build=1
+elif find "$FRONTEND_DIR/src" -type f -newer "$FRONTEND_DIR/dist/index.html" | grep -q .; then
+  _needs_build=1
+fi
+
+if [[ "$_needs_build" -eq 1 ]]; then
+  echo "[problem-solver-ui] Building latest frontend bundle..."
+  npm --prefix "$FRONTEND_DIR" run build
+else
+  echo "[problem-solver-ui] Frontend bundle is up to date."
+fi
+
+export PORT="$UI_PORT"
+# Avoid self-proxy loops in Node fallback calls that use PYTHON_BACKEND_PORT.
+export PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
+
+echo "[problem-solver-ui] Starting unified backend+UI on http://127.0.0.1:$PORT"
+exec node "$BACKEND_DIR/server.js"
