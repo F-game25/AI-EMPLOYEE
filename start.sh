@@ -18,7 +18,9 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-python3 runtime/core/startup.py --preflight
+if ! python3 runtime/core/startup.py --preflight; then
+  echo "⚠️  Preflight failed; continuing with unified runtime startup."
+fi
 
 echo "[1/3] Ensuring backend/frontend dependencies..."
 if [[ ! -d backend/node_modules ]]; then
