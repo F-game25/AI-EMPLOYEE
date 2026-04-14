@@ -216,7 +216,7 @@ export default function DashboardPage() {
     () => normalizedAgents.filter(a => a.status === 'running' || a.status === 'busy'),
     [normalizedAgents]
   )
-  const totalAgents = systemStatus?.total_agents || agents?.length || 0
+  const totalAgents = systemStatus?.total_agents ?? agents?.length ?? 0
   const runningAgents = systemStatus?.running_agents ?? activeAgents.length
   const stoppedAgents = Math.max(totalAgents - runningAgents, 0)
 
