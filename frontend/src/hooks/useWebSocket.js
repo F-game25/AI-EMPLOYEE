@@ -40,6 +40,8 @@ function connectSingleton() {
           break
         case 'system:status':
           store.setSystemStatus(data)
+          if (data?.money_mode_panel) store.setObjectivePanel('money_mode', data.money_mode_panel)
+          if (data?.ascend_forge_panel) store.setObjectivePanel('ascend_forge', data.ascend_forge_panel)
           break
         case 'orchestrator:message':
           clearTimeout(_typingTimeout)
@@ -88,6 +90,9 @@ function connectSingleton() {
           break
         case 'workflow:update':
           store.upsertWorkflowRun(data)
+          break
+        case 'objective:update':
+          if (data?.system) store.setObjectivePanel(data.system, data)
           break
       }
     } catch (e) { /* ignore */ }
