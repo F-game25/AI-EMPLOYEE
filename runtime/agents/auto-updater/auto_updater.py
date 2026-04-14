@@ -52,6 +52,7 @@ TRIGGER_FILE = AI_HOME / "run"   / "updater.trigger"
 STATE_FILE   = AI_HOME / "state" / "updater.json"
 COMMIT_FILE  = AI_HOME / "state" / "installed_commit.txt"
 LOG_FILE     = AI_HOME / "logs"  / "updater.log"
+GITHUB_COMPARE_API_FILE_LIMIT = 300
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -232,7 +233,10 @@ def _runtime_files_at_sha(sha: str) -> "list | None":
     commit = _gh_get(f"{API_BASE}/commits/{sha}", label="commit metadata")
     if not isinstance(commit, dict):
         return None
-    tree_sha = (((commit.get("commit") or {}).get("tree") or {}).get("sha") or "").strip()
+    commit_info = commit.get("commit")
+    tree_info = commit_info.get("tree") if isinstance(commit_info, dict) else None
+    tree_sha = (tree_info.get("sha") if isinstance(tree_info, dict) else "") or ""
+    tree_sha = tree_sha.strip()
     if not tree_sha:
         return None
     tree = _gh_get(f"{API_BASE}/git/trees/{tree_sha}?recursive=1", label="repository tree")
@@ -409,7 +413,7 @@ def check_and_update(force: bool = False, progress_cb=None) -> dict:
 
     # GitHub compare API returns at most 300 changed files. For large updates,
     # use a conservative full runtime sync to avoid silently missing UI changes.
-    if len(changed) >= 300:
+    if len(changed) >= GITHUB_COMPARE_API_FILE_LIMIT:
         logger.warning(
             "Compare API returned %d files (likely capped). Falling back to full runtime sync.",
             len(changed),
