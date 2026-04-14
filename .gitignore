@@ -40,3 +40,5 @@ state/learning_engine.json
 .coverage
 coverage/
 .pytest_cache/
+backend.pid
+worker.pid

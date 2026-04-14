@@ -302,7 +302,9 @@ export default function AIControlPage() {
         const res = await fetch(`${BASE}/api/brain/status`, { signal: controller.signal })
         const data = await res.json()
         if (data) useAppStore.getState().setNnStatus(data)
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.error('Failed to fetch neural status', e)
+      }
     }
     fetchNN()
     const i = setInterval(fetchNN, 3000)
@@ -336,7 +338,8 @@ export default function AIControlPage() {
           addChatMessage({ role: 'ai', content: data.reply || data.message || 'No response.' })
           setTyping(false)
         })
-        .catch(() => {
+        .catch((e) => {
+          console.error('HTTP chat fallback failed', e)
           addChatMessage({ role: 'ai', content: 'Connection error. Please try again.' })
           setTyping(false)
         })

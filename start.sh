@@ -6,37 +6,48 @@ cd "$(dirname "$0")"
 
 echo "Starting AI Employee..."
 
-if ! python3 -c "import fastapi, uvicorn" >/dev/null 2>&1; then
-  echo "Installing backend dependencies (fastapi, uvicorn)..."
-  python3 -m pip install --user fastapi "uvicorn[standard]"
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "❌ Node.js is required but not installed."
+  exit 1
 fi
 
-python3 runtime/core/startup.py --preflight
+if ! command -v npm >/dev/null 2>&1; then
+  echo "❌ npm is required but not installed."
+  exit 1
+fi
 
-# Step 1: Backend
-echo "[1/3] Starting backend..."
-PYTHONPATH="runtime:${PYTHONPATH:-}" python3 -m uvicorn app.main:app --app-dir runtime/bots/problem-solver-ui --host 127.0.0.1 --port 8787 &
+if ! python3 runtime/core/startup.py --preflight; then
+  echo "⚠️  Preflight checks failed; see runtime/core/startup.py output above for details. Continuing with unified runtime startup."
+fi
+
+echo "[1/3] Ensuring backend/frontend dependencies..."
+if [[ ! -d backend/node_modules ]]; then
+  npm --prefix backend install
+fi
+
+if [[ ! -d frontend/node_modules ]]; then
+  npm --prefix frontend install
+fi
+
+echo "[2/3] Building frontend..."
+npm --prefix frontend run build
+
+echo "[3/3] Starting unified runtime on port ${UI_PORT}..."
+PORT="${UI_PORT}" PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}" node backend/server.js &
 BACKEND_PID=$!
 
-# Step 2: Worker pool
-echo "[2/3] Starting workers..."
-python3 runtime/core/worker_pool.py &
-WORKER_PID=$!
-
-# Step 3: Health check
-echo "[3/3] Checking system..."
 sleep 2
-
-if curl -fsS http://127.0.0.1:8787/health > /dev/null && curl -fsS http://127.0.0.1:8787/ > /dev/null; then
-  echo "✅ System running at http://localhost:8787"
+if curl -fsS "http://127.0.0.1:${UI_PORT}/health" > /dev/null && curl -fsS "http://127.0.0.1:${UI_PORT}/" > /dev/null; then
+  echo "✅ System running at http://localhost:${UI_PORT}"
 else
   echo "❌ Backend failed to start"
   kill "$BACKEND_PID" 2>/dev/null || true
-  kill "$WORKER_PID" 2>/dev/null || true
   exit 1
 fi
 
 echo "$BACKEND_PID" > backend.pid
-echo "$WORKER_PID" > worker.pid
+rm -f worker.pid
 
-echo "Tip: For live frontend reload during development, run: cd frontend && npm run dev"
+echo "Tip: For live frontend reload during development, run: PORT=${UI_PORT} node backend/server.js (terminal 1), then cd frontend && npm run dev (terminal 2)"
