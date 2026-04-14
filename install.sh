@@ -26,6 +26,27 @@ step()  { echo ""; echo -e "${M}━━━ $1 ━━━━━━━━━━━�
 info()  { echo -e "    ${B}$1${NC}"; }
 ask()   { echo -e "${Y}?${NC} $1"; }
 
+# ── Progress bar helper ────────────────────────────────────────────────────────
+# Usage: _prog_bar <current> <total> <label>
+_prog_bar() {
+    local cur="$1" tot="$2" label="${3:-}"
+    local pct fill empty bar i
+    [[ "${tot:-0}" -le 0 ]] && tot=1
+    pct=$(( cur * 100 / tot ))
+    fill=$(( cur * 30 / tot ))
+    empty=$(( 30 - fill ))
+    bar="  ["
+    for (( i=0; i<fill;  i++ )); do bar+="█"; done
+    for (( i=0; i<empty; i++ )); do bar+="░"; done
+    bar+="]"
+    if [[ -t 2 ]]; then
+        printf "\r%s %3d%%  %-50s" "$bar" "$pct" "${label:0:50}" >&2
+    else
+        printf "%s %3d%%  %s\n" "$bar" "$pct" "${label:0:50}" >&2
+    fi
+}
+_prog_bar_done() { [[ -t 2 ]] && printf "\n" >&2 || true; }
+
 banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
@@ -522,6 +543,7 @@ install_runtime() {
     step "6/8 — Installing runtime files"
 
     local src="$RUNTIME_DIR"
+    local _DL_COUNT=0 _DL_TOTAL=252
 
     if [[ ! -d "$src" ]]; then
         log "Runtime dir not found locally — downloading from GitHub..."
@@ -531,11 +553,13 @@ install_runtime() {
 
         dl() {
             local rel="$1"
+            _DL_COUNT=$(( _DL_COUNT + 1 ))
+            _prog_bar "$_DL_COUNT" "$_DL_TOTAL" "$rel"
             mkdir -p "$TMP_RUNTIME/$(dirname "$rel")"
-            curl -fsSL "$BASE_URL/runtime/$rel" -o "$TMP_RUNTIME/$rel" \
-                || { echo "FATAL: could not download $rel"; exit 1; }
+            curl -fsSL "$BASE_URL/runtime/$rel" -o "$TMP_RUNTIME/$rel" 2>/dev/null \
+                || { _prog_bar_done; echo "FATAL: could not download $rel"; exit 1; }
             if [[ ! -s "$TMP_RUNTIME/$rel" ]]; then
-                echo "FATAL: downloaded $rel is empty"; exit 1
+                _prog_bar_done; echo "FATAL: downloaded $rel is empty"; exit 1
             fi
         }
     else
@@ -808,9 +832,16 @@ install_runtime() {
         dl "config/custom_agents.json"
         dl "start.sh"
         dl "stop.sh"
+        _prog_bar_done
+        ok "Downloaded $_DL_TOTAL files from GitHub"
 
         src="$TMP_RUNTIME"
     fi
+
+    # ── Implementing updates: copy agents ─────────────────────────────────────
+    local _COPY_TOTAL=0 _COPY_COUNT=0
+    for _d in "$src/agents"/*/; do [[ -d "$_d" ]] && _COPY_TOTAL=$(( _COPY_TOTAL + 1 )); done
+    log "Implementing updates: installing ${_COPY_TOTAL} agents..."
 
     # bin/
     mkdir -p "$AI_HOME/bin"
@@ -820,6 +851,8 @@ install_runtime() {
     # agents/ (overwrite code; never overwrite .env)
     for bot_dir in "$src/agents"/*/; do
         bot_name="$(basename "$bot_dir")"
+        _COPY_COUNT=$(( _COPY_COUNT + 1 ))
+        _prog_bar "$_COPY_COUNT" "$_COPY_TOTAL" "agent: $bot_name"
         mkdir -p "$AI_HOME/agents/$bot_name"
         for f in "$bot_dir"*; do
             [[ -f "$f" ]] || continue
@@ -838,6 +871,8 @@ install_runtime() {
             done
         done
     done
+    _prog_bar_done
+    ok "All agents installed (${_COPY_TOTAL})"
 
     # Copy shared files at agents/ root (utils.py, agent_selftest.py)
     for f in "$src/agents"/*.py; do
@@ -860,24 +895,48 @@ install_runtime() {
         fi
     done
 
-    # Python deps for UI bot (critical — must succeed)
+    # Python deps for UI helper agents (non-critical — UI now uses Node.js backend)
     local req="$AI_HOME/agents/problem-solver-ui/requirements.txt"
     if [[ -f "$req" ]]; then
         if command -v pip3 >/dev/null 2>&1; then
             pip3 install --user -q -r "$req" \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || err "pip3 install failed for core UI bot. Fix pip and re-run installer."
+                || warn "pip3 install failed for UI helper — non-critical (UI runs via Node.js)"
         elif command -v pip >/dev/null 2>&1; then
             pip install --user -q -r "$req" \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || err "pip install failed for core UI bot. Fix pip and re-run installer."
+                || warn "pip install failed for UI helper — non-critical (UI runs via Node.js)"
         elif command -v python3 >/dev/null 2>&1; then
             python3 -m pip install --user -q -r "$req" \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || err "pip install failed for core UI bot. Fix pip and re-run installer."
+                || warn "pip install failed for UI helper — non-critical (UI runs via Node.js)"
         else
             warn "pip not found — install manually: pip3 install fastapi uvicorn"
         fi
+    fi
+
+    # Node.js backend + React frontend (required for unified UI on port 8787)
+    if command -v npm >/dev/null 2>&1; then
+        local _be_dir="$SCRIPT_DIR/backend"
+        local _fe_dir="$SCRIPT_DIR/frontend"
+        if [[ -f "$_be_dir/package.json" ]]; then
+            log "Installing Node.js backend packages..."
+            npm --prefix "$_be_dir" install --silent 2>/dev/null \
+                && ok "Backend Node packages installed" \
+                || warn "npm install for backend failed — run: npm --prefix backend install"
+        fi
+        if [[ -f "$_fe_dir/package.json" ]]; then
+            log "Building React UI bundle..."
+            if [[ ! -d "$_fe_dir/node_modules" ]]; then
+                npm --prefix "$_fe_dir" install --silent 2>/dev/null \
+                    || warn "npm install for frontend failed"
+            fi
+            npm --prefix "$_fe_dir" run build 2>/dev/null \
+                && ok "React UI bundle built (frontend/dist)" \
+                || warn "Frontend build failed — run: cd frontend && npm run build"
+        fi
+    else
+        warn "npm not found — Node.js packages will be installed on first start of the UI"
     fi
 
     # Python deps for ai-router (requests is needed for Ollama calls)
@@ -1354,6 +1413,8 @@ CFG_END
             echo "OPENCLAW_DISABLE_BONJOUR=1"
 
             echo "TZ=${TZ:-UTC}"
+            # Repo location (used by run.sh to locate the Node backend/frontend)
+            echo "AI_EMPLOYEE_REPO_DIR=$SCRIPT_DIR"
         } > "$env_file"
         chmod 600 "$env_file"
         ok ".env created in credentials/"
@@ -1369,6 +1430,9 @@ CFG_END
         || echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}" >> "$env_file"
     grep -q "^AI_EMPLOYEE_AUTO_INSTALL_DOCKER=" "$env_file" \
         || echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}" >> "$env_file"
+    # Ensure repo dir is always recorded (update-safe — so run.sh finds backend/frontend)
+    grep -q "^AI_EMPLOYEE_REPO_DIR=" "$env_file" \
+        || echo "AI_EMPLOYEE_REPO_DIR=$SCRIPT_DIR" >> "$env_file"
 
     # Keep gateway token in .env aligned with config.json to avoid auth mismatch.
     local cfg_token
@@ -1562,24 +1626,38 @@ add_to_path() {
 
 create_desktop_launcher() {
     # ── Write a smart launcher script that starts the bot OR opens the UI ───────
-    # If the bot is already running (UI responds), just open the browser.
-    # If it isn't running, launch start.sh in a new terminal window.
+    # If the bot is already running (UI responds on /health), just open the browser.
+    # If it isn't running, launch run.sh in a new terminal window (or background).
     local launcher_script="$AI_HOME/bin/ai-employee-launcher"
     cat > "$launcher_script" << 'LAUNCHER'
 #!/usr/bin/env bash
 # AI Employee Smart Launcher
 # • If the bot is already running  → open the dashboard in the browser
-# • If the bot is NOT running      → start the bot (which opens the browser)
+# • If the bot is NOT running      → start the bot, then open the browser
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
 
-# Load .env so ports are respected
+# Load .env so ports and repo path are respected
 if [[ -f "$AI_HOME/.env" ]]; then
     set -a; source "$AI_HOME/.env"; set +a
 fi
 
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
 DASHBOARD_URL="http://127.0.0.1:${UI_PORT}"
+mkdir -p "$AI_HOME/logs"
+
+# Locate the best startup script:
+# 1. Installed agent run.sh  2. Repo-relative run.sh  3. Full start.sh fallback
+_find_run_sh() {
+    local installed="$AI_HOME/agents/problem-solver-ui/run.sh"
+    [[ -x "$installed" ]] && echo "$installed" && return 0
+    if [[ -n "${AI_EMPLOYEE_REPO_DIR:-}" ]]; then
+        local repo_run="$AI_EMPLOYEE_REPO_DIR/runtime/agents/problem-solver-ui/run.sh"
+        [[ -x "$repo_run" ]] && echo "$repo_run" && return 0
+    fi
+    [[ -x "$AI_HOME/start.sh" ]] && echo "$AI_HOME/start.sh" && return 0
+    echo ""
+}
 
 _open_url() {
     local url="$1"
@@ -1595,7 +1673,24 @@ _open_url() {
 }
 
 _bot_running() {
-    curl -sf --max-time 2 "$DASHBOARD_URL" >/dev/null 2>&1
+    # Try /health first (Node backend), fall back to root URL
+    curl -sf --max-time 2 "${DASHBOARD_URL}/health" >/dev/null 2>&1 \
+        || curl -sf --max-time 2 "${DASHBOARD_URL}" >/dev/null 2>&1
+}
+
+_wait_for_bot() {
+    local tries=0 max=40
+    printf "  Waiting for AI Employee"
+    while [[ $tries -lt $max ]]; do
+        if _bot_running; then
+            printf "  ✓ Ready!\n"
+            return 0
+        fi
+        printf "."
+        sleep 2
+        tries=$(( tries + 1 ))
+    done
+    printf "\n  ⚠ Timed out — opening browser anyway…\n"
 }
 
 if _bot_running; then
@@ -1603,23 +1698,35 @@ if _bot_running; then
     _open_url "$DASHBOARD_URL"
 else
     echo "Starting AI Employee…"
-    # Try to open a terminal emulator with start.sh
-    if command -v gnome-terminal >/dev/null 2>&1; then
-        gnome-terminal -- bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash"
-    elif command -v xterm >/dev/null 2>&1; then
-        xterm -e bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash" &
-    elif command -v konsole >/dev/null 2>&1; then
-        konsole -e bash -c "cd \"$AI_HOME\" && ./start.sh; exec bash" &
-    elif command -v xfce4-terminal >/dev/null 2>&1; then
-        xfce4-terminal -e "bash -c \"cd \\\"$AI_HOME\\\" && ./start.sh; exec bash\"" &
-    elif command -v tilix >/dev/null 2>&1; then
-        tilix -e "bash -c \"cd \\\"$AI_HOME\\\" && ./start.sh; exec bash\"" &
-    else
-        # Fallback: run in background, open browser after a delay
-        cd "$AI_HOME" && nohup ./start.sh >/dev/null 2>&1 &
-        echo "Bot started in background — opening browser in 8s…"
-        sleep 8 && _open_url "$DASHBOARD_URL"
+    _RUN_SH="$(_find_run_sh)"
+    _TERM_OPENED=0
+
+    if [[ -n "$_RUN_SH" ]]; then
+        if command -v gnome-terminal >/dev/null 2>&1; then
+            gnome-terminal -- bash -c "\"$_RUN_SH\"; exec bash" && _TERM_OPENED=1
+        elif command -v xterm >/dev/null 2>&1; then
+            xterm -e bash -c "\"$_RUN_SH\"; exec bash" & _TERM_OPENED=1
+        elif command -v konsole >/dev/null 2>&1; then
+            konsole -e bash -c "\"$_RUN_SH\"; exec bash" & _TERM_OPENED=1
+        elif command -v xfce4-terminal >/dev/null 2>&1; then
+            xfce4-terminal -e "bash -c \"\\\"$_RUN_SH\\\"; exec bash\"" & _TERM_OPENED=1
+        elif command -v tilix >/dev/null 2>&1; then
+            tilix -e "bash -c \"\\\"$_RUN_SH\\\"; exec bash\"" & _TERM_OPENED=1
+        fi
     fi
+
+    if [[ "$_TERM_OPENED" -eq 0 ]]; then
+        # Headless / no terminal emulator — run in background and poll
+        if [[ -n "$_RUN_SH" ]]; then
+            nohup bash "$_RUN_SH" >> "$AI_HOME/logs/launcher.log" 2>&1 &
+        else
+            cd "$AI_HOME" && nohup ./start.sh >> "$AI_HOME/logs/launcher.log" 2>&1 &
+        fi
+        echo "Bot started in background (logs: $AI_HOME/logs/launcher.log)"
+        _wait_for_bot
+    fi
+
+    _open_url "$DASHBOARD_URL"
 fi
 LAUNCHER
     chmod +x "$launcher_script"

@@ -548,7 +548,14 @@ Read-Host 'Press Enter to exit'
 # Download bot files using correct per-bot filenames
 $downloadCount = 0
 $failCount = 0
+$botTotal = $BOTS.Count
+$botIndex = 0
 foreach ($bot in $BOTS) {
+    $botIndex++
+    $pct = [int](($botIndex / $botTotal) * 100)
+    Write-Progress -Activity "Downloading runtime files" `
+        -Status "[$botIndex/$botTotal]  agent: $bot" `
+        -PercentComplete $pct
     $pyFile = $BOT_FILES[$bot]
     $botDir = Join-Path $AI_HOME "agents\$bot"
     if (-not (Test-Path $botDir)) {
@@ -570,6 +577,7 @@ foreach ($bot in $BOTS) {
     $cfgDest = Join-Path $AI_HOME "config\$bot.env"
     Invoke-Download $cfgUrl $cfgDest | Out-Null
 }
+Write-Progress -Activity "Downloading runtime files" -Completed
 
 # Also download shared config files
 $configFiles = @(
@@ -577,11 +585,17 @@ $configFiles = @(
     'skills_library.json', 'custom_agents.json', 'agent_capabilities.json',
     'task_plans.json', 'agent_templates.json'
 )
+$cfIndex = 0
 foreach ($cf in $configFiles) {
+    $cfIndex++
+    Write-Progress -Activity "Downloading config files" `
+        -Status "$cf" `
+        -PercentComplete ([int](($cfIndex / $configFiles.Count) * 100))
     $cfUrl   = "$BASE_URL/config/$cf"
     $cfDest  = Join-Path $AI_HOME "config\$cf"
     Invoke-Download $cfUrl $cfDest | Out-Null
 }
+Write-Progress -Activity "Downloading config files" -Completed
 
 Write-OK "Agent files: $downloadCount downloaded, $failCount not found (placeholders created)."
 
@@ -656,11 +670,16 @@ try {
 foreach ($bot in $BOTS) {
     $reqFile = Join-Path $AI_HOME "agents\$bot\requirements.txt"
     if (Test-Path $reqFile) {
+        $botIdx = [array]::IndexOf($BOTS, $bot) + 1
+        Write-Progress -Activity "Implementing updates: installing dependencies" `
+            -Status "agent: $bot  ($botIdx/$($BOTS.Count))" `
+            -PercentComplete ([int](($botIdx / $BOTS.Count) * 100))
         try {
             & $PYTHON -m pip install --user -r $reqFile --quiet -ErrorAction SilentlyContinue | Out-Null
         } catch { }
     }
 }
+Write-Progress -Activity "Implementing updates: installing dependencies" -Completed
 Write-OK "Bot dependencies installed."
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -846,7 +865,7 @@ $desktop = [Environment]::GetFolderPath('Desktop')
 
 # ── Smart launcher PowerShell script ─────────────────────────────────────────
 # Clicking the desktop button:
-#   • If the bot is already running (UI responds) → open the dashboard in browser
+#   • If the bot is already running (UI responds on /health) → open the dashboard in browser
 #   • If it is NOT running → open a new PowerShell window and start the bot
 $smartLauncherContent = @"
 # AI Employee Smart Launcher (Windows)
@@ -864,12 +883,44 @@ if (Test-Path `$envFile) {
 }
 
 `$dashboardUrl = "http://127.0.0.1:`$UI_PORT"
+`$logsDir      = Join-Path `$AI_HOME 'logs'
+if (-not (Test-Path `$logsDir)) { New-Item -ItemType Directory `$logsDir -Force | Out-Null }
 
 function Test-BotRunning {
     try {
-        `$r = Invoke-WebRequest -Uri `$dashboardUrl -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+        `$r = Invoke-WebRequest -Uri "`$dashboardUrl/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
         return `$r.StatusCode -eq 200
-    } catch { return `$false }
+    } catch {
+        try {
+            `$r2 = Invoke-WebRequest -Uri `$dashboardUrl -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+            return `$r2.StatusCode -eq 200
+        } catch { return `$false }
+    }
+}
+
+function Wait-ForBot {
+    `$tries = 0; `$max = 40
+    Write-Host "  Waiting for AI Employee" -NoNewline -ForegroundColor Cyan
+    while (`$tries -lt `$max) {
+        if (Test-BotRunning) { Write-Host "  Ready!" -ForegroundColor Green; return `$true }
+        Write-Host "." -NoNewline -ForegroundColor DarkGray
+        Start-Sleep -Seconds 2
+        `$tries++
+    }
+    Write-Host ""
+    Write-Host "  Timed out — opening browser anyway." -ForegroundColor Yellow
+    return `$false
+}
+
+function Find-RunScript {
+    `$candidates = @(
+        (Join-Path `$AI_HOME 'agents\problem-solver-ui\run.sh'),
+        (Join-Path `$AI_HOME 'start-windows.ps1')
+    )
+    foreach (`$c in `$candidates) {
+        if (Test-Path `$c) { return `$c }
+    }
+    return `$null
 }
 
 if (Test-BotRunning) {
@@ -877,8 +928,23 @@ if (Test-BotRunning) {
     Start-Process `$dashboardUrl
 } else {
     Write-Host "Starting AI Employee…" -ForegroundColor Cyan
-    `$startScript = Join-Path `$AI_HOME 'start-windows.ps1'
-    Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File `"`$startScript`"" -WindowStyle Normal
+    `$script = Find-RunScript
+    if (`$script -and `$script.EndsWith('.ps1')) {
+        Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File \"`$script\"" -WindowStyle Normal
+    } elseif (`$script -and `$script.EndsWith('.sh')) {
+        # WSL / Git Bash path for run.sh
+        `$bash = if (Get-Command bash -ErrorAction SilentlyContinue) { 'bash' } else { `$null }
+        if (`$bash) {
+            Start-Process `$bash -ArgumentList "\"`$script\"" -WindowStyle Normal
+        } else {
+            Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -Command \"& { cd '`$AI_HOME'; .\start-windows.ps1 }\"" -WindowStyle Normal
+        }
+    } else {
+        `$startScript = Join-Path `$AI_HOME 'start-windows.ps1'
+        Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File \"`$startScript\"" -WindowStyle Normal
+    }
+    Wait-ForBot | Out-Null
+    Start-Process `$dashboardUrl
 }
 "@
 
