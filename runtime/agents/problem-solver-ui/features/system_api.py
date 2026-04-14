@@ -817,3 +817,126 @@ def stop_daemon():
     except Exception as exc:
         _log.exception("stop_daemon failed")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── Self-Evolution endpoints ────────────────────────────────────────────────────
+
+class EvolutionModeBody(BaseModel):
+    mode: str  # OFF | SAFE | AUTO
+
+
+@router.get("/evolution/status")
+def get_evolution_status():
+    try:
+        from core.self_evolution.evolution_controller import get_evolution_controller
+
+        controller = get_evolution_controller()
+        return JSONResponse(controller.status())
+    except Exception:
+        _log.exception("get_evolution_status failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/evolution/mode")
+def set_evolution_mode(body: EvolutionModeBody):
+    try:
+        from core.self_evolution.evolution_controller import get_evolution_controller
+
+        controller = get_evolution_controller()
+        mode = controller.set_mode(body.mode)
+        return JSONResponse({"mode": mode, "status": controller.status()})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        _log.exception("set_evolution_mode failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/evolution/start")
+def start_evolution():
+    try:
+        from core.self_evolution.evolution_controller import get_evolution_controller
+
+        controller = get_evolution_controller()
+        controller.start()
+        return JSONResponse(controller.status())
+    except Exception:
+        _log.exception("start_evolution failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/evolution/stop")
+def stop_evolution():
+    try:
+        from core.self_evolution.evolution_controller import get_evolution_controller
+
+        controller = get_evolution_controller()
+        controller.stop()
+        return JSONResponse(controller.status())
+    except Exception:
+        _log.exception("stop_evolution failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/evolution/run-once")
+def evolution_run_once(approved: bool = Query(default=False)):
+    try:
+        from core.self_evolution.evolution_controller import get_evolution_controller
+
+        controller = get_evolution_controller()
+        return JSONResponse(controller.run_once(manual_approved=approved))
+    except Exception:
+        _log.exception("evolution_run_once failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── Observability endpoints ─────────────────────────────────────────────────────
+
+def _get_observability_runtime():
+    from core.observability.anomaly_detector import get_anomaly_detector
+    from core.observability.event_stream import get_event_stream
+    from core.observability.metrics_collector import get_metrics_collector
+
+    stream = get_event_stream()
+    metrics = get_metrics_collector()
+    detector = get_anomaly_detector()
+    metrics.start()
+    anomalies = detector.detect()
+    return stream, metrics, detector, anomalies
+
+
+@router.get("/observability/snapshot")
+def observability_snapshot():
+    try:
+        stream, metrics, detector, anomalies = _get_observability_runtime()
+        return JSONResponse(
+            {
+                "metrics": metrics.snapshot(),
+                "events": stream.recent(200),
+                "event_stats": stream.stats(),
+                "anomalies": anomalies or detector.recent(20),
+            }
+        )
+    except Exception:
+        _log.exception("observability_snapshot failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/observability/events")
+def observability_events(limit: int = Query(default=100, ge=1, le=500)):
+    try:
+        stream, _metrics, _detector, _anomalies = _get_observability_runtime()
+        return JSONResponse({"events": stream.recent(limit)})
+    except Exception:
+        _log.exception("observability_events failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/observability/anomalies")
+def observability_anomalies():
+    try:
+        _stream, _metrics, detector, anomalies = _get_observability_runtime()
+        return JSONResponse({"anomalies": anomalies or detector.recent(20)})
+    except Exception:
+        _log.exception("observability_anomalies failed")
+        raise HTTPException(status_code=500, detail="Internal server error")

@@ -64,6 +64,7 @@ const GPU_TEMP_JITTER = 4;
 const MAX_ACTIVITY_ITEMS = 50;
 const MAX_EXECUTION_LOGS = 100;
 const MAX_DECISION_LOG_ENTRIES = 30;
+const MAX_OBSERVABILITY_EVENTS = 300;
 const BASE_PIPELINE_ROI = 250;
 const PIPELINE_ROI_SWING = 400;
 const REVENUE_CONVERSION_RATE = 0.45;
@@ -127,6 +128,12 @@ const runtimeState = {
     },
   },
   objectiveTaskMeta: {},
+  observability: {
+    events: [],
+    autoFixLog: [],
+    traces: {},
+    _traceSeq: 0,
+  },
   _seq: 0,
 };
 
@@ -293,6 +300,32 @@ function addActivity(notes, kind = 'system') {
   broadcaster.broadcast('activity:item', item);
 }
 
+function emitObservabilityEvent(eventType, payload = {}) {
+  const event = {
+    id: `obs-${++runtimeState._seq}`,
+    ts: new Date().toISOString(),
+    event_type: eventType,
+    payload,
+    trace_id: payload.trace_id || '',
+  };
+  runtimeState.observability.events.unshift(event);
+  runtimeState.observability.events = runtimeState.observability.events.slice(0, MAX_OBSERVABILITY_EVENTS);
+  broadcaster.broadcast('event_stream', event);
+  return event;
+}
+
+function appendAutoFixLog(entry) {
+  const row = {
+    id: `autofix-${++runtimeState._seq}`,
+    ts: new Date().toISOString(),
+    ...entry,
+  };
+  runtimeState.observability.autoFixLog.unshift(row);
+  runtimeState.observability.autoFixLog = runtimeState.observability.autoFixLog.slice(0, MAX_ACTIVITY_ITEMS);
+  emitObservabilityEvent('auto_fix_applied', row);
+  return row;
+}
+
 function createWorkflowRun({ name, source = 'automation', goal = '' }) {
   const runId = `wf-${++runtimeState._seq}`;
   const run = {
@@ -449,6 +482,35 @@ function queueWorkflowStep({
     seq.stepTaskIds[stepIndex] = queued.taskId;
   }
   addActivity(`[BRAIN] Strategy ${queued.brain?.strategy || 'default'} selected for ${queued.taskId}`, 'task');
+  const traceId = `trace-${++runtimeState.observability._traceSeq}`;
+  runtimeState.observability.traces[queued.taskId] = {
+    trace_id: traceId,
+    user_input: message,
+    intent: queued.brain?.intent || queued.subsystem || 'general',
+    agent: queued.agentId || 'task_orchestrator',
+    strategy: queued.brain?.strategy || 'default',
+    confidence: queued.brain?.confidence || 0,
+    started_at: new Date().toISOString(),
+    steps: [],
+  };
+  emitObservabilityEvent('task_started', {
+    trace_id: traceId,
+    task_id: queued.taskId,
+    user_input: message,
+    intent: queued.brain?.intent || queued.subsystem || 'general',
+  });
+  emitObservabilityEvent('agent_selected', {
+    trace_id: traceId,
+    task_id: queued.taskId,
+    agent: queued.agentId || 'task_orchestrator',
+  });
+  emitObservabilityEvent('brain_decision', {
+    trace_id: traceId,
+    task_id: queued.taskId,
+    strategy: queued.brain?.strategy || 'default',
+    reasoning: queued.brain?.reasoning || '',
+    confidence: queued.brain?.confidence || 0,
+  });
   return queued;
 }
 
@@ -482,6 +544,12 @@ function retryWorkflowStep(failedTaskId) {
   if (meta.retries >= meta.maxRetries) return false;
   const retryNumber = meta.retries + 1;
   addActivity(`[RETRY] ${failedTaskId} retry ${retryNumber}/${meta.maxRetries}`, 'task');
+  appendAutoFixLog({
+    task_id: failedTaskId,
+    issue: meta.error || 'task failure',
+    fix: `Automatic retry ${retryNumber}/${meta.maxRetries}`,
+    status: 'retrying',
+  });
   queueWorkflowStep({
     runId: meta.runId,
     message: meta.message,
@@ -904,6 +972,57 @@ app.get('/api/system/stats', (req, res) => {
   res.json(sampleSystemStatus());
 });
 
+function buildObservabilitySnapshot() {
+  const stats = sampleSystemStatus();
+  const events = runtimeState.observability.events || [];
+  const nowTs = Date.now();
+  const recentErrorEvents = events.filter((item) => item.event_type === 'error_detected');
+  const errorsPerMinute = recentErrorEvents.filter((item) => (nowTs - Date.parse(item.ts)) <= 60000).length;
+  const recentTaskEvents = events.filter((item) => item.event_type === 'task_completed' || item.event_type === 'task_started');
+  const tasksPerMinute = recentTaskEvents.filter((item) => (nowTs - Date.parse(item.ts)) <= 60000).length;
+  const latestLogs = runtimeState.executionLogs.slice(0, 20);
+  const avgLatency = latestLogs.length
+    ? Math.round(latestLogs.reduce((acc, row) => acc + (Number(row.duration_ms || 0) || 0), 0) / latestLogs.length)
+    : 0;
+  return {
+    system_health: {
+      uptime: stats.uptime,
+      errors_per_minute: errorsPerMinute,
+      status: errorsPerMinute > 3 ? 'degraded' : 'healthy',
+    },
+    metrics: {
+      tasks_per_minute: tasksPerMinute,
+      errors_per_minute: errorsPerMinute,
+      latency_ms: avgLatency,
+      cpu_percent: stats.cpu_usage,
+      memory_percent: stats.memory,
+      queue_depth: runtimeState.workflowRuns.filter((run) => run.status === 'pending').length,
+    },
+    activity_feed: runtimeState.activityFeed,
+    agent_grid: getAgents().map((agent) => ({
+      id: agent.id,
+      name: agent.name,
+      status: agent.status || 'idle',
+    })),
+    queue_visualizer: {
+      pending: runtimeState.workflowRuns.filter((run) => run.status === 'pending').length,
+      processing: runtimeState.workflowRuns.filter((run) => run.status === 'running').length,
+    },
+    auto_fix_log: runtimeState.observability.autoFixLog || [],
+    events: events.slice(0, 200),
+    traces: runtimeState.observability.traces,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+app.get('/api/observability/snapshot', (req, res) => {
+  res.json(buildObservabilitySnapshot());
+});
+
+app.get('/api/observability/events', (req, res) => {
+  res.json({ events: (runtimeState.observability.events || []).slice(0, 200) });
+});
+
 app.get('/api/mode', (req, res) => {
   const mode = getMode();
   const robotSignal = getRobotSignal();
@@ -990,6 +1109,35 @@ app.get('/api/autonomy/mode', (req, res) => {
   res.json(auto.mode || { mode: 'OFF', active: false });
 });
 
+function requestPythonJSON(pathname, method = 'GET', payload = null) {
+  return new Promise((resolve, reject) => {
+    const httpLib = require('http');
+    const body = payload ? JSON.stringify(payload) : null;
+    const req = httpLib.request(`http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}${pathname}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {},
+      timeout: 3000,
+    }, (response) => {
+      let text = '';
+      response.on('data', (chunk) => { text += chunk; });
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(text || '{}'));
+        } catch {
+          resolve({});
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('timeout'));
+    });
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 app.post('/api/autonomy/mode', async (req, res) => {
   const nextMode = String((req.body || {}).mode || '').toUpperCase();
   if (!['OFF', 'ON', 'AUTO'].includes(nextMode)) {
@@ -1041,6 +1189,29 @@ app.post('/api/autonomy/emergency-stop', (req, res) => {
   r.on('timeout', () => { r.destroy(); res.json({ status: 'stopped', message: 'Emergency stop sent (timeout).' }); });
   r.on('error', () => res.json({ status: 'stopped', message: 'Emergency stop sent (backend unreachable).' }));
   r.end();
+});
+
+app.get('/api/evolution/status', async (req, res) => {
+  try {
+    const data = await requestPythonJSON('/api/evolution/status', 'GET');
+    res.json(data);
+  } catch {
+    res.json({ mode: 'OFF', running: false });
+  }
+});
+
+app.post('/api/evolution/mode', async (req, res) => {
+  const mode = String((req.body || {}).mode || '').toUpperCase();
+  if (!['OFF', 'SAFE', 'AUTO'].includes(mode)) {
+    return res.status(400).json({ error: 'Invalid mode. Use OFF, SAFE, or AUTO.' });
+  }
+  try {
+    const data = await requestPythonJSON('/api/evolution/mode', 'POST', { mode });
+    addActivity(`[EVOLUTION] Mode → ${mode}`, 'system');
+    res.json(data);
+  } catch {
+    res.json({ mode, status: { mode, running: false } });
+  }
 });
 
 app.get('/api/product/dashboard', (req, res) => {
@@ -1247,6 +1418,11 @@ wss.on('connection', (ws) => {
     data: { active_run: runtimeState.selectedWorkflowRun, runs: runtimeState.workflowRuns },
     timestamp: new Date().toISOString(),
   }));
+  ws.send(JSON.stringify({
+    event: 'observability:snapshot',
+    data: buildObservabilitySnapshot(),
+    timestamp: new Date().toISOString(),
+  }));
 
   // Send existing activity feed so newly connected clients are up to date
   if (runtimeState.activityFeed.length > 0) {
@@ -1392,6 +1568,13 @@ onAgentEvent('task:started', ({ agent, task }) => {
       summary: `Agent ${agent.name} started with strategy ${node.strategy || 'default'}`,
     });
   });
+  const trace = runtimeState.observability.traces[task.id];
+  emitObservabilityEvent('step_progress', {
+    trace_id: trace ? trace.trace_id : '',
+    task_id: task.id,
+    step: 'execution_started',
+    agent: agent.name,
+  });
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] started ${task.id}`,
     level: 'info',
@@ -1468,6 +1651,13 @@ onAgentEvent('task:completed', ({ agent, task }) => {
       summary: `Result success • ${task.message}`,
     });
   });
+  const trace = runtimeState.observability.traces[task.id];
+  emitObservabilityEvent('task_completed', {
+    trace_id: trace ? trace.trace_id : '',
+    task_id: task.id,
+    agent: agent.name,
+    result: task.message,
+  });
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] completed ${task.id}`,
     level: 'success',
@@ -1521,6 +1711,13 @@ onAgentEvent('task:failed', ({ agent, task }) => {
       summary: `Result failed • ${task.error || 'execution error'}`,
     });
   });
+  const trace = runtimeState.observability.traces[task.id];
+  emitObservabilityEvent('error_detected', {
+    trace_id: trace ? trace.trace_id : '',
+    task_id: task.id,
+    agent: agent.name,
+    error: task.error || 'execution error',
+  });
   broadcaster.broadcast('heartbeat', {
     message: `[${agent.name}] failed ${task.id}`,
     level: 'warning',
@@ -1555,6 +1752,7 @@ setInterval(() => {
     active_run: runtimeState.selectedWorkflowRun,
     runs: runtimeState.workflowRuns,
   });
+  broadcaster.broadcast('observability:snapshot', buildObservabilitySnapshot());
 }, 2000);
 
 app.get('*', (req, res, next) => {
