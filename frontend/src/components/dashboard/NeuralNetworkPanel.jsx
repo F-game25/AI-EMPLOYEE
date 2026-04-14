@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { API_URL } from '../../config/api'
 
 const MODE_COLORS = {
   ONLINE: 'var(--success)',
   OFFLINE: 'var(--warning)',
   AUTO: 'var(--gold)',
 }
-const API_BASE = window.location.origin
+const API_BASE = API_URL
 
 function StatRow({ label, value, highlight }) {
   return (

@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { API_URL } from '../../config/api'
 
-const API_BASE = window.location.origin
+const API_BASE = API_URL
 
 const MODE_CONFIG = {
   OFF: { color: 'var(--error)', bg: 'rgba(255,68,102,0.08)', border: 'rgba(255,68,102,0.35)', label: 'PAUSED', icon: '⏸' },

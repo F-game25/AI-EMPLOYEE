@@ -9,8 +9,9 @@ import NeuralBrainPage from './pages/NeuralBrainPage'
 import OperationsPage from './pages/OperationsPage'
 import AgentsPage from './pages/AgentsPage'
 import SystemPage from './pages/SystemPage'
+import { API_URL } from '../config/api'
 
-const BASE = window.location.origin
+const BASE = API_URL
 
 const PAGES = {
   'dashboard': DashboardPage,
