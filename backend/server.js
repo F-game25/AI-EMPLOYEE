@@ -27,6 +27,8 @@ const brain = require('./brain/active_brain');
 const persistence = require('./persistence');
 
 const PORT = process.env.PORT || 8787;
+const PYTHON_BACKEND_HOST = '127.0.0.1';
+const PYTHON_BACKEND_PORT = process.env.PYTHON_BACKEND_PORT || 8787;
 const FRONTEND_DIST = path.resolve(__dirname, '../frontend/dist');
 const FRONTEND_INDEX = path.join(FRONTEND_DIST, 'index.html');
 const HAS_FRONTEND_DIST = fs.existsSync(FRONTEND_INDEX);
@@ -1113,7 +1115,7 @@ function requestPythonJSON(pathname, method = 'GET', payload = null) {
   return new Promise((resolve, reject) => {
     const httpLib = require('http');
     const body = payload ? JSON.stringify(payload) : null;
-    const req = httpLib.request(`http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}${pathname}`, {
+    const req = httpLib.request(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}${pathname}`, {
       method,
       headers: body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {},
       timeout: 3000,
