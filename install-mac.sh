@@ -388,7 +388,7 @@ wizard() {
 
     # 9) Timezone
     local default_tz
-    default_tz=$(cat /etc/timezone 2>/dev/null || echo "UTC")
+    default_tz=$(systemsetup -gettimezone 2>/dev/null | sed 's/Time Zone: //' || cat /etc/timezone 2>/dev/null || echo "UTC")
     echo ""
     ask "Timezone [default: $default_tz]:"
     read -r TZ_INPUT < "$tty_in"
