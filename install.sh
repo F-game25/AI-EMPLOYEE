@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="$SCRIPT_DIR/runtime"
 START_TIME=$(date +%s)
 CONFIG_FILES_UPDATED=0
-CLAUDE_MODEL="claude-opus-4-6"
+CLAUDE_MODEL="claude-sonnet-4-5-20251022"
 OLLAMA_HOST="http://localhost:11434"
 OLLAMA_MODEL="llama3.2"
 ZERO_CONFIG="${ZERO_CONFIG:-0}"
@@ -30,7 +30,7 @@ banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
 ║      AI EMPLOYEE - v4.0 INSTALLER  (Linux)           ║
-║  35 Agents • Claude AI • Ollama Local • WhatsApp     ║
+║  Claude AI • Ollama Local • WhatsApp                 ║
 ╚══════════════════════════════════════════════════════╝
 EOF
 }
@@ -105,7 +105,7 @@ install_openclaw() {
             fi
             ok "OpenClaw installed"
         else
-            warn "OpenClaw auto-install failed. Install manually:
+            err "OpenClaw auto-install failed. Install manually:
   curl -fsSL https://openclaw.ai/install.sh | bash
   Then re-run this installer."
         fi
@@ -223,7 +223,7 @@ wizard() {
     # ── Zero-config mode — skip all questions, use safe defaults ──────────────
     if [[ "$ZERO_CONFIG" == "1" ]]; then
         ok "Zero-config mode: using safe defaults (no questions asked)."
-        PHONE="+10000000000"
+        PHONE=""
         WANT_OLLAMA="y"
         OLLAMA_MODEL="llama3.2"
         MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
@@ -239,15 +239,15 @@ wizard() {
         BOT_PATH=""
         WANT_STATUS="y"
         STATUS_INTERVAL=3600
-        DASHBOARD_PORT=3000
         UI_PORT=8787
         WORKERS=5
         AI_EMPLOYEE_MODE="starter"
         AUTO_INSTALL_OPENCLAW="1"
         AUTO_INSTALL_DOCKER="0"
+        TZ=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
         TOKEN=$(openssl rand -hex 32)
         ok "Zero-config defaults set (5 agents, Starter mode, local Ollama)"
-        ok "WhatsApp: set placeholder phone — update ~/.ai-employee/config.json to connect"
+        ok "Phone: not set — run 'ai-employee setup-phone' to configure WhatsApp"
         return
     fi
 
@@ -358,6 +358,20 @@ wizard() {
         info "Trading bot path: skipped"
     fi
 
+    # 5b) Trading bot risk disclosure
+    echo ""
+    echo -e "${Y}⚠ RISK NOTICE:${NC} This system includes trading bots (polymarket-trader, arbitrage-bot)."
+    echo "  • All trading bots default to PAPER/SIMULATION mode (no real money)."
+    echo "  • To enable live trading, you must manually set LIVE_TRADING=true in the config."
+    echo "  • Trading involves risk of financial loss. Use at your own discretion."
+    ask "I understand trading bots are in paper mode by default [Y/n]:"
+    read -r TRADING_ACK < "$tty_in"
+    TRADING_ACK="${TRADING_ACK:-y}"
+    if [[ "$TRADING_ACK" =~ ^[Nn] ]]; then
+        warn "Trading bots will still be installed in paper mode. No real money will be used."
+    fi
+    ok "Trading bots: paper/simulation mode (default)"
+
     # 6) Hourly status reports
     echo ""
     ask "Enable hourly WhatsApp status updates? [Y/n]:"
@@ -373,16 +387,12 @@ wizard() {
         ok "Status interval: ${STATUS_INTERVAL}s"
     fi
 
-    # 7) UI ports
+    # 7) UI port (single unified port)
     echo ""
-    ask "Dashboard port [default: 3000]:"
-    read -r DASHBOARD_PORT_INPUT < "$tty_in"
-    DASHBOARD_PORT="${DASHBOARD_PORT_INPUT:-3000}"
-
     ask "Problem Solver UI port [default: 8787]:"
     read -r UI_PORT_INPUT < "$tty_in"
     UI_PORT="${UI_PORT_INPUT:-8787}"
-    ok "Ports: dashboard=$DASHBOARD_PORT, ui=$UI_PORT"
+    ok "UI port: $UI_PORT"
 
     # 8) Number of workers
     echo ""
@@ -431,6 +441,15 @@ wizard() {
         AUTO_INSTALL_DOCKER="0"
         info "Docker runtime auto-install: disabled"
     fi
+
+    # 11) Timezone
+    local default_tz
+    default_tz=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
+    echo ""
+    ask "Timezone [default: $default_tz]:"
+    read -r TZ_INPUT < "$tty_in"
+    TZ="${TZ_INPUT:-$default_tz}"
+    ok "Timezone: $TZ"
 
     TOKEN=$(openssl rand -hex 32)
     ok "Wizard complete"
@@ -485,9 +504,10 @@ setup_directories() {
 
     mkdir -p "$AI_HOME"/{workspace,credentials,downloads,logs,ui,backups,bin,run,agents,config,state,improvements}
 
-    for a in orchestrator lead-hunter content-master social-guru intel-agent product-scout \
-              email-ninja support-bot data-analyst creative-studio crypto-trader bot-dev web-sales \
-              company-builder memecoin-creator hr-manager finance-wizard brand-strategist growth-hacker project-manager; do
+    for a in task-orchestrator lead-generator social-media-manager web-researcher lead-hunter-elite \
+              cold-outreach-assassin newsletter-bot signal-community ad-campaign-wizard \
+              ecom-agent arbitrage-bot hr-manager finance-wizard brand-strategist growth-hacker project-manager \
+              company-builder creator-agency faceless-video recruiter; do
         mkdir -p "$AI_HOME/workspace-$a/skills"
     done
 
@@ -504,7 +524,7 @@ install_runtime() {
     local src="$RUNTIME_DIR"
 
     if [[ ! -d "$src" ]]; then
-        log "Runtime dir not found locally. Downloading from GitHub..."
+        log "Runtime dir not found locally — downloading from GitHub..."
         local TMP_RUNTIME
         TMP_RUNTIME=$(mktemp -d)
         local BASE_URL="https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main"
@@ -512,8 +532,17 @@ install_runtime() {
         dl() {
             local rel="$1"
             mkdir -p "$TMP_RUNTIME/$(dirname "$rel")"
-            curl -fsSL "$BASE_URL/runtime/$rel" -o "$TMP_RUNTIME/$rel" || warn "Could not download $rel"
+            curl -fsSL "$BASE_URL/runtime/$rel" -o "$TMP_RUNTIME/$rel" \
+                || { echo "FATAL: could not download $rel"; exit 1; }
+            if [[ ! -s "$TMP_RUNTIME/$rel" ]]; then
+                echo "FATAL: downloaded $rel is empty"; exit 1
+            fi
         }
+    else
+        log "Using local runtime from $src"
+    fi
+
+    if [[ ! -d "$src" ]]; then
 
         dl "bin/ai-employee"
         # Core agents
@@ -545,6 +574,7 @@ install_runtime() {
         dl "agents/agent_selftest.py"
         # AI providers
         dl "agents/ai-router/ai_router.py"
+        dl "agents/ai-router/run.sh"
         dl "agents/ollama-agent/run.sh"
         dl "agents/ollama-agent/ollama_agent.py"
         dl "agents/ollama-agent/requirements.txt"
@@ -588,9 +618,7 @@ install_runtime() {
         dl "agents/whatsapp-webhook/run.sh"
         dl "agents/whatsapp-webhook/webhook_server.py"
         dl "agents/whatsapp-webhook/requirements.txt"
-        # Research & data agents
-        dl "agents/mirofish-researcher/run.sh"
-        dl "agents/mirofish-researcher/researcher.py"
+        # Web researcher (mirofish-researcher removed — external dependency not bundled)
         dl "agents/web-researcher/run.sh"
         dl "agents/web-researcher/web_researcher.py"
         dl "agents/web-researcher/requirements.txt"
@@ -722,9 +750,7 @@ install_runtime() {
         dl "agents/arbitrage-bot/run.sh"
         dl "agents/arbitrage-bot/arbitrage_bot.py"
         dl "agents/arbitrage-bot/requirements.txt"
-        dl "agents/memecoin-creator/run.sh"
-        dl "agents/memecoin-creator/memecoin_creator.py"
-        dl "agents/memecoin-creator/requirements.txt"
+        # memecoin-creator removed — reputational/legal risk for enterprise use
         dl "agents/partnership-matchmaker/run.sh"
         dl "agents/partnership-matchmaker/partnership_matchmaker.py"
         dl "agents/partnership-matchmaker/requirements.txt"
@@ -834,31 +860,31 @@ install_runtime() {
         fi
     done
 
-    # Python deps for UI bot
+    # Python deps for UI bot (critical — must succeed)
     local req="$AI_HOME/agents/problem-solver-ui/requirements.txt"
     if [[ -f "$req" ]]; then
         if command -v pip3 >/dev/null 2>&1; then
-            pip3 install --user -q -r "$req" 2>/dev/null \
+            pip3 install --user -q -r "$req" \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip3 install failed — run.sh will auto-retry on first start."
+                || err "pip3 install failed for core UI bot. Fix pip and re-run installer."
         elif command -v pip >/dev/null 2>&1; then
-            pip install --user -q -r "$req" 2>/dev/null \
+            pip install --user -q -r "$req" \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip install failed — run.sh will auto-retry on first start."
+                || err "pip install failed for core UI bot. Fix pip and re-run installer."
         elif command -v python3 >/dev/null 2>&1; then
-            python3 -m pip install --user -q -r "$req" 2>/dev/null \
+            python3 -m pip install --user -q -r "$req" \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip install failed — run.sh will auto-retry on first start."
+                || err "pip install failed for core UI bot. Fix pip and re-run installer."
         else
-            warn "pip not found — run.sh will install deps on first start."
+            warn "pip not found — install manually: pip3 install fastapi uvicorn"
         fi
     fi
 
     # Python deps for ai-router (requests is needed for Ollama calls)
     if command -v pip3 >/dev/null 2>&1; then
-        pip3 install --user -q "requests>=2.31.0" 2>/dev/null \
+        pip3 install --user -q "requests>=2.31.0" \
             && ok "Python deps (requests) installed for AI router" \
-            || warn "pip3 install requests failed"
+            || warn "pip3 install requests failed — install manually: pip3 install requests"
     fi
 
     ok "Runtime files installed"
@@ -901,13 +927,17 @@ EOF
       # Append model from installer variable
       echo "CLAUDE_MODEL=$CLAUDE_MODEL" >> "$AI_HOME/config/claude-agent.env"
       echo "CLAUDE_MAX_TOKENS=4096" >> "$AI_HOME/config/claude-agent.env"
+      # Write API key so the agent can authenticate independently
+      if [[ -n "${ANTHROPIC_KEY:-}" ]]; then
+          echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY" >> "$AI_HOME/config/claude-agent.env"
+      fi
       chmod 600 "$AI_HOME/config/claude-agent.env"
     fi
 
     log "Installing Python deps for Claude Agent (best-effort)..."
     local req="$AI_HOME/agents/claude-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
-      pip3 install --user -q -r "$req" 2>/dev/null \
+      pip3 install --user -q -r "$req" \
         || warn "pip install failed; run manually: pip3 install --user anthropic fastapi uvicorn"
     else
       [[ ! -f "$req" ]] && warn "requirements.txt not found; run manually: pip3 install --user anthropic fastapi uvicorn"
@@ -943,7 +973,7 @@ EOF
     log "Installing Python deps for Ollama Agent (best-effort)..."
     local req="$AI_HOME/agents/ollama-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
-      pip3 install --user -q -r "$req" 2>/dev/null \
+      pip3 install --user -q -r "$req" \
         || warn "pip install failed; run manually: pip3 install --user fastapi uvicorn requests"
     else
       [[ ! -f "$req" ]] && warn "requirements.txt not found; run manually: pip3 install --user fastapi uvicorn requests"
@@ -958,90 +988,157 @@ EOF
 install_skills() {
     log "Installing agent skills..."
 
-    local all_skills=(
-        "lead-hunter:linkedin_scraper:Find decision makers on LinkedIn"
-        "lead-hunter:email_finder:Find and verify email addresses"
-        "lead-hunter:lead_scorer:Score lead quality 0-100"
-        "lead-hunter:company_enrichment:Enrich company data"
-        "content-master:keyword_research:SEO keyword research"
-        "content-master:blog_writer:Write 2000+ word SEO articles"
-        "content-master:content_optimizer:Optimize existing content"
-        "social-guru:viral_finder:Find trending viral content"
-        "social-guru:caption_writer:Write platform-specific captions"
-        "social-guru:hashtag_generator:Generate relevant hashtags"
-        "social-guru:content_calendar:Create 30-day content calendar"
-        "intel-agent:pricing_tracker:Track competitor pricing"
-        "intel-agent:review_scraper:Scrape and analyze reviews"
-        "intel-agent:feature_comparison:Compare features with competitors"
-        "intel-agent:traffic_estimator:Estimate competitor traffic"
-        "product-scout:arbitrage_finder:Find AliExpress to Amazon arbitrage"
-        "product-scout:trend_spotter:Find trending products"
-        "product-scout:supplier_validator:Validate supplier reliability"
-        "product-scout:profit_calculator:Calculate true profit"
-        "email-ninja:sequence_builder:Build cold email sequences"
-        "email-ninja:deliverability_checker:Check email deliverability"
-        "email-ninja:personalization_engine:Personalize emails at scale"
-        "support-bot:faq_trainer:Extract FAQs from docs"
-        "support-bot:ticket_classifier:Classify support tickets"
-        "support-bot:sentiment_analyzer:Analyze customer sentiment"
-        "data-analyst:trend_analyzer:Analyze market trends"
-        "data-analyst:swot_generator:Generate SWOT analysis"
-        "data-analyst:survey_analyzer:Analyze survey responses"
-        "creative-studio:design_brief:Create design briefs"
-        "creative-studio:image_prompt:Generate AI image prompts"
-        "creative-studio:brand_voice:Define brand voice"
-        "creative-studio:ad_copy:Write ad copy"
-        "crypto-trader:technical_analysis:Full technical analysis"
-        "crypto-trader:pattern_recognition:Identify chart patterns"
-        "crypto-trader:whale_tracker:Track large wallet movements"
-        "crypto-trader:prediction_markets_research:Scan prediction markets for mispricing"
-        "bot-dev:code_review:Review code for issues"
-        "bot-dev:feature_implementation:Implement new features"
-        "bot-dev:bug_finder:Find bugs in code"
-        "web-sales:ux_audit:Audit website UX"
-        "web-sales:seo_audit:Technical SEO audit"
-        "web-sales:speed_test:Website speed analysis"
-        "orchestrator:complex_problem_solving:Complex problem solving for system issues"
-        "orchestrator:tool_language_selector:Select best tools and language for a task"
+    # Helper: writes a skill file with system prompt, input/output schema, and example
+    _write_skill() {
+        local skill_file="$1" skill_name="$2" desc="$3" system_prompt="$4" \
+              input_schema="$5" output_schema="$6" example_input="$7" example_output="$8"
+        [[ -f "$skill_file" ]] && return
+        cat > "$skill_file" << SKILL
+---
+name: $skill_name
+description: $desc
+---
+
+## System Prompt
+
+$system_prompt
+
+## Input Schema
+
+\`\`\`json
+$input_schema
+\`\`\`
+
+## Output Schema
+
+\`\`\`json
+$output_schema
+\`\`\`
+
+## Example
+
+**Input:**
+\`\`\`json
+$example_input
+\`\`\`
+
+**Output:**
+\`\`\`json
+$example_output
+\`\`\`
+SKILL
+    }
+
+    # ── Lead hunting skills ─────────────────────────────────────────────────────
+    local ws="$AI_HOME/workspace-lead-hunter-elite/skills"
+    mkdir -p "$ws"
+
+    _write_skill "$ws/linkedin_scraper.md" "linkedin_scraper" \
+        "Find decision makers on LinkedIn" \
+        "You are a B2B lead research specialist. Given a target company or industry, search LinkedIn for decision makers matching the specified criteria. Focus on C-level, VP, and Director roles. Return structured contact profiles with name, title, company, location, profile URL, and a relevance score (0-100) based on how well they match the search criteria. Prioritize recently active profiles. Exclude recruiters and sales people unless specifically requested. Always verify company match before including a result." \
+        '{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"Target company, industry, or role to search"},"role_filter":{"type":"string","description":"Role titles to filter (e.g. CTO, VP Engineering)"},"location":{"type":"string","description":"Geographic filter"},"limit":{"type":"integer","default":10}}}' \
+        '{"type":"object","properties":{"leads":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"title":{"type":"string"},"company":{"type":"string"},"location":{"type":"string"},"profile_url":{"type":"string"},"relevance_score":{"type":"integer","minimum":0,"maximum":100}}}},"total_found":{"type":"integer"}}}' \
+        '{"query":"SaaS companies in Netherlands","role_filter":"CTO","location":"Netherlands","limit":5}' \
+        '{"leads":[{"name":"Jan de Vries","title":"CTO","company":"CloudFlow BV","location":"Amsterdam","profile_url":"https://linkedin.com/in/jandevries","relevance_score":92}],"total_found":23}'
+
+    _write_skill "$ws/email_finder.md" "email_finder" \
+        "Find and verify email addresses" \
+        "You are an email discovery and verification specialist. Given a person name and company, determine the most likely professional email address using common email patterns (first.last@, first@, flast@, etc.) and the company domain. Verify the email exists using MX record checks and SMTP validation where possible. Return the best candidate email, confidence score, and the pattern used. Never fabricate emails — only return addresses with reasonable confidence of delivery. Flag disposable or catch-all domains." \
+        '{"type":"object","required":["name","company"],"properties":{"name":{"type":"string"},"company":{"type":"string"},"domain":{"type":"string","description":"Known company domain (optional)"}}}' \
+        '{"type":"object","properties":{"email":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1},"pattern_used":{"type":"string"},"domain_type":{"type":"string","enum":["corporate","catch_all","disposable","unknown"]},"mx_valid":{"type":"boolean"}}}' \
+        '{"name":"Jan de Vries","company":"CloudFlow BV","domain":"cloudflow.nl"}' \
+        '{"email":"jan.devries@cloudflow.nl","confidence":0.85,"pattern_used":"first.last@domain","domain_type":"corporate","mx_valid":true}'
+
+    _write_skill "$ws/lead_scorer.md" "lead_scorer" \
+        "Score lead quality 0-100" \
+        "You are a lead qualification analyst. Given a lead profile with company data, evaluate the lead quality on a 0-100 scale using the BANT framework (Budget, Authority, Need, Timeline). Consider company size, industry fit, technology stack, growth indicators, recent funding, and job postings as signals. Provide a breakdown of sub-scores for each BANT dimension, a final composite score, and a recommended next action (e.g., immediate outreach, nurture, disqualify). Be specific about why each sub-score was assigned." \
+        '{"type":"object","required":["lead"],"properties":{"lead":{"type":"object","properties":{"name":{"type":"string"},"title":{"type":"string"},"company":{"type":"string"},"industry":{"type":"string"},"company_size":{"type":"string"},"tech_stack":{"type":"array","items":{"type":"string"}}}}}}' \
+        '{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":100},"breakdown":{"type":"object","properties":{"budget":{"type":"integer"},"authority":{"type":"integer"},"need":{"type":"integer"},"timeline":{"type":"integer"}}},"recommendation":{"type":"string","enum":["immediate_outreach","nurture","disqualify"]},"reasoning":{"type":"string"}}}' \
+        '{"lead":{"name":"Jan de Vries","title":"CTO","company":"CloudFlow BV","industry":"SaaS","company_size":"50-200","tech_stack":["Python","AWS","Kubernetes"]}}' \
+        '{"score":78,"breakdown":{"budget":70,"authority":95,"need":75,"timeline":72},"recommendation":"immediate_outreach","reasoning":"CTO at mid-size SaaS with modern tech stack indicates strong decision-making authority and likely budget. Growth signals positive."}'
+
+    _write_skill "$ws/company_enrichment.md" "company_enrichment" \
+        "Enrich company data" \
+        "You are a company intelligence researcher. Given a company name or domain, gather comprehensive company data including: industry, sub-industry, employee count range, estimated revenue range, headquarters location, founding year, key technologies used, recent news, funding history, and key competitors. Use web search and public data sources. Return structured, verified data with confidence levels. Flag any data points that could not be verified. Focus on actionable intelligence that helps sales teams qualify and personalize outreach." \
+        '{"type":"object","required":["company"],"properties":{"company":{"type":"string"},"domain":{"type":"string"}}}' \
+        '{"type":"object","properties":{"company_name":{"type":"string"},"domain":{"type":"string"},"industry":{"type":"string"},"employee_range":{"type":"string"},"revenue_range":{"type":"string"},"hq_location":{"type":"string"},"founded_year":{"type":"integer"},"technologies":{"type":"array","items":{"type":"string"}},"recent_news":{"type":"array","items":{"type":"string"}},"competitors":{"type":"array","items":{"type":"string"}}}}' \
+        '{"company":"CloudFlow BV","domain":"cloudflow.nl"}' \
+        '{"company_name":"CloudFlow BV","domain":"cloudflow.nl","industry":"Cloud Infrastructure SaaS","employee_range":"50-200","revenue_range":"5M-20M EUR","hq_location":"Amsterdam, Netherlands","founded_year":2018,"technologies":["Python","AWS","Kubernetes","React"],"recent_news":["Series B funding of 15M EUR (2024)"],"competitors":["Pulumi","Terraform Cloud"]}'
+
+    # ── Task orchestrator skills ─────────────────────────────────────────────────
+    ws="$AI_HOME/workspace-task-orchestrator/skills"
+    mkdir -p "$ws"
+
+    _write_skill "$ws/complex_problem_solving.md" "complex_problem_solving" \
+        "Complex problem solving for system issues" \
+        "You are a systems problem-solving specialist. Given a complex problem description, break it down into sub-problems, identify root causes, evaluate possible solutions with trade-offs, and recommend an action plan. Use structured reasoning: (1) Problem decomposition, (2) Root cause analysis using the 5-Whys or Ishikawa method, (3) Solution brainstorming with pros/cons, (4) Recommended action plan with steps, owners, and timeline. Be specific and actionable. If the problem involves code, infrastructure, or business processes, provide concrete steps rather than generic advice." \
+        '{"type":"object","required":["problem"],"properties":{"problem":{"type":"string","description":"Detailed problem description"},"context":{"type":"string","description":"Additional context or constraints"},"urgency":{"type":"string","enum":["critical","high","medium","low"]}}}' \
+        '{"type":"object","properties":{"root_causes":{"type":"array","items":{"type":"string"}},"solutions":{"type":"array","items":{"type":"object","properties":{"description":{"type":"string"},"pros":{"type":"array","items":{"type":"string"}},"cons":{"type":"array","items":{"type":"string"}},"effort":{"type":"string"}}}},"recommended_plan":{"type":"array","items":{"type":"object","properties":{"step":{"type":"integer"},"action":{"type":"string"},"owner":{"type":"string"},"timeline":{"type":"string"}}}}}}' \
+        '{"problem":"API response times degraded from 200ms to 2s after deployment","context":"Deployed new feature with additional database queries","urgency":"high"}' \
+        '{"root_causes":["New feature adds N+1 query pattern","Missing database index on new join column"],"solutions":[{"description":"Add database index","pros":["Quick fix","No code changes"],"cons":["May slow writes slightly"],"effort":"30 minutes"},{"description":"Refactor to eager loading","pros":["Eliminates N+1","Better long-term"],"cons":["Code changes needed","Testing required"],"effort":"2-4 hours"}],"recommended_plan":[{"step":1,"action":"Add missing index immediately","owner":"DBA","timeline":"30 min"},{"step":2,"action":"Deploy eager loading fix","owner":"Backend team","timeline":"Next sprint"}]}'
+
+    _write_skill "$ws/tool_language_selector.md" "tool_language_selector" \
+        "Select best tools and language for a task" \
+        "You are a technical architecture advisor. Given a task or project description, recommend the optimal programming language, framework, and tools. Consider: team expertise, project scale, performance requirements, ecosystem maturity, hiring pool, maintenance burden, and deployment target. Provide a primary recommendation with rationale and one alternative. Include specific library/package recommendations for common needs (HTTP, database, testing, deployment). Be opinionated but justify each choice with concrete trade-offs." \
+        '{"type":"object","required":["task"],"properties":{"task":{"type":"string"},"constraints":{"type":"object","properties":{"team_languages":{"type":"array","items":{"type":"string"}},"scale":{"type":"string","enum":["prototype","startup","enterprise"]},"deployment_target":{"type":"string"}}}}}' \
+        '{"type":"object","properties":{"primary":{"type":"object","properties":{"language":{"type":"string"},"framework":{"type":"string"},"key_libraries":{"type":"array","items":{"type":"string"}},"rationale":{"type":"string"}}},"alternative":{"type":"object","properties":{"language":{"type":"string"},"framework":{"type":"string"},"rationale":{"type":"string"}}}}}' \
+        '{"task":"Build a real-time analytics dashboard with websockets","constraints":{"team_languages":["Python","JavaScript"],"scale":"startup","deployment_target":"AWS"}}' \
+        '{"primary":{"language":"TypeScript","framework":"Next.js + Socket.io","key_libraries":["Prisma","Chart.js","Redis","Bull"],"rationale":"Team knows JS, Next.js provides SSR+API routes, Socket.io handles websockets natively, Prisma for type-safe DB access"},"alternative":{"language":"Python","framework":"FastAPI + HTMX","rationale":"If team prefers Python backend, FastAPI websockets + HTMX for progressive enhancement, simpler but less real-time UI capability"}}'
+
+    # ── Remaining skills — generate with enhanced template ──────────────────────
+    local remaining_skills=(
+        "web-researcher:ux_audit:Audit website UX:You are a UX audit specialist. Analyze a website for usability issues including navigation clarity, mobile responsiveness, accessibility compliance (WCAG 2.1), page load performance, call-to-action effectiveness, and form usability. Provide severity ratings (critical/major/minor) for each issue found, with specific recommendations and before/after descriptions. Focus on conversion-impacting issues first."
+        "web-researcher:seo_audit:Technical SEO audit:You are a technical SEO analyst. Perform a comprehensive SEO audit covering: meta tags, heading hierarchy, canonical URLs, robots.txt, sitemap.xml, Core Web Vitals, mobile-friendliness, structured data markup, internal linking, broken links, duplicate content, and page speed. Score each category 0-100 and provide prioritized fix recommendations with estimated traffic impact."
+        "social-media-manager:viral_finder:Find trending viral content:You are a social media trend analyst. Monitor and identify currently trending content across platforms (Twitter/X, TikTok, Instagram, LinkedIn, Reddit). Analyze virality signals: engagement velocity, share ratio, sentiment, cross-platform spread. Return trending topics with relevance scores, suggested angles for content creation, and optimal posting windows. Focus on trends relevant to the user's industry."
+        "social-media-manager:caption_writer:Write platform-specific captions:You are a social media copywriter specializing in platform-specific content. Write captions optimized for each platform's algorithm and audience behavior. Twitter/X: concise, hook-first, thread-worthy. Instagram: storytelling with line breaks, 3-5 relevant hashtags. LinkedIn: professional insight, question-ending for engagement. TikTok: trend-aware, casual, hook in first 3 words. Include A/B test variants."
+        "social-media-manager:hashtag_generator:Generate relevant hashtags:You are a hashtag strategy specialist. Given a topic and target platform, generate optimized hashtag sets: 5 high-volume (>1M posts), 5 medium-volume (100K-1M), 5 niche/specific (<100K). Avoid banned or shadowbanned hashtags. Include engagement rate estimates where possible. Group hashtags by theme for easy rotation across posts."
+        "social-media-manager:content_calendar:Create 30-day content calendar:You are a content strategist. Create a 30-day social media content calendar with daily posts across specified platforms. Balance content types: educational (40%), entertaining (30%), promotional (20%), community (10%). Include post topics, suggested formats (carousel, video, story, poll), optimal posting times for the target timezone, and cross-promotion opportunities. Account for industry events and seasonal trends."
+        "ecom-agent:arbitrage_finder:Find AliExpress to Amazon arbitrage:You are a product arbitrage analyst. Search for products available on AliExpress at low cost that can be sold on Amazon at a profit. Calculate true margins including shipping, Amazon FBA fees, returns rate, and advertising cost. Minimum viable margin: 30%. Verify the product is not restricted on Amazon. Score opportunities by risk level (competition, IP concerns, seasonal demand)."
+        "ecom-agent:trend_spotter:Find trending products:You are an e-commerce trend analyst. Identify products with rising demand using signals from Google Trends, Amazon Best Sellers, TikTok Made Me Buy It, and social media mentions. Focus on products with upward trajectory but not yet saturated. Provide demand score, competition level, estimated monthly search volume, and suggested entry strategy."
     )
 
-    for skill in "${all_skills[@]}"; do
-        IFS=':' read -r agent skill_name desc <<< "$skill"
+    for skill_entry in "${remaining_skills[@]}"; do
+        IFS=':' read -r agent skill_name desc system_prompt <<< "$skill_entry"
         local skill_file="$AI_HOME/workspace-$agent/skills/${skill_name}.md"
         if [[ ! -f "$skill_file" ]]; then
+            mkdir -p "$(dirname "$skill_file")"
             cat > "$skill_file" << SKILL
 ---
 name: $skill_name
 description: $desc
 ---
-Use this skill to $desc. Provide structured output with clear, actionable results.
+
+## System Prompt
+
+$system_prompt
+
+## Input Schema
+
+\`\`\`json
+{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"The search query or topic to analyze"},"options":{"type":"object","description":"Additional parameters for the analysis"}}}
+\`\`\`
+
+## Output Schema
+
+\`\`\`json
+{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"score":{"type":"number"},"details":{"type":"string"}}}},"summary":{"type":"string"},"recommendations":{"type":"array","items":{"type":"string"}}}}
+\`\`\`
+
+## Example
+
+**Input:**
+\`\`\`json
+{"query":"example $desc query"}
+\`\`\`
+
+**Output:**
+\`\`\`json
+{"results":[{"item":"Example result","score":85,"details":"Detailed analysis of the result"}],"summary":"Analysis complete with actionable findings","recommendations":["First recommended action","Second recommended action"]}
+\`\`\`
 SKILL
         fi
     done
 
-    cat > "$AI_HOME/.env" << ENV
-OPENCLAW_GATEWAY_TOKEN=$TOKEN
-${ANTHROPIC_KEY:+ANTHROPIC_API_KEY=$ANTHROPIC_KEY}
-${OPENAI_KEY:+OPENAI_API_KEY=$OPENAI_KEY}
-${ALPHA_INSIDER_KEY:+ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY}
-${TAVILY_KEY:+TAVILY_API_KEY=$TAVILY_KEY}
-${NEWS_API_KEY:+NEWS_API_KEY=$NEWS_API_KEY}
-${TELEGRAM_BOT_TOKEN:+TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN}
-${DISCORD_WEBHOOK_URL:+DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL}
-${SMTP_HOST:+SMTP_HOST=$SMTP_HOST}
-${SMTP_USER:+SMTP_USER=$SMTP_USER}
-${SMTP_PASS:+SMTP_PASS=$SMTP_PASS}
-${ELEVEN_LABS_KEY:+ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY}
-OLLAMA_HOST=$OLLAMA_HOST
-OLLAMA_MODEL=$OLLAMA_MODEL
-CLAUDE_MODEL=$CLAUDE_MODEL
-AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}
-AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}
-AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}
-OPENCLAW_DISABLE_BONJOUR=1
-TZ=Europe/Amsterdam
-ENV
-    chmod 600 "$AI_HOME/.env"
     ok "Skills installed"
 }
 
@@ -1057,7 +1154,7 @@ generate_configs() {
         if [[ -f "$template" ]]; then
             cp "$template" "$AI_HOME/config.json"
         else
-            # Minimal fallback
+            # Minimal fallback — unified on port 8787
                         cat > "$AI_HOME/config.json" << 'CFG_END'
 {
     "wizard": {
@@ -1082,7 +1179,7 @@ generate_configs() {
         "dmScope": "per-channel-peer"
     },
     "gateway": {
-        "port": 18789,
+        "port": 8787,
         "mode": "local",
         "bind": "loopback",
         "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
@@ -1091,7 +1188,7 @@ generate_configs() {
     "channels": {
         "whatsapp": {
             "dmPolicy": "allowlist",
-            "allowFrom": ["PHONE_PLACEHOLDER"],
+            "allowFrom": [PHONE_JSON_PLACEHOLDER],
             "groups": { "*": { "requireMention": true } },
             "mediaMaxMb": 50,
             "sendReadReceipts": true
@@ -1103,18 +1200,42 @@ generate_configs() {
 }
 CFG_END
         fi
-        sed -i.bak \
-            -e "s|TOKEN_PLACEHOLDER|$TOKEN|g" \
-            -e "s|AI_HOME_PLACEHOLDER|$AI_HOME|g" \
-            -e "s|PHONE_PLACEHOLDER|$PHONE|g" \
-            -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" \
-            "$AI_HOME/config.json"
-        rm -f "$AI_HOME/config.json.bak"
+
+        # Build phone placeholder value: empty array or quoted phone
+        local phone_json
+        if [[ -n "${PHONE:-}" ]]; then
+            phone_json="\"$PHONE\""
+        else
+            phone_json=""
+        fi
+
+        # Cross-platform inline substitution (works on both GNU and BSD sed)
+        perl -pi -e "s|TOKEN_PLACEHOLDER|$TOKEN|g" "$AI_HOME/config.json"
+        perl -pi -e "s|AI_HOME_PLACEHOLDER|$AI_HOME|g" "$AI_HOME/config.json"
+        perl -pi -e "s|PHONE_JSON_PLACEHOLDER|$phone_json|g" "$AI_HOME/config.json"
+        perl -pi -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" "$AI_HOME/config.json"
         chmod 600 "$AI_HOME/config.json"
+
+        # Validate the generated JSON
+        if command -v python3 >/dev/null 2>&1; then
+            python3 -m json.tool "$AI_HOME/config.json" >/dev/null 2>&1 \
+                || warn "config.json may contain invalid JSON — check manually"
+        fi
         ok "OpenClaw config.json created"
     else
         # Existing config: patch gateway.mode=local if missing (fixes old installs)
-        if ! grep -q '"mode".*"local"' "$AI_HOME/config.json" 2>/dev/null; then
+        local mode_ok=0
+        if command -v python3 >/dev/null 2>&1; then
+            python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+sys.exit(0 if d.get('gateway',{}).get('mode')=='local' else 1)
+" "$AI_HOME/config.json" 2>/dev/null && mode_ok=1
+        else
+            grep -q '"mode".*"local"' "$AI_HOME/config.json" 2>/dev/null && mode_ok=1
+        fi
+
+        if [[ "$mode_ok" -eq 0 ]]; then
             warn "Existing config.json missing gateway.mode=local — backing up and replacing"
             cp "$AI_HOME/config.json" "$AI_HOME/config.json.bak.$(date +%s)"
             if [[ -f "$template" ]]; then
@@ -1144,7 +1265,7 @@ CFG_END
         "dmScope": "per-channel-peer"
     },
     "gateway": {
-        "port": 18789,
+        "port": 8787,
         "mode": "local",
         "bind": "loopback",
         "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
@@ -1153,7 +1274,7 @@ CFG_END
     "channels": {
         "whatsapp": {
             "dmPolicy": "allowlist",
-            "allowFrom": ["PHONE_PLACEHOLDER"],
+            "allowFrom": [PHONE_JSON_PLACEHOLDER],
             "groups": { "*": { "requireMention": true } },
             "mediaMaxMb": 50,
             "sendReadReceipts": true
@@ -1165,13 +1286,18 @@ CFG_END
 }
 CFG_END
             fi
-            sed -i.bak \
-                -e "s|TOKEN_PLACEHOLDER|$TOKEN|g" \
-                -e "s|AI_HOME_PLACEHOLDER|$AI_HOME|g" \
-                -e "s|PHONE_PLACEHOLDER|$PHONE|g" \
-                -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" \
-                "$AI_HOME/config.json"
-            rm -f "$AI_HOME/config.json.bak"
+
+            local phone_json
+            if [[ -n "${PHONE:-}" ]]; then
+                phone_json="\"$PHONE\""
+            else
+                phone_json=""
+            fi
+
+            perl -pi -e "s|TOKEN_PLACEHOLDER|$TOKEN|g" "$AI_HOME/config.json"
+            perl -pi -e "s|AI_HOME_PLACEHOLDER|$AI_HOME|g" "$AI_HOME/config.json"
+            perl -pi -e "s|PHONE_JSON_PLACEHOLDER|$phone_json|g" "$AI_HOME/config.json"
+            perl -pi -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" "$AI_HOME/config.json"
             chmod 600 "$AI_HOME/config.json"
             ok "OpenClaw config.json updated (gateway.mode=local added)"
         else
@@ -1183,39 +1309,66 @@ CFG_END
     mkdir -p "$HOME/.openclaw"
     ln -sf "$AI_HOME/config.json" "$HOME/.openclaw/openclaw.json" 2>/dev/null || true
 
-    # .env file
-    if [[ ! -f "$AI_HOME/.env" ]]; then
+    # ── Write .env once (single canonical writer) ──────────────────────────────
+    # .env lives in credentials/ for security; symlinked from $AI_HOME/.env
+    mkdir -p "$AI_HOME/credentials"
+    chmod 700 "$AI_HOME/credentials"
+    local env_file="$AI_HOME/credentials/.env"
+
+    if [[ ! -f "$env_file" ]]; then
         {
+            # --- Gateway & auth ---
+            # OPENCLAW_GATEWAY_TOKEN: used by openclaw gateway for API auth
             echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN"
+            # JWT_SECRET_KEY: used by the dashboard UI for session authentication
+            [[ -n "${JWT_SECRET_KEY:-}" ]] && echo "JWT_SECRET_KEY=$JWT_SECRET_KEY"
+
+            # --- AI provider keys ---
             [[ -n "${ANTHROPIC_KEY:-}" ]]        && echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY"
-            [[ -n "${OPENAI_KEY:-}" ]]             && echo "OPENAI_API_KEY=$OPENAI_KEY"
+            [[ -n "${OPENAI_KEY:-}" ]]            && echo "OPENAI_API_KEY=$OPENAI_KEY"
+
+            # --- Service keys ---
             [[ -n "${ALPHA_INSIDER_KEY:-}" ]]     && echo "ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY"
-            [[ -n "${TAVILY_KEY:-}" ]]             && echo "TAVILY_API_KEY=$TAVILY_KEY"
-            [[ -n "${NEWS_API_KEY:-}" ]]           && echo "NEWS_API_KEY=$NEWS_API_KEY"
-            [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]    && echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"
-            [[ -n "${DISCORD_WEBHOOK_URL:-}" ]]   && echo "DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL"
-            [[ -n "${SMTP_HOST:-}" ]]              && echo "SMTP_HOST=$SMTP_HOST"
-            [[ -n "${SMTP_USER:-}" ]]              && echo "SMTP_USER=$SMTP_USER"
-            [[ -n "${SMTP_PASS:-}" ]]              && echo "SMTP_PASS=$SMTP_PASS"
+            [[ -n "${TAVILY_KEY:-}" ]]            && echo "TAVILY_API_KEY=$TAVILY_KEY"
+            [[ -n "${NEWS_API_KEY:-}" ]]          && echo "NEWS_API_KEY=$NEWS_API_KEY"
+            [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]   && echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"
+            [[ -n "${DISCORD_WEBHOOK_URL:-}" ]]  && echo "DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL"
+            [[ -n "${SMTP_HOST:-}" ]]             && echo "SMTP_HOST=$SMTP_HOST"
+            [[ -n "${SMTP_USER:-}" ]]             && echo "SMTP_USER=$SMTP_USER"
+            [[ -n "${SMTP_PASS:-}" ]]             && echo "SMTP_PASS=$SMTP_PASS"
             [[ -n "${ELEVEN_LABS_KEY:-}" ]]       && echo "ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY"
+
+            # --- Model configuration ---
+            echo "OLLAMA_HOST=$OLLAMA_HOST"
+            echo "OLLAMA_MODEL=$OLLAMA_MODEL"
+            echo "CLAUDE_MODEL=$CLAUDE_MODEL"
+
+            # --- Runtime settings ---
             echo "AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}"
+            echo "UI_PORT=${UI_PORT:-8787}"
+            echo "WORKERS=${WORKERS:-35}"
             echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}"
             echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}"
+
+            # Disables mDNS/Bonjour service discovery in openclaw (not needed for local mode)
             echo "OPENCLAW_DISABLE_BONJOUR=1"
-            echo "DASHBOARD_PORT=${DASHBOARD_PORT:-3000}"
-            echo "TZ=Europe/Amsterdam"
-        } > "$AI_HOME/.env"
-        chmod 600 "$AI_HOME/.env"
-        ok ".env created"
+
+            echo "TZ=${TZ:-UTC}"
+        } > "$env_file"
+        chmod 600 "$env_file"
+        ok ".env created in credentials/"
     else
         ok ".env already exists — not overwritten"
     fi
 
-        # Ensure runtime self-healing flags exist for older installs.
-        grep -q "^AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=" "$AI_HOME/.env" \
-            || echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}" >> "$AI_HOME/.env"
-        grep -q "^AI_EMPLOYEE_AUTO_INSTALL_DOCKER=" "$AI_HOME/.env" \
-            || echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}" >> "$AI_HOME/.env"
+    # Symlink .env for backward compatibility
+    ln -sf "$AI_HOME/credentials/.env" "$AI_HOME/.env" 2>/dev/null || true
+
+    # Ensure runtime self-healing flags exist for older installs.
+    grep -q "^AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=" "$env_file" \
+        || echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}" >> "$env_file"
+    grep -q "^AI_EMPLOYEE_AUTO_INSTALL_DOCKER=" "$env_file" \
+        || echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}" >> "$env_file"
 
     # Keep gateway token in .env aligned with config.json to avoid auth mismatch.
     local cfg_token
@@ -1225,11 +1378,10 @@ try:
 except Exception:
  print("")' "$AI_HOME/config.json" 2>/dev/null)"
         if [[ -n "${cfg_token:-}" ]]; then
-            if grep -q "^OPENCLAW_GATEWAY_TOKEN=" "$AI_HOME/.env"; then
-                sed -i.bak "s|^OPENCLAW_GATEWAY_TOKEN=.*|OPENCLAW_GATEWAY_TOKEN=$cfg_token|" "$AI_HOME/.env"
-                rm -f "$AI_HOME/.env.bak"
+            if grep -q "^OPENCLAW_GATEWAY_TOKEN=" "$env_file"; then
+                perl -pi -e "s|^OPENCLAW_GATEWAY_TOKEN=.*|OPENCLAW_GATEWAY_TOKEN=$cfg_token|" "$env_file"
             else
-                echo "OPENCLAW_GATEWAY_TOKEN=$cfg_token" >> "$AI_HOME/.env"
+                echo "OPENCLAW_GATEWAY_TOKEN=$cfg_token" >> "$env_file"
             fi
         fi
 
@@ -1237,20 +1389,28 @@ except Exception:
     local sr_env="$AI_HOME/config/status-reporter.env"
     if [[ -f "$sr_env" ]]; then
         grep -q "^WHATSAPP_PHONE=" "$sr_env" || \
-            echo "WHATSAPP_PHONE=$PHONE" >> "$sr_env"
+            echo "WHATSAPP_PHONE=${PHONE:-}" >> "$sr_env"
         grep -q "^OPENCLAW_GATEWAY_TOKEN=" "$sr_env" || \
             echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN" >> "$sr_env"
-        sed -i.bak "s|^STATUS_REPORT_INTERVAL_SECONDS=.*|STATUS_REPORT_INTERVAL_SECONDS=${STATUS_INTERVAL:-3600}|" "$sr_env"
-        rm -f "${sr_env}.bak"
+        perl -pi -e "s|^STATUS_REPORT_INTERVAL_SECONDS=.*|STATUS_REPORT_INTERVAL_SECONDS=${STATUS_INTERVAL:-3600}|" "$sr_env"
         chmod 600 "$sr_env"
     fi
 
     # Patch problem-solver-ui.env
     local ui_env="$AI_HOME/config/problem-solver-ui.env"
     if [[ -f "$ui_env" ]]; then
-        sed -i.bak "s|^PROBLEM_SOLVER_UI_PORT=.*|PROBLEM_SOLVER_UI_PORT=${UI_PORT:-8787}|" "$ui_env"
-        rm -f "${ui_env}.bak"
+        perl -pi -e "s|^PROBLEM_SOLVER_UI_PORT=.*|PROBLEM_SOLVER_UI_PORT=${UI_PORT:-8787}|" "$ui_env"
         chmod 600 "$ui_env"
+    fi
+
+    # Validate all JSON config files
+    if command -v python3 >/dev/null 2>&1; then
+        for json_file in "$AI_HOME/config"/*.json; do
+            [[ -f "$json_file" ]] || continue
+            if ! python3 -m json.tool "$json_file" >/dev/null 2>&1; then
+                warn "$(basename "$json_file") contains invalid JSON — check manually"
+            fi
+        done
     fi
 
     ok "Configuration complete"
@@ -1272,17 +1432,22 @@ install_dashboard_ui() {
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:20px}
 .container{max-width:1000px;margin:0 auto}
-header{background:linear-gradient(135deg,#667eea,#764ba2);padding:28px;border-radius:15px;margin-bottom:28px;text-align:center}
+header{background:#1e293b;padding:28px;border-radius:15px;margin-bottom:28px;text-align:center;border:1px solid #334155}
 h1{color:#fff;font-size:2.2em;margin-bottom:8px}
 .sub{color:rgba(255,255,255,.85)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px}
 .card{background:#1e293b;padding:22px;border-radius:12px;border:1px solid #334155}
-.card h2{color:#667eea;margin-bottom:14px;font-size:1.1em}
-.btn{display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:.9em;margin:4px;text-decoration:none}
+.card h2{color:#D4AF37;margin-bottom:14px;font-size:1.1em}
+.btn{display:inline-block;background:#D4AF37;color:#0f172a;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:.9em;margin:4px;text-decoration:none;font-weight:600}
+.btn:hover{opacity:0.9}
 .stat{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #334155}
 .stat:last-child{border:none}
-.stat-val{color:#10b981;font-weight:bold}
-.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px;background:#10b981;animation:pulse 2s infinite}
+.stat-val{font-weight:bold}
+.online{color:#10b981}
+.offline{color:#ef4444}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px;background:#64748b}
+.dot.ok{background:#10b981;animation:pulse 2s infinite}
+.dot.fail{background:#ef4444}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 code{background:#334155;padding:2px 8px;border-radius:4px;font-family:monospace;color:#10b981;font-size:.9em}
 footer{text-align:center;margin-top:32px;color:#64748b;font-size:.9em}
@@ -1297,26 +1462,21 @@ footer{text-align:center;margin-top:32px;color:#64748b;font-size:.9em}
 <div class="grid">
   <div class="card">
     <h2>System Status</h2>
-    <div class="stat"><span><span class="dot"></span>Gateway</span><span class="stat-val" id="gw-status">checking...</span></div>
-    <div class="stat"><span><span class="dot"></span>Dashboard</span><span class="stat-val" id="ui-status">checking...</span></div>
+    <div class="stat"><span><span class="dot" id="ui-dot"></span>Dashboard</span><span class="stat-val" id="ui-status">checking...</span></div>
   </div>
   <div class="card">
     <h2>Quick Access</h2>
     <a class="btn" href="http://127.0.0.1:8787" target="_blank">🛠️ Full Dashboard</a>
-    <a class="btn" href="http://localhost:18789" target="_blank">📡 Gateway</a>
   </div>
 </div>
 <div class="card">
 <h2>Quick Actions</h2>
-<button onclick="window.open('http://localhost:18789','_blank')">📊 Open Gateway</button>
-<button onclick="window.open('http://127.0.0.1:8787','_blank')">🛠️ Problem Solver UI</button>
-<button onclick="window.open('http://127.0.0.1:8788','_blank')">🤖 Claude AI Agent</button>
-<button onclick="window.open('http://127.0.0.1:8789','_blank')">🦙 Ollama Local Agent</button>
-<button onclick="alert('Run in terminal: openclaw logs --follow')">📋 View Logs</button>
+<button class="btn" onclick="window.open('http://127.0.0.1:8787','_blank')">🛠️ Problem Solver UI</button>
+<button class="btn" onclick="alert('Run in terminal: openclaw logs --follow')">📋 View Logs</button>
 </div>
 </div>
 
-<div class="card instruction">
+<div class="card instruction" style="margin-top:16px">
 <h2>💬 How to Use</h2>
 <p style="margin-bottom:15px">Send WhatsApp message to yourself:</p>
 <p><code>switch to lead-hunter</code></p>
@@ -1325,8 +1485,6 @@ footer{text-align:center;margin-top:32px;color:#64748b;font-size:.9em}
 <p style="margin:10px 0"><code>switch to ollama-agent</code></p>
 <p style="margin-top:15px;color:#94a3b8;font-size:0.9em">
 The agent will process your request and return results via WhatsApp.
-Claude Agent UI: <a href="http://127.0.0.1:8788" style="color:#a78bfa">http://127.0.0.1:8788</a> •
-Ollama Agent UI: <a href="http://127.0.0.1:8789" style="color:#34d399">http://127.0.0.1:8789</a>
 </p>
   <h2>💬 WhatsApp Commands</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
@@ -1339,20 +1497,27 @@ Ollama Agent UI: <a href="http://127.0.0.1:8789" style="color:#34d399">http://12
   </div>
 </div>
 <footer>
-<p>🤖 AI Employee v4.0 • Multi-bot runtime + Claude &amp; Ollama</p>
-<p style="margin-top:10px;font-size:0.9em">
-Gateway: localhost:18789 • Dashboard: localhost:3000 • Problem Solver: localhost:8787 • Claude: localhost:8788 • Ollama: localhost:8789
-</p>
-  <p>🤖 AI Employee v4.0 • <a href="http://127.0.0.1:8787" style="color:#667eea">Open full dashboard →</a></p>
+  <p>🤖 AI Employee v4.0 • <a href="http://127.0.0.1:8787" style="color:#D4AF37">Open full dashboard →</a></p>
 </footer>
 </div>
 <script>
-async function check(url, id) {
-  try { await fetch(url,{mode:'no-cors',signal:AbortSignal.timeout(2000)}); document.getElementById(id).textContent='Online'; document.getElementById(id).style.color='#10b981'; }
-  catch { document.getElementById(id).textContent='Offline'; document.getElementById(id).style.color='#ef4444'; }
+async function checkService(url, statusId, dotId) {
+  try {
+    const resp = await fetch(url, {signal: AbortSignal.timeout(3000)});
+    if (resp.ok) {
+      document.getElementById(statusId).textContent = 'Online';
+      document.getElementById(statusId).className = 'stat-val online';
+      document.getElementById(dotId).className = 'dot ok';
+    } else {
+      throw new Error('not ok');
+    }
+  } catch {
+    document.getElementById(statusId).textContent = 'Offline';
+    document.getElementById(statusId).className = 'stat-val offline';
+    document.getElementById(dotId).className = 'dot fail';
+  }
 }
-check('http://localhost:18789','gw-status');
-check('http://127.0.0.1:8787','ui-status');
+checkService('http://127.0.0.1:8787', 'ui-status', 'ui-dot');
 </script>
 </body>
 </html>
@@ -1369,10 +1534,15 @@ queue_startup_message() {
     cat > "$f" << MSG
 {
   "pending": true,
-  "message": "👋 *Welcome to AI Employee!*\n\n✅ Setup complete — your bot is connected and ready.\n\n*Available commands:*\n• status — get system status\n• workers — list active agents\n• switch to lead-hunter — activate an agent\n• help — show all commands\n\n*Try it now:*\nType 'hello' or 'status' to get started.\n\n📊 Dashboard: http://127.0.0.1:${UI_PORT:-8787}",
+  "message": "👋 *Welcome to AI Employee!*\\n\\n✅ Setup complete — your bot is connected and ready.\\n\\n*Available commands:*\\n• status — get system status\\n• workers — list active agents\\n• switch to lead-hunter — activate an agent\\n• help — show all commands\\n\\n*Try it now:*\\nType 'hello' or 'status' to get started.\\n\\n📊 Dashboard: http://127.0.0.1:${UI_PORT:-8787}",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 MSG
+    # Validate JSON
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -m json.tool "$f" >/dev/null 2>&1 \
+            || warn "startup_message.json may contain invalid JSON"
+    fi
 }
 
 # ─── PATH ─────────────────────────────────────────────────────────────────────
@@ -1545,6 +1715,10 @@ done_message() {
     echo ""
     echo -e "${Y}Next steps:${NC}"
     echo ""
+    echo "  0. Activate PATH in current shell:"
+    echo "     source ~/.bashrc"
+    echo "     (or: export PATH=\"\$HOME/.ai-employee/bin:\$PATH\")"
+    echo ""
     echo "  1. Start your AI employee:"
     echo "     cd ~/.ai-employee && ./start.sh"
     echo "     (dashboard opens automatically in your browser)"
@@ -1600,10 +1774,10 @@ main() {
     check_requirements
     install_openclaw
     wizard
+    setup_jwt_secret
     install_ollama "${WANT_OLLAMA:-n}"
     setup_directories
     install_runtime
-    setup_jwt_secret
     install_claude_bot
     install_ollama_bot
     install_skills

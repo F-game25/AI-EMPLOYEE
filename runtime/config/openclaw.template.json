@@ -21,7 +21,7 @@
     "dmScope": "per-channel-peer"
   },
   "gateway": {
-    "port": 18789,
+    "port": 8787,
     "mode": "local",
     "bind": "loopback",
     "auth": {
