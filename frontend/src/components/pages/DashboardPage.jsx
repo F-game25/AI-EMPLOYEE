@@ -203,9 +203,18 @@ export default function DashboardPage() {
     setInput('')
   }
 
-  const activeAgents = useMemo(
-    () => (agents || []).filter(a => a.status === 'running' || a.status === 'busy'),
+  const normalizedAgents = useMemo(
+    () =>
+      (agents || []).map(agent => ({
+        ...agent,
+        status: agent.status ?? agent.state,
+        current_task: agent.current_task ?? agent.task,
+      })),
     [agents]
+  )
+  const activeAgents = useMemo(
+    () => normalizedAgents.filter(a => a.status === 'running' || a.status === 'busy'),
+    [normalizedAgents]
   )
   const totalAgents = systemStatus?.total_agents || agents?.length || 0
   const runningAgents = systemStatus?.running_agents ?? activeAgents.length
