@@ -72,10 +72,14 @@ class StrategyStore:
         status = (outcome_status or ("success" if score >= _SUCCESS_SCORE_THRESHOLD else "failed")).lower()
         if status not in ("success", "failed"):
             status = "failed"
+        pattern = (goal_type or "general").strip().lower()
         entry = {
             "strategy_id": str(uuid.uuid4())[:8],
             "goal_type": goal_type,
+            "pattern": pattern,
             "agent": agent,
+            "best_agent": agent,
+            "success_rate": score if status == "success" else 0.0,
             "config": config or {},
             "outcome_score": score,
             "outcome_status": status,
@@ -87,6 +91,12 @@ class StrategyStore:
         with self._lock:
             data = self._read()
             data.append(entry)
+            aggregated = self._pattern_success_rates_locked(data)
+            row = aggregated.get(pattern)
+            if row:
+                entry["best_agent"] = row.get("best_agent", entry["best_agent"])
+                entry["success_rate"] = row.get("success_rate", entry["success_rate"])
+                data[-1] = entry
             self._write(data)
         return entry
 
@@ -153,17 +163,60 @@ class StrategyStore:
         summary = self.performance_summary(goal_type=goal_type, limit=10)
         winners = [s.get("agent", "") for s in summary["top_strategies"] if s.get("agent")]
         losers = [s.get("agent", "") for s in summary["failed_strategies"] if s.get("agent")]
+        pattern_summary = self.pattern_success_rates(pattern=goal_type)
         return {
             "goal_type": goal_type,
             "success_rate": summary["success_rate"],
             "promote_agents": list(dict.fromkeys(winners[:3])),
             "deprioritize_agents": list(dict.fromkeys(losers[:3])),
+            "patterns": pattern_summary[:5],
             "insight": (
                 "Promote agents with successful outcomes and deprioritize repeated failures."
                 if summary["total_attempts"] > 0
                 else "No prior outcomes yet; use default planning."
             ),
         }
+
+    def _pattern_success_rates_locked(self, data: list[dict]) -> dict[str, dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in data:
+            pattern = str(row.get("pattern") or row.get("goal_type") or "general").strip().lower()
+            agent = row.get("agent", "")
+            status = row.get("outcome_status", "failed")
+            g = grouped.setdefault(pattern, {"total": 0, "success": 0, "by_agent": {}})
+            g["total"] += 1
+            if status == "success":
+                g["success"] += 1
+            by_agent = g["by_agent"].setdefault(agent, {"total": 0, "success": 0})
+            by_agent["total"] += 1
+            if status == "success":
+                by_agent["success"] += 1
+
+        result: dict[str, dict[str, Any]] = {}
+        for pattern, g in grouped.items():
+            best_agent = "task_orchestrator"
+            best_rate = 0.0
+            for agent, stats in g["by_agent"].items():
+                rate = stats["success"] / max(stats["total"], 1)
+                if rate > best_rate:
+                    best_rate = rate
+                    best_agent = agent
+            result[pattern] = {
+                "pattern": pattern,
+                "best_agent": best_agent,
+                "success_rate": round(g["success"] / max(g["total"], 1), 3),
+            }
+        return result
+
+    def pattern_success_rates(self, *, pattern: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            data = self._read()
+            rows = self._pattern_success_rates_locked(data)
+        values = list(rows.values())
+        if pattern:
+            key = pattern.strip().lower()
+            values = [v for v in values if v.get("pattern") == key]
+        return sorted(values, key=lambda x: x.get("success_rate", 0.0), reverse=True)
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────

@@ -13,9 +13,9 @@ def test_weights_update_and_persist(tmp_path, monkeypatch):
     monkeypatch.setenv("AI_HOME", str(tmp_path))
     bw = _reload("core.brain_weights")
 
-    before = bw.get_weights()["lead_hunter"]
+    before = bw.get_weights()["lead_hunter"]["task_match"]
     bw.update_weight("lead_hunter", 1.0)
-    after = bw.get_weights()["lead_hunter"]
+    after = bw.get_weights()["lead_hunter"]["task_match"]
 
     assert after > before
     assert (tmp_path / "state" / "brain_weights.json").exists()
@@ -42,7 +42,7 @@ def test_same_task_selection_improves_over_runs(tmp_path, monkeypatch):
         registry.learn_from_task(goal="find qualified sales leads", task=task)
 
     assert confidences[-1] >= confidences[0]
-    assert bw.get_weights()["lead_hunter"] >= 0.5
+    assert bw.get_weights()["lead_hunter"]["task_match"] >= 0.5
 
 
 def test_learn_topic_is_reused_in_planner_context(tmp_path, monkeypatch):
@@ -60,7 +60,7 @@ def test_learn_topic_is_reused_in_planner_context(tmp_path, monkeypatch):
         target_area="agents",
     )
     plan = PlannerAI().analyze_and_plan(task)
-    assert "learned the following relevant knowledge" in plan.why
+    assert "learned the following relevant context" in plan.why
     assert "ecommerce" in plan.why.lower()
 
 
