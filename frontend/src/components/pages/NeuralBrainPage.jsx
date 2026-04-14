@@ -395,7 +395,9 @@ export default function NeuralBrainPage() {
             return { ...data, nodes: tagged }
           })
         }
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.error('Failed to fetch neuron graph', e)
+      }
     }
     fetchNeurons()
     const i = setInterval(fetchNeurons, 3000)
