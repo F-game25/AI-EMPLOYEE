@@ -2,6 +2,8 @@
 
 const http = require('http');
 const os = require('os');
+const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
@@ -24,12 +26,21 @@ const { buildMoneyTemplate, buildThinkingSummary } = require('./money_mode');
 const brain = require('./brain/active_brain');
 const persistence = require('./persistence');
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8787;
+const FRONTEND_DIST = path.resolve(__dirname, '../frontend/dist');
+const FRONTEND_INDEX = path.join(FRONTEND_DIST, 'index.html');
+const HAS_FRONTEND_DIST = fs.existsSync(FRONTEND_INDEX);
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+if (HAS_FRONTEND_DIST) {
+  app.use(express.static(FRONTEND_DIST, {
+    index: false,
+    maxAge: '1h',
+  }));
+}
 
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
@@ -777,6 +788,43 @@ app.post('/api/tasks/run', (req, res) => {
   res.json({ ok: true, workflow_run: run.run_id, ...result });
 });
 
+// Compatibility endpoint used by legacy CLI flows (`ai-employee do/onboard`)
+app.post('/api/chat', (req, res) => {
+  const message = String((req.body || {}).message || '').trim();
+  if (!message) {
+    return res.status(400).json({ ok: false, error: 'message required' });
+  }
+  const run = createWorkflowRun({
+    name: 'Chat Workflow',
+    source: 'chat-http',
+    goal: message,
+  });
+  const queued = orchestrator.submitTask(message, {
+    userId: 'user:default',
+    workflow: { runId: run.run_id, parentTaskId: null },
+    labels: ['chat', 'http'],
+  });
+  attachWorkflowNode({
+    runId: run.run_id,
+    queued,
+    taskName: message,
+    parentTaskId: null,
+  });
+  addActivity(`[CHAT] Submitted: ${message}`, 'task');
+  broadcaster.broadcast('orchestrator:queued', queued);
+  broadcaster.broadcast('heartbeat', {
+    message: `[QUEUE] ${queued.taskId} assigned to ${queued.agentId} (${queued.subsystem})`,
+    level: 'info',
+    heartbeat: heartbeatCounter,
+  });
+  return res.json({
+    ok: true,
+    taskId: queued.taskId,
+    workflow_run: run.run_id,
+    response: `Queued task ${queued.taskId} on ${queued.agentId}.`,
+  });
+});
+
 // ── WebSocket server ──────────────────────────────────────────────────────────
 
 const server = http.createServer(app);
@@ -1019,8 +1067,20 @@ setInterval(() => {
   });
 }, 2000);
 
+app.get('*', (req, res, next) => {
+  if (!HAS_FRONTEND_DIST) return next();
+  if (req.path.startsWith('/api/') || req.path === '/health') return next();
+  if (req.path.startsWith('/gateway') || req.path.startsWith('/orchestrator')) return next();
+  res.sendFile(FRONTEND_INDEX);
+});
+
 server.listen(PORT, () => {
   console.log(`[SERVER] AI Employee backend running on port ${PORT}`);
+  if (HAS_FRONTEND_DIST) {
+    console.log(`[SERVER] Serving frontend bundle from ${FRONTEND_DIST}`);
+  } else {
+    console.log('[SERVER] Frontend bundle not found (expected frontend/dist).');
+  }
   // Start periodic state persistence (every 30s)
   persistence.startAutoSave(
     () => runtimeState,
