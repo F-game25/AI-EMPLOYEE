@@ -78,6 +78,15 @@ _copy_checked() {
     fi
 }
 
+_copy_template_checked() {
+    local src="$1"
+    local dst="$2"
+    if [[ -f "$dst" ]] && ! cmp -s "$src" "$dst"; then
+        cp -f "$dst" "$dst.bak.$(date +%s)" || err "Failed to back up existing config: $dst"
+    fi
+    _copy_checked "$src" "$dst"
+}
+
 _download_checked() {
     local url="$1"
     local dest="$2"
@@ -991,7 +1000,7 @@ install_runtime() {
     for f in "$src/config"/*; do
         [[ -f "$f" ]] || continue
         fname="$(basename "$f")"
-        _copy_checked "$f" "$AI_HOME/config/$fname"
+        _copy_template_checked "$f" "$AI_HOME/config/$fname"
     done
 
     # Python deps for UI helper agents (non-critical — UI now uses Node.js backend)
@@ -1020,23 +1029,23 @@ install_runtime() {
         local _fe_dir="$SCRIPT_DIR/frontend"
         if [[ -f "$_be_dir/package.json" ]]; then
             log "Installing Node.js backend packages..."
-            npm --prefix "$_be_dir" install --silent \
+            npm --prefix "$_be_dir" install --loglevel=error \
                 && ok "Backend Node packages installed" \
-                || err "npm install for backend failed"
+                || err "npm install for backend failed in $_be_dir (check npm logs)"
         fi
         if [[ -f "$_fe_dir/package.json" ]]; then
             log "Building React UI bundle..."
             if [[ ! -d "$_fe_dir/node_modules" ]]; then
-                npm --prefix "$_fe_dir" install --silent \
+                npm --prefix "$_fe_dir" install --loglevel=error \
                     || err "npm install for frontend failed"
             fi
             npm --prefix "$_fe_dir" run build \
-                || err "Frontend build failed"
+                || err "Frontend build failed in $_fe_dir (check npm build output)"
             _verify_nonempty_file "$_fe_dir/dist/index.html" "$_fe_dir/dist/index.html"
             ok "React UI bundle built (frontend/dist)"
         fi
     else
-        err "npm not found — cannot build required frontend/dist bundle"
+        err "npm not found — install Node.js and npm first (https://nodejs.org/) to build frontend/dist"
     fi
 
     # Python deps for ai-router (requests is needed for Ollama calls)
