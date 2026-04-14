@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import os
 from pathlib import Path
 from typing import Any
 
@@ -29,9 +30,12 @@ class PatchValidator:
         return current.parents[3]
 
     def validate(self, diff_text: str) -> dict[str, Any]:
-        lint = self._run(["npm", "run", "lint"], timeout=120)
-        type_checks = self._run(["python3", "-m", "compileall", "runtime"], timeout=120)
-        tests = self._run(["python3", "-m", "pytest", "tests/", "-q", "-x"], timeout=240)
+        lint_cmd = os.environ.get("EVOLUTION_LINT_CMD", "npm run lint")
+        type_cmd = os.environ.get("EVOLUTION_TYPECHECK_CMD", "python3 -m compileall runtime")
+        test_cmd = os.environ.get("EVOLUTION_TEST_CMD", "python3 -m pytest tests/ -q -x")
+        lint = self._run(lint_cmd.split(), timeout=120)
+        type_checks = self._run(type_cmd.split(), timeout=120)
+        tests = self._run(test_cmd.split(), timeout=240)
         security = self._security_scan(diff_text)
         passed = lint["ok"] and type_checks["ok"] and tests["ok"] and security["ok"]
         return {

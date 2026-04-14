@@ -66,8 +66,9 @@ class CodeAnalyzer:
                 if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                     parts = node.module.split(".")
                     if parts[0] in {"core", "brain", "memory", "agents", "actions"}:
-                        candidate = self._repo_root / "runtime" / "/".join(parts)
-                        candidate_py = self._repo_root / "runtime" / ("/".join(parts) + ".py")
+                        module_path = Path(*parts)
+                        candidate = self._repo_root / "runtime" / module_path
+                        candidate_py = (self._repo_root / "runtime" / module_path).with_suffix(".py")
                         if not candidate.exists() and not candidate_py.exists():
                             issues.append(
                                 CodeIssue(

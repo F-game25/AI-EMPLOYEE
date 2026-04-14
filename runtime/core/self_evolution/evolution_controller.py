@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Literal
 
@@ -163,7 +164,12 @@ class EvolutionController:
             try:
                 self.run_once(manual_approved=False)
             except Exception as exc:
-                self._last_result = {"status": "error", "error": str(exc), "at": self._ts()}
+                self._last_result = {
+                    "status": "error",
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                    "at": self._ts(),
+                }
             time.sleep(self._cycle_interval_s)
 
     @staticmethod

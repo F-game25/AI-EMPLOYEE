@@ -3,6 +3,9 @@ import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 
 const NODE_ORDER = ['User Input', 'Intent', 'Brain Decision', 'Agent', 'Task Steps', 'Result']
+const GOLD_BORDER = 'rgba(212,175,55,0.35)'
+const GOLD_GLOW = 'rgba(212,175,55,0.2)'
+const ACTIVE_EDGE_GRADIENT = `linear-gradient(90deg, ${GOLD_BORDER}, rgba(32,214,199,0.45))`
 
 function buildFlow(run) {
   if (!run) return { nodes: [], edges: [] }
@@ -54,7 +57,7 @@ export default function NeuralGraphPanel() {
               <motion.button
                 key={node.id}
                 onClick={() => setSelectedNode(node)}
-                animate={{ boxShadow: idx <= (run?.nodes?.length || 0) ? '0 0 0 1px rgba(212,175,55,0.35), 0 0 14px rgba(212,175,55,0.2)' : 'none' }}
+                animate={{ boxShadow: idx <= (run?.nodes?.length || 0) ? `0 0 0 1px ${GOLD_BORDER}, 0 0 14px ${GOLD_GLOW}` : 'none' }}
                 style={{
                   background: 'var(--bg-card)',
                   border: '1px solid var(--border-subtle)',
@@ -80,7 +83,7 @@ export default function NeuralGraphPanel() {
                   flex: 1,
                   height: '4px',
                   borderRadius: '999px',
-                  background: edge.active ? 'linear-gradient(90deg, rgba(212,175,55,0.35), rgba(32,214,199,0.45))' : 'rgba(255,255,255,0.08)',
+                  background: edge.active ? ACTIVE_EDGE_GRADIENT : 'rgba(255,255,255,0.08)',
                 }}
               />
             ))}

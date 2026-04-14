@@ -8,6 +8,8 @@ from typing import Any
 
 from core.observability.event_stream import EventStream, get_event_stream
 
+DECISION_WINDOW_SECONDS = 10.0
+
 
 class MetricsCollector:
     """Collects runtime metrics every second."""
@@ -92,7 +94,7 @@ class MetricsCollector:
         now_t = time.time()
         with self._lock:
             errors_last_min = len([t for t in self._errors if now_t - t <= 60])
-            decisions_last_10 = len([t for t in self._brain_decisions if now_t - t <= 10])
+            decisions_last_10 = len([t for t in self._brain_decisions if now_t - t <= DECISION_WINDOW_SECONDS])
             avg_task = round(sum(self._task_durations) / max(len(self._task_durations), 1), 2) if self._task_durations else 0.0
             avg_latency = round(sum(self._api_latencies) / max(len(self._api_latencies), 1), 2) if self._api_latencies else 0.0
             snapshot = {
@@ -104,7 +106,7 @@ class MetricsCollector:
                 "task_duration_ms": avg_task,
                 "errors_per_minute": errors_last_min,
                 "api_latency_ms": avg_latency,
-                "brain_decisions_per_sec": round(decisions_last_10 / 10.0, 3),
+                "brain_decisions_per_sec": round(decisions_last_10 / DECISION_WINDOW_SECONDS, 3),
             }
             self._metrics.appendleft(snapshot)
         return snapshot
