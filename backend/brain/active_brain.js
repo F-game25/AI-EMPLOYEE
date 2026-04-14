@@ -503,12 +503,149 @@ function restoreState(saved) {
   }
 }
 
+/**
+ * Build a live neuron graph from the brain's internal state.
+ * Each node maps to a real knowledge unit; connections map to learned associations.
+ * Used by the Neural Brain visualization page.
+ */
+function neurons() {
+  const nodes = [];
+  const connections = [];
+  let nid = 0;
+  const idMap = new Map(); // key → node id
+
+  const _nid = (prefix, key) => {
+    const k = `${prefix}:${key}`;
+    if (idMap.has(k)) return idMap.get(k);
+    const id = `n-${++nid}`;
+    idMap.set(k, id);
+    return id;
+  };
+
+  // Task-pattern nodes (Input / Hidden)
+  state.taskPatterns.forEach((p) => {
+    const runs = p.runs || 0;
+    const sr = runs ? p.success / runs : 0;
+    nodes.push({
+      id: _nid('pattern', p.intent),
+      label: p.intent,
+      type: 'Input',
+      activation: Math.min(1, runs / Math.max(state.performance.total || 1, 1)),
+      confidence: Number(sr.toFixed(3)),
+      weight: runs,
+      source: 'System',
+      tag: p.intent.replace(/_/g, ' '),
+    });
+  });
+
+  // Strategy nodes (Hidden / Skill)
+  state.strategies.forEach((byIntent, intentKey) => {
+    byIntent.forEach((s) => {
+      const sr = s.runs ? s.success / s.runs : 0;
+      nodes.push({
+        id: _nid('strategy', `${s.intent}:${s.strategy}`),
+        label: s.strategy,
+        type: 'Skill',
+        activation: Math.min(1, sr),
+        confidence: Number((s.avgConfidence || 0).toFixed(3)),
+        weight: s.runs || 0,
+        source: 'System',
+        tag: s.intent.replace(/_/g, ' '),
+      });
+      // Connect pattern → strategy
+      const patternId = idMap.get(`pattern:${intentKey}`);
+      if (patternId) {
+        connections.push({
+          from: patternId,
+          to: _nid('strategy', `${s.intent}:${s.strategy}`),
+          weight: Math.min(1, sr),
+          confidence: Number((s.avgConfidence || 0).toFixed(3)),
+        });
+      }
+    });
+  });
+
+  // Decision nodes (Output)
+  const recentDecisions = state.decisionHistory.slice(0, 12);
+  recentDecisions.forEach((d) => {
+    const nodeId = _nid('decision', d.taskId || `d-${nodes.length}`);
+    nodes.push({
+      id: nodeId,
+      label: `decision:${(d.intent || 'general').slice(0, 16)}`,
+      type: 'Output',
+      activation: Number((d.confidence || 0).toFixed(3)),
+      confidence: Number((d.confidence || 0).toFixed(3)),
+      weight: 1,
+      source: 'Generated',
+      tag: d.strategy || 'decision',
+    });
+    // Connect strategy → decision
+    const stratKey = `strategy:${d.intent || 'general'}:${d.strategy || 'balanced_execution'}`;
+    if (idMap.has(stratKey)) {
+      connections.push({
+        from: idMap.get(stratKey),
+        to: nodeId,
+        weight: Number((d.confidence || 0.5).toFixed(3)),
+        confidence: Number((d.confidence || 0.5).toFixed(3)),
+      });
+    }
+  });
+
+  // User-preference nodes (Memory)
+  state.userPreferences.forEach((pref, userId) => {
+    const nodeId = _nid('user', userId);
+    nodes.push({
+      id: nodeId,
+      label: userId,
+      type: 'Memory',
+      activation: Math.min(1, (pref.prefersDetail + pref.prefersSpeed) / 2),
+      confidence: 0.7,
+      weight: Object.values(pref.preferredStrategies || {}).reduce((a, b) => a + b, 0),
+      source: 'User',
+      tag: 'preference',
+    });
+  });
+
+  // Recent-improvement nodes (Strategy / Learning)
+  state.recentImprovements.slice(0, 6).forEach((imp) => {
+    const nodeId = _nid('improvement', imp.task_id || `imp-${nodes.length}`);
+    nodes.push({
+      id: nodeId,
+      label: imp.improvement || 'learning',
+      type: 'Strategy',
+      activation: Number((imp.confidence || 0.5).toFixed(3)),
+      confidence: Number((imp.confidence || 0.5).toFixed(3)),
+      weight: 1,
+      source: 'Generated',
+      tag: imp.intent || 'learning',
+    });
+  });
+
+  // Global stats for the visualization
+  const total = state.performance.total || 0;
+  return {
+    nodes,
+    connections,
+    stats: {
+      total_nodes: nodes.length,
+      total_connections: connections.length,
+      learn_step: total,
+      global_confidence: total ? Number((state.performance.success / total).toFixed(3)) : 0,
+      learning_rate: total > 0 ? Number((state.recentImprovements.length / Math.max(total, 1)).toFixed(4)) : 0,
+      memory_size: memorySize(),
+      active_tasks: state.decisionHistory.length,
+    },
+    updated_at: nowIso(),
+  };
+}
+
 module.exports = {
   consult,
   feedback,
   insights,
   status,
   activity,
+  neurons,
   taskInfluence,
   rebindPlan,
   normalizeLatencyMs,
