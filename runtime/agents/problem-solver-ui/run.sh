@@ -1,62 +1,133 @@
 #!/usr/bin/env bash
-# AI Employee — Problem Solver UI launcher
-# Auto-installs Python dependencies on every platform before starting the server.
+# AI Employee — Problem Solver UI launcher (single-port unified runtime)
+# Builds/serves the React UI and Node backend together on one port.
 set -euo pipefail
 
-AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-AGENT_HOME="$AI_HOME/agents/problem-solver-ui"
-REQ="$AGENT_HOME/requirements.txt"
+# ── Colors & step helpers ──────────────────────────────────────────────────────
+R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; C='\033[0;36m'; B='\033[0;34m'; NC='\033[0m'
+_ok()   { printf "       ${G}✓${NC}  %s\n" "$1"; }
+_err()  { printf "       ${R}✗${NC}  %s\n" "$1" >&2; exit 1; }
+_info() { printf "       ${C}▸${NC}  %s\n" "$1"; }
+_step() { printf "\n  ${B}[%s]${NC}  %s\n" "$1" "$2"; }
 
-# ── Load config ────────────────────────────────────────────────────────────────
-# Load bot-specific env defaults first.
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+
+# ── Load env overrides ─────────────────────────────────────────────────────────
 if [[ -f "$AI_HOME/config/problem-solver-ui.env" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$AI_HOME/config/problem-solver-ui.env"
   set +a
 fi
-
-# Load global AI Employee env last so runtime/user overrides win.
 if [[ -f "$AI_HOME/.env" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$AI_HOME/.env"
   set +a
 fi
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-$UI_PORT}"
 
-# ── Resolve python binary (python3 on Linux/macOS, python on Windows/Git Bash) ─
-PYTHON=""
-for _py in python3 python; do
-  if command -v "$_py" >/dev/null 2>&1 && "$_py" -c "import sys; assert sys.version_info >= (3,10)" 2>/dev/null; then
-    PYTHON="$_py"
-    break
-  fi
-done
+# ── Banner ─────────────────────────────────────────────────────────────────────
+echo ""
+printf "  ${C}╔═══════════════════════════════════════════════╗${NC}\n"
+printf "  ${C}║${NC}  🤖  AI Employee — Unified Runtime           ${C}║${NC}\n"
+printf "  ${C}╚═══════════════════════════════════════════════╝${NC}\n"
 
-if [[ -z "$PYTHON" ]]; then
-  echo "[problem-solver-ui] ERROR: Python 3.10+ not found."
-  echo "  Install Python: https://www.python.org/downloads/"
-  exit 1
+# ── Step 1: Locate backend & frontend ─────────────────────────────────────────
+_step "1/5" "Locating backend & frontend..."
+
+# Priority order:
+# 1. SCRIPT_DIR/../../.. (running from within the cloned repo)
+# 2. AI_EMPLOYEE_REPO_DIR env var (set by installer for installed copies)
+# 3. Common clone locations (auto-detect)
+_REPO_CAND="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+BACKEND_DIR=""
+FRONTEND_DIR=""
+
+if [[ -f "$_REPO_CAND/backend/server.js" ]]; then
+  BACKEND_DIR="$_REPO_CAND/backend"
+  FRONTEND_DIR="$_REPO_CAND/frontend"
+  _info "Repo root: $_REPO_CAND"
+elif [[ -n "${AI_EMPLOYEE_REPO_DIR:-}" && -f "$AI_EMPLOYEE_REPO_DIR/backend/server.js" ]]; then
+  BACKEND_DIR="$AI_EMPLOYEE_REPO_DIR/backend"
+  FRONTEND_DIR="$AI_EMPLOYEE_REPO_DIR/frontend"
+  _info "Repo: $AI_EMPLOYEE_REPO_DIR  (AI_EMPLOYEE_REPO_DIR)"
+else
+  for _c in "$HOME/AI-EMPLOYEE" "$HOME/ai-employee" \
+            "$HOME/code/AI-EMPLOYEE" "$HOME/projects/AI-EMPLOYEE" \
+            "$HOME/Desktop/AI-EMPLOYEE"; do
+    if [[ -f "$_c/backend/server.js" ]]; then
+      BACKEND_DIR="$_c/backend"
+      FRONTEND_DIR="$_c/frontend"
+      _info "Repo: $_c  (auto-detected)"
+      break
+    fi
+  done
 fi
 
-# ── Auto-install dependencies ──────────────────────────────────────────────────
-_need_install=0
-if ! "$PYTHON" -c "import fastapi, uvicorn" 2>/dev/null; then
-  _need_install=1
+[[ -z "$BACKEND_DIR" ]] && _err "Cannot find backend/server.js. Set AI_EMPLOYEE_REPO_DIR in $AI_HOME/.env pointing to the repo root."
+[[ ! -f "$FRONTEND_DIR/package.json" ]] && _err "Cannot find frontend/package.json at $FRONTEND_DIR"
+_ok "Backend : $BACKEND_DIR"
+_ok "Frontend: $FRONTEND_DIR"
+
+# ── Step 2: Runtime requirements ──────────────────────────────────────────────
+_step "2/5" "Checking runtime requirements..."
+
+command -v node >/dev/null 2>&1 || _err "node not found. Install Node.js 20+ from https://nodejs.org"
+command -v npm  >/dev/null 2>&1 || _err "npm not found. Install Node.js 20+ from https://nodejs.org"
+_ok "Node.js $(node -v)  /  npm $(npm -v)"
+
+# ── Step 3: Backend dependencies ──────────────────────────────────────────────
+_step "3/5" "Ensuring backend dependencies..."
+
+if [[ ! -d "$BACKEND_DIR/node_modules" ]]; then
+  _info "Installing backend packages (express, ws, cors…)"
+  npm --prefix "$BACKEND_DIR" install --silent \
+    || npm --prefix "$BACKEND_DIR" install
+  _ok "Backend packages installed"
+else
+        _ok "Backend packages ready  ($(find "$BACKEND_DIR/node_modules" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ') packages)"
 fi
 
-if [[ "$_need_install" -eq 1 ]]; then
-  echo "[problem-solver-ui] Installing Python dependencies (fastapi, uvicorn)..."
-  if [[ -f "$REQ" ]]; then
-    "$PYTHON" -m pip install --user -q -r "$REQ" 2>&1 \
-      || "$PYTHON" -m pip install --user -q fastapi "uvicorn[standard]" 2>&1 \
-      || { echo "[problem-solver-ui] ERROR: pip install failed. Run: pip install fastapi uvicorn"; exit 1; }
-  else
-    "$PYTHON" -m pip install --user -q fastapi "uvicorn[standard]" 2>&1 \
-      || { echo "[problem-solver-ui] ERROR: pip install failed. Run: pip install fastapi uvicorn"; exit 1; }
-  fi
-  echo "[problem-solver-ui] Dependencies installed."
+# ── Step 4: Frontend bundle ────────────────────────────────────────────────────
+_step "4/5" "Building UI bundle..."
+
+if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+  _info "Installing frontend packages…"
+  npm --prefix "$FRONTEND_DIR" install --silent \
+    || npm --prefix "$FRONTEND_DIR" install
+  _ok "Frontend packages installed"
 fi
 
-# ── Start server ───────────────────────────────────────────────────────────────
-exec "$PYTHON" "$AGENT_HOME/server.py"
+_needs_build=0
+if [[ ! -f "$FRONTEND_DIR/dist/index.html" ]]; then
+  _needs_build=1
+  _info "No build found — compiling from source…"
+elif find "$FRONTEND_DIR/src" -type f -newer "$FRONTEND_DIR/dist/index.html" 2>/dev/null | grep -q .; then
+  _needs_build=1
+  _info "Source changes detected — rebuilding…"
+fi
+
+if [[ "$_needs_build" -eq 1 ]]; then
+  _BUILD_LOG=$(npm --prefix "$FRONTEND_DIR" run build 2>&1)
+  _BUILD_TIME=$(echo "$_BUILD_LOG" | grep -oE '\b[0-9]+(\.[0-9]+)?\s*(ms|s)\b' | tail -1 || true)
+  _BUILD_SIZE=$(echo "$_BUILD_LOG" | grep -E 'kB|MB' | tail -1 | sed 's/^[[:space:]]*//' || true)
+  _ok "Build complete${_BUILD_TIME:+  (${_BUILD_TIME})}"
+  [[ -n "$_BUILD_SIZE" ]] && _info "$_BUILD_SIZE"
+else
+  _DIST_SIZE=$(du -sh "$FRONTEND_DIR/dist" 2>/dev/null | cut -f1 || echo "?")
+  _ok "Bundle up to date  ($_DIST_SIZE)"
+fi
+
+# ── Step 5: Start server ───────────────────────────────────────────────────────
+_step "5/5" "Starting AI Employee server..."
+
+export PORT="$UI_PORT"
+# Avoid self-proxy loops in Node fallback calls that use PYTHON_BACKEND_PORT.
+export PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
+
+_info "http://127.0.0.1:$PORT"
+echo ""
+exec node "$BACKEND_DIR/server.js"

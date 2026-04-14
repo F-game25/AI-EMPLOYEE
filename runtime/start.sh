@@ -15,7 +15,6 @@ _AI_CLEANUP_DONE=0
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
-DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; C='\033[0;36m'; NC='\033[0m'
 
@@ -102,7 +101,6 @@ if [[ -f "$AI_HOME/.env" ]]; then
 fi
 # Re-read ports (they may be in .env)
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-$UI_PORT}"
-DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
 _bootstrap_runtime_path
 
 # Keep gateway token consistent between config.json and .env.
@@ -240,21 +238,6 @@ else
   warn "  Install: curl -fsSL https://openclaw.ai/install.sh | bash"
 fi
 
-# ── Static dashboard ───────────────────────────────────────────────────────────
-log "Starting dashboard on port $DASHBOARD_PORT..."
-if [[ -f "$AI_HOME/ui/index.html" ]]; then
-  if _port_in_use "$DASHBOARD_PORT"; then
-    warn "Dashboard port $DASHBOARD_PORT already in use -- skipping (run: ai-employee doctor)"
-  else
-    cd "$AI_HOME/ui"
-    nohup python3 -m http.server "$DASHBOARD_PORT" --bind 127.0.0.1 \
-      >> "$AI_HOME/logs/dashboard.log" 2>&1 &
-    echo $! > "$AI_HOME/run/dashboard.pid"
-    cd - >/dev/null
-    ok "Dashboard started (http://localhost:$DASHBOARD_PORT)"
-  fi
-fi
-
 # ── Start Problem Solver UI first (critical — browser will open this) ──────────
 log "Starting Problem Solver UI (port $UI_PORT)..."
 if [[ -x "$AI_HOME/bin/ai-employee" ]]; then
@@ -273,7 +256,6 @@ fi
 echo ""
 ok "AI Employee started!"
 echo ""
-echo -e "  ${C}📊 Dashboard:${NC}     http://localhost:$DASHBOARD_PORT"
 echo -e "  ${C}🛠️  Problem Solver:${NC} http://127.0.0.1:$UI_PORT"
 echo -e "  ${C}🔧 Gateway:${NC}       http://localhost:18789"
 echo ""
@@ -361,8 +343,7 @@ cleanup() {
     done
   fi
   [[ -f "$AI_HOME/run/gateway.pid" ]] && kill "$(cat "$AI_HOME/run/gateway.pid")" 2>/dev/null || true
-  [[ -f "$AI_HOME/run/dashboard.pid" ]] && kill "$(cat "$AI_HOME/run/dashboard.pid")" 2>/dev/null || true
-  rm -f "$AI_HOME/run/gateway.pid" "$AI_HOME/run/dashboard.pid"
+  rm -f "$AI_HOME/run/gateway.pid"
   ok "All services stopped."
 }
 
