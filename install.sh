@@ -988,63 +988,153 @@ EOF
 install_skills() {
     log "Installing agent skills..."
 
-    local all_skills=(
-        "lead-hunter:linkedin_scraper:Find decision makers on LinkedIn"
-        "lead-hunter:email_finder:Find and verify email addresses"
-        "lead-hunter:lead_scorer:Score lead quality 0-100"
-        "lead-hunter:company_enrichment:Enrich company data"
-        "content-master:keyword_research:SEO keyword research"
-        "content-master:blog_writer:Write 2000+ word SEO articles"
-        "content-master:content_optimizer:Optimize existing content"
-        "social-guru:viral_finder:Find trending viral content"
-        "social-guru:caption_writer:Write platform-specific captions"
-        "social-guru:hashtag_generator:Generate relevant hashtags"
-        "social-guru:content_calendar:Create 30-day content calendar"
-        "intel-agent:pricing_tracker:Track competitor pricing"
-        "intel-agent:review_scraper:Scrape and analyze reviews"
-        "intel-agent:feature_comparison:Compare features with competitors"
-        "intel-agent:traffic_estimator:Estimate competitor traffic"
-        "product-scout:arbitrage_finder:Find AliExpress to Amazon arbitrage"
-        "product-scout:trend_spotter:Find trending products"
-        "product-scout:supplier_validator:Validate supplier reliability"
-        "product-scout:profit_calculator:Calculate true profit"
-        "email-ninja:sequence_builder:Build cold email sequences"
-        "email-ninja:deliverability_checker:Check email deliverability"
-        "email-ninja:personalization_engine:Personalize emails at scale"
-        "support-bot:faq_trainer:Extract FAQs from docs"
-        "support-bot:ticket_classifier:Classify support tickets"
-        "support-bot:sentiment_analyzer:Analyze customer sentiment"
-        "data-analyst:trend_analyzer:Analyze market trends"
-        "data-analyst:swot_generator:Generate SWOT analysis"
-        "data-analyst:survey_analyzer:Analyze survey responses"
-        "creative-studio:design_brief:Create design briefs"
-        "creative-studio:image_prompt:Generate AI image prompts"
-        "creative-studio:brand_voice:Define brand voice"
-        "creative-studio:ad_copy:Write ad copy"
-        "crypto-trader:technical_analysis:Full technical analysis"
-        "crypto-trader:pattern_recognition:Identify chart patterns"
-        "crypto-trader:whale_tracker:Track large wallet movements"
-        "crypto-trader:prediction_markets_research:Scan prediction markets for mispricing"
-        "bot-dev:code_review:Review code for issues"
-        "bot-dev:feature_implementation:Implement new features"
-        "bot-dev:bug_finder:Find bugs in code"
-        "web-sales:ux_audit:Audit website UX"
-        "web-sales:seo_audit:Technical SEO audit"
-        "web-sales:speed_test:Website speed analysis"
-        "orchestrator:complex_problem_solving:Complex problem solving for system issues"
-        "orchestrator:tool_language_selector:Select best tools and language for a task"
+    # Helper: writes a skill file with system prompt, input/output schema, and example
+    _write_skill() {
+        local skill_file="$1" skill_name="$2" desc="$3" system_prompt="$4" \
+              input_schema="$5" output_schema="$6" example_input="$7" example_output="$8"
+        [[ -f "$skill_file" ]] && return
+        cat > "$skill_file" << SKILL
+---
+name: $skill_name
+description: $desc
+---
+
+## System Prompt
+
+$system_prompt
+
+## Input Schema
+
+\`\`\`json
+$input_schema
+\`\`\`
+
+## Output Schema
+
+\`\`\`json
+$output_schema
+\`\`\`
+
+## Example
+
+**Input:**
+\`\`\`json
+$example_input
+\`\`\`
+
+**Output:**
+\`\`\`json
+$example_output
+\`\`\`
+SKILL
+    }
+
+    # ── Lead hunting skills ─────────────────────────────────────────────────────
+    local ws="$AI_HOME/workspace-lead-hunter-elite/skills"
+    mkdir -p "$ws"
+
+    _write_skill "$ws/linkedin_scraper.md" "linkedin_scraper" \
+        "Find decision makers on LinkedIn" \
+        "You are a B2B lead research specialist. Given a target company or industry, search LinkedIn for decision makers matching the specified criteria. Focus on C-level, VP, and Director roles. Return structured contact profiles with name, title, company, location, profile URL, and a relevance score (0-100) based on how well they match the search criteria. Prioritize recently active profiles. Exclude recruiters and sales people unless specifically requested. Always verify company match before including a result." \
+        '{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"Target company, industry, or role to search"},"role_filter":{"type":"string","description":"Role titles to filter (e.g. CTO, VP Engineering)"},"location":{"type":"string","description":"Geographic filter"},"limit":{"type":"integer","default":10}}}' \
+        '{"type":"object","properties":{"leads":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"title":{"type":"string"},"company":{"type":"string"},"location":{"type":"string"},"profile_url":{"type":"string"},"relevance_score":{"type":"integer","minimum":0,"maximum":100}}}},"total_found":{"type":"integer"}}}' \
+        '{"query":"SaaS companies in Netherlands","role_filter":"CTO","location":"Netherlands","limit":5}' \
+        '{"leads":[{"name":"Jan de Vries","title":"CTO","company":"CloudFlow BV","location":"Amsterdam","profile_url":"https://linkedin.com/in/jandevries","relevance_score":92}],"total_found":23}'
+
+    _write_skill "$ws/email_finder.md" "email_finder" \
+        "Find and verify email addresses" \
+        "You are an email discovery and verification specialist. Given a person name and company, determine the most likely professional email address using common email patterns (first.last@, first@, flast@, etc.) and the company domain. Verify the email exists using MX record checks and SMTP validation where possible. Return the best candidate email, confidence score, and the pattern used. Never fabricate emails — only return addresses with reasonable confidence of delivery. Flag disposable or catch-all domains." \
+        '{"type":"object","required":["name","company"],"properties":{"name":{"type":"string"},"company":{"type":"string"},"domain":{"type":"string","description":"Known company domain (optional)"}}}' \
+        '{"type":"object","properties":{"email":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1},"pattern_used":{"type":"string"},"domain_type":{"type":"string","enum":["corporate","catch_all","disposable","unknown"]},"mx_valid":{"type":"boolean"}}}' \
+        '{"name":"Jan de Vries","company":"CloudFlow BV","domain":"cloudflow.nl"}' \
+        '{"email":"jan.devries@cloudflow.nl","confidence":0.85,"pattern_used":"first.last@domain","domain_type":"corporate","mx_valid":true}'
+
+    _write_skill "$ws/lead_scorer.md" "lead_scorer" \
+        "Score lead quality 0-100" \
+        "You are a lead qualification analyst. Given a lead profile with company data, evaluate the lead quality on a 0-100 scale using the BANT framework (Budget, Authority, Need, Timeline). Consider company size, industry fit, technology stack, growth indicators, recent funding, and job postings as signals. Provide a breakdown of sub-scores for each BANT dimension, a final composite score, and a recommended next action (e.g., immediate outreach, nurture, disqualify). Be specific about why each sub-score was assigned." \
+        '{"type":"object","required":["lead"],"properties":{"lead":{"type":"object","properties":{"name":{"type":"string"},"title":{"type":"string"},"company":{"type":"string"},"industry":{"type":"string"},"company_size":{"type":"string"},"tech_stack":{"type":"array","items":{"type":"string"}}}}}}' \
+        '{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":100},"breakdown":{"type":"object","properties":{"budget":{"type":"integer"},"authority":{"type":"integer"},"need":{"type":"integer"},"timeline":{"type":"integer"}}},"recommendation":{"type":"string","enum":["immediate_outreach","nurture","disqualify"]},"reasoning":{"type":"string"}}}' \
+        '{"lead":{"name":"Jan de Vries","title":"CTO","company":"CloudFlow BV","industry":"SaaS","company_size":"50-200","tech_stack":["Python","AWS","Kubernetes"]}}' \
+        '{"score":78,"breakdown":{"budget":70,"authority":95,"need":75,"timeline":72},"recommendation":"immediate_outreach","reasoning":"CTO at mid-size SaaS with modern tech stack indicates strong decision-making authority and likely budget. Growth signals positive."}'
+
+    _write_skill "$ws/company_enrichment.md" "company_enrichment" \
+        "Enrich company data" \
+        "You are a company intelligence researcher. Given a company name or domain, gather comprehensive company data including: industry, sub-industry, employee count range, estimated revenue range, headquarters location, founding year, key technologies used, recent news, funding history, and key competitors. Use web search and public data sources. Return structured, verified data with confidence levels. Flag any data points that could not be verified. Focus on actionable intelligence that helps sales teams qualify and personalize outreach." \
+        '{"type":"object","required":["company"],"properties":{"company":{"type":"string"},"domain":{"type":"string"}}}' \
+        '{"type":"object","properties":{"company_name":{"type":"string"},"domain":{"type":"string"},"industry":{"type":"string"},"employee_range":{"type":"string"},"revenue_range":{"type":"string"},"hq_location":{"type":"string"},"founded_year":{"type":"integer"},"technologies":{"type":"array","items":{"type":"string"}},"recent_news":{"type":"array","items":{"type":"string"}},"competitors":{"type":"array","items":{"type":"string"}}}}' \
+        '{"company":"CloudFlow BV","domain":"cloudflow.nl"}' \
+        '{"company_name":"CloudFlow BV","domain":"cloudflow.nl","industry":"Cloud Infrastructure SaaS","employee_range":"50-200","revenue_range":"5M-20M EUR","hq_location":"Amsterdam, Netherlands","founded_year":2018,"technologies":["Python","AWS","Kubernetes","React"],"recent_news":["Series B funding of 15M EUR (2024)"],"competitors":["Pulumi","Terraform Cloud"]}'
+
+    # ── Task orchestrator skills ─────────────────────────────────────────────────
+    ws="$AI_HOME/workspace-task-orchestrator/skills"
+    mkdir -p "$ws"
+
+    _write_skill "$ws/complex_problem_solving.md" "complex_problem_solving" \
+        "Complex problem solving for system issues" \
+        "You are a systems problem-solving specialist. Given a complex problem description, break it down into sub-problems, identify root causes, evaluate possible solutions with trade-offs, and recommend an action plan. Use structured reasoning: (1) Problem decomposition, (2) Root cause analysis using the 5-Whys or Ishikawa method, (3) Solution brainstorming with pros/cons, (4) Recommended action plan with steps, owners, and timeline. Be specific and actionable. If the problem involves code, infrastructure, or business processes, provide concrete steps rather than generic advice." \
+        '{"type":"object","required":["problem"],"properties":{"problem":{"type":"string","description":"Detailed problem description"},"context":{"type":"string","description":"Additional context or constraints"},"urgency":{"type":"string","enum":["critical","high","medium","low"]}}}' \
+        '{"type":"object","properties":{"root_causes":{"type":"array","items":{"type":"string"}},"solutions":{"type":"array","items":{"type":"object","properties":{"description":{"type":"string"},"pros":{"type":"array","items":{"type":"string"}},"cons":{"type":"array","items":{"type":"string"}},"effort":{"type":"string"}}}},"recommended_plan":{"type":"array","items":{"type":"object","properties":{"step":{"type":"integer"},"action":{"type":"string"},"owner":{"type":"string"},"timeline":{"type":"string"}}}}}}' \
+        '{"problem":"API response times degraded from 200ms to 2s after deployment","context":"Deployed new feature with additional database queries","urgency":"high"}' \
+        '{"root_causes":["New feature adds N+1 query pattern","Missing database index on new join column"],"solutions":[{"description":"Add database index","pros":["Quick fix","No code changes"],"cons":["May slow writes slightly"],"effort":"30 minutes"},{"description":"Refactor to eager loading","pros":["Eliminates N+1","Better long-term"],"cons":["Code changes needed","Testing required"],"effort":"2-4 hours"}],"recommended_plan":[{"step":1,"action":"Add missing index immediately","owner":"DBA","timeline":"30 min"},{"step":2,"action":"Deploy eager loading fix","owner":"Backend team","timeline":"Next sprint"}]}'
+
+    _write_skill "$ws/tool_language_selector.md" "tool_language_selector" \
+        "Select best tools and language for a task" \
+        "You are a technical architecture advisor. Given a task or project description, recommend the optimal programming language, framework, and tools. Consider: team expertise, project scale, performance requirements, ecosystem maturity, hiring pool, maintenance burden, and deployment target. Provide a primary recommendation with rationale and one alternative. Include specific library/package recommendations for common needs (HTTP, database, testing, deployment). Be opinionated but justify each choice with concrete trade-offs." \
+        '{"type":"object","required":["task"],"properties":{"task":{"type":"string"},"constraints":{"type":"object","properties":{"team_languages":{"type":"array","items":{"type":"string"}},"scale":{"type":"string","enum":["prototype","startup","enterprise"]},"deployment_target":{"type":"string"}}}}}' \
+        '{"type":"object","properties":{"primary":{"type":"object","properties":{"language":{"type":"string"},"framework":{"type":"string"},"key_libraries":{"type":"array","items":{"type":"string"}},"rationale":{"type":"string"}}},"alternative":{"type":"object","properties":{"language":{"type":"string"},"framework":{"type":"string"},"rationale":{"type":"string"}}}}}' \
+        '{"task":"Build a real-time analytics dashboard with websockets","constraints":{"team_languages":["Python","JavaScript"],"scale":"startup","deployment_target":"AWS"}}' \
+        '{"primary":{"language":"TypeScript","framework":"Next.js + Socket.io","key_libraries":["Prisma","Chart.js","Redis","Bull"],"rationale":"Team knows JS, Next.js provides SSR+API routes, Socket.io handles websockets natively, Prisma for type-safe DB access"},"alternative":{"language":"Python","framework":"FastAPI + HTMX","rationale":"If team prefers Python backend, FastAPI websockets + HTMX for progressive enhancement, simpler but less real-time UI capability"}}'
+
+    # ── Remaining skills — generate with enhanced template ──────────────────────
+    local remaining_skills=(
+        "web-researcher:ux_audit:Audit website UX:You are a UX audit specialist. Analyze a website for usability issues including navigation clarity, mobile responsiveness, accessibility compliance (WCAG 2.1), page load performance, call-to-action effectiveness, and form usability. Provide severity ratings (critical/major/minor) for each issue found, with specific recommendations and before/after descriptions. Focus on conversion-impacting issues first."
+        "web-researcher:seo_audit:Technical SEO audit:You are a technical SEO analyst. Perform a comprehensive SEO audit covering: meta tags, heading hierarchy, canonical URLs, robots.txt, sitemap.xml, Core Web Vitals, mobile-friendliness, structured data markup, internal linking, broken links, duplicate content, and page speed. Score each category 0-100 and provide prioritized fix recommendations with estimated traffic impact."
+        "social-media-manager:viral_finder:Find trending viral content:You are a social media trend analyst. Monitor and identify currently trending content across platforms (Twitter/X, TikTok, Instagram, LinkedIn, Reddit). Analyze virality signals: engagement velocity, share ratio, sentiment, cross-platform spread. Return trending topics with relevance scores, suggested angles for content creation, and optimal posting windows. Focus on trends relevant to the user's industry."
+        "social-media-manager:caption_writer:Write platform-specific captions:You are a social media copywriter specializing in platform-specific content. Write captions optimized for each platform's algorithm and audience behavior. Twitter/X: concise, hook-first, thread-worthy. Instagram: storytelling with line breaks, 3-5 relevant hashtags. LinkedIn: professional insight, question-ending for engagement. TikTok: trend-aware, casual, hook in first 3 words. Include A/B test variants."
+        "social-media-manager:hashtag_generator:Generate relevant hashtags:You are a hashtag strategy specialist. Given a topic and target platform, generate optimized hashtag sets: 5 high-volume (>1M posts), 5 medium-volume (100K-1M), 5 niche/specific (<100K). Avoid banned or shadowbanned hashtags. Include engagement rate estimates where possible. Group hashtags by theme for easy rotation across posts."
+        "social-media-manager:content_calendar:Create 30-day content calendar:You are a content strategist. Create a 30-day social media content calendar with daily posts across specified platforms. Balance content types: educational (40%), entertaining (30%), promotional (20%), community (10%). Include post topics, suggested formats (carousel, video, story, poll), optimal posting times for the target timezone, and cross-promotion opportunities. Account for industry events and seasonal trends."
+        "ecom-agent:arbitrage_finder:Find AliExpress to Amazon arbitrage:You are a product arbitrage analyst. Search for products available on AliExpress at low cost that can be sold on Amazon at a profit. Calculate true margins including shipping, Amazon FBA fees, returns rate, and advertising cost. Minimum viable margin: 30%. Verify the product is not restricted on Amazon. Score opportunities by risk level (competition, IP concerns, seasonal demand)."
+        "ecom-agent:trend_spotter:Find trending products:You are an e-commerce trend analyst. Identify products with rising demand using signals from Google Trends, Amazon Best Sellers, TikTok Made Me Buy It, and social media mentions. Focus on products with upward trajectory but not yet saturated. Provide demand score, competition level, estimated monthly search volume, and suggested entry strategy."
     )
 
-    for skill in "${all_skills[@]}"; do
-        IFS=':' read -r agent skill_name desc <<< "$skill"
+    for skill_entry in "${remaining_skills[@]}"; do
+        IFS=':' read -r agent skill_name desc system_prompt <<< "$skill_entry"
         local skill_file="$AI_HOME/workspace-$agent/skills/${skill_name}.md"
         if [[ ! -f "$skill_file" ]]; then
+            mkdir -p "$(dirname "$skill_file")"
             cat > "$skill_file" << SKILL
 ---
 name: $skill_name
 description: $desc
 ---
-Use this skill to $desc. Provide structured output with clear, actionable results.
+
+## System Prompt
+
+$system_prompt
+
+## Input Schema
+
+\`\`\`json
+{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"The search query or topic to analyze"},"options":{"type":"object","description":"Additional parameters for the analysis"}}}
+\`\`\`
+
+## Output Schema
+
+\`\`\`json
+{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"score":{"type":"number"},"details":{"type":"string"}}}},"summary":{"type":"string"},"recommendations":{"type":"array","items":{"type":"string"}}}}
+\`\`\`
+
+## Example
+
+**Input:**
+\`\`\`json
+{"query":"example $desc query"}
+\`\`\`
+
+**Output:**
+\`\`\`json
+{"results":[{"item":"Example result","score":85,"details":"Detailed analysis of the result"}],"summary":"Analysis complete with actionable findings","recommendations":["First recommended action","Second recommended action"]}
+\`\`\`
 SKILL
         fi
     done
