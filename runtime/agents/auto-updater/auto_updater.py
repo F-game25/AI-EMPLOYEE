@@ -129,7 +129,7 @@ def _download_raw(repo_path: str, dest: Path, retries: int = 3) -> bool:
             with urllib.request.urlopen(req, timeout=30) as r:
                 data = r.read()
             if not data:
-                raise ValueError("downloaded file is empty")
+                raise ValueError(f"downloaded file is empty for {url} -> {dest}")
             dest.parent.mkdir(parents=True, exist_ok=True)
             tmp = dest.parent / f".{dest.name}.tmp"
             tmp.write_bytes(data)
