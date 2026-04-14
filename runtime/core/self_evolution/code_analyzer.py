@@ -49,6 +49,7 @@ class CodeAnalyzer:
         issues.extend(self._detect_failing_modules(py_files))
         issues.extend(self._detect_performance_bottlenecks(py_files))
         issues.extend(self._detect_missing_connections())
+        issues.extend(self._scan_runtime_health())
         uniq: dict[tuple[str, str, str], CodeIssue] = {}
         for issue in issues:
             uniq[(issue.file, issue.issue_type, issue.suggested_fix)] = issue
@@ -206,4 +207,68 @@ class CodeAnalyzer:
                         suggested_fix=f"Add required brain route '{route}'.",
                     )
                 )
+        return issues
+
+    def _scan_runtime_health(self) -> list[CodeIssue]:
+        """Translate live observability signals into CodeIssue entries.
+
+        Queries the anomaly detector for recent anomalies and the event stream
+        for recent ``error_detected`` events.  Each finding becomes a
+        ``CodeIssue`` with ``issue_type="runtime_failure"`` so the evolution
+        loop can generate a patch for it.
+        """
+        issues: list[CodeIssue] = []
+
+        # ── Anomaly detector ──────────────────────────────────────────────────
+        try:
+            from core.observability.anomaly_detector import get_anomaly_detector
+            for anomaly in get_anomaly_detector().recent(20):
+                severity = (anomaly.get("severity") or "high").lower()
+                anomaly_type = anomaly.get("type", "unknown_anomaly")
+                payload_str = str(anomaly.get("payload") or "")[:200]
+                issues.append(
+                    CodeIssue(
+                        file="runtime",
+                        issue_type="runtime_failure",
+                        severity=severity,
+                        suggested_fix=(
+                            f"Resolve runtime anomaly '{anomaly_type}': {payload_str}"
+                        ),
+                    )
+                )
+        except Exception:
+            pass
+
+        # ── Event stream: recent error_detected events ────────────────────────
+        try:
+            from core.observability.event_stream import get_event_stream
+            recent_events = get_event_stream().recent(100)
+            error_events = [
+                e for e in recent_events
+                if e.get("event_type") == "error_detected"
+            ]
+            # Group by anomaly type to avoid duplicate issues.
+            seen: set[str] = set()
+            for event in error_events:
+                payload = event.get("payload") or {}
+                anomaly = payload.get("anomaly") or {}
+                key = anomaly.get("type") or str(payload)[:60]
+                if key in seen:
+                    continue
+                seen.add(key)
+                severity = (anomaly.get("severity") or "high").lower()
+                detail = str(payload)[:200]
+                issues.append(
+                    CodeIssue(
+                        file="runtime",
+                        issue_type="runtime_failure",
+                        severity=severity,
+                        suggested_fix=(
+                            f"Fix runtime error event '{key}': {detail}"
+                        ),
+                    )
+                )
+        except Exception:
+            pass
+
         return issues

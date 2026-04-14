@@ -14,6 +14,8 @@ from core.self_evolution.safe_deployer import SafeDeployer
 
 EvolutionMode = Literal["OFF", "SAFE", "AUTO"]
 
+_ANOMALY_SEVERITIES_THAT_WAKE_LOOP: frozenset[str] = frozenset({"high", "critical"})
+
 
 class EvolutionController:
     """Continuous self-evolution loop with validation and safe deploy."""
@@ -32,6 +34,8 @@ class EvolutionController:
         self._cycle_interval_s = 10.0
         self._last_cycle_at: str | None = None
         self._last_result: dict[str, Any] | None = None
+        # Event used to wake the loop early on anomaly detection.
+        self._wake_event = threading.Event()
 
     @staticmethod
     def _detect_repo_root() -> Path:
@@ -64,6 +68,12 @@ class EvolutionController:
             self._running = True
             self._thread = threading.Thread(target=self._loop, name="evolution-controller", daemon=True)
             self._thread.start()
+        # Subscribe to the event stream so high-severity anomalies wake the loop.
+        try:
+            from core.observability.event_stream import get_event_stream
+            get_event_stream().subscribe(self._on_stream_event)
+        except Exception:
+            pass
 
     def stop(self) -> None:
         with self._lock:
@@ -117,7 +127,7 @@ class EvolutionController:
             diff_text=generated.diff,
             risk_level=generated.risk_level,
             evolution_mode=mode,
-            tester_gate_passed=True,
+            tester_gate_passed=validation.get("passed", False),
             manual_approved=manual_approved,
         )
         if deploy.get("deployed"):
@@ -162,6 +172,8 @@ class EvolutionController:
                 if not self._running:
                     return
             try:
+                # Poll anomaly detector; wake immediately on high/critical issues.
+                self._check_anomalies()
                 self.run_once(manual_approved=False)
             except Exception as exc:
                 self._last_result = {
@@ -170,7 +182,39 @@ class EvolutionController:
                     "traceback": traceback.format_exc(),
                     "at": self._ts(),
                 }
-            time.sleep(self._cycle_interval_s)
+            # Wait for the scheduled interval, but allow early wake-up.
+            self._wake_event.wait(timeout=self._cycle_interval_s)
+            self._wake_event.clear()
+
+    def _check_anomalies(self) -> None:
+        """Poll the anomaly detector and record any new findings."""
+        try:
+            from core.observability.anomaly_detector import get_anomaly_detector
+            anomalies = get_anomaly_detector().detect()
+            for anomaly in anomalies:
+                self._memory.record_outcome(
+                    issue={
+                        "file": "runtime",
+                        "issue_type": anomaly.get("type", "anomaly"),
+                        "severity": anomaly.get("severity", "high"),
+                        "suggested_fix": str(anomaly.get("payload", {})),
+                    },
+                    status="anomaly_detected",
+                    reward=0,
+                    detail=anomaly,
+                )
+        except Exception:
+            pass
+
+    def _on_stream_event(self, event: dict[str, Any]) -> None:
+        """Wake the evolution loop immediately on high-severity error events."""
+        if event.get("event_type") not in {"error_detected", "auto_debug"}:
+            return
+        payload = event.get("payload") or {}
+        anomaly = payload.get("anomaly") or {}
+        severity = (anomaly.get("severity") or payload.get("severity") or "").lower()
+        if severity in _ANOMALY_SEVERITIES_THAT_WAKE_LOOP:
+            self._wake_event.set()
 
     @staticmethod
     def _pick_issue(issues: list[dict[str, str]]) -> dict[str, str]:

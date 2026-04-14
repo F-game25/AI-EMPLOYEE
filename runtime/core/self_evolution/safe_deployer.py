@@ -10,9 +10,11 @@ from typing import Any
 from core.self_improvement.contracts import PatchArtifact
 from core.self_improvement.diff_policy import DiffPolicy
 
+_SMOKE_TEST_TIMEOUT_S = 60   # max seconds for post-deploy smoke test
+
 
 class SafeDeployer:
-    """Policy-aware deployer with backup and rollback."""
+    """Policy-aware deployer with backup, rollback, and post-deploy verification."""
 
     def __init__(self, repo_root: Path | None = None) -> None:
         self._repo_root = repo_root or self._detect_repo_root()
@@ -76,10 +78,23 @@ class SafeDeployer:
                 "reason": "git_apply_failed",
                 "stderr": (proc.stderr or "")[-1000:],
             }
+
+        # Post-deploy smoke test: lint + compileall on the patched files.
+        smoke = self._smoke_test(files)
+        if not smoke["ok"]:
+            self.rollback(backup_id)
+            return {
+                "deployed": False,
+                "reason": "post_deploy_smoke_failed",
+                "smoke": smoke,
+                "backup_id": backup_id,
+            }
+
         return {
             "deployed": True,
             "backup_id": backup_id,
             "files": files,
+            "smoke": smoke,
         }
 
     def rollback(self, backup_id: str) -> dict[str, Any]:
@@ -109,6 +124,48 @@ class SafeDeployer:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
         return backup_id
+
+    def _smoke_test(self, files: list[str]) -> dict[str, Any]:
+        """Run a quick post-deploy health check on *files*.
+
+        Runs ``python3 -m compileall`` on any patched Python files and
+        ``npm run lint`` for the whole project.  Returns ``{"ok": True}`` only
+        if all checks pass.
+        """
+        py_files = [f for f in files if f.endswith(".py")]
+        if py_files:
+            compile_result = self._run(
+                ["python3", "-m", "py_compile"] + [
+                    str(self._repo_root / f) for f in py_files
+                ],
+                timeout=_SMOKE_TEST_TIMEOUT_S,
+            )
+            if not compile_result["ok"]:
+                return {"ok": False, "stage": "py_compile", "detail": compile_result}
+
+        lint_result = self._run(["npm", "run", "lint"], timeout=_SMOKE_TEST_TIMEOUT_S)
+        if not lint_result["ok"]:
+            return {"ok": False, "stage": "lint", "detail": lint_result}
+
+        return {"ok": True}
+
+    def _run(self, cmd: list[str], timeout: int) -> dict[str, Any]:
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(self._repo_root),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            return {
+                "ok": proc.returncode == 0,
+                "returncode": proc.returncode,
+                "stdout": (proc.stdout or "")[-800:],
+                "stderr": (proc.stderr or "")[-800:],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     @staticmethod
     def _extract_files(diff_text: str) -> list[str]:
