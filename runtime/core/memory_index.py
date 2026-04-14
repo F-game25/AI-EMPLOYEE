@@ -73,7 +73,8 @@ def recency_score(last_used: str | None) -> float:
 class MemoryIndex:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or _state_path()
-        self._memories: list[dict[str, Any]] = self._load()
+        self._memories: list[dict[str, Any]] = []
+        self._memories = self._load()
 
     def _load(self) -> list[dict[str, Any]]:
         try:
