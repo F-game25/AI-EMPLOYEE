@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
+import { WS_URL as API_WS_URL } from '../config/api'
 
-const WS_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`
+const WS_URL = API_WS_URL
 
 // Module-level singleton to prevent duplicate connections
 let _wsInstance = null

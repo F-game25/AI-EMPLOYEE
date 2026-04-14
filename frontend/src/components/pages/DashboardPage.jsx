@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import { sendChatMessage } from '../../hooks/useWebSocket'
 import PageHeader from '../layout/PageHeader'
+import { API_URL } from '../../config/api'
 
 const STATUS_CONFIG = {
   running: { color: 'var(--success)', label: 'Active', dot: 'dashboard-status-dot--active' },
@@ -189,7 +190,7 @@ export default function DashboardPage() {
   const brainInsights = useAppStore(s => s.brainInsights)
   const objectivePanels = useAppStore(s => s.objectivePanels)
 
-  const BASE = window.location.origin
+  const BASE = API_URL
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })

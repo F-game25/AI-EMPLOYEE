@@ -2,8 +2,9 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import PageHeader from '../layout/PageHeader'
+import { API_URL } from '../../config/api'
 
-const BASE = window.location.origin
+const BASE = API_URL
 
 const MODE_CONFIG = {
   OFF: { color: 'var(--text-muted)', bg: 'rgba(102,102,112,0.1)', label: 'System Off' },

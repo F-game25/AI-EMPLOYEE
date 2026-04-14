@@ -2,8 +2,9 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import PageHeader from '../layout/PageHeader'
+import { API_URL } from '../../config/api'
 
-const BASE = window.location.origin
+const BASE = API_URL
 
 const SUBSYSTEM_TAG = {
   orchestrator: { label: 'ORCHESTRATOR', color: 'var(--gold)' },
