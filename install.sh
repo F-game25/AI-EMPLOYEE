@@ -244,7 +244,7 @@ wizard() {
         AI_EMPLOYEE_MODE="starter"
         AUTO_INSTALL_OPENCLAW="1"
         AUTO_INSTALL_DOCKER="0"
-        TZ=$(cat /etc/timezone 2>/dev/null || echo "UTC")
+        TZ=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
         TOKEN=$(openssl rand -hex 32)
         ok "Zero-config defaults set (5 agents, Starter mode, local Ollama)"
         ok "Phone: not set — run 'ai-employee setup-phone' to configure WhatsApp"
@@ -444,7 +444,7 @@ wizard() {
 
     # 11) Timezone
     local default_tz
-    default_tz=$(cat /etc/timezone 2>/dev/null || echo "UTC")
+    default_tz=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
     echo ""
     ask "Timezone [default: $default_tz]:"
     read -r TZ_INPUT < "$tty_in"
