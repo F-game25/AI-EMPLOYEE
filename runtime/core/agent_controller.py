@@ -12,6 +12,7 @@ from core.brain_registry import brain
 from core.contracts import TaskGraph, TaskNode
 from core.knowledge_store import get_knowledge_store
 from core.learning_engine import get_learning_engine
+from core.memory_index import get_memory_index
 from core.research_agent import ResearchAgent
 from core.executor import Executor
 from core.planner import Planner
@@ -157,6 +158,7 @@ class AgentController:
         try:
             get_knowledge_store().learn_from_conversation(text)
             get_learning_engine().add_conversation_message(role="user", message=text)
+            get_memory_index().add_memory(text, importance=0.7)
         except Exception:
             logging.getLogger(__name__).debug("conversation learning failed", exc_info=True)
             return
