@@ -49,7 +49,9 @@ function NeuralNetworkSection() {
         const res = await fetch(`${BASE}/api/brain/status`, { signal: controller.signal })
         const data = await res.json()
         if (data) useAppStore.getState().setNnStatus(data)
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.error('Failed to fetch neural status', e)
+      }
     }
     fetchStatus()
     const i = setInterval(fetchStatus, 5000)
@@ -160,7 +162,9 @@ function SelfImprovementSection() {
         const res = await fetch(`${BASE}/api/self-improvement/status`, { signal: controller.signal })
         const data = await res.json()
         if (data) useAppStore.getState().setSelfImprovement(data)
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.error('Failed to fetch self-improvement status', e)
+      }
     }
     fetchSI()
     const i = setInterval(fetchSI, 8000)
@@ -212,14 +216,18 @@ export default function SystemPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: newMode }),
       })
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error('Failed to set system mode', e)
+    }
     setModeLoading(false)
   }, [])
 
   const emergencyStop = useCallback(async () => {
     try {
       await fetch(`${BASE}/api/autonomy/emergency-stop`, { method: 'POST' })
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error('Failed to send emergency stop', e)
+    }
   }, [])
 
   const setEvolutionMode = useCallback(async (mode) => {
