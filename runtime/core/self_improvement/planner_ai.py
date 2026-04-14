@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from core.knowledge_store import get_knowledge_store
 from core.self_improvement.contracts import ImprovementPlan, ImprovementTask, RiskLevel
 
 
@@ -89,6 +90,9 @@ class PlannerAI:
 
         # ── 5. Consult strategy store for historical insights ─────────────
         learning = self._consult_memory(task)
+        context = self._knowledge_context(task)
+        if isinstance(task.brain_strategy, dict):
+            task.brain_strategy["knowledge_context"] = context
 
         # ── 6. Estimate scope ─────────────────────────────────────────────
         estimated_lines = self._estimate_lines(task.description, risk)
@@ -97,7 +101,7 @@ class PlannerAI:
             task_id=task.task_id,
             what=task.description,
             where=targets,
-            why=self._build_why(task, learning),
+            why=self._build_why(task, learning, context),
             acceptance_criteria=criteria,
             risk_level=risk,
             estimated_lines=estimated_lines,
@@ -158,7 +162,7 @@ class PlannerAI:
         except Exception:
             return {"insight": "No prior data", "success_rate": 0.0}
 
-    def _build_why(self, task: ImprovementTask, learning: dict) -> str:
+    def _build_why(self, task: ImprovementTask, learning: dict, context: str) -> str:
         """Build a human-readable 'why' explanation."""
         parts = [f"Improvement target: {task.description}"]
         rate = learning.get("success_rate", 0.0)
@@ -167,7 +171,19 @@ class PlannerAI:
         promote = learning.get("promote_agents", [])
         if promote:
             parts.append(f"Recommended approaches: {', '.join(promote)}")
+        if context:
+            parts.append(
+                "You have learned the following relevant knowledge: "
+                f"{context}. Use this to improve your decision."
+            )
         return ". ".join(parts) + "."
+
+    @staticmethod
+    def _knowledge_context(task: ImprovementTask) -> str:
+        try:
+            return get_knowledge_store().get_relevant_context(task.description)
+        except Exception:
+            return ""
 
     def _estimate_lines(self, description: str, risk: RiskLevel) -> int:
         """Rough estimate of lines that will be changed."""
