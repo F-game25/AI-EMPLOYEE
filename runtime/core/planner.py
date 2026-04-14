@@ -56,7 +56,8 @@ class Planner:
         if best_strategies:
             first = best_strategies[0] or {}
             cfg = first.get("config", {}) if isinstance(first, dict) else {}
-            strategy_hint = str(cfg.get("strategy_used") or f"{self.classify_goal(goal)}:{first.get('agent', 'problem-solver')}")
+            fallback_strategy = f"{self.classify_goal(goal)}:{first.get('agent', 'problem-solver')}"
+            strategy_hint = str(cfg.get("strategy_used") or fallback_strategy)
             reason_hint = str(cfg.get("memory_usage_reason") or f"Based on previous similar tasks, strategy {strategy_hint} performed best because it produced stronger outcomes in this context.")
         prompt = (
             "You have learned the following relevant context:\n"
