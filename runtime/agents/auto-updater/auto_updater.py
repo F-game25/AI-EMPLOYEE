@@ -222,6 +222,36 @@ def _changed_files(base_sha: str, head_sha: str) -> "list | None":
         return [f["filename"] for f in data.get("files", [])]
     return None
 
+
+def _runtime_files_at_sha(sha: str) -> "list | None":
+    """Return all runtime/* file paths for the given commit SHA.
+
+    Used as a safety fallback when GitHub compare results are likely truncated
+    (compare API caps file lists at ~300 entries).
+    """
+    commit = _gh_get(f"{API_BASE}/commits/{sha}", label="commit metadata")
+    if not isinstance(commit, dict):
+        return None
+    tree_sha = (((commit.get("commit") or {}).get("tree") or {}).get("sha") or "").strip()
+    if not tree_sha:
+        return None
+    tree = _gh_get(f"{API_BASE}/git/trees/{tree_sha}?recursive=1", label="repository tree")
+    if not isinstance(tree, dict):
+        return None
+    items = tree.get("tree")
+    if not isinstance(items, list):
+        return None
+    runtime_files: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "blob":
+            continue
+        path = item.get("path")
+        if isinstance(path, str) and path.startswith("runtime/"):
+            runtime_files.append(path)
+    return runtime_files
+
 # ── File mapping ──────────────────────────────────────────────────────────────
 # Never overwrite these — they contain user data or secrets
 _SKIP_PREFIXES = ("runtime/config/", "runtime/state/")
@@ -376,6 +406,20 @@ def check_and_update(force: bool = False, progress_cb=None) -> dict:
         state["status"] = "check_failed"
         _save_state(state)
         return state
+
+    # GitHub compare API returns at most 300 changed files. For large updates,
+    # use a conservative full runtime sync to avoid silently missing UI changes.
+    if len(changed) >= 300:
+        logger.warning(
+            "Compare API returned %d files (likely capped). Falling back to full runtime sync.",
+            len(changed),
+        )
+        runtime_files = _runtime_files_at_sha(remote_sha)
+        if runtime_files:
+            changed = sorted(set(changed).union(runtime_files))
+            logger.info("Fallback added %d runtime file(s) for safe update coverage", len(runtime_files))
+        else:
+            logger.warning("Runtime fallback file listing failed — proceeding with compare API result only")
 
     if not changed:
         logger.info("No files changed between %s and %s — recording new SHA", local_sha[:8], remote_sha[:8])
