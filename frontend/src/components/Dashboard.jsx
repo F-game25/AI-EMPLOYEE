@@ -51,7 +51,8 @@ export default function Dashboard() {
           runs: dashData.workflow_runs,
         })
       }
-    } catch {
+    } catch (e) {
+      console.error('Failed to refresh dashboard', e)
       setAutomationStatus('Unable to refresh dashboard data.')
     }
   }, [setAutomationStatus, setProductMetrics, setBrainInsights, setWorkflowSnapshot])
@@ -71,7 +72,8 @@ export default function Dashboard() {
       if (statusData) setBrainStatus(statusData)
       if (insightsData) setBrainInsights(insightsData)
       if (activityData) setBrainActivity(activityData)
-    } catch {
+    } catch (e) {
+      console.error('Failed to refresh brain runtime', e)
       // Keep current state; WebSocket updates continue in real time.
     }
   }, [setBrainActivity, setBrainInsights, setBrainStatus])

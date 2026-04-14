@@ -27,7 +27,9 @@ export default function SystemModeToggle() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: nextMode }),
       })
-    } catch { /* handled by next WS update */ }
+    } catch (e) {
+      console.error('Failed to set autonomy mode', e)
+    }
     setBusy(false)
   }, [])
 
@@ -35,7 +37,9 @@ export default function SystemModeToggle() {
     setBusy(true)
     try {
       await fetch(`${API_BASE}/api/autonomy/emergency-stop`, { method: 'POST' })
-    } catch { /* handled by next WS update */ }
+    } catch (e) {
+      console.error('Failed to trigger emergency stop', e)
+    }
     setBusy(false)
   }, [])
 
