@@ -96,7 +96,9 @@ function connectSingleton() {
           if (data?.system) store.setObjectivePanel(data.system, data)
           break
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.error('[ws] message handling failed', e)
+    }
   }
 
   ws.onclose = () => {

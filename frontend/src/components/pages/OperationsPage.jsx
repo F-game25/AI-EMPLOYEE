@@ -135,7 +135,8 @@ export default function OperationsPage() {
       })
       const data = await res.json()
       setAutomationStatus(data.message || data.reason || `Automation ${action}: ${data.status || 'ok'}`)
-    } catch {
+    } catch (e) {
+      console.error(`Automation ${action} failed`, e)
       setAutomationStatus(`Automation ${action} failed.`)
     } finally {
       setRunning(false)
@@ -154,7 +155,8 @@ export default function OperationsPage() {
       })
       const data = await res.json()
       setAutomationStatus(`${data.pipeline || 'Pipeline'} run ${data.status || 'queued'}.`)
-    } catch {
+    } catch (e) {
+      console.error(`${kind} pipeline failed`, e)
       setAutomationStatus(`${kind} pipeline failed.`)
     } finally {
       setRunning(false)

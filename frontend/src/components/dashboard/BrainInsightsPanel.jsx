@@ -28,6 +28,7 @@ export default function BrainInsightsPanel() {
         setError('')
       } catch (e) {
         if (cancelled) return
+        console.error('Failed to load brain insights', e)
         setInsights(storeInsights || {})
         setError('Brain insights unavailable')
       } finally {

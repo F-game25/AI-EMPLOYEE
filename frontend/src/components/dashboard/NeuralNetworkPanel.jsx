@@ -71,6 +71,7 @@ export default function NeuralNetworkPanel() {
         setError('')
       } catch (e) {
         if (cancelled) return
+        console.error('Failed to load brain status', e)
         setError('Unable to load brain status')
       } finally {
         if (!cancelled) setLoading(false)
