@@ -6,11 +6,16 @@ cd "$(dirname "$0")"
 
 echo "Starting AI Employee..."
 
+if ! python3 -c "import fastapi, uvicorn" >/dev/null 2>&1; then
+  echo "Installing backend dependencies (fastapi, uvicorn)..."
+  python3 -m pip install --user fastapi "uvicorn[standard]"
+fi
+
 python3 runtime/core/startup.py --preflight
 
 # Step 1: Backend
 echo "[1/3] Starting backend..."
-uvicorn app.main:app --app-dir runtime/bots/problem-solver-ui --host 127.0.0.1 --port 8787 &
+PYTHONPATH="runtime:${PYTHONPATH:-}" python3 -m uvicorn app.main:app --app-dir runtime/bots/problem-solver-ui --host 127.0.0.1 --port 8787 &
 BACKEND_PID=$!
 
 # Step 2: Worker pool
@@ -22,7 +27,7 @@ WORKER_PID=$!
 echo "[3/3] Checking system..."
 sleep 2
 
-if curl -s http://127.0.0.1:8787/health > /dev/null && curl -s http://127.0.0.1:8787/ > /dev/null; then
+if curl -fsS http://127.0.0.1:8787/health > /dev/null && curl -fsS http://127.0.0.1:8787/ > /dev/null; then
   echo "✅ System running at http://localhost:8787"
 else
   echo "❌ Backend failed to start"

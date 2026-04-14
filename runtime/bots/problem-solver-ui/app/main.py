@@ -16,7 +16,7 @@ from app.state import store
 from app.websocket import router as ws_router
 
 APP_DIR = Path(__file__).resolve().parent
-REPO_ROOT = APP_DIR.parents[4]
+REPO_ROOT = APP_DIR.parents[3]
 LOCAL_FRONTEND_DIR = APP_DIR.parent / "frontend"
 REPO_FRONTEND_DIR = REPO_ROOT / "frontend"
 
@@ -55,6 +55,7 @@ def _ensure_frontend_build(static_dir: Path) -> None:
 
 STATIC_DIR = str(_resolve_static_dir())
 INDEX_FILE = os.path.join(STATIC_DIR, "index.html")
+os.makedirs(STATIC_DIR, exist_ok=True)
 
 app = FastAPI(title="AI Employee Dashboard API", version="1.0.0")
 
@@ -75,7 +76,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR, check_dir=False), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.middleware("http")

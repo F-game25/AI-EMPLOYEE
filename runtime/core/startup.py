@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import signal
@@ -54,6 +55,11 @@ def check_env_variables() -> None:
     configured_port = os.environ.get("PROBLEM_SOLVER_UI_PORT")
     if configured_port and configured_port != str(UI_PORT):
         _fail(f"PROBLEM_SOLVER_UI_PORT must be {UI_PORT}, got {configured_port}")
+    try:
+        __import__("fastapi")
+        __import__("uvicorn")
+    except Exception as exc:
+        _fail(f"Missing backend dependency: {exc}")
     _ok("Environment variables OK")
 
 
@@ -99,6 +105,10 @@ def start_worker_pool() -> subprocess.Popen[str]:
 
 
 def start_server() -> subprocess.Popen[str]:
+    env = os.environ.copy()
+    current_pythonpath = env.get("PYTHONPATH", "")
+    runtime_path = str(REPO_ROOT / "runtime")
+    env["PYTHONPATH"] = f"{runtime_path}:{current_pythonpath}" if current_pythonpath else runtime_path
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -113,6 +123,7 @@ def start_server() -> subprocess.Popen[str]:
             str(UI_PORT),
         ],
         text=True,
+        env=env,
     )
     time.sleep(1.0)
     if proc.poll() is not None:
@@ -126,8 +137,8 @@ def verify_ui_access(timeout: float = 15.0) -> None:
     while time.time() < deadline:
         try:
             with urlopen(f"http://{UI_HOST}:{UI_PORT}/health", timeout=1.0) as resp:
-                body = resp.read().decode("utf-8")
-                if '"status":"ok"' not in body.replace(" ", ""):
+                body = json.loads(resp.read().decode("utf-8"))
+                if body.get("status") != "ok":
                     raise RuntimeError("/health response invalid")
             with urlopen(f"http://{UI_HOST}:{UI_PORT}/", timeout=1.0) as resp:
                 if resp.status != 200:
