@@ -469,7 +469,8 @@ export default function NeuralBrainPage() {
   const topMemories = brainInsights?.top_memories || []
   const learningPanel = brainInsights?.learning_panel || {}
   const memoryUsed = lastDecision?.memory_used || lastDecision?.relevant_memory || {}
-  const memoryUsedCount = (memoryUsed?.short_term?.length || 0) + (memoryUsed?.long_term?.length || 0) + (memoryUsed?.episodic?.length || 0)
+  const memoryUsedCount = ['short_term', 'long_term', 'episodic']
+    .reduce((total, key) => total + (memoryUsed?.[key]?.length || 0), 0)
   const bestStrategies = learningPanel?.best_performing_strategies || brainInsights?.learned_strategies || []
   const worstStrategies = learningPanel?.worst_performing_strategies || []
   const rewardTrends = learningPanel?.reward_trends || []

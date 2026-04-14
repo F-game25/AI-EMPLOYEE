@@ -141,8 +141,9 @@ class BrainRegistry:
         return min(1.0, 0.4 + (hits * 0.2))
 
     def _agent_success_rate(self, agent: str) -> float:
-        learned = get_learning_engine().agent_success_rate(agent)
-        if learned > 0:
+        learning_engine = get_learning_engine()
+        learned = learning_engine.agent_success_rate(agent)
+        if learning_engine.has_agent_stats(agent):
             return round(learned, 3)
         try:
             from memory.strategy_store import get_strategy_store
@@ -251,9 +252,9 @@ class BrainRegistry:
         if result.status == "success":
             return 1.0
         output = result.output if isinstance(result.output, dict) else {}
-        if output.get("usable") is True or output.get("partial") is True:
+        if output.get("usable") or output.get("partial"):
             return 0.5
-        if output.get("neutral") is True:
+        if output.get("neutral"):
             return 0.0
         return -1.0
 

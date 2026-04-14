@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import time
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +95,9 @@ class LearningEngine:
         row = self._state.get("agent_stats", {}).get(agent, {})
         return float(row.get("success_rate", 0.5))
 
+    def has_agent_stats(self, agent: str) -> bool:
+        return agent in self._state.get("agent_stats", {})
+
     def search_memory(self, query: str, *, top_k: int = 5) -> dict[str, list[dict[str, Any]]]:
         q = (query or "").strip()
         if not q:
@@ -148,8 +152,9 @@ class LearningEngine:
                 },
             )
             strat["use_count"] = int(strat.get("use_count", 0)) + 1
+            reward_success = (reward + 1.0) / 2.0
             prior_successes = float(strat.get("success_rate", 0.5)) * (strat["use_count"] - 1)
-            strat["success_rate"] = round((prior_successes + (1.0 if reward > 0 else 0.0)) / strat["use_count"], 4)
+            strat["success_rate"] = round((prior_successes + reward_success) / strat["use_count"], 4)
             strat["avg_reward"] = round(_running_avg(float(strat.get("avg_reward", 0.0)), strat["use_count"], reward), 4)
             contexts = list(strat.get("contexts_used_in", []))
             for token in _tokens(task_input):
@@ -162,14 +167,15 @@ class LearningEngine:
             agent = agents.setdefault(chosen_agent, {"use_count": 0, "success_rate": 0.5, "avg_reward": 0.0, "updated_at": None})
             agent["use_count"] = int(agent.get("use_count", 0)) + 1
             prior_agent_successes = float(agent.get("success_rate", 0.5)) * (agent["use_count"] - 1)
-            agent["success_rate"] = round((prior_agent_successes + (1.0 if reward > 0 else 0.0)) / agent["use_count"], 4)
+            agent["success_rate"] = round((prior_agent_successes + reward_success) / agent["use_count"], 4)
             agent["avg_reward"] = round(_running_avg(float(agent.get("avg_reward", 0.0)), agent["use_count"], reward), 4)
             agent["updated_at"] = _ts()
 
             episodic = self._state.setdefault("episodic_memory", [])
+            row_seed = f"{task_input}|{strategy_used}|{_ts()}".encode("utf-8")
             episodic.append(
                 {
-                    "id": f"ep-{abs(hash((task_input, strategy_used, _ts()))) % 10_000_000}",
+                    "id": f"ep-{hashlib.sha1(row_seed).hexdigest()[:12]}",
                     "ts": _ts(),
                     "task_input": task_input,
                     "chosen_agent": chosen_agent,
