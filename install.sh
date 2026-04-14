@@ -358,6 +358,20 @@ wizard() {
         info "Trading bot path: skipped"
     fi
 
+    # 5b) Trading bot risk disclosure
+    echo ""
+    echo -e "${Y}⚠ RISK NOTICE:${NC} This system includes trading bots (polymarket-trader, arbitrage-bot)."
+    echo "  • All trading bots default to PAPER/SIMULATION mode (no real money)."
+    echo "  • To enable live trading, you must manually set LIVE_TRADING=true in the config."
+    echo "  • Trading involves risk of financial loss. Use at your own discretion."
+    ask "I understand trading bots are in paper mode by default [Y/n]:"
+    read -r TRADING_ACK < "$tty_in"
+    TRADING_ACK="${TRADING_ACK:-y}"
+    if [[ "$TRADING_ACK" =~ ^[Nn] ]]; then
+        warn "Trading bots will still be installed in paper mode. No real money will be used."
+    fi
+    ok "Trading bots: paper/simulation mode (default)"
+
     # 6) Hourly status reports
     echo ""
     ask "Enable hourly WhatsApp status updates? [Y/n]:"

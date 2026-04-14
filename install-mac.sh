@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="$SCRIPT_DIR/runtime"
 START_TIME=$(date +%s)
 CONFIG_FILES_UPDATED=0
-CLAUDE_MODEL="claude-opus-4-5"
+CLAUDE_MODEL="claude-sonnet-4-5-20251022"
 OLLAMA_HOST="http://localhost:11434"
 OLLAMA_MODEL="llama3.2"
 
@@ -26,7 +26,7 @@ banner() {
 cat << 'EOF'
 ╔══════════════════════════════════════════════════════╗
 ║      AI EMPLOYEE - v4.0 INSTALLER  (macOS)           ║
-║  35 Agents • Claude AI • Ollama Local • WhatsApp     ║
+║  Claude AI • Ollama Local • WhatsApp                 ║
 ╚══════════════════════════════════════════════════════╝
 EOF
 }
@@ -96,6 +96,13 @@ Install them with:
     fi
 
     ok "Requirements checked"
+
+    # Ensure Homebrew is on PATH for all subsequent operations (Apple Silicon vs Intel)
+    if [[ -f "/opt/homebrew/bin/brew" ]]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [[ -f "/usr/local/bin/brew" ]]; then
+        eval "$(/usr/local/bin/brew shellenv)"
+    fi
 }
 
 # ─── OpenClaw ─────────────────────────────────────────────────────────────────
@@ -348,16 +355,12 @@ wizard() {
         ok "Status reports: disabled"
     fi
 
-    # 7) UI ports
+    # 7) UI port (single unified port)
     echo ""
-    ask "Dashboard port [default: 3000]:"
-    read -r DASHBOARD_PORT_INPUT < "$tty_in"
-    DASHBOARD_PORT="${DASHBOARD_PORT_INPUT:-3000}"
-
     ask "Problem Solver UI port [default: 8787]:"
     read -r UI_PORT_INPUT < "$tty_in"
     UI_PORT="${UI_PORT_INPUT:-8787}"
-    ok "Ports: dashboard=$DASHBOARD_PORT, ui=$UI_PORT"
+    ok "UI port: $UI_PORT"
 
     # 8) Number of workers
     echo ""
@@ -368,6 +371,15 @@ wizard() {
     if (( WORKERS > 35 )); then warn "Maximum is 35; clamping to 35"; WORKERS=35; fi
     if (( WORKERS < 1  )); then warn "Minimum is 1; clamping to 1";  WORKERS=1;  fi
     ok "Workers: $WORKERS enabled"
+
+    # 9) Timezone
+    local default_tz
+    default_tz=$(cat /etc/timezone 2>/dev/null || echo "UTC")
+    echo ""
+    ask "Timezone [default: $default_tz]:"
+    read -r TZ_INPUT < "$tty_in"
+    TZ="${TZ_INPUT:-$default_tz}"
+    ok "Timezone: $TZ"
 
     TOKEN=$(openssl rand -hex 32)
     ok "Wizard complete"
@@ -380,9 +392,10 @@ setup_directories() {
 
     mkdir -p "$AI_HOME"/{workspace,credentials,downloads,logs,ui,backups,bin,run,agents,config,state,improvements}
 
-    for a in orchestrator lead-hunter content-master social-guru intel-agent product-scout \
-              email-ninja support-bot data-analyst creative-studio crypto-trader bot-dev web-sales \
-              company-builder memecoin-creator hr-manager finance-wizard brand-strategist growth-hacker project-manager; do
+    for a in task-orchestrator lead-generator social-media-manager web-researcher lead-hunter-elite \
+              cold-outreach-assassin newsletter-bot signal-community ad-campaign-wizard \
+              ecom-agent arbitrage-bot hr-manager finance-wizard brand-strategist growth-hacker project-manager \
+              company-builder creator-agency faceless-video recruiter; do
         mkdir -p "$AI_HOME/workspace-$a/skills"
     done
 
@@ -398,7 +411,7 @@ install_runtime() {
     local src="$RUNTIME_DIR"
 
     if [[ ! -d "$src" ]]; then
-        log "Runtime dir not found locally. Downloading from GitHub..."
+        log "Runtime dir not found locally — downloading from GitHub..."
         local TMP_RUNTIME
         TMP_RUNTIME=$(mktemp -d)
         local BASE_URL="https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main"
@@ -406,8 +419,17 @@ install_runtime() {
         dl() {
             local rel="$1"
             mkdir -p "$TMP_RUNTIME/$(dirname "$rel")"
-            curl -fsSL "$BASE_URL/runtime/$rel" -o "$TMP_RUNTIME/$rel" || warn "Could not download $rel"
+            curl -fsSL "$BASE_URL/runtime/$rel" -o "$TMP_RUNTIME/$rel" \
+                || { echo "FATAL: could not download $rel"; exit 1; }
+            if [[ ! -s "$TMP_RUNTIME/$rel" ]]; then
+                echo "FATAL: downloaded $rel is empty"; exit 1
+            fi
         }
+    else
+        log "Using local runtime from $src"
+    fi
+
+    if [[ ! -d "$src" ]]; then
 
         dl "bin/ai-employee"
         # Core agents
@@ -439,6 +461,7 @@ install_runtime() {
         dl "agents/agent_selftest.py"
         # AI providers
         dl "agents/ai-router/ai_router.py"
+        dl "agents/ai-router/run.sh"
         dl "agents/ollama-agent/run.sh"
         dl "agents/ollama-agent/ollama_agent.py"
         dl "agents/ollama-agent/requirements.txt"
@@ -482,9 +505,7 @@ install_runtime() {
         dl "agents/whatsapp-webhook/run.sh"
         dl "agents/whatsapp-webhook/webhook_server.py"
         dl "agents/whatsapp-webhook/requirements.txt"
-        # Research & data agents
-        dl "agents/mirofish-researcher/run.sh"
-        dl "agents/mirofish-researcher/researcher.py"
+        # Web researcher (mirofish-researcher removed — external dependency not bundled)
         dl "agents/web-researcher/run.sh"
         dl "agents/web-researcher/web_researcher.py"
         dl "agents/web-researcher/requirements.txt"
@@ -616,9 +637,7 @@ install_runtime() {
         dl "agents/arbitrage-bot/run.sh"
         dl "agents/arbitrage-bot/arbitrage_bot.py"
         dl "agents/arbitrage-bot/requirements.txt"
-        dl "agents/memecoin-creator/run.sh"
-        dl "agents/memecoin-creator/memecoin_creator.py"
-        dl "agents/memecoin-creator/requirements.txt"
+        # memecoin-creator removed — reputational/legal risk for enterprise use
         dl "agents/partnership-matchmaker/run.sh"
         dl "agents/partnership-matchmaker/partnership_matchmaker.py"
         dl "agents/partnership-matchmaker/requirements.txt"
@@ -728,31 +747,31 @@ install_runtime() {
         fi
     done
 
-    # Python deps for UI bot
+    # Python deps for UI bot (critical — must succeed)
     local req="$AI_HOME/agents/problem-solver-ui/requirements.txt"
     if [[ -f "$req" ]]; then
         if command -v pip3 >/dev/null 2>&1; then
-            pip3 install --user -q -r "$req" 2>/dev/null \
+            pip3 install --user -q -r "$req" \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip3 install failed — run.sh will auto-retry on first start."
+                || err "pip3 install failed for core UI bot. Fix pip and re-run installer."
         elif command -v pip >/dev/null 2>&1; then
-            pip install --user -q -r "$req" 2>/dev/null \
+            pip install --user -q -r "$req" \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip install failed — run.sh will auto-retry on first start."
+                || err "pip install failed for core UI bot. Fix pip and re-run installer."
         elif command -v python3 >/dev/null 2>&1; then
-            python3 -m pip install --user -q -r "$req" 2>/dev/null \
+            python3 -m pip install --user -q -r "$req" \
                 && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip install failed — run.sh will auto-retry on first start."
+                || err "pip install failed for core UI bot. Fix pip and re-run installer."
         else
-            warn "pip not found — run.sh will install deps on first start."
+            warn "pip not found — install manually: pip3 install fastapi uvicorn"
         fi
     fi
 
     # Python deps for ai-router (requests is needed for Ollama calls)
     if command -v pip3 >/dev/null 2>&1; then
-        pip3 install --user -q "requests>=2.31.0" 2>/dev/null \
+        pip3 install --user -q "requests>=2.31.0" \
             && ok "Python deps (requests) installed for AI router" \
-            || warn "pip3 install requests failed"
+            || warn "pip3 install requests failed — install manually: pip3 install requests"
     fi
 
     ok "Runtime files installed"
@@ -777,13 +796,17 @@ EOF
       # Append model from installer variable
       echo "CLAUDE_MODEL=$CLAUDE_MODEL" >> "$AI_HOME/config/claude-agent.env"
       echo "CLAUDE_MAX_TOKENS=4096" >> "$AI_HOME/config/claude-agent.env"
+      # Write API key so the agent can authenticate independently
+      if [[ -n "${ANTHROPIC_KEY:-}" ]]; then
+          echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY" >> "$AI_HOME/config/claude-agent.env"
+      fi
       chmod 600 "$AI_HOME/config/claude-agent.env"
     fi
 
     log "Installing Python deps for Claude Agent (best-effort)..."
     local req="$AI_HOME/agents/claude-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
-      pip3 install --user -q -r "$req" 2>/dev/null \
+      pip3 install --user -q -r "$req" \
         || warn "pip install failed; run manually: pip3 install --user anthropic fastapi uvicorn"
     else
       [[ ! -f "$req" ]] && warn "requirements.txt not found; run manually: pip3 install --user anthropic fastapi uvicorn"
@@ -819,7 +842,7 @@ EOF
     log "Installing Python deps for Ollama Agent (best-effort)..."
     local req="$AI_HOME/agents/ollama-agent/requirements.txt"
     if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
-      pip3 install --user -q -r "$req" 2>/dev/null \
+      pip3 install --user -q -r "$req" \
         || warn "pip install failed; run manually: pip3 install --user fastapi uvicorn requests"
     else
       [[ ! -f "$req" ]] && warn "requirements.txt not found; run manually: pip3 install --user fastapi uvicorn requests"
@@ -910,36 +933,59 @@ generate_configs() {
         if [[ -f "$template" ]]; then
             cp "$template" "$AI_HOME/config.json"
         else
-            # Minimal fallback
+            # Minimal fallback — unified on port 8787
             cat > "$AI_HOME/config.json" << 'CFG_END'
 {
   "gateway": {
     "mode": "local",
     "bind": "loopback",
-    "port": 18789,
-    "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
-    "controlUi": { "enabled": true, "port": 18789 }
+    "port": 8787,
+    "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" }
   },
   "channels": {
-    "whatsapp": { "dmPolicy": "allowlist", "allowFrom": ["PHONE_PLACEHOLDER"] }
+    "whatsapp": { "dmPolicy": "allowlist", "allowFrom": [PHONE_JSON_PLACEHOLDER] }
   },
   "cron": { "enabled": true },
   "discovery": { "mdns": { "mode": "off" } }
 }
 CFG_END
         fi
-        sed -i.bak \
-            -e "s|TOKEN_PLACEHOLDER|$TOKEN|g" \
-            -e "s|AI_HOME_PLACEHOLDER|$AI_HOME|g" \
-            -e "s|PHONE_PLACEHOLDER|$PHONE|g" \
-            -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" \
-            "$AI_HOME/config.json"
-        rm -f "$AI_HOME/config.json.bak"
+
+        # Build phone placeholder value: empty array or quoted phone
+        local phone_json
+        if [[ -n "${PHONE:-}" ]]; then
+            phone_json="\"$PHONE\""
+        else
+            phone_json=""
+        fi
+
+        # Cross-platform inline substitution
+        perl -pi -e "s|TOKEN_PLACEHOLDER|$TOKEN|g" "$AI_HOME/config.json"
+        perl -pi -e "s|AI_HOME_PLACEHOLDER|$AI_HOME|g" "$AI_HOME/config.json"
+        perl -pi -e "s|PHONE_JSON_PLACEHOLDER|$phone_json|g" "$AI_HOME/config.json"
+        perl -pi -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" "$AI_HOME/config.json"
         chmod 600 "$AI_HOME/config.json"
+
+        # Validate the generated JSON
+        if command -v python3 >/dev/null 2>&1; then
+            python3 -m json.tool "$AI_HOME/config.json" >/dev/null 2>&1 \
+                || warn "config.json may contain invalid JSON — check manually"
+        fi
         ok "OpenClaw config.json created"
     else
         # Existing config: patch gateway.mode=local if missing (fixes old installs)
-        if ! grep -q '"mode".*"local"' "$AI_HOME/config.json" 2>/dev/null; then
+        local mode_ok=0
+        if command -v python3 >/dev/null 2>&1; then
+            python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+sys.exit(0 if d.get('gateway',{}).get('mode')=='local' else 1)
+" "$AI_HOME/config.json" 2>/dev/null && mode_ok=1
+        else
+            grep -q '"mode".*"local"' "$AI_HOME/config.json" 2>/dev/null && mode_ok=1
+        fi
+
+        if [[ "$mode_ok" -eq 0 ]]; then
             warn "Existing config.json missing gateway.mode=local — backing up and replacing"
             cp "$AI_HOME/config.json" "$AI_HOME/config.json.bak.$(date +%s)"
             if [[ -f "$template" ]]; then
@@ -950,25 +996,29 @@ CFG_END
   "gateway": {
     "mode": "local",
     "bind": "loopback",
-    "port": 18789,
-    "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" },
-    "controlUi": { "enabled": true, "port": 18789 }
+    "port": 8787,
+    "auth": { "mode": "token", "token": "TOKEN_PLACEHOLDER" }
   },
   "channels": {
-    "whatsapp": { "dmPolicy": "allowlist", "allowFrom": ["PHONE_PLACEHOLDER"] }
+    "whatsapp": { "dmPolicy": "allowlist", "allowFrom": [PHONE_JSON_PLACEHOLDER] }
   },
   "cron": { "enabled": true },
   "discovery": { "mdns": { "mode": "off" } }
 }
 CFG_END
             fi
-            sed -i.bak \
-                -e "s|TOKEN_PLACEHOLDER|$TOKEN|g" \
-                -e "s|AI_HOME_PLACEHOLDER|$AI_HOME|g" \
-                -e "s|PHONE_PLACEHOLDER|$PHONE|g" \
-                -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" \
-                "$AI_HOME/config.json"
-            rm -f "$AI_HOME/config.json.bak"
+
+            local phone_json
+            if [[ -n "${PHONE:-}" ]]; then
+                phone_json="\"$PHONE\""
+            else
+                phone_json=""
+            fi
+
+            perl -pi -e "s|TOKEN_PLACEHOLDER|$TOKEN|g" "$AI_HOME/config.json"
+            perl -pi -e "s|AI_HOME_PLACEHOLDER|$AI_HOME|g" "$AI_HOME/config.json"
+            perl -pi -e "s|PHONE_JSON_PLACEHOLDER|$phone_json|g" "$AI_HOME/config.json"
+            perl -pi -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" "$AI_HOME/config.json"
             chmod 600 "$AI_HOME/config.json"
             ok "OpenClaw config.json updated (gateway.mode=local added)"
         else
@@ -980,51 +1030,82 @@ CFG_END
     mkdir -p "$HOME/.openclaw"
     ln -sf "$AI_HOME/config.json" "$HOME/.openclaw/openclaw.json" 2>/dev/null || true
 
-    # .env file
-    if [[ ! -f "$AI_HOME/.env" ]]; then
+    # ── Write .env once (single canonical writer) ──────────────────────────────
+    mkdir -p "$AI_HOME/credentials"
+    chmod 700 "$AI_HOME/credentials"
+    local env_file="$AI_HOME/credentials/.env"
+
+    if [[ ! -f "$env_file" ]]; then
         {
+            # --- Gateway & auth ---
+            # OPENCLAW_GATEWAY_TOKEN: used by openclaw gateway for API auth
             echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN"
+
+            # --- AI provider keys ---
             [[ -n "${ANTHROPIC_KEY:-}" ]]        && echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY"
-            [[ -n "${OPENAI_KEY:-}" ]]             && echo "OPENAI_API_KEY=$OPENAI_KEY"
+            [[ -n "${OPENAI_KEY:-}" ]]            && echo "OPENAI_API_KEY=$OPENAI_KEY"
+
+            # --- Service keys ---
             [[ -n "${ALPHA_INSIDER_KEY:-}" ]]     && echo "ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY"
-            [[ -n "${TAVILY_KEY:-}" ]]             && echo "TAVILY_API_KEY=$TAVILY_KEY"
-            [[ -n "${NEWS_API_KEY:-}" ]]           && echo "NEWS_API_KEY=$NEWS_API_KEY"
-            [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]    && echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"
-            [[ -n "${DISCORD_WEBHOOK_URL:-}" ]]   && echo "DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL"
-            [[ -n "${SMTP_HOST:-}" ]]              && echo "SMTP_HOST=$SMTP_HOST"
-            [[ -n "${SMTP_USER:-}" ]]              && echo "SMTP_USER=$SMTP_USER"
-            [[ -n "${SMTP_PASS:-}" ]]              && echo "SMTP_PASS=$SMTP_PASS"
+            [[ -n "${TAVILY_KEY:-}" ]]            && echo "TAVILY_API_KEY=$TAVILY_KEY"
+            [[ -n "${NEWS_API_KEY:-}" ]]          && echo "NEWS_API_KEY=$NEWS_API_KEY"
+            [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]   && echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"
+            [[ -n "${DISCORD_WEBHOOK_URL:-}" ]]  && echo "DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL"
+            [[ -n "${SMTP_HOST:-}" ]]             && echo "SMTP_HOST=$SMTP_HOST"
+            [[ -n "${SMTP_USER:-}" ]]             && echo "SMTP_USER=$SMTP_USER"
+            [[ -n "${SMTP_PASS:-}" ]]             && echo "SMTP_PASS=$SMTP_PASS"
             [[ -n "${ELEVEN_LABS_KEY:-}" ]]       && echo "ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY"
-            echo "OPENCLAW_DISABLE_BONJOUR=1"
-            echo "DASHBOARD_PORT=${DASHBOARD_PORT:-3000}"
-            echo "PROBLEM_SOLVER_UI_PORT=${UI_PORT:-8787}"
+
+            # --- Model configuration ---
+            echo "OLLAMA_HOST=$OLLAMA_HOST"
+            echo "OLLAMA_MODEL=$OLLAMA_MODEL"
+            echo "CLAUDE_MODEL=$CLAUDE_MODEL"
+
+            # --- Runtime settings ---
+            echo "AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}"
             echo "UI_PORT=${UI_PORT:-8787}"
-            echo "TZ=Europe/Amsterdam"
-        } > "$AI_HOME/.env"
-        chmod 600 "$AI_HOME/.env"
-        ok ".env created"
+            echo "WORKERS=${WORKERS:-35}"
+
+            # Disables mDNS/Bonjour service discovery in openclaw (not needed for local mode)
+            echo "OPENCLAW_DISABLE_BONJOUR=1"
+
+            echo "TZ=${TZ:-UTC}"
+        } > "$env_file"
+        chmod 600 "$env_file"
+        ok ".env created in credentials/"
     else
         ok ".env already exists — not overwritten"
     fi
+
+    # Symlink .env for backward compatibility
+    ln -sf "$AI_HOME/credentials/.env" "$AI_HOME/.env" 2>/dev/null || true
 
     # Patch status-reporter.env
     local sr_env="$AI_HOME/config/status-reporter.env"
     if [[ -f "$sr_env" ]]; then
         grep -q "^WHATSAPP_PHONE=" "$sr_env" || \
-            echo "WHATSAPP_PHONE=$PHONE" >> "$sr_env"
+            echo "WHATSAPP_PHONE=${PHONE:-}" >> "$sr_env"
         grep -q "^OPENCLAW_GATEWAY_TOKEN=" "$sr_env" || \
             echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN" >> "$sr_env"
-        sed -i.bak "s|^STATUS_REPORT_INTERVAL_SECONDS=.*|STATUS_REPORT_INTERVAL_SECONDS=${STATUS_INTERVAL:-3600}|" "$sr_env"
-        rm -f "${sr_env}.bak"
+        perl -pi -e "s|^STATUS_REPORT_INTERVAL_SECONDS=.*|STATUS_REPORT_INTERVAL_SECONDS=${STATUS_INTERVAL:-3600}|" "$sr_env"
         chmod 600 "$sr_env"
     fi
 
     # Patch problem-solver-ui.env
     local ui_env="$AI_HOME/config/problem-solver-ui.env"
     if [[ -f "$ui_env" ]]; then
-        sed -i.bak "s|^PROBLEM_SOLVER_UI_PORT=.*|PROBLEM_SOLVER_UI_PORT=${UI_PORT:-8787}|" "$ui_env"
-        rm -f "${ui_env}.bak"
+        perl -pi -e "s|^PROBLEM_SOLVER_UI_PORT=.*|PROBLEM_SOLVER_UI_PORT=${UI_PORT:-8787}|" "$ui_env"
         chmod 600 "$ui_env"
+    fi
+
+    # Validate all JSON config files
+    if command -v python3 >/dev/null 2>&1; then
+        for json_file in "$AI_HOME/config"/*.json; do
+            [[ -f "$json_file" ]] || continue
+            if ! python3 -m json.tool "$json_file" >/dev/null 2>&1; then
+                warn "$(basename "$json_file") contains invalid JSON — check manually"
+            fi
+        done
     fi
 
     ok "Configuration complete"
@@ -1046,17 +1127,22 @@ install_dashboard_ui() {
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:20px}
 .container{max-width:1000px;margin:0 auto}
-header{background:linear-gradient(135deg,#667eea,#764ba2);padding:28px;border-radius:15px;margin-bottom:28px;text-align:center}
+header{background:#1e293b;padding:28px;border-radius:15px;margin-bottom:28px;text-align:center;border:1px solid #334155}
 h1{color:#fff;font-size:2.2em;margin-bottom:8px}
 .sub{color:rgba(255,255,255,.85)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px}
 .card{background:#1e293b;padding:22px;border-radius:12px;border:1px solid #334155}
-.card h2{color:#667eea;margin-bottom:14px;font-size:1.1em}
-.btn{display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:.9em;margin:4px;text-decoration:none}
+.card h2{color:#D4AF37;margin-bottom:14px;font-size:1.1em}
+.btn{display:inline-block;background:#D4AF37;color:#0f172a;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:.9em;margin:4px;text-decoration:none;font-weight:600}
+.btn:hover{opacity:0.9}
 .stat{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #334155}
 .stat:last-child{border:none}
-.stat-val{color:#10b981;font-weight:bold}
-.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px;background:#10b981;animation:pulse 2s infinite}
+.stat-val{font-weight:bold}
+.online{color:#10b981}
+.offline{color:#ef4444}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px;background:#64748b}
+.dot.ok{background:#10b981;animation:pulse 2s infinite}
+.dot.fail{background:#ef4444}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 code{background:#334155;padding:2px 8px;border-radius:4px;font-family:monospace;color:#10b981;font-size:.9em}
 footer{text-align:center;margin-top:32px;color:#64748b;font-size:.9em}
@@ -1071,26 +1157,21 @@ footer{text-align:center;margin-top:32px;color:#64748b;font-size:.9em}
 <div class="grid">
   <div class="card">
     <h2>System Status</h2>
-    <div class="stat"><span><span class="dot"></span>Gateway</span><span class="stat-val" id="gw-status">checking...</span></div>
-    <div class="stat"><span><span class="dot"></span>Dashboard</span><span class="stat-val" id="ui-status">checking...</span></div>
+    <div class="stat"><span><span class="dot" id="ui-dot"></span>Dashboard</span><span class="stat-val" id="ui-status">checking...</span></div>
   </div>
   <div class="card">
     <h2>Quick Access</h2>
     <a class="btn" href="http://127.0.0.1:8787" target="_blank">🛠️ Full Dashboard</a>
-    <a class="btn" href="http://localhost:18789" target="_blank">📡 Gateway</a>
   </div>
 </div>
 <div class="card">
 <h2>Quick Actions</h2>
-<button onclick="window.open('http://localhost:18789','_blank')">📊 Open Gateway</button>
-<button onclick="window.open('http://127.0.0.1:8787','_blank')">🛠️ Problem Solver UI</button>
-<button onclick="window.open('http://127.0.0.1:8788','_blank')">🤖 Claude AI Agent</button>
-<button onclick="window.open('http://127.0.0.1:8789','_blank')">🦙 Ollama Local Agent</button>
-<button onclick="alert('Run in terminal: openclaw logs --follow')">📋 View Logs</button>
+<button class="btn" onclick="window.open('http://127.0.0.1:8787','_blank')">🛠️ Problem Solver UI</button>
+<button class="btn" onclick="alert('Run in terminal: openclaw logs --follow')">📋 View Logs</button>
 </div>
 </div>
 
-<div class="card instruction">
+<div class="card instruction" style="margin-top:16px">
 <h2>💬 How to Use</h2>
 <p style="margin-bottom:15px">Send WhatsApp message to yourself:</p>
 <p><code>switch to lead-hunter</code></p>
@@ -1099,8 +1180,6 @@ footer{text-align:center;margin-top:32px;color:#64748b;font-size:.9em}
 <p style="margin:10px 0"><code>switch to ollama-agent</code></p>
 <p style="margin-top:15px;color:#94a3b8;font-size:0.9em">
 The agent will process your request and return results via WhatsApp.
-Claude Agent UI: <a href="http://127.0.0.1:8788" style="color:#a78bfa">http://127.0.0.1:8788</a> •
-Ollama Agent UI: <a href="http://127.0.0.1:8789" style="color:#34d399">http://127.0.0.1:8789</a>
 </p>
   <h2>💬 WhatsApp Commands</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
@@ -1113,20 +1192,27 @@ Ollama Agent UI: <a href="http://127.0.0.1:8789" style="color:#34d399">http://12
   </div>
 </div>
 <footer>
-<p>🤖 AI Employee v4.0 • Multi-bot runtime + Claude &amp; Ollama</p>
-<p style="margin-top:10px;font-size:0.9em">
-Gateway: localhost:18789 • Dashboard: localhost:3000 • Problem Solver: localhost:8787 • Claude: localhost:8788 • Ollama: localhost:8789
-</p>
-  <p>🤖 AI Employee v4.0 • <a href="http://127.0.0.1:8787" style="color:#667eea">Open full dashboard →</a></p>
+  <p>🤖 AI Employee v4.0 • <a href="http://127.0.0.1:8787" style="color:#D4AF37">Open full dashboard →</a></p>
 </footer>
 </div>
 <script>
-async function check(url, id) {
-  try { await fetch(url,{mode:'no-cors',signal:AbortSignal.timeout(2000)}); document.getElementById(id).textContent='Online'; document.getElementById(id).style.color='#10b981'; }
-  catch { document.getElementById(id).textContent='Offline'; document.getElementById(id).style.color='#ef4444'; }
+async function checkService(url, statusId, dotId) {
+  try {
+    const resp = await fetch(url, {signal: AbortSignal.timeout(3000)});
+    if (resp.ok) {
+      document.getElementById(statusId).textContent = 'Online';
+      document.getElementById(statusId).className = 'stat-val online';
+      document.getElementById(dotId).className = 'dot ok';
+    } else {
+      throw new Error('not ok');
+    }
+  } catch {
+    document.getElementById(statusId).textContent = 'Offline';
+    document.getElementById(statusId).className = 'stat-val offline';
+    document.getElementById(dotId).className = 'dot fail';
+  }
 }
-check('http://localhost:18789','gw-status');
-check('http://127.0.0.1:8787','ui-status');
+checkService('http://127.0.0.1:8787', 'ui-status', 'ui-dot');
 </script>
 </body>
 </html>
@@ -1143,10 +1229,15 @@ queue_startup_message() {
     cat > "$f" << MSG
 {
   "pending": true,
-  "message": "👋 *Welcome to AI Employee!*\n\n✅ Setup complete — your bot is connected and ready.\n\n*Available commands:*\n• status — get system status\n• workers — list active agents\n• switch to lead-hunter — activate an agent\n• help — show all commands\n\n*Try it now:*\nType 'hello' or 'status' to get started.\n\n📊 Dashboard: http://127.0.0.1:${UI_PORT:-8787}",
+  "message": "👋 *Welcome to AI Employee!*\\n\\n✅ Setup complete — your bot is connected and ready.\\n\\n*Available commands:*\\n• status — get system status\\n• workers — list active agents\\n• switch to lead-hunter — activate an agent\\n• help — show all commands\\n\\n*Try it now:*\\nType 'hello' or 'status' to get started.\\n\\n📊 Dashboard: http://127.0.0.1:${UI_PORT:-8787}",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 MSG
+    # Validate JSON
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -m json.tool "$f" >/dev/null 2>&1 \
+            || warn "startup_message.json may contain invalid JSON"
+    fi
 }
 
 # ─── PATH ─────────────────────────────────────────────────────────────────────
@@ -1276,6 +1367,10 @@ done_message() {
     echo "  Ollama Agent: http://127.0.0.1:8789"
     echo ""
     echo -e "${Y}Next steps:${NC}"
+    echo ""
+    echo "  0. Activate PATH in current shell:"
+    echo "     source ~/.zshrc"
+    echo "     (or: export PATH=\"\$HOME/.ai-employee/bin:\$PATH\")"
     echo ""
     echo -e "  ${G}▸ Desktop launcher (smart — starts bot or opens UI if already running):${NC}"
     if [[ -d "$HOME/Desktop" ]]; then
