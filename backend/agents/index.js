@@ -227,29 +227,48 @@ function _runningAgents() {
   return agents.filter((a) => a.state === 'running' || a.state === 'busy');
 }
 
-function _findBestAgent(subsystem) {
-  const running = _runningAgents().filter((a) => a.skills.includes(subsystem) || a.skills.includes('general'));
+function _findBestAgent(subsystem, categoryHint) {
+  const running = _runningAgents();
   if (running.length === 0) return null;
 
-  return running
-    .slice()
-    .sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
+  // 1. Prefer agents whose category (type) matches the intent category hint.
+  if (categoryHint) {
+    const categoryMatched = running.filter((a) => a.type === categoryHint);
+    if (categoryMatched.length > 0) {
+      return categoryMatched.slice().sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
+    }
+  }
+
+  // 2. Prefer agents with the specific subsystem skill (not just 'general').
+  if (subsystem && subsystem !== 'general') {
+    const specialists = running.filter((a) => a.skills.includes(subsystem));
+    if (specialists.length > 0) {
+      return specialists.slice().sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
+    }
+  }
+
+  // 3. Fallback: least-loaded running agent.
+  return running.slice().sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
 }
 
 function _agentLoad(agent) {
   return (agent.currentTask ? 1 : 0) + agent.taskQueue.length;
 }
 
-function _activateForDemand(subsystem) {
+function _activateForDemand(subsystem, categoryHint) {
   const maxActive = _modeMaxActive();
   const active = _runningAgents().length;
   if (active >= maxActive) return;
 
-  const candidate = agents.find(
-    (a) =>
-      a.state === 'idle' &&
-      (a.skills.includes(subsystem) || a.skills.includes('general')),
-  ) || agents.find((a) => a.state === 'idle');
+  // Prefer activating an agent whose category matches the hint.
+  const candidate =
+    (categoryHint && agents.find((a) => a.state === 'idle' && a.type === categoryHint)) ||
+    agents.find(
+      (a) =>
+        a.state === 'idle' &&
+        (a.skills.includes(subsystem) || a.skills.includes('general')),
+    ) ||
+    agents.find((a) => a.state === 'idle');
 
   if (candidate) _activateAgent(candidate);
 }
@@ -412,15 +431,15 @@ function stopAllAgents(reason = 'manual_stop') {
   };
 }
 
-function enqueueTask({ message, subsystem = 'general', metadata = {} }) {
-  _activateForDemand(subsystem);
+function enqueueTask({ message, subsystem = 'general', categoryHint = null, metadata = {} }) {
+  _activateForDemand(subsystem, categoryHint);
   if (_runningAgents().length === 0) {
     activateAgents(1);
   }
 
-  let selected = _findBestAgent(subsystem);
+  let selected = _findBestAgent(subsystem, categoryHint);
   if (!selected) {
-    selected = _findBestAgent(subsystem);
+    selected = _findBestAgent(subsystem, categoryHint);
   }
   if (!selected) {
     selected = agents

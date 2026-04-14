@@ -185,7 +185,11 @@ export default function DashboardPage() {
   const isTyping = useAppStore(s => s.isTyping)
   const setActiveSection = useAppStore(s => s.setActiveSection)
   const wsConnected = useAppStore(s => s.wsConnected)
+  const nnStatus = useAppStore(s => s.nnStatus)
+  const brainInsights = useAppStore(s => s.brainInsights)
   const { sendMessage } = useWebSocket()
+
+  const BASE = window.location.origin
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -347,6 +351,86 @@ export default function DashboardPage() {
               <QuickAction label="Manage Agents" onClick={() => setActiveSection('agents')} />
               <QuickAction label="View Operations" onClick={() => setActiveSection('operations')} />
               <QuickAction label="System Settings" onClick={() => setActiveSection('system')} />
+            </div>
+          </div>
+
+          <div className="dashboard-glass-card dashboard-panel">
+            <div className="dashboard-panel-header">
+              <h2>Command Center</h2>
+            </div>
+            <div className="dashboard-actions-grid">
+              <QuickAction label="⚡ Hermes Agent" onClick={() => {
+                addChatMessage({ role: 'user', content: 'Activate Hermes agent for rapid task execution', ts: Date.now() })
+                sendMessage('Activate Hermes agent for rapid task execution')
+              }} />
+              <QuickAction label="◉ Blacklight Mode" onClick={() => {
+                fetch(`${BASE}/api/agents/mode`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mode: 'BLACKLIGHT' }),
+                }).catch(() => {})
+                addChatMessage({ role: 'user', content: 'Activating BLACKLIGHT mode — all agents online', ts: Date.now() })
+                sendMessage('Activating BLACKLIGHT mode — all agents online')
+              }} />
+              <QuickAction label="🔺 Ascend Forge" onClick={() => {
+                fetch(`${BASE}/api/self-improvement/queue`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ task_type: 'self_improvement', description: 'Ascend Forge: optimize strategies and evolve' }),
+                }).catch(() => {})
+                addChatMessage({ role: 'user', content: 'Launching Ascend Forge — self-improvement pipeline activated', ts: Date.now() })
+                sendMessage('Launching Ascend Forge — self-improvement pipeline activated')
+              }} />
+              <QuickAction label="💰 Money Mode" onClick={() => {
+                fetch(`${BASE}/api/agents/mode`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mode: 'MONEYMODE' }),
+                }).catch(() => {})
+                addChatMessage({ role: 'user', content: 'Engaging MONEYMODE — revenue-optimized operations', ts: Date.now() })
+                sendMessage('Engaging MONEYMODE — revenue-optimized operations')
+              }} />
+            </div>
+          </div>
+
+          <div className="dashboard-glass-card dashboard-panel">
+            <div className="dashboard-panel-header">
+              <h2>Neural Brain</h2>
+              <span style={{ color: nnStatus?.active ? 'var(--success)' : 'var(--text-muted)', fontSize: '11px' }}>
+                {nnStatus?.active ? '● Live' : '○ Idle'}
+              </span>
+            </div>
+            <div className="dashboard-brain-mini">
+              <div className="dashboard-brain-row">
+                <span className="dashboard-brain-label">Confidence</span>
+                <span className="dashboard-brain-value" style={{ color: 'var(--gold)' }}>
+                  {Math.round((nnStatus?.confidence ?? 0) * 100)}%
+                </span>
+              </div>
+              <div className="dashboard-brain-bar">
+                <motion.div
+                  className="dashboard-brain-bar-fill"
+                  style={{ background: 'var(--gold)' }}
+                  animate={{ width: `${Math.round((nnStatus?.confidence ?? 0) * 100)}%` }}
+                  transition={{ duration: 0.6 }}
+                />
+              </div>
+              <div className="dashboard-brain-row">
+                <span className="dashboard-brain-label">Learn Step</span>
+                <span className="dashboard-brain-value">{(nnStatus?.learn_step ?? 0).toLocaleString()}</span>
+              </div>
+              <div className="dashboard-brain-row">
+                <span className="dashboard-brain-label">Success Rate</span>
+                <span className="dashboard-brain-value" style={{ color: 'var(--success)' }}>
+                  {brainInsights?.performance_metrics?.success_rate
+                    ? `${Math.round(brainInsights.performance_metrics.success_rate * 100)}%`
+                    : '—'}
+                </span>
+              </div>
+              <div className="dashboard-brain-row">
+                <span className="dashboard-brain-label">Strategies</span>
+                <span className="dashboard-brain-value">{brainInsights?.learned_strategies?.length ?? 0}</span>
+              </div>
             </div>
           </div>
 
