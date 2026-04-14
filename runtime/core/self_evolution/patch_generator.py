@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+_MAX_FILE_LINES = 400   # maximum lines of file context sent to the LLM
+_CONTEXT_WINDOW = 60    # lines of context around a matched keyword
+
 
 @dataclass
 class GeneratedPatch:
@@ -45,6 +48,11 @@ class PatchGenerator:
             "critical": "critical",
         }.get(severity, "medium")
 
+        file_context = self._read_file_context(
+            file_rel=issue.get("file") or "",
+            hint=issue.get("suggested_fix") or "",
+        )
+
         prompt = (
             "Generate ONLY a unified git diff for this issue. "
             "Do not output prose before the diff.\n"
@@ -52,6 +60,7 @@ class PatchGenerator:
             f"Issue type: {issue.get('issue_type')}\n"
             f"Severity: {severity}\n"
             f"Suggested fix: {issue.get('suggested_fix')}\n"
+            f"\n--- current file content ---\n{file_context}\n--- end file content ---\n"
         )
 
         diff = ""
@@ -107,3 +116,41 @@ class PatchGenerator:
         if not files:
             files = re.findall(r"diff --git a/(.+?) b/", diff_text)
         return sorted(set(files))
+
+    def _read_file_context(self, file_rel: str, hint: str) -> str:
+        """Return the relevant portion of *file_rel* as numbered source lines.
+
+        If the file is small (<= _MAX_FILE_LINES) it is returned in full.
+        Otherwise only the lines around the first keyword from *hint* are
+        returned to stay within a reasonable prompt budget.
+        """
+        if not file_rel:
+            return "(no file path provided)"
+        path = self._repo_root / file_rel
+        if not path.is_file():
+            return f"(file not found: {file_rel})"
+        try:
+            raw = path.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            return f"(could not read file: {exc})"
+
+        lines = raw.splitlines()
+        if len(lines) <= _MAX_FILE_LINES:
+            return "\n".join(f"{i+1:4d} | {l}" for i, l in enumerate(lines))
+
+        # Find first line matching a word from the hint
+        keywords = [w.lower() for w in re.split(r"\W+", hint) if len(w) > 4]
+        center = 0
+        for kw in keywords:
+            for idx, line in enumerate(lines):
+                if kw in line.lower():
+                    center = idx
+                    break
+            if center:
+                break
+
+        start = max(0, center - _CONTEXT_WINDOW // 2)
+        end = min(len(lines), start + _CONTEXT_WINDOW)
+        snippet = lines[start:end]
+        prefix = f"(showing lines {start+1}–{end} of {len(lines)})\n"
+        return prefix + "\n".join(f"{start+i+1:4d} | {l}" for i, l in enumerate(snippet))
