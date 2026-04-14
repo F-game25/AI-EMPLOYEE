@@ -82,6 +82,8 @@ const OBJECTIVE_STATUS = {
 const MONEY_MODE_AGENTS = ['lead_hunter', 'email_ninja', 'intel_agent', 'social_guru'];
 const ASCEND_FORGE_AGENTS = ['intel_agent', 'email_ninja', 'social_guru'];
 const OBJECTIVES_FILE = path.resolve(__dirname, '../state/objectives.json');
+const MONEY_LEADS_PER_TASK = 5;
+const MONEY_EMAILS_PER_TASK = 10;
 
 const runtimeState = {
   automationRunning: false,
@@ -202,8 +204,14 @@ function normalizeConstraints(value) {
 function parseConstraintsFromGoal(goalText) {
   const text = String(goalText || '');
   const constraints = {};
-  const budgetMatch = text.match(/\b(?:budget|€|\$)\s*[:=]?\s*(\d+)/i);
-  if (budgetMatch) constraints.budget = Number(budgetMatch[1]);
+  const lower = text.toLowerCase();
+  const budgetTokenAt = lower.indexOf('budget');
+  if (budgetTokenAt >= 0) {
+    const numericBudget = lower.slice(budgetTokenAt).match(/\d+/);
+    if (numericBudget) constraints.budget = Number(numericBudget[0]);
+  }
+  const currencyBudget = text.match(/[€$]\s*(\d+)/);
+  if (currencyBudget) constraints.budget = Number(currencyBudget[1]);
   if (/\binstagram\b/i.test(text)) constraints.channel = 'instagram';
   if (/\bemail\b/i.test(text)) {
     constraints.channel = constraints.channel ? `${constraints.channel} + email` : 'email';
@@ -635,9 +643,9 @@ function handleGoalDrivenCommand(message) {
     };
   }
 
-  const setMoneyGoalMatch = raw.match(/^set goal for money mode\s*:\s*(.+)$/i);
-  if (setMoneyGoalMatch) {
-    const goal = setMoneyGoalMatch[1].trim();
+  const setMoneyPrefix = 'set goal for money mode:';
+  if (msg.startsWith(setMoneyPrefix)) {
+    const goal = raw.slice(setMoneyPrefix.length).trim();
     if (!goal) {
       setObjectiveWaiting('money_mode');
       return {
@@ -655,9 +663,9 @@ function handleGoalDrivenCommand(message) {
     return { handled: true, reply: started.message };
   }
 
-  const startAscendGoalMatch = raw.match(/^start ascend forge with goal\s*:\s*(.+)$/i);
-  if (startAscendGoalMatch) {
-    const goal = startAscendGoalMatch[1].trim();
+  const startAscendPrefix = 'start ascend forge with goal:';
+  if (msg.startsWith(startAscendPrefix)) {
+    const goal = raw.slice(startAscendPrefix.length).trim();
     if (!goal) {
       setObjectiveWaiting('ascend_forge');
       return {
@@ -1401,8 +1409,9 @@ onAgentEvent('task:completed', ({ agent, task }) => {
     const taskRow = objState?.active_tasks?.find((entry) => entry.task_id === task.id);
     if (taskRow) taskRow.status = 'completed';
     if (objectiveMeta.system === 'money_mode' && objState?.performance) {
-      if (/lead/i.test(objectiveMeta.task_name)) objState.performance.leads_generated += 5;
-      if (/email|outreach/i.test(objectiveMeta.task_name)) objState.performance.emails_sent += 10;
+      if (/lead/i.test(objectiveMeta.task_name)) objState.performance.leads_generated += MONEY_LEADS_PER_TASK;
+      if (/email|outreach/i.test(objectiveMeta.task_name)) objState.performance.emails_sent += MONEY_EMAILS_PER_TASK;
+      // Lightweight estimate: emails-to-lead conversion ratio normalized to percentage.
       const leads = objState.performance.leads_generated || 1;
       objState.performance.conversion_pct = Math.round((objState.performance.emails_sent / Math.max(leads * 2, 1)) * 10);
     }

@@ -402,7 +402,8 @@ export default function DashboardPage() {
                 sendChatMessage('Activating BLACKLIGHT mode — all agents online')
               }} />
               <QuickAction label="🔺 Ascend Forge" onClick={() => {
-                const text = 'start ascend forge with goal: optimize conversion funnel'
+                const goal = window.prompt('Set Ascend Forge goal', 'optimize conversion funnel')
+                const text = `start ascend forge with goal: ${(goal || '').trim()}`
                 addChatMessage({ role: 'user', content: text, ts: Date.now() })
                 sendChatMessage(text)
               }} />

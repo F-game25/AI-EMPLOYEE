@@ -31,8 +31,8 @@ class AscendForgeExecutor:
         constraints = constraints or {}
         plan = self.build_plan(goal)
         agents_used = list(_DEFAULT_AGENTS)
-        progress = 0 if plan else 100
-        status = "running" if plan else "completed"
+        progress = 0
+        status = "running" if plan else "pending"
 
         return {
             "objective_id": objective_id,

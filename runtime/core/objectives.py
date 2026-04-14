@@ -8,7 +8,15 @@ from typing import Any
 
 
 class Objective:
-    def __init__(self, id, system, goal, constraints, priority, status):
+    def __init__(
+        self,
+        id: str,
+        system: str,
+        goal: str,
+        constraints: dict[str, Any],
+        priority: str,
+        status: str,
+    ) -> None:
         self.id = id
         self.system = system  # "money_mode" or "ascend_forge"
         self.goal = goal
