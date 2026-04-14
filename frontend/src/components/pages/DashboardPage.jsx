@@ -1,264 +1,366 @@
-import { useMemo } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { useWebSocket } from '../../hooks/useWebSocket'
 import PageHeader from '../layout/PageHeader'
 
 const STATUS_CONFIG = {
-  running: { color: 'var(--success)', label: 'Active' },
-  busy: { color: 'var(--warning)', label: 'Busy' },
-  idle: { color: 'var(--text-muted)', label: 'Idle' },
+  running: { color: 'var(--success)', label: 'Active', dot: 'dashboard-status-dot--active' },
+  busy: { color: 'var(--warning)', label: 'Busy', dot: 'dashboard-status-dot--warning' },
+  idle: { color: 'var(--text-muted)', label: 'Idle', dot: 'dashboard-status-dot--idle' },
 }
 
-function StatCard({ label, value, simulated }) {
+function MetricCard({ label, value, hint, highlighted = false }) {
   return (
-    <div className="ds-card" style={{ padding: 'var(--space-4)' }}>
-      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+    <motion.div
+      whileHover={{ y: -2 }}
+      whileTap={{ scale: 0.97 }}
+      className={`dashboard-glass-card dashboard-metric-card${highlighted ? ' dashboard-metric-card--highlighted' : ''}`}
+    >
+      <div className="dashboard-metric-label">
         {label}
-        {simulated && <span style={{ color: 'var(--warning)', fontSize: '10px', marginLeft: '6px' }}>SIMULATED</span>}
       </div>
-      <div style={{ fontSize: '24px', fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
-        {value}
-      </div>
-    </div>
+      <div className="dashboard-metric-value">{value}</div>
+      {hint && <div className="dashboard-metric-hint">{hint}</div>}
+    </motion.div>
   )
 }
 
-function QuickAction({ label, onClick, disabled, variant = 'secondary' }) {
+function QuickAction({ label, onClick }) {
   return (
-    <button
-      className={`btn-${variant}`}
+    <motion.button
+      whileHover={{ y: -2, scale: 1.01 }}
+      whileTap={{ scale: 0.97 }}
+      className="dashboard-action-btn"
       onClick={onClick}
-      disabled={disabled}
-      style={{ fontSize: '13px' }}
     >
       {label}
-    </button>
+    </motion.button>
   )
 }
 
-function ActivityItem({ item, index }) {
-  const kindColors = {
-    automation: 'var(--gold)',
-    pipeline: 'var(--info)',
-    task: 'var(--success)',
-    system: 'var(--text-muted)',
-  }
-
+function ActivityItem({ item, index, compact = false }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.03 }}
-      className="ds-card-interactive"
-      style={{
-        padding: 'var(--space-3) var(--space-4)',
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 'var(--space-3)',
-      }}
+      className="dashboard-activity-row"
+      style={{ padding: compact ? '10px 12px' : '12px 14px' }}
     >
-      <span
-        className="status-dot"
-        style={{
-          background: kindColors[item.kind] || 'var(--text-muted)',
-          marginTop: '6px',
-          flexShrink: 0,
-        }}
-      />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: '13px',
-          color: 'var(--text-primary)',
-          wordBreak: 'break-word',
-        }}>
-          {item.notes}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+        <span className="dashboard-status-dot dashboard-status-dot--teal" />
+        <div style={{ minWidth: 0 }}>
+          <div className="dashboard-activity-text">{item?.notes || item?.message || 'System event'}</div>
+          <div className="dashboard-activity-kind">{item?.kind || 'event'}</div>
         </div>
-        {item.kind && (
-          <div style={{
-            fontSize: '11px',
-            color: 'var(--text-muted)',
-            marginTop: '2px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}>
-            {item.kind}
-          </div>
-        )}
       </div>
-      <span style={{
-        fontSize: '11px',
-        color: 'var(--text-muted)',
-        flexShrink: 0,
-        fontVariantNumeric: 'tabular-nums',
-      }}>
-        {item.ts ? new Date(item.ts).toLocaleTimeString('en-US', {
+      <span className="dashboard-activity-ts">
+        {item?.ts ? new Date(item.ts).toLocaleTimeString('en-US', {
           hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
-        }) : ''}
+        }) : '--:--:--'}
       </span>
     </motion.div>
   )
 }
 
-function AgentMiniCard({ agent }) {
+function AgentPill({ agent, index }) {
   const cfg = STATUS_CONFIG[agent.status] || STATUS_CONFIG.idle
+  const health = Math.max(0, Math.min(100, Math.round(agent.health ?? (agent.status === 'running' ? 92 : agent.status === 'busy' ? 78 : 55))))
+
   return (
-    <div className="ds-card-interactive" style={{ padding: 'var(--space-3) var(--space-4)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: '4px' }}>
-        <span className={`status-dot ${agent.status === 'running' ? 'status-dot--active status-dot--pulse' : agent.status === 'busy' ? 'status-dot--busy' : 'status-dot--idle'}`} />
-        <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>
-          {agent.name || agent.id}
-        </span>
-        <span style={{
-          fontSize: '10px',
-          padding: '1px 6px',
-          borderRadius: '4px',
-          background: `${cfg.color}15`,
-          color: cfg.color,
-          marginLeft: 'auto',
-        }}>
-          {cfg.label}
-        </span>
-      </div>
-      {agent.current_task && (
-        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', paddingLeft: '18px' }}>
-          {agent.current_task}
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.02 }}
+      whileHover={{ y: -1 }}
+      whileTap={{ scale: 0.98 }}
+      className={`dashboard-agent-pill${agent.status === 'running' ? ' dashboard-agent-pill--active' : ''}`}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <span className={`dashboard-status-dot ${cfg.dot}`} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="dashboard-agent-name">{agent.name || agent.id}</div>
+          <div className="dashboard-agent-task">{agent.current_task || 'Monitoring orchestration queue'}</div>
         </div>
-      )}
+        <span className="dashboard-agent-health">{health}%</span>
+      </div>
+    </motion.div>
+  )
+}
+
+function RadialGauge({ label, value, color }) {
+  const size = 110
+  const stroke = 8
+  const radius = (size - stroke) / 2
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference - (Math.max(0, Math.min(value, 100)) / 100) * circumference
+
+  return (
+    <div className="dashboard-gauge">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${Math.round(value)} percent`}>
+        <circle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(255,255,255,0.08)" strokeWidth={stroke} fill="none" />
+        <motion.circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          fill="none"
+          style={{ filter: `drop-shadow(0 0 8px ${color})` }}
+          strokeDasharray={circumference}
+          initial={{ strokeDashoffset: circumference }}
+          animate={{ strokeDashoffset: offset }}
+          transition={{ duration: 0.7, ease: 'easeOut' }}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <div className="dashboard-gauge-center">
+        <span className="dashboard-gauge-value">{Math.round(value)}%</span>
+        <span className="dashboard-gauge-label">{label}</span>
+      </div>
+    </div>
+  )
+}
+
+function ParticleMap({ compact = false }) {
+  const particles = useMemo(
+    () => Array.from({ length: compact ? 14 : 26 }, (_, i) => ({
+      id: i,
+      left: `${(i * 37) % 96 + 2}%`,
+      top: `${(i * 23) % 86 + 5}%`,
+      size: 4 + (i % 4),
+      duration: 7 + (i % 6) * 0.7,
+      delay: i * 0.14,
+      amber: i % 3 === 0,
+    })),
+    [compact]
+  )
+
+  return (
+    <div className={`dashboard-particle-map${compact ? ' dashboard-particle-map--compact' : ''}`}>
+      <div className="dashboard-map-grid" />
+      {particles.map((particle) => (
+        <motion.span
+          key={particle.id}
+          className={`dashboard-particle${particle.amber ? ' dashboard-particle--amber' : ''}`}
+          style={{ left: particle.left, top: particle.top, width: particle.size, height: particle.size }}
+          animate={{
+            y: [0, -8, 0],
+            opacity: [0.45, 1, 0.45],
+          }}
+          transition={{
+            duration: particle.duration,
+            repeat: Infinity,
+            ease: 'easeInOut',
+            delay: particle.delay,
+          }}
+        />
+      ))}
     </div>
   )
 }
 
 export default function DashboardPage() {
+  const [activeTab, setActiveTab] = useState('chat')
+  const [input, setInput] = useState('')
+  const messagesEndRef = useRef(null)
   const systemStatus = useAppStore(s => s.systemStatus)
-  const productMetrics = useAppStore(s => s.productMetrics)
   const agents = useAppStore(s => s.agents)
   const activityFeed = useAppStore(s => s.activityFeed)
-  const autonomyStatus = useAppStore(s => s.autonomyStatus)
+  const executionLogs = useAppStore(s => s.executionLogs)
+  const chatMessages = useAppStore(s => s.chatMessages)
+  const addChatMessage = useAppStore(s => s.addChatMessage)
+  const isTyping = useAppStore(s => s.isTyping)
   const setActiveSection = useAppStore(s => s.setActiveSection)
+  const wsConnected = useAppStore(s => s.wsConnected)
+  const { sendMessage } = useWebSocket()
 
-  const stats = useMemo(() => [
-    { label: 'Active Agents', value: `${systemStatus?.running_agents ?? 0}` },
-    { label: 'Tasks Executed', value: `${productMetrics?.tasks?.tasks_executed ?? 0}` },
-    { label: 'Success Rate', value: `${Math.round((productMetrics?.tasks?.success_rate ?? 0) * 100)}%` },
-    { label: 'Value Generated', value: `$${(productMetrics?.value?.value_generated ?? 0).toFixed(0)}`, simulated: true },
-  ], [systemStatus, productMetrics])
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages, isTyping])
 
-  const systemHealth = useMemo(() => ({
-    cpu: systemStatus?.cpu_usage ?? 0,
-    memory: systemStatus?.memory ?? 0,
-    mode: autonomyStatus?.mode?.mode || 'OFF',
-  }), [systemStatus, autonomyStatus])
+  const handleSend = () => {
+    const text = input.trim()
+    if (!text) return
+    addChatMessage({ role: 'user', content: text, ts: Date.now() })
+    sendMessage(text)
+    setInput('')
+  }
 
-  const activeAgents = useMemo(() =>
-    (agents || []).filter(a => a.status === 'running' || a.status === 'busy').slice(0, 5),
+  const activeAgents = useMemo(
+    () => (agents || []).filter(a => a.status === 'running' || a.status === 'busy'),
     [agents]
   )
+  const totalAgents = systemStatus?.total_agents || agents?.length || 0
+  const runningAgents = systemStatus?.running_agents ?? activeAgents.length
+  const stoppedAgents = Math.max(totalAgents - runningAgents, 0)
+
+  const metrics = [
+    { label: 'Active Agents', value: runningAgents, hint: `${Math.round((runningAgents / Math.max(totalAgents, 1)) * 100)}% utilization` },
+    { label: 'Total Agents', value: totalAgents, hint: 'Fleet capacity' },
+    { label: 'Stopped Agents', value: stoppedAgents, hint: 'Standby / idle' },
+    { label: 'Gateway Status', value: wsConnected ? 'ONLINE' : 'OFFLINE', hint: wsConnected ? 'Realtime link stable' : 'Reconnect required', highlighted: true },
+  ]
+
+  const healthItems = [
+    { label: 'CPU', value: systemStatus?.cpu_usage ?? 0, color: 'var(--neon-teal)' },
+    { label: 'RAM', value: systemStatus?.memory ?? 0, color: 'var(--neon-amber)' },
+    { label: 'GPU', value: systemStatus?.gpu_usage ?? 0, color: 'var(--neon-cyan)' },
+    { label: 'Temp', value: Math.min(100, Math.round(systemStatus?.cpu_temperature ?? 0)), color: 'var(--warning)' },
+  ]
+
+  const tabLogs = activeTab === 'logs' ? executionLogs : activityFeed
 
   return (
-    <div className="page-enter">
+    <div className="page-enter dashboard-overview">
       <PageHeader
-        title="Dashboard"
-        subtitle="System overview and quick actions"
+        title="Overview"
+        subtitle="AI Employee control center"
       />
 
-      {/* System health bar */}
-      <div className="ds-card" style={{
-        padding: 'var(--space-3) var(--space-4)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--space-5)',
-        marginBottom: 'var(--space-4)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          <span className={`status-dot ${systemHealth.mode !== 'OFF' ? 'status-dot--active status-dot--pulse' : 'status-dot--idle'}`} />
-          <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>
-            {systemHealth.mode}
-          </span>
-        </div>
-        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-          CPU <span style={{ color: 'var(--text-primary)' }}>{systemHealth.cpu}%</span>
-        </div>
-        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-          Memory <span style={{ color: 'var(--text-primary)' }}>{systemHealth.memory}%</span>
-        </div>
-        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-          Heartbeat <span style={{ color: 'var(--text-primary)' }}>{systemStatus?.heartbeat ?? 0}</span>
-        </div>
-      </div>
-
-      {/* KPI Cards */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: 'var(--space-3)',
-        marginBottom: 'var(--space-5)',
-      }}>
-        {stats.map((s) => (
-          <StatCard key={s.label} {...s} />
+      <div className="dashboard-metrics-grid">
+        {metrics.map((metric) => (
+          <MetricCard key={metric.label} {...metric} />
         ))}
       </div>
 
-      {/* Quick Actions */}
-      <div style={{ marginBottom: 'var(--space-5)' }}>
-        <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>
-          Quick Actions
-        </h2>
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          <QuickAction label="Open Chat" onClick={() => setActiveSection('ai-control')} variant="primary" />
-          <QuickAction label="View Agents" onClick={() => setActiveSection('agents')} />
-          <QuickAction label="Operations" onClick={() => setActiveSection('operations')} />
-          <QuickAction label="System Settings" onClick={() => setActiveSection('system')} />
-        </div>
-      </div>
-
-      {/* Two-column: Active Agents + Recent Activity */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-        gap: 'var(--space-4)',
-      }}>
-        {/* Active Agents */}
-        <div>
-          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>
-            Active Agents
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+      <div className="dashboard-main-grid">
+        <section className="dashboard-glass-card dashboard-panel">
+          <div className="dashboard-panel-header">
+            <h2>Agents</h2>
+            <span>{activeAgents.length} active</span>
+          </div>
+          <div className="dashboard-agents-scroll">
             {activeAgents.length === 0 ? (
-              <div className="ds-card" style={{
-                padding: 'var(--space-5)',
-                textAlign: 'center',
-                color: 'var(--text-muted)',
-                fontSize: '13px',
-              }}>
-                No active agents — start automation to deploy
-              </div>
-            ) : activeAgents.map((agent) => (
-              <AgentMiniCard key={agent.id || agent.name} agent={agent} />
+              <div className="dashboard-empty">No active agents online</div>
+            ) : activeAgents.slice(0, 18).map((agent, idx) => (
+              <AgentPill key={agent.id || agent.name || idx} agent={agent} index={idx} />
             ))}
           </div>
-        </div>
+        </section>
 
-        {/* Recent Activity */}
-        <div>
-          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>
-            Recent Activity
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-            {activityFeed.length === 0 ? (
-              <div className="ds-card" style={{
-                padding: 'var(--space-5)',
-                textAlign: 'center',
-                color: 'var(--text-muted)',
-                fontSize: '13px',
-              }}>
-                No recent activity
-              </div>
-            ) : activityFeed.slice(0, 8).map((item, idx) => (
-              <ActivityItem key={item.id || idx} item={item} index={idx} />
-            ))}
+        <section className="dashboard-glass-card dashboard-panel dashboard-panel-center">
+          <div className="dashboard-panel-header">
+            <h2>Orchestrator</h2>
+            <div className="dashboard-tabs">
+              {['chat', 'live map', 'logs'].map((tab) => (
+                <button
+                  key={tab}
+                  className={`dashboard-tab-btn${activeTab === tab ? ' dashboard-tab-btn--active' : ''}`}
+                  onClick={() => setActiveTab(tab)}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+
+          <div className="dashboard-tab-content">
+            {activeTab === 'chat' && (
+              <div className="dashboard-chat-panel">
+                <div className="dashboard-chat-messages">
+                  {chatMessages.length === 0 && !isTyping && (
+                    <div className="dashboard-empty">Start the conversation with your orchestrator</div>
+                  )}
+                  <AnimatePresence initial={false}>
+                    {chatMessages.slice(-20).map((msg, idx) => (
+                      <motion.div
+                        key={`${msg.ts || idx}-${idx}`}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className={`dashboard-msg-row ${msg.role === 'user' ? 'dashboard-msg-row--user' : ''}`}
+                      >
+                        <div className={`dashboard-msg-bubble ${msg.role === 'user' ? 'dashboard-msg-bubble--user' : ''}`}>
+                          {msg.content}
+                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                  {isTyping && <div className="dashboard-msg-typing">Orchestrator is thinking…</div>}
+                  <div ref={messagesEndRef} />
+                </div>
+                <div className="dashboard-chat-input-wrap">
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSend()
+                      }
+                    }}
+                    className="dashboard-chat-input"
+                    placeholder="Send instruction..."
+                  />
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="dashboard-send-btn" onClick={handleSend}>
+                    Send
+                  </motion.button>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'live map' && (
+              <div style={{ height: '100%' }}>
+                <ParticleMap compact />
+              </div>
+            )}
+
+            {activeTab === 'logs' && (
+              <div className="dashboard-log-stream">
+                {tabLogs.length === 0
+                  ? <div className="dashboard-empty">No logs captured yet</div>
+                  : tabLogs.slice(0, 14).map((item, idx) => <ActivityItem key={item.id || idx} item={item} index={idx} compact />)}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="dashboard-side-column">
+          <div className="dashboard-glass-card dashboard-panel">
+            <div className="dashboard-panel-header">
+              <h2>Quick Actions</h2>
+            </div>
+            <div className="dashboard-actions-grid">
+              <QuickAction label="Open AI Control" onClick={() => setActiveSection('ai-control')} />
+              <QuickAction label="Manage Agents" onClick={() => setActiveSection('agents')} />
+              <QuickAction label="View Operations" onClick={() => setActiveSection('operations')} />
+              <QuickAction label="System Settings" onClick={() => setActiveSection('system')} />
+            </div>
+          </div>
+
+          <div className="dashboard-glass-card dashboard-panel">
+            <div className="dashboard-panel-header">
+              <h2>System Health</h2>
+              <span>Live</span>
+            </div>
+            <div className="dashboard-health-grid">
+              {healthItems.map((item) => (
+                <RadialGauge key={item.label} label={item.label} value={item.value} color={item.color} />
+              ))}
+            </div>
+          </div>
+        </section>
       </div>
+
+      <section className="dashboard-glass-card dashboard-map-section">
+        <div className="dashboard-panel-header">
+          <h2>Live Activity Map</h2>
+          <span>Heartbeat {systemStatus?.heartbeat ?? 0}</span>
+        </div>
+        <ParticleMap />
+        <div className="dashboard-map-feed">
+          {(activityFeed || []).slice(0, 3).map((item, idx) => (
+            <ActivityItem key={item.id || idx} item={item} index={idx} />
+          ))}
+          {activityFeed.length === 0 && (
+            <div className="dashboard-empty">No live events streaming</div>
+          )}
+        </div>
+      </section>
     </div>
   )
 }
