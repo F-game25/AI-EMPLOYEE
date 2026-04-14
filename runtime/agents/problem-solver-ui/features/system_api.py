@@ -243,6 +243,44 @@ def brain_insights():
         return JSONResponse({"active": True, "recent_learning_events": [], "performance_metrics": {}, "error": "Brain insights load failed; showing default state"})
 
 
+@router.get("/brain/knowledge")
+def brain_knowledge(query: str = Query("", min_length=0)):
+    """Return learned knowledge topics and optional search hits."""
+    try:
+        from core.knowledge_store import get_knowledge_store
+
+        store = get_knowledge_store()
+        snap = store.snapshot()
+        return JSONResponse(
+            {
+                "topics": snap.get("topics", {}),
+                "user_profile": snap.get("user_profile", {}),
+                "hits": store.search_knowledge(query) if query else [],
+            }
+        )
+    except Exception:
+        _log.exception("brain_knowledge failed")
+        return JSONResponse({"topics": {}, "user_profile": {}, "hits": [], "error": "Knowledge store unavailable"})
+
+
+@router.post("/brain/learn-topic")
+def brain_learn_topic(body: dict):
+    """Ingest research knowledge for a requested topic prompt."""
+    try:
+        from core.research_agent import ResearchAgent
+
+        prompt = str(body.get("topic") or body.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(status_code=400, detail="topic is required")
+        result = ResearchAgent().learn_topic(prompt)
+        return JSONResponse({"ok": True, "result": result})
+    except HTTPException:
+        raise
+    except Exception:
+        _log.exception("brain_learn_topic failed")
+        return JSONResponse({"ok": False, "result": {}, "error": "Unable to learn topic"})
+
+
 @router.get("/tasks/recent")
 def recent_tasks(limit: int = Query(20, ge=1, le=100)):
     """Return recent task log entries."""

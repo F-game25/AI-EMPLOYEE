@@ -18,6 +18,7 @@ class Planner:
         "lead_generation": ("lead", "prospect", "outreach"),
         "email_marketing": ("email", "campaign", "newsletter"),
         "analytics": ("analyse", "analyze", "report", "metric"),
+        "task_learn_topic": ("learn about", "learn how to run a business", "research online product sales", "research "),
     }
 
     def __init__(self, logger: StructuredLogger | None = None) -> None:
@@ -25,6 +26,12 @@ class Planner:
 
     def classify_goal(self, goal: str) -> str:
         text = goal.lower()
+        if (
+            "learn about" in text or
+            "learn how to run a business" in text or
+            "research online product sales" in text
+        ):
+            return "task_learn_topic"
         for goal_type, keywords in self._GOAL_KEYWORDS.items():
             if any(word in text for word in keywords):
                 return goal_type
@@ -112,6 +119,7 @@ class Planner:
             "lead_generation": ["lead-generator", "lead-crm"],
             "email_marketing": ["email-marketing"],
             "analytics": ["ceo-briefing"],
+            "task_learn_topic": ["problem-solver"],
             "general": ["problem-solver"],
         }
         return mapping.get(goal_type, ["problem-solver"])
