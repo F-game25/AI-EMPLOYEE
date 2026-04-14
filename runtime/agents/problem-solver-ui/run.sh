@@ -12,11 +12,19 @@ _step() { printf "\n  ${B}[%s]${NC}  %s\n" "$1" "$2"; }
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
-if command -v readlink >/dev/null 2>&1; then
-  _SCRIPT_REALPATH="$(readlink -f "$SCRIPT_SOURCE" 2>/dev/null || true)"
-  [[ -n "${_SCRIPT_REALPATH:-}" ]] && SCRIPT_SOURCE="$_SCRIPT_REALPATH"
-fi
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd -P)"
+_resolve_path() {
+  local p="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$p" 2>/dev/null && return 0
+  fi
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f "$p" 2>/dev/null && return 0
+  fi
+  return 1
+}
+_SCRIPT_REALPATH="$(_resolve_path "$SCRIPT_SOURCE" || true)"
+[[ -n "${_SCRIPT_REALPATH:-}" ]] && SCRIPT_SOURCE="$_SCRIPT_REALPATH"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
 
 # ── Load env overrides ─────────────────────────────────────────────────────────
@@ -55,8 +63,7 @@ _find_repo_root() {
   if [[ -f "$start" ]]; then
     start="$(dirname "$start")"
   fi
-  cur="$(cd "$start" 2>/dev/null && pwd || true)"
-  [[ -z "$cur" ]] && return 1
+  cur="$(cd "$start" 2>/dev/null && pwd)" || return 1
   while [[ -n "$cur" && "$cur" != "/" ]]; do
     if [[ -f "$cur/backend/server.js" && -f "$cur/frontend/package.json" ]]; then
       echo "$cur"
@@ -67,6 +74,7 @@ _find_repo_root() {
   return 1
 }
 
+# When run from repo runtime/agents/problem-solver-ui/run.sh, repo root is 3 levels up.
 _REPO_CAND="$(_find_repo_root "$SCRIPT_DIR/../../.." || true)"
 _GITHUB_WORKSPACE_REPO=""
 _PWD_REPO=""
