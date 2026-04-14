@@ -330,7 +330,7 @@ class TerminalProgress:
 
 # ── Core update logic ─────────────────────────────────────────────────────────
 
-def check_and_update(force: bool = False, progress_cb: "callable | None" = None) -> dict:
+def check_and_update(force: bool = False, progress_cb=None) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     state = _load_state()
 
@@ -479,7 +479,7 @@ def _once() -> None:
             h.setLevel(logging.ERROR)
 
     # ── Progress bar for download phase ──────────────────────────────────────
-    _bar: "TerminalProgress | None" = None
+    _bar = None
 
     def _progress(current: int, total: int, filename: str) -> None:
         nonlocal _bar
@@ -499,7 +499,7 @@ def _once() -> None:
         sys.exit(1)
 
     if _bar is not None:
-        _bar.finish("✓ complete")
+        _bar.finish("complete")
 
     status = result.get("status", "unknown")
     if status == "updated":
