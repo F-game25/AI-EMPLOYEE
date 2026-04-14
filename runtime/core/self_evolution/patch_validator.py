@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import subprocess
 import os
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +34,9 @@ class PatchValidator:
         lint_cmd = os.environ.get("EVOLUTION_LINT_CMD", "npm run lint")
         type_cmd = os.environ.get("EVOLUTION_TYPECHECK_CMD", "python3 -m compileall runtime")
         test_cmd = os.environ.get("EVOLUTION_TEST_CMD", "python3 -m pytest tests/ -q -x")
-        lint = self._run(lint_cmd.split(), timeout=120)
-        type_checks = self._run(type_cmd.split(), timeout=120)
-        tests = self._run(test_cmd.split(), timeout=240)
+        lint = self._run(shlex.split(lint_cmd), timeout=120)
+        type_checks = self._run(shlex.split(type_cmd), timeout=120)
+        tests = self._run(shlex.split(test_cmd), timeout=240)
         security = self._security_scan(diff_text)
         passed = lint["ok"] and type_checks["ok"] and tests["ok"] and security["ok"]
         return {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from collections import deque
@@ -43,9 +44,9 @@ class MetricsCollector:
         try:
             import resource
 
-            rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            rss_raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-            rss = rss_kb * 1024
+            rss = rss_raw if sys.platform == "darwin" else (rss_raw * 1024)
             return round(max(0.0, min(100.0, (rss / max(total, 1)) * 100)), 2)
         except Exception:
             return 0.0

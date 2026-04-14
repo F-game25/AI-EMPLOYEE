@@ -29,7 +29,7 @@ function buildFlow(run) {
     id: `edge-${idx}`,
     from: idx,
     to: idx + 1,
-    active: idx < Math.max(1, run.nodes?.filter((node) => node.status === 'completed' || node.status === 'active').length),
+    active: idx < Math.max(0, run.nodes?.findIndex((node) => node.status === 'active' || node.status === 'completed') + 1),
   }))
 
   return { nodes, edges }

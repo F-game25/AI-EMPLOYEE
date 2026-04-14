@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import os
 import py_compile
 import re
 from dataclasses import dataclass
@@ -98,6 +97,8 @@ class CodeAnalyzer:
             for node in ast.walk(tree):
                 if isinstance(node, ast.Name):
                     used.add(node.id)
+                elif isinstance(node, ast.Attribute):
+                    used.add(node.attr)
             for name in defs:
                 if name not in used:
                     issues.append(
@@ -167,7 +168,7 @@ class CodeAnalyzer:
                 )
             ]
 
-        backend_text = backend.read_text(encoding="utf-8", errors="ignore")
+        backend_text = backend.read_text(encoding="utf-8", errors="replace")
         backend_routes = set(re.findall(r"app\.(?:get|post|put|delete)\('(/api/[^']+)'", backend_text))
 
         frontend_files = list((self._repo_root / "frontend" / "src").rglob("*.jsx")) + list(
