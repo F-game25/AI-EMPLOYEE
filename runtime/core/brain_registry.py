@@ -14,6 +14,7 @@ from core.brain_model import (
 )
 from core.brain_weights import get_weights, update_weight
 from core.knowledge_store import get_knowledge_store
+from core.learning_engine import get_learning_engine
 from core.memory_index import get_memory_index
 
 if TYPE_CHECKING:
@@ -105,6 +106,21 @@ class BrainRegistry:
         base = 0.35 + (0.08 * hits) + min(0.2, len(text.split()) / 120)
         return max(0.05, min(1.0, base))
 
+    @staticmethod
+    def _classify_goal(goal: str) -> str:
+        text = (goal or "").lower()
+        mapping = {
+            "lead_generation": ("lead", "prospect", "outreach"),
+            "email_marketing": ("email", "newsletter", "campaign"),
+            "analytics": ("analytics", "metric", "report", "analyze", "analyse"),
+            "content_generation": ("content", "post", "social", "video"),
+            "task_learn_topic": ("learn about", "learn how to", "research "),
+        }
+        for goal_type, keys in mapping.items():
+            if any(k in text for k in keys):
+                return goal_type
+        return "general"
+
     def _speed_for_agent(self, agent: str, priority: float, complexity: float) -> float:
         bias = {
             "lead_hunter": 0.85,
@@ -125,6 +141,9 @@ class BrainRegistry:
         return min(1.0, 0.4 + (hits * 0.2))
 
     def _agent_success_rate(self, agent: str) -> float:
+        learned = get_learning_engine().agent_success_rate(agent)
+        if learned > 0:
+            return round(learned, 3)
         try:
             from memory.strategy_store import get_strategy_store
 
@@ -136,6 +155,10 @@ class BrainRegistry:
             return round(success / max(len(rows), 1), 3)
         except Exception:
             return 0.5
+
+    def _strategy_success_rate(self, *, goal_type: str, agent: str) -> float:
+        strategy_id = f"{goal_type}:{agent}"
+        return max(0.0, min(1.0, get_learning_engine().strategy_success_rate(strategy_id)))
 
     def _build_features(self, *, goal: str, goal_type: str, context: str) -> dict[str, dict[str, float]]:
         priority = self._priority_for_goal(goal, goal_type)
@@ -171,6 +194,55 @@ class BrainRegistry:
         except Exception:
             return {}
 
+    def _score_agents_for_goal(
+        self,
+        *,
+        goal: str,
+        goal_type: str,
+        context: str,
+    ) -> tuple[str, float, dict[str, Any], str]:
+        features = self._build_features(goal=goal, goal_type=goal_type, context=context)
+        memory = get_learning_engine().search_memory(goal, top_k=5)
+        boosts = self._strategy_boosts(goal_type)
+        rows: list[dict[str, Any]] = []
+        for agent in get_weights():
+            context_match = max(0.0, min(1.0, float(features.get(agent, {}).get("task_match", 0.0))))
+            past_performance = self._agent_success_rate(agent)
+            strategy_success_rate = self._strategy_success_rate(goal_type=goal_type, agent=agent)
+            score = (
+                (strategy_success_rate * 0.4)
+                + (context_match * 0.3)
+                + (past_performance * 0.3)
+                + float(boosts.get(agent, 0.0))
+            )
+            rows.append(
+                {
+                    "agent": agent,
+                    "score": round(score, 4),
+                    "strategy_success_rate": round(strategy_success_rate, 4),
+                    "context_match": round(context_match, 4),
+                    "past_performance": round(past_performance, 4),
+                }
+            )
+        rows = sorted(rows, key=lambda r: r["score"], reverse=True)
+        best = rows[0] if rows else {"agent": "task_orchestrator", "score": 0.0, "strategy_success_rate": 0.0, "context_match": 0.0, "past_performance": 0.0}
+        memory_hits = (
+            len(memory.get("episodic", []))
+            + len(memory.get("long_term", []))
+            + len(memory.get("short_term", []))
+        )
+        reason = (
+            f"Selected {best['agent']} because: "
+            f"- {int(best['strategy_success_rate'] * 100)}% success in similar tasks; "
+            f"- context match {best['context_match']:.2f}; "
+            f"- past performance {best['past_performance']:.2f}; "
+            f"- memory hits {memory_hits}; "
+            f"- highest combined score ({best['score']:.2f}). "
+            f"Based on previous similar tasks, strategy {goal_type}:{best['agent']} performed best because it had the strongest weighted outcome."
+        )
+        confidence = max(0.0, min(1.0, float(best["score"])))
+        return best["agent"], confidence, {"rows": rows, "features": features, "memory": memory, "boosts": boosts}, reason
+
     def select_agent(self, task_features: dict[str, Any], *, score_boosts: dict[str, float] | None = None) -> tuple[str, float, dict[str, float]]:
         return _select_agent(task_features, score_boosts=score_boosts)
 
@@ -179,7 +251,9 @@ class BrainRegistry:
         if result.status == "success":
             return 1.0
         output = result.output if isinstance(result.output, dict) else {}
-        if output.get("partial") is True:
+        if output.get("usable") is True or output.get("partial") is True:
+            return 0.5
+        if output.get("neutral") is True:
             return 0.0
         return -1.0
 
@@ -187,12 +261,15 @@ class BrainRegistry:
         """Return brain-guided strategy metadata for planner injection."""
         knowledge = get_knowledge_store()
         memory_index = get_memory_index()
+        learning_engine = get_learning_engine()
         memory_index.apply_decay()
         context = knowledge.get_relevant_context(goal)
         memories = memory_index.get_relevant_memories(goal, top_k=5)
+        relevant_memory = learning_engine.search_memory(goal, top_k=5)
         profile = knowledge.snapshot().get("user_profile", {})
         context_bundle = {
             "knowledge": context,
+            "relevant_memory": relevant_memory,
             "memories": [
                 {
                     "id": m.get("id"),
@@ -209,48 +286,44 @@ class BrainRegistry:
             f"{json.dumps(context_bundle, ensure_ascii=False)}\n\n"
             "Use this to make better decisions."
         )
-        features = self._build_features(goal=goal, goal_type=goal_type, context=context)
-        boosts = self._strategy_boosts(goal_type)
-        selected_agent, confidence, scores = self.select_agent(features, score_boosts=boosts)
+        selected_agent, confidence, scored, reason = self._score_agents_for_goal(goal=goal, goal_type=goal_type, context=context)
+        scores = {row["agent"]: row["score"] for row in scored["rows"]}
+        features = scored["features"]
+        boosts = scored["boosts"]
         current_weights = get_weights()
-        feature_row = features.get(
-            selected_agent,
-            {"task_match": 0.0, "success_rate": 0.0, "speed": 0.0, "complexity": 0.0},
-        )
-        chosen_score = _score_agent(selected_agent, feature_row) + boosts.get(selected_agent, 0.0)
-        reason = (
-            f"selected_agent={selected_agent}; "
-            f"confidence={confidence:.3f}; "
-            f"score={chosen_score:.3f}; "
-            f"fallback={'yes' if selected_agent == 'task_orchestrator' and confidence < 0.4 else 'no'}"
-        )
         source = "reinforcement_brain"
         skill = _AGENT_TO_SKILL.get(selected_agent, "problem-solver")
+        selected_strategy = f"{goal_type}:{selected_agent}"
         strategy = {
             "agent": skill,
             "config": {
                 "goal": goal,
                 "goal_type": goal_type,
+                "strategy_used": selected_strategy,
                 "brain_agent": selected_agent,
                 "brain_confidence": confidence,
                 "knowledge_context": context,
                 "context_bundle": context_bundle,
                 "context_prompt": context_prompt,
+                "memory_usage_reason": reason,
             },
             "brain": {
                 "source": source,
                 "selected_agent": selected_agent,
                 "confidence": confidence,
                 "selected_skill": skill,
+                "strategy_used": selected_strategy,
                 "weights": current_weights,
                 "task_features": features,
                 "scores": scores,
+                "scoring_rows": scored["rows"],
                 "score_boosts": boosts,
                 "knowledge_context": context,
                 "context": context_bundle,
                 "reasoning": reason,
                 "decision_reasoning": reason,
                 "top_memories": context_bundle["memories"],
+                "relevant_memory": relevant_memory,
                 "last_learning_update": get_last_learning_update(),
             },
         }
@@ -263,6 +336,10 @@ class BrainRegistry:
                 "confidence": round(confidence, 3),
                 "context": context[:200],
                 "reasoning": reason,
+                "decision_reason": reason,
+                "memory_used": relevant_memory,
+                "strategy_used": selected_strategy,
+                "scores": scored["rows"],
             },
         )
         return strategy
@@ -272,9 +349,25 @@ class BrainRegistry:
         reward = self.calculate_reward(task)
         learned = False
         routed_agent = self._agent_for_skill(task.skill, goal)
+        goal_type = self._classify_goal(goal)
+        strategy_used = f"{goal_type}:{routed_agent}"
         memories_used = get_memory_index().get_relevant_memories(goal, top_k=3)
         get_memory_index().apply_feedback(memories_used, reward)
         weight_before, weight_after = update_weight(routed_agent, reward)
+        learning_update = get_learning_engine().record_task(
+            task_input=goal,
+            chosen_agent=routed_agent,
+            strategy_used=strategy_used,
+            result={
+                "status": task.status,
+                "score": task.score,
+                "error": task.error,
+                "output": task.output if isinstance(task.output, dict) else {},
+            },
+            success_score=reward,
+            decision_reason=next((e.get("reasoning", "") for e in list(self._events) if e.get("event") == "strategy_selected"), ""),
+            memories_used=[{"id": m.get("id"), "text": m.get("text")} for m in memories_used],
+        )
 
         intel = self._load_intelligence()
         if intel is not None:
@@ -320,6 +413,8 @@ class BrainRegistry:
                 "learned": learned,
                 "weight_before": round(weight_before, 4),
                 "weight_after": round(weight_after, 4),
+                "strategy_used": strategy_used,
+                "learning_update": learning_update,
                 "memories_updated": [
                     {
                         "id": m.get("id"),
@@ -336,6 +431,8 @@ class BrainRegistry:
             "agent": routed_agent,
             "weight_before": round(weight_before, 4),
             "weight_after": round(weight_after, 4),
+            "strategy_used": strategy_used,
+            "learning_update": learning_update,
             "memories_updated": memories_used,
         }
 
@@ -407,6 +504,8 @@ class BrainRegistry:
         recent_goal_hint = ""
         if status.get("recent_decisions"):
             recent_goal_hint = str(status["recent_decisions"][0].get("intent", ""))
+        learning_metrics = get_learning_engine().metrics()
+        memory_panel = get_learning_engine().search_memory(recent_goal_hint or "general", top_k=5)
         return {
             "active": bool(status.get("available")),
             "updated_at": status.get("last_updated"),
@@ -420,6 +519,25 @@ class BrainRegistry:
             "learning_updates": [e for e in events if e.get("event") == "task_feedback"][:10],
             "learned_topics": list(get_knowledge_store().snapshot().get("topics", {}).keys()),
             "top_memories": get_memory_index().get_relevant_memories(recent_goal_hint, top_k=5, touch=False) if recent_goal_hint else [],
+            "memory_panel": {
+                "short_term": memory_panel.get("short_term", []),
+                "long_term": memory_panel.get("long_term", []),
+                "episodic": memory_panel.get("episodic", []),
+                "learned_strategies": learning_metrics.get("strategies", []),
+            },
+            "learning_panel": {
+                "success_rate_over_time": [
+                    {
+                        "ts": row.get("ts"),
+                        "reward": row.get("reward", 0.0),
+                    }
+                    for row in learning_metrics.get("reward_trend", [])[-40:]
+                ],
+                "best_performing_strategies": learning_metrics.get("best_strategies", []),
+                "worst_performing_strategies": learning_metrics.get("worst_strategies", []),
+                "reward_trends": learning_metrics.get("reward_trend", []),
+                "avg_reward_recent": learning_metrics.get("avg_reward_recent", 0.0),
+            },
             "performance_metrics": {
                 "total_feedback_events": total,
                 "success_rate": round(successes / total, 3) if total else 0.0,

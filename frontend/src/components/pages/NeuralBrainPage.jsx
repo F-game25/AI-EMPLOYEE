@@ -467,6 +467,13 @@ export default function NeuralBrainPage() {
   const lastDecision = brainInsights?.last_decision || null
   const lastReward = brainInsights?.last_reward ?? 0
   const topMemories = brainInsights?.top_memories || []
+  const learningPanel = brainInsights?.learning_panel || {}
+  const memoryUsed = lastDecision?.memory_used || lastDecision?.relevant_memory || {}
+  const memoryUsedCount = (memoryUsed?.short_term?.length || 0) + (memoryUsed?.long_term?.length || 0) + (memoryUsed?.episodic?.length || 0)
+  const bestStrategies = learningPanel?.best_performing_strategies || brainInsights?.learned_strategies || []
+  const worstStrategies = learningPanel?.worst_performing_strategies || []
+  const rewardTrends = learningPanel?.reward_trends || []
+  const successRateSeries = learningPanel?.success_rate_over_time || []
   const lastLearningUpdate = brainStatus?.last_learning_update || brainInsights?.last_learning_update || '—'
 
   return (
@@ -549,7 +556,7 @@ export default function NeuralBrainPage() {
 
         {/* RIGHT PANELS */}
         <div style={{ width: '280px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', overflowY: 'auto' }}>
-          <GlassPanel title="Brain Insights" badge={`${stats.total_nodes || 0} nodes`}>
+          <GlassPanel title="🧠 Brain Panel" badge={`${stats.total_nodes || 0} nodes`}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '8px' }}>
               <div style={{ padding: '6px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
                 <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Active Nodes</div>
@@ -568,6 +575,18 @@ export default function NeuralBrainPage() {
                 <div style={{ fontSize: '15px', fontWeight: 500, color: 'var(--info)' }}>{stats.total_connections || 0}</div>
               </div>
             </div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>
+              Last decision: {lastDecision?.agent || lastDecision?.skill || '—'}
+            </div>
+            <div style={{ fontSize: '10px', color: 'var(--gold)' }}>
+              Strategy confidence: {Math.round((lastDecision?.confidence || 0) * 100)}%
+            </div>
+            <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+              Why: {lastDecision?.reasoning || lastDecision?.decision_reasoning || '—'}
+            </div>
+            <div style={{ fontSize: '10px', color: 'var(--neon-teal)' }}>
+              Memory used: {memoryUsedCount}
+            </div>
           </GlassPanel>
 
           <GlassPanel title="Skill Modules">
@@ -582,7 +601,7 @@ export default function NeuralBrainPage() {
             }} />
           </GlassPanel>
 
-          <GlassPanel title="Agent Weights" badge="live RL">
+          <GlassPanel title="📈 Learning Panel" badge="live RL">
             {Object.keys(agentWeights).length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>No weight data yet</div>
             ) : (
@@ -607,19 +626,18 @@ export default function NeuralBrainPage() {
                 <div style={{ marginTop: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}>
                   Last reward: {lastReward}
                 </div>
-                {lastDecision && (
-                  <>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                      Last decision: {lastDecision.agent || lastDecision.skill || '—'}
-                    </div>
-                    <div style={{ fontSize: '10px', color: 'var(--gold)' }}>
-                      Confidence: {Math.round((lastDecision.confidence || 0) * 100)}%
-                    </div>
-                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
-                      Reasoning: {lastDecision.reasoning || lastDecision.decision_reasoning || '—'}
-                    </div>
-                  </>
-                )}
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                  Success samples: {successRateSeries.length}
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--success)' }}>
+                  Best strategies: {bestStrategies.length}
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--error)' }}>
+                  Worst strategies: {worstStrategies.length}
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--gold)' }}>
+                  Reward trend points: {rewardTrends.length}
+                </div>
                 <div style={{ marginTop: '2px', fontSize: '10px', color: 'var(--text-muted)' }}>Last learning update: {lastLearningUpdate}</div>
               </div>
             )}
@@ -684,7 +702,7 @@ export default function NeuralBrainPage() {
           </div>
         </GlassPanel>
 
-        <GlassPanel title="Memory Panel" badge={`${learnedTopics.length} topics`}>
+        <GlassPanel title="📚 Memory Panel" badge={`${learnedTopics.length} topics`}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '6px' }}>
             {learnedTopics.length === 0 ? (
               <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>No learned topics yet</span>
@@ -703,6 +721,15 @@ export default function NeuralBrainPage() {
                 </div>
               </div>
             ))}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+            Learned strategies: {(bestStrategies || []).length}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+            Past outcomes: {(learningUpdates || []).length}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+            Research knowledge: {(learnedTopics || []).length}
           </div>
           <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
             Updates: {learningUpdates.length}
