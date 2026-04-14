@@ -11,7 +11,12 @@ _info() { printf "       ${C}▸${NC}  %s\n" "$1"; }
 _step() { printf "\n  ${B}[%s]${NC}  %s\n" "$1" "$2"; }
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  _SCRIPT_REALPATH="$(readlink -f "$SCRIPT_SOURCE" 2>/dev/null || true)"
+  [[ -n "${_SCRIPT_REALPATH:-}" ]] && SCRIPT_SOURCE="$_SCRIPT_REALPATH"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd -P)"
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
 
 # ── Load env overrides ─────────────────────────────────────────────────────────
@@ -46,7 +51,12 @@ _step "1/5" "Locating backend & frontend..."
 _find_repo_root() {
   local start="$1"
   local cur
+  [[ -z "${start:-}" ]] && return 1
+  if [[ -f "$start" ]]; then
+    start="$(dirname "$start")"
+  fi
   cur="$(cd "$start" 2>/dev/null && pwd || true)"
+  [[ -z "$cur" ]] && return 1
   while [[ -n "$cur" && "$cur" != "/" ]]; do
     if [[ -f "$cur/backend/server.js" && -f "$cur/frontend/package.json" ]]; then
       echo "$cur"
