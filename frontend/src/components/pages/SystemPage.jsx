@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import PageHeader from '../layout/PageHeader'
@@ -204,6 +204,7 @@ export default function SystemPage() {
   const autonomyStatus = useAppStore(s => s.autonomyStatus)
   const [modeLoading, setModeLoading] = useState(false)
   const [evolutionStatus, setEvolutionStatus] = useState({ mode: 'OFF', running: false })
+  const [versionInfo, setVersionInfo] = useState({ commit: '—', timestamp: '—' })
 
   const currentMode = autonomyStatus?.mode?.mode || 'OFF'
   const cfg = MODE_CONFIG[currentMode] || MODE_CONFIG.OFF
@@ -253,6 +254,27 @@ export default function SystemPage() {
     }
     load()
     const interval = setInterval(load, 5000)
+    return () => { clearInterval(interval); controller.abort() }
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const loadVersion = async () => {
+      try {
+        const res = await fetch(`${BASE}/version`, { signal: controller.signal, cache: 'no-store' })
+        const data = await res.json()
+        if (data) {
+          setVersionInfo({
+            commit: data.commit || 'unknown',
+            timestamp: data.timestamp || '—',
+          })
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    loadVersion()
+    const interval = setInterval(loadVersion, 60000)
     return () => { clearInterval(interval); controller.abort() }
   }, [])
 
@@ -353,6 +375,8 @@ export default function SystemPage() {
           <SettingRow label="Running Agents" value={`${systemStatus?.running_agents ?? 0}/${systemStatus?.total_agents ?? 0}`} />
           <SettingRow label="Heartbeat" value={systemStatus?.heartbeat ?? 0} />
           <SettingRow label="Mode" value={systemStatus?.mode || 'MANUAL'} />
+          <SettingRow label="Backend Commit" value={versionInfo.commit} />
+          <SettingRow label="Version Timestamp" value={versionInfo.timestamp} />
         </SectionCard>
 
         {/* Integrations - Neural Network */}
