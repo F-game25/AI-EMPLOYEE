@@ -326,10 +326,10 @@ def _git_sync(branch: str = BRANCH) -> "tuple[bool, str]":
                 cmd, capture_output=True, text=True, cwd=str(repo), timeout=120,
             )
             if r.returncode != 0:
-                logger.warning("git command failed: %s (exit %d)", " ".join(cmd), r.returncode)
+                logger.warning("git command failed: %s (exit %d)", cmd[0], r.returncode)
                 return False, ""
         except Exception as e:
-            logger.warning("git command error: %s — %s", " ".join(cmd), type(e).__name__)
+            logger.warning("git command error: %s — %s", cmd[0], type(e).__name__)
             return False, ""
 
     # Read new HEAD
