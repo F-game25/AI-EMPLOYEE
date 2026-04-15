@@ -1075,6 +1075,19 @@ app.get('/api/brain/status', (req, res) => {
   });
 });
 
+app.get('/internal/brain/status', (req, res) => {
+  const core = brain.status() || {};
+  const insights = brain.insights() || {};
+  const strategies = Array.isArray(insights.learned_strategies) ? insights.learned_strategies.length : 0;
+  const active = Boolean(core.available && core.active);
+  res.json({
+    status: active ? 'online' : 'offline',
+    initialized: active,
+    strategies_loaded: strategies,
+    updated_at: core.last_update || insights.updated_at || new Date().toISOString(),
+  });
+});
+
 app.get('/api/brain/insights', (req, res) => {
   res.json(brain.insights());
 });
