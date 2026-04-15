@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -17,6 +18,7 @@ UI_HOST = "127.0.0.1"
 UI_PORT = 8787
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BOT_APP_DIR = REPO_ROOT / "runtime" / "bots" / "problem-solver-ui"
+BOT_MAIN_PATH = BOT_APP_DIR / "app" / "main.py"
 FRONTEND_DIR = REPO_ROOT / "frontend"
 FRONTEND_DIST = FRONTEND_DIR / "dist"
 WORKER_POOL_PATH = REPO_ROOT / "runtime" / "core" / "worker_pool.py"
@@ -63,6 +65,109 @@ def check_env_variables() -> None:
     _ok("Environment variables OK")
 
 
+def clear_python_caches() -> None:
+    removed = 0
+    for root, dirs, files in os.walk(REPO_ROOT):
+        if "__pycache__" in dirs:
+            cache_dir = Path(root) / "__pycache__"
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            removed += 1
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for filename in files:
+            if filename.endswith(".pyc"):
+                try:
+                    (Path(root) / filename).unlink(missing_ok=True)
+                    removed += 1
+                except OSError:
+                    pass
+    _ok(f"Python cache cleaned ({removed} entries removed)")
+
+
+def _list_pids_on_port(port: int) -> list[int]:
+    pids: set[int] = set()
+    if shutil.which("lsof"):
+        proc = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if line.isdigit():
+                pids.add(int(line))
+    elif shutil.which("ss"):
+        proc = subprocess.run(
+            ["ss", "-tlnp"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        for line in proc.stdout.splitlines():
+            if f":{port} " not in line and not line.rstrip().endswith(f":{port}"):
+                continue
+            for match in re.findall(r"pid=(\d+)", line):
+                pids.add(int(match))
+    return sorted(pids)
+
+
+def stop_existing_processes(port: int) -> None:
+    pids = [pid for pid in _list_pids_on_port(port) if pid != os.getpid()]
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            continue
+    if pids:
+        time.sleep(1.5)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    if pids:
+        _ok(f"Stopped stale process(es) on port {port}: {', '.join(str(p) for p in pids)}")
+
+
+def print_runtime_diagnostics() -> None:
+    print(f"RUNNING FROM: {Path.cwd()}", flush=True)
+    print(f"FILE PATH: {Path(__file__).resolve()}", flush=True)
+    print(f"EXPECTED APP MAIN: {BOT_MAIN_PATH}", flush=True)
+    print(f"PYTHON: {shutil.which('python3') or sys.executable}", flush=True)
+    print(f"UVICORN: {shutil.which('uvicorn') or 'not-found'}", flush=True)
+    try:
+        latest_commit = subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "log", "-1", "--oneline"],
+            text=True,
+        ).strip()
+    except Exception:
+        latest_commit = "unknown"
+    print(f"LATEST COMMIT: {latest_commit}", flush=True)
+
+
+def verify_uvicorn_import_target() -> None:
+    env = os.environ.copy()
+    current_pythonpath = env.get("PYTHONPATH", "")
+    runtime_path = str(REPO_ROOT / "runtime")
+    env["PYTHONPATH"] = f"{runtime_path}:{current_pythonpath}" if current_pythonpath else runtime_path
+    try:
+        output = subprocess.check_output(
+            [sys.executable, "-c", "import app.main as m; print(m.__file__)"],
+            cwd=BOT_APP_DIR,
+            env=env,
+            text=True,
+            stderr=subprocess.STDOUT,
+        ).strip()
+    except subprocess.CalledProcessError as exc:
+        _fail(f"uvicorn import target check failed: {(exc.output or '').strip()}")
+        return
+    resolved = str(Path(output).resolve())
+    expected = str(BOT_MAIN_PATH.resolve())
+    if resolved != expected:
+        _fail(f"uvicorn import target mismatch: got {resolved}, expected {expected}")
+    _ok(f"uvicorn import target OK ({resolved})")
+
+
 def check_frontend_build() -> None:
     if (FRONTEND_DIST / "index.html").exists():
         _ok("Frontend build found")
@@ -70,8 +175,16 @@ def check_frontend_build() -> None:
 
     print("[•] Frontend dist missing, running npm install + npm run build", flush=True)
     try:
+        env = os.environ.copy()
+        try:
+            env["VITE_APP_VERSION"] = subprocess.check_output(
+                ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+                text=True,
+            ).strip()
+        except Exception:
+            env["VITE_APP_VERSION"] = "unknown"
         subprocess.run(["npm", "install"], cwd=FRONTEND_DIR, check=True)
-        subprocess.run(["npm", "run", "build"], cwd=FRONTEND_DIR, check=True)
+        subprocess.run(["npm", "run", "build"], cwd=FRONTEND_DIR, check=True, env=env)
     except subprocess.CalledProcessError as exc:
         _fail(f"Frontend build failed: {exc}")
 
@@ -161,10 +274,14 @@ def _terminate(proc: subprocess.Popen[str] | None) -> None:
 
 
 def startup_sequence() -> tuple[subprocess.Popen[str], subprocess.Popen[str]]:
+    print_runtime_diagnostics()
+    clear_python_caches()
+    stop_existing_processes(UI_PORT)
     check_python_version()
     check_node_installed()
     check_port_available(UI_PORT)
     check_env_variables()
+    verify_uvicorn_import_target()
     check_frontend_build()
     check_database()
     worker_proc = start_worker_pool()
@@ -215,10 +332,13 @@ def start_evolution_controller() -> None:
 
 
 def run_preflight() -> None:
+    print_runtime_diagnostics()
+    clear_python_caches()
     check_python_version()
     check_node_installed()
     check_port_available(UI_PORT)
     check_env_variables()
+    verify_uvicorn_import_target()
     check_frontend_build()
     check_database()
 

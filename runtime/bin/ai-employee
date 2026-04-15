@@ -4,7 +4,49 @@
 set -euo pipefail
 
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
-AGENTS_DIR="$AI_HOME/agents"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+if command -v realpath >/dev/null 2>&1; then
+  SCRIPT_SOURCE="$(realpath "$SCRIPT_SOURCE" 2>/dev/null || echo "$SCRIPT_SOURCE")"
+elif command -v readlink >/dev/null 2>&1; then
+  SCRIPT_SOURCE="$(readlink -f "$SCRIPT_SOURCE" 2>/dev/null || echo "$SCRIPT_SOURCE")"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+
+find_repo_root() {
+  local start="$1"
+  local cur
+  [[ -z "${start:-}" ]] && return 1
+  if [[ -f "$start" ]]; then
+    start="$(dirname "$start")"
+  fi
+  cur="$(cd "$start" 2>/dev/null && pwd)" || return 1
+  while [[ -n "$cur" && "$cur" != "/" ]]; do
+    if [[ -d "$cur/runtime/agents" && -f "$cur/backend/server.js" && -f "$cur/frontend/package.json" ]]; then
+      echo "$cur"
+      return 0
+    fi
+    cur="$(dirname "$cur")"
+  done
+  return 1
+}
+
+REPO_ROOT=""
+if [[ -n "${AI_EMPLOYEE_REPO_DIR:-}" ]] && [[ -d "${AI_EMPLOYEE_REPO_DIR}/runtime/agents" ]]; then
+  REPO_ROOT="$AI_EMPLOYEE_REPO_DIR"
+elif _repo="$(find_repo_root "$SCRIPT_DIR" 2>/dev/null)"; then
+  REPO_ROOT="$_repo"
+elif [[ -n "${GITHUB_WORKSPACE:-}" ]] && _repo="$(find_repo_root "$GITHUB_WORKSPACE" 2>/dev/null)"; then
+  REPO_ROOT="$_repo"
+elif _repo="$(find_repo_root "$PWD" 2>/dev/null)"; then
+  REPO_ROOT="$_repo"
+fi
+
+if [[ -n "$REPO_ROOT" ]]; then
+  export AI_EMPLOYEE_REPO_DIR="$REPO_ROOT"
+  AGENTS_DIR="$REPO_ROOT/runtime/agents"
+else
+  AGENTS_DIR="$AI_HOME/agents"
+fi
 LOGS_DIR="$AI_HOME/logs"
 RUN_DIR="$AI_HOME/run"
 STATE_DIR="$AI_HOME/state"
