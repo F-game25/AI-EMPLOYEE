@@ -35,6 +35,7 @@ const FRONTEND_DIST = path.resolve(__dirname, '../frontend/dist');
 const FRONTEND_INDEX = path.join(FRONTEND_DIST, 'index.html');
 const HAS_FRONTEND_DIST = fs.existsSync(FRONTEND_INDEX);
 const SERVER_START_TIMESTAMP = new Date().toISOString();
+const FRONTEND_INDEX_TEMPLATE = HAS_FRONTEND_DIST ? fs.readFileSync(FRONTEND_INDEX, 'utf8') : '';
 
 function latestCommit() {
   try {
@@ -51,7 +52,7 @@ app.use(express.json());
 if (HAS_FRONTEND_DIST) {
   app.use(express.static(FRONTEND_DIST, {
     index: false,
-    maxAge: '0',
+    maxAge: '1h',
   }));
 }
 
@@ -1800,7 +1801,7 @@ app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
   if (req.path.startsWith('/gateway') || req.path.startsWith('/orchestrator')) return next();
   res.set('Cache-Control', 'no-store, must-revalidate');
-  const html = fs.readFileSync(FRONTEND_INDEX, 'utf8').replace(/__APP_VERSION__/g, latestCommit());
+  const html = FRONTEND_INDEX_TEMPLATE.replace(/__APP_VERSION__/g, latestCommit());
   res.type('html').send(html);
 });
 
