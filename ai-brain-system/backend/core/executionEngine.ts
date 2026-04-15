@@ -1,12 +1,14 @@
 import { graphEngine } from './graphEngine';
 
 class ExecutionEngine {
+  private static readonly MAX_PATH_LENGTH = 5;
+
   findBestPath(start: string): string[] {
     const path = [start];
     let current = start;
     const visited = new Set([start]);
 
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < ExecutionEngine.MAX_PATH_LENGTH; i += 1) {
       const next = this.getStrongestConnection(current, visited);
       if (!next) break;
 
@@ -23,7 +25,7 @@ class ExecutionEngine {
     let current = start;
     const visited = new Set([start]);
 
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < ExecutionEngine.MAX_PATH_LENGTH; i += 1) {
       const options = graphEngine.getOutgoing(current)
         .filter((edge) => !visited.has(edge.to))
         .sort((a, b) => a.usageCount - b.usageCount || a.weight - b.weight);
