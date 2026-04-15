@@ -150,12 +150,17 @@ def verify_uvicorn_import_target() -> None:
     current_pythonpath = env.get("PYTHONPATH", "")
     runtime_path = str(REPO_ROOT / "runtime")
     env["PYTHONPATH"] = f"{runtime_path}:{current_pythonpath}" if current_pythonpath else runtime_path
-    output = subprocess.check_output(
-        [sys.executable, "-c", "import app.main as m; print(m.__file__)"],
-        cwd=BOT_APP_DIR,
-        env=env,
-        text=True,
-    ).strip()
+    try:
+        output = subprocess.check_output(
+            [sys.executable, "-c", "import app.main as m; print(m.__file__)"],
+            cwd=BOT_APP_DIR,
+            env=env,
+            text=True,
+            stderr=subprocess.STDOUT,
+        ).strip()
+    except subprocess.CalledProcessError as exc:
+        _fail(f"uvicorn import target check failed: {(exc.output or '').strip()}")
+        return
     resolved = str(Path(output).resolve())
     expected = str(BOT_MAIN_PATH.resolve())
     if resolved != expected:
