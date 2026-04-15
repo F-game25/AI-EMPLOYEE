@@ -14,11 +14,18 @@ let volume = DEFAULT_VOLUME;
 let voiceStyle = 'default';
 let queue = [];
 let draining = false;
+let consecutiveFailures = 0;
 
 function commandExists(command) {
-  const checker = os.platform() === 'win32' ? 'where' : 'which';
-  const result = spawnSync(checker, [command], { stdio: 'ignore' });
-  return result.status === 0;
+  try {
+    const isWindows = os.platform() === 'win32';
+    const checker = isWindows ? 'where' : 'which';
+    const args = isWindows ? ['/Q', command] : [command];
+    const result = spawnSync(checker, args, { stdio: 'ignore' });
+    return result.status === 0;
+  } catch (_err) {
+    return false;
+  }
 }
 
 function clampVolume(raw) {
@@ -53,12 +60,13 @@ function buildCommand(text) {
     return { cmd: 'spd-say', args: [text] };
   }
   if (backend === 'powershell') {
-    const escaped = text.replace(/'/g, "''");
+    const encoded = Buffer.from(text, 'utf8').toString('base64');
     const script = [
       'Add-Type -AssemblyName System.Speech;',
+      `$text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}'));`,
       '$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;',
       `$s.Volume = ${Math.round(clampVolume(volume) * 100)};`,
-      `$s.Speak('${escaped}');`,
+      '$s.Speak($text);',
     ].join(' ');
     return { cmd: 'powershell', args: ['-NoProfile', '-Command', script] };
   }
@@ -95,18 +103,21 @@ async function runSpeak(text) {
       currentProcess.once('exit', () => {
         currentProcess = null;
         speaking = false;
+        consecutiveFailures = 0;
         resolve();
       });
       currentProcess.once('error', () => {
         currentProcess = null;
         speaking = false;
-        silentMode = true;
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 3) silentMode = true;
         resolve();
       });
     } catch (_err) {
       currentProcess = null;
       speaking = false;
-      silentMode = true;
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 3) silentMode = true;
       resolve();
     }
   });

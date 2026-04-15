@@ -162,9 +162,21 @@ const bootVoiceState = {
   ui_loaded: false,
   triggered: false,
 };
-const BOOT_VOICE_FLAG = '__AI_EMPLOYEE_BOOT_VOICE_PLAYED';
+const BOOT_VOICE_PLAYED_FLAG = path.join(os.tmpdir(), `ai-employee-voice-boot-${process.pid}.flag`);
 
-function localGreeting(now = new Date()) {
+function hasBootVoicePlayed() {
+  return fs.existsSync(BOOT_VOICE_PLAYED_FLAG);
+}
+
+function markBootVoicePlayed() {
+  try {
+    fs.writeFileSync(BOOT_VOICE_PLAYED_FLAG, '1', 'utf8');
+  } catch (_err) {
+    // best effort
+  }
+}
+
+function getTimeBasedGreeting(now = new Date()) {
   const hour = now.getHours();
   if (hour >= 5 && hour <= 11) return 'Good morning';
   if (hour >= 12 && hour <= 17) return 'Good afternoon';
@@ -172,19 +184,19 @@ function localGreeting(now = new Date()) {
 }
 
 async function maybeSpeakBootGreeting() {
-  if (bootVoiceState.triggered || global[BOOT_VOICE_FLAG]) return;
+  if (bootVoiceState.triggered || hasBootVoicePlayed()) return;
   if (!bootVoiceState.system_init || !bootVoiceState.ai_core_ready || !bootVoiceState.ui_loaded) return;
 
   try {
     await voiceManager.init();
     if (!voiceManager.isBootGreetingEnabled()) {
       bootVoiceState.triggered = true;
-      global[BOOT_VOICE_FLAG] = true;
+      markBootVoicePlayed();
       return;
     }
     bootVoiceState.triggered = true;
-    global[BOOT_VOICE_FLAG] = true;
-    await voiceManager.speak(`${localGreeting()}. Starting control panel.`, true);
+    markBootVoicePlayed();
+    await voiceManager.speak(`${getTimeBasedGreeting()}. Starting control panel.`, true);
   } catch (_err) {
     // best effort
   }

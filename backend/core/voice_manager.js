@@ -11,6 +11,7 @@ const DEFAULT_CONFIG = {
   voiceStyle: 'default',
   bootGreeting: true,
 };
+const MAX_CACHEABLE_PHRASE_LENGTH = 120;
 
 let config = { ...DEFAULT_CONFIG };
 let initialized = false;
@@ -39,7 +40,8 @@ function getCachedPhrase(text) {
   if (!normalized) return '';
   const key = normalized.toLowerCase();
   if (phraseCache.has(key)) return phraseCache.get(key);
-  if (normalized.length <= 120) phraseCache.set(key, normalized);
+  // Cache short/high-frequency UI phrases only to avoid unbounded memory usage.
+  if (normalized.length <= MAX_CACHEABLE_PHRASE_LENGTH) phraseCache.set(key, normalized);
   return normalized;
 }
 
@@ -60,9 +62,9 @@ async function processQueue() {
       await ttsEngine.speak(next.text);
       next.resolve(true);
     }
-    while (queue.length > 0 && runEpoch === queueEpoch) {
-      const skipped = queue.shift();
-      skipped.resolve(false);
+    if (queue.length > 0 && runEpoch === queueEpoch) {
+      const skippedBatch = queue.splice(0);
+      for (const skipped of skippedBatch) skipped.resolve(false);
     }
   } finally {
     draining = false;
