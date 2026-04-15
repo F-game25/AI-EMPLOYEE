@@ -4,6 +4,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const { execSync } = require('child_process');
 const express = require('express');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
@@ -29,10 +30,19 @@ const persistence = require('./persistence');
 const PORT = process.env.PORT || 8787;
 const PYTHON_BACKEND_HOST = '127.0.0.1';
 const PYTHON_BACKEND_PORT = process.env.PYTHON_BACKEND_PORT || 8787;
+const REPO_ROOT = path.resolve(__dirname, '..');
 const FRONTEND_DIST = path.resolve(__dirname, '../frontend/dist');
 const FRONTEND_INDEX = path.join(FRONTEND_DIST, 'index.html');
 const HAS_FRONTEND_DIST = fs.existsSync(FRONTEND_INDEX);
-const FRONTEND_INDEX_CONTENT = HAS_FRONTEND_DIST ? fs.readFileSync(FRONTEND_INDEX, 'utf8') : null;
+const SERVER_START_TIMESTAMP = new Date().toISOString();
+
+function latestCommit() {
+  try {
+    return execSync('git log -1 --oneline', { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+  } catch (_err) {
+    return 'unknown';
+  }
+}
 
 const app = express();
 
@@ -41,7 +51,7 @@ app.use(express.json());
 if (HAS_FRONTEND_DIST) {
   app.use(express.static(FRONTEND_DIST, {
     index: false,
-    maxAge: '1h',
+    maxAge: '0',
   }));
 }
 
@@ -949,6 +959,17 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
 });
 
+app.get('/version', (req, res) => {
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.json({
+    commit: latestCommit(),
+    timestamp: new Date().toISOString(),
+    started_at: SERVER_START_TIMESTAMP,
+    cwd: process.cwd(),
+    file: __filename,
+  });
+});
+
 app.get('/agents', (req, res) => {
   res.json({ agents: getAgents() });
 });
@@ -1776,13 +1797,17 @@ setInterval(() => {
 
 app.get('*', (req, res, next) => {
   if (!HAS_FRONTEND_DIST) return next();
-  if (req.path.startsWith('/api/') || req.path === '/health') return next();
+  if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
   if (req.path.startsWith('/gateway') || req.path.startsWith('/orchestrator')) return next();
-  res.type('html').send(FRONTEND_INDEX_CONTENT);
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.type('html').send(fs.readFileSync(FRONTEND_INDEX, 'utf8'));
 });
 
 server.listen(PORT, () => {
   console.log(`[SERVER] AI Employee backend running on port ${PORT}`);
+  console.log(`[SERVER] RUNNING FROM: ${process.cwd()}`);
+  console.log(`[SERVER] FILE PATH: ${__filename}`);
+  console.log(`[SERVER] LATEST COMMIT: ${latestCommit()}`);
   if (HAS_FRONTEND_DIST) {
     console.log(`[SERVER] Serving frontend bundle from ${FRONTEND_DIST}`);
   } else {

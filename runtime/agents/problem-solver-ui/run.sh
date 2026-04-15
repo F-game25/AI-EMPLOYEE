@@ -84,6 +84,7 @@ BACKEND_DIR=""
 FRONTEND_DIR=""
 
 if [[ -n "$_REPO_CAND" ]]; then
+  export AI_EMPLOYEE_REPO_DIR="$_REPO_CAND"
   BACKEND_DIR="$_REPO_CAND/backend"
   FRONTEND_DIR="$_REPO_CAND/frontend"
   _info "Repo root: $_REPO_CAND"
@@ -124,8 +125,13 @@ fi
 
 [[ -z "$BACKEND_DIR" ]] && _err "Cannot find backend/server.js. Set AI_EMPLOYEE_REPO_DIR in $AI_HOME/.env pointing to the repo root."
 [[ ! -f "$FRONTEND_DIR/package.json" ]] && _err "Cannot find frontend/package.json at $FRONTEND_DIR"
+REPO_ROOT_DIR="$(cd "$BACKEND_DIR/.." && pwd)"
+export AI_EMPLOYEE_REPO_DIR="$REPO_ROOT_DIR"
 _ok "Backend : $BACKEND_DIR"
 _ok "Frontend: $FRONTEND_DIR"
+_info "Latest commit: $(git -C "$REPO_ROOT_DIR" log -1 --oneline 2>/dev/null || echo unknown)"
+_info "Python: $(command -v python3 || echo missing)"
+_info "Uvicorn: $(command -v uvicorn || echo missing)"
 
 # ── Step 2: Runtime requirements ──────────────────────────────────────────────
 _step "2/5" "Checking runtime requirements..."
@@ -156,20 +162,19 @@ if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
   _ok "Frontend packages installed"
 fi
 
-_needs_build=0
-if [[ ! -f "$FRONTEND_DIR/dist/index.html" ]]; then
-  _needs_build=1
-  _info "No build found — compiling from source…"
-elif find "$FRONTEND_DIR/src" -type f -newer "$FRONTEND_DIR/dist/index.html" 2>/dev/null | grep -q .; then
-  _needs_build=1
-  _info "Source changes detected — rebuilding…"
-fi
+_needs_build=1
+_info "Rebuilding frontend to avoid stale dist cache…"
+find "$REPO_ROOT_DIR" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+find "$REPO_ROOT_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
+rm -rf "$FRONTEND_DIR/dist"
 
 if [[ "$_needs_build" -eq 1 ]]; then
-  _BUILD_LOG=$(npm --prefix "$FRONTEND_DIR" run build 2>&1)
+  APP_VERSION="$(git -C "$REPO_ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  _BUILD_LOG=$(VITE_APP_VERSION="$APP_VERSION" npm --prefix "$FRONTEND_DIR" run build 2>&1)
   _BUILD_TIME=$(echo "$_BUILD_LOG" | grep -oE '\b[0-9]+(\.[0-9]+)?\s*(ms|s)\b' | tail -1 || true)
   _BUILD_SIZE=$(echo "$_BUILD_LOG" | grep -E 'kB|MB' | tail -1 | sed 's/^[[:space:]]*//' || true)
   _ok "Build complete${_BUILD_TIME:+  (${_BUILD_TIME})}"
+  _info "Build version: ${APP_VERSION}"
   [[ -n "$_BUILD_SIZE" ]] && _info "$_BUILD_SIZE"
 else
   _DIST_SIZE=$(du -sh "$FRONTEND_DIR/dist" 2>/dev/null | cut -f1 || echo "?")
@@ -184,5 +189,12 @@ export PORT="$UI_PORT"
 export PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
 
 _info "http://127.0.0.1:$PORT"
+if command -v lsof >/dev/null 2>&1; then
+  for _pid in $(lsof -ti ":$PORT" 2>/dev/null || true); do
+    kill "$_pid" 2>/dev/null || true
+    sleep 1
+    kill -9 "$_pid" 2>/dev/null || true
+  done
+fi
 echo ""
 exec node "$BACKEND_DIR/server.js"
