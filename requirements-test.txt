@@ -1,0 +1,30 @@
+# Test-time Python dependencies
+#
+# Install before running the full test suite:
+#   pip install -r requirements-test.txt
+#
+# These packages are needed by tests/test_ai_employee_core.py,
+# tests/test_features.py, and tests/test_improvements.py, which load FastAPI
+# feature modules and spin up a TestClient to exercise them.
+
+# FastAPI + ASGI server (mirrors runtime/agents/problem-solver-ui/requirements.txt)
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# httpx is the transport backend for FastAPI's TestClient
+httpx>=0.25.0,<1.0.0
+
+# System metrics (used by problem-solver-ui feature modules)
+psutil>=5.9.0
+
+# Auth / encryption (loaded transitively by server modules under test)
+bcrypt>=4.0.0
+cryptography>=40.0.0
+python-jose[cryptography]>=3.3.0
+
+# Config / serialisation
+pyyaml>=6.0
+
+# Test runner and coverage
+pytest>=8.0.0
+pytest-cov>=4.0.0
