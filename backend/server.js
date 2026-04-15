@@ -44,6 +44,7 @@ function latestCommit() {
     return 'unknown';
   }
 }
+const GIT_COMMIT = latestCommit();
 
 const app = express();
 
@@ -963,7 +964,7 @@ app.get('/health', (req, res) => {
 app.get('/version', (req, res) => {
   res.set('Cache-Control', 'no-store, must-revalidate');
   res.json({
-    commit: latestCommit(),
+    commit: GIT_COMMIT,
     timestamp: new Date().toISOString(),
     started_at: SERVER_START_TIMESTAMP,
     cwd: process.cwd(),
@@ -1801,7 +1802,7 @@ app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
   if (req.path.startsWith('/gateway') || req.path.startsWith('/orchestrator')) return next();
   res.set('Cache-Control', 'no-store, must-revalidate');
-  const html = FRONTEND_INDEX_TEMPLATE.replace(/__APP_VERSION__/g, latestCommit());
+  const html = FRONTEND_INDEX_TEMPLATE.replace(/__APP_VERSION__/g, GIT_COMMIT);
   res.type('html').send(html);
 });
 
@@ -1809,7 +1810,7 @@ server.listen(PORT, () => {
   console.log(`[SERVER] AI Employee backend running on port ${PORT}`);
   console.log(`[SERVER] RUNNING FROM: ${process.cwd()}`);
   console.log(`[SERVER] FILE PATH: ${__filename}`);
-  console.log(`[SERVER] LATEST COMMIT: ${latestCommit()}`);
+  console.log(`[SERVER] LATEST COMMIT: ${GIT_COMMIT}`);
   if (HAS_FRONTEND_DIST) {
     console.log(`[SERVER] Serving frontend bundle from ${FRONTEND_DIST}`);
   } else {
