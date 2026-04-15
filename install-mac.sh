@@ -451,11 +451,6 @@ wizard() {
         info "SMTP: skipped (newsletter will save to outbox)"
     fi
 
-    # 4h) ElevenLabs for faceless-video voiceovers
-    ask "ElevenLabs API key (optional — voiceover generation for faceless-video bot, Enter to skip):"
-    read -rs ELEVEN_LABS_KEY < "$tty_in"; echo
-    [[ -n "$ELEVEN_LABS_KEY" ]] && ok "ElevenLabs: set" || info "ElevenLabs: skipped"
-
     # 5) Trading bot path
     echo ""
     ask "Path to trading bot directory (optional, Enter to skip):"
@@ -1319,7 +1314,6 @@ CFG_END
             [[ -n "${SMTP_HOST:-}" ]]             && echo "SMTP_HOST=$SMTP_HOST"
             [[ -n "${SMTP_USER:-}" ]]             && echo "SMTP_USER=$SMTP_USER"
             [[ -n "${SMTP_PASS:-}" ]]             && echo "SMTP_PASS=$SMTP_PASS"
-            [[ -n "${ELEVEN_LABS_KEY:-}" ]]       && echo "ELEVEN_LABS_API_KEY=$ELEVEN_LABS_KEY"
 
             # --- Model configuration ---
             echo "OLLAMA_HOST=$OLLAMA_HOST"

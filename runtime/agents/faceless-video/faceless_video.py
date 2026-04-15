@@ -1,7 +1,7 @@
 """Faceless Video Bot — YouTube/TikTok faceless video production pipeline.
 
 Given a topic, produces a complete content package: video script with hook and
-scenes, voiceover text ready for ElevenLabs, visual descriptions ready for
+scenes, voiceover-ready text, visual descriptions ready for
 Runway ML / Midjourney, B-roll suggestions, YouTube SEO (title A/B, description,
 tags), thumbnail concept, and a 30-day posting schedule.  All artefacts are
 persisted as a JSON package so downstream tools (or humans) can act immediately.
