@@ -274,7 +274,7 @@ export default function SystemPage() {
       }
     }
     loadVersion()
-    const interval = setInterval(loadVersion, 5000)
+    const interval = setInterval(loadVersion, 60000)
     return () => { clearInterval(interval); controller.abort() }
   }, [])
 
