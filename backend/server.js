@@ -1008,12 +1008,20 @@ app.get('/health', (req, res) => {
 
 app.get('/version', (req, res) => {
   res.set('Cache-Control', 'no-store, must-revalidate');
+  let versionState = null;
+  try {
+    const versionFile = path.join(REPO_ROOT, 'state', 'version.json');
+    if (fs.existsSync(versionFile)) {
+      versionState = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+    }
+  } catch (_e) { /* ignore */ }
   res.json({
     commit: GIT_COMMIT,
     timestamp: new Date().toISOString(),
     started_at: SERVER_START_TIMESTAMP,
     cwd: process.cwd(),
     file: __filename,
+    version_state: versionState,
   });
 });
 

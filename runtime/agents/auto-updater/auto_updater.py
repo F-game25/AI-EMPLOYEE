@@ -272,23 +272,171 @@ def _runtime_files_at_sha(sha: str) -> "list | None":
             runtime_files.append(path)
     return runtime_files
 
+# ── Git-based repo update ─────────────────────────────────────────────────────
+_REPO_DIR: "Path | None" = None
+
+def _detect_repo_dir() -> "Path | None":
+    """Return the repo root if running from a cloned git repository."""
+    global _REPO_DIR
+    if _REPO_DIR is not None:
+        return _REPO_DIR if _REPO_DIR != Path() else None
+
+    # Check AI_EMPLOYEE_REPO_DIR env var first
+    env_dir = os.environ.get("AI_EMPLOYEE_REPO_DIR", "")
+    if env_dir:
+        p = Path(env_dir)
+        if (p / ".git").is_dir() and (p / "backend" / "server.js").is_file():
+            _REPO_DIR = p
+            return _REPO_DIR
+
+    # Walk up from AI_HOME looking for a git repo with the expected markers
+    cur = AI_HOME
+    for _ in range(6):
+        if (cur / ".git").is_dir() and (cur / "backend" / "server.js").is_file():
+            _REPO_DIR = cur
+            return _REPO_DIR
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+
+    _REPO_DIR = Path()  # sentinel: no repo found
+    return None
+
+
+def _git_sync(branch: str = BRANCH) -> "tuple[bool, str]":
+    """Perform a hard git sync to origin/<branch> in the repo directory.
+
+    Returns (success, new_head_sha).
+    """
+    import subprocess
+
+    repo = _detect_repo_dir()
+    if repo is None:
+        return False, ""
+
+    cmds = [
+        ["git", "fetch", "origin"],
+        ["git", "reset", "--hard", f"origin/{branch}"],
+        ["git", "clean", "-fd"],
+    ]
+    for cmd in cmds:
+        try:
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=str(repo), timeout=120,
+            )
+            if r.returncode != 0:
+                logger.warning("git command failed: %s → %s", " ".join(cmd), r.stderr.strip()[:200])
+                return False, ""
+        except Exception as e:
+            logger.warning("git command error: %s — %s", " ".join(cmd), e)
+            return False, ""
+
+    # Read new HEAD
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=str(repo), timeout=10,
+        )
+        return True, r.stdout.strip()
+    except Exception:
+        return True, ""
+
+
+def _rebuild_frontend(repo_dir: Path) -> bool:
+    """Run npm install + npm run build in the frontend directory."""
+    import subprocess
+
+    frontend = repo_dir / "frontend"
+    if not (frontend / "package.json").is_file():
+        logger.warning("frontend/package.json not found at %s — skipping rebuild", frontend)
+        return False
+
+    logger.info("Rebuilding frontend bundle...")
+    try:
+        # Install dependencies if needed
+        if not (frontend / "node_modules").is_dir():
+            logger.info("  Installing frontend dependencies...")
+            r = subprocess.run(
+                ["npm", "install", "--silent"],
+                capture_output=True, text=True, cwd=str(frontend), timeout=300,
+            )
+            if r.returncode != 0:
+                logger.warning("npm install failed: %s", r.stderr.strip()[:300])
+                return False
+
+        # Clean old dist
+        dist = frontend / "dist"
+        if dist.is_dir():
+            shutil.rmtree(dist, ignore_errors=True)
+
+        # Build
+        env = {**os.environ}
+        try:
+            import subprocess as _sp
+            sha = _sp.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, cwd=str(repo_dir), timeout=10,
+            ).stdout.strip()
+        except Exception:
+            sha = "unknown"
+        env["VITE_APP_VERSION"] = sha
+
+        r = subprocess.run(
+            ["npm", "run", "build"],
+            capture_output=True, text=True, cwd=str(frontend), timeout=300,
+            env=env,
+        )
+        if r.returncode != 0:
+            logger.warning("Frontend build failed: %s", r.stderr.strip()[:300])
+            return False
+
+        logger.info("  ✓ Frontend build complete")
+        return True
+    except Exception as e:
+        logger.warning("Frontend rebuild error: %s", e)
+        return False
+
+
 # ── File mapping ──────────────────────────────────────────────────────────────
 # Never overwrite these — they contain user data or secrets
 _SKIP_PREFIXES = ("runtime/config/", "runtime/state/")
 
+# Top-level repo directories/files that should be synced to AI_HOME in CDN mode
+_REPO_TOPLEVEL_DIRS = ("backend/", "frontend/", "scripts/")
+_REPO_TOPLEVEL_FILES = ("start.sh", "stop.sh", "package.json", "package-lock.json")
+
 
 def _repo_path_to_local(repo_path: str) -> "Path | None":
-    """Map a repo file path (runtime/…) to its installed location in AI_HOME."""
+    """Map a repo file path to its installed location in AI_HOME.
+
+    Handles runtime/ files (mapped to AI_HOME root) as well as backend/,
+    frontend/, scripts/, and top-level files (mapped to AI_HOME/<same path>).
+    """
     for skip in _SKIP_PREFIXES:
         if repo_path.startswith(skip):
             return None
     parts = Path(repo_path).parts
-    if not parts or parts[0] != "runtime":
+    if not parts:
         return None
-    rest = parts[1:]
-    if not rest:
-        return None
-    return AI_HOME / Path(*rest)
+
+    # runtime/ → AI_HOME/<rest>  (existing behaviour)
+    if parts[0] == "runtime":
+        rest = parts[1:]
+        if not rest:
+            return None
+        return AI_HOME / Path(*rest)
+
+    # backend/, frontend/, scripts/ → AI_HOME/<full path>
+    for prefix in _REPO_TOPLEVEL_DIRS:
+        if repo_path.startswith(prefix):
+            return AI_HOME / Path(*parts)
+
+    # Top-level files (start.sh, stop.sh, etc.) → AI_HOME/<filename>
+    if len(parts) == 1 and parts[0] in _REPO_TOPLEVEL_FILES:
+        return AI_HOME / parts[0]
+
+    return None
 
 
 def _bot_for_file(repo_path: str) -> "str | None":
@@ -380,6 +528,62 @@ class TerminalProgress:
 
 # ── Core update logic ─────────────────────────────────────────────────────────
 
+def _check_and_update_git(remote_sha: str, local_sha: str, state: dict, now: str) -> "dict | None":
+    """Attempt a git-based update when running from a cloned repo.
+
+    Returns the final state dict on success, or None to fall back to CDN mode.
+    """
+    repo_dir = _detect_repo_dir()
+    if repo_dir is None:
+        return None
+
+    logger.info("Git repo detected at %s — using git sync", repo_dir)
+
+    # Determine which files changed (for frontend rebuild detection)
+    changed = _changed_files(local_sha, remote_sha)
+
+    # Hard reset to origin/branch
+    ok, new_sha = _git_sync()
+    if not ok:
+        logger.warning("Git sync failed — falling back to CDN mode")
+        return None
+
+    final_sha = new_sha or remote_sha
+
+    # Rebuild frontend if any frontend/ files changed (or if we can't tell)
+    frontend_changed = changed is None or any(
+        f.startswith("frontend/") for f in (changed or [])
+    )
+    if frontend_changed:
+        _rebuild_frontend(repo_dir)
+
+    _save_sha(final_sha)
+    _write_version_state(final_sha, source="auto-updater:git-sync")
+
+    # Also write version.json at repo root state/ directory
+    repo_version = repo_dir / "state" / "version.json"
+    repo_version.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "last_commit": final_sha,
+        "last_updated_at": now,
+        "source": "auto-updater:git-sync",
+    }
+    repo_version.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    state.update({
+        "status":         "updated",
+        "last_update":    now,
+        "update_sha":     final_sha,
+        "local_sha":      final_sha,
+        "update_mode":    "git",
+        "changed_files":  changed or [],
+        "frontend_rebuilt": frontend_changed,
+    })
+    _save_state(state)
+    logger.info("✅ Git sync complete → %s", final_sha[:8])
+    return state
+
+
 def check_and_update(force: bool = False, progress_cb=None) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     state = _load_state()
@@ -421,6 +625,12 @@ def check_and_update(force: bool = False, progress_cb=None) -> dict:
     state["status"] = "updating"
     _save_state(state)
 
+    # ── Try git-based update first (when running from a cloned repo) ──────────
+    git_result = _check_and_update_git(remote_sha, local_sha, state, now)
+    if git_result is not None:
+        return git_result
+
+    # ── Fallback: CDN file-by-file download ───────────────────────────────────
     changed = _changed_files(local_sha, remote_sha)
     if changed is None:
         logger.warning("Could not diff commits (API rate-limit or network error) — will retry next cycle")
@@ -478,12 +688,29 @@ def check_and_update(force: bool = False, progress_cb=None) -> dict:
         else:
             skipped.append(repo_path)
 
+    # ── Rebuild frontend if any frontend/ files were downloaded ────────────────
+    frontend_changed = any(p.startswith("frontend/") for p in downloaded)
+    if frontend_changed:
+        # Attempt rebuild using AI_HOME/frontend or repo dir
+        fe_dir = AI_HOME / "frontend"
+        if (fe_dir / "package.json").is_file():
+            _rebuild_frontend(AI_HOME)
+        else:
+            repo_dir = _detect_repo_dir()
+            if repo_dir is not None:
+                _rebuild_frontend(repo_dir)
+
     # ── Hot-restart only the agents whose files changed ─────────────────────────
     agents_to_restart: set = set()
     for repo_path in downloaded:
         bot = _bot_for_file(repo_path)
         if bot and bot not in ("ai-router",):   # ai-router is a library, not a service
             agents_to_restart.add(bot)
+
+    # Backend changes require a UI restart to pick up the new server.js
+    backend_changed = any(p.startswith("backend/") for p in downloaded)
+    if backend_changed:
+        agents_to_restart.add("problem-solver-ui")
 
     restarted: list = []
     for bot in sorted(agents_to_restart):
@@ -497,13 +724,15 @@ def check_and_update(force: bool = False, progress_cb=None) -> dict:
     _save_sha(remote_sha)
     _write_version_state(remote_sha, source="auto-updater:update")
     state.update({
-        "status":           "updated",
-        "last_update":      now,
-        "update_sha":       remote_sha,
-        "local_sha":        remote_sha,
-        "changed_files":    changed,
-        "downloaded_files": downloaded,
+        "status":             "updated",
+        "last_update":        now,
+        "update_sha":         remote_sha,
+        "local_sha":          remote_sha,
+        "update_mode":        "cdn",
+        "changed_files":      changed,
+        "downloaded_files":   downloaded,
         "restarted_agents":   restarted,
+        "frontend_rebuilt":   frontend_changed,
     })
     _save_state(state)
     logger.info("✅ Update complete. Downloaded %d files, restarted: %s",
