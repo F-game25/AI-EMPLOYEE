@@ -326,10 +326,10 @@ def _git_sync(branch: str = BRANCH) -> "tuple[bool, str]":
                 cmd, capture_output=True, text=True, cwd=str(repo), timeout=120,
             )
             if r.returncode != 0:
-                logger.warning("git command failed: %s → %s", " ".join(cmd), r.stderr.strip()[:200])
+                logger.warning("git command failed: %s (exit %d)", " ".join(cmd), r.returncode)
                 return False, ""
         except Exception as e:
-            logger.warning("git command error: %s — %s", " ".join(cmd), e)
+            logger.warning("git command error: %s — %s", " ".join(cmd), type(e).__name__)
             return False, ""
 
     # Read new HEAD
@@ -349,7 +349,7 @@ def _rebuild_frontend(repo_dir: Path) -> bool:
 
     frontend = repo_dir / "frontend"
     if not (frontend / "package.json").is_file():
-        logger.warning("frontend/package.json not found at %s — skipping rebuild", frontend)
+        logger.warning("frontend/package.json not found — skipping rebuild")
         return False
 
     logger.info("Rebuilding frontend bundle...")
@@ -373,8 +373,7 @@ def _rebuild_frontend(repo_dir: Path) -> bool:
         # Build
         env = {**os.environ}
         try:
-            import subprocess as _sp
-            sha = _sp.run(
+            sha = subprocess.run(
                 ["git", "rev-parse", "--short", "HEAD"],
                 capture_output=True, text=True, cwd=str(repo_dir), timeout=10,
             ).stdout.strip()
@@ -531,13 +530,21 @@ class TerminalProgress:
 def _check_and_update_git(remote_sha: str, local_sha: str, state: dict, now: str) -> "dict | None":
     """Attempt a git-based update when running from a cloned repo.
 
-    Returns the final state dict on success, or None to fall back to CDN mode.
+    Parameters:
+        remote_sha: The latest commit SHA on the tracked remote branch.
+        local_sha:  The currently installed/checked-out commit SHA.
+        state:      Mutable state dict that will be persisted after the update.
+        now:        ISO-8601 timestamp string for the current check time.
+
+    Returns:
+        A state dict on success (git sync completed), or ``None`` to signal
+        that the caller should fall back to the CDN file-by-file download path.
     """
     repo_dir = _detect_repo_dir()
     if repo_dir is None:
         return None
 
-    logger.info("Git repo detected at %s — using git sync", repo_dir)
+    logger.info("Git repo detected — using git sync")
 
     # Determine which files changed (for frontend rebuild detection)
     changed = _changed_files(local_sha, remote_sha)
