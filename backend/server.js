@@ -31,6 +31,7 @@ const { buildMoneyTemplate, buildThinkingSummary } = require('./money_mode');
 const brain = require('./brain/active_brain');
 const persistence = require('./persistence');
 const voiceManager = require('./core/voice_manager');
+const voiceApiRouter = require('./api/voice');
 
 const PORT = process.env.PORT || 8787;
 const PYTHON_BACKEND_HOST = '127.0.0.1';
@@ -64,6 +65,7 @@ if (HAS_FRONTEND_DIST) {
 
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
+app.use('/api/voice', voiceApiRouter);
 
 const GPU_USAGE_BASELINE = 18;
 let currentGpuUsage = GPU_USAGE_BASELINE;
@@ -178,9 +180,9 @@ function markBootVoicePlayed() {
 
 function getTimeBasedGreeting(now = new Date()) {
   const hour = now.getHours();
-  if (hour >= 5 && hour <= 11) return 'Good morning';
-  if (hour >= 12 && hour <= 17) return 'Good afternoon';
-  return 'Good evening';
+  if (hour >= 5 && hour <= 11) return 'Good morning. Control panel online.';
+  if (hour >= 12 && hour <= 17) return 'Good afternoon. Systems ready.';
+  return 'Good evening. All systems operational.';
 }
 
 async function maybeSpeakBootGreeting() {
@@ -196,7 +198,7 @@ async function maybeSpeakBootGreeting() {
     }
     bootVoiceState.triggered = true;
     markBootVoicePlayed();
-    await voiceManager.speak(`${getTimeBasedGreeting()}. Starting control panel.`, true);
+    await voiceManager.emitEvent('system_boot', { greeting: getTimeBasedGreeting() }, true);
   } catch (_err) {
     // best effort
   }
@@ -1780,6 +1782,7 @@ onAgentEvent('task:started', ({ agent, task }) => {
     level: 'info',
     heartbeat: heartbeatCounter,
   });
+  void voiceManager.emitEvent('task_created', { priority: task.priority });
 });
 
 onAgentEvent('task:completed', ({ agent, task }) => {
@@ -1863,6 +1866,7 @@ onAgentEvent('task:completed', ({ agent, task }) => {
     level: 'success',
     heartbeat: heartbeatCounter,
   });
+  void voiceManager.emitEvent('task_completed');
   queueNextWorkflowStep(task.id);
 });
 
@@ -1923,6 +1927,7 @@ onAgentEvent('task:failed', ({ agent, task }) => {
     level: 'warning',
     heartbeat: heartbeatCounter,
   });
+  void voiceManager.emitEvent('error_detected', { message: 'Error detected.' });
   retryWorkflowStep(task.id);
 });
 

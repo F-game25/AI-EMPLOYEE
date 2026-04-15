@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { id: 'operations', icon: '▣', label: 'Operations' },
   { id: 'agents', icon: '⬡', label: 'Agents' },
   { id: 'system', icon: '⚙', label: 'System' },
+  { id: 'voice', icon: '◈', label: 'Voice' },
 ]
 
 export default function Sidebar() {

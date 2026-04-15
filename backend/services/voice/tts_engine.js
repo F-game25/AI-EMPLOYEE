@@ -5,16 +5,39 @@ const { spawn, spawnSync } = require('child_process');
 
 const DEFAULT_VOLUME = 0.9;
 
+// ── Voice profiles ────────────────────────────────────────────────────────────
+const VOICE_PROFILES = {
+  default_futuristic: { pitch: 1.0,  speed: 1.0,  amplitude: 180, tone: 'futuristic' },
+  minimal_assistant:  { pitch: 0.95, speed: 0.95, amplitude: 160, tone: 'neutral'    },
+  system_core:        { pitch: 0.88, speed: 0.9,  amplitude: 180, tone: 'sharp'      },
+  stealth_mode:       { pitch: 1.0,  speed: 0.88, amplitude: 80,  tone: 'calm'       },
+};
+
+// Tone → espeak voice variant
+const TONE_ESPEAK_VARIANT = {
+  futuristic: 'rob',
+  neutral:    '',
+  calm:       'f5',
+  sharp:      'croak',
+};
+
+// ── Engine state ──────────────────────────────────────────────────────────────
 let initialized = false;
 let backend = 'silent';
 let silentMode = true;
 let speaking = false;
 let currentProcess = null;
-let volume = DEFAULT_VOLUME;
-let voiceStyle = 'default';
+let engineVolume = DEFAULT_VOLUME;
+let enginePitch = 1.0;
+let engineSpeed = 1.0;
+let engineAmplitude = 180;
+let engineTone = 'futuristic';
+let engineVoiceId = 'default';
 let queue = [];
 let draining = false;
 let consecutiveFailures = 0;
+
+// ── Utility helpers ───────────────────────────────────────────────────────────
 
 function commandExists(command) {
   try {
@@ -28,10 +51,14 @@ function commandExists(command) {
   }
 }
 
+function clamp(val, min, max) {
+  const parsed = Number(val);
+  if (!Number.isFinite(parsed)) return min;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 function clampVolume(raw) {
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return DEFAULT_VOLUME;
-  return Math.min(1, Math.max(0, parsed));
+  return clamp(raw, 0, 1);
 }
 
 function detectBackend() {
@@ -43,44 +70,116 @@ function detectBackend() {
   return 'silent';
 }
 
+// ── Futuristic text normalization ─────────────────────────────────────────────
+const PHRASE_TRANSFORMS = [
+  [/\bI just (\w+ed)\b/gi, '$1'],
+  [/\bHey[,!]?\s*/gi, ''],
+  [/\bexcellent[!.]?/gi, 'Confirmed.'],
+  [/\beverything is working fine\b.*/i, 'All systems operational.'],
+  [/\btask (?:has been )?added/i, 'Task assigned.'],
+  [/\btask (?:has been )?completed/i, 'Task complete.'],
+  [/\bError detected\b/i, 'Error detected.'],
+  [/\bplease\s+/gi, ''],
+  [/\bjust\s+/gi, ''],
+];
+
+function normalizeText(raw) {
+  let text = String(raw || '').trim();
+  for (const [pattern, replacement] of PHRASE_TRANSFORMS) {
+    text = text.replace(pattern, replacement);
+  }
+  return text.replace(/\s{2,}/g, ' ').trim();
+}
+
+// ── Command builders ──────────────────────────────────────────────────────────
+
 function buildCommand(text) {
   if (backend === 'say') {
-    const args = ['-r', '180'];
-    if (voiceStyle && voiceStyle !== 'default') args.push('-v', String(voiceStyle));
+    const wpm = Math.round(clamp(engineSpeed, 0.5, 2) * 180);
+    const args = ['-r', String(wpm)];
+    if (engineVoiceId && engineVoiceId !== 'default') args.push('-v', String(engineVoiceId));
     args.push(text);
     return { cmd: 'say', args };
   }
+
   if (backend === 'espeak-ng' || backend === 'espeak') {
+    const speedWpm = Math.round(clamp(engineSpeed, 0.5, 2) * 165);
+    const pitchVal = Math.round(clamp(enginePitch, 0.5, 2) * 50);
+    const amp = engineAmplitude;
+    const variant = TONE_ESPEAK_VARIANT[engineTone] || '';
+    const voiceArg = variant ? `en+${variant}` : 'en';
     return {
       cmd: backend,
-      args: ['-s', '165', '-a', String(Math.round(clampVolume(volume) * 200)), text],
+      args: ['-s', String(speedWpm), '-p', String(pitchVal), '-a', String(amp), '-v', voiceArg, text],
     };
   }
+
   if (backend === 'spd-say') {
     return { cmd: 'spd-say', args: [text] };
   }
+
   if (backend === 'powershell') {
     const encoded = Buffer.from(text, 'utf8').toString('base64');
+    const volumePct = Math.round(clampVolume(engineVolume) * 100);
+    const rate = Math.round(clamp((engineSpeed - 1.0) * 10, -10, 10));
     const script = [
       'Add-Type -AssemblyName System.Speech;',
       `$text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}'));`,
       '$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;',
-      `$s.Volume = ${Math.round(clampVolume(volume) * 100)};`,
+      `$s.Volume = ${volumePct};`,
+      `$s.Rate = ${rate};`,
       '$s.Speak($text);',
     ].join(' ');
     return { cmd: 'powershell', args: ['-NoProfile', '-Command', script] };
   }
+
   return null;
 }
 
+// ── Public API ────────────────────────────────────────────────────────────────
+
+function loadVoice(voiceId) {
+  engineVoiceId = String(voiceId || 'default');
+  const profile = VOICE_PROFILES[voiceId];
+  if (profile) {
+    enginePitch = profile.pitch;
+    engineSpeed = profile.speed;
+    engineAmplitude = profile.amplitude;
+    engineTone = profile.tone;
+  }
+}
+
+function setPitch(value) {
+  enginePitch = clamp(value, 0.5, 2);
+}
+
+function setSpeed(value) {
+  engineSpeed = clamp(value, 0.5, 2);
+}
+
+function setTone(profile) {
+  const validTones = Object.keys(TONE_ESPEAK_VARIANT);
+  engineTone = validTones.includes(profile) ? profile : 'neutral';
+}
+
 async function init(options = {}) {
-  if (initialized) return;
-  volume = clampVolume(options.volume);
-  voiceStyle = String(options.voiceStyle || 'default');
-  backend = detectBackend();
-  silentMode = backend === 'silent';
-  initialized = true;
-  console.log(`[VOICE] Engine initialized (${backend}${silentMode ? ', silent mode' : ''})`);
+  engineVolume = clampVolume(options.volume ?? engineVolume);
+
+  if (options.profile && VOICE_PROFILES[options.profile]) {
+    loadVoice(options.profile);
+  } else {
+    if (options.voiceStyle) loadVoice(options.voiceStyle);
+    if (options.pitch != null) setPitch(options.pitch);
+    if (options.speed != null) setSpeed(options.speed);
+    if (options.tone) setTone(options.tone);
+  }
+
+  if (!initialized) {
+    backend = detectBackend();
+    silentMode = backend === 'silent';
+    initialized = true;
+    console.log(`[VOICE] Engine initialized (${backend}${silentMode ? ', silent mode' : ''})`);
+  }
 }
 
 function isSpeaking() {
@@ -88,16 +187,17 @@ function isSpeaking() {
 }
 
 async function runSpeak(text) {
-  if (!text || !String(text).trim()) return;
+  const normalized = normalizeText(text);
+  if (!normalized) return;
   if (!initialized) await init();
   if (silentMode) return;
 
-  const command = buildCommand(String(text));
+  const command = buildCommand(normalized);
   if (!command) return;
 
   await new Promise((resolve) => {
     speaking = true;
-    console.log(`[VOICE] Speaking: ${String(text)}`);
+    console.log(`[VOICE] Speaking: ${normalized}`);
     try {
       currentProcess = spawn(command.cmd, command.args, { stdio: 'ignore' });
       currentProcess.once('exit', () => {
@@ -148,14 +248,26 @@ async function speak(text) {
 async function stop() {
   queue = [];
   if (currentProcess && !currentProcess.killed) {
-    try {
-      currentProcess.kill('SIGTERM');
-    } catch (_err) {
-      // ignore
-    }
+    try { currentProcess.kill('SIGTERM'); } catch (_err) { /* ignore */ }
   }
   currentProcess = null;
   speaking = false;
+}
+
+async function reconfigure(options = {}) {
+  if (!initialized) {
+    await init(options);
+    return;
+  }
+  engineVolume = clampVolume(options.volume ?? engineVolume);
+  if (options.profile && VOICE_PROFILES[options.profile]) {
+    loadVoice(options.profile);
+  } else {
+    if (options.voiceStyle) loadVoice(options.voiceStyle);
+    if (options.pitch != null) setPitch(options.pitch);
+    if (options.speed != null) setSpeed(options.speed);
+    if (options.tone) setTone(options.tone);
+  }
 }
 
 module.exports = {
@@ -163,4 +275,10 @@ module.exports = {
   speak,
   stop,
   isSpeaking,
+  reconfigure,
+  loadVoice,
+  setPitch,
+  setSpeed,
+  setTone,
+  VOICE_PROFILES,
 };
