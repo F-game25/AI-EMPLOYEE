@@ -30,6 +30,7 @@ const subsystems = require('./subsystems');
 const { buildMoneyTemplate, buildThinkingSummary } = require('./money_mode');
 const brain = require('./brain/active_brain');
 const persistence = require('./persistence');
+const voiceManager = require('./core/voice_manager');
 
 const PORT = process.env.PORT || 8787;
 const PYTHON_BACKEND_HOST = '127.0.0.1';
@@ -155,6 +156,46 @@ const runtimeState = {
   _seq: 0,
 };
 
+const bootVoiceState = {
+  system_init: false,
+  ai_core_ready: false,
+  ui_loaded: false,
+  triggered: false,
+};
+const BOOT_VOICE_FLAG = '__AI_EMPLOYEE_BOOT_VOICE_PLAYED';
+
+function localGreeting(now = new Date()) {
+  const hour = now.getHours();
+  if (hour >= 5 && hour <= 11) return 'Good morning';
+  if (hour >= 12 && hour <= 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+async function maybeSpeakBootGreeting() {
+  if (bootVoiceState.triggered || global[BOOT_VOICE_FLAG]) return;
+  if (!bootVoiceState.system_init || !bootVoiceState.ai_core_ready || !bootVoiceState.ui_loaded) return;
+
+  try {
+    await voiceManager.init();
+    if (!voiceManager.isBootGreetingEnabled()) {
+      bootVoiceState.triggered = true;
+      global[BOOT_VOICE_FLAG] = true;
+      return;
+    }
+    bootVoiceState.triggered = true;
+    global[BOOT_VOICE_FLAG] = true;
+    await voiceManager.speak(`${localGreeting()}. Starting control panel.`, true);
+  } catch (_err) {
+    // best effort
+  }
+}
+
+function markBootEvent(name) {
+  if (!Object.prototype.hasOwnProperty.call(bootVoiceState, name)) return;
+  bootVoiceState[name] = true;
+  void maybeSpeakBootGreeting();
+}
+
 const secretStore = new SecretStore();
 const securitySyncPolicy = createOfflineSecuritySyncPolicy({
   queueFile: path.resolve(__dirname, '../state/security_sync_queue.json'),
@@ -220,6 +261,7 @@ if (_savedBrain) {
   brain.restoreState(_savedBrain);
   console.log('[PERSISTENCE] Restored brain state');
 }
+markBootEvent('system_init');
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
@@ -1686,6 +1728,7 @@ broadcaster.startHeartbeat({
     return `[SYSTEM] heartbeat=${seq} mode=${stats.mode} running=${stats.running_agents}/${stats.total_agents}`;
   },
 });
+markBootEvent('ai_core_ready');
 
 onAgentEvent('agent:update', (agents) => {
   broadcaster.broadcast('agent:update', { agents });
@@ -1924,4 +1967,5 @@ server.listen(PORT, () => {
     () => runtimeState,
     () => brain.exportState(),
   );
+  markBootEvent('ui_loaded');
 });

@@ -20142,7 +20142,7 @@ _SECRET_KEYS: frozenset = frozenset({
     "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "SENDGRID_API_KEY",
     "SMTP_PASS", "DISCORD_BOT_TOKEN", "TELEGRAM_BOT_TOKEN",
     "WHATSAPP_TOKEN", "TAVILY_API_KEY", "SERP_API_KEY",
-    "NEWS_API_KEY", "ELEVEN_LABS_KEY", "ALPHA_INSIDER_KEY",
+    "NEWS_API_KEY", "ALPHA_INSIDER_KEY",
     "DISCORD_WEBHOOK_URL",
 })
 _MASK = "••••••••"
@@ -20155,7 +20155,6 @@ _SETTINGS_SCHEMA: list = [
     ("TAVILY_API_KEY",        "Tavily Search Key",           "password", "tvly-…",                        "api_keys"),
     ("SERP_API_KEY",          "SerpAPI Key",                 "password", "your-serpapi-key",              "api_keys"),
     ("NEWS_API_KEY",          "NewsAPI Key",                 "password", "your-newsapi-key",              "api_keys"),
-    ("ELEVEN_LABS_KEY",       "ElevenLabs API Key",          "password", "your-elevenlabs-key",           "api_keys"),
     ("ALPHA_INSIDER_KEY",     "Alpha Insider Key",           "password", "your-key",                      "api_keys"),
     ("DISCORD_BOT_TOKEN",     "Discord Bot Token",           "password", "MTxxxxxxx",                     "api_keys"),
     ("DISCORD_WEBHOOK_URL",   "Discord Webhook URL",         "password", "https://discord.com/api/webhooks/…", "api_keys"),

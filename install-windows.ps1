@@ -346,8 +346,6 @@ if (-not [string]::IsNullOrWhiteSpace($SMTP_HOST)) {
     $SMTP_PASS = Get-SecureInput "  SMTP password (optional, hidden)"
 }
 
-$ELEVENLABS_KEY = Get-SecureInput "  ElevenLabs API key (optional, hidden)"
-
 # Hourly status
 $statusChoice = Read-Host "  Enable hourly status updates? [Y/n]"
 $HOURLY_STATUS = ($statusChoice -ne 'n' -and $statusChoice -ne 'N')
@@ -736,7 +734,6 @@ OPENAI_API_KEY=$OPENAI_KEY
 ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY
 TAVILY_API_KEY=$TAVILY_KEY
 NEWSAPI_KEY=$NEWSAPI_KEY
-ELEVENLABS_API_KEY=$ELEVENLABS_KEY
 
 # Messaging
 TELEGRAM_BOT_TOKEN=$TELEGRAM_TOKEN
