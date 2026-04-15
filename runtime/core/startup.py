@@ -170,7 +170,48 @@ def startup_sequence() -> tuple[subprocess.Popen[str], subprocess.Popen[str]]:
     worker_proc = start_worker_pool()
     server_proc = start_server()
     verify_ui_access()
+    start_evolution_controller()
     return server_proc, worker_proc
+
+
+def start_evolution_controller() -> None:
+    """Start the autonomous evolution loop using the EVOLUTION_MODE env var.
+
+    Valid values for EVOLUTION_MODE:
+      OFF   — disabled (default when the var is unset).
+      SAFE  — analyse & generate patches but require explicit API approval.
+      AUTO  — fully autonomous: detect, patch, validate, and deploy with no
+              human in the loop.
+
+    Set EVOLUTION_MODE=AUTO in ~/.ai-employee/credentials/.env for fully
+    unsupervised production self-healing.
+    """
+    mode = os.environ.get("EVOLUTION_MODE", "OFF").upper().strip()
+    if mode == "OFF":
+        _ok("Evolution controller: mode OFF (set EVOLUTION_MODE=AUTO or SAFE to enable)")
+        return
+
+    runtime_path = str(REPO_ROOT / "runtime")
+    env = os.environ.copy()
+    current = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{runtime_path}:{current}" if current else runtime_path
+
+    try:
+        sys.path.insert(0, runtime_path)
+        from core.self_evolution.evolution_controller import get_evolution_controller
+        ctrl = get_evolution_controller()
+        ctrl.set_mode(mode)
+        ctrl.start()
+        _ok(f"Evolution controller started (mode={mode})")
+    except Exception as exc:
+        # Non-fatal: print a prominent warning so operators know autonomous
+        # mode is NOT active even though EVOLUTION_MODE was requested.
+        print(
+            f"[!] WARNING: Evolution controller failed to start (EVOLUTION_MODE={mode}): {exc}\n"
+            "[!] The system is running WITHOUT autonomous self-healing. "
+            "Check PYTHONPATH and runtime dependencies.",
+            flush=True,
+        )
 
 
 def run_preflight() -> None:
