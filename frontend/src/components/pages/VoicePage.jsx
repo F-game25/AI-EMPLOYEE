@@ -393,10 +393,127 @@ function CustomerVoiceTab({ cfg, customerProfiles, customerTones, saving, patch,
   )
 }
 
+// ── Pipeline settings tab ─────────────────────────────────────────────────────
+
+function PipelineTab({ pipelineOpts, onPatch, interruptStatus, onInterrupt }) {
+  const opts = pipelineOpts || {}
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-4)' }}>
+
+      <SectionCard title="Streaming Pipeline" accent="var(--success)">
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: 'var(--space-3)', lineHeight: 1.5 }}>
+          Sentence-level chunk streaming. First sentence plays within ~100ms.
+          Remaining chunks chain with micro-pauses so speech sounds natural.
+        </div>
+        <ToggleSwitch
+          label="Pre-roll filler phrases"
+          value={opts.preRollEnabled !== false}
+          onChange={(v) => onPatch({ preRollEnabled: v })}
+        />
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: 'var(--space-3)' }}>
+          Speaks "One moment…" / "Processing…" immediately while a longer response generates.
+        </div>
+        <Slider
+          label="Pre-roll threshold (chunks)"
+          value={opts.preRollThreshold ?? 2}
+          min={1} max={6} step={1}
+          format={(v) => `≥ ${v} sentences`}
+          onChange={(v) => onPatch({ preRollThreshold: v })}
+        />
+      </SectionCard>
+
+      <SectionCard title="Timing" accent="var(--success)">
+        <Slider
+          label="Micro-pause between sentences"
+          value={opts.microPauseMs ?? 80}
+          min={0} max={400} step={10}
+          format={(v) => `${v} ms`}
+          onChange={(v) => onPatch({ microPauseMs: v })}
+        />
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: 'var(--space-3)' }}>
+          50–150 ms sounds natural. 0 ms is robotic. 300+ ms is very deliberate.
+        </div>
+        <Slider
+          label="Thinking delay"
+          value={opts.thinkingDelayMs ?? 0}
+          min={0} max={800} step={50}
+          format={(v) => v === 0 ? 'Off' : `${v} ms`}
+          onChange={(v) => onPatch({ thinkingDelayMs: v })}
+        />
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          Artificial pause before first chunk. 0 = instant. Only applied after pre-roll finishes.
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Interrupt Control" accent="var(--success)">
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: 'var(--space-3)', lineHeight: 1.5 }}>
+          Manual override — immediately stop all current speech. In production this
+          fires automatically when the VAD detects user speech.
+        </div>
+        <button
+          onClick={onInterrupt}
+          style={{
+            width: '100%', padding: 'var(--space-2) var(--space-4)',
+            borderRadius: 'var(--radius-md)', border: '1px solid var(--error, #ef4444)',
+            background: 'rgba(239,68,68,0.06)', color: 'var(--error, #ef4444)',
+            fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          {interruptStatus || '⬛ Stop Speech Now'}
+        </button>
+        <div style={{ marginTop: 'var(--space-4)', padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 500, marginBottom: 'var(--space-2)' }}>
+            Future: Real-time VAD + STT
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            VAD and STT stubs are already wired in{' '}
+            <code style={{ background: 'var(--bg-base)', padding: '1px 4px', borderRadius: '3px', fontSize: '10px' }}>
+              stream_pipeline.js
+            </code>
+            . When Whisper.cpp is added, replace <code style={{ background: 'var(--bg-base)', padding: '1px 4px', borderRadius: '3px', fontSize: '10px' }}>detectSpeech()</code> and{' '}
+            <code style={{ background: 'var(--bg-base)', padding: '1px 4px', borderRadius: '3px', fontSize: '10px' }}>streamTranscribe()</code> bodies.
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Target Latency" accent="var(--success)">
+        <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+          {[
+            { stage: 'Sentence split', target: '< 1 ms',    note: 'Pure JS, O(n) text' },
+            { stage: 'TTS first chunk', target: '50–150 ms', note: 'OS TTS startup' },
+            { stage: 'Pipeline feel',   target: '< 300 ms',  note: 'Perceived by humans as instant' },
+          ].map(({ stage, target, note }) => (
+            <div key={stage} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+            }}>
+              <div>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{stage}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{note}</div>
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--success)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', flexShrink: 0, marginLeft: 'var(--space-3)' }}>
+                {target}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 'var(--space-3)', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          With STT + token streaming, first-word latency drops to ~300–700 ms total.
+          STT and token-session API stubs are ready for drop-in integration.
+        </div>
+      </SectionCard>
+
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function VoicePage() {
   const [cfg, setCfg] = useState(null)
+  const [pipelineOpts, setPipelineOpts] = useState(null)
   const [profiles, setProfiles] = useState([])
   const [customerProfiles, setCustomerProfiles] = useState([])
   const [tones, setTones] = useState([])
@@ -406,6 +523,7 @@ export default function VoicePage() {
   const [customerTestStatus, setCustomerTestStatus] = useState('')
   const [saveStatus, setSaveStatus] = useState('')
   const [activeTab, setActiveTab] = useState('system')
+  const [interruptStatus, setInterruptStatus] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -418,6 +536,7 @@ export default function VoicePage() {
         setCustomerProfiles(data.customer_profiles || [])
         setTones(data.tones || [])
         setCustomerTones(data.customer_tones || [])
+        setPipelineOpts(data.pipeline || {})
       } catch (_e) {
         // keep current state
       }
@@ -462,6 +581,19 @@ export default function VoicePage() {
     setTimeout(() => setSaveStatus(''), 2000)
   }, [cfg])
 
+  const patchPipeline = useCallback(async (update) => {
+    setPipelineOpts((prev) => ({ ...prev, ...update }))
+    try {
+      await fetch(`${BASE}/api/voice/pipeline/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(update),
+      })
+    } catch (_e) {
+      // best-effort
+    }
+  }, [])
+
   const testVoice = useCallback(async () => {
     setTestStatus('Testing...')
     try {
@@ -484,6 +616,17 @@ export default function VoicePage() {
       setCustomerTestStatus('Error.')
     }
     setTimeout(() => setCustomerTestStatus(''), 3000)
+  }, [])
+
+  const interruptSpeech = useCallback(async () => {
+    setInterruptStatus('Stopping…')
+    try {
+      await fetch(`${BASE}/api/voice/pipeline/interrupt`, { method: 'POST' })
+      setInterruptStatus('Stopped.')
+    } catch (_e) {
+      setInterruptStatus('Error.')
+    }
+    setTimeout(() => setInterruptStatus(''), 2000)
   }, [])
 
   if (!cfg) {
@@ -538,6 +681,7 @@ export default function VoicePage() {
         tabs={[
           { id: 'system',   label: '◈ System Voice' },
           { id: 'customer', label: '◎ Customer Voice' },
+          { id: 'pipeline', label: '⚡ Pipeline' },
         ]}
         active={activeTab}
         onChange={setActiveTab}
@@ -562,6 +706,15 @@ export default function VoicePage() {
           patch={patch}
           testCustomer={testCustomerVoice}
           testStatus={customerTestStatus}
+        />
+      )}
+
+      {activeTab === 'pipeline' && (
+        <PipelineTab
+          pipelineOpts={pipelineOpts}
+          onPatch={patchPipeline}
+          interruptStatus={interruptStatus}
+          onInterrupt={interruptSpeech}
         />
       )}
     </div>
