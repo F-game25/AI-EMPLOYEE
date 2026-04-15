@@ -315,21 +315,20 @@ def _git_sync(branch: str = BRANCH) -> "tuple[bool, str]":
     if repo is None:
         return False, ""
 
-    cmds = [
-        ("fetch", ["git", "fetch", "origin"]),
-        ("reset", ["git", "reset", "--hard", f"origin/{branch}"]),
-        ("clean", ["git", "clean", "-fd"]),
-    ]
-    for label, cmd in cmds:
+    cmd_fetch = ["git", "fetch", "origin"]
+    cmd_reset = ["git", "reset", "--hard", f"origin/{branch}"]
+    cmd_clean = ["git", "clean", "-fd"]
+
+    for step, cmd in enumerate((cmd_fetch, cmd_reset, cmd_clean)):
         try:
             r = subprocess.run(
                 cmd, capture_output=True, text=True, cwd=str(repo), timeout=120,
             )
             if r.returncode != 0:
-                logger.warning("git %s failed (exit %d)", label, r.returncode)
+                logger.warning("git sync step %d failed (exit %d)", step, r.returncode)
                 return False, ""
         except Exception as e:
-            logger.warning("git %s error: %s", label, type(e).__name__)
+            logger.warning("git sync step %d error: %s", step, type(e).__name__)
             return False, ""
 
     # Read new HEAD
