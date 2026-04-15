@@ -74,6 +74,17 @@ rm -rf frontend/dist
 APP_VERSION="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 VITE_APP_VERSION="$APP_VERSION" npm --prefix frontend run build
 
+# Write version state for runtime integrity checks
+mkdir -p "$REPO_ROOT/state"
+FULL_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+cat > "$REPO_ROOT/state/version.json" <<EOF
+{
+  "last_commit": "$FULL_COMMIT",
+  "last_updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "source": "start.sh"
+}
+EOF
+
 echo "[3/3] Starting unified runtime on port ${UI_PORT}..."
 if [[ -f backend.pid ]]; then
   OLD_PID="$(cat backend.pid 2>/dev/null || true)"
