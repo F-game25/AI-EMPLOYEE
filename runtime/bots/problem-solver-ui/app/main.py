@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -14,6 +16,10 @@ from app.routes import agents, guardrails, integrations, memory, metrics, schedu
 from app.schemas import LoginRequest, LoginResponse
 from app.state import store
 from app.websocket import router as ws_router
+
+sys.dont_write_bytecode = True
+print("RUNNING FROM:", os.getcwd(), flush=True)
+print("FILE PATH:", __file__, flush=True)
 
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parents[3]
@@ -47,10 +53,22 @@ def _ensure_frontend_build(static_dir: Path) -> None:
 
     print(f"[ui-startup] dist missing, rebuilding frontend in {frontend_dir}", flush=True)
     try:
+        env = os.environ.copy()
+        env["VITE_APP_VERSION"] = _latest_commit().split(" ")[0]
         subprocess.run(["npm", "install"], cwd=frontend_dir, check=True)
-        subprocess.run(["npm", "run", "build"], cwd=frontend_dir, check=True)
+        subprocess.run(["npm", "run", "build"], cwd=frontend_dir, check=True, env=env)
     except Exception as exc:  # pragma: no cover - defensive startup diagnostics
         print(f"[ui-startup] frontend build failed: {exc}", flush=True)
+
+
+def _latest_commit() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "log", "-1", "--oneline"],
+            text=True,
+        ).strip()
+    except Exception:
+        return "unknown"
 
 
 STATIC_DIR = str(_resolve_static_dir())
@@ -90,6 +108,7 @@ async def log_route_failures(request: Request, call_next):
 @app.on_event("startup")
 async def startup_bus_subscriptions() -> None:
     _ensure_frontend_build(Path(STATIC_DIR))
+    print("LATEST COMMIT:", _latest_commit(), flush=True)
     for ch in ("tasks", "results", "notifications", "logs"):
         await store.bus.subscribe(ch)
 
@@ -109,6 +128,14 @@ async def serve_ui():
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/version")
+async def version() -> dict[str, str]:
+    return {
+        "commit": _latest_commit(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.post("/login", response_model=LoginResponse)

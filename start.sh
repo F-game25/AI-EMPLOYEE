@@ -3,8 +3,15 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+REPO_ROOT="$(pwd -P)"
+export AI_EMPLOYEE_REPO_DIR="$REPO_ROOT"
+export PYTHONDONTWRITEBYTECODE=1
 
 echo "Starting AI Employee..."
+echo "RUNNING FROM: $REPO_ROOT"
+echo "LATEST COMMIT: $(git -C "$REPO_ROOT" log -1 --oneline 2>/dev/null || echo unknown)"
+echo "PYTHON: $(command -v python3 || echo missing)"
+echo "UVICORN: $(command -v uvicorn || echo missing)"
 
 # ── Evolution mode prompt ─────────────────────────────────────────────────────
 # Ask the operator which self-evolution mode to use, but only when:
@@ -61,9 +68,24 @@ if [[ ! -d frontend/node_modules ]]; then
 fi
 
 echo "[2/3] Building frontend..."
-npm --prefix frontend run build
+find "$REPO_ROOT" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+find "$REPO_ROOT" -type f -name "*.pyc" -delete 2>/dev/null || true
+rm -rf frontend/dist
+APP_VERSION="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+VITE_APP_VERSION="$APP_VERSION" npm --prefix frontend run build
 
 echo "[3/3] Starting unified runtime on port ${UI_PORT}..."
+if [[ -f backend.pid ]]; then
+  OLD_PID="$(cat backend.pid 2>/dev/null || true)"
+  if [[ -n "${OLD_PID:-}" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
+    kill "$OLD_PID" 2>/dev/null || true
+    sleep 2
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+      kill -9 "$OLD_PID" 2>/dev/null || true
+    fi
+  fi
+  rm -f backend.pid
+fi
 PORT="${UI_PORT}" PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}" node backend/server.js &
 BACKEND_PID=$!
 
