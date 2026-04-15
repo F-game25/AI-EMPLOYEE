@@ -168,8 +168,8 @@ const anomalyResponder = createAnomalyResponder({
 setInterval(() => {
   try {
     anomalyResponder.evaluate();
-  } catch {
-    // best effort
+  } catch (error) {
+    console.warn('[SECURITY] anomaly responder evaluate failed:', error && error.message ? error.message : error);
   }
 }, 15000).unref();
 

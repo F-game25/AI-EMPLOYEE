@@ -9,6 +9,8 @@ const HONEYPOT_PATTERNS = [
   '/admin',
   '/config',
 ];
+const MAX_PAYLOAD_BYTES = 64 * 1024;
+const MAX_HONEYPOT_EVENTS = 200;
 
 function nowIso() {
   return new Date().toISOString();
@@ -27,6 +29,7 @@ function createApiGatewayProtector(options = {}) {
     honeypot_events: [],
     rate_limit_events: 0,
     api_key_protected_requests: 0,
+    _honeypot_seq: 0,
   };
   const ipWindows = new Map();
 
@@ -58,7 +61,7 @@ function createApiGatewayProtector(options = {}) {
     const matched = HONEYPOT_PATTERNS.find((pattern) => hitPath.includes(pattern));
     if (!matched) return false;
     const event = {
-      id: `hp-${Date.now()}-${state.honeypot_events.length + 1}`,
+      id: `hp-${Date.now()}-${++state._honeypot_seq}`,
       ts: nowIso(),
       ip: req.ip || req.socket.remoteAddress || 'unknown',
       method: req.method,
@@ -67,7 +70,7 @@ function createApiGatewayProtector(options = {}) {
       user_agent: req.get('user-agent') || '',
     };
     state.honeypot_events.unshift(event);
-    state.honeypot_events = state.honeypot_events.slice(0, 200);
+    state.honeypot_events = state.honeypot_events.slice(0, MAX_HONEYPOT_EVENTS);
     recordSecurityEvent('honeypot_triggered', { ...event, severity: 'high' });
     res.status(200).json({
       status: 'ok',
@@ -101,7 +104,7 @@ function createApiGatewayProtector(options = {}) {
     }
 
     const contentLength = Number(req.get('content-length') || 0);
-    if (contentLength > 64 * 1024) {
+    if (contentLength > MAX_PAYLOAD_BYTES) {
       state.blocked_requests += 1;
       recordSecurityEvent('security_gateway_block', {
         reason: 'payload_too_large',
