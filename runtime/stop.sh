@@ -15,7 +15,7 @@ if [[ -f "$AI_HOME/.env" ]]; then
   source "$AI_HOME/.env" 2>/dev/null || true
   set +a
 fi
-DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
+DASHBOARD_PORT="${DASHBOARD_PORT:-8787}"
 
 log "Stopping agents..."
 "$AI_HOME/bin/ai-employee" stop --all >/dev/null 2>&1 || true
