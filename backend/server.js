@@ -30,6 +30,8 @@ const subsystems = require('./subsystems');
 const { buildMoneyTemplate, buildThinkingSummary } = require('./money_mode');
 const brain = require('./brain/active_brain');
 const persistence = require('./persistence');
+const voiceManager = require('./core/voice_manager');
+const voiceApiRouter = require('./api/voice');
 
 const PORT = process.env.PORT || 8787;
 const PYTHON_BACKEND_HOST = '127.0.0.1';
@@ -63,6 +65,7 @@ if (HAS_FRONTEND_DIST) {
 
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
+app.use('/api/voice', voiceApiRouter);
 
 const GPU_USAGE_BASELINE = 18;
 let currentGpuUsage = GPU_USAGE_BASELINE;
@@ -155,6 +158,58 @@ const runtimeState = {
   _seq: 0,
 };
 
+const bootVoiceState = {
+  system_init: false,
+  ai_core_ready: false,
+  ui_loaded: false,
+  triggered: false,
+};
+const BOOT_VOICE_PLAYED_FLAG = path.join(os.tmpdir(), `ai-employee-voice-boot-${process.pid}.flag`);
+
+function hasBootVoicePlayed() {
+  return fs.existsSync(BOOT_VOICE_PLAYED_FLAG);
+}
+
+function markBootVoicePlayed() {
+  try {
+    fs.writeFileSync(BOOT_VOICE_PLAYED_FLAG, '1', 'utf8');
+  } catch (_err) {
+    // best effort
+  }
+}
+
+function getTimeBasedGreeting(now = new Date()) {
+  const hour = now.getHours();
+  if (hour >= 5 && hour < 12) return 'Good morning. Control panel online.';
+  if (hour >= 12 && hour < 18) return 'Good afternoon. Systems ready.';
+  return 'Good evening. All systems operational.';
+}
+
+async function maybeSpeakBootGreeting() {
+  if (bootVoiceState.triggered || hasBootVoicePlayed()) return;
+  if (!bootVoiceState.system_init || !bootVoiceState.ai_core_ready || !bootVoiceState.ui_loaded) return;
+
+  try {
+    await voiceManager.init();
+    if (!voiceManager.isBootGreetingEnabled()) {
+      bootVoiceState.triggered = true;
+      markBootVoicePlayed();
+      return;
+    }
+    bootVoiceState.triggered = true;
+    markBootVoicePlayed();
+    await voiceManager.emitEvent('system_boot', { greeting: getTimeBasedGreeting() }, true);
+  } catch (_err) {
+    // best effort
+  }
+}
+
+function markBootEvent(name) {
+  if (!Object.prototype.hasOwnProperty.call(bootVoiceState, name)) return;
+  bootVoiceState[name] = true;
+  void maybeSpeakBootGreeting();
+}
+
 const secretStore = new SecretStore();
 const securitySyncPolicy = createOfflineSecuritySyncPolicy({
   queueFile: path.resolve(__dirname, '../state/security_sync_queue.json'),
@@ -220,6 +275,7 @@ if (_savedBrain) {
   brain.restoreState(_savedBrain);
   console.log('[PERSISTENCE] Restored brain state');
 }
+markBootEvent('system_init');
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
@@ -1694,6 +1750,7 @@ broadcaster.startHeartbeat({
     return `[SYSTEM] heartbeat=${seq} mode=${stats.mode} running=${stats.running_agents}/${stats.total_agents}`;
   },
 });
+markBootEvent('ai_core_ready');
 
 onAgentEvent('agent:update', (agents) => {
   broadcaster.broadcast('agent:update', { agents });
@@ -1733,6 +1790,7 @@ onAgentEvent('task:started', ({ agent, task }) => {
     level: 'info',
     heartbeat: heartbeatCounter,
   });
+  void voiceManager.emitEvent('task_created', { priority: task.priority });
 });
 
 onAgentEvent('task:completed', ({ agent, task }) => {
@@ -1816,6 +1874,7 @@ onAgentEvent('task:completed', ({ agent, task }) => {
     level: 'success',
     heartbeat: heartbeatCounter,
   });
+  void voiceManager.emitEvent('task_completed');
   queueNextWorkflowStep(task.id);
 });
 
@@ -1876,6 +1935,7 @@ onAgentEvent('task:failed', ({ agent, task }) => {
     level: 'warning',
     heartbeat: heartbeatCounter,
   });
+  void voiceManager.emitEvent('error_detected', { message: 'Error detected.' });
   retryWorkflowStep(task.id);
 });
 
@@ -1932,4 +1992,5 @@ server.listen(PORT, () => {
     () => runtimeState,
     () => brain.exportState(),
   );
+  markBootEvent('ui_loaded');
 });

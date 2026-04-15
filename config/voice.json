@@ -1,0 +1,31 @@
+{
+  "enabled": true,
+  "profile": "default_futuristic",
+  "verbosity": 3,
+  "volume": 0.9,
+  "pitch": 1.0,
+  "speed": 1.0,
+  "tone": "futuristic",
+  "voiceStyle": "default",
+  "bootGreeting": true,
+  "events": {
+    "system_boot": true,
+    "task_created": true,
+    "task_completed": true,
+    "error_detected": true,
+    "ai_learning_update": false
+  },
+  "customer": {
+    "enabled": false,
+    "profile": "customer_default",
+    "speed": 1.0,
+    "warmth": 0.7,
+    "formality": 0.5,
+    "maxCallDurationMs": 600000,
+    "events": {
+      "incoming_support": true,
+      "outbound_call": false,
+      "followup_reminder": false
+    }
+  }
+}
