@@ -72,7 +72,6 @@ function detectBackend() {
 
 // ── Futuristic text normalization ─────────────────────────────────────────────
 const PHRASE_TRANSFORMS = [
-  [/\bI just (\w+ed)\b/gi, '$1'],
   [/\bHey[,!]?\s*/gi, ''],
   [/\bexcellent[!.]?/gi, 'Confirmed.'],
   [/\beverything is working fine\b.*/i, 'All systems operational.'],

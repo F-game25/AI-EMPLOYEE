@@ -180,8 +180,8 @@ function markBootVoicePlayed() {
 
 function getTimeBasedGreeting(now = new Date()) {
   const hour = now.getHours();
-  if (hour >= 5 && hour <= 11) return 'Good morning. Control panel online.';
-  if (hour >= 12 && hour <= 17) return 'Good afternoon. Systems ready.';
+  if (hour >= 5 && hour < 12) return 'Good morning. Control panel online.';
+  if (hour >= 12 && hour < 18) return 'Good afternoon. Systems ready.';
   return 'Good evening. All systems operational.';
 }
 

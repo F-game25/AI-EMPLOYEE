@@ -262,14 +262,14 @@ function batchTaskCreated(data) {
     if (!verbosityAllows(eventName)) return;
     if (!checkCooldown(eventName)) return;
 
-    const hasHighPriority = batch.some((d) => d.priority === 'high');
     const phraseData = batch.length > 1
       ? { count: batch.length }
-      : { ...batch[0], priority: hasHighPriority ? 'high' : undefined };
+      : { ...batch[0] };
     const text = EVENT_PHRASES.task_created(phraseData);
     void speak(text);
   }, TASK_BATCH_WINDOW_MS);
-  return true;
+  // Returns false: actual speech depends on guards evaluated when the timer fires.
+  return false;
 }
 
 // ── Control functions ─────────────────────────────────────────────────────────
