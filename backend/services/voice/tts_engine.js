@@ -6,19 +6,32 @@ const { spawn, spawnSync } = require('child_process');
 const DEFAULT_VOLUME = 0.9;
 
 // ── Voice profiles ────────────────────────────────────────────────────────────
+// system profiles: futuristic, terse, robotic
+// customer profiles: natural, warm, human-like
 const VOICE_PROFILES = {
-  default_futuristic: { pitch: 1.0,  speed: 1.0,  amplitude: 180, tone: 'futuristic' },
-  minimal_assistant:  { pitch: 0.95, speed: 0.95, amplitude: 160, tone: 'neutral'    },
-  system_core:        { pitch: 0.88, speed: 0.9,  amplitude: 180, tone: 'sharp'      },
-  stealth_mode:       { pitch: 1.0,  speed: 0.88, amplitude: 80,  tone: 'calm'       },
+  // ── System (internal AI) ────────────────────────────────────────────────────
+  default_futuristic: { pitch: 1.0,  speed: 1.0,  amplitude: 180, tone: 'futuristic', channel: 'system'   },
+  minimal_assistant:  { pitch: 0.95, speed: 0.95, amplitude: 160, tone: 'neutral',    channel: 'system'   },
+  system_core:        { pitch: 0.88, speed: 0.9,  amplitude: 180, tone: 'sharp',      channel: 'system'   },
+  stealth_mode:       { pitch: 1.0,  speed: 0.88, amplitude: 80,  tone: 'calm',       channel: 'system'   },
+  // ── Customer (external / call centre) ──────────────────────────────────────
+  customer_default:          { pitch: 1.08, speed: 1.0,  amplitude: 160, tone: 'warm',         channel: 'customer' },
+  customer_friendly:         { pitch: 1.12, speed: 1.05, amplitude: 155, tone: 'warm',         channel: 'customer' },
+  customer_professional:     { pitch: 1.0,  speed: 0.95, amplitude: 170, tone: 'professional', channel: 'customer' },
+  customer_fast_response:    { pitch: 1.05, speed: 1.15, amplitude: 160, tone: 'warm',         channel: 'customer' },
 };
 
 // Tone → espeak voice variant
+// Customer tones use softer/more natural voices
 const TONE_ESPEAK_VARIANT = {
-  futuristic: 'rob',
-  neutral:    '',
-  calm:       'f5',
-  sharp:      'croak',
+  // system
+  futuristic:    'rob',
+  neutral:       '',
+  calm:          'f5',
+  sharp:         'croak',
+  // customer
+  warm:          'f3',
+  professional:  '',
 };
 
 // ── Engine state ──────────────────────────────────────────────────────────────
@@ -33,6 +46,7 @@ let engineSpeed = 1.0;
 let engineAmplitude = 180;
 let engineTone = 'futuristic';
 let engineVoiceId = 'default';
+let engineChannel = 'system'; // 'system' | 'customer'
 let queue = [];
 let draining = false;
 let consecutiveFailures = 0;
@@ -70,8 +84,9 @@ function detectBackend() {
   return 'silent';
 }
 
-// ── Futuristic text normalization ─────────────────────────────────────────────
-const PHRASE_TRANSFORMS = [
+// ── Text normalization ────────────────────────────────────────────────────────
+// System channel: short, terse, no filler
+const SYSTEM_TRANSFORMS = [
   [/\bHey[,!]?\s*/gi, ''],
   [/\bexcellent[!.]?/gi, 'Confirmed.'],
   [/\beverything is working fine\b.*/i, 'All systems operational.'],
@@ -82,9 +97,19 @@ const PHRASE_TRANSFORMS = [
   [/\bjust\s+/gi, ''],
 ];
 
-function normalizeText(raw) {
+// Customer channel: polite, conversational, helpful
+const CUSTOMER_TRANSFORMS = [
+  [/^Task assigned\.$/, 'Your request has been received. We\'ll take care of that right away.'],
+  [/^Task complete\.$/, 'Your request has been completed successfully. Is there anything else I can help you with?'],
+  [/^Error detected\.$/, 'We\'ve encountered a small issue. Our team is looking into it right away.'],
+  [/^Systems online\.$/, 'Hello! Thank you for calling. How can I assist you today?'],
+  [/^All systems operational\.$/, 'Everything is running smoothly on our end.'],
+];
+
+function normalizeText(raw, channel) {
   let text = String(raw || '').trim();
-  for (const [pattern, replacement] of PHRASE_TRANSFORMS) {
+  const transforms = channel === 'customer' ? CUSTOMER_TRANSFORMS : SYSTEM_TRANSFORMS;
+  for (const [pattern, replacement] of transforms) {
     text = text.replace(pattern, replacement);
   }
   return text.replace(/\s{2,}/g, ' ').trim();
@@ -145,6 +170,7 @@ function loadVoice(voiceId) {
     engineSpeed = profile.speed;
     engineAmplitude = profile.amplitude;
     engineTone = profile.tone;
+    engineChannel = profile.channel || 'system';
   }
 }
 
@@ -161,6 +187,14 @@ function setTone(profile) {
   engineTone = validTones.includes(profile) ? profile : 'neutral';
 }
 
+function setChannel(channel) {
+  engineChannel = channel === 'customer' ? 'customer' : 'system';
+}
+
+function getChannel() {
+  return engineChannel;
+}
+
 async function init(options = {}) {
   engineVolume = clampVolume(options.volume ?? engineVolume);
 
@@ -171,6 +205,7 @@ async function init(options = {}) {
     if (options.pitch != null) setPitch(options.pitch);
     if (options.speed != null) setSpeed(options.speed);
     if (options.tone) setTone(options.tone);
+    if (options.channel) setChannel(options.channel);
   }
 
   if (!initialized) {
@@ -185,8 +220,9 @@ function isSpeaking() {
   return speaking;
 }
 
-async function runSpeak(text) {
-  const normalized = normalizeText(text);
+async function runSpeak(text, channel) {
+  const resolvedChannel = channel || engineChannel || 'system';
+  const normalized = normalizeText(text, resolvedChannel);
   if (!normalized) return;
   if (!initialized) await init();
   if (silentMode) return;
@@ -196,7 +232,7 @@ async function runSpeak(text) {
 
   await new Promise((resolve) => {
     speaking = true;
-    console.log(`[VOICE] Speaking: ${normalized}`);
+    console.log(`[VOICE:${resolvedChannel}] Speaking: ${normalized}`);
     try {
       currentProcess = spawn(command.cmd, command.args, { stdio: 'ignore' });
       currentProcess.once('exit', () => {
@@ -228,7 +264,7 @@ async function drainQueue() {
   try {
     while (queue.length > 0) {
       const item = queue.shift();
-      await runSpeak(item.text);
+      await runSpeak(item.text, item.channel);
       item.resolve();
     }
   } finally {
@@ -236,10 +272,10 @@ async function drainQueue() {
   }
 }
 
-async function speak(text) {
+async function speak(text, channel) {
   if (!initialized) await init();
   return new Promise((resolve) => {
-    queue.push({ text: String(text || ''), resolve });
+    queue.push({ text: String(text || ''), channel: channel || engineChannel, resolve });
     void drainQueue();
   });
 }
@@ -266,6 +302,7 @@ async function reconfigure(options = {}) {
     if (options.pitch != null) setPitch(options.pitch);
     if (options.speed != null) setSpeed(options.speed);
     if (options.tone) setTone(options.tone);
+    if (options.channel) setChannel(options.channel);
   }
 }
 
@@ -279,5 +316,8 @@ module.exports = {
   setPitch,
   setSpeed,
   setTone,
+  setChannel,
+  getChannel,
+  normalizeText,
   VOICE_PROFILES,
 };
