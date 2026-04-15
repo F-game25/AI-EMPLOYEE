@@ -6,6 +6,35 @@ cd "$(dirname "$0")"
 
 echo "Starting AI Employee..."
 
+# ── Evolution mode prompt ─────────────────────────────────────────────────────
+# Ask the operator which self-evolution mode to use, but only when:
+#   • EVOLUTION_MODE has NOT already been set in the environment / .env, AND
+#   • stdin is an interactive terminal (skip in CI / non-interactive pipes).
+if [ -z "${EVOLUTION_MODE:-}" ] && [ -t 0 ]; then
+  echo ""
+  echo "┌─────────────────────────────────────────────────────┐"
+  echo "│          Self-Evolution Mode Selection              │"
+  echo "│                                                     │"
+  echo "│  AUTO  — fully autonomous (detect, patch, deploy)  │"
+  echo "│  SAFE  — generate patches; require API approval    │"
+  echo "│  OFF   — disabled (default)                        │"
+  echo "└─────────────────────────────────────────────────────┘"
+  printf "  EVOLUTION_MODE [OFF]: "
+  read -r _evo_input </dev/tty
+  _evo_input="$(echo "${_evo_input}" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
+  case "${_evo_input}" in
+    AUTO|SAFE|OFF) EVOLUTION_MODE="${_evo_input}" ;;
+    "")            EVOLUTION_MODE="OFF" ;;
+    *)
+      echo "  Unknown value '${_evo_input}'. Valid choices: AUTO, SAFE, OFF. Defaulting to OFF."
+      EVOLUTION_MODE="OFF"
+      ;;
+  esac
+  export EVOLUTION_MODE
+  echo "  → Evolution mode set to: ${EVOLUTION_MODE}"
+  echo ""
+fi
+
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
 
 if ! command -v node >/dev/null 2>&1; then

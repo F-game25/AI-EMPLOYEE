@@ -203,6 +203,7 @@ export default function SystemPage() {
   const systemStatus = useAppStore(s => s.systemStatus)
   const autonomyStatus = useAppStore(s => s.autonomyStatus)
   const [modeLoading, setModeLoading] = useState(false)
+  const [evolutionStatus, setEvolutionStatus] = useState({ mode: 'OFF', running: false })
 
   const currentMode = autonomyStatus?.mode?.mode || 'OFF'
   const cfg = MODE_CONFIG[currentMode] || MODE_CONFIG.OFF
@@ -227,6 +228,32 @@ export default function SystemPage() {
     } catch (e) {
       console.error('Failed to send emergency stop', e)
     }
+  }, [])
+
+  const setEvolutionMode = useCallback(async (mode) => {
+    try {
+      const res = await fetch(`${BASE}/api/evolution/mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      })
+      const data = await res.json()
+      setEvolutionStatus(data?.status || { mode })
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const load = async () => {
+      try {
+        const res = await fetch(`${BASE}/api/evolution/status`, { signal: controller.signal })
+        const data = await res.json()
+        setEvolutionStatus(data || {})
+      } catch { /* ignore */ }
+    }
+    load()
+    const interval = setInterval(load, 5000)
+    return () => { clearInterval(interval); controller.abort() }
   }, [])
 
   const daemon = autonomyStatus?.daemon || {}
@@ -282,6 +309,33 @@ export default function SystemPage() {
           <button className="btn-danger" onClick={emergencyStop} style={{ fontSize: '12px' }}>
             Emergency Stop
           </button>
+        </div>
+      </div>
+
+      <div className="ds-card" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
+        <h3 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>
+          Evolution Mode
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 'var(--space-2)' }}>
+          {['OFF', 'SAFE', 'AUTO'].map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setEvolutionMode(mode)}
+              style={{
+                padding: 'var(--space-2)',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                background: evolutionStatus?.mode === mode ? 'rgba(212,175,55,0.1)' : 'transparent',
+                color: evolutionStatus?.mode === mode ? 'var(--gold)' : 'var(--text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+        <div style={{ marginTop: 'var(--space-2)', fontSize: '12px', color: 'var(--text-muted)' }}>
+          Loop: {evolutionStatus?.running ? 'running' : 'stopped'} · mode: {evolutionStatus?.mode || 'OFF'}
         </div>
       </div>
 

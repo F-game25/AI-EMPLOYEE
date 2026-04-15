@@ -274,4 +274,17 @@ export const useAppStore = create((set) => ({
       },
     }
   }),
+
+  observability: {
+    system_health: { uptime: 0, errors_per_minute: 0, status: 'unknown' },
+    metrics: {},
+    activity_feed: [],
+    agent_grid: [],
+    queue_visualizer: { pending: 0, processing: 0 },
+    auto_fix_log: [],
+    events: [],
+    traces: {},
+    updated_at: null,
+  },
+  setObservability: (payload) => set({ observability: payload || {} }),
 }))

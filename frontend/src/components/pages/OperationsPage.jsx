@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import PageHeader from '../layout/PageHeader'
+import ObservabilityDashboard from '../dashboard/ObservabilityDashboard'
 import { API_URL } from '../../config/api'
 
 const BASE = API_URL
@@ -363,6 +364,10 @@ export default function OperationsPage() {
             </div>
           )}
         </div>
+      </div>
+
+      <div style={{ marginTop: 'var(--space-4)' }}>
+        <ObservabilityDashboard />
       </div>
     </div>
   )

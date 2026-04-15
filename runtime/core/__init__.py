@@ -108,6 +108,26 @@ def get_ascend_forge_executor():
     return _f()
 
 
+def get_evolution_controller():
+    from core.self_evolution.evolution_controller import get_evolution_controller as _f
+    return _f()
+
+
+def get_evolution_memory():
+    from core.self_evolution.evolution_memory import get_evolution_memory as _f
+    return _f()
+
+
+def get_observability_event_stream():
+    from core.observability.event_stream import get_event_stream as _f
+    return _f()
+
+
+def get_metrics_collector():
+    from core.observability.metrics_collector import get_metrics_collector as _f
+    return _f()
+
+
 __all__ = [
     "get_changelog",
     "get_roi_tracker",
@@ -126,4 +146,8 @@ __all__ = [
     "get_improvement_telemetry",
     "get_objective_store",
     "get_ascend_forge_executor",
+    "get_evolution_controller",
+    "get_evolution_memory",
+    "get_observability_event_stream",
+    "get_metrics_collector",
 ]
