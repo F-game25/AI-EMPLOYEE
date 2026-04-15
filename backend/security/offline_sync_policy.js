@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const MAX_QUEUE_SIZE = 2000;
 
 function nowIso() {
   return new Date().toISOString();
@@ -16,6 +17,7 @@ function createOfflineSecuritySyncPolicy(options = {}) {
   let lastSyncAt = null;
   let lastError = null;
   let queue = [];
+  let seq = 0;
 
   function ensureParent(filePath) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -66,15 +68,16 @@ function createOfflineSecuritySyncPolicy(options = {}) {
   }
 
   function enqueueEvent(eventType, payload = {}) {
+    seq += 1;
     const event = {
-      id: `sec-sync-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: `sec-sync-${Date.now()}-${seq}`,
       ts: nowIso(),
       event_type: String(eventType || 'unknown_security_event'),
       payload: payload && typeof payload === 'object' ? payload : {},
     };
     if (!online) {
       queue.unshift(event);
-      queue = queue.slice(0, 2000);
+      queue = queue.slice(0, MAX_QUEUE_SIZE);
       persistQueue();
       return {
         status: 'queued_offline',
@@ -92,7 +95,7 @@ function createOfflineSecuritySyncPolicy(options = {}) {
       };
     } catch (error) {
       queue.unshift(event);
-      queue = queue.slice(0, 2000);
+      queue = queue.slice(0, MAX_QUEUE_SIZE);
       lastError = error && error.message ? error.message : 'sync_failed';
       persistQueue();
       return {
