@@ -184,6 +184,17 @@ fi
 # ── Step 5: Start server ───────────────────────────────────────────────────────
 _step "5/5" "Starting AI Employee server..."
 
+# Write version state for runtime integrity checks
+mkdir -p "$REPO_ROOT_DIR/state"
+_FULL_COMMIT="$(git -C "$REPO_ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+cat > "$REPO_ROOT_DIR/state/version.json" <<EOF
+{
+  "last_commit": "$_FULL_COMMIT",
+  "last_updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "source": "run.sh"
+}
+EOF
+
 export PORT="$UI_PORT"
 # Avoid self-proxy loops in Node fallback calls that use PYTHON_BACKEND_PORT.
 export PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
