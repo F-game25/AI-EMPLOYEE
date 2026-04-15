@@ -1044,8 +1044,12 @@ install_runtime() {
             _verify_nonempty_file "$_fe_dir/dist/index.html" "$_fe_dir/dist/index.html"
             ok "React UI bundle built (frontend/dist)"
         fi
-    else
+    elif [[ -f "$SCRIPT_DIR/frontend/package.json" ]]; then
+        # npm is missing AND the repo frontend is present — we need npm to build the UI.
         err "npm not found — install Node.js and npm first (https://nodejs.org/) to build frontend/dist"
+    else
+        warn "npm not found — skipping frontend build (no frontend/package.json in $SCRIPT_DIR)."
+        warn "For a full UI install: clone the repo, install Node.js, then re-run install.sh."
     fi
 
     # Python deps for ai-router (requests is needed for Ollama calls)
@@ -1526,8 +1530,11 @@ CFG_END
             echo "OPENCLAW_DISABLE_BONJOUR=1"
 
             echo "TZ=${TZ:-UTC}"
-            # Repo location (used by run.sh to locate the Node backend/frontend)
-            echo "AI_EMPLOYEE_REPO_DIR=$SCRIPT_DIR"
+            # Repo location (used by run.sh to locate the Node backend/frontend).
+            # Only record when SCRIPT_DIR is a real persistent clone — not a temp dir.
+            if [[ -f "$SCRIPT_DIR/backend/server.js" && -f "$SCRIPT_DIR/frontend/package.json" ]]; then
+                echo "AI_EMPLOYEE_REPO_DIR=$SCRIPT_DIR"
+            fi
         } > "$env_file"
         chmod 600 "$env_file"
         ok ".env created in credentials/"
@@ -1543,9 +1550,12 @@ CFG_END
         || echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}" >> "$env_file"
     grep -q "^AI_EMPLOYEE_AUTO_INSTALL_DOCKER=" "$env_file" \
         || echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}" >> "$env_file"
-    # Ensure repo dir is always recorded (update-safe — so run.sh finds backend/frontend)
-    grep -q "^AI_EMPLOYEE_REPO_DIR=" "$env_file" \
-        || echo "AI_EMPLOYEE_REPO_DIR=$SCRIPT_DIR" >> "$env_file"
+    # Only record repo dir when SCRIPT_DIR is a real persistent clone (backend/server.js present).
+    # This prevents a quick-install temp dir from being saved and later deleted, breaking run.sh.
+    if [[ -f "$SCRIPT_DIR/backend/server.js" && -f "$SCRIPT_DIR/frontend/package.json" ]]; then
+        grep -q "^AI_EMPLOYEE_REPO_DIR=" "$env_file" \
+            || echo "AI_EMPLOYEE_REPO_DIR=$SCRIPT_DIR" >> "$env_file"
+    fi
 
     # Keep gateway token in .env aligned with config.json to avoid auth mismatch.
     local cfg_token
@@ -1597,8 +1607,14 @@ except Exception:
 
 install_dashboard_ui() {
     local dist_index="$SCRIPT_DIR/frontend/dist/index.html"
-    _verify_nonempty_file "$dist_index" "$dist_index"
-    ok "Static dashboard overwrite disabled; runtime serves frontend/dist only"
+    if [[ -f "$dist_index" && -s "$dist_index" ]]; then
+        ok "Static dashboard ready: runtime serves frontend/dist"
+    else
+        warn "frontend/dist not found at $SCRIPT_DIR — UI bundle not yet built."
+        warn "To build it, run these steps from the repo:"
+        warn "  1) npm --prefix frontend install"
+        warn "  2) npm --prefix frontend run build"
+    fi
 }
 
 # ─── Startup message ──────────────────────────────────────────────────────────
