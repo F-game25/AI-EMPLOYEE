@@ -10,7 +10,7 @@ function PathList({ title, rows }: { title: string; rows: string[] }) {
   return (
     <section style={{ border: '1px solid #1f2937', borderRadius: 12, padding: 12, background: '#0b1020' }}>
       <h4 style={{ marginTop: 0 }}>{title}</h4>
-      {rows.length === 0 ? <div style={{ color: '#94a3b8' }}>No data</div> : rows.map((path) => <div key={`${title}-${path}`}>{path}</div>)}
+      {rows.length === 0 ? <div style={{ color: '#94a3b8' }}>No data</div> : rows.map((path, idx) => <div key={`${title}-${idx}`}>{path}</div>)}
     </section>
   );
 }

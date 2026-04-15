@@ -32,15 +32,27 @@ export function MemoryViewer({ strategies, shortTerm, longTerm }: MemoryViewerPr
       />
       <div style={{ marginBottom: 10 }}>
         <strong>Learned Strategies</strong>
-        {strategies.length === 0 ? <div style={{ color: '#94a3b8' }}>No strategies yet</div> : strategies.slice(0, 5).map((strategy) => (
-          <div key={strategy.id}>{strategy.path.join(' → ')} | success {(strategy.successRate * 100).toFixed(0)}% | used {strategy.usageCount}</div>
-        ))}
+        {strategies.length === 0 ? <div style={{ color: '#94a3b8' }}>No strategies yet</div> : (
+          <ul aria-label="Learned strategy list">
+            {strategies.slice(0, 5).map((strategy) => (
+              <li key={strategy.id}>
+                {strategy.path.join(' → ')} | <span aria-label="strategy success rate">success {(strategy.successRate * 100).toFixed(0)}%</span> | <span aria-label="strategy usage count">used {strategy.usageCount}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       <div>
         <strong>Stored Experiences</strong>
-        {experiences.length === 0 ? <div style={{ color: '#94a3b8' }}>No experiences yet</div> : experiences.slice(0, 8).map((exp) => (
-          <div key={exp.id}>{new Date(exp.timestamp).toLocaleTimeString()} | {(exp.taskId || 'task')} | {exp.path.join(' → ')} | {String(exp.success)}</div>
-        ))}
+        {experiences.length === 0 ? <div style={{ color: '#94a3b8' }}>No experiences yet</div> : (
+          <ul aria-label="Stored experience list">
+            {experiences.slice(0, 8).map((exp) => (
+              <li key={exp.id}>
+                <span aria-label="experience timestamp">{new Date(exp.timestamp).toLocaleTimeString()}</span> | <span aria-label="experience task">{exp.taskId || 'task'}</span> | <span aria-label="experience path">{exp.path.join(' → ')}</span> | <span aria-label="experience success">{String(exp.success)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </section>
   );

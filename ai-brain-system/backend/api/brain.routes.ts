@@ -89,11 +89,12 @@ router.post('/agents/sync', (req: Request, res: Response) => {
   const agents = Array.isArray(req.body?.agents) ? req.body.agents : [];
   agents.forEach((agent: any) => {
     if (!agent?.id) return;
+    const metadata = sanitizeMetadata(agent.metadata);
     graphEngine.addNode({
       id: String(agent.id),
       type: 'agent',
       label: String(agent.label || agent.id),
-      metadata: { source: 'agents/sync', ...agent.metadata },
+      metadata: { source: 'agents/sync', ...metadata },
       activation: Number(agent.activation || 0),
       confidence: Number(agent.confidence || 0.5),
       createdAt: Date.now(),
@@ -191,3 +192,15 @@ router.post('/task/feedback', (req: Request, res: Response) => {
 });
 
 export { router as brainRouter };
+
+function sanitizeMetadata(value: unknown): Record<string, string | number | boolean | null> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const safe: Record<string, string | number | boolean | null> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([key, item]) => {
+    if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(key)) return;
+    if (item === null || typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+      safe[key] = item;
+    }
+  });
+  return safe;
+}
