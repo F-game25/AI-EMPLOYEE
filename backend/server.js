@@ -1800,7 +1800,8 @@ app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
   if (req.path.startsWith('/gateway') || req.path.startsWith('/orchestrator')) return next();
   res.set('Cache-Control', 'no-store, must-revalidate');
-  res.type('html').send(fs.readFileSync(FRONTEND_INDEX, 'utf8'));
+  const html = fs.readFileSync(FRONTEND_INDEX, 'utf8').replace(/__APP_VERSION__/g, latestCommit());
+  res.type('html').send(html);
 });
 
 server.listen(PORT, () => {
