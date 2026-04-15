@@ -162,7 +162,7 @@ router.post('/task/feedback', (req: Request, res: Response) => {
   const agentId = req.body?.agentId ? String(req.body.agentId) : undefined;
 
   if (!taskId || path.length < 2) {
-    res.status(400).json({ error: 'taskId_required_and_path_must_have_at_least_two_nodes' });
+    res.status(400).json({ error: 'taskId required and path must have at least 2 nodes' });
     return;
   }
 
