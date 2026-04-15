@@ -3,18 +3,18 @@
 /**
  * call_engine.js — Customer-facing call channel
  *
- * Manages voice sessions for external / customer interactions.
- * Reuses the shared TTS engine (same backend process, different config snapshot).
- *
- * Future STT integration: the listen() stub returns a resolved promise today;
- * when a speech-to-text library is added, replace the body of listen() with
- * the real capture logic without changing any callers.
+ * All speech goes through stream_pipeline, giving:
+ *   • Sentence-level chunk streaming  (first word plays ~100ms after text arrives)
+ *   • Pre-roll fillers                ("One moment…" while response is generating)
+ *   • Between-chunk interrupt         (user speaks → AI stops at sentence boundary)
+ *   • VAD / STT stubs                 (replace body of listen() / detectSpeech() when ready)
  */
 
 const fs = require('fs');
 const path = require('path');
 const EventEmitter = require('events');
 const ttsEngine = require('./tts_engine');
+const { pipeline: sharedPipeline } = require('./stream_pipeline');
 
 const LOG_DIR = path.resolve(__dirname, '../../../state/call_logs');
 const MAX_CALL_DURATION_MS = 10 * 60 * 1000; // 10 minutes default
@@ -39,10 +39,15 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+// Sanitize sessionId to safe filename characters only (alphanumeric, dash, underscore)
+function safeSessionFilename(sessionId) {
+  return String(sessionId).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+}
+
 function appendLog(session, entry) {
   session.log.push(entry);
   // Persist incrementally — ignore errors to stay non-blocking
-  const file = path.join(LOG_DIR, `call_${session.sessionId}.json`);
+  const file = path.join(LOG_DIR, `call_${safeSessionFilename(session.sessionId)}.json`);
   try {
     fs.writeFileSync(file, JSON.stringify(session, null, 2), 'utf8');
   } catch (_err) {
@@ -87,7 +92,11 @@ async function startCall(sessionId, options = {}) {
   ensureLogDir();
 
   const profile = options.profile || 'customer_default';
-  const maxDurationMs = options.maxDurationMs || MAX_CALL_DURATION_MS;
+  // Cap max duration between 10 s and 2 hours to prevent resource exhaustion
+  const MAX_ALLOWED_MS = 2 * 60 * 60 * 1000; // 2 hours
+  const MIN_ALLOWED_MS = 10 * 1000;           // 10 seconds
+  const rawDuration = Number(options.maxDurationMs) || MAX_CALL_DURATION_MS;
+  const maxDurationMs = Math.min(MAX_ALLOWED_MS, Math.max(MIN_ALLOWED_MS, rawDuration));
 
   const session = {
     sessionId,
@@ -125,46 +134,50 @@ async function startCall(sessionId, options = {}) {
 }
 
 /**
- * Speak text within an active call session.
+ * Speak text within an active call session using the streaming pipeline.
+ * Text is sentence-chunked — first chunk plays ~100ms after this call.
  * Automatically expands system-style phrases to customer-friendly language.
  * @param {string} sessionId
  * @param {string} text
+ * @param {object} [opts]
+ * @param {boolean} [opts.preRoll]         - speak a filler phrase first
+ * @param {string}  [opts.preRollType]     - 'thinking' | 'acknowledging' etc.
+ * @param {number}  [opts.thinkingDelayMs] - extra pause before first chunk
  */
-async function speak(sessionId, text) {
+async function speak(sessionId, text, opts = {}) {
   const session = sessions.get(sessionId);
   if (!session || !session.active) {
     console.warn(`[CALL] speak() called on inactive/unknown session: ${sessionId}`);
     return;
   }
 
-  // Interrupt: stop any in-progress speech immediately
-  if (ttsEngine.isSpeaking()) {
-    await ttsEngine.stop();
-    session.interrupted = true;
-  }
-
   const expanded = expandForCustomer(text);
   appendLog(session, { ts: nowIso(), role: 'agent', text: expanded });
   callEvents.emit('call:speak', { sessionId, text: expanded });
 
-  await ttsEngine.speak(expanded, 'customer');
+  await sharedPipeline.speakStreaming(expanded, {
+    channel:          'customer',
+    preRollEnabled:   opts.preRoll !== false,
+    preRollThreshold: 3,            // pre-roll for responses with ≥3 sentences
+    microPauseMs:     90,           // 90ms between sentences — warm, conversational
+    thinkingDelayMs:  opts.thinkingDelayMs || 0,
+  });
 }
 
 /**
  * Interrupt the currently speaking agent (e.g. user started talking).
+ * Uses the pipeline interrupt so it stops cleanly at a sentence boundary.
  * @param {string} sessionId
  */
 async function interrupt(sessionId) {
   const session = sessions.get(sessionId);
   if (!session || !session.active) return;
 
-  if (ttsEngine.isSpeaking()) {
-    await ttsEngine.stop();
-    session.interrupted = true;
-    appendLog(session, { ts: nowIso(), role: 'system', event: 'interrupted' });
-    callEvents.emit('call:interrupted', { sessionId });
-    console.log(`[CALL] Session ${sessionId} interrupted.`);
-  }
+  await sharedPipeline.interrupt();
+  session.interrupted = true;
+  appendLog(session, { ts: nowIso(), role: 'system', event: 'interrupted' });
+  callEvents.emit('call:interrupted', { sessionId });
+  console.log(`[CALL] Session ${sessionId} interrupted.`);
 }
 
 /**

@@ -306,9 +306,25 @@ async function reconfigure(options = {}) {
   }
 }
 
+// ── Chunked speak ─────────────────────────────────────────────────────────────
+// Speaks an array of pre-split sentence chunks one by one with an optional
+// micro-pause between each.  Used by StreamPipeline; can also be called directly.
+async function speakChunked(chunks, channel, microPauseMs = 80) {
+  if (!initialized) await init();
+  const ch = channel || engineChannel;
+  for (let i = 0; i < chunks.length; i++) {
+    if (!chunks[i]) continue;
+    await speak(chunks[i], ch);
+    if (i < chunks.length - 1 && microPauseMs > 0) {
+      await new Promise((r) => setTimeout(r, microPauseMs));
+    }
+  }
+}
+
 module.exports = {
   init,
   speak,
+  speakChunked,
   stop,
   isSpeaking,
   reconfigure,

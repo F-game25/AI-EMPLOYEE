@@ -12,6 +12,7 @@ const router = Router();
 // GET /api/voice/config
 router.get('/config', (_req, res) => {
   const profiles = Object.keys(VOICE_PROFILES);
+  const pipeline = voiceManager.getPipeline();
   res.json({
     config: voiceManager.getConfig(),
     profiles: profiles.filter((p) => !p.startsWith('customer_')),
@@ -20,6 +21,7 @@ router.get('/config', (_req, res) => {
     customer_tones: ['warm', 'professional'],
     verbosity_levels: { 0: 'silent', 1: 'critical', 2: 'important', 3: 'normal', 4: 'verbose' },
     mode: voiceManager.getMode(),
+    pipeline: pipeline.getOptions(),
   });
 });
 
@@ -31,6 +33,10 @@ router.post('/config', (req, res) => {
   }
   try {
     voiceManager.applyConfig(patch);
+    // If pipeline settings are included, apply them too
+    if (patch.pipeline && typeof patch.pipeline === 'object') {
+      voiceManager.getPipeline().configure(patch.pipeline);
+    }
     res.json({ ok: true, config: voiceManager.getConfig() });
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err.message || err) });
@@ -64,6 +70,57 @@ router.post('/mode', (req, res) => {
 // GET /api/voice/mode
 router.get('/mode', (_req, res) => {
   res.json({ mode: voiceManager.getMode() });
+});
+
+// ── Pipeline control ──────────────────────────────────────────────────────────
+
+// GET /api/voice/pipeline
+// Returns current pipeline settings and speaking status.
+router.get('/pipeline', (_req, res) => {
+  const pipeline = voiceManager.getPipeline();
+  res.json({
+    options: pipeline.getOptions(),
+    speaking: pipeline.isSpeaking(),
+    interrupted: pipeline.isInterrupted(),
+  });
+});
+
+// POST /api/voice/pipeline/config
+// Update pipeline settings (microPauseMs, thinkingDelayMs, preRollEnabled, etc.)
+router.post('/pipeline/config', (req, res) => {
+  const patch = req.body;
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    return res.status(400).json({ ok: false, error: 'Body must be a JSON object.' });
+  }
+  try {
+    voiceManager.getPipeline().configure(patch);
+    res.json({ ok: true, options: voiceManager.getPipeline().getOptions() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// POST /api/voice/pipeline/interrupt
+// Immediately stop all speech (manual override — works for both system and call sessions).
+router.post('/pipeline/interrupt', async (_req, res) => {
+  try {
+    await voiceManager.getPipeline().interrupt();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// POST /api/voice/pipeline/preroll   { type?, channel? }
+// Speak an immediate filler phrase.
+router.post('/pipeline/preroll', async (req, res) => {
+  const { type = 'thinking', channel } = req.body || {};
+  try {
+    const phrase = await voiceManager.getPipeline().preRoll(type, channel || voiceManager.getMode());
+    res.json({ ok: true, phrase });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
 });
 
 // ── Customer call control ─────────────────────────────────────────────────────

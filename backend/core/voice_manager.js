@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const ttsEngine = require('../services/voice/tts_engine');
 const callEngine = require('../services/voice/call_engine');
+const { pipeline: sharedPipeline, PRE_ROLL_SYSTEM, PRE_ROLL_CUSTOMER } = require('../services/voice/stream_pipeline');
 
 const VOICE_CONFIG_PATH = path.resolve(__dirname, '../../config/voice.json');
 const MAX_CACHEABLE_PHRASE_LENGTH = 120;
@@ -229,7 +230,9 @@ async function processQueue() {
   try {
     while (queue.length > 0 && isEnabled() && runEpoch === queueEpoch) {
       const next = queue.shift();
-      await ttsEngine.speak(next.text, next.channel || 'system');
+      const channel = next.channel || 'system';
+      // Use the streaming pipeline: sentences play as they arrive
+      await sharedPipeline.speakStreaming(next.text, { channel });
       next.resolve(true);
     }
     if (queue.length > 0 && runEpoch === queueEpoch) {
@@ -256,6 +259,18 @@ async function init() {
     voiceStyle: config.voiceStyle,
     channel: 'system',
   });
+  // Warm the pipeline phrase cache with all known pre-roll phrases
+  const allPhrases = [
+    ...Object.values(PRE_ROLL_SYSTEM).flat(),
+    ...Object.values(PRE_ROLL_CUSTOMER).flat(),
+    // Common system event phrases
+    'Systems online.', 'Task complete.', 'Task assigned.', 'Error detected.',
+    // Common customer phrases
+    'Hello! How can I assist you today?',
+    'Your request has been completed successfully.',
+    'Is there anything else I can help you with?',
+  ];
+  sharedPipeline.warmCache(allPhrases);
   initialized = true;
 }
 
@@ -267,19 +282,22 @@ async function speak(text, priority = false) {
 
   const channel = activeMode === 'customer' ? 'customer' : 'system';
 
+  // Priority speak: flush queue and interrupt current speech, then stream
+  if (priority) {
+    for (const pending of queue) pending.resolve(false);
+    queue = [];
+    queueEpoch += 1;
+    await sharedPipeline.interrupt();
+  }
+
+  // Use streaming pipeline for all speech (sentence chunking, micro-pauses)
   return new Promise((resolve) => {
-    if (priority) {
-      for (const pending of queue) pending.resolve(false);
-      queue = [];
-      queueEpoch += 1;
-      void ttsEngine.stop().finally(() => {
-        queue.unshift({ text: phrase, channel, resolve });
-        void processQueue();
-      });
-    } else {
-      queue.push({ text: phrase, channel, resolve });
-      void processQueue();
-    }
+    queue.push({
+      text: phrase,
+      channel,
+      resolve,
+    });
+    void processQueue();
   });
 }
 
@@ -377,7 +395,7 @@ async function clearQueue() {
   for (const pending of queue) pending.resolve(false);
   queue = [];
   queueEpoch += 1;
-  await ttsEngine.stop();
+  await sharedPipeline.interrupt();
 }
 
 async function mute() {
@@ -390,7 +408,11 @@ function unmute() {
 }
 
 function isSpeaking() {
-  return ttsEngine.isSpeaking();
+  return sharedPipeline.isSpeaking() || ttsEngine.isSpeaking();
+}
+
+function getPipeline() {
+  return sharedPipeline;
 }
 
 function isBootGreetingEnabled() {
@@ -413,6 +435,7 @@ module.exports = {
   getMode,
   triggerCall,
   stopCall,
+  getPipeline,
   VERBOSITY,
   EVENT_VERBOSITY,
   SYSTEM_EVENT_PHRASES,
