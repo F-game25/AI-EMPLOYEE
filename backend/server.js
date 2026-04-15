@@ -12,6 +12,10 @@ const { WebSocketServer } = require('ws');
 const gateway = require('./gateway');
 const orchestrator = require('./orchestrator');
 const broadcaster = require('./events/broadcaster');
+const { SecretStore } = require('./security/secrets');
+const { createOfflineSecuritySyncPolicy } = require('./security/offline_sync_policy');
+const { createApiGatewayProtector } = require('./security/api_gateway');
+const { createAnomalyResponder } = require('./security/anomaly_response');
 const {
   getAgents,
   on: onAgentEvent,
@@ -49,7 +53,7 @@ const GIT_COMMIT = latestCommit();
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '64kb' }));
 if (HAS_FRONTEND_DIST) {
   app.use(express.static(FRONTEND_DIST, {
     index: false,
@@ -150,6 +154,36 @@ const runtimeState = {
   },
   _seq: 0,
 };
+
+const secretStore = new SecretStore();
+const securitySyncPolicy = createOfflineSecuritySyncPolicy({
+  queueFile: path.resolve(__dirname, '../state/security_sync_queue.json'),
+  historyFile: path.resolve(__dirname, '../state/security_sync_history.log'),
+});
+const apiGatewayProtector = createApiGatewayProtector({
+  secretStore,
+  syncPolicy: securitySyncPolicy,
+  emitObservabilityEvent,
+});
+app.use('/api', apiGatewayProtector.middleware);
+const anomalyResponder = createAnomalyResponder({
+  sampleSnapshot: buildObservabilitySnapshot,
+  getMode,
+  setMode,
+  stopAllAgents,
+  addActivity,
+  appendAutoFixLog,
+  emitObservabilityEvent,
+  gatewayProtector: apiGatewayProtector,
+  syncPolicy: securitySyncPolicy,
+});
+setInterval(() => {
+  try {
+    anomalyResponder.evaluate();
+  } catch (error) {
+    console.warn('[SECURITY] anomaly responder evaluate failed:', error);
+  }
+}, 15000).unref();
 
 // ── Restore persisted state on startup ────────────────────────────────────────
 const _savedState = persistence.loadRuntimeState();
@@ -325,7 +359,18 @@ function emitObservabilityEvent(eventType, payload = {}) {
   runtimeState.observability.events.unshift(event);
   runtimeState.observability.events = runtimeState.observability.events.slice(0, MAX_OBSERVABILITY_EVENTS);
   broadcaster.broadcast('event_stream', event);
+  if (isSecurityEventType(eventType)) {
+    securitySyncPolicy.enqueueEvent(eventType, payload);
+  }
   return event;
+}
+
+function isSecurityEventType(eventType) {
+  return (
+    eventType === 'honeypot_triggered'
+    || eventType === 'anomaly_response'
+    || String(eventType).startsWith('security_')
+  );
 }
 
 function appendAutoFixLog(entry) {
@@ -1036,6 +1081,11 @@ function buildObservabilitySnapshot() {
     auto_fix_log: runtimeState.observability.autoFixLog || [],
     events: events.slice(0, 200),
     traces: runtimeState.observability.traces,
+    security: {
+      gateway: apiGatewayProtector.status(),
+      sync: securitySyncPolicy.status(),
+      anomaly_response: anomalyResponder.status(),
+    },
     updated_at: new Date().toISOString(),
   };
 }
@@ -1046,6 +1096,59 @@ app.get('/api/observability/snapshot', (req, res) => {
 
 app.get('/api/observability/events', (req, res) => {
   res.json({ events: (runtimeState.observability.events || []).slice(0, 200) });
+});
+
+app.get('/api/security/aztsa/status', (req, res) => {
+  const requiredSecrets = [
+    secretStore.describe('API_GATEWAY_KEY', { aliases: ['AZTSA_GATEWAY_KEY'] }),
+    secretStore.describe('JWT_SECRET', { aliases: ['JWT_SECRET_KEY'] }),
+  ];
+  res.json({
+    gateway: apiGatewayProtector.status(),
+    secret_health: {
+      required: requiredSecrets,
+      missing: requiredSecrets.filter((item) => !item.configured).map((item) => item.name),
+    },
+    anomaly_response: anomalyResponder.status(),
+    offline_security_sync: securitySyncPolicy.status(),
+    honeypot: {
+      events: apiGatewayProtector.recentHoneypot(20),
+    },
+    updated_at: new Date().toISOString(),
+  });
+});
+
+app.get('/api/security/honeypot/events', (req, res) => {
+  const limitRaw = Number((req.query || {}).limit || 50);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, limitRaw)) : 50;
+  res.json({
+    events: apiGatewayProtector.recentHoneypot(limit),
+    total: apiGatewayProtector.status().honeypot_events,
+  });
+});
+
+app.post('/api/security/offline-sync', (req, res) => {
+  const body = req.body || {};
+  const online = body.online !== false;
+  const state = securitySyncPolicy.setOnline(online);
+  res.json({
+    status: state,
+    applied_online: online,
+  });
+});
+
+app.post('/api/security/anomaly/evaluate', (req, res) => {
+  const result = anomalyResponder.evaluate();
+  res.json(result);
+});
+
+app.post('/api/security/gateway/strict-mode', (req, res) => {
+  const enabled = Boolean((req.body || {}).enabled);
+  const strict = apiGatewayProtector.setStrictMode(enabled, 'manual_override');
+  res.json({
+    strict_mode: strict,
+    gateway: apiGatewayProtector.status(),
+  });
 });
 
 app.get('/api/mode', (req, res) => {
