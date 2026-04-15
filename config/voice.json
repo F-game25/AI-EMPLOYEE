@@ -1,6 +1,18 @@
 {
   "enabled": true,
+  "profile": "default_futuristic",
+  "verbosity": 3,
   "volume": 0.9,
+  "pitch": 1.0,
+  "speed": 1.0,
+  "tone": "futuristic",
   "voiceStyle": "default",
-  "bootGreeting": true
+  "bootGreeting": true,
+  "events": {
+    "system_boot": true,
+    "task_created": true,
+    "task_completed": true,
+    "error_detected": true,
+    "ai_learning_update": false
+  }
 }
