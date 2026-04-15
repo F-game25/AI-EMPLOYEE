@@ -318,6 +318,7 @@ def _git_sync(branch: str = BRANCH) -> "tuple[bool, str]":
     cmd_fetch = ["git", "fetch", "origin"]
     cmd_reset = ["git", "reset", "--hard", f"origin/{branch}"]
     cmd_clean = ["git", "clean", "-fd"]
+    step_names = {0: "fetch", 1: "reset", 2: "clean"}
 
     for step, cmd in enumerate((cmd_fetch, cmd_reset, cmd_clean)):
         try:
@@ -325,10 +326,10 @@ def _git_sync(branch: str = BRANCH) -> "tuple[bool, str]":
                 cmd, capture_output=True, text=True, cwd=str(repo), timeout=120,
             )
             if r.returncode != 0:
-                logger.warning("git sync step %d failed (exit %d)", step, r.returncode)
+                logger.warning("git %s failed (exit %d)", step_names[step], r.returncode)
                 return False, ""
         except Exception as e:
-            logger.warning("git sync step %d error: %s", step, type(e).__name__)
+            logger.warning("git %s error: %s", step_names[step], type(e).__name__)
             return False, ""
 
     # Read new HEAD
