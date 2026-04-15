@@ -17,6 +17,7 @@ let initialized = false;
 let muted = false;
 let queue = [];
 let draining = false;
+let queueEpoch = 0;
 const phraseCache = new Map();
 
 function loadConfig() {
@@ -52,18 +53,20 @@ async function init() {
 async function processQueue() {
   if (draining) return;
   draining = true;
+  const runEpoch = queueEpoch;
   try {
-    while (queue.length > 0 && isEnabled()) {
+    while (queue.length > 0 && isEnabled() && runEpoch === queueEpoch) {
       const next = queue.shift();
       await ttsEngine.speak(next.text);
       next.resolve(true);
     }
-    while (queue.length > 0) {
+    while (queue.length > 0 && runEpoch === queueEpoch) {
       const skipped = queue.shift();
       skipped.resolve(false);
     }
   } finally {
     draining = false;
+    if (queue.length > 0 && isEnabled()) void processQueue();
   }
 }
 
@@ -73,20 +76,26 @@ async function speak(text, priority = false) {
   await init();
   if (!isEnabled()) return false;
 
-  return new Promise(async (resolve) => {
+  return new Promise((resolve) => {
     if (priority) {
+      for (const pending of queue) pending.resolve(false);
       queue = [];
-      await ttsEngine.stop();
-      queue.unshift({ text: phrase, resolve });
+      queueEpoch += 1;
+      void ttsEngine.stop().finally(() => {
+        queue.unshift({ text: phrase, resolve });
+        void processQueue();
+      });
     } else {
       queue.push({ text: phrase, resolve });
+      void processQueue();
     }
-    void processQueue();
   });
 }
 
 async function clearQueue() {
+  for (const pending of queue) pending.resolve(false);
   queue = [];
+  queueEpoch += 1;
   await ttsEngine.stop();
 }
 
