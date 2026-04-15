@@ -41,7 +41,7 @@ const FRONTEND_INDEX_CONTENT = HAS_FRONTEND_DIST ? fs.readFileSync(FRONTEND_INDE
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: '128kb' }));
+app.use(express.json({ limit: '64kb' }));
 if (HAS_FRONTEND_DIST) {
   app.use(express.static(FRONTEND_DIST, {
     index: false,
@@ -169,7 +169,7 @@ setInterval(() => {
   try {
     anomalyResponder.evaluate();
   } catch (error) {
-    console.warn('[SECURITY] anomaly responder evaluate failed:', error && error.message ? error.message : error);
+    console.warn('[SECURITY] anomaly responder evaluate failed:', error);
   }
 }, 15000).unref();
 
@@ -347,14 +347,18 @@ function emitObservabilityEvent(eventType, payload = {}) {
   runtimeState.observability.events.unshift(event);
   runtimeState.observability.events = runtimeState.observability.events.slice(0, MAX_OBSERVABILITY_EVENTS);
   broadcaster.broadcast('event_stream', event);
-  if (
-    eventType === 'honeypot_triggered'
-    || eventType === 'anomaly_response'
-    || String(eventType).startsWith('security_')
-  ) {
+  if (isSecurityEventType(eventType)) {
     securitySyncPolicy.enqueueEvent(eventType, payload);
   }
   return event;
+}
+
+function isSecurityEventType(eventType) {
+  return (
+    eventType === 'honeypot_triggered'
+    || eventType === 'anomaly_response'
+    || String(eventType).startsWith('security_')
+  );
 }
 
 function appendAutoFixLog(entry) {

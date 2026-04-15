@@ -11,6 +11,7 @@ const HONEYPOT_PATTERNS = [
 ];
 const MAX_PAYLOAD_BYTES = 64 * 1024;
 const MAX_HONEYPOT_EVENTS = 200;
+const PATH_TRAVERSAL_PATTERN = /(\.\.|%2e|%252e)/i;
 
 function nowIso() {
   return new Date().toISOString();
@@ -93,7 +94,7 @@ function createApiGatewayProtector(options = {}) {
 
     const rawPath = String(req.path || '');
     const loweredPath = rawPath.toLowerCase();
-    if (loweredPath.includes('..') || loweredPath.includes('%2e%2e')) {
+    if (PATH_TRAVERSAL_PATTERN.test(loweredPath)) {
       state.blocked_requests += 1;
       recordSecurityEvent('security_gateway_block', {
         reason: 'path_traversal_pattern',
