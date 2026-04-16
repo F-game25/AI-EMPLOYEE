@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../../store/appStore'
 import PageHeader from '../../layout/PageHeader'
@@ -96,6 +96,10 @@ export default function MoneyModePage() {
   const [offlineMode, setOfflineMode] = useState(false)
   const [localState, setLocalState] = useState(null)
   const [runningPipeline, setRunningPipeline] = useState(null)
+  const simTickRef = useRef(null) // tracks offline simulation interval for cleanup
+
+  // Clean up any pending simulation tick on unmount
+  useEffect(() => () => { if (simTickRef.current) clearInterval(simTickRef.current) }, [])
 
   const state = localState || moneyMode
 
@@ -181,21 +185,22 @@ export default function MoneyModePage() {
       } else {
         setPipelines(prev => prev.map(p => p.id === pipelineId ? { ...p, status: 'error' } : p))
       }
+      setRunningPipeline(null)
     } catch {
-      // Simulate progress for offline mode
+      // Simulate progress for offline mode — interval tracked in ref for cleanup on unmount
+      if (simTickRef.current) clearInterval(simTickRef.current)
       let progress = 0
-      const tick = setInterval(() => {
+      simTickRef.current = setInterval(() => {
         progress += 10
         setPipelines(prev => prev.map(p => p.id === pipelineId ? { ...p, progress } : p))
         if (progress >= 100) {
-          clearInterval(tick)
+          clearInterval(simTickRef.current)
+          simTickRef.current = null
           setPipelines(prev => prev.map(p => p.id === pipelineId ? { ...p, status: 'completed', progress: 100 } : p))
           setRunningPipeline(null)
         }
       }, 300)
-      return
     }
-    setRunningPipeline(null)
   }, [])
 
   const isActive = state?.active || state?.status === 'running'

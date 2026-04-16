@@ -3,6 +3,14 @@ import { eventBus, EVENTS } from '../utils/eventBus'
 
 const STORAGE_KEY = 'ai_employee_settings'
 
+// API keys are NOT persisted to localStorage (sensitive data).
+// Only non-sensitive settings are stored.
+const PERSISTED_SECTIONS = ['webhooks', 'tools', 'environment', 'memory', 'llm']
+
+function pickPersisted(state) {
+  return Object.fromEntries(PERSISTED_SECTIONS.map(k => [k, state[k]]))
+}
+
 function loadFromStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -73,11 +81,11 @@ const DEFAULT_SETTINGS = {
 
 export const useSettingsStore = create((set, get) => {
   const saved = loadFromStorage()
+  // API keys start from defaults every session (never persisted).
   const initial = saved
     ? {
         ...DEFAULT_SETTINGS,
-        ...saved,
-        apiKeys: { ...DEFAULT_SETTINGS.apiKeys, ...(saved.apiKeys || {}) },
+        // Only restore non-sensitive sections
         webhooks: { ...DEFAULT_SETTINGS.webhooks, ...(saved.webhooks || {}) },
         tools: { ...DEFAULT_SETTINGS.tools, ...(saved.tools || {}) },
         environment: { ...DEFAULT_SETTINGS.environment, ...(saved.environment || {}) },
@@ -93,33 +101,21 @@ export const useSettingsStore = create((set, get) => {
     updateSection(section, values) {
       set((state) => {
         const next = { ...state, [section]: { ...state[section], ...values } }
-        saveToStorage({
-          apiKeys: next.apiKeys,
-          webhooks: next.webhooks,
-          tools: next.tools,
-          environment: next.environment,
-          memory: next.memory,
-          llm: next.llm,
-        })
+        // Never persist API keys
+        if (PERSISTED_SECTIONS.includes(section)) {
+          saveToStorage(pickPersisted(next))
+        }
         return next
       })
       eventBus.emit(EVENTS.SETTINGS_SAVED, { section, values })
     },
 
-    /** Update a single API key. */
+    /** Update a single API key (in-memory only, never persisted). */
     setApiKey(provider, value) {
-      set((state) => {
-        const next = { ...state, apiKeys: { ...state.apiKeys, [provider]: value } }
-        saveToStorage({
-          apiKeys: next.apiKeys,
-          webhooks: next.webhooks,
-          tools: next.tools,
-          environment: next.environment,
-          memory: next.memory,
-          llm: next.llm,
-        })
-        return next
-      })
+      set((state) => ({
+        ...state,
+        apiKeys: { ...state.apiKeys, [provider]: value },
+      }))
       eventBus.emit(EVENTS.API_KEY_UPDATED, { provider })
     },
 

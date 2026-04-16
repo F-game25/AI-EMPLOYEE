@@ -6,6 +6,8 @@ import { API_URL } from '../../config/api'
 
 const BASE = API_URL
 
+const MAX_VISIBLE_FACTS = 5
+
 function MemoryNode({ node, depth = 0, expanded, onToggle }) {
   const typeIcons = { user: '👤', agent: '🤖', task: '📋', concept: '💡', system: '⚙️', default: '◆' }
   const icon = typeIcons[node.type] || typeIcons.default
@@ -54,7 +56,7 @@ function MemoryNode({ node, depth = 0, expanded, onToggle }) {
         <div style={{ marginLeft: 24, marginBottom: 'var(--space-1)' }}>
           {hasFacts && (
             <div style={{ marginBottom: 'var(--space-1)' }}>
-              {node.facts.slice(0, 5).map((fact, i) => (
+              {node.facts.slice(0, MAX_VISIBLE_FACTS).map((fact, i) => (
                 <div key={i} style={{
                   fontSize: '12px',
                   color: 'var(--text-muted)',
@@ -65,9 +67,9 @@ function MemoryNode({ node, depth = 0, expanded, onToggle }) {
                   {typeof fact === 'string' ? fact : fact.value || JSON.stringify(fact)}
                 </div>
               ))}
-              {node.facts.length > 5 && (
+              {node.facts.length > MAX_VISIBLE_FACTS && (
                 <div style={{ fontSize: '11px', color: 'var(--text-dim)', paddingLeft: 'var(--space-3)' }}>
-                  +{node.facts.length - 5} more facts
+                  +{node.facts.length - MAX_VISIBLE_FACTS} more facts
                 </div>
               )}
             </div>

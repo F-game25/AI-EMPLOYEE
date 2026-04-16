@@ -212,7 +212,7 @@ export default function SettingsPage() {
       <SectionCard>
         <SectionHeader
           title="API Key Manager"
-          subtitle="Configure LLM provider credentials. Keys are stored locally and never sent to third parties."
+          subtitle="Configure LLM provider credentials. Keys are stored in memory only and must be re-entered each session."
         />
         <SettingField
           label="OpenAI API Key"
