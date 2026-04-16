@@ -20,7 +20,7 @@ function buildFlow(run) {
     { id: 'user', label: 'User Input', input: run.goal || run.name || 'Task', output: run.goal || '', reasoning: 'Original request entrypoint', confidence: 1 },
     { id: 'intent', label: 'Intent', input: run.goal || '', output: firstNode.subsystem || 'general', reasoning: 'Intent classified from user request', confidence: confidence || 0.5 },
     { id: 'decision', label: 'Brain Decision', input: firstNode.task_name || run.goal || '', output: strategy, reasoning, confidence: confidence || 0 },
-    { id: 'agent', label: 'Agent', input: strategy, output: firstNode.agent || 'task_orchestrator', reasoning: `Selected agent ${firstNode.agent || 'task_orchestrator'} from strategy`, confidence: confidence || 0 },
+    { id: 'agent', label: 'Agent', input: strategy, output: firstNode.agent || 'core_brain_agent', reasoning: `Selected agent ${firstNode.agent || 'core_brain_agent'} from strategy`, confidence: confidence || 0 },
     { id: 'steps', label: 'Task Steps', input: run.nodes?.length || 0, output: `${run.nodes?.length || 0} steps`, reasoning: `Workflow executed through ${run.nodes?.length || 0} steps`, confidence: 1 },
     { id: 'result', label: 'Result', input: resultNode.task_name || 'execution', output: resultNode.result?.summary || run.status || 'pending', reasoning: resultNode.result?.summary || `Run status is ${run.status || 'pending'}`, confidence: resultNode.status === 'completed' ? 1 : resultNode.status === 'failed' ? 0 : 0.5 },
   ]
@@ -98,7 +98,7 @@ export default function NeuralGraphPanel() {
               Reason: {(selectedNode || nodes.find((n) => n.id === 'decision'))?.reasoning || 'No reasoning available'}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Agent chosen: {nodes.find((n) => n.id === 'agent')?.output || 'task_orchestrator'}
+              Agent chosen: {nodes.find((n) => n.id === 'agent')?.output || 'core_brain_agent'}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
               Confidence: {Math.round(((selectedNode || nodes.find((n) => n.id === 'decision'))?.confidence || 0) * 100)}%
