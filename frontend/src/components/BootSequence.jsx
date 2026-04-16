@@ -8,7 +8,7 @@ function buildBootLines(agentCount) {
     { text: '> Establishing secure channels...', delay: 640 },
     { text: `> Calibrating agent network [${agentCount} agents]...`, delay: 960 },
     { text: '> Scanning for anomalies... [CLEAR]', delay: 1280 },
-    { text: '> Synchronizing orchestrator...', delay: 1600 },
+    { text: '> Synchronizing Core Brain Agent...', delay: 1600 },
     { text: '> Verifying memory integrity... [OK]', delay: 1920 },
     { text: '> All systems nominal. BOOT COMPLETE.', delay: 2240 },
   ]

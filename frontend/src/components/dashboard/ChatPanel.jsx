@@ -53,7 +53,7 @@ export default function ChatPanel() {
         {messages.length === 0 && !isTyping && (
           <div className="flex items-center justify-center h-full">
             <p className="font-mono text-xs text-center" style={{ color: 'var(--text-muted)' }}>
-              Send a command to the orchestrator
+              Send a directive to the Core Brain Agent
             </p>
           </div>
         )}
@@ -89,7 +89,7 @@ export default function ChatPanel() {
                     {msg.subsystem === 'nn' ? 'NEURAL BRAIN' :
                      msg.subsystem === 'memory' ? 'MEMORY TREE' :
                      msg.subsystem === 'doctor' ? 'DOCTOR' :
-                     'ORCHESTRATOR'}
+                     'CORE BRAIN AGENT'}
                   </div>
                 )}
                 {msg.content}
@@ -116,7 +116,7 @@ export default function ChatPanel() {
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '6px 6px 6px 2px',
                 }}
-                aria-label="Orchestrator is typing"
+                aria-label="Core Brain Agent is typing"
               >
                 <div className="flex items-center gap-1.5">
                   {[0, 1, 2].map(i => (
@@ -143,7 +143,7 @@ export default function ChatPanel() {
         style={{ borderTop: '1px solid var(--border-gold-dim)' }}
       >
         <label htmlFor={inputId} className="sr-only">
-          Send a command to the orchestrator
+          Send a directive to the Core Brain Agent
         </label>
         {/* Chevron prompt indicator */}
         <svg

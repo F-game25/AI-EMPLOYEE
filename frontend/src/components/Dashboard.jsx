@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../store/appStore'
 import Sidebar from './layout/Sidebar'
@@ -10,22 +11,18 @@ import OperationsPage from './pages/OperationsPage'
 import AgentsPage from './pages/AgentsPage'
 import SystemPage from './pages/SystemPage'
 import VoicePage from './pages/VoicePage'
+import CommandCenterPage from './pages/CommandCenterPage'
+import BlacklightModePage from './pages/modes/BlacklightModePage'
+import AscendForgePage from './pages/modes/AscendForgePage'
+import MoneyModePage from './pages/modes/MoneyModePage'
+import SettingsPage from './pages/SettingsPage'
+import MemoryPage from './pages/MemoryPage'
+import HealthPage from './pages/HealthPage'
 import { API_URL } from '../config/api'
 
 const BASE = API_URL
 
-const PAGES = {
-  'dashboard': DashboardPage,
-  'ai-control': AIControlPage,
-  'neural-brain': NeuralBrainPage,
-  'operations': OperationsPage,
-  'agents': AgentsPage,
-  'system': SystemPage,
-  'voice': VoicePage,
-}
-
 export default function Dashboard() {
-  const activeSection = useAppStore(s => s.activeSection)
   const setProductMetrics = useAppStore(s => s.setProductMetrics)
   const setAutomationStatus = useAppStore(s => s.setAutomationStatus)
   const setBrainInsights = useAppStore(s => s.setBrainInsights)
@@ -92,8 +89,6 @@ export default function Dashboard() {
     return () => clearInterval(i)
   }, [refreshBrainRuntime])
 
-  const PageComponent = PAGES[activeSection] || DashboardPage
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -115,7 +110,25 @@ export default function Dashboard() {
           overflowY: 'auto',
           padding: 'var(--space-5) var(--space-5) var(--space-8)',
         }}>
-          <PageComponent />
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/command-center" element={<CommandCenterPage />} />
+            <Route path="/agents" element={<AgentsPage />} />
+            <Route path="/modes/blacklight" element={<BlacklightModePage />} />
+            <Route path="/modes/ascend-forge" element={<AscendForgePage />} />
+            <Route path="/modes/money" element={<MoneyModePage />} />
+            <Route path="/system" element={<SystemPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/memory" element={<MemoryPage />} />
+            <Route path="/health" element={<HealthPage />} />
+            {/* Legacy routes kept for backward compatibility */}
+            <Route path="/ai-control" element={<AIControlPage />} />
+            <Route path="/neural-brain" element={<NeuralBrainPage />} />
+            <Route path="/operations" element={<OperationsPage />} />
+            <Route path="/voice" element={<VoicePage />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
         </div>
       </main>
 
