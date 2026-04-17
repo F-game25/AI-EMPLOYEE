@@ -1,5 +1,4 @@
 import { useCallback } from 'react'
-import { HashRouter } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useAppStore } from './store/appStore'
 import BootSequence from './components/BootSequence'
@@ -33,10 +32,8 @@ function AppContent() {
 
 export default function App() {
   return (
-    <HashRouter>
-      <div className="app">
-        <AppContent />
-      </div>
-    </HashRouter>
+    <div className="app">
+      <AppContent />
+    </div>
   )
 }
