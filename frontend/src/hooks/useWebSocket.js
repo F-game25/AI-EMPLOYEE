@@ -51,7 +51,7 @@ function connectSingleton() {
           break
         case 'orchestrator:queued':
           store.addHeartbeatLog({
-            text: `[CORE BRAIN AGENT] Queued ${data.taskId} on ${data.agentId}`,
+            text: `[ORCHESTRATOR] Queued ${data.taskId} on ${data.agentId}`,
             level: 'info',
             ts: Date.now(),
           })
