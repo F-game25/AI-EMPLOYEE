@@ -1,35 +1,18 @@
-import { NavLink } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 
-const NAV_SECTIONS = [
-  {
-    label: 'Core',
-    items: [
-      { to: '/dashboard', icon: '◆', label: 'Dashboard' },
-      { to: '/command-center', icon: '◉', label: 'Command Center' },
-      { to: '/agents', icon: '⬡', label: 'Agents' },
-    ],
-  },
-  {
-    label: 'Modes',
-    items: [
-      { to: '/modes/blacklight', icon: '◈', label: 'Blacklight' },
-      { to: '/modes/ascend-forge', icon: '🔺', label: 'Ascend Forge' },
-      { to: '/modes/money', icon: '💰', label: 'Money Mode' },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
-      { to: '/memory', icon: '🧠', label: 'Memory' },
-      { to: '/health', icon: '♥', label: 'Health' },
-      { to: '/system', icon: '⚙', label: 'System' },
-      { to: '/settings', icon: '▣', label: 'Settings' },
-    ],
-  },
+const NAV_ITEMS = [
+  { id: 'dashboard', icon: '◆', label: 'Dashboard' },
+  { id: 'ai-control', icon: '◉', label: 'AI Control' },
+  { id: 'neural-brain', icon: '🧠', label: 'Neural Brain' },
+  { id: 'operations', icon: '▣', label: 'Operations' },
+  { id: 'agents', icon: '⬡', label: 'Agents' },
+  { id: 'system', icon: '⚙', label: 'System' },
+  { id: 'voice', icon: '◈', label: 'Voice' },
 ]
 
 export default function Sidebar() {
+  const activeSection = useAppStore(s => s.activeSection)
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const wsConnected = useAppStore(s => s.wsConnected)
 
   return (
@@ -39,42 +22,23 @@ export default function Sidebar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
           <span style={{ color: 'var(--gold)', fontSize: '18px', fontWeight: 500 }}>◈</span>
           <span className="sidebar-brand-text" style={{ color: 'var(--text-primary)', fontSize: '14px', fontWeight: 500, letterSpacing: '-0.02em' }}>
-            AI Employee OS
+            AI Employee
           </span>
         </div>
       </div>
 
       {/* Navigation */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', overflowY: 'auto' }}>
-        {NAV_SECTIONS.map((section) => (
-          <div key={section.label}>
-            <div style={{
-              fontSize: '10px',
-              fontWeight: 600,
-              letterSpacing: '0.08em',
-              color: 'var(--text-dim)',
-              textTransform: 'uppercase',
-              padding: '0 var(--space-4)',
-              marginBottom: '4px',
-            }}>
-              {section.label}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {section.items.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={({ isActive }) =>
-                    `sidebar-nav-item${isActive ? ' sidebar-nav-item--active' : ''}`
-                  }
-                  aria-current={({ isActive }) => isActive ? 'page' : undefined}
-                >
-                  <span className="sidebar-nav-icon">{item.icon}</span>
-                  <span className="sidebar-nav-label">{item.label}</span>
-                </NavLink>
-              ))}
-            </div>
-          </div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        {NAV_ITEMS.map((item) => (
+          <button
+            key={item.id}
+            className={`sidebar-nav-item${activeSection === item.id ? ' sidebar-nav-item--active' : ''}`}
+            onClick={() => setActiveSection(item.id)}
+            aria-current={activeSection === item.id ? 'page' : undefined}
+          >
+            <span className="sidebar-nav-icon">{item.icon}</span>
+            <span className="sidebar-nav-label">{item.label}</span>
+          </button>
         ))}
       </div>
 
