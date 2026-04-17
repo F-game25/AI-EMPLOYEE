@@ -7,7 +7,7 @@ import { API_URL } from '../../config/api'
 const BASE = API_URL
 
 const SUBSYSTEM_TAG = {
-  orchestrator: { label: 'ORCHESTRATOR', color: 'var(--gold)' },
+  orchestrator: { label: 'CORE BRAIN AGENT', color: 'var(--gold)' },
   brain: { label: 'NEURAL BRAIN', color: 'var(--info)' },
   memory: { label: 'MEMORY', color: 'var(--success)' },
   doctor: { label: 'DOCTOR', color: 'var(--warning)' },
