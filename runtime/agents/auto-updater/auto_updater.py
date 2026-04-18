@@ -307,6 +307,11 @@ def _detect_repo_dir() -> "Path | None":
 def _git_sync(branch: str = BRANCH) -> "tuple[bool, str]":
     """Perform a hard git sync to origin/<branch> in the repo directory.
 
+    Before fetching, repairs any broken upstream tracking: if the current
+    branch is pointing at a remote ref that no longer exists the stale
+    upstream is unset and reset to origin/<branch> so that subsequent
+    ``git pull`` invocations work without manual intervention.
+
     Returns (success, new_head_sha).
     """
     import subprocess
@@ -314,6 +319,43 @@ def _git_sync(branch: str = BRANCH) -> "tuple[bool, str]":
     repo = _detect_repo_dir()
     if repo is None:
         return False, ""
+
+    # ── Repair broken upstream tracking ──────────────────────────────────────
+    try:
+        up_r = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+            capture_output=True, text=True, cwd=str(repo), timeout=10,
+        )
+        upstream = up_r.stdout.strip()  # e.g. "origin/copilot/redesign-chatbot-ui"
+        if upstream:
+            # Extract the remote branch name after "origin/"
+            remote_branch = upstream.removeprefix("origin/")
+            ls_r = subprocess.run(
+                ["git", "ls-remote", "--exit-code", "origin", remote_branch],
+                capture_output=True, text=True, cwd=str(repo), timeout=15,
+            )
+            if ls_r.returncode != 0:
+                # Stale upstream — unset and re-point to the configured branch.
+                # Use a static label in the log message to avoid CodeQL flagging
+                # environment-sourced branch names as clear-text sensitive data.
+                logger.info(
+                    "Stale upstream tracking detected — resetting to configured branch",
+                )
+                cur_branch_r = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True, text=True, cwd=str(repo), timeout=10,
+                )
+                cur_branch = cur_branch_r.stdout.strip()
+                subprocess.run(
+                    ["git", "branch", "--unset-upstream", cur_branch],
+                    capture_output=True, text=True, cwd=str(repo), timeout=10,
+                )
+                subprocess.run(
+                    ["git", "branch", "--set-upstream-to", f"origin/{branch}", cur_branch],
+                    capture_output=True, text=True, cwd=str(repo), timeout=10,
+                )
+    except Exception as e:
+        logger.warning("Could not check/repair upstream tracking: %s", e)
 
     cmd_fetch = ["git", "fetch", "origin"]
     cmd_reset = ["git", "reset", "--hard", f"origin/{branch}"]
