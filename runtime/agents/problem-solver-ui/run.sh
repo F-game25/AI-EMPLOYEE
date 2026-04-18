@@ -211,7 +211,7 @@ if command -v lsof >/dev/null 2>&1; then
     kill -9 "$_pid" 2>/dev/null || true
   done
 elif command -v ss >/dev/null 2>&1 && command -v fuser >/dev/null 2>&1; then
-  if ss -tlnp 2>/dev/null | grep -qE ":${PORT}([[:space:]]|$)"; then
+  if ss -tlnp 2>/dev/null | grep -qE ":${PORT} "; then
     fuser -k "${PORT}/tcp" 2>/dev/null || true
     sleep 1
   fi
