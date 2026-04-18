@@ -4,7 +4,7 @@
     AI EMPLOYEE v4.0 - Windows Native Installer
 .DESCRIPTION
     One-click installer for AI Employee on Windows (no WSL or Git Bash required).
-    Installs Python, Git, OpenClaw, Ollama (optional), all 35 agents, and configures
+    Installs Python, Git, Ollama (optional), all 35 agents, and configures
     everything for immediate use.
 .NOTES
     Run as a normal user (not Administrator).
@@ -197,66 +197,11 @@ if (-not (Test-CommandExists 'git')) {
 Write-OK "Invoke-WebRequest available (built-in)"
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  STEP 3 – INSTALL OPENCLAW
+#  STEP 3 – AI EMPLOYEE INTERNAL ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
-Write-Step "Installing OpenClaw (WhatsApp gateway)..."
-
-$openClawOk = $false
-if (Test-CommandExists 'openclaw') {
-    Write-OK "OpenClaw already installed."
-    $openClawOk = $true
-} else {
-    # Try winget first
-    try {
-        $result = winget install --id OpenClaw.OpenClaw --silent --accept-source-agreements --accept-package-agreements 2>&1
-        $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
-                    [Environment]::GetEnvironmentVariable('Path', 'User')
-        if (Test-CommandExists 'openclaw') {
-            Write-OK "OpenClaw installed via winget."
-            $openClawOk = $true
-        }
-    } catch { }
-
-    if (-not $openClawOk) {
-        Write-Warn "winget install failed. Trying remote install script..."
-        try {
-            $installScript = Invoke-DownloadText 'https://openclaw.ai/install.ps1'
-            if ($installScript) {
-                $tmpScript = Join-Path $env:TEMP 'openclaw-install.ps1'
-                Set-Content -Path $tmpScript -Value $installScript -Encoding UTF8
-                & powershell -ExecutionPolicy Bypass -File $tmpScript
-                $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
-                            [Environment]::GetEnvironmentVariable('Path', 'User')
-                if (Test-CommandExists 'openclaw') {
-                    Write-OK "OpenClaw installed via remote script."
-                    $openClawOk = $true
-                }
-            }
-        } catch {
-            Write-Warn "Remote OpenClaw install failed: $_"
-        }
-    }
-
-    if (-not $openClawOk) {
-        Write-Warn "OpenClaw could not be installed automatically."
-        Write-Info "Visit https://openclaw.ai to install manually, then re-run if needed."
-    }
-}
-
-# Add OpenClaw bin to PATH if not already there
-$openClawBin = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
-if (Test-Path $openClawBin) { Add-UserPath $openClawBin }
-
-# Create OpenClaw PS completion stub
-$openClawCompDir  = Join-Path $env:USERPROFILE '.openclaw\completions'
-$openClawCompFile = Join-Path $openClawCompDir 'openclaw.ps1'
-if (-not (Test-Path $openClawCompDir)) {
-    New-Item -ItemType Directory -Path $openClawCompDir -Force | Out-Null
-}
-if (-not (Test-Path $openClawCompFile)) {
-    Set-Content -Path $openClawCompFile -Value '# OpenClaw PowerShell completions' -Encoding UTF8
-    Write-OK "Created OpenClaw completion stub."
-}
+Write-Step "Setting up AI Employee internal engine..."
+# The engine is fully embedded — no external gateway binary is required.
+Write-OK "AI Employee internal engine configured (runtime/engine/)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  STEP 4 – CONFIGURATION WIZARD
@@ -579,7 +524,7 @@ Write-Progress -Activity "Downloading runtime files" -Completed
 
 # Also download shared config files
 $configFiles = @(
-    'openclaw.template.json', 'schedules.json', 'polymarket_estimates.json',
+    'gateway.template.json', 'schedules.json', 'polymarket_estimates.json',
     'skills_library.json', 'custom_agents.json', 'agent_capabilities.json',
     'task_plans.json', 'agent_templates.json'
 )
@@ -685,7 +630,7 @@ Write-OK "Bot dependencies installed."
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Step "Writing configuration files..."
 
-# 9a. OpenClaw config.json
+# 9a. AI Employee config.json
 $openClawConfig = @"
 {
   "gateway": {
@@ -744,10 +689,10 @@ SMTP_HOST=$SMTP_HOST
 SMTP_USER=$SMTP_USER
 SMTP_PASS=$SMTP_PASS
 
-# OpenClaw Gateway
-OPENCLAW_TOKEN=$AI_SECRET_TOKEN
-OPENCLAW_PORT=18789
-OPENCLAW_HOST=127.0.0.1
+# AI Employee Internal Gateway
+AI_EMPLOYEE_GATEWAY_TOKEN=$AI_SECRET_TOKEN
+AI_EMPLOYEE_GATEWAY_PORT=18789
+AI_EMPLOYEE_GATEWAY_HOST=127.0.0.1
 "@
 Set-Content -Path (Join-Path $AI_HOME '.env') -Value $envContent -Encoding UTF8
 Write-OK ".env written."
@@ -767,15 +712,15 @@ if ($HOURLY_STATUS) {
     $statusEnv = @"
 WHATSAPP_PHONE=$WHATSAPP_PHONE
 STATUS_REPORT_INTERVAL_SECONDS=3600
-OPENCLAW_GATEWAY_TOKEN=$AI_SECRET_TOKEN
-OPENCLAW_PORT=18789
+AI_EMPLOYEE_GATEWAY_TOKEN=$AI_SECRET_TOKEN
+AI_EMPLOYEE_GATEWAY_PORT=18789
 "@
 } else {
     $statusEnv = @"
 WHATSAPP_PHONE=$WHATSAPP_PHONE
 STATUS_REPORT_INTERVAL_SECONDS=-1
-OPENCLAW_GATEWAY_TOKEN=$AI_SECRET_TOKEN
-OPENCLAW_PORT=18789
+AI_EMPLOYEE_GATEWAY_TOKEN=$AI_SECRET_TOKEN
+AI_EMPLOYEE_GATEWAY_PORT=18789
 "@
 }
 Set-Content -Path (Join-Path $AI_HOME 'config\status-reporter.env') -Value $statusEnv -Encoding UTF8
@@ -1052,9 +997,8 @@ Write-Host "    • If bot is NOT running     → starts the bot (and opens the 
 Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor Yellow
 Write-Host "    1.  Double-click  'AI Employee.bat'  on your Desktop"
-Write-Host "    2.  Link WhatsApp: run  openclaw channels login"
-Write-Host "    3.  Scan the QR code shown in the terminal"
-Write-Host "    4.  Send  'Hello!'  to yourself on WhatsApp to verify"
+Write-Host "    2.  Optional: link WhatsApp via the dashboard > Settings > Channels"
+Write-Host "    3.  Send any task through the dashboard or WhatsApp"
 Write-Host ""
 Write-Host "  URLs:" -ForegroundColor Cyan
 Write-Host "    Dashboard  →  http://127.0.0.1:$UI_PORT"

@@ -511,17 +511,18 @@ def check_discord_bot_state() -> None:
 
 
 def check_gateway_reachable() -> None:
-    """OpenClaw gateway should be reachable at localhost:18789."""
-    url = os.environ.get("OPENCLAW_GATEWAY_URL", "http://localhost:18789")
+    """AI Employee internal gateway should be reachable at localhost:18789."""
+    url = os.environ.get("AI_EMPLOYEE_GATEWAY_URL",
+                         os.environ.get("OPENCLAW_GATEWAY_URL", "http://localhost:18789"))
     try:
         req = urllib.request.Request(f"{url}/health", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
             if resp.status < 400:
-                _ok("OpenClaw gateway", f"reachable at {url}")
+                _ok("AI Employee gateway", f"reachable at {url}")
             else:
-                _fail("OpenClaw gateway", f"HTTP {resp.status}", required=False)
+                _fail("AI Employee gateway", f"HTTP {resp.status}", required=False)
     except Exception:
-        _fail("OpenClaw gateway", f"not reachable at {url} — run: cd ~/.ai-employee && ./start.sh", required=False)
+        _fail("AI Employee gateway", f"not reachable at {url} — run: cd ~/.ai-employee && ./start.sh", required=False)
 
 
 def check_problem_solver_ui() -> None:

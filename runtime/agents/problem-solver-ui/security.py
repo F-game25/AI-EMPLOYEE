@@ -1,5 +1,5 @@
 """
-AI Employee — Security Module (from openclaw-2)
+AI Employee — Security Module
 Handles authentication, authorization, encryption, and input validation.
 """
 import re
