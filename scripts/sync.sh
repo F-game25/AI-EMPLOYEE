@@ -39,7 +39,30 @@ if ! ping -c1 -W3 github.com &>/dev/null 2>&1 && \
   exit 1
 fi
 
-# ── 2. Show current status ────────────────────────────────────────────────────
+# ── 2. Repair broken upstream tracking ───────────────────────────────────────
+# Detect if the current branch is tracking a remote ref that does not exist,
+# which causes `git pull` to fail. Reset tracking to origin/main in that case.
+echo ""
+echo -e "${CYAN}Checking branch tracking…${NC}"
+_CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+_UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+
+if [[ -z "$_UPSTREAM" ]]; then
+  echo -e "${YELLOW}⚠  No upstream set for branch '$_CURRENT_BRANCH'. Setting to origin/main.${NC}"
+  git branch --set-upstream-to=origin/main "$_CURRENT_BRANCH" 2>/dev/null \
+    || echo -e "${YELLOW}  (Could not set upstream — will fetch origin/main directly.)${NC}"
+elif ! git ls-remote --exit-code origin "${_UPSTREAM#origin/}" &>/dev/null; then
+  echo -e "${YELLOW}⚠  Tracked upstream '$_UPSTREAM' does not exist on remote.${NC}"
+  echo -e "${YELLOW}   Unsetting stale tracking and switching to origin/main.${NC}"
+  git branch --unset-upstream "$_CURRENT_BRANCH" 2>/dev/null || true
+  git branch --set-upstream-to=origin/main "$_CURRENT_BRANCH" 2>/dev/null \
+    || echo -e "${YELLOW}  (Could not set upstream — will fetch origin/main directly.)${NC}"
+  _UPSTREAM="origin/main"
+else
+  echo -e "${GREEN}✔ Branch '$_CURRENT_BRANCH' correctly tracks '$_UPSTREAM'.${NC}"
+fi
+
+# ── 3. Show current status ────────────────────────────────────────────────────
 echo ""
 echo -e "${CYAN}Current status:${NC}"
 git fetch origin --quiet
@@ -58,8 +81,9 @@ if [[ -n "$UNPUSHED" ]]; then
   echo "$UNPUSHED"
 fi
 
-# ── 3. Pull latest from GitHub ────────────────────────────────────────────────
+# ── 4. Pull latest from GitHub ────────────────────────────────────────────────
 UPSTREAM_CHANGES="$(git log HEAD..origin/main --oneline 2>/dev/null || true)"
+_PULLED=0
 
 if [[ -n "$UPSTREAM_CHANGES" ]]; then
   echo ""
@@ -75,9 +99,40 @@ if [[ -n "$UPSTREAM_CHANGES" ]]; then
     exit 1
   fi
   echo -e "${GREEN}✔ Pulled and rebased successfully.${NC}"
+  _PULLED=1
 fi
 
-# ── 4. Commit local changes if any ───────────────────────────────────────────
+# ── 5. Rebuild UI bundle & clear stale runtime cache after a pull ─────────────
+# Always rebuild when new commits were pulled so the browser sees the latest UI.
+# Also purge Python bytecode caches to prevent stale .pyc files from hiding
+# runtime code changes.
+REPO_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [[ "$_PULLED" -eq 1 ]]; then
+  echo ""
+  echo -e "${CYAN}Clearing stale runtime cache (*.pyc / __pycache__)…${NC}"
+  find "$REPO_DIR" \( -type d -name "__pycache__" -exec rm -rf {} + \) \
+    -o \( -type f -name "*.pyc" -delete \) 2>/dev/null || true
+  echo -e "${GREEN}✔ Cache cleared.${NC}"
+
+  if [[ -f "$REPO_DIR/frontend/package.json" ]]; then
+    echo ""
+    echo -e "${CYAN}Rebuilding UI bundle (frontend changed)…${NC}"
+    if [[ ! -d "$REPO_DIR/frontend/node_modules" ]]; then
+      npm --prefix "$REPO_DIR/frontend" install --silent \
+        || npm --prefix "$REPO_DIR/frontend" install
+    fi
+    rm -rf "$REPO_DIR/frontend/dist"
+    _APP_VER="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    if VITE_APP_VERSION="$_APP_VER" npm --prefix "$REPO_DIR/frontend" run build; then
+      echo -e "${GREEN}✔ UI bundle rebuilt (version: ${_APP_VER}).${NC}"
+      echo -e "${YELLOW}  Restart the server to serve the new bundle: bash start.sh${NC}"
+    else
+      echo -e "${RED}✗ Frontend build failed — check the output above.${NC}"
+    fi
+  fi
+fi
+
+# ── 6. Commit local changes if any ───────────────────────────────────────────
 DIRTY="$(git status --porcelain)"
 if [[ -n "$DIRTY" ]]; then
   AUTO_MSG="sync: auto-commit $(date '+%Y-%m-%d %H:%M:%S')"
@@ -91,7 +146,7 @@ else
   echo "  (no local changes to commit)"
 fi
 
-# ── 5. Push to GitHub ─────────────────────────────────────────────────────────
+# ── 7. Push to GitHub ─────────────────────────────────────────────────────────
 COMMITS_TO_PUSH="$(git log origin/main..HEAD --oneline 2>/dev/null || true)"
 PUSH_COUNT=0
 if [[ -n "$COMMITS_TO_PUSH" ]]; then
@@ -115,12 +170,12 @@ else
   echo -e "${GREEN}✔ origin/main is already up to date.${NC}"
 fi
 
-# ── 6. Log the result ─────────────────────────────────────────────────────────
+# ── 8. Log the result ─────────────────────────────────────────────────────────
 mkdir -p "$log_dir"
 SHORT_SHA="$(git rev-parse --short HEAD)"
 echo "$(date '+%Y-%m-%d %H:%M:%S') | sync complete | $SHORT_SHA" >> "$log_file"
 
-# ── 7. Print summary ──────────────────────────────────────────────────────────
+# ── 9. Print summary ──────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}✅ Sync complete${NC}"
 echo "   Local:  $(git rev-parse --short HEAD) ($(git log -1 --format='%s'))"
