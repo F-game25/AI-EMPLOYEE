@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { id: 'neural-brain', icon: '🧠', label: 'Neural Brain' },
   { id: 'operations', icon: '▣', label: 'Operations' },
   { id: 'agents', icon: '⬡', label: 'Agents' },
+  { id: 'control-center', icon: '🛡', label: 'Control Center' },
   { id: 'system', icon: '⚙', label: 'System' },
   { id: 'voice', icon: '◈', label: 'Voice' },
 ]
