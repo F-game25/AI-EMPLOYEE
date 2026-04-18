@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { useBrainStore } from '../../store/brainStore'
 import { sendChatMessage } from '../../hooks/useWebSocket'
 
 export default function ChatPanel() {
@@ -9,6 +10,7 @@ export default function ChatPanel() {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
   const addChatMessage = useAppStore(s => s.addChatMessage)
+  const addFromPrompt = useBrainStore(s => s.addFromPrompt)
   const inputId = useId()
 
   useEffect(() => {
@@ -20,6 +22,8 @@ export default function ChatPanel() {
     if (!text) return
     addChatMessage({ role: 'user', content: text, ts: Date.now() })
     sendChatMessage(text)
+    // Add prompt as a node in the shared brain graph
+    addFromPrompt(text, 'task', 'automation')
     setInput('')
   }
 

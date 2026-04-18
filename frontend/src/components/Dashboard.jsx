@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../store/appStore'
+import { useBrainStore } from '../store/brainStore'
 import Sidebar from './layout/Sidebar'
 import ContextPanel from './layout/ContextPanel'
 import DashboardPage from './pages/DashboardPage'
@@ -34,6 +35,7 @@ export default function Dashboard() {
   const setBrainStatus = useAppStore(s => s.setBrainStatus)
   const setBrainActivity = useAppStore(s => s.setBrainActivity)
   const setWorkflowSnapshot = useAppStore(s => s.setWorkflowSnapshot)
+  const setGraph = useBrainStore(s => s.setGraph)
 
   // Background data fetching — shared across all sections
   const refreshDashboard = useCallback(async () => {
@@ -63,24 +65,27 @@ export default function Dashboard() {
 
   const refreshBrainRuntime = useCallback(async () => {
     try {
-      const [statusRes, insightsRes, activityRes] = await Promise.all([
+      const [statusRes, insightsRes, activityRes, graphRes] = await Promise.all([
         fetch(`${BASE}/api/brain/status`),
         fetch(`${BASE}/api/brain/insights`),
         fetch(`${BASE}/api/brain/activity?limit=20`),
+        fetch(`${BASE}/api/brain/graph`),
       ])
-      const [statusData, insightsData, activityData] = await Promise.all([
+      const [statusData, insightsData, activityData, graphData] = await Promise.all([
         statusRes.json(),
         insightsRes.json(),
         activityRes.json(),
+        graphRes.ok ? graphRes.json() : null,
       ])
       if (statusData) setBrainStatus(statusData)
       if (insightsData) setBrainInsights(insightsData)
       if (activityData) setBrainActivity(activityData)
+      if (graphData) setGraph(graphData)
     } catch (e) {
       console.error('Failed to refresh brain runtime', e)
       // Keep current state; WebSocket updates continue in real time.
     }
-  }, [setBrainActivity, setBrainInsights, setBrainStatus])
+  }, [setBrainActivity, setBrainInsights, setBrainStatus, setGraph])
 
   useEffect(() => {
     refreshDashboard()

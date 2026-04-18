@@ -1291,6 +1291,66 @@ app.get('/api/brain/neurons', (req, res) => {
   res.json(brain.neurons());
 });
 
+/**
+ * Unified graph endpoint for the 3-D Neural Brain visualization.
+ * Returns { nodes, links, stats } using a normalized schema so the
+ * frontend brainStore can consume it directly.
+ */
+app.get('/api/brain/graph', (req, res) => {
+  const raw = brain.neurons();
+  const memoryTree = subsystems.getMemoryTree();
+  const nodes = (raw.nodes || []).map((n) => ({
+    id: n.id,
+    label: n.label,
+    type: n.type || 'skill',
+    group:
+      n.type === 'Memory'
+        ? 'memory'
+        : n.type === 'Strategy' || n.type === 'Skill'
+          ? 'money'
+          : n.type === 'Output'
+            ? 'automation'
+            : 'learning',
+    weight: n.weight ?? 1,
+    confidence: n.confidence ?? 0,
+    activation: n.activation ?? 0,
+    source: n.source || 'system',
+    tag: n.tag || '',
+  }));
+
+  // Append top memory-tree entities as nodes
+  if (Array.isArray(memoryTree?.nodes)) {
+    memoryTree.nodes.slice(0, 30).forEach((m) => {
+      const id = `mem-${(m.id || m.entity || '').replace(/\s+/g, '-').slice(0, 40)}`;
+      if (nodes.some((n) => n.id === id)) return;
+      nodes.push({
+        id,
+        label: m.entity || m.id || 'memory',
+        type: 'memory',
+        group: 'memory',
+        weight: m.mention_count ?? m.importance ?? 1,
+        confidence: m.importance ?? 0.5,
+        activation: 0,
+        source: 'memory',
+        tag: 'knowledge',
+      });
+    });
+  }
+
+  const links = (raw.connections || []).map((c) => ({
+    source: c.from,
+    target: c.to,
+    strength: c.weight ?? c.confidence ?? 0.5,
+  }));
+
+  res.json({
+    nodes,
+    links,
+    stats: raw.stats || {},
+    updated_at: raw.updated_at || new Date().toISOString(),
+  });
+});
+
 app.get('/api/memory/tree', (req, res) => {
   res.json(subsystems.getMemoryTree());
 });
