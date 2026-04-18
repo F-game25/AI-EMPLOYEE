@@ -2,7 +2,8 @@
 """AI Employee — Single Entrypoint
 
 This is the ONLY file that should be executed to start the AI Employee system.
-It initialises the orchestrator, the internal engine, and launches all services.
+It initialises the orchestrator, the internal engine, memory router,
+self-learning brain, and launches all services.
 
 Usage::
 
@@ -13,6 +14,15 @@ Usage::
 The internal engine (formerly OpenClaw) is initialised here and is never started
 directly.  All agent and orchestrator access to LLM / memory / input-processing
 goes through ``runtime/engine/api.py``.
+
+Data flow::
+
+    INPUT → core/orchestrator.py
+              → core/decision_engine.py     (route to best agent)
+              → core/self_learning_brain.py (suggest + learn)
+              → agent execution
+              → memory/memory_router.py     (store outcome)
+              → self_learning_brain.record_outcome()  (reinforce)
 """
 from __future__ import annotations
 
@@ -51,6 +61,53 @@ def _init_engine() -> None:
         logger.info("Internal engine initialised")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Engine init warning (non-fatal): %s", exc)
+
+
+# ── Self-learning brain ───────────────────────────────────────────────────────
+
+def _init_self_learning_brain() -> None:
+    """Initialise the self-learning brain singleton."""
+    try:
+        from core.self_learning_brain import get_self_learning_brain
+        slb = get_self_learning_brain()
+        metrics = slb.metrics()
+        logger.info(
+            "Self-learning brain ready — avg_reward=%.3f, outcomes=%d",
+            metrics.get("avg_reward_recent", 0.0),
+            metrics.get("total_outcomes_recorded", 0),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Self-learning brain init warning (non-fatal): %s", exc)
+
+
+# ── Memory router ─────────────────────────────────────────────────────────────
+
+def _init_memory_router() -> None:
+    """Initialise the memory router (short-term cache + vector store)."""
+    try:
+        from memory.memory_router import get_memory_router
+        router = get_memory_router()
+        health = router.health()
+        logger.info(
+            "Memory router ready — cache=%d, vector=%d",
+            health.get("cache_live_entries", 0),
+            health.get("vector_entries", {}).get("total", 0),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Memory router init warning (non-fatal): %s", exc)
+
+
+# ── UI API server ─────────────────────────────────────────────────────────────
+
+def _start_ui_api_server() -> None:
+    """Start the UI API server in a background daemon thread."""
+    try:
+        from ui.api_server import start_api_server_thread
+        start_api_server_thread()
+    except ImportError:
+        logger.debug("FastAPI/uvicorn not installed — UI API server skipped.")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("UI API server start warning (non-fatal): %s", exc)
 
 
 # ── Preflight checks ──────────────────────────────────────────────────────────
@@ -120,7 +177,12 @@ def main() -> int:
     args = _parse_args()
 
     logger.info("AI Employee starting (engine: internal)")
+
+    # Initialise subsystems in dependency order
     _init_engine()
+    _init_memory_router()
+    _init_self_learning_brain()
+    _start_ui_api_server()
 
     if args.preflight:
         return _run_preflight()
