@@ -1969,7 +1969,27 @@ setInterval(() => {
 }, 2000);
 
 app.get('*', (req, res, next) => {
-  if (!HAS_FRONTEND_DIST) return next();
+  if (!HAS_FRONTEND_DIST) {
+    if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
+    res.status(503).type('html').send(`<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>AI Employee — Build Required</title>
+<style>body{font-family:sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:2rem 2.5rem;max-width:480px;text-align:center}
+h1{color:#f8fafc;margin-top:0}pre{background:#0f172a;border-radius:6px;padding:1rem;text-align:left;font-size:.85rem;overflow-x:auto}</style>
+</head>
+<body><div class="box">
+<h1>⚠ Frontend Not Built</h1>
+<p>The production build of the frontend is missing. Run the following command from the repository root to build it:</p>
+<pre>npm --prefix frontend run build</pre>
+<p>Or start the full system with:</p>
+<pre>./start.sh</pre>
+<p>For live development with hot-reload, start the Vite dev server instead:</p>
+<pre>cd frontend &amp;&amp; npm run dev</pre>
+<p>API health check: <a href="/health" style="color:#60a5fa">/health</a></p>
+</div></body></html>`);
+    return;
+  }
   if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
   if (req.path.startsWith('/gateway') || req.path.startsWith('/orchestrator')) return next();
   res.set('Cache-Control', 'no-store, must-revalidate');
@@ -1977,10 +1997,10 @@ app.get('*', (req, res, next) => {
   res.type('html').send(html);
 });
 
-// Bind explicitly to the IPv4 loopback so curl/health-checks using
-// http://127.0.0.1:<port> work correctly on systems where Node's default
-// wildcard resolves to the IPv6 interface only.
-const LISTEN_HOST = process.env.LISTEN_HOST || '127.0.0.1';
+// Bind to all interfaces by default so the server is reachable from the host
+// machine when running inside WSL, Docker, or a VM.  Set LISTEN_HOST=127.0.0.1
+// in the environment to restrict to loopback only.
+const LISTEN_HOST = process.env.LISTEN_HOST || '0.0.0.0';
 
 console.log(`[SERVER] Initializing — binding to ${LISTEN_HOST}:${PORT} …`);
 
