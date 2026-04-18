@@ -348,7 +348,7 @@ export default function AIControlPage() {
           setTyping(false)
         })
     }
-  }, [input, ws, addChatMessage, setTyping])
+  }, [input, ws, addChatMessage, setTyping, addFromPrompt])
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {

@@ -150,7 +150,6 @@ export default function NeuralBrainPage() {
   const graphRef = useRef(null)
   const containerRef = useRef(null)
   const nnStatus = useAppStore(s => s.nnStatus)
-  const brainInsights = useAppStore(s => s.brainInsights)
   const brainActivity = useAppStore(s => s.brainActivity)
 
   // Brain store (shared state)
@@ -218,12 +217,6 @@ export default function NeuralBrainPage() {
   // Hover handler
   const handleNodeHover = useCallback((node) => {
     setHoveredNode(node || null)
-  }, [])
-
-  // Node rendering: glowing sphere with color
-  const nodeThreeObject = useCallback((node) => {
-    // Uses default sphere with custom color — no need for custom THREE objects
-    return undefined
   }, [])
 
   const nodeColor = useCallback((node) => {
