@@ -97,14 +97,27 @@ if [[ -f backend.pid ]]; then
   fi
   rm -f backend.pid
 fi
-PORT="${UI_PORT}" PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}" node backend/server.js &
+PORT="${UI_PORT}" PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}" LISTEN_HOST="127.0.0.1" node backend/server.js &
 BACKEND_PID=$!
 
-sleep 2
-if curl -fsS "http://127.0.0.1:${UI_PORT}/health" > /dev/null && curl -fsS "http://127.0.0.1:${UI_PORT}/" > /dev/null; then
+# Poll /health until the server responds (up to 30 s).
+# /health always returns 200 OK as soon as the server is listening.
+# We do NOT check / (root) here because that requires a built frontend dist
+# and would return 404 if the dist is somehow absent.
+_BE_READY=0
+for _i in $(seq 1 30); do
+  sleep 1
+  if curl -fsS --max-time 3 "http://127.0.0.1:${UI_PORT}/health" > /dev/null 2>&1; then
+    _BE_READY=1
+    break
+  fi
+  echo "  ⏳ Waiting for backend… (${_i}/30)"
+done
+
+if [[ "$_BE_READY" -eq 1 ]]; then
   echo "✅ System running at http://localhost:${UI_PORT}"
 else
-  echo "❌ Backend failed to start"
+  echo "❌ Backend did not become healthy within 30 s"
   kill "$BACKEND_PID" 2>/dev/null || true
   exit 1
 fi
@@ -112,4 +125,6 @@ fi
 echo "$BACKEND_PID" > backend.pid
 rm -f worker.pid
 
-echo "Tip: For live frontend reload during development, run: PORT=${UI_PORT} node backend/server.js (terminal 1), then cd frontend && npm run dev (terminal 2)"
+echo "Tip: For live frontend hot-reload, run the backend in one terminal and the Vite dev server in another:"
+echo "  Terminal 1: PORT=${UI_PORT} node backend/server.js"
+echo "  Terminal 2: cd frontend && npm run dev   # listens on http://127.0.0.1:5173 and proxies API to :${UI_PORT}"

@@ -1977,15 +1977,31 @@ app.get('*', (req, res, next) => {
   res.type('html').send(html);
 });
 
-server.listen(PORT, () => {
-  console.log(`[SERVER] AI Employee backend running on port ${PORT}`);
+// Bind explicitly to the IPv4 loopback so curl/health-checks using
+// http://127.0.0.1:<port> work correctly on systems where Node's default
+// wildcard resolves to the IPv6 interface only.
+const LISTEN_HOST = process.env.LISTEN_HOST || '127.0.0.1';
+
+console.log(`[SERVER] Initializing — binding to ${LISTEN_HOST}:${PORT} …`);
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[SERVER] ❌ Port ${PORT} is already in use. Stop the conflicting process and restart.`);
+  } else {
+    console.error('[SERVER] ❌ Server error:', err.message);
+  }
+  process.exit(1);
+});
+
+server.listen(PORT, LISTEN_HOST, () => {
+  console.log(`[SERVER] ✅ AI Employee backend running on http://${LISTEN_HOST}:${PORT}`);
   console.log(`[SERVER] RUNNING FROM: ${process.cwd()}`);
   console.log(`[SERVER] FILE PATH: ${__filename}`);
   console.log(`[SERVER] LATEST COMMIT: ${GIT_COMMIT}`);
   if (HAS_FRONTEND_DIST) {
     console.log(`[SERVER] Serving frontend bundle from ${FRONTEND_DIST}`);
   } else {
-    console.log('[SERVER] Frontend bundle not found (expected frontend/dist).');
+    console.log('[SERVER] ⚠  Frontend bundle not found (expected frontend/dist). Run: npm --prefix frontend run build');
   }
   // Start periodic state persistence (every 30s)
   persistence.startAutoSave(
