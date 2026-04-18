@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { API_URL } from '../config/api'
 
 function buildBootLines(agentCount) {
   return [
@@ -97,7 +98,7 @@ export default function BootSequence({ onComplete }) {
       timers.push(setTimeout(() => { if (!cancelled) onCompleteRef.current?.() }, lastDelay + 1400))
     }
 
-    fetch('/agents')
+    fetch(`${API_URL}/agents`)
       .then(r => r.json())
       .then(data => startBoot(data?.agents?.length || 57))
       .catch(() => startBoot(57))
