@@ -110,6 +110,36 @@ def _start_ui_api_server() -> None:
         logger.warning("UI API server start warning (non-fatal): %s", exc)
 
 
+# ── Version control ───────────────────────────────────────────────────────────
+
+def _init_version_control() -> None:
+    """Initialise the version control singleton."""
+    try:
+        from runtime.runtime.version_control import get_version_control
+        vc = get_version_control()
+        summary = vc.summary()
+        logger.info(
+            "Version control ready — %d snapshots (%d deployed, %d rolled back)",
+            summary.get("total_snapshots", 0),
+            summary.get("deployed", 0),
+            summary.get("rolled_back", 0),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Version control init warning (non-fatal): %s", exc)
+
+
+# ── Forge controller ──────────────────────────────────────────────────────────
+
+def _init_forge_controller() -> None:
+    """Initialise the Forge Controller (safe-modification gateway)."""
+    try:
+        from core.forge_controller import get_forge_controller
+        get_forge_controller()
+        logger.info("Forge controller ready")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Forge controller init warning (non-fatal): %s", exc)
+
+
 # ── Preflight checks ──────────────────────────────────────────────────────────
 
 def _run_preflight() -> int:
@@ -182,6 +212,8 @@ def main() -> int:
     _init_engine()
     _init_memory_router()
     _init_self_learning_brain()
+    _init_version_control()
+    _init_forge_controller()
     _start_ui_api_server()
 
     if args.preflight:

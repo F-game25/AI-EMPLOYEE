@@ -214,6 +214,90 @@ def _build_app() -> Any:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    # ── Ascend Forge endpoints ─────────────────────────────────────────────────
+
+    class ForgeSubmitRequest(BaseModel):
+        module: str
+        code: str
+        description: str = ""
+        tag: str = ""
+        author: str = "api"
+        auto_deploy: bool = False
+
+    class ForgeApproveRequest(BaseModel):
+        snapshot_id: str
+
+    class ForgeRollbackRequest(BaseModel):
+        snapshot_id: str
+
+    class SandboxRunRequest(BaseModel):
+        code: str
+        module_name: str = "preview_module"
+        target_module: str = ""
+
+    @app.post("/forge/submit")
+    def forge_submit(req: ForgeSubmitRequest) -> dict:
+        try:
+            from core.forge_controller import get_forge_controller
+            return get_forge_controller().submit_change(
+                module=req.module,
+                code=req.code,
+                description=req.description,
+                tag=req.tag,
+                author=req.author,
+                auto_deploy=req.auto_deploy,
+            )
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Forge submit failed — check server logs") from None
+
+    @app.post("/forge/approve")
+    def forge_approve(req: ForgeApproveRequest) -> dict:
+        try:
+            from core.forge_controller import get_forge_controller
+            return get_forge_controller().approve(req.snapshot_id)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Forge approve failed — check server logs") from None
+
+    @app.post("/forge/rollback")
+    def forge_rollback(req: ForgeRollbackRequest) -> dict:
+        try:
+            from core.forge_controller import get_forge_controller
+            return get_forge_controller().rollback(req.snapshot_id)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Forge rollback failed — check server logs") from None
+
+    @app.get("/forge/pending")
+    def forge_pending() -> dict:
+        try:
+            from core.forge_controller import get_forge_controller
+            return {"pending": get_forge_controller().list_pending(), "ts": _ts()}
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Forge pending query failed — check server logs") from None
+
+    @app.get("/forge/versions")
+    def forge_versions(module: str | None = None, limit: int = 50) -> dict:
+        try:
+            from runtime.runtime.version_control import get_version_control
+            return {
+                "versions": get_version_control().list_versions(module=module, limit=limit),
+                "summary": get_version_control().summary(),
+                "ts": _ts(),
+            }
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Version query failed — check server logs") from None
+
+    @app.post("/forge/sandbox")
+    def forge_sandbox(req: SandboxRunRequest) -> dict:
+        try:
+            from runtime.sandbox_executor import get_sandbox_executor
+            return get_sandbox_executor().run(
+                req.code,
+                module_name=req.module_name,
+                target_module=req.target_module,
+            )
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Sandbox execution failed — check server logs") from None
+
     return app
 
 

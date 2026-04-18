@@ -2,10 +2,11 @@
 
 Assembles all dashboard tabs into a single multi-tab Streamlit application:
 
-  🏠 System Status   — overall health, memory summary, brain KPIs
-  🧠 Brain Visualizer — node/edge graph of learning paths
-  🤖 Agent Monitor    — per-agent stats, recent outcomes, live suggestions
-  🗄️ Memory Viewer    — semantic search, recent entries, write panel
+  🏠 System Status    — overall health, memory summary, brain KPIs
+  🧠 Brain Visualizer  — node/edge graph of learning paths
+  🤖 Agent Monitor     — per-agent stats, recent outcomes, live suggestions
+  🗄️ Memory Viewer     — semantic search, recent entries, write panel
+  🔨 Ascend Forge      — live code editor, module builder, deployment panel
 
 Launch::
 
@@ -155,7 +156,13 @@ def run_dashboard() -> None:
         st.markdown("**Navigation**")
         tab_choice = st.radio(
             "Select view",
-            ["🏠 System Status", "🧠 Brain Visualizer", "🤖 Agent Monitor", "🗄️ Memory Viewer"],
+            [
+                "🏠 System Status",
+                "🧠 Brain Visualizer",
+                "🤖 Agent Monitor",
+                "🗄️ Memory Viewer",
+                "🔨 Ascend Forge",
+            ],
             label_visibility="collapsed",
         )
         st.divider()
@@ -175,6 +182,38 @@ def run_dashboard() -> None:
     elif tab_choice == "🗄️ Memory Viewer":
         from ui.dashboard.memory_viewer import render_memory_viewer
         render_memory_viewer()
+    elif tab_choice == "🔨 Ascend Forge":
+        _render_ascend_forge()
+
+
+def _render_ascend_forge() -> None:
+    """Render the Ascend Forge multi-sub-tab panel."""
+    st.header("🔨 Ascend Forge")
+    st.caption(
+        "Internal AI-powered development environment. "
+        "Build, test, and deploy modules — all under controlled execution rules."
+    )
+
+    forge_tab = st.radio(
+        "Forge section",
+        ["✏️ Code Editor", "🧩 Module Builder", "🔬 Live Preview", "🚦 Deployment"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="forge_sub_tab",
+    )
+
+    if forge_tab == "✏️ Code Editor":
+        from ui.ascend_forge.forge_editor import render_forge_editor
+        render_forge_editor()
+    elif forge_tab == "🧩 Module Builder":
+        from ui.ascend_forge.module_builder import render_module_builder
+        render_module_builder()
+    elif forge_tab == "🔬 Live Preview":
+        from ui.ascend_forge.live_preview import render_live_preview
+        render_live_preview()
+    elif forge_tab == "🚦 Deployment":
+        from ui.ascend_forge.deployment_panel import render_deployment_panel
+        render_deployment_panel()
 
 
 # ── Direct entry ──────────────────────────────────────────────────────────────
