@@ -242,7 +242,16 @@ class SandboxExecutor:
             )
 
         # 4. Dry-run compile + exec in isolated namespace
-        namespace: dict[str, Any] = {"__name__": module_name, "__builtins__": {}}
+        # Use a restricted builtins dict: keep __import__ so that normal `import`
+        # statements work, but strip out dangerous callables (eval, exec, compile,
+        # open, input, breakpoint).  Explicit use of __import__ as a *call* is
+        # already caught by the AST scan above (it appears as a Name node).
+        import builtins as _builtins_mod
+        _STRIP_BUILTINS = frozenset({"eval", "exec", "compile", "open", "input", "breakpoint", "__loader__"})
+        restricted_builtins = {
+            k: v for k, v in vars(_builtins_mod).items() if k not in _STRIP_BUILTINS
+        }
+        namespace: dict[str, Any] = {"__name__": module_name, "__builtins__": restricted_builtins}
         try:
             bytecode = compile(tree, module_name, "exec")
             # Run with a timeout via a thread

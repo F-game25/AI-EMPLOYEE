@@ -215,7 +215,7 @@ class HotReloadManager:
         if not snapshot_id:
             return
         try:
-            from runtime.runtime.version_control import get_version_control
+            from runtime.version_control import get_version_control
             get_version_control().set_status(snapshot_id, status)
         except Exception:  # noqa: BLE001
             pass

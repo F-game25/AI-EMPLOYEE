@@ -301,7 +301,7 @@ class ForgeController:
     def _read_current(self, module: str) -> str:
         """Read current on-disk content of *module* for rollback storage."""
         try:
-            from runtime.runtime.version_control import _resolve_module_path
+            from runtime.version_control import _resolve_module_path
             path = _resolve_module_path(module)
             if path and path.exists():
                 return path.read_text(encoding="utf-8")
@@ -310,15 +310,15 @@ class ForgeController:
         return ""
 
     def _get_sandbox(self):  # type: ignore[return]
-        from runtime.runtime.sandbox_executor import get_sandbox_executor
+        from runtime.sandbox_executor import get_sandbox_executor
         return get_sandbox_executor()
 
     def _get_vc(self):  # type: ignore[return]
-        from runtime.runtime.version_control import get_version_control
+        from runtime.version_control import get_version_control
         return get_version_control()
 
     def _get_hrm(self):  # type: ignore[return]
-        from runtime.runtime.hot_reload_manager import get_hot_reload_manager
+        from runtime.hot_reload_manager import get_hot_reload_manager
         return get_hot_reload_manager()
 
     def _feed_learning(self, *, action: str, success: bool, context: str) -> None:
@@ -349,6 +349,147 @@ class ForgeController:
             )
         except Exception:  # noqa: BLE001
             pass
+
+    # ------------------------------------------------------------------
+    # V4: Profit Impact Analysis + ROI-ranked suggestion queue
+    # ------------------------------------------------------------------
+
+    def profit_impact_analysis(
+        self,
+        *,
+        module: str,
+        description: str = "",
+        change_type: str = "optimization",
+    ) -> dict[str, Any]:
+        """Estimate the ROI impact of a proposed Forge change.
+
+        Args:
+            module:       Module being changed.
+            description:  What the change does.
+            change_type:  One of: optimization, new_agent, memory, ui, tool.
+
+        Returns:
+            Dict with expected_revenue_increase, efficiency_gain,
+            stability_risk, roi_score, priority.
+        """
+        eco = self._get_eco()
+
+        # Base estimates from economy state
+        base_roi = 0.0
+        if eco:
+            try:
+                summary = eco.system_summary()
+                base_roi = summary.get("global_roi", 0.0)
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Heuristic impact matrix by change_type
+        _impact: dict[str, dict[str, float]] = {
+            "optimization":  {"revenue": 0.10, "efficiency": 0.20, "risk": 0.10},
+            "new_agent":     {"revenue": 0.25, "efficiency": 0.05, "risk": 0.25},
+            "memory":        {"revenue": 0.05, "efficiency": 0.30, "risk": 0.15},
+            "ui":            {"revenue": 0.02, "efficiency": 0.05, "risk": 0.05},
+            "tool":          {"revenue": 0.35, "efficiency": 0.10, "risk": 0.20},
+        }
+        impact = _impact.get(change_type, _impact["optimization"])
+
+        # Penalise core-module changes with higher risk
+        if module in _AUTO_DEPLOY_BLOCKED:
+            impact = {**impact, "risk": min(impact["risk"] + 0.25, 0.95)}
+
+        # ROI score: (revenue + efficiency) / risk
+        roi_score = round(
+            (impact["revenue"] + impact["efficiency"]) / max(impact["risk"], 0.01), 3
+        )
+
+        # Priority
+        if roi_score >= 3.0:
+            priority = "critical"
+        elif roi_score >= 1.5:
+            priority = "high"
+        elif roi_score >= 0.8:
+            priority = "medium"
+        else:
+            priority = "low"
+
+        analysis = {
+            "module": module,
+            "change_type": change_type,
+            "description": description,
+            "expected_revenue_increase": round(impact["revenue"] * 100, 1),  # %
+            "efficiency_gain": round(impact["efficiency"] * 100, 1),         # %
+            "stability_risk": round(impact["risk"] * 100, 1),                # %
+            "roi_score": roi_score,
+            "priority": priority,
+            "base_system_roi": round(base_roi, 4),
+            "auto_deploy_eligible": priority in ("critical", "high") and module not in _AUTO_DEPLOY_BLOCKED,
+            "ts": _ts(),
+        }
+        logger.info(
+            "Profit impact analysis: %s | roi=%.3f | priority=%s",
+            module, roi_score, priority,
+        )
+        return analysis
+
+    def roi_suggestions(self, *, limit: int = 5) -> list[dict[str, Any]]:
+        """Return ROI-ranked improvement suggestions from the economy engine.
+
+        Combines economy engine suggestions with forge-specific analysis.
+        Always sorted highest ROI first.  Low ROI suggestions are excluded.
+        """
+        eco = self._get_eco()
+        suggestions: list[dict[str, Any]] = []
+
+        if eco:
+            try:
+                eco_suggestions = eco.suggest_improvements(limit=limit * 2)
+                for s in eco_suggestions:
+                    # Enrich with forge ROI analysis
+                    analysis = self.profit_impact_analysis(
+                        module=f"agents/{s.get('agent', 'unknown')}.py",
+                        description=s.get("reason", ""),
+                        change_type="optimization" if s.get("type") == "optimize" else "new_agent",
+                    )
+                    suggestions.append({**s, "roi_analysis": analysis})
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Add competition engine proposals
+        try:
+            from core.agent_competition_engine import get_competition_engine
+            rewrites = get_competition_engine().propose_rewrites(limit=3)
+            for rw in rewrites:
+                analysis = self.profit_impact_analysis(
+                    module=f"agents/{rw.get('agent', 'unknown')}.py",
+                    description=rw.get("description", "Competition engine rewrite proposal"),
+                    change_type="optimization",
+                )
+                suggestions.append({
+                    "type": "rewrite",
+                    "agent": rw.get("agent"),
+                    "reason": rw.get("description", ""),
+                    "roi_impact": analysis["roi_score"],
+                    "priority": analysis["priority"],
+                    "roi_analysis": analysis,
+                })
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Filter out low-ROI, sort by roi_score desc
+        suggestions = [s for s in suggestions if s.get("roi_impact", 0) >= 0.5]
+        suggestions.sort(
+            key=lambda s: s.get("roi_analysis", {}).get("roi_score", 0),
+            reverse=True,
+        )
+        return suggestions[:limit]
+
+    @staticmethod
+    def _get_eco():  # type: ignore[return]
+        try:
+            from core.economy_engine import get_economy_engine
+            return get_economy_engine()
+        except Exception:  # noqa: BLE001
+            return None
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────

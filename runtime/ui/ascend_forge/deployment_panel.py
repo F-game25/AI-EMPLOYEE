@@ -29,12 +29,12 @@ def _get_fc() -> Any:
 
 
 def _get_vc() -> Any:
-    from runtime.runtime.version_control import get_version_control
+    from runtime.version_control import get_version_control
     return get_version_control()
 
 
 def _get_hrm() -> Any:
-    from runtime.runtime.hot_reload_manager import get_hot_reload_manager
+    from runtime.hot_reload_manager import get_hot_reload_manager
     return get_hot_reload_manager()
 
 

@@ -134,7 +134,7 @@ def _build_app() -> Any:
                 "ts": _ts(),
             }
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Internal server error — check server logs") from None
 
     @app.get("/brain/metrics")
     def brain_metrics() -> dict:
@@ -145,7 +145,7 @@ def _build_app() -> Any:
                 "recent_outcomes": brain.recent_outcomes(limit=20),
             }
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Internal server error — check server logs") from None
 
     @app.get("/agents")
     def list_agents() -> dict:
@@ -164,14 +164,14 @@ def _build_app() -> Any:
                 })
             return {"agents": agents, "count": len(agents), "ts": _ts()}
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Internal server error — check server logs") from None
 
     @app.get("/memory")
     def memory_health() -> dict:
         try:
             return get_memory_router().health()
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Internal server error — check server logs") from None
 
     @app.post("/memory/search")
     def memory_search(req: MemorySearchRequest) -> dict:
@@ -183,7 +183,7 @@ def _build_app() -> Any:
             )
             return {"results": results, "count": len(results), "ts": _ts()}
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Internal server error — check server logs") from None
 
     @app.post("/memory/store")
     def memory_store(req: MemoryStoreRequest) -> dict:
@@ -198,7 +198,7 @@ def _build_app() -> Any:
             )
             return result
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Internal server error — check server logs") from None
 
     @app.post("/brain/record_outcome")
     def record_outcome(req: OutcomeRequest) -> dict:
@@ -212,7 +212,7 @@ def _build_app() -> Any:
             )
             return result
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Internal server error — check server logs") from None
 
     # ── Ascend Forge endpoints ─────────────────────────────────────────────────
 
@@ -277,7 +277,7 @@ def _build_app() -> Any:
     @app.get("/forge/versions")
     def forge_versions(module: str | None = None, limit: int = 50) -> dict:
         try:
-            from runtime.runtime.version_control import get_version_control
+            from runtime.version_control import get_version_control
             return {
                 "versions": get_version_control().list_versions(module=module, limit=limit),
                 "summary": get_version_control().summary(),
@@ -297,6 +297,168 @@ def _build_app() -> Any:
             )
         except Exception:  # noqa: BLE001
             raise HTTPException(status_code=500, detail="Sandbox execution failed — check server logs") from None
+
+    # ── V4: Economy endpoints ──────────────────────────────────────────────────
+
+    class TaskRecordRequest(BaseModel):
+        agent: str
+        task_id: str
+        cost: float
+        value: float
+        duration_ms: int = 0
+        success: bool = True
+        description: str = ""
+
+    class ForgeROIRequest(BaseModel):
+        module: str
+        description: str = ""
+        change_type: str = "optimization"
+
+    @app.get("/economy/summary")
+    def economy_summary() -> dict:
+        try:
+            from core.economy_engine import get_economy_engine
+            eco = get_economy_engine()
+            return {
+                "summary": eco.system_summary(),
+                "top_agents": eco.top_agents(limit=10),
+                "suggestions": eco.suggest_improvements(limit=5),
+            }
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Economy engine error — check server logs") from None
+
+    @app.get("/economy/agents")
+    def economy_agents(limit: int = 20) -> dict:
+        try:
+            from core.economy_engine import get_economy_engine
+            eco = get_economy_engine()
+            return {"agents": eco.top_agents(limit=limit), "ts": _ts()}
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Economy agents error — check server logs") from None
+
+    @app.post("/economy/record_task")
+    def economy_record_task(req: TaskRecordRequest) -> dict:
+        try:
+            from core.economy_engine import get_economy_engine
+            return get_economy_engine().record_task(
+                agent=req.agent,
+                task_id=req.task_id,
+                cost=req.cost,
+                value=req.value,
+                duration_ms=req.duration_ms,
+                success=req.success,
+                description=req.description,
+            )
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Task record error — check server logs") from None
+
+    @app.get("/economy/recent_tasks")
+    def economy_recent_tasks(limit: int = 20) -> dict:
+        try:
+            from core.economy_engine import get_economy_engine
+            return {"tasks": get_economy_engine().recent_tasks(limit=limit), "ts": _ts()}
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Recent tasks error — check server logs") from None
+
+    # ── V4: Competition endpoints ──────────────────────────────────────────────
+
+    class ChallengeRequest(BaseModel):
+        challenger: str
+        defender: str
+        task_type: str = ""
+
+    class OutcomeV4Request(BaseModel):
+        agent: str
+        success: bool
+        value: float = 0.0
+        cost: float = 0.0
+        duration_ms: int = 0
+        task_id: str = ""
+
+    @app.get("/arena/leaderboard")
+    def arena_leaderboard(limit: int = 15) -> dict:
+        try:
+            from core.agent_competition_engine import get_competition_engine
+            return {
+                "leaderboard": get_competition_engine().leaderboard(limit=limit),
+                "summary": get_competition_engine().competition_summary(),
+                "ts": _ts(),
+            }
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Arena leaderboard error — check server logs") from None
+
+    @app.post("/arena/challenge")
+    def arena_challenge(req: ChallengeRequest) -> dict:
+        try:
+            from core.agent_competition_engine import get_competition_engine
+            return get_competition_engine().challenge(
+                challenger=req.challenger,
+                defender=req.defender,
+                task_type=req.task_type,
+            )
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Challenge error — check server logs") from None
+
+    @app.post("/arena/register_outcome")
+    def arena_register_outcome(req: OutcomeV4Request) -> dict:
+        try:
+            from core.agent_competition_engine import get_competition_engine
+            return get_competition_engine().register_outcome(
+                req.agent,
+                success=req.success,
+                value=req.value,
+                cost=req.cost,
+                duration_ms=req.duration_ms,
+                task_id=req.task_id,
+            )
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Register outcome error — check server logs") from None
+
+    @app.get("/arena/proposals")
+    def arena_proposals() -> dict:
+        try:
+            from core.agent_competition_engine import get_competition_engine
+            return {"proposals": get_competition_engine().propose_rewrites(limit=5), "ts": _ts()}
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Proposals error — check server logs") from None
+
+    # ── V4: Profit / Forge ROI endpoints ──────────────────────────────────────
+
+    @app.post("/forge/roi_analysis")
+    def forge_roi_analysis(req: ForgeROIRequest) -> dict:
+        try:
+            from core.forge_controller import get_forge_controller
+            return get_forge_controller().profit_impact_analysis(
+                module=req.module,
+                description=req.description,
+                change_type=req.change_type,
+            )
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="ROI analysis error — check server logs") from None
+
+    @app.get("/forge/roi_suggestions")
+    def forge_roi_suggestions(limit: int = 5) -> dict:
+        try:
+            from core.forge_controller import get_forge_controller
+            return {"suggestions": get_forge_controller().roi_suggestions(limit=limit), "ts": _ts()}
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="ROI suggestions error — check server logs") from None
+
+    @app.get("/optimizer/status")
+    def optimizer_status() -> dict:
+        try:
+            from agents.optimizer_agent import get_optimizer_agent
+            return get_optimizer_agent().status()
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Optimizer status error — check server logs") from None
+
+    @app.post("/optimizer/scan")
+    def optimizer_scan() -> dict:
+        try:
+            from agents.optimizer_agent import get_optimizer_agent
+            return get_optimizer_agent().analyze()
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail="Optimizer scan error — check server logs") from None
 
     return app
 

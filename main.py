@@ -115,7 +115,7 @@ def _start_ui_api_server() -> None:
 def _init_version_control() -> None:
     """Initialise the version control singleton."""
     try:
-        from runtime.runtime.version_control import get_version_control
+        from runtime.version_control import get_version_control
         vc = get_version_control()
         summary = vc.summary()
         logger.info(
@@ -138,6 +138,48 @@ def _init_forge_controller() -> None:
         logger.info("Forge controller ready")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Forge controller init warning (non-fatal): %s", exc)
+
+
+# ── V4: Economy engine ────────────────────────────────────────────────────────
+
+def _init_economy_engine() -> None:
+    """Initialise the internal economy engine."""
+    try:
+        from core.economy_engine import get_economy_engine
+        eco = get_economy_engine()
+        summary = eco.system_summary()
+        logger.info(
+            "Economy engine ready — agents=%d, global_profit=%.2f, global_roi=%.4f",
+            summary.get("total_agents", 0),
+            summary.get("global_profit", 0.0),
+            summary.get("global_roi", 0.0),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Economy engine init warning (non-fatal): %s", exc)
+
+
+# ── V4: Agent competition engine ──────────────────────────────────────────────
+
+def _init_competition_engine() -> None:
+    """Initialise the agent competition engine."""
+    try:
+        from core.agent_competition_engine import get_competition_engine
+        get_competition_engine()
+        logger.info("Agent competition engine ready")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Competition engine init warning (non-fatal): %s", exc)
+
+
+# ── V4: Optimizer agent background loop ───────────────────────────────────────
+
+def _start_optimizer_agent() -> None:
+    """Start the optimizer agent background scan loop."""
+    try:
+        from agents.optimizer_agent import get_optimizer_agent
+        get_optimizer_agent().start_background_loop()
+        logger.info("Optimizer agent background loop started")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Optimizer agent start warning (non-fatal): %s", exc)
 
 
 # ── Preflight checks ──────────────────────────────────────────────────────────
@@ -214,6 +256,9 @@ def main() -> int:
     _init_self_learning_brain()
     _init_version_control()
     _init_forge_controller()
+    _init_economy_engine()
+    _init_competition_engine()
+    _start_optimizer_agent()
     _start_ui_api_server()
 
     if args.preflight:
