@@ -54,11 +54,33 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! python3 runtime/core/startup.py --preflight; then
-  echo "⚠️  Preflight checks failed; see runtime/core/startup.py output above for details. Continuing with unified runtime startup."
+# startup.py lives at runtime/core/startup.py in the repo and at core/startup.py
+# when deployed to AI_HOME via the auto-updater (runtime/ prefix is stripped).
+_STARTUP_PY=""
+if [[ -f "$REPO_ROOT/runtime/core/startup.py" ]]; then
+  _STARTUP_PY="$REPO_ROOT/runtime/core/startup.py"
+elif [[ -f "$REPO_ROOT/core/startup.py" ]]; then
+  _STARTUP_PY="$REPO_ROOT/core/startup.py"
+fi
+if [[ -n "$_STARTUP_PY" ]]; then
+  if ! python3 "$_STARTUP_PY" --preflight; then
+    echo "⚠️  Preflight checks failed; see startup.py output above for details. Continuing with unified runtime startup."
+  fi
 fi
 
 echo "[1/3] Ensuring backend/frontend dependencies..."
+if [[ ! -f backend/package.json ]]; then
+  echo "❌ backend/package.json not found in $REPO_ROOT"
+  echo "   This location is missing the Node.js backend files."
+  if [[ -n "${AI_EMPLOYEE_REPO_DIR:-}" ]]; then
+    echo "   Re-run the installer from the repo:"
+    echo "     cd ${AI_EMPLOYEE_REPO_DIR} && bash install.sh"
+  else
+    echo "   Re-run the installer from your cloned repository directory:"
+    echo "     cd /path/to/AI-EMPLOYEE && bash install.sh"
+  fi
+  exit 1
+fi
 if [[ ! -d backend/node_modules ]]; then
   npm --prefix backend install
 fi
