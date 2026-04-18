@@ -162,6 +162,9 @@ def run_dashboard() -> None:
                 "🤖 Agent Monitor",
                 "🗄️ Memory Viewer",
                 "🔨 Ascend Forge",
+                "💰 Economy",
+                "⚔️ Agent Arena",
+                "📈 Profit",
             ],
             label_visibility="collapsed",
         )
@@ -184,6 +187,15 @@ def run_dashboard() -> None:
         render_memory_viewer()
     elif tab_choice == "🔨 Ascend Forge":
         _render_ascend_forge()
+    elif tab_choice == "💰 Economy":
+        from ui.economy_dashboard.economy_overview import render_economy_overview
+        render_economy_overview()
+    elif tab_choice == "⚔️ Agent Arena":
+        from ui.agent_arena.arena_panel import render_agent_arena
+        render_agent_arena()
+    elif tab_choice == "📈 Profit":
+        from ui.profit_visualizer.profit_panel import render_profit_visualizer
+        render_profit_visualizer()
 
 
 def _render_ascend_forge() -> None:

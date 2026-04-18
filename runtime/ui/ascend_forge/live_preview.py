@@ -57,7 +57,7 @@ def render_live_preview() -> None:
             return
 
         try:
-            from runtime.runtime.sandbox_executor import get_sandbox_executor
+            from runtime.sandbox_executor import get_sandbox_executor
             result = get_sandbox_executor().run(code, module_name=module_name)
         except Exception as exc:  # noqa: BLE001
             st.error(f"Sandbox executor error: {exc}")
