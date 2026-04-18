@@ -107,7 +107,7 @@ BACKEND_PID=$!
 _BE_READY=0
 for _i in $(seq 1 30); do
   sleep 1
-  if curl -fsS --max-time 1 "http://127.0.0.1:${UI_PORT}/health" > /dev/null 2>&1; then
+  if curl -fsS --max-time 3 "http://127.0.0.1:${UI_PORT}/health" > /dev/null 2>&1; then
     _BE_READY=1
     break
   fi
