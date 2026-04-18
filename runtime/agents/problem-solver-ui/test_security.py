@@ -1,5 +1,5 @@
 """
-AI Employee — Security & API Test Suite (from openclaw-2)
+AI Employee — Security & API Test Suite
 
 Covers:
   - PasswordValidator

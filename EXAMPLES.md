@@ -1,7 +1,7 @@
 # AI Employee — Usage Examples
 
 This guide shows practical examples for running and interacting with AI Employee,
-including the security features integrated from openclaw-2.
+including the security features of the built-in security module.
 
 ---
 
@@ -24,8 +24,11 @@ bash install.sh
 ## Starting AI Employee
 
 ```bash
-# Standard start (starts OpenClaw gateway + all agents + dashboard)
+# Standard start (initialises internal engine + all agents + dashboard)
 cd ~/.ai-employee && bash start.sh
+
+# Or use the single Python entrypoint from the repo root:
+python main.py
 
 # The dashboard opens automatically at:
 #   http://127.0.0.1:8787   (Problem Solver UI / main dashboard)
@@ -34,7 +37,7 @@ cd ~/.ai-employee && bash start.sh
 
 ---
 
-## Security Setup (openclaw-2)
+## Security Setup
 
 ### 1. Generate a secure JWT secret
 
@@ -141,7 +144,7 @@ curl -X POST http://127.0.0.1:8787/api/agents/stop \
 
 ## WhatsApp / Chat Commands
 
-Once the gateway is connected (`openclaw channels login`):
+Once the WhatsApp channel is linked (configure via the dashboard):
 
 ```
 # ROI metrics
@@ -176,7 +179,7 @@ task Build a marketing plan for a SaaS product
 # Application log
 tail -f ~/.ai-employee/logs/gateway.log
 
-# Security audit log (openclaw-2)
+# Security audit log
 tail -f ~/.ai-employee/logs/audit.log
 
 # Filter for failed authentication attempts

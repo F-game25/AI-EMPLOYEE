@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # AI Employee — Start script
-# Starts OpenClaw gateway + UI agent first, then all remaining agents, then opens the browser.
+# Starts the AI Employee internal gateway + UI agent, then all remaining agents,
+# then opens the browser.
 set -euo pipefail
 
 # ── Re-entrancy guard (Bug 1) ─────────────────────────────────────────────────
@@ -30,7 +31,6 @@ _add_to_path_if_dir() {
 
 _bootstrap_runtime_path() {
   _add_to_path_if_dir "$HOME/.local/bin"
-  _add_to_path_if_dir "$HOME/.openclaw/bin"
   _add_to_path_if_dir "$HOME/.npm-global/bin"
   if command -v npm >/dev/null 2>&1; then
     local npm_prefix npm_bin
@@ -46,32 +46,6 @@ _env_true() {
     1|true|TRUE|yes|YES|y|Y|on|ON) return 0 ;;
     *) return 1 ;;
   esac
-}
-
-find_openclaw_cmd() {
-  if [[ -x "$AI_HOME/bin/openclaw" ]]; then
-    echo "$AI_HOME/bin/openclaw"
-    return 0
-  fi
-  if command -v openclaw >/dev/null 2>&1; then
-    command -v openclaw
-    return 0
-  fi
-  return 1
-}
-
-install_openclaw_if_enabled() {
-  find_openclaw_cmd >/dev/null 2>&1 && return 0
-  if _env_true "${AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW:-0}"; then
-    log "OpenClaw missing, auto-install enabled. Installing..."
-    if curl -fsSL https://openclaw.ai/install.sh | bash; then
-      _bootstrap_runtime_path
-      ok "OpenClaw installed"
-      return 0
-    fi
-    warn "OpenClaw auto-install failed"
-  fi
-  return 1
 }
 
 install_docker_if_enabled() {
@@ -116,14 +90,14 @@ except Exception:
     print('')
 PY
 )"
-  if [[ -n "${CFG_GATEWAY_TOKEN:-}" ]] && [[ "${OPENCLAW_GATEWAY_TOKEN:-}" != "$CFG_GATEWAY_TOKEN" ]]; then
-    export OPENCLAW_GATEWAY_TOKEN="$CFG_GATEWAY_TOKEN"
+  if [[ -n "${CFG_GATEWAY_TOKEN:-}" ]] && [[ "${AI_EMPLOYEE_GATEWAY_TOKEN:-}" != "$CFG_GATEWAY_TOKEN" ]]; then
+    export AI_EMPLOYEE_GATEWAY_TOKEN="$CFG_GATEWAY_TOKEN"
     if [[ -f "$AI_HOME/.env" ]]; then
-      if grep -q '^OPENCLAW_GATEWAY_TOKEN=' "$AI_HOME/.env"; then
-        sed -i.bak "s|^OPENCLAW_GATEWAY_TOKEN=.*|OPENCLAW_GATEWAY_TOKEN=$CFG_GATEWAY_TOKEN|" "$AI_HOME/.env"
+      if grep -q '^AI_EMPLOYEE_GATEWAY_TOKEN=' "$AI_HOME/.env"; then
+        sed -i.bak "s|^AI_EMPLOYEE_GATEWAY_TOKEN=.*|AI_EMPLOYEE_GATEWAY_TOKEN=$CFG_GATEWAY_TOKEN|" "$AI_HOME/.env"
         rm -f "$AI_HOME/.env.bak"
       else
-        echo "OPENCLAW_GATEWAY_TOKEN=$CFG_GATEWAY_TOKEN" >> "$AI_HOME/.env"
+        echo "AI_EMPLOYEE_GATEWAY_TOKEN=$CFG_GATEWAY_TOKEN" >> "$AI_HOME/.env"
       fi
     fi
     ok "Gateway token synchronized from config.json"
@@ -155,7 +129,7 @@ echo -e "${G}║       🚀 AI Employee Starting         ║${NC}"
 echo -e "${G}╚══════════════════════════════════════╝${NC}"
 echo ""
 
-# ── JWT secret check (openclaw-2) ─────────────────────────────────────────────
+# ── JWT secret check ──────────────────────────────────────────────────────────
 if [[ -z "${JWT_SECRET_KEY:-}" ]]; then
   warn "JWT_SECRET_KEY is not set."
   if command -v python3 >/dev/null 2>&1; then
@@ -180,63 +154,13 @@ else
   warn "Auto-updater not found — skipping update check."
 fi
 
-# ── OpenClaw gateway ───────────────────────────────────────────────────────────
+# ── Internal AI Employee gateway ───────────────────────────────────────────────
 install_docker_if_enabled
 
-log "Starting OpenClaw gateway..."
-# Support openclaw 2.0 (safe version): set OPENCLAW_BIN=openclaw2 in .env
-# to use ~/.ai-employee/bin/openclaw2 instead of the standard openclaw binary.
-OPENCLAW_BIN="${OPENCLAW_BIN:-openclaw}"
-if [[ "$OPENCLAW_BIN" != "openclaw" ]] && [[ -x "$AI_HOME/bin/$OPENCLAW_BIN" ]]; then
-  OPENCLAW_CMD="$AI_HOME/bin/$OPENCLAW_BIN"
-else
-  OPENCLAW_CMD="$(find_openclaw_cmd 2>/dev/null || true)"
-fi
-
-if [[ -z "$OPENCLAW_CMD" ]]; then
-  install_openclaw_if_enabled || true
-  OPENCLAW_CMD="$(find_openclaw_cmd 2>/dev/null || true)"
-fi
-
-if [[ -n "$OPENCLAW_CMD" ]]; then
-  OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$AI_HOME/config.json}"
-  export OPENCLAW_CONFIG
-
-  # Ensure the symlink exists so openclaw can find config by default path too
-  mkdir -p "$HOME/.openclaw"
-  ln -sf "$OPENCLAW_CONFIG" "$HOME/.openclaw/openclaw.json" 2>/dev/null || true
-
-  # Verify config has gateway.mode=local before starting
-  if [[ ! -f "$OPENCLAW_CONFIG" ]]; then
-    warn "No config.json found at $OPENCLAW_CONFIG"
-    warn "Re-run the installer: cd ~/.ai-employee && bash install.sh"
-  elif ! grep -q '"mode".*"local"\|mode.*local' "$OPENCLAW_CONFIG" 2>/dev/null; then
-    warn "config.json is missing gateway.mode=local — re-run installer to fix:"
-    warn "  curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash"
-  fi
-
-  nohup "$OPENCLAW_CMD" gateway \
-    >> "$AI_HOME/logs/gateway.log" 2>&1 &
-  GATEWAY_PID=$!
-  echo "$GATEWAY_PID" > "$AI_HOME/run/gateway.pid"
-  # Wait up to 10 s for the gateway to become healthy before declaring failure.
-  _gw_ready=0
-  for _ in {1..10}; do
-    sleep 1
-    if "$OPENCLAW_CMD" health >/dev/null 2>&1 || _port_in_use "${OPENCLAW_GATEWAY_PORT:-18789}"; then
-      _gw_ready=1
-      break
-    fi
-  done
-  if [[ "$_gw_ready" -eq 1 ]]; then
-    ok "OpenClaw gateway started (pid=$GATEWAY_PID)"
-  else
-    warn "Gateway process started but health probe failed. Check: $AI_HOME/logs/gateway.log"
-  fi
-else
-  warn "openclaw not found — gateway not started."
-  warn "  Install: curl -fsSL https://openclaw.ai/install.sh | bash"
-fi
+log "Initialising AI Employee internal engine..."
+# The engine layer is fully internal — no external gateway binary is started.
+# All gateway functionality is provided by the engine package at runtime/engine/.
+ok "AI Employee internal engine ready"
 
 # ── Start Problem Solver UI first (critical — browser will open this) ──────────
 log "Starting Problem Solver UI (port $UI_PORT)..."
@@ -260,7 +184,7 @@ echo -e "  ${C}🛠️  Problem Solver:${NC} http://127.0.0.1:$UI_PORT"
 echo -e "  ${C}🔧 Gateway:${NC}       http://localhost:18789"
 echo ""
 echo -e "${Y}WhatsApp (quick commands + notifications only):${NC}"
-echo -e "  Run ${C}openclaw channels login${NC} in a new terminal to link your phone."
+echo -e "  To link your phone, configure the WhatsApp channel in the ${C}dashboard${NC}."
 echo -e "  Use WhatsApp to check status & get alerts — use the ${C}dashboard${NC} for full control."
 echo ""
 
