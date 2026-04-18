@@ -97,7 +97,7 @@ if [[ -f backend.pid ]]; then
   fi
   rm -f backend.pid
 fi
-PORT="${UI_PORT}" PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}" LISTEN_HOST="127.0.0.1" node backend/server.js &
+PORT="${UI_PORT}" PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}" LISTEN_HOST="${LISTEN_HOST:-0.0.0.0}" node backend/server.js &
 BACKEND_PID=$!
 
 # Poll /health until the server responds (up to 30 s).
