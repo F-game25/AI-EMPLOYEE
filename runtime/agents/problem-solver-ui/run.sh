@@ -200,7 +200,7 @@ export PORT="$UI_PORT"
 export PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
 # Bind explicitly to IPv4 loopback so the server is reachable via
 # http://127.0.0.1:<port> regardless of the system's IPv6 configuration.
-export LISTEN_HOST="127.0.0.1"
+export LISTEN_HOST="${LISTEN_HOST:-0.0.0.0}"
 
 _info "Binding to http://${LISTEN_HOST}:$PORT"
 _info "Clearing port $PORT if occupied…"
