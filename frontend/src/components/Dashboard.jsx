@@ -4,6 +4,7 @@ import { useAppStore } from '../store/appStore'
 import Sidebar from './layout/Sidebar'
 import ContextPanel from './layout/ContextPanel'
 import DashboardPage from './pages/DashboardPage'
+import ControlCenterPage from './pages/ControlCenterPage'
 import AIControlPage from './pages/AIControlPage'
 import NeuralBrainPage from './pages/NeuralBrainPage'
 import OperationsPage from './pages/OperationsPage'
@@ -20,6 +21,7 @@ const PAGES = {
   'neural-brain': NeuralBrainPage,
   'operations': OperationsPage,
   'agents': AgentsPage,
+  'control-center': ControlCenterPage,
   'system': SystemPage,
   'voice': VoicePage,
 }
