@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
+import { useBrainStore } from '../store/brainStore'
 import { WS_URL as API_WS_URL } from '../config/api'
 
 const WS_URL = API_WS_URL
@@ -83,6 +84,17 @@ function connectSingleton() {
         case 'brain:activity':
           store.setBrainActivity(data)
           break
+        case 'brain:graph': {
+          // Live graph update from backend — feed the shared brain store
+          const brainState = useBrainStore.getState()
+          if (data?.nodes && data?.links) {
+            brainState.setGraph(data)
+          } else if (data?.node) {
+            brainState.addNode(data.node)
+            if (data.link) brainState.addLink(data.link)
+          }
+          break
+        }
         case 'autonomy:status':
           store.setAutonomyStatus(data)
           break
