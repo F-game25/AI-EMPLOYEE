@@ -198,14 +198,24 @@ EOF
 export PORT="$UI_PORT"
 # Avoid self-proxy loops in Node fallback calls that use PYTHON_BACKEND_PORT.
 export PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
+# Bind explicitly to IPv4 loopback so the server is reachable via
+# http://127.0.0.1:<port> regardless of the system's IPv6 configuration.
+export LISTEN_HOST="127.0.0.1"
 
-_info "http://127.0.0.1:$PORT"
+_info "Binding to http://${LISTEN_HOST}:$PORT"
+_info "Clearing port $PORT if occupied…"
 if command -v lsof >/dev/null 2>&1; then
   for _pid in $(lsof -ti ":$PORT" 2>/dev/null || true); do
     kill "$_pid" 2>/dev/null || true
     sleep 1
     kill -9 "$_pid" 2>/dev/null || true
   done
+elif command -v ss >/dev/null 2>&1 && command -v fuser >/dev/null 2>&1; then
+  if ss -tlnp 2>/dev/null | grep -qE ":${PORT}([[:space:]]|$)"; then
+    fuser -k "${PORT}/tcp" 2>/dev/null || true
+    sleep 1
+  fi
 fi
+_info "Launching Node backend…"
 echo ""
 exec node "$BACKEND_DIR/server.js"
