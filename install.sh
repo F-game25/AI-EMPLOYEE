@@ -1038,6 +1038,37 @@ install_runtime() {
             _verify_nonempty_file "$_fe_dir/dist/index.html" "$_fe_dir/dist/index.html"
             ok "React UI bundle built (frontend/dist)"
         fi
+
+        # ── Deploy backend/frontend to AI_HOME so start.sh works from there ────
+        # Only needed when the repo and the installed location differ (the normal
+        # case for an end-user install where AI_HOME=~/.ai-employee).
+        if [[ "$AI_HOME" != "$SCRIPT_DIR" ]]; then
+            if [[ -f "$_be_dir/package.json" ]]; then
+                log "Deploying backend source to $AI_HOME/backend..."
+                mkdir -p "$AI_HOME/backend"
+                # Copy every top-level item except node_modules, .git and build caches
+                (
+                    cd "$_be_dir"
+                    find . -mindepth 1 -maxdepth 1 \
+                        ! -name node_modules ! -name .git ! -name .cache ! -name coverage \
+                        -exec cp -rp {} "$AI_HOME/backend/" \;
+                )
+                ok "Backend source deployed to $AI_HOME/backend (deps will install on first start)"
+            fi
+            if [[ -f "$_fe_dir/package.json" ]]; then
+                log "Deploying frontend source to $AI_HOME/frontend..."
+                mkdir -p "$AI_HOME/frontend"
+                # Copy source tree (excl. node_modules, .git, build caches); include
+                # the built dist/ so the first start serves immediately without rebuilding.
+                (
+                    cd "$_fe_dir"
+                    find . -mindepth 1 -maxdepth 1 \
+                        ! -name node_modules ! -name .git ! -name .cache ! -name coverage \
+                        -exec cp -rp {} "$AI_HOME/frontend/" \;
+                )
+                ok "Frontend source deployed to $AI_HOME/frontend"
+            fi
+        fi
     elif [[ -f "$SCRIPT_DIR/frontend/package.json" ]]; then
         # npm is missing AND the repo frontend is present — we need npm to build the UI.
         err "npm not found — install Node.js and npm first (https://nodejs.org/) to build frontend/dist"
