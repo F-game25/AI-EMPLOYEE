@@ -964,16 +964,14 @@ install_runtime() {
             _copy_checked "$f" "$AI_HOME/agents/$bot_name/$fname"
             [[ "$fname" == *.sh ]] && chmod +x "$AI_HOME/agents/$bot_name/$fname"
         done
-        # Copy subdirectories (e.g. problem-solver-ui/features/)
-        for sub_dir in "$bot_dir"*/; do
-            [[ -d "$sub_dir" ]] || continue
-            sub_name="$(basename "$sub_dir")"
-            mkdir -p "$AI_HOME/agents/$bot_name/$sub_name"
-            for f in "$sub_dir"*; do
-                [[ -f "$f" ]] || continue
-                _copy_checked "$f" "$AI_HOME/agents/$bot_name/$sub_name/$(basename "$f")"
-            done
-        done
+        # Copy subdirectories recursively (e.g. problem-solver-ui/features/, ascend-forge/ui-engine/)
+        while IFS= read -r f; do
+            rel="${f#"$bot_dir"}"
+            dst_file="$AI_HOME/agents/$bot_name/$rel"
+            mkdir -p "$(dirname "$dst_file")"
+            _copy_checked "$f" "$dst_file"
+            [[ "$f" == *.sh ]] && chmod +x "$dst_file"
+        done < <(find "$bot_dir" -mindepth 2 -type f)
     done
     _prog_bar_done
     ok "All agents installed (${_COPY_TOTAL})"
