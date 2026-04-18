@@ -1,6 +1,6 @@
 {
-  "updated_at": "2026-04-18T20:02:20Z",
-  "count": 3,
+  "updated_at": "2026-04-18T20:19:06Z",
+  "count": 4,
   "entries": [
     {
       "key": "tip001",
@@ -140,6 +140,53 @@
       "access_count": 0,
       "created_at": "2026-04-18T20:02:20Z",
       "last_accessed": "2026-04-18T20:02:20Z"
+    },
+    {
+      "key": "forge:b563e289a05b",
+      "text": "Forge deployed 'agents/smoke_test_agent.py' (snapshot=b563e289a05b)",
+      "embedding": [
+        0.0,
+        0.5,
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metadata": {
+        "memory_type": "episodic",
+        "source": "forge_controller",
+        "agent": ""
+      },
+      "importance": 0.6,
+      "access_count": 0,
+      "created_at": "2026-04-18T20:19:06Z",
+      "last_accessed": "2026-04-18T20:19:06Z"
     }
   ]
 }
