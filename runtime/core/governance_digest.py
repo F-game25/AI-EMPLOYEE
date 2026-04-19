@@ -167,7 +167,7 @@ class GovernanceDigest:
                     })
             events = events[:self._max_events]
         except Exception as exc:
-            error = str(exc)
+            error = "internal collector error"
             logger.warning("high_risk_events collector error: %s", exc)
 
         return {"count": len(events), "events": events, "error": error}
@@ -198,7 +198,7 @@ class GovernanceDigest:
                 })
             alerts = alerts[:self._max_events]
         except Exception as exc:
-            error = str(exc)
+            error = "internal collector error"
             logger.warning("bias_alerts collector error: %s", exc)
 
         return {"count": len(alerts), "alerts": alerts, "error": error}
@@ -223,7 +223,7 @@ class GovernanceDigest:
                 })
             changes = changes[:self._max_events]
         except Exception as exc:
-            error = str(exc)
+            error = "internal collector error"
             logger.warning("system_changes collector error: %s", exc)
 
         return {"count": len(changes), "changes": changes, "error": error}
@@ -252,7 +252,7 @@ class GovernanceDigest:
                 if _epoch_from_iso(a.get("ts", "")) >= cutoff_epoch:
                     anomalies.append(a)
         except Exception as exc:
-            error = str(exc)
+            error = "internal collector error"
             logger.warning("failures/reliability collector error: %s", exc)
 
         try:
@@ -267,7 +267,7 @@ class GovernanceDigest:
                     })
         except Exception as exc:
             if not error:
-                error = str(exc)
+                error = "internal collector error"
             logger.warning("circuit_breaker collector error: %s", exc)
 
         total_failures = len(anomalies) + len(open_breakers)
