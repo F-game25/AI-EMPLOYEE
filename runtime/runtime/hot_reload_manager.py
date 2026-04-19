@@ -140,12 +140,13 @@ class HotReloadManager:
             # 2. Write new code
             try:
                 target.write_text(new_code, encoding="utf-8")
-            except OSError as exc:
+            except OSError:
+                logger.exception("Failed to write module '%s' during reload", module)
                 return self._record(
                     success=False,
                     module=module,
                     snapshot_id=snapshot_id,
-                    error=f"Cannot write module: {exc}",
+                    error="Cannot write module.",
                 )
 
             # 3. Attempt importlib reload
@@ -207,8 +208,9 @@ class HotReloadManager:
                     sys.modules[mod_name] = mod
                     spec.loader.exec_module(mod)  # type: ignore[union-attr]
             return ""
-        except Exception as exc:  # noqa: BLE001
-            return str(exc)
+        except Exception:  # noqa: BLE001
+            logger.exception("Module reload failed for '%s'", mod_name)
+            return "Module reload failed."
 
     def _notify_vc(self, snapshot_id: str, status: str) -> None:
         """Update VersionControl status for *snapshot_id* (best-effort)."""
