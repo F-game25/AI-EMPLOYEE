@@ -19,7 +19,6 @@ const KEY_FIELDS = [
 
 export function Settings() {
   const [cat, setCat] = useState<Category>('general')
-  const [, setSettings] = useState<Record<string, unknown>>({})
   const [keys, setKeys] = useState<Record<string, string>>({})
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({})
   const [fontSize, setFontSize] = useState('normal')
@@ -29,7 +28,6 @@ export function Settings() {
   useEffect(() => {
     fetch('/api/settings')
       .then((r) => r.json())
-      .then((d) => setSettings(d))
       .catch(() => {})
   }, [])
 
