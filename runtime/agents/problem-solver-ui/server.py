@@ -1200,6 +1200,18 @@ def _get_hitl_gate():
         return None
 
 
+def _get_bias_engine():
+    """Return the BiasDetectionEngine singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.bias_detection_engine import get_bias_engine as _gbe  # type: ignore
+        return _gbe()
+    except Exception:
+        return None
+
+
 def _verify_any_token(token_str: str) -> bool:
     """Return True if the token is valid using the configured AuthManager."""
     return _decode_any_token(token_str) is not None
@@ -18525,6 +18537,51 @@ def handle_command(
             f"before the action is executed. Once approved, re-submit your request."
         )
 
+    # ── Bias detection pipeline ────────────────────────────────────────────────
+    _bias = _get_bias_engine()
+    if _bias is not None and _bias.is_checked_agent(routed_agent, message):
+        try:
+            from core.bias_detection_engine import BiasCheckContext  # type: ignore
+            _demographic_group = (
+                (payload.get("demographic_group") or "").strip()
+                if isinstance(locals().get("payload"), dict)
+                else ""
+            ) or "unknown"
+            _bc = BiasCheckContext(
+                agent=routed_agent,
+                action=f"chat_request: {message[:80]}",
+                subject_id=user_id,
+                decision=True,          # intent: positive decision (process request)
+                demographic_group=_demographic_group,
+            )
+            _bias_report = _bias.check(_bc)
+            if _bias_report.outcome == "block":
+                _audit_logger.warning(json.dumps({
+                    "event": "bias_block",
+                    "agent": routed_agent,
+                    "check_id": _bias_report.check_id,
+                    "risk_score": _bias_report.audit_risk_score,
+                    "timestamp": now_iso(),
+                }))
+                return (
+                    f"⛔ Request Blocked — Bias Detection\n\n"
+                    f"Agent: **{routed_agent}**\n"
+                    f"Check ID: `{_bias_report.check_id}`\n\n"
+                    f"{_bias_report.summary}\n\n"
+                    "This decision pattern has been flagged for adverse impact. "
+                    "Contact your compliance officer before proceeding."
+                )
+            if _bias_report.high_risk:
+                _audit_logger.warning(json.dumps({
+                    "event": "bias_high_risk",
+                    "agent": routed_agent,
+                    "check_id": _bias_report.check_id,
+                    "risk_score": _bias_report.audit_risk_score,
+                    "timestamp": now_iso(),
+                }))
+        except Exception as _bias_exc:
+            logger.debug("bias check error (non-fatal): %s", _bias_exc)
+
     return _generate_llm_response(message, routed_agent, mode, model_route=model_route, user_id=user_id)
 
     return (
@@ -24176,6 +24233,72 @@ def hitl_reject(request_id: str, payload: dict, request: Request,
     if not result.get("ok"):
         raise HTTPException(400, result.get("error", "Rejection failed"))
     return JSONResponse(result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bias Detection API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/bias/report/{agent_id}")
+def bias_report_for_agent(agent_id: str, _auth: None = Depends(require_auth)):
+    """Return the current bias metrics summary for a specific agent.
+
+    Includes demographic parity, equalized odds, and disparate impact ratios
+    computed over all decisions accumulated for this agent in the current process.
+    """
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent ID")
+    engine = _get_bias_engine()
+    if engine is None:
+        raise HTTPException(503, "Bias detection module unavailable")
+    return JSONResponse(engine.report_for_agent(agent_id))
+
+
+@app.get("/api/bias/events")
+def bias_events(_auth: None = Depends(require_auth)):
+    """Return recent bias-related audit events (bias_check, bias_flag, bias_block)."""
+    engine = _get_bias_engine()
+    if engine is None:
+        return JSONResponse({"events": []})
+    return JSONResponse({"events": engine.recent_events(limit=200)})
+
+
+@app.post("/api/bias/check")
+def bias_check_endpoint(payload: dict, _auth: None = Depends(require_auth)):
+    """Run a bias check for a single decision and return the BiasReport.
+
+    Payload fields:
+      agent            – agent performing the decision (required)
+      action           – description of the action (required)
+      subject_id       – identifier of the person/entity being decided on (required)
+      decision         – bool: True = positive decision (required)
+      demographic_group – group label (required)
+      ground_truth     – bool or null: actual outcome if known (optional)
+      metadata         – free-form dict (optional)
+    """
+    from core.bias_detection_engine import BiasCheckContext, get_bias_engine  # type: ignore
+    agent = (payload.get("agent") or "").strip()
+    action = (payload.get("action") or "").strip()
+    subject_id = (payload.get("subject_id") or "").strip()
+    group = (payload.get("demographic_group") or "").strip()
+    if not agent or not action or not subject_id or not group:
+        raise HTTPException(400, "agent, action, subject_id, demographic_group are required")
+    decision = bool(payload.get("decision", True))
+    ground_truth = payload.get("ground_truth")
+    if ground_truth is not None:
+        ground_truth = bool(ground_truth)
+    ctx = BiasCheckContext(
+        agent=agent,
+        action=action,
+        subject_id=subject_id,
+        decision=decision,
+        demographic_group=group,
+        ground_truth=ground_truth,
+        metadata=payload.get("metadata") or {},
+    )
+    engine = get_bias_engine()
+    report = engine.check(ctx)
+    return JSONResponse(report.to_dict())
 
 
 if __name__ == "__main__":
