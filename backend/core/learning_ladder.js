@@ -103,7 +103,12 @@ function ts() {
 }
 
 function topicKey(topic) {
-  return (topic || '').trim().toLowerCase();
+  const key = (topic || '').trim().toLowerCase();
+  // Prevent prototype pollution: block keys that could shadow Object.prototype
+  if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+    throw new Error('Invalid topic name');
+  }
+  return key;
 }
 
 function ladderId(topic) {
