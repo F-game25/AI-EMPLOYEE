@@ -4,6 +4,7 @@
   --bg-panel: #111111;
   --bg-surface: #161616;
   --gold: #D4AF37;
+  --gold-secondary: #B8972E;
   --bronze: #CD7F32;
   --text-primary: #F5F0E8;
   --text-secondary: #B8B0A0;
@@ -11,9 +12,10 @@
   --border-gold: 1px solid rgba(212,175,55,0.2);
   --border-subtle: 1px solid rgba(212,175,55,0.08);
   --glow-gold: 0 0 20px rgba(212,175,55,0.15);
-  --font-heading: 'Cinzel', serif;
-  --font-body: 'DM Sans', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-heading: 'Inter', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', monospace;
+  --font-display: 'Cinzel', serif;
   --online: #34D399;
   --offline: #EF4444;
   --warning: #F59E0B;
@@ -94,13 +96,59 @@ html, body, #root {
 @media (max-width: 768px) {
   .app-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: 52px 1fr 56px;
   }
   .app-layout .sidebar {
+    grid-row: 3;
+    grid-column: 1;
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-top: var(--border-gold);
+    padding: 0;
+    gap: 0;
+  }
+  .app-layout .sidebar .nav-label {
     display: none;
+  }
+  .app-layout .sidebar a {
+    flex: 1;
+    justify-content: center;
+    border-left: none !important;
+    border-top: 2px solid transparent;
+    padding: 8px 4px !important;
+    font-size: 11px !important;
+    min-width: 0;
+    text-align: center;
+  }
+  .app-layout .sidebar a[data-active="true"] {
+    border-top-color: var(--gold);
   }
   .app-layout .main-content {
     padding: 12px;
   }
+}
+
+/* Metallic glow on hover (0.2s transition) */
+.glow-hover {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.glow-hover:hover {
+  box-shadow: 0 0 16px rgba(212,175,55,0.25);
+}
+
+/* Bronze typing indicator */
+@keyframes bronze-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.typing-indicator {
+  color: var(--bronze);
+  animation: bronze-blink 1s infinite;
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 /* Button base */

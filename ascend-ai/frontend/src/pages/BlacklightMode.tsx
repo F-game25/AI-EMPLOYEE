@@ -16,6 +16,10 @@ export function BlacklightMode() {
   const { blacklightActive, setBlacklightActive, blacklightLines, addBlacklightLine } = useStore()
   const [mode, setMode] = useState('off')
   const [connections, setConnections] = useState<Connection[]>([])
+  const [breachAlerts] = useState<{ id: number; message: string; severity: string; ts: string }[]>([
+    { id: 1, message: 'Unusual API access pattern detected', severity: 'low', ts: new Date().toISOString() },
+    { id: 2, message: 'Rate limit threshold approaching for external endpoints', severity: 'medium', ts: new Date().toISOString() },
+  ])
 
   useEffect(() => {
     fetch('/api/blacklight/status')
@@ -65,9 +69,9 @@ export function BlacklightMode() {
         </motion.button>
         <div>
           <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 28, fontWeight: 700 }} className="metallic-text">
-            🔒 BLACKLIGHT MODE
+            🔒 BLACKLIGHT MODE — Ultra Safe &amp; Security
           </h1>
-          <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>Ultra Safe & Security</p>
+          <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>API monitoring • Encryption state • Connection stability</p>
         </div>
       </div>
 
@@ -85,6 +89,7 @@ export function BlacklightMode() {
 
       <SystemResponseWindow title="SECURITY STATUS" lines={blacklightLines} active={blacklightActive} accentColor="bronze" />
 
+      {/* Connection grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 20 }}>
         {connections.map((c) => (
           <div key={c.name} className="panel" style={{ padding: 16 }}>
@@ -96,6 +101,45 @@ export function BlacklightMode() {
             </div>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)' }}>
               Latency: {c.latency}ms
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Breach alerts */}
+      <div className="panel" style={{ padding: 20, marginTop: 20 }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--bronze)', letterSpacing: 2, marginBottom: 12 }}>
+          BREACH ALERTS
+        </div>
+        {breachAlerts.length === 0 && (
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>No breach alerts</div>
+        )}
+        {breachAlerts.map((alert) => (
+          <div key={alert.id} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '8px 12px',
+            marginBottom: 8,
+            background: 'rgba(205,127,50,0.06)',
+            border: '1px solid rgba(205,127,50,0.15)',
+            borderRadius: 8,
+          }}>
+            <span style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: alert.severity === 'high' ? 'var(--offline)' : 'var(--bronze)',
+              boxShadow: `0 0 6px ${alert.severity === 'high' ? 'var(--offline)' : 'var(--bronze)'}`,
+              flexShrink: 0,
+            }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--text-primary)' }}>
+                {alert.message}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
+                {new Date(alert.ts).toLocaleTimeString()} • {alert.severity.toUpperCase()}
+              </div>
             </div>
           </div>
         ))}

@@ -20,7 +20,7 @@ export function Sidebar() {
       flexDirection: 'column',
       gap: 2,
     }}>
-      <div style={{ padding: '0 16px 12px', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: 2 }}>
+      <div className="nav-label" style={{ padding: '0 16px 12px', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: 2 }}>
         NAVIGATION
       </div>
       {NAV.map((n) => (
@@ -39,11 +39,12 @@ export function Sidebar() {
             color: isActive ? 'var(--gold)' : 'var(--text-secondary)',
             borderLeft: isActive ? '2px solid var(--gold)' : '2px solid transparent',
             background: isActive ? 'rgba(212,175,55,0.06)' : 'transparent',
-            transition: 'all 0.15s',
+            transition: 'all 0.2s ease',
           })}
+          {...({ 'data-active': undefined } as Record<string, string | undefined>)}
         >
           <span style={{ fontSize: 15, width: 20, textAlign: 'center' }}>{n.icon}</span>
-          {n.label}
+          <span className="nav-label">{n.label}</span>
         </NavLink>
       ))}
     </nav>

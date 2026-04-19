@@ -16,7 +16,7 @@ export function LiveFeedback() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 28, fontWeight: 700, marginBottom: 20 }} className="metallic-text">
-        📡 LIVE FEEDBACK
+        📡 LIVE FEEDBACK — Real-time Monitoring
       </h1>
 
       {/* Action bar */}

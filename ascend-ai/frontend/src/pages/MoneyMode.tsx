@@ -45,9 +45,9 @@ export function MoneyMode() {
         </motion.button>
         <div>
           <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 28, fontWeight: 700 }} className="metallic-text">
-            💰 MONEY MODE
+            💰 MONEY MODE — Optimalisatie &amp; Geld Verdienen
           </h1>
-          <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>Optimization & Revenue Generation</p>
+          <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>Revenue generation • Income strategies • Business optimization</p>
         </div>
       </div>
 
