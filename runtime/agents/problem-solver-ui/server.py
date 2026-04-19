@@ -75,7 +75,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 import uvicorn
 
-# ── Security imports (openclaw-2) ─────────────────────────────────────────────
+# ── Security imports ─────────────────────────────────────────────
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.util import get_remote_address
@@ -1403,7 +1403,7 @@ async def require_auth(
             )
 
 
-# ── Rate limiter (openclaw-2) ─────────────────────────────────────────────────
+# ── Rate limiter ─────────────────────────────────────────────────
 if _SLOWAPI_AVAILABLE:
     _rate_limit = (
         f"{_security_config.security.rate_limit_per_minute}/minute"
@@ -1427,7 +1427,7 @@ def _auth_rate_limit(f):
         return limiter.limit("5/minute")(f)
     return f
 
-# ── CORS (openclaw-2) ─────────────────────────────────────────────────────────
+# ── CORS ─────────────────────────────────────────────────────────
 _cors_origins = (
     _security_config.security.cors_origins
     if _security_config
@@ -1456,7 +1456,7 @@ try:
 except Exception as _feat_err:
     logger.warning("⚠️  Feature modules failed to load: %s", _feat_err)
 
-# ── Security headers middleware (openclaw-2) ──────────────────────────────────
+# ── Security headers middleware ──────────────────────────────────
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     """Attach HTTP security headers to every response.
@@ -1480,7 +1480,7 @@ async def security_headers_middleware(request: Request, call_next):
         )
     return response
 
-# ── Audit logging middleware (openclaw-2) ─────────────────────────────────────
+# ── Audit logging middleware ─────────────────────────────────────
 _audit_logger = logging.getLogger("ai_employee.audit")
 if not _audit_logger.handlers:
     _audit_handler = logging.StreamHandler()
@@ -16526,7 +16526,7 @@ def index():
     return HTMLResponse(content=INDEX_HTML, headers={"Content-Security-Policy": csp})
 
 
-# ── Security endpoints (openclaw-2) ───────────────────────────────────────────
+# ── Security endpoints ───────────────────────────────────────────
 
 class _HealthResponse(BaseModel):
     status: str
@@ -16591,7 +16591,7 @@ def auth_register(request: Request, user_data: _UserCreate):
     """
     Register a dashboard user and return a JWT bearer token.
 
-    Password is validated against the configured strength policy (openclaw-2).
+    Password is validated against the configured strength policy.
     Rate limited to 5 requests/minute per IP to prevent abuse.
     """
     if not _SECURITY_AVAILABLE:
@@ -17063,7 +17063,7 @@ def _run_doctor_checks() -> list:
         items.append(_item("svc_ui", "warn", f"Problem Solver UI not detected on port {ui_port}",
                            "Run 'ai-employee start problem-solver-ui' to start it."))
 
-    gw_port = int(_env("OPENCLAW_GATEWAY_PORT") or "18789")
+    gw_port = int(_env("AI_EMPLOYEE_GATEWAY_PORT") or _env("OPENCLAW_GATEWAY_PORT") or "18789")
     if _is_port_open(gw_port):
         items.append(_item("svc_gateway", "ok", f"AI Gateway running (port {gw_port})"))
     else:

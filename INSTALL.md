@@ -194,7 +194,6 @@ ai-employee mode power      # 20 agents — everything unlocked
 | Port already in use | Change port in `~/.ai-employee/.env`: `PROBLEM_SOLVER_UI_PORT=8788` |
 | Ollama not found | Install Ollama: https://ollama.com/download then run `ollama pull llama3.2` |
 | Python < 3.10 | Install: `sudo apt install python3.10` or `sudo apt install python3.11` |
-| `~/.openclaw/completions/openclaw.bash: No such file or directory` on terminal start | Run: `mkdir -p ~/.openclaw/completions && touch ~/.openclaw/completions/openclaw.bash` |
 
 ---
 

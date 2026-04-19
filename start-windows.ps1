@@ -187,50 +187,10 @@ foreach ($dir in @("$AI_HOME\logs", "$AI_HOME\run")) {
 # Collect all process objects for cleanup on exit
 $allProcs = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 
-# ─── 4. Start OpenClaw gateway ─────────────────────────────────────────────────
-Write-Step "Starting OpenClaw gateway…"
-
-$openclawExe = $null
-foreach ($candidate in @(
-    'openclaw',
-    (Join-Path $AI_HOME 'bin\openclaw.exe'),
-    (Join-Path $AI_HOME 'bin\openclaw')
-)) {
-    $resolved = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($resolved) { $openclawExe = $resolved.Source; break }
-    if (Test-Path $candidate) { $openclawExe = $candidate; break }
-}
-
-if ($openclawExe) {
-    $gwConfig  = Join-Path $AI_HOME 'config.json'
-    $gwLog     = Join-Path $AI_HOME 'logs\gateway.log'
-    $gwErrLog  = Join-Path $AI_HOME 'logs\gateway-err.log'
-    $gwPidFile = Join-Path $AI_HOME 'run\gateway.pid'
-
-    [System.Environment]::SetEnvironmentVariable('OPENCLAW_CONFIG', $gwConfig, 'Process')
-
-    try {
-        $gwProc = Start-Process `
-            -FilePath $openclawExe `
-            -ArgumentList "gateway --config `"$gwConfig`"" `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $gwLog `
-            -RedirectStandardError  $gwErrLog `
-            -PassThru
-
-        if ($gwProc -and $gwProc.Id) {
-            $gwProc.Id | Out-File $gwPidFile -Encoding ASCII -Force
-            $allProcs.Add($gwProc)
-            Write-OK "OpenClaw gateway  (pid $($gwProc.Id))"
-        }
-    }
-    catch {
-        Write-Warn "Gateway failed to start: $_"
-    }
-} else {
-    Write-Warn "openclaw not found — gateway skipped"
-    Write-Info "Install via: install-windows.ps1"
-}
+# ─── 4. Initialise AI Employee internal engine ─────────────────────────────────
+Write-Step "Initialising AI Employee internal engine…"
+# The internal engine is fully embedded — no external gateway binary is started.
+Write-OK "AI Employee internal engine ready"
 
 # ─── 5. Start static dashboard ─────────────────────────────────────────────────
 Write-Step "Starting static dashboard (port $DASHBOARD_PORT)…"
@@ -435,7 +395,7 @@ Write-Host ("  │  Gateway      : port {0,-28}│" -f $GATEWAY_PORT) -Foregroun
 Write-Host "  ├──────────────────────────────────────────────────┤" -ForegroundColor Cyan
 Write-Host "  │  Logs  : %USERPROFILE%\.ai-employee\logs\        │" -ForegroundColor DarkCyan
 Write-Host "  │  Stop  : run  Stop AI Employee.bat  on Desktop   │" -ForegroundColor DarkCyan
-Write-Host "  │  WhatsApp: openclaw channels login               │" -ForegroundColor DarkCyan
+Write-Host "  │  WhatsApp: configure in dashboard > Settings         │" -ForegroundColor DarkCyan
 Write-Host "  └──────────────────────────────────────────────────┘" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Press Ctrl+C to stop all AI Employee services" -ForegroundColor Yellow

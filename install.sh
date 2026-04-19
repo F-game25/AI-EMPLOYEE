@@ -15,7 +15,6 @@ CLAUDE_MODEL="claude-sonnet-4-5-20251022"
 OLLAMA_HOST="http://localhost:11434"
 OLLAMA_MODEL="llama3.2"
 ZERO_CONFIG="${ZERO_CONFIG:-0}"
-AUTO_INSTALL_OPENCLAW="${AUTO_INSTALL_OPENCLAW:-1}"
 AUTO_INSTALL_DOCKER="${AUTO_INSTALL_DOCKER:-0}"
 
 log()   { echo -e "${C}▸${NC} $1"; }
@@ -205,49 +204,12 @@ Install them with:
     ok "Requirements checked"
 }
 
-# ─── OpenClaw ─────────────────────────────────────────────────────────────────
+# ─── AI Employee Internal Engine (replaces external OpenClaw gateway) ─────────
 
-install_openclaw() {
-    step "2/8 — OpenClaw gateway"
-
-    if command -v openclaw >/dev/null 2>&1; then
-        local ver
-        ver=$(openclaw --version 2>/dev/null || echo "unknown")
-        ok "OpenClaw already installed: $ver"
-    else
-        log "OpenClaw not found. Attempting install..."
-        if curl -fsSL https://openclaw.ai/install.sh | bash; then
-            export PATH="$HOME/.local/bin:$HOME/.openclaw/bin:$PATH"
-            # Also pick up the npm global bin dir (used when installed via npm)
-            local npm_prefix npm_bin
-            npm_prefix="$(npm config get prefix 2>/dev/null)"
-            npm_bin="${npm_prefix:+$npm_prefix/bin}"
-            if [[ -n "$npm_bin" ]] && [[ -d "$npm_bin" ]] && [[ ":$PATH:" != *":$npm_bin:"* ]]; then
-                export PATH="$npm_bin:$PATH"
-                local npm_path_line="export PATH=\"$npm_bin:\$PATH\""
-                for profile in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc"; do
-                    if [[ -f "$profile" ]] && ! grep -qF "$npm_bin" "$profile" 2>/dev/null; then
-                        { echo ""; echo "# OpenClaw (npm global bin)"; echo "$npm_path_line"; } >> "$profile"
-                    fi
-                done
-                ok "npm global bin dir added to PATH ($npm_bin)"
-            fi
-            ok "OpenClaw installed"
-        else
-            err "OpenClaw auto-install failed. Install manually:
-  curl -fsSL https://openclaw.ai/install.sh | bash
-  Then re-run this installer."
-        fi
-    fi
-
-    # The openclaw installer adds a `source ~/.openclaw/completions/openclaw.bash`
-    # line to ~/.bashrc, but it does not always create that file.  Create a stub
-    # so every new terminal session starts cleanly without a "file not found" error.
-    mkdir -p "$HOME/.openclaw/completions"
-    if [[ ! -f "$HOME/.openclaw/completions/openclaw.bash" ]]; then
-        touch "$HOME/.openclaw/completions/openclaw.bash"
-        ok "Created ~/.openclaw/completions/openclaw.bash stub (fixes terminal error)"
-    fi
+setup_internal_engine() {
+    step "2/8 — AI Employee internal engine"
+    ok "AI Employee uses an internal engine — no external gateway binary required"
+    ok "All gateway functionality is provided by runtime/engine/"
 }
 
 # ─── Ollama model catalogue ───────────────────────────────────────────────────
@@ -370,7 +332,6 @@ wizard() {
         UI_PORT=8787
         WORKERS=5
         AI_EMPLOYEE_MODE="starter"
-        AUTO_INSTALL_OPENCLAW="1"
         AUTO_INSTALL_DOCKER="0"
         TZ=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
         TOKEN=$(openssl rand -hex 32)
@@ -397,7 +358,7 @@ wizard() {
     ok "Phone: $PHONE"
     echo ""
     echo -e "  📱 Phone registered! A welcome message will be sent to ${PHONE} via WhatsApp"
-    echo -e "     once you connect with: ${C}openclaw channels login${NC}"
+    echo -e "     once you link your phone through the AI Employee dashboard."
     echo ""
 
     # 2) Local LLM — Ollama is the recommended default (saves tokens, privacy-first)
@@ -543,17 +504,6 @@ wizard() {
 
     # 10) Runtime self-healing preferences
     echo ""
-    ask "Auto-install OpenClaw at runtime if missing? [Y/n]:"
-    read -r AUTO_OPENCLAW_INPUT < "$tty_in"
-    AUTO_OPENCLAW_INPUT="${AUTO_OPENCLAW_INPUT:-y}"
-    if [[ "$(echo "$AUTO_OPENCLAW_INPUT" | tr '[:upper:]' '[:lower:]')" =~ ^(y|yes)$ ]]; then
-        AUTO_INSTALL_OPENCLAW="1"
-        ok "OpenClaw runtime auto-install: enabled"
-    else
-        AUTO_INSTALL_OPENCLAW="0"
-        info "OpenClaw runtime auto-install: disabled"
-    fi
-
     ask "Auto-install Docker + sandbox safety setup if missing? [y/N]:"
     read -r AUTO_DOCKER_INPUT < "$tty_in"
     AUTO_DOCKER_INPUT="${AUTO_DOCKER_INPUT:-n}"
@@ -578,7 +528,7 @@ wizard() {
     ok "Wizard complete"
 }
 
-# ─── JWT Secret (openclaw-2) ───────────────────────────────────────────────────
+# ─── JWT Secret ───────────────────────────────────────────────────────────────
 
 setup_jwt_secret() {
     step "JWT / Security secret"
@@ -896,7 +846,7 @@ install_runtime() {
         dl "agents/artifacts/artifacts.py"
         dl "agents/artifacts/requirements.txt"
         # Config files
-        dl "config/openclaw.template.json"
+        dl "config/gateway.template.json"
         dl "config/problem-solver.env"
         dl "config/problem-solver-ui.env"
         dl "config/status-reporter.env"
@@ -1346,7 +1296,10 @@ SKILL
 generate_configs() {
     step "7/8 — Generating configuration"
 
-    local template="$RUNTIME_DIR/config/openclaw.template.json"
+    local template="$RUNTIME_DIR/config/gateway.template.json"
+    [[ -f "$template" ]] || template="$AI_HOME/config/gateway.template.json"
+    # Fallback to legacy name for backward compatibility with older installs
+    [[ -f "$template" ]] || template="$RUNTIME_DIR/config/openclaw.template.json"
     [[ -f "$template" ]] || template="$AI_HOME/config/openclaw.template.json"
 
     if [[ ! -f "$AI_HOME/config.json" ]]; then
@@ -1420,7 +1373,7 @@ CFG_END
             python3 -m json.tool "$AI_HOME/config.json" >/dev/null 2>&1 \
                 || warn "config.json may contain invalid JSON — check manually"
         fi
-        ok "OpenClaw config.json created"
+        ok "AI Employee config.json created"
     else
         # Existing config: patch gateway.mode=local if missing (fixes old installs)
         local mode_ok=0
@@ -1498,15 +1451,15 @@ CFG_END
             perl -pi -e "s|PHONE_JSON_PLACEHOLDER|$phone_json|g" "$AI_HOME/config.json"
             perl -pi -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" "$AI_HOME/config.json"
             chmod 600 "$AI_HOME/config.json"
-            ok "OpenClaw config.json updated (gateway.mode=local added)"
+            ok "AI Employee config.json updated (gateway.mode=local added)"
         else
-            ok "OpenClaw config.json already exists — not overwritten"
+            ok "AI Employee config.json already exists — not overwritten"
         fi
     fi
 
-    # Symlink for openclaw (always ensure it points to current config)
-    mkdir -p "$HOME/.openclaw"
-    ln -sf "$AI_HOME/config.json" "$HOME/.openclaw/openclaw.json" 2>/dev/null || true
+    # Keep a symlink at the legacy path for backward compatibility with any
+    # existing config.json references.
+    mkdir -p "$HOME/.ai-employee"
 
     # ── Write .env once (single canonical writer) ──────────────────────────────
     # .env lives in credentials/ for security; symlinked from $AI_HOME/.env
@@ -1517,8 +1470,8 @@ CFG_END
     if [[ ! -f "$env_file" ]]; then
         {
             # --- Gateway & auth ---
-            # OPENCLAW_GATEWAY_TOKEN: used by openclaw gateway for API auth
-            echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN"
+            # AI_EMPLOYEE_GATEWAY_TOKEN: used by the internal gateway for API auth
+            echo "AI_EMPLOYEE_GATEWAY_TOKEN=$TOKEN"
             # JWT_SECRET_KEY: used by the dashboard UI for session authentication
             [[ -n "${JWT_SECRET_KEY:-}" ]] && echo "JWT_SECRET_KEY=$JWT_SECRET_KEY"
 
@@ -1545,11 +1498,7 @@ CFG_END
             echo "AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}"
             echo "UI_PORT=${UI_PORT:-8787}"
             echo "WORKERS=${WORKERS:-35}"
-            echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}"
             echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}"
-
-            # Disables mDNS/Bonjour service discovery in openclaw (not needed for local mode)
-            echo "OPENCLAW_DISABLE_BONJOUR=1"
 
             echo "TZ=${TZ:-UTC}"
             # Repo location (used by run.sh to locate the Node backend/frontend).
@@ -1568,8 +1517,6 @@ CFG_END
     ln -sf "$AI_HOME/credentials/.env" "$AI_HOME/.env" 2>/dev/null || true
 
     # Ensure runtime self-healing flags exist for older installs.
-    grep -q "^AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=" "$env_file" \
-        || echo "AI_EMPLOYEE_AUTO_INSTALL_OPENCLAW=${AUTO_INSTALL_OPENCLAW:-1}" >> "$env_file"
     grep -q "^AI_EMPLOYEE_AUTO_INSTALL_DOCKER=" "$env_file" \
         || echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}" >> "$env_file"
     # Only record repo dir when SCRIPT_DIR is a real persistent clone (backend/server.js present).
@@ -1587,10 +1534,10 @@ try:
 except Exception:
  print("")' "$AI_HOME/config.json" 2>/dev/null)"
         if [[ -n "${cfg_token:-}" ]]; then
-            if grep -q "^OPENCLAW_GATEWAY_TOKEN=" "$env_file"; then
-                perl -pi -e "s|^OPENCLAW_GATEWAY_TOKEN=.*|OPENCLAW_GATEWAY_TOKEN=$cfg_token|" "$env_file"
+            if grep -q "^AI_EMPLOYEE_GATEWAY_TOKEN=" "$env_file"; then
+                perl -pi -e "s|^AI_EMPLOYEE_GATEWAY_TOKEN=.*|AI_EMPLOYEE_GATEWAY_TOKEN=$cfg_token|" "$env_file"
             else
-                echo "OPENCLAW_GATEWAY_TOKEN=$cfg_token" >> "$env_file"
+                echo "AI_EMPLOYEE_GATEWAY_TOKEN=$cfg_token" >> "$env_file"
             fi
         fi
 
@@ -1599,8 +1546,8 @@ except Exception:
     if [[ -f "$sr_env" ]]; then
         grep -q "^WHATSAPP_PHONE=" "$sr_env" || \
             echo "WHATSAPP_PHONE=${PHONE:-}" >> "$sr_env"
-        grep -q "^OPENCLAW_GATEWAY_TOKEN=" "$sr_env" || \
-            echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN" >> "$sr_env"
+        grep -q "^AI_EMPLOYEE_GATEWAY_TOKEN=" "$sr_env" || \
+            echo "AI_EMPLOYEE_GATEWAY_TOKEN=$TOKEN" >> "$sr_env"
         perl -pi -e "s|^STATUS_REPORT_INTERVAL_SECONDS=.*|STATUS_REPORT_INTERVAL_SECONDS=${STATUS_INTERVAL:-3600}|" "$sr_env"
         chmod 600 "$sr_env"
     fi
@@ -1888,7 +1835,7 @@ done_message() {
     echo "     ai-employee do \"write a sales email for my agency\""
     echo ""
     echo "  4. Optional — link WhatsApp for notifications & quick commands:"
-    echo "     openclaw channels login  (scan QR code)"
+    echo "     Open the dashboard and configure the WhatsApp channel from Settings."
     echo "     Use WhatsApp for status checks. Use the dashboard for full control."
     echo ""
     echo -e "  ${G}▸ Desktop launcher (smart — starts bot or opens UI if already running):${NC}"
@@ -1929,7 +1876,7 @@ main() {
     echo ""
 
     check_requirements
-    install_openclaw
+    setup_internal_engine
     wizard
     setup_jwt_secret
     install_ollama "${WANT_OLLAMA:-n}"

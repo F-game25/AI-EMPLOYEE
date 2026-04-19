@@ -8,9 +8,9 @@ If you discover a security vulnerability in AI Employee, please report it respon
 2. Email the maintainer privately with full details
 3. Allow reasonable time for the issue to be addressed before public disclosure
 
-## Security Features (openclaw-2)
+## Security Features
 
-AI Employee integrates the security model from openclaw-2, providing:
+AI Employee includes a built-in security module providing:
 
 ### Authentication & Authorization
 - **JWT-based** token authentication with configurable expiration
@@ -182,4 +182,4 @@ If you suspect a security incident:
 ---
 
 **Last Updated**: 2026-03-25  
-**Version**: 2.0.0 (openclaw-2 security model)
+**Version**: 2.0.0
