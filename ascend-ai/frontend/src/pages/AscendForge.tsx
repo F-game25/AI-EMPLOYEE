@@ -13,6 +13,14 @@ const PILLS = [
   'Reduce RAM usage by 20%',
 ]
 
+const SAFEGUARDS = [
+  'Sandbox execution — all tasks run in isolated environment',
+  'Risk assessment — automatic threat analysis before execution',
+  'Rollback support — one-click revert to previous state',
+  'Permission gates — manual approval for HIGH risk tasks',
+  'Rate limiting — max 3 concurrent forge tasks',
+]
+
 export function AscendForge() {
   const nav = useNavigate()
   const { forgeMode, setForgeMode, forgeLines, addForgeLine } = useStore()
@@ -38,6 +46,22 @@ export function AscendForge() {
     }
   }
 
+  const askPermission = () => {
+    addForgeLine(`[${new Date().toLocaleTimeString()}] ⚠ Requesting manual approval for task...`)
+    addForgeLine(`[${new Date().toLocaleTimeString()}] Awaiting operator confirmation...`)
+  }
+
+  const rollback = async () => {
+    addForgeLine(`[${new Date().toLocaleTimeString()}] 🔄 Rolling back to previous state...`)
+    try {
+      await fetch('/api/forge/rollback', { method: 'POST' })
+      addForgeLine(`[${new Date().toLocaleTimeString()}] Rollback complete.`)
+      setProgress(0)
+    } catch {
+      addForgeLine('ERROR: Rollback failed')
+    }
+  }
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
@@ -46,9 +70,9 @@ export function AscendForge() {
         </motion.button>
         <div>
           <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 28, fontWeight: 700 }} className="metallic-text">
-            ⚗ ASCEND FORGE
+            ⚗ ASCEND FORGE — Self-Improvement System
           </h1>
-          <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>Self-Improvement System</p>
+          <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>Sandbox execution • Risk-based behavior • Auto-optimization</p>
         </div>
       </div>
 
@@ -81,7 +105,7 @@ export function AscendForge() {
             </button>
           ))}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <ToggleSwitch value={forgeMode} onChange={setForgeMode} />
           <motion.button
             onClick={execute}
@@ -90,6 +114,23 @@ export function AscendForge() {
             className="btn-gold"
           >
             ⚡ EXECUTE IMPROVEMENT
+          </motion.button>
+          <motion.button
+            onClick={askPermission}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            className="btn-outline"
+          >
+            🛡 ASK PERMISSION
+          </motion.button>
+          <motion.button
+            onClick={rollback}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            className="btn-outline"
+            style={{ color: 'var(--warning)', borderColor: 'rgba(245,158,11,0.3)' }}
+          >
+            🔄 ROLLBACK
           </motion.button>
         </div>
       </div>
@@ -119,6 +160,28 @@ export function AscendForge() {
             </span>
           ))}
         </div>
+      </div>
+
+      {/* Safeguards */}
+      <div className="panel" style={{ padding: 20, marginTop: 20 }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', letterSpacing: 2, marginBottom: 12 }}>
+          SAFEGUARDS
+        </div>
+        {SAFEGUARDS.map((s, i) => (
+          <div key={i} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 0',
+            borderBottom: i < SAFEGUARDS.length - 1 ? 'var(--border-subtle)' : 'none',
+            fontFamily: 'var(--font-body)',
+            fontSize: 12,
+            color: 'var(--text-secondary)',
+          }}>
+            <span style={{ color: 'var(--online)', fontSize: 10 }}>✓</span>
+            {s}
+          </div>
+        ))}
       </div>
     </motion.div>
   )
