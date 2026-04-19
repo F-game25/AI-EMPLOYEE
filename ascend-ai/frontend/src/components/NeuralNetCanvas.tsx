@@ -129,7 +129,7 @@ export function NeuralNetCanvas() {
 
         // Label
         ctx.fillStyle = '#F5F0E8'
-        ctx.font = '500 9px JetBrains Mono'
+        ctx.font = '500 9px SF Mono, JetBrains Mono, monospace'
         ctx.textAlign = 'center'
         ctx.fillText(node.label, x, y + node.r + 14)
       })
