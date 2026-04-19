@@ -71,18 +71,22 @@ def _server_reachable() -> bool:
         return False
 
 
-pytestmark = [
-    pytest.mark.skipif(not _playwright_available(), reason="playwright not installed"),
-    pytest.mark.skipif(
-        not _server_reachable(),
-        reason=f"ASCEND AI backend not running on port {PORT}",
-    ),
-]
+# All tests require the backend to be reachable.
+pytestmark = pytest.mark.skipif(
+    not _server_reachable(),
+    reason=f"ASCEND AI backend not running on port {PORT}",
+)
+
+# Marker for tests that additionally require Playwright.
+_needs_playwright = pytest.mark.skipif(
+    not _playwright_available(), reason="playwright not installed"
+)
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="session")
+@_needs_playwright
 def browser_context():
     """Launch a single browser context shared across the session."""
     from playwright.sync_api import sync_playwright
@@ -99,6 +103,7 @@ def browser_context():
 
 
 @pytest.fixture(scope="session")
+@_needs_playwright
 def page(browser_context):
     """Return a page that has loaded the ASCEND AI UI."""
     pg = browser_context.new_page()
@@ -287,6 +292,7 @@ class TestBackendIntegration:
 
 # ── UI Page tests ──────────────────────────────────────────────────────────
 
+@_needs_playwright
 class TestUIPageLoad:
     """Navigate to each ASCEND AI route, validate content, take screenshot."""
 
@@ -325,6 +331,7 @@ class TestUIPageLoad:
         self._navigate_and_capture(page, "/settings", "settings.png", "Settings")
 
 
+@_needs_playwright
 class TestUINavigation:
     """Verify the sidebar renders and navigation links work."""
 
@@ -364,6 +371,7 @@ class TestUINavigation:
         assert len(critical) < 10, f"Too many console errors: {critical[:5]}"
 
 
+@_needs_playwright
 class TestUIInteractions:
     """Test interactive elements: buttons, inputs, panels."""
 
