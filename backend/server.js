@@ -1849,6 +1849,70 @@ app.post('/api/forge/reject/:id', (req, res) => {
   res.json({ ok: true, request: item });
 });
 
+// ── Learning Ladder Builder API ───────────────────────────────────────────────
+
+const learningLadder = require('./core/learning_ladder');
+
+// POST /api/learning-ladder/build  { topic }
+app.post('/api/learning-ladder/build', (req, res) => {
+  const topic = String((req.body || {}).topic || '').trim();
+  if (!topic) return res.status(400).json({ ok: false, error: 'topic is required' });
+  try {
+    const ladder = learningLadder.buildLadder(topic);
+    addActivity(`[LEARNING] Ladder built: ${topic}`, 'learning');
+    res.json({ ok: true, ladder });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/learning-ladder/complete  { topic, level, success, milestone_output, score, notes }
+app.post('/api/learning-ladder/complete', (req, res) => {
+  const body = req.body || {};
+  const topic = String(body.topic || '').trim();
+  const level = parseInt(body.level, 10);
+  if (!topic) return res.status(400).json({ ok: false, error: 'topic is required' });
+  if (!level || level < 1 || level > 5) return res.status(400).json({ ok: false, error: 'level must be 1–5' });
+  try {
+    const result = learningLadder.recordLevelCompletion({
+      topic,
+      level,
+      success: Boolean(body.success),
+      milestoneOutput: String(body.milestone_output || ''),
+      score: parseFloat(body.score) || 0,
+      notes: String(body.notes || ''),
+    });
+    const status = result.learned ? 'LEARNED' : 'NOT LEARNED';
+    addActivity(`[LEARNING] Level ${level} ${status}: ${topic}`, 'learning');
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/learning-ladder/progress?topic=...
+app.get('/api/learning-ladder/progress', (req, res) => {
+  const topic = String(req.query.topic || '').trim();
+  if (!topic) return res.status(400).json({ ok: false, error: 'topic query param is required' });
+  try {
+    const progress = learningLadder.getProgress(topic);
+    res.json({ ok: true, ...progress });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/learning-ladder/all
+app.get('/api/learning-ladder/all', (req, res) => {
+  try {
+    const topics = learningLadder.getAllTopics();
+    const metrics = learningLadder.getMetrics();
+    res.json({ ok: true, topics, metrics });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── WebSocket server ──────────────────────────────────────────────────────────
 
 const server = http.createServer(app);
