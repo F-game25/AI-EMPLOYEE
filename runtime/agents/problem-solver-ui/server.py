@@ -1084,6 +1084,27 @@ def _generate_llm_response(
   # ── Financial disclaimer — appended whenever a financial agent responds ────
   if routed_agent in _FINANCIAL_AGENT_IDS:
       result += _FINANCIAL_DISCLAIMER
+
+  # ── Explainability — generate structured explanation and embed its ID ───────
+  try:
+      _xai = _get_explain_engine()
+      if _xai is not None:
+          from core.explainability_layer import ExplainContext  # type: ignore
+          _exp = _xai.explain(ExplainContext(
+              agent=routed_agent,
+              action="generate_response",
+              message=message,
+              response=answer,
+              model=model or "",
+              user_id=user_id,
+          ))
+          # Embed explain_id as a hidden HTML comment so the chat endpoint
+          # can promote it to a structured JSON field without breaking
+          # plain-text consumers (the comment is invisible in markdown).
+          result += f"\n<!--xai:{_exp.explain_id}-->"
+  except Exception as _xai_exc:
+      logger.debug("explainability generation error (non-fatal): %s", _xai_exc)
+
   return result
 
 _SENSITIVE_DETAIL_PAT = re.compile(
@@ -1208,6 +1229,18 @@ def _get_bias_engine():
             sys.path.insert(0, str(_rdir))
         from core.bias_detection_engine import get_bias_engine as _gbe  # type: ignore
         return _gbe()
+    except Exception:
+        return None
+
+
+def _get_explain_engine():
+    """Return the ExplainabilityEngine singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.explainability_layer import get_explain_engine as _gee  # type: ignore
+        return _gee()
     except Exception:
         return None
 
@@ -17768,7 +17801,32 @@ async def post_chat(payload: dict, request: Request):
         details={"command": message[:500], "response_preview": safe_response[:200]},
         source="chat",
     )
-    return JSONResponse({"ok": True, "response": response})
+
+    # ── Extract XAI explanation embedded by _generate_llm_response ────────────
+    _xai_comment_pat = re.compile(r"\n?<!--xai:(xai-[a-zA-Z0-9]{12})-->$")
+    _explain_dict: dict | None = None
+    _xai_match = _xai_comment_pat.search(response)
+    if _xai_match:
+        _explain_id = _xai_match.group(1)
+        response = response[:_xai_match.start()]
+        try:
+            _xai_engine = _get_explain_engine()
+            if _xai_engine is not None:
+                _explain_dict = _xai_engine.get(_explain_id)
+        except Exception:
+            pass
+
+    _resp_payload: dict = {"ok": True, "response": response}
+    if _explain_dict is not None:
+        _resp_payload["explanation"] = {
+            "explain_id": _explain_dict.get("explain_id"),
+            "reason": _explain_dict.get("reason"),
+            "key_factors": _explain_dict.get("key_factors"),
+            "alternatives": _explain_dict.get("alternatives"),
+            "confidence": _explain_dict.get("confidence"),
+            "confidence_label": _explain_dict.get("confidence_label"),
+        }
+    return JSONResponse(_resp_payload)
 
 
 @app.post("/chat")
@@ -24299,6 +24357,53 @@ def bias_check_endpoint(payload: dict, _auth: None = Depends(require_auth)):
     engine = get_bias_engine()
     report = engine.check(ctx)
     return JSONResponse(report.to_dict())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Explainability (XAI) API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/explain/{explain_id}")
+def get_explanation(explain_id: str, _auth: None = Depends(require_auth)):
+    """Return the structured XAI explanation for a specific decision.
+
+    The ``explain_id`` is included in every ``/api/chat`` response as
+    ``explanation.explain_id`` when an explanation was generated.
+    """
+    if not re.match(r"^xai-[a-zA-Z0-9]{12}$", explain_id):
+        raise HTTPException(400, "Invalid explain_id format")
+    engine = _get_explain_engine()
+    if engine is None:
+        raise HTTPException(503, "Explainability module unavailable")
+    exp = engine.get(explain_id)
+    if exp is None:
+        raise HTTPException(404, f"Explanation {explain_id!r} not found")
+    return JSONResponse(exp)
+
+
+@app.get("/api/explain/history")
+def explanation_history(
+    limit: int = 50,
+    agent: str = "",
+    _auth: None = Depends(require_auth),
+):
+    """Return recent XAI explanations, optionally filtered by agent.
+
+    Query params:
+      limit  – max number of results (default 50, max 200)
+      agent  – filter to a specific agent (optional)
+    """
+    limit = max(1, min(limit, 200))
+    engine = _get_explain_engine()
+    if engine is None:
+        return JSONResponse({"explanations": []})
+    if agent:
+        if not _SAFE_AGENT_ID_PAT.match(agent):
+            raise HTTPException(400, "Invalid agent name")
+        items = engine.recent_for_agent(agent, limit=limit)
+    else:
+        items = engine.recent(limit=limit)
+    return JSONResponse({"explanations": items})
 
 
 if __name__ == "__main__":
