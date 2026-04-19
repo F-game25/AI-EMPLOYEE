@@ -28,6 +28,7 @@ export function Sidebar() {
           key={n.to}
           to={n.to}
           end={n.to === '/'}
+          className={({ isActive }) => isActive ? 'nav-active' : ''}
           style={({ isActive }) => ({
             display: 'flex',
             alignItems: 'center',
@@ -41,7 +42,6 @@ export function Sidebar() {
             background: isActive ? 'rgba(212,175,55,0.06)' : 'transparent',
             transition: 'all 0.2s ease',
           })}
-          {...({ 'data-active': undefined } as Record<string, string | undefined>)}
         >
           <span style={{ fontSize: 15, width: 20, textAlign: 'center' }}>{n.icon}</span>
           <span className="nav-label">{n.label}</span>

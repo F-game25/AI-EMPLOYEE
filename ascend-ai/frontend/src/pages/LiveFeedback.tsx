@@ -57,7 +57,7 @@ export function LiveFeedback() {
                     background: '#111',
                     border: '1px solid rgba(205,127,50,0.3)',
                     borderRadius: 6,
-                    fontFamily: 'JetBrains Mono',
+                    fontFamily: 'SF Mono, JetBrains Mono, monospace',
                     fontSize: 10,
                     color: '#CD7F32',
                   }}

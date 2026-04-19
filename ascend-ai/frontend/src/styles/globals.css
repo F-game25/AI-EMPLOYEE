@@ -123,7 +123,7 @@ html, body, #root {
     min-width: 0;
     text-align: center;
   }
-  .app-layout .sidebar a[data-active="true"] {
+  .app-layout .sidebar a.nav-active {
     border-top-color: var(--gold);
   }
   .app-layout .main-content {
