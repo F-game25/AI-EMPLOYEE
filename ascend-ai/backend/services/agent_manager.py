@@ -8,20 +8,13 @@ import asyncio
 import os
 
 from services.mock_layer import get_mock_agents
-from services.process_wrapper import get_pid, start_bot, stop_bot
+from services.process_wrapper import BOT_START_CMDS, get_pid, start_bot, stop_bot
 
 AI_EMPLOYEE_DIR = os.path.expanduser("~/.ai-employee")
 
 _agent_statuses: dict[str, dict] = {}
 
-ALL_BOTS = [
-    "task-orchestrator", "company-builder", "hr-manager", "finance-wizard",
-    "brand-strategist", "growth-hacker", "project-manager", "lead-hunter",
-    "content-master", "social-guru", "intel-agent", "email-ninja",
-    "support-bot", "data-analyst", "creative-studio", "web-sales",
-    "skills-manager", "polymarket-trader", "mirofish-researcher", "discovery",
-    "problem-solver", "problem-solver-ui",
-]
+ALL_BOTS = list(BOT_START_CMDS.keys())
 
 
 async def startup():

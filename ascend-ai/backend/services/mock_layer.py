@@ -48,7 +48,7 @@ def get_mock_system_stats():
 
 def get_mock_chat_response():
     return (
-        "ASCEND AI is initialising. Some agents are currently offline. "
+        "ASCEND AI is initializing. Some agents are currently offline. "
         "Use the Doctor page to run diagnostics."
     )
 
