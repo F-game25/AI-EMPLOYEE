@@ -1361,6 +1361,18 @@ def _get_feedback_store():
         return None
 
 
+def _get_governance_digest():
+    """Return the GovernanceDigest singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.governance_digest import get_governance_digest as _ggd  # type: ignore
+        return _ggd()
+    except Exception:
+        return None
+
+
 def _verify_any_token(token_str: str) -> bool:
     """Return True if the token is valid using the configured AuthManager."""
     return _decode_any_token(token_str) is not None
@@ -24923,6 +24935,54 @@ def get_feedback_for_output(output_id: str, _auth: None = Depends(require_auth))
         raise HTTPException(503, "Feedback store unavailable")
     entries = store.get_for_output(output_id)
     return JSONResponse({"ok": True, "output_id": output_id, "entries": [e.to_dict() for e in entries]})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Governance Digest API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/governance/digest")
+async def generate_governance_digest(payload: dict = None, _auth: None = Depends(require_auth)):
+    """Generate a fresh governance digest for the requested time window.
+
+    Body (all fields optional)::
+
+        {
+          "window_days": 7    // look-back window in days (default 7)
+        }
+
+    Returns the full digest including the Markdown report.
+    """
+    gd = _get_governance_digest()
+    if gd is None:
+        raise HTTPException(503, "Governance digest unavailable")
+    body = payload or {}
+    window_days = None
+    if "window_days" in body:
+        try:
+            window_days = max(1, min(int(body["window_days"]), 365))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "window_days must be an integer")
+
+    from starlette.concurrency import run_in_threadpool as _rtp  # noqa: PLC0415
+
+    digest = await _rtp(lambda: gd.run(window_days=window_days))
+    return JSONResponse({"ok": True, "digest": digest})
+
+
+@app.get("/api/governance/digest/latest")
+def get_latest_governance_digest(limit: int = 5, _auth: None = Depends(require_auth)):
+    """Return the *limit* most recent stored digests (newest first).
+
+    Digests are persisted (without Markdown) to ``state/governance_digests.jsonl``
+    after each :func:`generate_governance_digest` call.
+    """
+    gd = _get_governance_digest()
+    if gd is None:
+        raise HTTPException(503, "Governance digest unavailable")
+    limit = max(1, min(limit, 100))
+    digests = gd.load_recent(limit=limit)
+    return JSONResponse({"ok": True, "digests": digests})
 
 
 if __name__ == "__main__":
