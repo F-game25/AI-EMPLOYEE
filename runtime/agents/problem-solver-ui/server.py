@@ -1349,6 +1349,18 @@ def _get_lifecycle_manager():
         return None
 
 
+def _get_feedback_store():
+    """Return the UserFeedbackStore singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.user_feedback_store import get_feedback_store as _gfs  # type: ignore
+        return _gfs()
+    except Exception:
+        return None
+
+
 def _verify_any_token(token_str: str) -> bool:
     """Return True if the token is valid using the configured AuthManager."""
     return _decode_any_token(token_str) is not None
@@ -24805,6 +24817,112 @@ def update_lifecycle_ttl(store_id: str, payload: dict, _auth: None = Depends(req
     if not updated:
         raise HTTPException(404, f"Store '{store_id}' not found")
     return JSONResponse({"ok": True, "store_id": store_id, "ttl_days": days})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# User Feedback API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/feedback")
+async def submit_feedback(payload: dict, _auth: None = Depends(require_auth)):
+    """Submit a thumbs-up or thumbs-down rating for an agent output.
+
+    Body::
+
+        {
+          "output_id":  "resp-abc123",      // required
+          "rating":     "up" | "down",      // required
+          "agent_id":   "company-builder",  // optional
+          "text":       "Great answer!",    // optional
+          "memory_ids": ["m-1", "m-2"],     // optional
+          "meta":       {}                  // optional
+        }
+
+    Returns the persisted :class:`~core.user_feedback_store.FeedbackEntry`.
+    """
+    store = _get_feedback_store()
+    if store is None:
+        raise HTTPException(503, "Feedback store unavailable")
+
+    body         = payload or {}
+    output_id    = str(body.get("output_id", "")).strip()
+    rating_raw   = str(body.get("rating", "")).strip().lower()
+    agent_id     = str(body.get("agent_id", "")).strip()
+    text         = str(body.get("text", "")).strip()
+    memory_ids   = body.get("memory_ids") or []
+    meta         = body.get("meta") or {}
+
+    if not output_id:
+        raise HTTPException(400, "output_id is required")
+    if rating_raw not in ("up", "down"):
+        raise HTTPException(400, "rating must be 'up' or 'down'")
+    if not isinstance(memory_ids, list):
+        raise HTTPException(400, "memory_ids must be a list")
+
+    actor = str((body.get("actor") or _DEFAULT_USER)).strip() or _DEFAULT_USER
+
+    from starlette.concurrency import run_in_threadpool as _rtp  # noqa: PLC0415
+
+    def _submit():
+        return store.submit(
+            output_id  = output_id,
+            rating     = rating_raw,   # type: ignore[arg-type]
+            agent_id   = agent_id,
+            actor      = actor,
+            text       = text,
+            memory_ids = [str(m) for m in memory_ids[:50]],
+            meta       = dict(meta) if isinstance(meta, dict) else {},
+        )
+
+    entry = await _rtp(_submit)
+    return JSONResponse({"ok": True, "feedback": entry.to_dict()})
+
+
+@app.get("/api/feedback/summary")
+def get_feedback_summary(_auth: None = Depends(require_auth)):
+    """Return aggregate feedback statistics across all agents.
+
+    Response shape::
+
+        {
+          "total":        42,
+          "thumbs_up":    30,
+          "thumbs_down":  12,
+          "avg_reward":   0.43,
+          "positive_rate": 0.71,
+          "by_agent": {
+            "company-builder": {...},
+            ...
+          }
+        }
+    """
+    store = _get_feedback_store()
+    if store is None:
+        raise HTTPException(503, "Feedback store unavailable")
+    return JSONResponse(store.summary())
+
+
+@app.get("/api/feedback/recent")
+def get_feedback_recent(limit: int = 50, _auth: None = Depends(require_auth)):
+    """Return the most recent feedback entries (newest first)."""
+    store = _get_feedback_store()
+    if store is None:
+        raise HTTPException(503, "Feedback store unavailable")
+    limit = max(1, min(limit, 500))
+    entries = store.list_recent(limit=limit)
+    return JSONResponse({"ok": True, "entries": [e.to_dict() for e in entries]})
+
+
+@app.get("/api/feedback/{output_id}")
+def get_feedback_for_output(output_id: str, _auth: None = Depends(require_auth)):
+    """Return all feedback entries for a specific output ID."""
+    if not re.match(r'^[A-Za-z0-9_\-]{1,128}$', output_id):
+        raise HTTPException(400, "Invalid output_id")
+    store = _get_feedback_store()
+    if store is None:
+        raise HTTPException(503, "Feedback store unavailable")
+    entries = store.get_for_output(output_id)
+    return JSONResponse({"ok": True, "output_id": output_id, "entries": [e.to_dict() for e in entries]})
 
 
 if __name__ == "__main__":
