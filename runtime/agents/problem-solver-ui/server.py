@@ -1045,9 +1045,12 @@ def _generate_llm_response(
     )
 
   # ── Circuit breaker for this LLM provider ───────────────────────────────────
+  # ── Circuit breaker + distributed tracing for this LLM call ────────────────
   _cb_registry = _get_circuit_registry()
   _cb_name = f"llm:{provider}"
   _cb = _cb_registry.get(_cb_name) if _cb_registry is not None else None
+
+  _dt_llm = _get_distributed_tracer()
 
   system_prompt = _build_llm_system_prompt(message, routed_agent, mode, user_id=user_id)
   try:
@@ -1068,9 +1071,19 @@ def _generate_llm_response(
         ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
         return _call_ollama_chat(message, system_prompt, model, ollama_host)
 
+    def _do_llm_call_with_trace():
+      if _dt_llm is not None:
+        with _dt_llm.span(
+            f"llm_call:{provider}",
+            kind=_get_span_kind_llm(),
+            attributes={"provider": provider, "model": model or "", "agent": routed_agent},
+        ):
+          return _do_llm_call()
+      return _do_llm_call()
+
     if _cb is not None:
       try:
-        answer = _cb.call(_do_llm_call)
+        answer = _cb.call(_do_llm_call_with_trace)
       except Exception as _cb_exc:
         _cb_open_msg = getattr(_cb_exc, "reset_in", None)
         if _cb_open_msg is not None:
@@ -1082,7 +1095,7 @@ def _generate_llm_response(
           )
         raise
     else:
-      answer = _do_llm_call()
+      answer = _do_llm_call_with_trace()
   except urllib.error.HTTPError as exc:
     if _llm_auth_failed(exc):
       return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
@@ -1301,6 +1314,27 @@ def _get_adversarial_filter():
         return _gaf()
     except Exception:
         return None
+
+
+def _get_distributed_tracer():
+    """Return the DistributedTracer singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.distributed_tracing import get_distributed_tracer as _gdt  # type: ignore
+        return _gdt()
+    except Exception:
+        return None
+
+
+def _get_span_kind_llm():
+    """Return SpanKind.LLM if distributed_tracing is available, else a string fallback."""
+    try:
+        from core.distributed_tracing import SpanKind  # type: ignore
+        return SpanKind.LLM
+    except Exception:
+        return "llm"
 
 
 def _verify_any_token(token_str: str) -> bool:
@@ -17849,6 +17883,22 @@ async def post_chat(payload: dict, request: Request):
             pass
 
     # Run handle_command in a thread pool to avoid blocking the async event loop
+    # ── Distributed tracing — start trace before entering the thread pool ─────
+    _dt = _get_distributed_tracer()
+    _trace_id = ""
+    if _dt is not None:
+        try:
+            _trace_id = _dt.start_trace(
+                "chat_request",
+                attributes={
+                    "user_id":     user_id,
+                    "model_route": model_route or "",
+                    "message_len": len(message),
+                },
+            )
+        except Exception as _dt_exc:
+            logger.debug("distributed_tracer.start_trace error (non-fatal): %s", _dt_exc)
+
     response = await run_in_threadpool(
         handle_command, message, model_route=model_route, user_id=user_id
     )
@@ -17885,6 +17935,29 @@ async def post_chat(payload: dict, request: Request):
             # Guard memory writes with the memory circuit breaker
             _mem_registry = _get_circuit_registry()
             _mem_cb = _mem_registry.get("memory") if _mem_registry is not None else None
+            # Wrap the actual exchange call with a memory span for distributed tracing
+            _dt_mem = _get_distributed_tracer()
+
+            async def _run_exchange():
+                if _dt_mem is not None:
+                    try:
+                        from core.distributed_tracing import SpanKind  # type: ignore
+                        with _dt_mem.span(
+                            "memory_write",
+                            kind=SpanKind.MEMORY,
+                            attributes={"agent": routed_agent, "user_id": user_id},
+                        ):
+                            return await run_in_threadpool(
+                                intel.on_exchange,
+                                user_id, message, response, routed_agent, mode
+                            )
+                    except Exception:
+                        pass
+                return await run_in_threadpool(
+                    intel.on_exchange,
+                    user_id, message, response, routed_agent, mode
+                )
+
             if _mem_cb is not None:
                 _mem_cb.call(
                     lambda: run_in_threadpool(
@@ -17893,10 +17966,7 @@ async def post_chat(payload: dict, request: Request):
                     )
                 )
             else:
-                await run_in_threadpool(
-                    intel.on_exchange,
-                    user_id, message, response, routed_agent, mode
-                )
+                await _run_exchange()
         except Exception as exc:
             logger.debug("IntelligenceCore.on_exchange error: %s", exc)
 
@@ -17931,7 +18001,21 @@ async def post_chat(payload: dict, request: Request):
             "confidence": _explain_dict.get("confidence"),
             "confidence_label": _explain_dict.get("confidence_label"),
         }
-    return JSONResponse(_resp_payload)
+
+    # ── Finish trace and embed trace_id in response ───────────────────────────
+    if _trace_id:
+        _resp_payload["trace_id"] = _trace_id
+        if _dt is not None:
+            try:
+                _dt.finish_trace(_trace_id)
+            except Exception:
+                pass
+
+    _resp_headers: dict[str, str] = {}
+    if _trace_id:
+        _resp_headers["X-Trace-ID"] = _trace_id
+
+    return JSONResponse(_resp_payload, headers=_resp_headers or None)
 
 
 @app.post("/chat")
@@ -24587,6 +24671,40 @@ def reset_circuit_breaker(name: str, _auth: None = Depends(require_auth)):
         raise HTTPException(503, "Circuit breaker module unavailable")
     registry.get(name).reset()
     return JSONResponse({"ok": True, "name": name, "state": "closed"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Distributed Tracing API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/traces")
+def list_traces(_auth: None = Depends(require_auth)):
+    """Return a summary list of the most recent traces (no span details).
+
+    Useful for monitoring dashboards and quick health checks.
+    """
+    tracer = _get_distributed_tracer()
+    if tracer is None:
+        raise HTTPException(503, "Distributed tracing module unavailable")
+    return JSONResponse({"traces": tracer.list_traces(limit=100)})
+
+
+@app.get("/api/traces/{trace_id}")
+def get_trace(trace_id: str, _auth: None = Depends(require_auth)):
+    """Return the full trace tree for a specific trace_id.
+
+    The tree includes every span — orchestrator, agent routing, LLM call,
+    and memory write — with parent_span_id links for reconstruction.
+    """
+    if not re.match(r'^trace-[a-fA-F0-9]{32}$', trace_id):
+        raise HTTPException(400, "Invalid trace_id format")
+    tracer = _get_distributed_tracer()
+    if tracer is None:
+        raise HTTPException(503, "Distributed tracing module unavailable")
+    tree = tracer.get_trace(trace_id)
+    if tree is None:
+        raise HTTPException(404, f"Trace '{trace_id}' not found")
+    return JSONResponse(tree)
 
 
 if __name__ == "__main__":

@@ -441,7 +441,7 @@ class TestServerRobustnessIntegration:
 
     def test_circuit_breaker_in_generate_llm_response(self):
         src = self._src()
-        assert "_cb.call(_do_llm_call)" in src
+        assert "_cb.call(_do_llm_call_with_trace)" in src
 
     def test_memory_circuit_breaker_around_on_exchange(self):
         src = self._src()
