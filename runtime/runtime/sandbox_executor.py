@@ -206,10 +206,11 @@ class SandboxExecutor:
         # 1. Syntax check
         try:
             tree = ast.parse(code, filename=module_name)
-        except SyntaxError as exc:
+        except SyntaxError:
+            logger.exception("Syntax validation failed for sandbox module '%s'", module_name)
             return self._result(
                 safe=False,
-                errors=[f"SyntaxError: {exc}"],
+                errors=["SyntaxError: invalid Python syntax."],
                 warnings=[],
                 exports=[],
                 started=started,
@@ -260,8 +261,9 @@ class SandboxExecutor:
             def _run() -> None:
                 try:
                     exec(bytecode, namespace)  # noqa: S102
-                except Exception as exc:  # noqa: BLE001
-                    exec_error.append(str(exc))
+                except Exception:  # noqa: BLE001
+                    logger.exception("Sandbox runtime execution failed for module '%s'", module_name)
+                    exec_error.append("sandbox runtime failure")
 
             t = threading.Thread(target=_run, daemon=True)
             t.start()
@@ -286,8 +288,9 @@ class SandboxExecutor:
                     exports=[],
                     started=started,
                 )
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"Compile error: {exc}")
+        except Exception:  # noqa: BLE001
+            logger.exception("Sandbox compile step failed for module '%s'", module_name)
+            errors.append("Compile error: unable to compile module.")
             return self._result(
                 safe=False,
                 errors=errors,
