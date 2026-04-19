@@ -1852,6 +1852,7 @@ app.post('/api/forge/reject/:id', (req, res) => {
 // ── Learning Ladder Builder API ───────────────────────────────────────────────
 
 const learningLadder = require('./core/learning_ladder');
+const agentLearningProfile = require('./core/agent_learning_profile');
 
 // POST /api/learning-ladder/build  { topic }
 app.post('/api/learning-ladder/build', (req, res) => {
@@ -1908,6 +1909,83 @@ app.get('/api/learning-ladder/all', (req, res) => {
     const topics = learningLadder.getAllTopics();
     const metrics = learningLadder.getMetrics();
     res.json({ ok: true, topics, metrics });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Agent Learning Profile API ────────────────────────────────────────────────
+
+// POST /api/agents/:agent_id/ladder/assign  { topic }
+app.post('/api/agents/:agent_id/ladder/assign', (req, res) => {
+  const agentId = String(req.params.agent_id || '').trim();
+  const topic = String((req.body || {}).topic || '').trim();
+  if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
+  if (!topic) return res.status(400).json({ ok: false, error: 'topic is required' });
+  try {
+    const result = agentLearningProfile.assignLadder(agentId, topic);
+    addActivity(`[LEARNING] Ladder '${topic}' assigned to agent ${agentId}`, 'learning');
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/agents/:agent_id/ladder/advance  { level, success, milestone_output, score, notes }
+app.post('/api/agents/:agent_id/ladder/advance', (req, res) => {
+  const agentId = String(req.params.agent_id || '').trim();
+  const body = req.body || {};
+  const level = parseInt(body.level, 10);
+  if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
+  if (!level || level < 1 || level > 5) return res.status(400).json({ ok: false, error: 'level must be 1–5' });
+  try {
+    const result = agentLearningProfile.advanceAgent({
+      agentId,
+      level,
+      success: Boolean(body.success),
+      score: parseFloat(body.score) || 0,
+      milestoneOutput: String(body.milestone_output || ''),
+      notes: String(body.notes || ''),
+    });
+    const status = result.learned ? `LEARNED (grade: ${result.grade})` : 'NOT LEARNED';
+    addActivity(`[LEARNING] Agent ${agentId} Level ${level} ${status}`, 'learning');
+    res.json({ ok: true, result });
+  } catch (err) {
+    const status = err.message.includes('no learning ladder') ? 404 : 500;
+    res.status(status).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/agents/:agent_id/grade
+app.get('/api/agents/:agent_id/grade', (req, res) => {
+  const agentId = String(req.params.agent_id || '').trim();
+  if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
+  try {
+    const grade = agentLearningProfile.getAgentGrade(agentId);
+    res.json({ ok: true, ...grade });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/agents/:agent_id/profile
+app.get('/api/agents/:agent_id/profile', (req, res) => {
+  const agentId = String(req.params.agent_id || '').trim();
+  if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
+  try {
+    const profile = agentLearningProfile.getAgentProfile(agentId);
+    res.json({ ok: true, ...profile });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/agents/grades
+app.get('/api/agents/grades', (req, res) => {
+  try {
+    const profiles = agentLearningProfile.getAllProfiles();
+    const metrics = agentLearningProfile.getMetrics();
+    res.json({ ok: true, profiles, metrics });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

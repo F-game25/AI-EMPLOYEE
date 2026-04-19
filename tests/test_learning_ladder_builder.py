@@ -41,7 +41,7 @@ def test_build_ladder_level_names(tmp_path, monkeypatch):
     ladder = builder.build_ladder("Machine learning")
 
     names = [lvl["name"] for lvl in ladder["levels"]]
-    assert names == ["Beginner", "Basic", "Intermediate", "Advanced", "Professional"]
+    assert names == ["Beginner", "Basic", "Mature", "Advanced", "Pro"]
 
 
 def test_build_ladder_interpolates_topic(tmp_path, monkeypatch):

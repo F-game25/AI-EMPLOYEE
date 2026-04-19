@@ -77,7 +77,7 @@ _LEVEL_TEMPLATES: dict[int, dict[str, Any]] = {
         ),
     },
     3: {
-        "name": "Intermediate",
+        "name": "Mature",
         "description": (
             "Solves moderately complex {topic} problems independently. "
             "Understands trade-offs and begins to apply best practices."
@@ -90,7 +90,7 @@ _LEVEL_TEMPLATES: dict[int, dict[str, Any]] = {
             "Test and validate {topic} implementations",
         ],
         "milestone": (
-            "Design, implement, and test a complete intermediate-level {topic} application "
+            "Design, implement, and test a complete mature-level {topic} application "
             "that integrates with at least one external tool or data source. "
             "Document the architecture and key decisions."
         ),
@@ -114,7 +114,7 @@ _LEVEL_TEMPLATES: dict[int, dict[str, Any]] = {
         ),
     },
     5: {
-        "name": "Professional",
+        "name": "Pro",
         "description": (
             "Expert-level mastery of {topic}. Can innovate, define standards, lead teams, "
             "and solve novel problems autonomously in {topic}."
@@ -137,9 +137,9 @@ _LEVEL_TEMPLATES: dict[int, dict[str, Any]] = {
 _LEVEL_NAMES = {
     1: "Beginner",
     2: "Basic",
-    3: "Intermediate",
+    3: "Mature",
     4: "Advanced",
-    5: "Professional",
+    5: "Pro",
 }
 
 # ── Utilities ──────────────────────────────────────────────────────────────────

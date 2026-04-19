@@ -22,9 +22,9 @@ const MAX_HISTORY_PER_LEVEL = 50;
 const LEVEL_NAMES = {
   1: 'Beginner',
   2: 'Basic',
-  3: 'Intermediate',
+  3: 'Mature',
   4: 'Advanced',
-  5: 'Professional',
+  5: 'Pro',
 };
 
 const LEVEL_TEMPLATES = {
@@ -54,7 +54,7 @@ const LEVEL_TEMPLATES = {
       'Build a simple standalone {topic} project from scratch (no tutorial) that solves a basic real-world problem. Include error handling and basic documentation.',
   },
   3: {
-    name: 'Intermediate',
+    name: 'Mature',
     description:
       'Solves moderately complex {topic} problems independently. Understands trade-offs and begins to apply best practices.',
     skills: [
@@ -65,7 +65,7 @@ const LEVEL_TEMPLATES = {
       'Test and validate {topic} implementations',
     ],
     milestone:
-      'Design, implement, and test a complete intermediate-level {topic} application that integrates with at least one external tool or data source. Document the architecture and key decisions.',
+      'Design, implement, and test a complete mature-level {topic} application that integrates with at least one external tool or data source. Document the architecture and key decisions.',
   },
   4: {
     name: 'Advanced',
@@ -81,7 +81,7 @@ const LEVEL_TEMPLATES = {
       'Architect and deploy a production-ready {topic} solution that handles real-world constraints (scale, security, reliability). Write a technical design document explaining key decisions and trade-offs.',
   },
   5: {
-    name: 'Professional',
+    name: 'Pro',
     description:
       'Expert-level mastery of {topic}. Can innovate, define standards, lead teams, and solve novel problems autonomously in {topic}.',
     skills: [

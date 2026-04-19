@@ -19,6 +19,178 @@ const STATUS_COLORS = {
   completed: 'var(--success)',
 }
 
+const GRADE_COLORS = {
+  Ungraded: 'var(--text-muted)',
+  Beginner: '#6ea8fe',
+  Basic: '#52d9b2',
+  Mature: '#f7c948',
+  Advanced: '#e07b39',
+  Pro: 'var(--gold)',
+}
+
+// ── Agent Assignment Panel ─────────────────────────────────────────────────────
+
+function AgentAssignPanel({ currentTopic, onAssigned }) {
+  const [agentId, setAgentId] = useState('')
+  const [assignTopic, setAssignTopic] = useState(currentTopic || '')
+  const [submitting, setSubmitting] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const [profiles, setProfiles] = useState([])
+
+  useEffect(() => {
+    setAssignTopic(currentTopic || '')
+  }, [currentTopic])
+
+  const fetchProfiles = useCallback(async () => {
+    try {
+      const res = await fetch(`${BASE}/api/agents/grades`)
+      const data = await res.json()
+      if (data.ok) setProfiles(data.profiles || [])
+    } catch (_) {}
+  }, [])
+
+  useEffect(() => { fetchProfiles() }, [fetchProfiles])
+
+  const handleAssign = useCallback(async () => {
+    const aid = agentId.trim()
+    const top = assignTopic.trim()
+    if (!aid || !top) return
+    setSubmitting(true)
+    setMsg('')
+    setErr('')
+    try {
+      const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(aid)}/ladder/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic: top }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setMsg(`Ladder '${top}' assigned to ${aid} — grade: ${data.grade}`)
+        setAgentId('')
+        await fetchProfiles()
+        onAssigned && onAssigned()
+      } else {
+        setErr(data.error || 'Failed to assign')
+      }
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }, [agentId, assignTopic, fetchProfiles, onAssigned])
+
+  return (
+    <div className="ds-card" style={{ padding: 'var(--space-4)' }}>
+      <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 'var(--space-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        Assign to Agent
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+        <input
+          value={agentId}
+          onChange={(e) => setAgentId(e.target.value)}
+          placeholder="Agent ID (e.g. lead-hunter)"
+          style={{
+            background: 'var(--bg-base)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            padding: 'var(--space-2) var(--space-3)',
+            color: 'var(--text-primary)',
+            fontSize: '12px',
+            outline: 'none',
+          }}
+        />
+        <input
+          value={assignTopic}
+          onChange={(e) => setAssignTopic(e.target.value)}
+          placeholder="Topic"
+          style={{
+            background: 'var(--bg-base)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            padding: 'var(--space-2) var(--space-3)',
+            color: 'var(--text-primary)',
+            fontSize: '12px',
+            outline: 'none',
+          }}
+        />
+        <button
+          className="btn-primary"
+          style={{ fontSize: '12px' }}
+          disabled={submitting || !agentId.trim() || !assignTopic.trim()}
+          onClick={handleAssign}
+        >
+          {submitting ? 'Assigning…' : 'Assign Ladder'}
+        </button>
+      </div>
+
+      {(msg || err) && (
+        <div style={{
+          fontSize: '11px',
+          color: err ? 'var(--error)' : 'var(--success)',
+          marginBottom: 'var(--space-3)',
+        }}>
+          {err || msg}
+        </div>
+      )}
+
+      {/* Agent grade list */}
+      {profiles.length > 0 && (
+        <div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: 'var(--space-2)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
+            Graded Agents
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '240px', overflowY: 'auto' }}>
+            {profiles.map((p) => (
+              <div key={p.agent_id} style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: 'var(--space-2) var(--space-3)',
+                background: 'var(--bg-base)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '12px',
+              }}>
+                <div>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{p.agent_id}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginTop: '1px' }}>{p.topic}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <div style={{ display: 'flex', gap: '2px' }}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <span key={n} style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '1px',
+                        background: n <= (p.levels_completed || 0) ? GRADE_COLORS[p.grade] || 'var(--success)' : 'var(--border-subtle)',
+                      }} />
+                    ))}
+                  </div>
+                  <span style={{
+                    fontSize: '10px',
+                    padding: '2px 6px',
+                    borderRadius: '8px',
+                    background: `${GRADE_COLORS[p.grade] || 'var(--text-muted)'}18`,
+                    color: GRADE_COLORS[p.grade] || 'var(--text-muted)',
+                    border: `1px solid ${GRADE_COLORS[p.grade] || 'var(--text-muted)'}30`,
+                    fontWeight: 600,
+                  }}>
+                    {p.grade}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Level Card ────────────────────────────────────────────────────────────────
+
 function LevelCard({ levelData, progressRec, onComplete, topic, isNext, disabled }) {
   const [showComplete, setShowComplete] = useState(false)
   const [output, setOutput] = useState('')
@@ -269,6 +441,8 @@ function LevelCard({ levelData, progressRec, onComplete, topic, isNext, disabled
   )
 }
 
+// ── Topic row ─────────────────────────────────────────────────────────────────
+
 function TopicRow({ item, onSelect, isActive }) {
   return (
     <button
@@ -309,6 +483,8 @@ function TopicRow({ item, onSelect, isActive }) {
   )
 }
 
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function LearningLadderPage() {
   const [topic, setTopic] = useState('')
   const [ladder, setLadder] = useState(null)
@@ -328,14 +504,10 @@ export default function LearningLadderPage() {
         setAllTopics(data.topics || [])
         setMetrics(data.metrics || null)
       }
-    } catch (_) {
-      // non-fatal
-    }
+    } catch (_) {}
   }, [])
 
-  useEffect(() => {
-    fetchAll()
-  }, [fetchAll])
+  useEffect(() => { fetchAll() }, [fetchAll])
 
   const fetchProgress = useCallback(async (t) => {
     if (!t) return
@@ -347,9 +519,7 @@ export default function LearningLadderPage() {
         setProgress(data.progress || {})
         setNextLevel(data.next_level)
       }
-    } catch (_) {
-      // non-fatal
-    }
+    } catch (_) {}
   }, [])
 
   const handleBuild = useCallback(async () => {
@@ -405,7 +575,6 @@ export default function LearningLadderPage() {
             ? `✓ Level ${r.level} marked as LEARNED (score: ${(r.best_score * 100).toFixed(0)}%). ${r.adaptation?.reason || ''}`
             : `✕ Level ${r.level} NOT LEARNED — Anti-Illusion Protocol active. ${r.adaptation?.reason || ''}`
         )
-        // Refresh progress
         await fetchProgress(payload.topic)
         await fetchAll()
       } else {
@@ -420,7 +589,7 @@ export default function LearningLadderPage() {
 
   return (
     <div className="page-enter">
-      <PageHeader title="Learning Ladder" subtitle="Structured 5-level progression — execution-first learning">
+      <PageHeader title="Learning Ladder" subtitle="Structured 5-level progression — Beginner · Basic · Mature · Advanced · Pro">
         {metrics && (
           <div style={{ display: 'flex', gap: 'var(--space-4)', fontSize: '12px', color: 'var(--text-muted)' }}>
             <span>{metrics.total_topics} topics</span>
@@ -430,12 +599,7 @@ export default function LearningLadderPage() {
       </PageHeader>
 
       {/* Build input */}
-      <div style={{
-        display: 'flex',
-        gap: 'var(--space-2)',
-        marginBottom: 'var(--space-4)',
-        flexWrap: 'wrap',
-      }}>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
         <input
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
@@ -480,8 +644,8 @@ export default function LearningLadderPage() {
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: allTopics.length > 0 ? '220px 1fr' : '1fr',
-        gap: 'var(--space-5)',
+        gridTemplateColumns: allTopics.length > 0 ? '220px 1fr 220px' : '1fr 220px',
+        gap: 'var(--space-4)',
         alignItems: 'start',
       }}>
         {/* Topic sidebar */}
@@ -534,9 +698,9 @@ export default function LearningLadderPage() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
                 {ladder.levels.map((lvl) => {
-                  const prevLearned = lvl.level === 1 || (progress[String(lvl.level - 1)] || {}).learned
+                  const isPreviousLevelLearned = lvl.level === 1 || (progress[String(lvl.level - 1)] || {}).learned
                   const isNext = lvl.level === nextLevel
-                  const blocked = !prevLearned && !(progress[String(lvl.level)] || {}).learned
+                  const blocked = !isPreviousLevelLearned && !(progress[String(lvl.level)] || {}).learned
                   return (
                     <LevelCard
                       key={lvl.level}
@@ -553,6 +717,12 @@ export default function LearningLadderPage() {
             </>
           )}
         </div>
+
+        {/* Agent assignment panel */}
+        <AgentAssignPanel
+          currentTopic={activeTopic}
+          onAssigned={fetchAll}
+        />
       </div>
     </div>
   )
