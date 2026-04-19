@@ -1,47 +1,55 @@
 """
 ASCEND AI — WebSocket Manager
-Manages connected WebSocket clients and broadcasts messages.
+Manages connected WebSocket clients, broadcasts system stats and agent status.
 """
 
+import asyncio
 import json
-from typing import Any
 
-from fastapi import WebSocket
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+router = APIRouter()
+_clients: list[WebSocket] = []
 
 
-class WebSocketManager:
-    """Keeps track of active WebSocket connections and broadcasts to all."""
-
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def broadcast(self, event: str, data: Any = None):
-        """Send a JSON message to every connected client."""
-        message = json.dumps({"event": event, "data": data})
-        dead: list[WebSocket] = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except Exception:
-                dead.append(connection)
-        for ws in dead:
-            self.disconnect(ws)
-
-    async def send_personal(self, websocket: WebSocket, event: str, data: Any = None):
-        """Send a JSON message to a single client."""
-        message = json.dumps({"event": event, "data": data})
+async def broadcast(message: dict):
+    """Send a JSON message to every connected WebSocket client."""
+    dead: list[WebSocket] = []
+    for ws in _clients:
         try:
-            await websocket.send_text(message)
+            await ws.send_json(message)
         except Exception:
-            self.disconnect(websocket)
+            dead.append(ws)
+    for ws in dead:
+        if ws in _clients:
+            _clients.remove(ws)
 
 
-manager = WebSocketManager()
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    _clients.append(websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # keep alive
+    except WebSocketDisconnect:
+        if websocket in _clients:
+            _clients.remove(websocket)
+
+
+async def stats_broadcast_loop():
+    """Push system stats to all connected clients every 2 seconds."""
+    from services.system_monitor import get_stats
+
+    while True:
+        await broadcast({"type": "system_stats", "data": get_stats()})
+        await asyncio.sleep(2)
+
+
+async def agents_broadcast_loop():
+    """Push agent status to all connected clients every 10 seconds."""
+    from services.agent_manager import get_all_statuses
+
+    while True:
+        await broadcast({"type": "agent_status", "data": get_all_statuses()})
+        await asyncio.sleep(10)

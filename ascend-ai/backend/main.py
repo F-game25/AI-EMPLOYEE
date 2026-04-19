@@ -8,12 +8,22 @@ import asyncio
 import os
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from services.mock_layer import get_mock_health
-from websocket_manager import manager
+from routers.agents import router as agents_router
+from routers.ascend_forge import router as forge_router
+from routers.blacklight import router as blacklight_router
+from routers.chat import router as chat_router
+from routers.doctor import router as doctor_router
+from routers.money_mode import router as money_router
+from routers.system import router as system_router
+from websocket_manager import (
+    agents_broadcast_loop,
+    router as ws_router,
+    stats_broadcast_loop,
+)
 
 app = FastAPI(
     title="ASCEND AI",
@@ -28,43 +38,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── API Routers (all under /api prefix) ──────────────────────────────
+app.include_router(agents_router, prefix="/api")
+app.include_router(chat_router, prefix="/api")
+app.include_router(system_router, prefix="/api")
+app.include_router(forge_router, prefix="/api")
+app.include_router(money_router, prefix="/api")
+app.include_router(blacklight_router, prefix="/api")
+app.include_router(doctor_router, prefix="/api")
 
-# ── Health endpoint ──────────────────────────────────────────────────
-@app.get("/api/health")
-async def health():
-    return get_mock_health()
-
-
-# ── WebSocket endpoint ───────────────────────────────────────────────
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_text()
-            # Echo back for now; routers will add real handlers in Part 2
-            await manager.send_personal(websocket, "echo", {"message": data})
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-
-
-# ── Routers (stubs — populated in Part 2) ────────────────────────────
-# from routers.agents import router as agents_router
-# from routers.chat import router as chat_router
-# from routers.system import router as system_router
-# from routers.ascend_forge import router as forge_router
-# from routers.money_mode import router as money_router
-# from routers.blacklight import router as blacklight_router
-# from routers.doctor import router as doctor_router
-#
-# app.include_router(agents_router, prefix="/api")
-# app.include_router(chat_router, prefix="/api")
-# app.include_router(system_router, prefix="/api")
-# app.include_router(forge_router, prefix="/api")
-# app.include_router(money_router, prefix="/api")
-# app.include_router(blacklight_router, prefix="/api")
-# app.include_router(doctor_router, prefix="/api")
-
+# ── WebSocket ────────────────────────────────────────────────────────
+app.include_router(ws_router)
 
 # ── Serve React build (LAST — after all API routes) ─────────────────
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -90,6 +74,22 @@ async def startup():
         await agent_startup()
     except Exception:
         pass  # Never crash if agents are broken
+
+    # Start WebSocket broadcast loops
+    try:
+        asyncio.create_task(stats_broadcast_loop())
+        asyncio.create_task(agents_broadcast_loop())
+    except Exception:
+        pass
+
+    # Start log streamer
+    try:
+        from services.log_streamer import tail_logs_forever
+        from websocket_manager import broadcast
+
+        asyncio.create_task(tail_logs_forever(broadcast))
+    except Exception:
+        pass
 
 
 # ── Entry point ──────────────────────────────────────────────────────
