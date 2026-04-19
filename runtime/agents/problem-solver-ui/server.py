@@ -1245,6 +1245,18 @@ def _get_explain_engine():
         return None
 
 
+def _get_schema_validator():
+    """Return the OutputValidationMiddleware singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.agent_output_schemas import get_schema_validator as _gsv  # type: ignore
+        return _gsv()
+    except Exception:
+        return None
+
+
 def _verify_any_token(token_str: str) -> bool:
     """Return True if the token is valid using the configured AuthManager."""
     return _decode_any_token(token_str) is not None
@@ -17777,6 +17789,25 @@ async def post_chat(payload: dict, request: Request):
     response = await run_in_threadpool(
         handle_command, message, model_route=model_route, user_id=user_id
     )
+
+    # ── Schema validation — before storing in memory or sending to UI ─────────
+    _routed_for_validation = route_to_agent(message)
+    _schema_validator = _get_schema_validator()
+    if _schema_validator is not None:
+        try:
+            _validated, _fallback = _schema_validator.validate_or_fallback(
+                _routed_for_validation,
+                response,
+                ts=now_iso(),
+                model=model_route or "",
+                user_id=user_id,
+            )
+            if _fallback:
+                # Validation failed — reject output and use safe fallback
+                response = _fallback
+        except Exception as _sv_exc:
+            logger.debug("schema_validator error (non-fatal): %s", _sv_exc)
+
     safe_response = _sanitize_for_log(response)
     resp_entry = {"ts": now_iso(), "type": "agent", "message": safe_response, "model_route": model_route}
     append_chatlog(resp_entry)
@@ -24404,6 +24435,55 @@ def explanation_history(
     else:
         items = engine.recent(limit=limit)
     return JSONResponse({"explanations": items})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Agent Output Schema API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/schema")
+def list_agent_schemas(_auth: None = Depends(require_auth)):
+    """Return a list of all registered agent IDs and their schema class names.
+
+    Useful for UI tooling to discover which agents have dedicated schemas.
+    """
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.agent_output_schemas import AGENT_SCHEMA_REGISTRY  # type: ignore
+        return JSONResponse({
+            "schemas": {
+                agent_id: schema_cls.__name__
+                for agent_id, schema_cls in sorted(AGENT_SCHEMA_REGISTRY.items())
+            }
+        })
+    except Exception as exc:
+        raise HTTPException(503, f"Schema registry unavailable: {exc}") from exc
+
+
+@app.get("/api/schema/{agent_id}")
+def get_agent_schema(agent_id: str, _auth: None = Depends(require_auth)):
+    """Return the full JSON Schema for a specific agent's output model.
+
+    This can be used by the UI, downstream consumers, and monitoring tools
+    to validate or describe what a given agent is expected to produce.
+    """
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent_id format")
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.agent_output_schemas import get_schema_for_agent  # type: ignore
+        schema_cls = get_schema_for_agent(agent_id)
+        return JSONResponse({
+            "agent_id": agent_id,
+            "schema_class": schema_cls.__name__,
+            "json_schema": schema_cls.model_json_schema(),
+        })
+    except Exception as exc:
+        raise HTTPException(503, f"Schema unavailable: {exc}") from exc
 
 
 if __name__ == "__main__":
