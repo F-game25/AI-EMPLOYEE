@@ -1044,23 +1044,45 @@ def _generate_llm_response(
       "or run Ollama locally: https://ollama.ai"
     )
 
+  # ── Circuit breaker for this LLM provider ───────────────────────────────────
+  _cb_registry = _get_circuit_registry()
+  _cb_name = f"llm:{provider}"
+  _cb = _cb_registry.get(_cb_name) if _cb_registry is not None else None
+
   system_prompt = _build_llm_system_prompt(message, routed_agent, mode, user_id=user_id)
   try:
-    if provider == "anthropic":
-      api_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
-      answer = _call_anthropic_chat(message, system_prompt, model, api_key)
-    elif provider == "openai":
-      api_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-      answer = _call_openai_chat(message, system_prompt, model, api_key)
-    elif provider == "groq":
-      api_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
-      answer = _call_groq_chat(message, system_prompt, model, api_key)
-    elif provider == "gemma":
-      ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-      answer = _call_gemma_chat(message, system_prompt, ollama_host)
+    def _do_llm_call():
+      if provider == "anthropic":
+        api_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+        return _call_anthropic_chat(message, system_prompt, model, api_key)
+      elif provider == "openai":
+        api_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+        return _call_openai_chat(message, system_prompt, model, api_key)
+      elif provider == "groq":
+        api_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+        return _call_groq_chat(message, system_prompt, model, api_key)
+      elif provider == "gemma":
+        ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+        return _call_gemma_chat(message, system_prompt, ollama_host)
+      else:
+        ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+        return _call_ollama_chat(message, system_prompt, model, ollama_host)
+
+    if _cb is not None:
+      try:
+        answer = _cb.call(_do_llm_call)
+      except Exception as _cb_exc:
+        _cb_open_msg = getattr(_cb_exc, "reset_in", None)
+        if _cb_open_msg is not None:
+          # Circuit is OPEN — fast fail with graceful degradation
+          logger.warning("Circuit breaker '%s' is OPEN — degrading gracefully", _cb_name)
+          return (
+            f"⚡ Service temporarily unavailable ({provider} is experiencing issues). "
+            "Please try again in a moment or switch to a different model route."
+          )
+        raise
     else:
-      ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-      answer = _call_ollama_chat(message, system_prompt, model, ollama_host)
+      answer = _do_llm_call()
   except urllib.error.HTTPError as exc:
     if _llm_auth_failed(exc):
       return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
@@ -1253,6 +1275,30 @@ def _get_schema_validator():
             sys.path.insert(0, str(_rdir))
         from core.agent_output_schemas import get_schema_validator as _gsv  # type: ignore
         return _gsv()
+    except Exception:
+        return None
+
+
+def _get_circuit_registry():
+    """Return the CircuitBreakerRegistry singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.circuit_breaker import get_circuit_registry as _gcr  # type: ignore
+        return _gcr()
+    except Exception:
+        return None
+
+
+def _get_adversarial_filter():
+    """Return the AdversarialFilter singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.adversarial_filter import get_adversarial_filter as _gaf  # type: ignore
+        return _gaf()
     except Exception:
         return None
 
@@ -17758,6 +17804,23 @@ async def post_chat(payload: dict, request: Request):
         message = raw_message[:10000].replace("\x00", "")
     message = _sanitize_for_log(message)
 
+    # ── Adversarial filter — before routing or any processing ─────────────────
+    _adv_filter = _get_adversarial_filter()
+    if _adv_filter is not None:
+        try:
+            _adv_assessment = _adv_filter.assess(message)
+            if _adv_assessment.blocked:
+                raise HTTPException(
+                    400,
+                    "Request rejected: potentially adversarial input detected. "
+                    f"Risk score: {_adv_assessment.risk_score:.2f}. "
+                    "Please rephrase your request.",
+                )
+        except HTTPException:
+            raise
+        except Exception as _adv_exc:
+            logger.debug("adversarial_filter error (non-fatal): %s", _adv_exc)
+
     entry = {"ts": now_iso(), "type": "user", "message": message, "model_route": model_route}
     append_chatlog(entry)
     await _ws_broadcast("chat:user", {"message": message, "model_route": model_route})
@@ -17819,10 +17882,21 @@ async def post_chat(payload: dict, request: Request):
             # Determine which agent handled the response
             routed_agent = route_to_agent(message)
             mode = _current_mode()
-            await run_in_threadpool(
-                intel.on_exchange,
-                user_id, message, response, routed_agent, mode
-            )
+            # Guard memory writes with the memory circuit breaker
+            _mem_registry = _get_circuit_registry()
+            _mem_cb = _mem_registry.get("memory") if _mem_registry is not None else None
+            if _mem_cb is not None:
+                _mem_cb.call(
+                    lambda: run_in_threadpool(
+                        intel.on_exchange,
+                        user_id, message, response, routed_agent, mode
+                    )
+                )
+            else:
+                await run_in_threadpool(
+                    intel.on_exchange,
+                    user_id, message, response, routed_agent, mode
+                )
         except Exception as exc:
             logger.debug("IntelligenceCore.on_exchange error: %s", exc)
 
@@ -24484,6 +24558,35 @@ def get_agent_schema(agent_id: str, _auth: None = Depends(require_auth)):
         })
     except Exception as exc:
         raise HTTPException(503, f"Schema unavailable: {exc}") from exc
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Circuit Breaker Status API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/circuit-breakers")
+def list_circuit_breakers(_auth: None = Depends(require_auth)):
+    """Return the current state of all registered circuit breakers.
+
+    Each entry reports the state (closed/open/half_open), recent failure
+    count, and how many seconds until an open breaker will probe again.
+    """
+    registry = _get_circuit_registry()
+    if registry is None:
+        raise HTTPException(503, "Circuit breaker module unavailable")
+    return JSONResponse({"circuit_breakers": registry.status_all()})
+
+
+@app.post("/api/circuit-breakers/{name}/reset")
+def reset_circuit_breaker(name: str, _auth: None = Depends(require_auth)):
+    """Manually reset a single circuit breaker back to CLOSED."""
+    if not re.match(r'^[a-zA-Z0-9_:.-]{1,64}$', name):
+        raise HTTPException(400, "Invalid circuit breaker name")
+    registry = _get_circuit_registry()
+    if registry is None:
+        raise HTTPException(503, "Circuit breaker module unavailable")
+    registry.get(name).reset()
+    return JSONResponse({"ok": True, "name": name, "state": "closed"})
 
 
 if __name__ == "__main__":
