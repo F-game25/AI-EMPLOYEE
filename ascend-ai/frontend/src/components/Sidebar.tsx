@@ -7,6 +7,8 @@ const NAV = [
   { to: '/blacklight', icon: '🔒', label: 'Blacklight' },
   { to: '/doctor', icon: '🩺', label: 'Doctor' },
   { to: '/live', icon: '📡', label: 'Live Feedback' },
+  { to: '/fairness', icon: '⚖', label: 'Fairness' },
+  { to: '/governance', icon: '🏛', label: 'Governance' },
   { to: '/settings', icon: '⚙', label: 'Settings' },
 ]
 

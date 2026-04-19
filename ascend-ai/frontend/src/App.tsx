@@ -12,6 +12,8 @@ import { BlacklightMode } from './pages/BlacklightMode'
 import { Doctor } from './pages/Doctor'
 import { LiveFeedback } from './pages/LiveFeedback'
 import { Settings } from './pages/Settings'
+import { FairnessDashboard } from './pages/FairnessDashboard'
+import { GovernanceDashboard } from './pages/GovernanceDashboard'
 import './styles/globals.css'
 
 function AppShell() {
@@ -43,6 +45,8 @@ function AppShell() {
             <Route path="/doctor" element={<Doctor />} />
             <Route path="/live" element={<LiveFeedback />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/fairness" element={<FairnessDashboard />} />
+            <Route path="/governance" element={<GovernanceDashboard />} />
           </Routes>
         </AnimatePresence>
       </main>

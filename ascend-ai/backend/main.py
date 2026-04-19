@@ -17,6 +17,8 @@ from routers.ascend_forge import router as forge_router
 from routers.blacklight import router as blacklight_router
 from routers.chat import router as chat_router
 from routers.doctor import router as doctor_router
+from routers.fairness import router as fairness_router
+from routers.governance import router as governance_router
 from routers.money_mode import router as money_router
 from routers.settings import router as settings_router
 from routers.system import router as system_router
@@ -48,6 +50,8 @@ app.include_router(money_router, prefix="/api")
 app.include_router(blacklight_router, prefix="/api")
 app.include_router(doctor_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
+app.include_router(fairness_router, prefix="/api")
+app.include_router(governance_router, prefix="/api")
 
 # ── WebSocket ────────────────────────────────────────────────────────
 app.include_router(ws_router)
