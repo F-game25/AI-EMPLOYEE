@@ -50,3 +50,7 @@ test_results/failures/*.png
 test_results/failures/*.log
 test_results/logs.txt
 test_results/system_report.json
+
+# ASCEND AI build output
+ascend-ai/backend/static/
+ascend-ai/frontend/node_modules/
