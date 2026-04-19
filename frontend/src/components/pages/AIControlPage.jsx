@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { useBrainStore } from '../../store/brainStore'
 import PageHeader from '../layout/PageHeader'
 import { API_URL } from '../../config/api'
 
@@ -290,6 +291,7 @@ export default function AIControlPage() {
   const brainInsights = useAppStore(s => s.brainInsights)
   const brainActivity = useAppStore(s => s.brainActivity)
   const nnStatus = useAppStore(s => s.nnStatus)
+  const addFromPrompt = useBrainStore(s => s.addFromPrompt)
 
   const [input, setInput] = useState('')
   const scrollRef = useRef(null)
@@ -323,6 +325,8 @@ export default function AIControlPage() {
     setInput('')
     addChatMessage({ role: 'user', content: text })
     setTyping(true)
+    // Add command as a node in the shared brain graph
+    addFromPrompt(text, 'task', 'automation')
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'chat', message: text }))
@@ -344,7 +348,7 @@ export default function AIControlPage() {
           setTyping(false)
         })
     }
-  }, [input, ws, addChatMessage, setTyping])
+  }, [input, ws, addChatMessage, setTyping, addFromPrompt])
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
