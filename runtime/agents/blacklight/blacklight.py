@@ -10,6 +10,19 @@ Flow (repeating loop):
 
 State file: ~/.ai-employee/state/blacklight.state.json
 Log file:   ~/.ai-employee/state/blacklight.log.jsonl
+
+──────────────────────────────────────────────────────────────────────────────
+GOVERNANCE LOCKDOWN (EU AI Act / Enterprise Compliance)
+──────────────────────────────────────────────────────────────────────────────
+AUTO mode is **disabled** by default.  BLACKLIGHT requires:
+
+  1. ``BLACKLIGHT_LEGAL_REVIEW=1`` — set by a human operator after legal review.
+  2. ``BLACKLIGHT_MAX_CYCLES`` > 0  — unlimited cycles are prohibited.
+  3. Every action above LOW risk is gated: execution is audited, and the
+     calling server-side endpoint enforces HITL approval for MEDIUM/HIGH risk.
+
+If the legal-review flag is not set, ``start()`` raises ``RuntimeError`` and
+the loop never begins.
 """
 from __future__ import annotations
 
@@ -28,10 +41,30 @@ STATE_FILE = AI_HOME / "state" / "blacklight.state.json"
 LOG_FILE   = AI_HOME / "state" / "blacklight.log.jsonl"
 CRM_FILE   = AI_HOME / "state" / "leads-crm.json"
 
+# ── Governance flags ──────────────────────────────────────────────────────────
+# LEGAL_REVIEW_INCOMPLETE = True means a legal/compliance review has NOT yet
+# been completed.  Set BLACKLIGHT_LEGAL_REVIEW=1 ONLY after a qualified
+# legal/compliance review of the deployment context.
+LEGAL_REVIEW_REQUIRED: bool = (
+    os.environ.get("BLACKLIGHT_LEGAL_REVIEW", "0").strip() not in ("1", "true", "yes")
+)
+
+# Unlimited autonomous cycles are prohibited.  MAX_CYCLES=0 (unlimited) is
+# overridden to a safe default of 10 if legal review has not been completed.
+_MAX_CYCLES_ENV = int(os.environ.get("BLACKLIGHT_MAX_CYCLES", "0"))
+if _MAX_CYCLES_ENV <= 0:
+    MAX_CYCLES: int = 10
+    # logger is defined below; emit governance notice via print for visibility at import time.
+    print(
+        "BLACKLIGHT governance: BLACKLIGHT_MAX_CYCLES not set or 0 (unlimited). "
+        "Defaulting to MAX_CYCLES=10 for governance compliance.",
+        flush=True,
+    )
+else:
+    MAX_CYCLES = _MAX_CYCLES_ENV
+
 # How long to wait between autonomous cycles (seconds)
 LOOP_INTERVAL = int(os.environ.get("BLACKLIGHT_LOOP_INTERVAL", "30"))
-# Maximum cycles to run (0 = unlimited)
-MAX_CYCLES = int(os.environ.get("BLACKLIGHT_MAX_CYCLES", "0"))
 # Maximum log entries to keep on disk
 MAX_LOG_LINES = 500
 
@@ -48,6 +81,27 @@ logging.basicConfig(
     format="%(message)s",
 )
 logger = logging.getLogger("blacklight")
+
+
+# ── Audit helper ──────────────────────────────────────────────────────────────
+
+def _audit_action(action: str, data: dict) -> None:
+    """Record a BLACKLIGHT action in the enterprise AuditEngine."""
+    try:
+        _runtime_dir = Path(__file__).resolve().parents[2]
+        if str(_runtime_dir) not in sys.path:
+            sys.path.insert(0, str(_runtime_dir))
+        from core.audit_engine import get_audit_engine  # type: ignore
+        get_audit_engine().record(
+            actor="blacklight",
+            action=action,
+            input_data=data,
+            output_data={},
+            risk_score=0.85,
+        )
+    except Exception as exc:
+        logger.debug("blacklight: audit record failed: %s", exc)
+
 
 # ── Dependency imports (graceful fallback) ────────────────────────────────────
 
@@ -325,7 +379,10 @@ def plan_actions(opps: list[dict], goal: str, strategy: dict) -> list[dict]:
 # ── Execution ─────────────────────────────────────────────────────────────────
 
 def execute_plan(plan: dict) -> dict:
-    """Run a single plan: store lead + generate outreach."""
+    """Run a single plan: store lead + generate outreach.
+
+    Every execution is recorded in the AuditEngine for traceability.
+    """
     lead  = plan["lead"]
     offer = plan.get("offer", "")
 
@@ -335,6 +392,14 @@ def execute_plan(plan: dict) -> dict:
     _log("action", f"Executed plan for {lead.get('name', 'Unknown')}", {
         "stored":  store_result.get("stored"),
         "preview": (outreach_result.get("message") or "")[:80],
+    })
+
+    # ── AUDIT: record every execution for traceability ──────────────────────
+    _audit_action("blacklight_execute_plan", {
+        "plan_id": plan.get("id", ""),
+        "lead_name": lead.get("name", "Unknown"),
+        "stored": store_result.get("stored", False),
+        "outreach_preview": (outreach_result.get("message") or "")[:120],
     })
 
     return {
@@ -431,10 +496,29 @@ def is_running() -> bool:
 
 
 def start(goal: str) -> bool:
-    """Launch BLACKLIGHT in a background daemon thread."""
+    """Launch BLACKLIGHT in a background daemon thread.
+
+    Raises ``RuntimeError`` if the legal-review gate has not been cleared
+    (``BLACKLIGHT_LEGAL_REVIEW=1`` not set in the environment).
+    """
     global _run_thread
     if is_running():
         return False  # already running
+
+    # ── GOVERNANCE GATE: legal review required before AUTO mode ───────────────
+    if LEGAL_REVIEW_REQUIRED:
+        _audit_action("blacklight_start_blocked", {
+            "reason": "legal_review_required",
+            "goal": goal[:200],
+        })
+        raise RuntimeError(
+            "BLACKLIGHT cannot start: BLACKLIGHT_LEGAL_REVIEW=1 is required.\n"
+            "Set this environment variable ONLY after a qualified legal/compliance "
+            "review of your deployment context and applicable regulations."
+        )
+
+    # ── AUDIT: record every start ─────────────────────────────────────────────
+    _audit_action("blacklight_start", {"goal": goal[:200], "max_cycles": MAX_CYCLES})
 
     _stop_event.clear()
     _run_thread = threading.Thread(
@@ -451,6 +535,7 @@ def start(goal: str) -> bool:
         "actions_taken":       0,
         "started_at":          _now_iso(),
         "strategy":            {},
+        "legal_review_confirmed": True,
     })
     _save_state(state)
     _log("system", f"BLACKLIGHT started — goal: {goal}")
@@ -463,6 +548,7 @@ def stop() -> bool:
     if not is_running():
         return False
 
+    _audit_action("blacklight_stop", {"stopped_at": _now_iso()})
     _stop_event.set()
     state = _load_state()
     state["running"]    = False

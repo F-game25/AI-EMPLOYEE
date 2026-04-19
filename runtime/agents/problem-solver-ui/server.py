@@ -1044,23 +1044,58 @@ def _generate_llm_response(
       "or run Ollama locally: https://ollama.ai"
     )
 
+  # ── Circuit breaker for this LLM provider ───────────────────────────────────
+  # ── Circuit breaker + distributed tracing for this LLM call ────────────────
+  _cb_registry = _get_circuit_registry()
+  _cb_name = f"llm:{provider}"
+  _cb = _cb_registry.get(_cb_name) if _cb_registry is not None else None
+
+  _dt_llm = _get_distributed_tracer()
+
   system_prompt = _build_llm_system_prompt(message, routed_agent, mode, user_id=user_id)
   try:
-    if provider == "anthropic":
-      api_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
-      answer = _call_anthropic_chat(message, system_prompt, model, api_key)
-    elif provider == "openai":
-      api_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-      answer = _call_openai_chat(message, system_prompt, model, api_key)
-    elif provider == "groq":
-      api_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
-      answer = _call_groq_chat(message, system_prompt, model, api_key)
-    elif provider == "gemma":
-      ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-      answer = _call_gemma_chat(message, system_prompt, ollama_host)
+    def _do_llm_call():
+      if provider == "anthropic":
+        api_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+        return _call_anthropic_chat(message, system_prompt, model, api_key)
+      elif provider == "openai":
+        api_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+        return _call_openai_chat(message, system_prompt, model, api_key)
+      elif provider == "groq":
+        api_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+        return _call_groq_chat(message, system_prompt, model, api_key)
+      elif provider == "gemma":
+        ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+        return _call_gemma_chat(message, system_prompt, ollama_host)
+      else:
+        ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+        return _call_ollama_chat(message, system_prompt, model, ollama_host)
+
+    def _do_llm_call_with_trace():
+      if _dt_llm is not None:
+        with _dt_llm.span(
+            f"llm_call:{provider}",
+            kind=_get_span_kind_llm(),
+            attributes={"provider": provider, "model": model or "", "agent": routed_agent},
+        ):
+          return _do_llm_call()
+      return _do_llm_call()
+
+    if _cb is not None:
+      try:
+        answer = _cb.call(_do_llm_call_with_trace)
+      except Exception as _cb_exc:
+        _cb_open_msg = getattr(_cb_exc, "reset_in", None)
+        if _cb_open_msg is not None:
+          # Circuit is OPEN — fast fail with graceful degradation
+          logger.warning("Circuit breaker '%s' is OPEN — degrading gracefully", _cb_name)
+          return (
+            f"⚡ Service temporarily unavailable ({provider} is experiencing issues). "
+            "Please try again in a moment or switch to a different model route."
+          )
+        raise
     else:
-      ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-      answer = _call_ollama_chat(message, system_prompt, model, ollama_host)
+      answer = _do_llm_call_with_trace()
   except urllib.error.HTTPError as exc:
     if _llm_auth_failed(exc):
       return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
@@ -1080,7 +1115,32 @@ def _generate_llm_response(
       "No model response was returned. Check your selected route credentials or model availability."
     )
 
-  return f"Agent: {routed_agent}\n\n{answer}"
+  result = f"Agent: {routed_agent}\n\n{answer}"
+  # ── Financial disclaimer — appended whenever a financial agent responds ────
+  if routed_agent in _FINANCIAL_AGENT_IDS:
+      result += _FINANCIAL_DISCLAIMER
+
+  # ── Explainability — generate structured explanation and embed its ID ───────
+  try:
+      _xai = _get_explain_engine()
+      if _xai is not None:
+          from core.explainability_layer import ExplainContext  # type: ignore
+          _exp = _xai.explain(ExplainContext(
+              agent=routed_agent,
+              action="generate_response",
+              message=message,
+              response=answer,
+              model=model or "",
+              user_id=user_id,
+          ))
+          # Embed explain_id as a hidden HTML comment so the chat endpoint
+          # can promote it to a structured JSON field without breaking
+          # plain-text consumers (the comment is invisible in markdown).
+          result += f"\n<!--xai:{_exp.explain_id}-->"
+  except Exception as _xai_exc:
+      logger.debug("explainability generation error (non-fatal): %s", _xai_exc)
+
+  return result
 
 _SENSITIVE_DETAIL_PAT = re.compile(
     r'(?i)(key|secret|token|password|passwd|pass|auth|credential|api_key)')
@@ -1131,21 +1191,186 @@ except ImportError:
 app = FastAPI(title="AI Employee Dashboard")
 
 # ── Optional endpoint authentication (REQUIRE_AUTH=1 enables enforcement) ──────
-# When REQUIRE_AUTH is not set (default), requests from localhost are allowed
-# without a token so the dashboard works out-of-the-box.  Set REQUIRE_AUTH=1
-# in ~/.ai-employee/.env to enforce JWT on all state-modifying endpoints.
-_REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "0").strip() in ("1", "true", "yes")
+# REQUIRE_AUTH defaults to "1" (enforced) for security.  Set REQUIRE_AUTH=0 in
+# ~/.ai-employee/.env ONLY for local development on a trusted machine.
+_REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "1").strip() in ("1", "true", "yes")
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 if not _REQUIRE_AUTH:
     print(
-        "\n⚠️  SECURITY WARNING: REQUIRE_AUTH is disabled (default).\n"
+        "\n⚠️  SECURITY WARNING: REQUIRE_AUTH is disabled (REQUIRE_AUTH=0).\n"
         "   All API endpoints — including task submission and automation control —\n"
         "   are accessible WITHOUT a token.\n"
-        "   Set REQUIRE_AUTH=1 in ~/.ai-employee/.env before exposing this server\n"
-        "   to a network or production environment.\n",
+        "   This is only safe for fully isolated local development.\n"
+        "   Do NOT use this setting in production or on any network-exposed server.\n",
         flush=True,
     )
+
+# ── Financial-agents safety gate ──────────────────────────────────────────────
+# Financial trading agents (turbo-quant, arbitrage-bot, polymarket-trader, etc.)
+# are DISABLED by default.  Set ENABLE_FINANCIAL_AGENTS=1 in
+# ~/.ai-employee/.env only after completing a jurisdiction-specific legal review.
+# Accepted values: 1, true, yes (case-insensitive).
+_ENABLE_FINANCIAL_AGENTS = os.environ.get("ENABLE_FINANCIAL_AGENTS", "0").strip() in ("1", "true", "yes")
+_FINANCIAL_AGENT_IDS: frozenset[str] = frozenset({
+    "turbo-quant",
+    "arbitrage-bot",
+    "polymarket-trader",
+    "financial-deepsearch",
+    "mirofish-researcher",
+    "signal-community",
+})
+_FINANCIAL_DISCLAIMER = (
+    "\n⚠️  FINANCIAL DISCLAIMER: This output is generated by an AI system and is "
+    "for informational purposes only. It does NOT constitute financial advice, "
+    "investment advice, or a recommendation to buy, sell, or hold any security, "
+    "asset, or instrument. Past performance is not indicative of future results. "
+    "Always consult a qualified financial adviser before making investment "
+    "decisions. The operator of this system assumes no liability for financial "
+    "losses arising from use of this tool.\n"
+)
+
+# ── Compliance modules (lazy import — non-fatal if runtime path not set up) ───
+
+def _get_data_subject_rights():
+    """Return the data_subject_rights_api module, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        import core.data_subject_rights_api as _dsr  # type: ignore
+        return _dsr
+    except Exception:
+        return None
+
+
+def _get_hitl_gate():
+    """Return the HITLGate singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.hitl_gate import get_hitl_gate as _ghg  # type: ignore
+        return _ghg()
+    except Exception:
+        return None
+
+
+def _get_bias_engine():
+    """Return the BiasDetectionEngine singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.bias_detection_engine import get_bias_engine as _gbe  # type: ignore
+        return _gbe()
+    except Exception:
+        return None
+
+
+def _get_explain_engine():
+    """Return the ExplainabilityEngine singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.explainability_layer import get_explain_engine as _gee  # type: ignore
+        return _gee()
+    except Exception:
+        return None
+
+
+def _get_schema_validator():
+    """Return the OutputValidationMiddleware singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.agent_output_schemas import get_schema_validator as _gsv  # type: ignore
+        return _gsv()
+    except Exception:
+        return None
+
+
+def _get_circuit_registry():
+    """Return the CircuitBreakerRegistry singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.circuit_breaker import get_circuit_registry as _gcr  # type: ignore
+        return _gcr()
+    except Exception:
+        return None
+
+
+def _get_adversarial_filter():
+    """Return the AdversarialFilter singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.adversarial_filter import get_adversarial_filter as _gaf  # type: ignore
+        return _gaf()
+    except Exception:
+        return None
+
+
+def _get_distributed_tracer():
+    """Return the DistributedTracer singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.distributed_tracing import get_distributed_tracer as _gdt  # type: ignore
+        return _gdt()
+    except Exception:
+        return None
+
+
+def _get_span_kind_llm():
+    """Return SpanKind.LLM if distributed_tracing is available, else a string fallback."""
+    try:
+        from core.distributed_tracing import SpanKind  # type: ignore
+        return SpanKind.LLM
+    except Exception:
+        return "llm"
+
+
+def _get_lifecycle_manager():
+    """Return the DataLifecycleManager singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.data_lifecycle_manager import get_lifecycle_manager as _glm  # type: ignore
+        return _glm()
+    except Exception:
+        return None
+
+
+def _get_feedback_store():
+    """Return the UserFeedbackStore singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.user_feedback_store import get_feedback_store as _gfs  # type: ignore
+        return _gfs()
+    except Exception:
+        return None
+
+
+def _get_governance_digest():
+    """Return the GovernanceDigest singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.governance_digest import get_governance_digest as _ggd  # type: ignore
+        return _ggd()
+    except Exception:
+        return None
 
 
 def _verify_any_token(token_str: str) -> bool:
@@ -17649,6 +17874,23 @@ async def post_chat(payload: dict, request: Request):
         message = raw_message[:10000].replace("\x00", "")
     message = _sanitize_for_log(message)
 
+    # ── Adversarial filter — before routing or any processing ─────────────────
+    _adv_filter = _get_adversarial_filter()
+    if _adv_filter is not None:
+        try:
+            _adv_assessment = _adv_filter.assess(message)
+            if _adv_assessment.blocked:
+                raise HTTPException(
+                    400,
+                    "Request rejected: potentially adversarial input detected. "
+                    f"Risk score: {_adv_assessment.risk_score:.2f}. "
+                    "Please rephrase your request.",
+                )
+        except HTTPException:
+            raise
+        except Exception as _adv_exc:
+            logger.debug("adversarial_filter error (non-fatal): %s", _adv_exc)
+
     entry = {"ts": now_iso(), "type": "user", "message": message, "model_route": model_route}
     append_chatlog(entry)
     await _ws_broadcast("chat:user", {"message": message, "model_route": model_route})
@@ -17677,9 +17919,44 @@ async def post_chat(payload: dict, request: Request):
             pass
 
     # Run handle_command in a thread pool to avoid blocking the async event loop
+    # ── Distributed tracing — start trace before entering the thread pool ─────
+    _dt = _get_distributed_tracer()
+    _trace_id = ""
+    if _dt is not None:
+        try:
+            _trace_id = _dt.start_trace(
+                "chat_request",
+                attributes={
+                    "user_id":     user_id,
+                    "model_route": model_route or "",
+                    "message_len": len(message),
+                },
+            )
+        except Exception as _dt_exc:
+            logger.debug("distributed_tracer.start_trace error (non-fatal): %s", _dt_exc)
+
     response = await run_in_threadpool(
         handle_command, message, model_route=model_route, user_id=user_id
     )
+
+    # ── Schema validation — before storing in memory or sending to UI ─────────
+    _routed_for_validation = route_to_agent(message)
+    _schema_validator = _get_schema_validator()
+    if _schema_validator is not None:
+        try:
+            _validated, _fallback = _schema_validator.validate_or_fallback(
+                _routed_for_validation,
+                response,
+                ts=now_iso(),
+                model=model_route or "",
+                user_id=user_id,
+            )
+            if _fallback:
+                # Validation failed — reject output and use safe fallback
+                response = _fallback
+        except Exception as _sv_exc:
+            logger.debug("schema_validator error (non-fatal): %s", _sv_exc)
+
     safe_response = _sanitize_for_log(response)
     resp_entry = {"ts": now_iso(), "type": "agent", "message": safe_response, "model_route": model_route}
     append_chatlog(resp_entry)
@@ -17691,10 +17968,41 @@ async def post_chat(payload: dict, request: Request):
             # Determine which agent handled the response
             routed_agent = route_to_agent(message)
             mode = _current_mode()
-            await run_in_threadpool(
-                intel.on_exchange,
-                user_id, message, response, routed_agent, mode
-            )
+            # Guard memory writes with the memory circuit breaker
+            _mem_registry = _get_circuit_registry()
+            _mem_cb = _mem_registry.get("memory") if _mem_registry is not None else None
+            # Wrap the actual exchange call with a memory span for distributed tracing
+            _dt_mem = _get_distributed_tracer()
+
+            async def _run_exchange():
+                if _dt_mem is not None:
+                    try:
+                        from core.distributed_tracing import SpanKind  # type: ignore
+                        with _dt_mem.span(
+                            "memory_write",
+                            kind=SpanKind.MEMORY,
+                            attributes={"agent": routed_agent, "user_id": user_id},
+                        ):
+                            return await run_in_threadpool(
+                                intel.on_exchange,
+                                user_id, message, response, routed_agent, mode
+                            )
+                    except Exception:
+                        pass
+                return await run_in_threadpool(
+                    intel.on_exchange,
+                    user_id, message, response, routed_agent, mode
+                )
+
+            if _mem_cb is not None:
+                _mem_cb.call(
+                    lambda: run_in_threadpool(
+                        intel.on_exchange,
+                        user_id, message, response, routed_agent, mode
+                    )
+                )
+            else:
+                await _run_exchange()
         except Exception as exc:
             logger.debug("IntelligenceCore.on_exchange error: %s", exc)
 
@@ -17704,7 +18012,46 @@ async def post_chat(payload: dict, request: Request):
         details={"command": message[:500], "response_preview": safe_response[:200]},
         source="chat",
     )
-    return JSONResponse({"ok": True, "response": response})
+
+    # ── Extract XAI explanation embedded by _generate_llm_response ────────────
+    _xai_comment_pat = re.compile(r"\n?<!--xai:(xai-[a-zA-Z0-9]{12})-->$")
+    _explain_dict: dict | None = None
+    _xai_match = _xai_comment_pat.search(response)
+    if _xai_match:
+        _explain_id = _xai_match.group(1)
+        response = response[:_xai_match.start()]
+        try:
+            _xai_engine = _get_explain_engine()
+            if _xai_engine is not None:
+                _explain_dict = _xai_engine.get(_explain_id)
+        except Exception:
+            pass
+
+    _resp_payload: dict = {"ok": True, "response": response}
+    if _explain_dict is not None:
+        _resp_payload["explanation"] = {
+            "explain_id": _explain_dict.get("explain_id"),
+            "reason": _explain_dict.get("reason"),
+            "key_factors": _explain_dict.get("key_factors"),
+            "alternatives": _explain_dict.get("alternatives"),
+            "confidence": _explain_dict.get("confidence"),
+            "confidence_label": _explain_dict.get("confidence_label"),
+        }
+
+    # ── Finish trace and embed trace_id in response ───────────────────────────
+    if _trace_id:
+        _resp_payload["trace_id"] = _trace_id
+        if _dt is not None:
+            try:
+                _dt.finish_trace(_trace_id)
+            except Exception:
+                pass
+
+    _resp_headers: dict[str, str] = {}
+    if _trace_id:
+        _resp_headers["X-Trace-ID"] = _trace_id
+
+    return JSONResponse(_resp_payload, headers=_resp_headers or None)
 
 
 @app.post("/chat")
@@ -18416,6 +18763,25 @@ def handle_command(
 
     routed_agent = route_to_agent(message)
     mode = _current_mode()
+
+    # ── Financial-agents safety gate ─────────────────────────────────────────
+    if routed_agent in _FINANCIAL_AGENT_IDS and not _ENABLE_FINANCIAL_AGENTS:
+        _audit_logger.warning(json.dumps({
+            "event": "financial_agent_blocked",
+            "agent": routed_agent,
+            "reason": "ENABLE_FINANCIAL_AGENTS not set",
+            "timestamp": now_iso(),
+        }))
+        return (
+            f"⚠️  Financial Agent Disabled\n\n"
+            f"The '{routed_agent}' agent is disabled by default due to regulatory "
+            f"requirements (MiFID II, SEC, FCA).\n\n"
+            f"To enable financial agents:\n"
+            f"  1. Complete a jurisdiction-specific legal/compliance review.\n"
+            f"  2. Add ENABLE_FINANCIAL_AGENTS=1 to ~/.ai-employee/.env.\n\n"
+            + _FINANCIAL_DISCLAIMER
+        )
+
     if ("all 56 agents" in msg_lower or "all agents" in msg_lower) and mode != "power":
       allowed = ", ".join(_available_agent_ids(mode))
       return (
@@ -18427,6 +18793,77 @@ def handle_command(
         f"{routed_agent} is not available in {mode} mode. "
         f"Run: ai-employee mode {'business' if mode == 'starter' else 'power'} to unlock more agents."
       )
+
+    # ── HITL gate for high-risk agents ────────────────────────────────────────
+    _hitl = _get_hitl_gate()
+    if _hitl is not None and _hitl.is_required(routed_agent):
+        result = _hitl.require_approval(
+            agent=routed_agent,
+            action=f"process_request: {message[:120]}{'...' if len(message) > 120 else ''}",
+            payload={"message": message[:500], "agent": routed_agent},
+            submitted_by=user_id,
+            blocking=False,
+        )
+        _audit_logger.info(json.dumps({
+            "event": "hitl_gate_triggered",
+            "agent": routed_agent,
+            "request_id": result.get("request_id"),
+            "timestamp": now_iso(),
+        }))
+        return (
+            f"⏳ Human Approval Required (EU AI Act — Article 14)\n\n"
+            f"Agent: **{routed_agent}**\n"
+            f"Request ID: `{result.get('request_id')}`\n\n"
+            f"This agent performs high-risk AI operations (recruitment, lead scoring, "
+            f"or profiling) that require human review before execution.\n\n"
+            f"A human operator must approve this request in the Governance panel "
+            f"before the action is executed. Once approved, re-submit your request."
+        )
+
+    # ── Bias detection pipeline ────────────────────────────────────────────────
+    _bias = _get_bias_engine()
+    if _bias is not None and _bias.is_checked_agent(routed_agent, message):
+        try:
+            from core.bias_detection_engine import BiasCheckContext  # type: ignore
+            _demographic_group = (
+                (payload.get("demographic_group") or "").strip()
+                if isinstance(locals().get("payload"), dict)
+                else ""
+            ) or "unknown"
+            _bc = BiasCheckContext(
+                agent=routed_agent,
+                action=f"chat_request: {message[:80]}",
+                subject_id=user_id,
+                decision=True,          # intent: positive decision (process request)
+                demographic_group=_demographic_group,
+            )
+            _bias_report = _bias.check(_bc)
+            if _bias_report.outcome == "block":
+                _audit_logger.warning(json.dumps({
+                    "event": "bias_block",
+                    "agent": routed_agent,
+                    "check_id": _bias_report.check_id,
+                    "risk_score": _bias_report.audit_risk_score,
+                    "timestamp": now_iso(),
+                }))
+                return (
+                    f"⛔ Request Blocked — Bias Detection\n\n"
+                    f"Agent: **{routed_agent}**\n"
+                    f"Check ID: `{_bias_report.check_id}`\n\n"
+                    f"{_bias_report.summary}\n\n"
+                    "This decision pattern has been flagged for adverse impact. "
+                    "Contact your compliance officer before proceeding."
+                )
+            if _bias_report.high_risk:
+                _audit_logger.warning(json.dumps({
+                    "event": "bias_high_risk",
+                    "agent": routed_agent,
+                    "check_id": _bias_report.check_id,
+                    "risk_score": _bias_report.audit_risk_score,
+                    "timestamp": now_iso(),
+                }))
+        except Exception as _bias_exc:
+            logger.debug("bias check error (non-fatal): %s", _bias_exc)
 
     return _generate_llm_response(message, routed_agent, mode, model_route=model_route, user_id=user_id)
 
@@ -20956,7 +21393,12 @@ def blacklight_status():
 
 @app.post("/api/blacklight/start")
 def blacklight_start(payload: dict, _auth: None = Depends(require_auth)):
-    """Start the BLACKLIGHT autonomous loop with the given goal."""
+    """Start the BLACKLIGHT autonomous loop with the given goal.
+
+    Governance gates:
+    - BLACKLIGHT_LEGAL_REVIEW=1 must be set (blacklight.py enforces this).
+    - Every start attempt is recorded in the AuditEngine.
+    """
     goal = (payload.get("goal") or "").strip()
     if not goal:
         raise HTTPException(400, "goal is required")
@@ -20964,11 +21406,22 @@ def blacklight_start(payload: dict, _auth: None = Depends(require_auth)):
         raise HTTPException(400, "goal must be 2000 characters or fewer")
     try:
         bl = _load_blacklight_module()
+        # Audit the attempt regardless of outcome
+        _audit_logger.info(json.dumps({
+            "event": "blacklight_start_attempt",
+            "goal_preview": goal[:200],
+            "timestamp": now_iso(),
+            "legal_review_flag": os.environ.get("BLACKLIGHT_LEGAL_REVIEW", "0"),
+        }))
         started = bl.start(goal)
         if started:
             return JSONResponse({"ok": True, "goal": goal,
                                  "message": "BLACKLIGHT started"})
         return JSONResponse({"ok": False, "message": "BLACKLIGHT is already running"})
+    except RuntimeError as exc:
+        # Legal-review gate raised by blacklight.start()
+        logger.warning("blacklight start blocked: %s", exc)
+        raise HTTPException(403, str(exc))
     except Exception as exc:
         logger.error("blacklight start error: %s", exc)
         raise HTTPException(500, "Failed to start BLACKLIGHT")
@@ -21309,10 +21762,35 @@ def _run_blacklight_task(task_id: str, task: str) -> None:
 
 @app.post("/api/blacklight/task")
 def blacklight_run_task(payload: dict, _auth: None = Depends(require_auth)):
-    """Assign a direct task to BLACKLIGHT, bypassing the normal goal toggle."""
+    """Assign a direct task to BLACKLIGHT, bypassing the normal goal toggle.
+
+    Governance gate: BLACKLIGHT_LEGAL_REVIEW=1 must be set, same as /start.
+    Every task submission is recorded in the audit log.
+    """
     task = (payload.get("task") or "").strip()
     if not task:
         raise HTTPException(400, "task is required")
+
+    # ── Governance gate: legal review required ────────────────────────────────
+    bl = _load_blacklight_module()
+    if getattr(bl, "LEGAL_REVIEW_REQUIRED", True):
+        _audit_logger.warning(json.dumps({
+            "event": "blacklight_task_blocked",
+            "reason": "legal_review_required",
+            "task_preview": task[:200],
+            "timestamp": now_iso(),
+        }))
+        raise HTTPException(
+            403,
+            "BLACKLIGHT task blocked: BLACKLIGHT_LEGAL_REVIEW=1 is required. "
+            "Set this environment variable only after a qualified legal/compliance review.",
+        )
+
+    _audit_logger.info(json.dumps({
+        "event": "blacklight_task_submitted",
+        "task_preview": task[:200],
+        "timestamp": now_iso(),
+    }))
     task_id = str(_uuid_mod.uuid4())[:8]
     t = threading.Thread(target=_run_blacklight_task, args=(task_id, task), daemon=True)
     t.start()
@@ -23904,6 +24382,607 @@ def set_lead_pilot(payload: dict, _auth: None = Depends(require_auth)):
         _LEAD_PILOT["updated_at"] = now_iso()
         cfg = dict(_LEAD_PILOT)
     return JSONResponse({"ok": True, **cfg})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GDPR Data Subject Rights (Articles 15, 17, 20)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class _GDPRDeleteRequest(BaseModel):
+    erase_chatlog: bool = True
+    erase_memory: bool = True
+    erase_audit: bool = True
+
+
+def _gdpr_actor(request: Request) -> str:
+    """Resolve the requesting user's identity from JWT or IP."""
+    try:
+        from fastapi.security.utils import get_authorization_scheme_param  # noqa: PLC0415
+        auth_header = request.headers.get("Authorization", "")
+        _scheme, token_str = get_authorization_scheme_param(auth_header)
+        if token_str:
+            payload = _decode_any_token(token_str)
+            if payload and "sub" in payload:
+                return f"user:{payload['sub']}"
+    except Exception:
+        pass
+    host = (request.client.host if request.client else "unknown") or "unknown"
+    return f"ip:{host}"
+
+
+@app.get("/data/summary")
+def gdpr_summary(request: Request, _auth: None = Depends(require_auth)):
+    """GDPR Article 15 — Summary of all personal data stores and record counts."""
+    dsr = _get_data_subject_rights()
+    if dsr is None:
+        raise HTTPException(503, "Data subject rights module unavailable")
+    actor = _gdpr_actor(request)
+    return JSONResponse(dsr.summary(actor))
+
+
+@app.get("/data/export")
+def gdpr_export(request: Request, _auth: None = Depends(require_auth)):
+    """GDPR Article 20 — Full portable export of all personal data."""
+    dsr = _get_data_subject_rights()
+    if dsr is None:
+        raise HTTPException(503, "Data subject rights module unavailable")
+    actor = _gdpr_actor(request)
+    return JSONResponse(dsr.export(actor))
+
+
+@app.delete("/data/delete")
+def gdpr_delete(
+    request: Request,
+    body: _GDPRDeleteRequest = _GDPRDeleteRequest(),
+    _auth: None = Depends(require_auth),
+):
+    """GDPR Article 17 — Irreversible erasure of all personal data.
+
+    This operation is permanent and cannot be undone.  Use the /data/summary
+    and /data/export endpoints first if you need a copy of the data.
+    """
+    dsr = _get_data_subject_rights()
+    if dsr is None:
+        raise HTTPException(503, "Data subject rights module unavailable")
+    actor = _gdpr_actor(request)
+    result = dsr.erase(
+        actor,
+        erase_chatlog=body.erase_chatlog,
+        erase_memory=body.erase_memory,
+        erase_audit=body.erase_audit,
+    )
+    return JSONResponse(result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Human-in-the-Loop (HITL) endpoints — EU AI Act Article 14
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/hitl/pending")
+def hitl_pending(_auth: None = Depends(require_auth)):
+    """Return all HITL requests awaiting human decision."""
+    gate = _get_hitl_gate()
+    if gate is None:
+        return JSONResponse({"pending": [], "error": "HITL module unavailable"})
+    return JSONResponse({"pending": gate.pending_requests()})
+
+
+@app.get("/api/hitl/requests")
+def hitl_all_requests(_auth: None = Depends(require_auth)):
+    """Return all HITL requests (any status), most recent first."""
+    gate = _get_hitl_gate()
+    if gate is None:
+        return JSONResponse({"requests": []})
+    return JSONResponse({"requests": gate.all_requests(limit=200)})
+
+
+@app.get("/api/hitl/requests/{request_id}")
+def hitl_get_request(request_id: str, _auth: None = Depends(require_auth)):
+    """Return details for a specific HITL request."""
+    gate = _get_hitl_gate()
+    if gate is None:
+        raise HTTPException(503, "HITL module unavailable")
+    req = gate.get_request(request_id)
+    if req is None:
+        raise HTTPException(404, "HITL request not found")
+    return JSONResponse(req)
+
+
+@app.post("/api/hitl/requests/{request_id}/approve")
+def hitl_approve(request_id: str, payload: dict, request: Request,
+                 _auth: None = Depends(require_auth)):
+    """Approve a pending HITL request (human operator action)."""
+    gate = _get_hitl_gate()
+    if gate is None:
+        raise HTTPException(503, "HITL module unavailable")
+    actor = _gdpr_actor(request)
+    reason = (payload.get("reason") or "").strip()
+    result = gate.approve(request_id, decided_by=actor, reason=reason)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "Approval failed"))
+    return JSONResponse(result)
+
+
+@app.post("/api/hitl/requests/{request_id}/reject")
+def hitl_reject(request_id: str, payload: dict, request: Request,
+                _auth: None = Depends(require_auth)):
+    """Reject a pending HITL request (human operator action)."""
+    gate = _get_hitl_gate()
+    if gate is None:
+        raise HTTPException(503, "HITL module unavailable")
+    actor = _gdpr_actor(request)
+    reason = (payload.get("reason") or "").strip()
+    result = gate.reject(request_id, decided_by=actor, reason=reason)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "Rejection failed"))
+    return JSONResponse(result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bias Detection API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/bias/report/{agent_id}")
+def bias_report_for_agent(agent_id: str, _auth: None = Depends(require_auth)):
+    """Return the current bias metrics summary for a specific agent.
+
+    Includes demographic parity, equalized odds, and disparate impact ratios
+    computed over all decisions accumulated for this agent in the current process.
+    """
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent ID")
+    engine = _get_bias_engine()
+    if engine is None:
+        raise HTTPException(503, "Bias detection module unavailable")
+    return JSONResponse(engine.report_for_agent(agent_id))
+
+
+@app.get("/api/bias/events")
+def bias_events(_auth: None = Depends(require_auth)):
+    """Return recent bias-related audit events (bias_check, bias_flag, bias_block)."""
+    engine = _get_bias_engine()
+    if engine is None:
+        return JSONResponse({"events": []})
+    return JSONResponse({"events": engine.recent_events(limit=200)})
+
+
+@app.post("/api/bias/check")
+def bias_check_endpoint(payload: dict, _auth: None = Depends(require_auth)):
+    """Run a bias check for a single decision and return the BiasReport.
+
+    Payload fields:
+      agent            – agent performing the decision (required)
+      action           – description of the action (required)
+      subject_id       – identifier of the person/entity being decided on (required)
+      decision         – bool: True = positive decision (required)
+      demographic_group – group label (required)
+      ground_truth     – bool or null: actual outcome if known (optional)
+      metadata         – free-form dict (optional)
+    """
+    from core.bias_detection_engine import BiasCheckContext, get_bias_engine  # type: ignore
+    agent = (payload.get("agent") or "").strip()
+    action = (payload.get("action") or "").strip()
+    subject_id = (payload.get("subject_id") or "").strip()
+    group = (payload.get("demographic_group") or "").strip()
+    if not agent or not action or not subject_id or not group:
+        raise HTTPException(400, "agent, action, subject_id, demographic_group are required")
+    decision = bool(payload.get("decision", True))
+    ground_truth = payload.get("ground_truth")
+    if ground_truth is not None:
+        ground_truth = bool(ground_truth)
+    ctx = BiasCheckContext(
+        agent=agent,
+        action=action,
+        subject_id=subject_id,
+        decision=decision,
+        demographic_group=group,
+        ground_truth=ground_truth,
+        metadata=payload.get("metadata") or {},
+    )
+    engine = get_bias_engine()
+    report = engine.check(ctx)
+    return JSONResponse(report.to_dict())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Explainability (XAI) API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/explain/{explain_id}")
+def get_explanation(explain_id: str, _auth: None = Depends(require_auth)):
+    """Return the structured XAI explanation for a specific decision.
+
+    The ``explain_id`` is included in every ``/api/chat`` response as
+    ``explanation.explain_id`` when an explanation was generated.
+    """
+    if not re.match(r"^xai-[a-zA-Z0-9]{12}$", explain_id):
+        raise HTTPException(400, "Invalid explain_id format")
+    engine = _get_explain_engine()
+    if engine is None:
+        raise HTTPException(503, "Explainability module unavailable")
+    exp = engine.get(explain_id)
+    if exp is None:
+        raise HTTPException(404, f"Explanation {explain_id!r} not found")
+    return JSONResponse(exp)
+
+
+@app.get("/api/explain/history")
+def explanation_history(
+    limit: int = 50,
+    agent: str = "",
+    _auth: None = Depends(require_auth),
+):
+    """Return recent XAI explanations, optionally filtered by agent.
+
+    Query params:
+      limit  – max number of results (default 50, max 200)
+      agent  – filter to a specific agent (optional)
+    """
+    limit = max(1, min(limit, 200))
+    engine = _get_explain_engine()
+    if engine is None:
+        return JSONResponse({"explanations": []})
+    if agent:
+        if not _SAFE_AGENT_ID_PAT.match(agent):
+            raise HTTPException(400, "Invalid agent name")
+        items = engine.recent_for_agent(agent, limit=limit)
+    else:
+        items = engine.recent(limit=limit)
+    return JSONResponse({"explanations": items})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Agent Output Schema API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/schema")
+def list_agent_schemas(_auth: None = Depends(require_auth)):
+    """Return a list of all registered agent IDs and their schema class names.
+
+    Useful for UI tooling to discover which agents have dedicated schemas.
+    """
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.agent_output_schemas import AGENT_SCHEMA_REGISTRY  # type: ignore
+        return JSONResponse({
+            "schemas": {
+                agent_id: schema_cls.__name__
+                for agent_id, schema_cls in sorted(AGENT_SCHEMA_REGISTRY.items())
+            }
+        })
+    except Exception as exc:
+        raise HTTPException(503, f"Schema registry unavailable: {exc}") from exc
+
+
+@app.get("/api/schema/{agent_id}")
+def get_agent_schema(agent_id: str, _auth: None = Depends(require_auth)):
+    """Return the full JSON Schema for a specific agent's output model.
+
+    This can be used by the UI, downstream consumers, and monitoring tools
+    to validate or describe what a given agent is expected to produce.
+    """
+    if not _SAFE_AGENT_ID_PAT.match(agent_id):
+        raise HTTPException(400, "Invalid agent_id format")
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.agent_output_schemas import get_schema_for_agent  # type: ignore
+        schema_cls = get_schema_for_agent(agent_id)
+        return JSONResponse({
+            "agent_id": agent_id,
+            "schema_class": schema_cls.__name__,
+            "json_schema": schema_cls.model_json_schema(),
+        })
+    except Exception as exc:
+        raise HTTPException(503, f"Schema unavailable: {exc}") from exc
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Circuit Breaker Status API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/circuit-breakers")
+def list_circuit_breakers(_auth: None = Depends(require_auth)):
+    """Return the current state of all registered circuit breakers.
+
+    Each entry reports the state (closed/open/half_open), recent failure
+    count, and how many seconds until an open breaker will probe again.
+    """
+    registry = _get_circuit_registry()
+    if registry is None:
+        raise HTTPException(503, "Circuit breaker module unavailable")
+    return JSONResponse({"circuit_breakers": registry.status_all()})
+
+
+@app.post("/api/circuit-breakers/{name}/reset")
+def reset_circuit_breaker(name: str, _auth: None = Depends(require_auth)):
+    """Manually reset a single circuit breaker back to CLOSED."""
+    if not re.match(r'^[a-zA-Z0-9_:.-]{1,64}$', name):
+        raise HTTPException(400, "Invalid circuit breaker name")
+    registry = _get_circuit_registry()
+    if registry is None:
+        raise HTTPException(503, "Circuit breaker module unavailable")
+    registry.get(name).reset()
+    return JSONResponse({"ok": True, "name": name, "state": "closed"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Distributed Tracing API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/traces")
+def list_traces(_auth: None = Depends(require_auth)):
+    """Return a summary list of the most recent traces (no span details).
+
+    Useful for monitoring dashboards and quick health checks.
+    """
+    tracer = _get_distributed_tracer()
+    if tracer is None:
+        raise HTTPException(503, "Distributed tracing module unavailable")
+    return JSONResponse({"traces": tracer.list_traces(limit=100)})
+
+
+@app.get("/api/traces/{trace_id}")
+def get_trace(trace_id: str, _auth: None = Depends(require_auth)):
+    """Return the full trace tree for a specific trace_id.
+
+    The tree includes every span — orchestrator, agent routing, LLM call,
+    and memory write — with parent_span_id links for reconstruction.
+    """
+    if not re.match(r'^trace-[a-fA-F0-9]{32}$', trace_id):
+        raise HTTPException(400, "Invalid trace_id format")
+    tracer = _get_distributed_tracer()
+    if tracer is None:
+        raise HTTPException(503, "Distributed tracing module unavailable")
+    tree = tracer.get_trace(trace_id)
+    if tree is None:
+        raise HTTPException(404, f"Trace '{trace_id}' not found")
+    return JSONResponse(tree)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Data Lifecycle Management API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/lifecycle")
+def get_lifecycle_status(_auth: None = Depends(require_auth)):
+    """Return retention policies and scheduler state for all managed stores.
+
+    Response shape::
+
+        {
+          "policies": {
+            "audit_log": {
+              "store_id": "audit_log",
+              "ttl_days": 90,
+              "store_type": "sqlite",
+              "enabled": true,
+              "cutoff_iso": "2025-01-18T..."
+            },
+            ...
+          },
+          "last_run": "2026-04-19T...",
+          "scheduler": {"running": false},
+          "store_count": 5
+        }
+    """
+    mgr = _get_lifecycle_manager()
+    if mgr is None:
+        raise HTTPException(503, "Data lifecycle module unavailable")
+    return JSONResponse(mgr.status())
+
+
+@app.post("/api/lifecycle/purge")
+async def purge_lifecycle(payload: dict, _auth: None = Depends(require_auth)):
+    """Trigger a purge pass across all (or one specific) data store.
+
+    Body (optional):
+
+    .. code-block:: json
+
+        {"store_id": "chat_history"}
+
+    Omitting ``store_id`` purges **all** stores.  Returns a per-store report.
+    """
+    mgr = _get_lifecycle_manager()
+    if mgr is None:
+        raise HTTPException(503, "Data lifecycle module unavailable")
+
+    store_id = ((payload or {}).get("store_id") or "").strip()
+    if store_id:
+        if not re.match(r'^[a-zA-Z0-9_]{1,64}$', store_id):
+            raise HTTPException(400, "Invalid store_id")
+        from starlette.concurrency import run_in_threadpool as _rtp  # noqa: PLC0415
+        result = await _rtp(mgr.purge, store_id)
+        return JSONResponse({"ok": True, "results": {store_id: result.to_dict()}})
+
+    from starlette.concurrency import run_in_threadpool as _rtp  # noqa: PLC0415
+    results = await _rtp(mgr.purge_all)
+    return JSONResponse({
+        "ok":      True,
+        "results": {sid: r.to_dict() for sid, r in results.items()},
+    })
+
+
+@app.patch("/api/lifecycle/{store_id}/ttl")
+def update_lifecycle_ttl(store_id: str, payload: dict, _auth: None = Depends(require_auth)):
+    """Update the TTL (in days) for a specific store at runtime.
+
+    Body::
+
+        {"days": 180}
+
+    Set ``days`` to 0 to disable automatic purging for that store.
+    """
+    if not re.match(r'^[a-zA-Z0-9_]{1,64}$', store_id):
+        raise HTTPException(400, "Invalid store_id")
+    days = (payload or {}).get("days")
+    if days is None or not isinstance(days, int) or days < 0:
+        raise HTTPException(400, "days must be a non-negative integer")
+    mgr = _get_lifecycle_manager()
+    if mgr is None:
+        raise HTTPException(503, "Data lifecycle module unavailable")
+    updated = mgr.set_ttl(store_id, days=days)
+    if not updated:
+        raise HTTPException(404, f"Store '{store_id}' not found")
+    return JSONResponse({"ok": True, "store_id": store_id, "ttl_days": days})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# User Feedback API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/feedback")
+async def submit_feedback(payload: dict, _auth: None = Depends(require_auth)):
+    """Submit a thumbs-up or thumbs-down rating for an agent output.
+
+    Body::
+
+        {
+          "output_id":  "resp-abc123",      // required
+          "rating":     "up" | "down",      // required
+          "agent_id":   "company-builder",  // optional
+          "text":       "Great answer!",    // optional
+          "memory_ids": ["m-1", "m-2"],     // optional
+          "meta":       {}                  // optional
+        }
+
+    Returns the persisted :class:`~core.user_feedback_store.FeedbackEntry`.
+    """
+    store = _get_feedback_store()
+    if store is None:
+        raise HTTPException(503, "Feedback store unavailable")
+
+    body         = payload or {}
+    output_id    = str(body.get("output_id", "")).strip()
+    rating_raw   = str(body.get("rating", "")).strip().lower()
+    agent_id     = str(body.get("agent_id", "")).strip()
+    text         = str(body.get("text", "")).strip()
+    memory_ids   = body.get("memory_ids") or []
+    meta         = body.get("meta") or {}
+
+    if not output_id:
+        raise HTTPException(400, "output_id is required")
+    if rating_raw not in ("up", "down"):
+        raise HTTPException(400, "rating must be 'up' or 'down'")
+    if not isinstance(memory_ids, list):
+        raise HTTPException(400, "memory_ids must be a list")
+
+    actor = str((body.get("actor") or _DEFAULT_USER)).strip() or _DEFAULT_USER
+
+    from starlette.concurrency import run_in_threadpool as _rtp  # noqa: PLC0415
+
+    def _submit():
+        return store.submit(
+            output_id  = output_id,
+            rating     = rating_raw,   # type: ignore[arg-type]
+            agent_id   = agent_id,
+            actor      = actor,
+            text       = text,
+            memory_ids = [str(m) for m in memory_ids[:50]],
+            meta       = dict(meta) if isinstance(meta, dict) else {},
+        )
+
+    entry = await _rtp(_submit)
+    return JSONResponse({"ok": True, "feedback": entry.to_dict()})
+
+
+@app.get("/api/feedback/summary")
+def get_feedback_summary(_auth: None = Depends(require_auth)):
+    """Return aggregate feedback statistics across all agents.
+
+    Response shape::
+
+        {
+          "total":        42,
+          "thumbs_up":    30,
+          "thumbs_down":  12,
+          "avg_reward":   0.43,
+          "positive_rate": 0.71,
+          "by_agent": {
+            "company-builder": {...},
+            ...
+          }
+        }
+    """
+    store = _get_feedback_store()
+    if store is None:
+        raise HTTPException(503, "Feedback store unavailable")
+    return JSONResponse(store.summary())
+
+
+@app.get("/api/feedback/recent")
+def get_feedback_recent(limit: int = 50, _auth: None = Depends(require_auth)):
+    """Return the most recent feedback entries (newest first)."""
+    store = _get_feedback_store()
+    if store is None:
+        raise HTTPException(503, "Feedback store unavailable")
+    limit = max(1, min(limit, 500))
+    entries = store.list_recent(limit=limit)
+    return JSONResponse({"ok": True, "entries": [e.to_dict() for e in entries]})
+
+
+@app.get("/api/feedback/{output_id}")
+def get_feedback_for_output(output_id: str, _auth: None = Depends(require_auth)):
+    """Return all feedback entries for a specific output ID."""
+    if not re.match(r'^[A-Za-z0-9_\-]{1,128}$', output_id):
+        raise HTTPException(400, "Invalid output_id")
+    store = _get_feedback_store()
+    if store is None:
+        raise HTTPException(503, "Feedback store unavailable")
+    entries = store.get_for_output(output_id)
+    return JSONResponse({"ok": True, "output_id": output_id, "entries": [e.to_dict() for e in entries]})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Governance Digest API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/governance/digest")
+async def generate_governance_digest(payload: dict = None, _auth: None = Depends(require_auth)):
+    """Generate a fresh governance digest for the requested time window.
+
+    Body (all fields optional)::
+
+        {
+          "window_days": 7    // look-back window in days (default 7)
+        }
+
+    Returns the full digest including the Markdown report.
+    """
+    gd = _get_governance_digest()
+    if gd is None:
+        raise HTTPException(503, "Governance digest unavailable")
+    body = payload or {}
+    window_days = None
+    if "window_days" in body:
+        try:
+            window_days = max(1, min(int(body["window_days"]), 365))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "window_days must be an integer")
+
+    from starlette.concurrency import run_in_threadpool as _rtp  # noqa: PLC0415
+
+    digest = await _rtp(lambda: gd.run(window_days=window_days))
+    return JSONResponse({"ok": True, "digest": digest})
+
+
+@app.get("/api/governance/digest/latest")
+def get_latest_governance_digest(limit: int = 5, _auth: None = Depends(require_auth)):
+    """Return the *limit* most recent stored digests (newest first).
+
+    Digests are persisted (without Markdown) to ``state/governance_digests.jsonl``
+    after each :func:`generate_governance_digest` call.
+    """
+    gd = _get_governance_digest()
+    if gd is None:
+        raise HTTPException(503, "Governance digest unavailable")
+    limit = max(1, min(limit, 100))
+    digests = gd.load_recent(limit=limit)
+    return JSONResponse({"ok": True, "digests": digests})
 
 
 if __name__ == "__main__":
