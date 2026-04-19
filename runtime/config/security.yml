@@ -1,4 +1,4 @@
-# AI Employee — Security Configuration Template (from openclaw-2)
+# AI Employee — Security Configuration Template
 # Copy to security.local.yml and customise for your environment.
 # security.local.yml is gitignored and will never be committed.
 

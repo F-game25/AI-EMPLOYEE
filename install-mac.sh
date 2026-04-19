@@ -233,39 +233,12 @@ Install them with:
     fi
 }
 
-# ─── OpenClaw ─────────────────────────────────────────────────────────────────
+# ─── AI Employee Internal Engine (replaces external OpenClaw gateway) ─────────
 
-install_openclaw() {
-    step "2/8 — OpenClaw gateway"
-
-    if command -v openclaw >/dev/null 2>&1; then
-        local ver
-        ver=$(openclaw --version 2>/dev/null || echo "unknown")
-        ok "OpenClaw already installed: $ver"
-    else
-        log "OpenClaw not found. Attempting install..."
-        # Try standard install script; also check for macOS-specific binary
-        if curl -fsSL https://openclaw.ai/install.sh | bash; then
-            export PATH="$HOME/.local/bin:$HOME/.openclaw/bin:$PATH"
-            ok "OpenClaw installed"
-        elif curl -fsSL "https://openclaw.ai/install-macos.sh" | bash 2>/dev/null; then
-            export PATH="$HOME/.local/bin:$HOME/.openclaw/bin:$PATH"
-            ok "OpenClaw installed (macOS binary)"
-        else
-            warn "OpenClaw auto-install failed. Install manually:
-  curl -fsSL https://openclaw.ai/install.sh | bash
-  Then re-run this installer."
-        fi
-    fi
-
-    # The openclaw installer adds a `source ~/.openclaw/completions/openclaw.bash`
-    # line to ~/.zshrc or ~/.bash_profile, but it does not always create that file.
-    # Create a stub so every new terminal session starts cleanly without a "file not found" error.
-    mkdir -p "$HOME/.openclaw/completions"
-    if [[ ! -f "$HOME/.openclaw/completions/openclaw.bash" ]]; then
-        touch "$HOME/.openclaw/completions/openclaw.bash"
-        ok "Created ~/.openclaw/completions/openclaw.bash stub (fixes terminal error)"
-    fi
+setup_internal_engine() {
+    step "2/8 — AI Employee internal engine"
+    ok "AI Employee uses an internal engine — no external gateway binary required"
+    ok "All gateway functionality is provided by runtime/engine/"
 }
 
 # ─── Ollama model catalogue ───────────────────────────────────────────────────
@@ -381,7 +354,7 @@ wizard() {
     ok "Phone: $PHONE"
     echo ""
     echo -e "  📱 Phone registered! A welcome message will be sent to ${PHONE} via WhatsApp"
-    echo -e "     once you connect with: ${C}openclaw channels login${NC}"
+    echo -e "     once you link your phone through the AI Employee dashboard."
     echo ""
 
     # 2) Local LLM — Ollama is the recommended default (saves tokens, privacy-first)
@@ -797,7 +770,7 @@ install_runtime() {
         dl "agents/artifacts/artifacts.py"
         dl "agents/artifacts/requirements.txt"
         # Config files
-        dl "config/openclaw.template.json"
+        dl "config/gateway.template.json"
         dl "config/problem-solver.env"
         dl "config/problem-solver-ui.env"
         dl "config/status-reporter.env"
@@ -1186,7 +1159,10 @@ SKILL
 generate_configs() {
     step "7/8 — Generating configuration"
 
-    local template="$RUNTIME_DIR/config/openclaw.template.json"
+    local template="$RUNTIME_DIR/config/gateway.template.json"
+    [[ -f "$template" ]] || template="$AI_HOME/config/gateway.template.json"
+    # Fallback to legacy name for backward compatibility with older installs
+    [[ -f "$template" ]] || template="$RUNTIME_DIR/config/openclaw.template.json"
     [[ -f "$template" ]] || template="$AI_HOME/config/openclaw.template.json"
 
     if [[ ! -f "$AI_HOME/config.json" ]]; then
@@ -1231,7 +1207,7 @@ CFG_END
             python3 -m json.tool "$AI_HOME/config.json" >/dev/null 2>&1 \
                 || warn "config.json may contain invalid JSON — check manually"
         fi
-        ok "OpenClaw config.json created"
+        ok "AI Employee config.json created"
     else
         # Existing config: patch gateway.mode=local if missing (fixes old installs)
         local mode_ok=0
@@ -1280,15 +1256,14 @@ CFG_END
             perl -pi -e "s|PHONE_JSON_PLACEHOLDER|$phone_json|g" "$AI_HOME/config.json"
             perl -pi -e "s|MODEL_PLACEHOLDER|$MODEL_PRIMARY|g" "$AI_HOME/config.json"
             chmod 600 "$AI_HOME/config.json"
-            ok "OpenClaw config.json updated (gateway.mode=local added)"
+            ok "AI Employee config.json updated (gateway.mode=local added)"
         else
-            ok "OpenClaw config.json already exists — not overwritten"
+            ok "AI Employee config.json already exists — not overwritten"
         fi
     fi
 
-    # Symlink for openclaw (always ensure it points to current config)
-    mkdir -p "$HOME/.openclaw"
-    ln -sf "$AI_HOME/config.json" "$HOME/.openclaw/openclaw.json" 2>/dev/null || true
+    # Keep a symlink at the legacy path for backward compatibility.
+    mkdir -p "$HOME/.ai-employee"
 
     # ── Write .env once (single canonical writer) ──────────────────────────────
     mkdir -p "$AI_HOME/credentials"
@@ -1298,8 +1273,8 @@ CFG_END
     if [[ ! -f "$env_file" ]]; then
         {
             # --- Gateway & auth ---
-            # OPENCLAW_GATEWAY_TOKEN: used by openclaw gateway for API auth
-            echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN"
+            # AI_EMPLOYEE_GATEWAY_TOKEN: used by the internal gateway for API auth
+            echo "AI_EMPLOYEE_GATEWAY_TOKEN=$TOKEN"
 
             # --- AI provider keys ---
             [[ -n "${ANTHROPIC_KEY:-}" ]]        && echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY"
@@ -1325,9 +1300,6 @@ CFG_END
             echo "UI_PORT=${UI_PORT:-8787}"
             echo "WORKERS=${WORKERS:-35}"
 
-            # Disables mDNS/Bonjour service discovery in openclaw (not needed for local mode)
-            echo "OPENCLAW_DISABLE_BONJOUR=1"
-
             echo "TZ=${TZ:-UTC}"
             # Repo location (used by run.sh to locate the Node backend/frontend)
             echo "AI_EMPLOYEE_REPO_DIR=$SCRIPT_DIR"
@@ -1349,8 +1321,8 @@ CFG_END
     if [[ -f "$sr_env" ]]; then
         grep -q "^WHATSAPP_PHONE=" "$sr_env" || \
             echo "WHATSAPP_PHONE=${PHONE:-}" >> "$sr_env"
-        grep -q "^OPENCLAW_GATEWAY_TOKEN=" "$sr_env" || \
-            echo "OPENCLAW_GATEWAY_TOKEN=$TOKEN" >> "$sr_env"
+        grep -q "^AI_EMPLOYEE_GATEWAY_TOKEN=" "$sr_env" || \
+            echo "AI_EMPLOYEE_GATEWAY_TOKEN=$TOKEN" >> "$sr_env"
         perl -pi -e "s|^STATUS_REPORT_INTERVAL_SECONDS=.*|STATUS_REPORT_INTERVAL_SECONDS=${STATUS_INTERVAL:-3600}|" "$sr_env"
         chmod 600 "$sr_env"
     fi
@@ -1596,9 +1568,9 @@ done_message() {
     echo "     cd ~/.ai-employee && ./start.sh"
     echo "     (the UI will open automatically in your browser)"
     echo ""
-    echo "  2. In a new terminal, link your WhatsApp:"
-    echo "     openclaw channels login"
-    echo "     Scan the QR code with your phone"
+    echo "  2. Optional — link WhatsApp for notifications & quick commands:"
+    echo "     Open the AI Employee dashboard and configure the WhatsApp channel"
+    echo "     from Settings > Channels."
     echo ""
     echo "  3. Send 'Hello!' to yourself on WhatsApp"
     echo "     You will receive a welcome message confirming it works"
@@ -1625,7 +1597,7 @@ main() {
     echo ""
 
     check_requirements
-    install_openclaw
+    setup_internal_engine
     wizard
     install_ollama "${WANT_OLLAMA:-n}"
     setup_directories

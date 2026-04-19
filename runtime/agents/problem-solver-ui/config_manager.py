@@ -1,5 +1,5 @@
 """
-AI Employee — Configuration Management (from openclaw-2)
+AI Employee — Configuration Management
 Handles secure loading and Pydantic-based validation of configuration.
 """
 import os

@@ -1,10 +1,12 @@
 """Status Reporter bot.
 
 Generates compact hourly status summaries and can send them via WhatsApp
-through the OpenClaw gateway (if configured). Also writes status to state files.
+through the AI Employee internal gateway (if configured). Also writes status
+to state files.
 Optionally posts status summaries to a Discord channel via a webhook URL.
 
-Usage: can be triggered by openclaw cron hourly, or run as a long-running daemon.
+Usage: can be triggered by the AI Employee scheduler hourly, or run as a
+long-running daemon.
 """
 import json
 import os
@@ -20,8 +22,8 @@ STATUS_FILE = AI_HOME / "state" / "status-reporter.state.json"
 
 REPORT_INTERVAL = int(os.environ.get("STATUS_REPORT_INTERVAL_SECONDS", "3600"))
 PHONE = os.environ.get("WHATSAPP_PHONE", "")
-GATEWAY_TOKEN = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
-GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "http://localhost:18789")
+GATEWAY_TOKEN = os.environ.get("AI_EMPLOYEE_GATEWAY_TOKEN", os.environ.get("OPENCLAW_GATEWAY_TOKEN", ""))
+GATEWAY_URL = os.environ.get("AI_EMPLOYEE_GATEWAY_URL", os.environ.get("OPENCLAW_GATEWAY_URL", "http://localhost:18789"))
 
 # ── Discord webhook (optional) ────────────────────────────────────────────────
 
@@ -131,7 +133,7 @@ def build_compact_status() -> str:
 
 
 def send_whatsapp(message: str) -> bool:
-    """Send a WhatsApp message via OpenClaw gateway REST API."""
+    """Send a WhatsApp message via the AI Employee internal gateway REST API."""
     if not PHONE or not GATEWAY_TOKEN:
         return False
     try:

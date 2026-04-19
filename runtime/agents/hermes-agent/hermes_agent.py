@@ -99,6 +99,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("hermes-agent")
 
+# ── Internal engine (replaces direct OpenClaw dependency) ─────────────────────
+# hermes_agent.py lives at runtime/agents/hermes-agent/hermes_agent.py
+# parents[0] = hermes-agent/, parents[1] = agents/, parents[2] = runtime/
+# We add runtime/ to sys.path so `from engine.api import …` resolves correctly.
+_runtime_path = Path(__file__).resolve().parents[2]  # …/runtime
+if str(_runtime_path) not in sys.path:
+    sys.path.insert(0, str(_runtime_path))
+
+try:
+    from engine.api import process_input as _engine_process_input  # type: ignore
+    _ENGINE_AVAILABLE = True
+except ImportError:
+    _ENGINE_AVAILABLE = False
+    _engine_process_input = None  # type: ignore[assignment]
+
 # ── AI Router (optional, falls back to direct Ollama) ─────────────────────────
 
 _ai_router_path = AI_HOME / "agents" / "ai-router"
@@ -190,66 +205,65 @@ def remember_short(entry: dict) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 1. OPENCLAW — Input normalisation & intent extraction
+# 1. INPUT PROCESSING — delegates to the internal engine
 # ══════════════════════════════════════════════════════════════════════════════
 
-_TASK_TYPES = {
-    "search": ["find", "search", "look up", "research", "discover"],
-    "generate": ["write", "create", "generate", "compose", "draft"],
-    "analyse": ["analyse", "analyze", "evaluate", "assess", "review", "compare"],
-    "code": ["code", "script", "program", "implement", "debug", "refactor"],
-    "summarise": ["summarise", "summarize", "brief", "overview", "tldr"],
-    "plan": ["plan", "strategy", "roadmap", "steps", "how to", "outline"],
-    "lead": ["lead", "prospect", "outreach", "email", "contact"],
-    "data": ["data", "report", "metrics", "stats", "numbers"],
-}
-
-
-def openclaw_process(raw_input: str | dict) -> dict:
+def process_input(raw_input: str | dict) -> dict:
     """Pre-process raw input: normalise, extract intent, entities, task type.
 
-    Returns a normalised task descriptor:
-    {
-        "text": str,           # cleaned input text
-        "task_type": str,      # detected task category
-        "intent": str,         # short intent phrase
-        "entities": list[str], # key entities / nouns
-        "input_format": str,   # "text" | "json"
-        "original": ...        # original raw input
-    }
+    Delegates to ``engine.api.process_input`` when the engine package is
+    available; falls back to a built-in implementation otherwise.
+
+    Returns a normalised task descriptor::
+
+        {
+            "text":         str,        # cleaned input text
+            "task_type":    str,        # detected task category
+            "intent":       str,        # short intent phrase
+            "entities":     list[str],  # key entities / nouns
+            "input_format": str,        # "text" | "json"
+            "original":     ...         # original raw input
+        }
     """
-    # ── Normalise input ──────────────────────────────────────────────────────
+    if _ENGINE_AVAILABLE and _engine_process_input is not None:
+        return _engine_process_input(raw_input)
+
+    # ── Built-in fallback (used when engine package is not on sys.path) ───────
+    _task_types = {
+        "search":   ["find", "search", "look up", "research", "discover"],
+        "generate": ["write", "create", "generate", "compose", "draft"],
+        "analyse":  ["analyse", "analyze", "evaluate", "assess", "review", "compare"],
+        "code":     ["code", "script", "program", "implement", "debug", "refactor"],
+        "summarise":["summarise", "summarize", "brief", "overview", "tldr"],
+        "plan":     ["plan", "strategy", "roadmap", "steps", "how to", "outline"],
+        "lead":     ["lead", "prospect", "outreach", "email", "contact"],
+        "data":     ["data", "report", "metrics", "stats", "numbers"],
+    }
+    _stop = {"The", "This", "That", "When", "What", "How", "Why", "Who",
+             "Create", "Write", "Find", "Build", "Make", "Show"}
+
     if isinstance(raw_input, dict):
-        text = raw_input.get("text", raw_input.get("task", str(raw_input)))
+        text = str(raw_input.get("text") or raw_input.get("task") or raw_input)
         input_format = "json"
     else:
         text = str(raw_input).strip()
         input_format = "text"
 
-    text = text.strip()
-
-    # ── Detect task type ─────────────────────────────────────────────────────
     text_lower = text.lower()
     task_type = "general"
-    for ttype, keywords in _TASK_TYPES.items():
+    for ttype, keywords in _task_types.items():
         if any(kw in text_lower for kw in keywords):
             task_type = ttype
             break
 
-    # ── Extract rough entities (capitalised words / quoted strings) ──────────
     entities = re.findall(r'"([^"]+)"', text)
-    entities += [w for w in re.findall(r"\b[A-Z][a-zA-Z]{2,}\b", text) if w not in {
-        "The", "This", "That", "When", "What", "How", "Why", "Who",
-        "Create", "Write", "Find", "Build", "Make", "Show",
-    }]
-    entities = list(dict.fromkeys(entities))[:10]  # deduplicate, cap at 10
+    entities += [w for w in re.findall(r"\b[A-Z][a-zA-Z]{2,}\b", text) if w not in _stop]
+    entities = list(dict.fromkeys(entities))[:10]
 
-    # ── Build a short intent phrase ───────────────────────────────────────────
     words = text.split()
     intent = " ".join(words[:8]) + ("…" if len(words) > 8 else "")
 
-    logger.debug("openclaw: type=%s intent=%s entities=%s", task_type, intent, entities)
-
+    logger.debug("hermes.process_input: type=%s intent=%s entities=%s", task_type, intent, entities)
     return {
         "text": text,
         "task_type": task_type,
@@ -993,9 +1007,9 @@ def run_pipeline(raw_input: str | dict, *, task_id: str | None = None) -> dict:
     ts_start = now_iso()
     logger.info("=== Hermes pipeline start: task_id=%s ===", task_id)
 
-    # ── 1. OpenClaw: normalise & extract intent ───────────────────────────────
-    normalized = openclaw_process(raw_input)
-    logger.info("OpenClaw: type=%s intent=%s", normalized["task_type"], normalized["intent"])
+    # ── 1. Engine: normalise & extract intent ────────────────────────────────
+    normalized = process_input(raw_input)
+    logger.info("Engine: type=%s intent=%s", normalized["task_type"], normalized["intent"])
 
     # ── 2. Build plan ─────────────────────────────────────────────────────────
     plan = build_plan(normalized)
@@ -1047,7 +1061,7 @@ def run_pipeline(raw_input: str | dict, *, task_id: str | None = None) -> dict:
                 save_memory(memory)
 
                 # Rebuild plan with improved prompt
-                improved_normalized = openclaw_process(improved_prompt)
+                improved_normalized = process_input(improved_prompt)
                 # Keep original task type for routing
                 improved_normalized["task_type"] = normalized["task_type"]
                 plan = build_plan(improved_normalized)

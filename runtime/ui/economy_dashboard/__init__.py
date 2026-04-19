@@ -1,0 +1,1 @@
+"""Economy Dashboard UI package."""
