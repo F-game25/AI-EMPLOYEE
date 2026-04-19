@@ -12,6 +12,7 @@ import OperationsPage from './pages/OperationsPage'
 import AgentsPage from './pages/AgentsPage'
 import SystemPage from './pages/SystemPage'
 import VoicePage from './pages/VoicePage'
+import LearningLadderPage from './pages/LearningLadderPage'
 import { API_URL } from '../config/api'
 
 const BASE = API_URL
@@ -23,6 +24,7 @@ const PAGES = {
   'operations': OperationsPage,
   'agents': AgentsPage,
   'control-center': ControlCenterPage,
+  'learning-ladder': LearningLadderPage,
   'system': SystemPage,
   'voice': VoicePage,
 }

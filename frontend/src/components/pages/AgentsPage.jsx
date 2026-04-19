@@ -1,7 +1,10 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import PageHeader from '../layout/PageHeader'
+import { API_URL } from '../../config/api'
+
+const BASE = API_URL
 
 const STATUS_CONFIG = {
   idle: { dot: 'status-dot--idle', color: 'var(--text-muted)', label: 'Idle' },
@@ -9,10 +12,42 @@ const STATUS_CONFIG = {
   busy: { dot: 'status-dot--busy', color: 'var(--warning)', label: 'Busy' },
 }
 
+const GRADE_COLORS = {
+  Ungraded: 'var(--text-muted)',
+  Beginner: '#6ea8fe',
+  Basic: '#52d9b2',
+  Mature: '#f7c948',
+  Advanced: '#e07b39',
+  Pro: 'var(--gold)',
+}
+
 const FILTERS = ['all', 'active', 'busy', 'idle']
 
-function AgentCard({ agent, index }) {
+function GradeBadge({ grade }) {
+  if (!grade || grade === 'Ungraded') return null
+  const color = GRADE_COLORS[grade] || 'var(--text-muted)'
+  return (
+    <span style={{
+      fontSize: '10px',
+      padding: '2px 7px',
+      borderRadius: '10px',
+      background: `${color}18`,
+      color,
+      border: `1px solid ${color}40`,
+      fontWeight: 600,
+      letterSpacing: '0.04em',
+      textTransform: 'uppercase',
+    }}>
+      {grade}
+    </span>
+  )
+}
+
+function AgentCard({ agent, index, gradeInfo }) {
   const cfg = STATUS_CONFIG[agent.status] || STATUS_CONFIG.idle
+  const grade = gradeInfo?.grade
+  const topic = gradeInfo?.topic
+  const levelsCompleted = gradeInfo?.levels_completed || 0
 
   return (
     <motion.div
@@ -28,6 +63,7 @@ function AgentCard({ agent, index }) {
         <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)', flex: 1 }}>
           {agent.name || agent.id}
         </span>
+        <GradeBadge grade={grade} />
         <span style={{
           fontSize: '11px',
           padding: '2px 8px',
@@ -48,6 +84,30 @@ function AgentCard({ agent, index }) {
           paddingLeft: '20px',
         }}>
           {agent.current_task}
+        </div>
+      )}
+
+      {/* Learning ladder progress */}
+      {topic && (
+        <div style={{
+          paddingLeft: '20px',
+          marginBottom: 'var(--space-2)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+        }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Learning:</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{topic}</span>
+          <div style={{ display: 'flex', gap: '2px', marginLeft: 'auto' }}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <span key={n} style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '2px',
+                background: n <= levelsCompleted ? GRADE_COLORS[grade] || 'var(--gold)' : 'var(--border-subtle)',
+              }} />
+            ))}
+          </div>
         </div>
       )}
 
@@ -115,10 +175,51 @@ function PerformanceBar({ label, value, max = 100, color = 'var(--gold)' }) {
   )
 }
 
+function GradeDistribution({ distribution }) {
+  if (!distribution) return null
+  const grades = ['Beginner', 'Basic', 'Mature', 'Advanced', 'Pro']
+  const graded = grades.filter(g => (distribution[g] || 0) > 0)
+  if (graded.length === 0) return null
+  return (
+    <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+      {graded.map(g => (
+        <div key={g} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: GRADE_COLORS[g], flexShrink: 0 }} />
+          <span style={{ color: 'var(--text-muted)' }}>{g}:</span>
+          <span style={{ color: GRADE_COLORS[g], fontWeight: 600 }}>{distribution[g]}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function AgentsPage() {
   const agents = useAppStore(s => s.agents)
   const systemStatus = useAppStore(s => s.systemStatus)
   const [filter, setFilter] = useState('all')
+  const [gradesMap, setGradesMap] = useState({})
+  const [gradeMetrics, setGradeMetrics] = useState(null)
+
+  const fetchGrades = useCallback(async () => {
+    try {
+      const res = await fetch(`${BASE}/api/agents/grades`)
+      const data = await res.json()
+      if (data.ok) {
+        const map = {}
+        for (const p of (data.profiles || [])) {
+          map[(p.agent_id || '').toLowerCase()] = p
+        }
+        setGradesMap(map)
+        setGradeMetrics(data.metrics || null)
+      }
+    } catch (_) {
+      // non-fatal
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchGrades()
+  }, [fetchGrades])
 
   const filteredAgents = useMemo(() => {
     if (!agents || agents.length === 0) return []
@@ -141,7 +242,11 @@ export default function AgentsPage() {
       <PageHeader
         title="Agents"
         subtitle={`${systemStatus?.running_agents ?? 0} active of ${systemStatus?.total_agents ?? 0} total`}
-      />
+      >
+        {gradeMetrics?.total_agents_assigned > 0 && (
+          <GradeDistribution distribution={gradeMetrics?.grade_distribution} />
+        )}
+      </PageHeader>
 
       {/* Filter tabs */}
       <div style={{
@@ -219,9 +324,17 @@ export default function AgentsPage() {
               ? 'No agents deployed — start automation to bring agents online'
               : `No ${filter} agents`}
           </div>
-        ) : filteredAgents.map((agent, idx) => (
-          <AgentCard key={agent.id || agent.name || idx} agent={agent} index={idx} />
-        ))}
+        ) : filteredAgents.map((agent, idx) => {
+          const gradeInfo = gradesMap[(agent.id || '').toLowerCase()] || gradesMap[(agent.name || '').toLowerCase()]
+          return (
+            <AgentCard
+              key={agent.id || agent.name || idx}
+              agent={agent}
+              index={idx}
+              gradeInfo={gradeInfo}
+            />
+          )
+        })}
       </div>
     </div>
   )
