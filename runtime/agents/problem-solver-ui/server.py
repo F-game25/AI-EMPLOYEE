@@ -1337,6 +1337,18 @@ def _get_span_kind_llm():
         return "llm"
 
 
+def _get_lifecycle_manager():
+    """Return the DataLifecycleManager singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.data_lifecycle_manager import get_lifecycle_manager as _glm  # type: ignore
+        return _glm()
+    except Exception:
+        return None
+
+
 def _verify_any_token(token_str: str) -> bool:
     """Return True if the token is valid using the configured AuthManager."""
     return _decode_any_token(token_str) is not None
@@ -24705,6 +24717,94 @@ def get_trace(trace_id: str, _auth: None = Depends(require_auth)):
     if tree is None:
         raise HTTPException(404, f"Trace '{trace_id}' not found")
     return JSONResponse(tree)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Data Lifecycle Management API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/lifecycle")
+def get_lifecycle_status(_auth: None = Depends(require_auth)):
+    """Return retention policies and scheduler state for all managed stores.
+
+    Response shape::
+
+        {
+          "policies": {
+            "audit_log": {
+              "store_id": "audit_log",
+              "ttl_days": 90,
+              "store_type": "sqlite",
+              "enabled": true,
+              "cutoff_iso": "2025-01-18T..."
+            },
+            ...
+          },
+          "last_run": "2026-04-19T...",
+          "scheduler": {"running": false},
+          "store_count": 5
+        }
+    """
+    mgr = _get_lifecycle_manager()
+    if mgr is None:
+        raise HTTPException(503, "Data lifecycle module unavailable")
+    return JSONResponse(mgr.status())
+
+
+@app.post("/api/lifecycle/purge")
+async def purge_lifecycle(payload: dict, _auth: None = Depends(require_auth)):
+    """Trigger a purge pass across all (or one specific) data store.
+
+    Body (optional):
+
+    .. code-block:: json
+
+        {"store_id": "chat_history"}
+
+    Omitting ``store_id`` purges **all** stores.  Returns a per-store report.
+    """
+    mgr = _get_lifecycle_manager()
+    if mgr is None:
+        raise HTTPException(503, "Data lifecycle module unavailable")
+
+    store_id = ((payload or {}).get("store_id") or "").strip()
+    if store_id:
+        if not re.match(r'^[a-zA-Z0-9_]{1,64}$', store_id):
+            raise HTTPException(400, "Invalid store_id")
+        from starlette.concurrency import run_in_threadpool as _rtp  # noqa: PLC0415
+        result = await _rtp(mgr.purge, store_id)
+        return JSONResponse({"ok": True, "results": {store_id: result.to_dict()}})
+
+    from starlette.concurrency import run_in_threadpool as _rtp  # noqa: PLC0415
+    results = await _rtp(mgr.purge_all)
+    return JSONResponse({
+        "ok":      True,
+        "results": {sid: r.to_dict() for sid, r in results.items()},
+    })
+
+
+@app.patch("/api/lifecycle/{store_id}/ttl")
+def update_lifecycle_ttl(store_id: str, payload: dict, _auth: None = Depends(require_auth)):
+    """Update the TTL (in days) for a specific store at runtime.
+
+    Body::
+
+        {"days": 180}
+
+    Set ``days`` to 0 to disable automatic purging for that store.
+    """
+    if not re.match(r'^[a-zA-Z0-9_]{1,64}$', store_id):
+        raise HTTPException(400, "Invalid store_id")
+    days = (payload or {}).get("days")
+    if days is None or not isinstance(days, int) or days < 0:
+        raise HTTPException(400, "days must be a non-negative integer")
+    mgr = _get_lifecycle_manager()
+    if mgr is None:
+        raise HTTPException(503, "Data lifecycle module unavailable")
+    updated = mgr.set_ttl(store_id, days=days)
+    if not updated:
+        raise HTTPException(404, f"Store '{store_id}' not found")
+    return JSONResponse({"ok": True, "store_id": store_id, "ttl_days": days})
 
 
 if __name__ == "__main__":
