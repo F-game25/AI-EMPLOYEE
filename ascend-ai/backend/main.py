@@ -10,6 +10,7 @@ import os
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from routers.agents import router as agents_router
@@ -59,7 +60,17 @@ app.include_router(ws_router)
 # ── Serve React build (LAST — after all API routes) ─────────────────
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+    # Mount static assets (JS/CSS) under /assets
+    assets_dir = os.path.join(static_dir, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    # SPA catch-all: every non-API path returns index.html
+    _index_html = os.path.join(static_dir, "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        return FileResponse(_index_html)
 
 
 # ── Startup ──────────────────────────────────────────────────────────
