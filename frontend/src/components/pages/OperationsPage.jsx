@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { useBrainStore } from '../../store/brainStore'
 import PageHeader from '../layout/PageHeader'
 import ObservabilityDashboard from '../dashboard/ObservabilityDashboard'
 import { API_URL } from '../../config/api'
@@ -120,6 +121,7 @@ export default function OperationsPage() {
   const activityFeed = useAppStore(s => s.activityFeed)
   const executionLogs = useAppStore(s => s.executionLogs)
   const workflowState = useAppStore(s => s.workflowState)
+  const addNode = useBrainStore(s => s.addNode)
 
   const [running, setRunning] = useState(false)
   const [goal, setGoal] = useState('Run value generation cycle')
@@ -136,13 +138,24 @@ export default function OperationsPage() {
       })
       const data = await res.json()
       setAutomationStatus(data.message || data.reason || `Automation ${action}: ${data.status || 'ok'}`)
+      // Add task node for the automation action
+      addNode({
+        id: `auto-${action}-${Date.now()}`,
+        label: `automation:${action}`,
+        type: 'task',
+        group: 'automation',
+        weight: 1,
+        confidence: 0.5,
+        source: 'operations',
+        tag: 'automation',
+      })
     } catch (e) {
       console.error(`Automation ${action} failed`, e)
       setAutomationStatus(`Automation ${action} failed.`)
     } finally {
       setRunning(false)
     }
-  }, [goal, setAutomationStatus])
+  }, [goal, setAutomationStatus, addNode])
 
   const runPipeline = useCallback(async (kind) => {
     const cfg = PIPELINE_DEFAULTS[kind]
@@ -156,13 +169,24 @@ export default function OperationsPage() {
       })
       const data = await res.json()
       setAutomationStatus(`${data.pipeline || 'Pipeline'} run ${data.status || 'queued'}.`)
+      // Add strategy node to the shared brain graph
+      addNode({
+        id: `pipeline-${kind}-${Date.now()}`,
+        label: `${kind} pipeline`,
+        type: 'strategy',
+        group: 'money',
+        weight: 2,
+        confidence: 0.6,
+        source: 'operations',
+        tag: kind,
+      })
     } catch (e) {
       console.error(`${kind} pipeline failed`, e)
       setAutomationStatus(`${kind} pipeline failed.`)
     } finally {
       setRunning(false)
     }
-  }, [setAutomationStatus])
+  }, [setAutomationStatus, addNode])
 
   const workflowNodes = useMemo(() => {
     const run = workflowState?.runs?.find(r => r.run_id === workflowState?.active_run)

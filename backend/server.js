@@ -1291,6 +1291,66 @@ app.get('/api/brain/neurons', (req, res) => {
   res.json(brain.neurons());
 });
 
+/**
+ * Unified graph endpoint for the 3-D Neural Brain visualization.
+ * Returns { nodes, links, stats } using a normalized schema so the
+ * frontend brainStore can consume it directly.
+ */
+app.get('/api/brain/graph', (req, res) => {
+  const raw = brain.neurons();
+  const memoryTree = subsystems.getMemoryTree();
+  const nodes = (raw.nodes || []).map((n) => ({
+    id: n.id,
+    label: n.label,
+    type: n.type || 'skill',
+    group:
+      n.type === 'Memory'
+        ? 'memory'
+        : n.type === 'Strategy' || n.type === 'Skill'
+          ? 'money'
+          : n.type === 'Output'
+            ? 'automation'
+            : 'learning',
+    weight: n.weight ?? 1,
+    confidence: n.confidence ?? 0,
+    activation: n.activation ?? 0,
+    source: n.source || 'system',
+    tag: n.tag || '',
+  }));
+
+  // Append top memory-tree entities as nodes
+  if (Array.isArray(memoryTree?.nodes)) {
+    memoryTree.nodes.slice(0, 30).forEach((m) => {
+      const id = `mem-${(m.id || m.entity || '').replace(/\s+/g, '-').slice(0, 40)}`;
+      if (nodes.some((n) => n.id === id)) return;
+      nodes.push({
+        id,
+        label: m.entity || m.id || 'memory',
+        type: 'memory',
+        group: 'memory',
+        weight: m.mention_count ?? m.importance ?? 1,
+        confidence: m.importance ?? 0.5,
+        activation: 0,
+        source: 'memory',
+        tag: 'knowledge',
+      });
+    });
+  }
+
+  const links = (raw.connections || []).map((c) => ({
+    source: c.from,
+    target: c.to,
+    strength: c.weight ?? c.confidence ?? 0.5,
+  }));
+
+  res.json({
+    nodes,
+    links,
+    stats: raw.stats || {},
+    updated_at: raw.updated_at || new Date().toISOString(),
+  });
+});
+
 app.get('/api/memory/tree', (req, res) => {
   res.json(subsystems.getMemoryTree());
 });
@@ -1585,6 +1645,208 @@ app.post('/api/chat', (req, res) => {
     workflow_run: run.run_id,
     response: `Queued task ${queued.taskId} on ${queued.agentId}.`,
   });
+});
+
+// ── Enterprise: Audit, Reliability, Forge-queue endpoints ────────────────────
+
+// In-process audit log (lightweight JS-side; Python audit_engine is the source
+// of truth when the Python backend is also running).
+const _auditLog = [];
+const MAX_AUDIT_ENTRIES = 2000;
+
+function recordAuditEvent({ actor, action, inputData, outputData, riskScore, traceId, meta }) {
+  const score = typeof riskScore === 'number' ? Math.min(1, Math.max(0, riskScore)) : _classifyRisk(action);
+  const evt = {
+    id: `audit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    ts: new Date().toISOString(),
+    actor: String(actor || 'system'),
+    action: String(action || 'unknown'),
+    input: inputData || {},
+    output: outputData || {},
+    risk_score: score,
+    trace_id: traceId || '',
+    meta: meta || {},
+  };
+  _auditLog.unshift(evt);
+  if (_auditLog.length > MAX_AUDIT_ENTRIES) _auditLog.length = MAX_AUDIT_ENTRIES;
+  return evt;
+}
+
+const _HIGH_RISK_ACTIONS = new Set([
+  'forge_deploy', 'forge_rollback', 'memory_delete', 'memory_rollback',
+  'permission_override', 'economy_withdraw', 'agent_stop_all', 'security_strict_mode',
+]);
+const _MEDIUM_RISK_ACTIONS = new Set([
+  'forge_submit', 'forge_approve', 'memory_write', 'config_change',
+  'agent_mode_change', 'economy_action', 'tool_execution',
+]);
+
+function _classifyRisk(action) {
+  if (_HIGH_RISK_ACTIONS.has(action)) return 0.85;
+  if (_MEDIUM_RISK_ACTIONS.has(action)) return 0.45;
+  return 0.10;
+}
+
+// Reliability state
+const reliabilityState = {
+  forgeFrozen: false,
+  freezeReason: '',
+  stabilityScore: 1.0,
+  checkpoints: [],
+  throttledAgents: [],
+  lastEvaluated: null,
+};
+
+function updateStabilityScore() {
+  const snap = buildObservabilitySnapshot();
+  const errorsPerMin = (snap.metrics || {}).errors_per_minute || 0;
+  const errorFactor = Math.min(1.0, errorsPerMin / 10);
+  const score = Math.max(0.0, 1.0 - 0.6 * errorFactor);
+  reliabilityState.stabilityScore = Math.round(score * 1000) / 1000;
+  reliabilityState.lastEvaluated = new Date().toISOString();
+  if (errorsPerMin >= 10 && !reliabilityState.forgeFrozen) {
+    reliabilityState.forgeFrozen = true;
+    reliabilityState.freezeReason = `error_rate=${errorsPerMin}/min`;
+    recordAuditEvent({ actor: 'system', action: 'forge_freeze', outputData: { reason: reliabilityState.freezeReason }, riskScore: 0.7 });
+  }
+}
+
+setInterval(updateStabilityScore, 10000);
+
+// Forge approval queue (JS-side mirror of Python AscendForgeExecutor queue)
+const _forgeQueue = [];
+const MAX_FORGE_QUEUE = 200;
+
+function _forgeRiskScore(goal) {
+  const text = (goal || '').toLowerCase();
+  const highKw = ['deploy', 'production', 'delete', 'drop', 'rm ', 'overwrite', 'replace all', 'wipe'];
+  const midKw = ['refactor', 'update', 'migrate', 'change', 'modify', 'patch', 'rewrite'];
+  if (highKw.some((kw) => text.includes(kw))) return 0.80;
+  if (midKw.some((kw) => text.includes(kw))) return 0.45;
+  return 0.15;
+}
+
+function _forgeRiskLabel(score) {
+  if (score >= 0.7) return 'HIGH';
+  if (score >= 0.3) return 'MEDIUM';
+  return 'LOW';
+}
+
+// GET /api/audit/events
+app.get('/api/audit/events', (req, res) => {
+  const limit = Math.min(500, Math.max(1, parseInt((req.query || {}).limit) || 100));
+  const actor = (req.query || {}).actor || '';
+  const action = (req.query || {}).action || '';
+  const minRisk = parseFloat((req.query || {}).min_risk || '0') || 0;
+  let events = _auditLog;
+  if (actor) events = events.filter((e) => e.actor === actor);
+  if (action) events = events.filter((e) => e.action === action);
+  if (minRisk > 0) events = events.filter((e) => e.risk_score >= minRisk);
+  res.json({ events: events.slice(0, limit), total: _auditLog.length });
+});
+
+// GET /api/audit/stats
+app.get('/api/audit/stats', (req, res) => {
+  const byActor = {};
+  const byAction = {};
+  const riskDist = { low: 0, medium: 0, high: 0 };
+  for (const evt of _auditLog) {
+    byActor[evt.actor] = (byActor[evt.actor] || 0) + 1;
+    byAction[evt.action] = (byAction[evt.action] || 0) + 1;
+    if (evt.risk_score < 0.25) riskDist.low++;
+    else if (evt.risk_score < 0.6) riskDist.medium++;
+    else riskDist.high++;
+  }
+  res.json({ total: _auditLog.length, by_actor: byActor, by_action: byAction, risk_distribution: riskDist });
+});
+
+// GET /api/reliability/status
+app.get('/api/reliability/status', (req, res) => {
+  res.json({
+    stability_score: reliabilityState.stabilityScore,
+    forge_frozen: reliabilityState.forgeFrozen,
+    freeze_reason: reliabilityState.freezeReason,
+    throttled_agents: reliabilityState.throttledAgents,
+    checkpoints_stored: reliabilityState.checkpoints.length,
+    last_evaluated: reliabilityState.lastEvaluated,
+    updated_at: new Date().toISOString(),
+  });
+});
+
+// POST /api/reliability/forge/freeze
+app.post('/api/reliability/forge/freeze', (req, res) => {
+  const reason = String((req.body || {}).reason || 'manual');
+  reliabilityState.forgeFrozen = true;
+  reliabilityState.freezeReason = reason;
+  recordAuditEvent({ actor: 'operator', action: 'forge_freeze', outputData: { reason }, riskScore: 0.7 });
+  res.json({ ok: true, forge_frozen: true, reason });
+});
+
+// POST /api/reliability/forge/unfreeze
+app.post('/api/reliability/forge/unfreeze', (req, res) => {
+  reliabilityState.forgeFrozen = false;
+  reliabilityState.freezeReason = '';
+  recordAuditEvent({ actor: 'operator', action: 'forge_unfreeze', outputData: {}, riskScore: 0.5 });
+  res.json({ ok: true, forge_frozen: false });
+});
+
+// GET /api/forge/queue
+app.get('/api/forge/queue', (req, res) => {
+  const status = (req.query || {}).status || '';
+  const items = status ? _forgeQueue.filter((r) => r.status === status) : _forgeQueue;
+  res.json({ items, total: _forgeQueue.length });
+});
+
+// POST /api/forge/submit
+app.post('/api/forge/submit', (req, res) => {
+  const body = req.body || {};
+  const goal = String(body.goal || '').trim();
+  if (!goal) return res.status(400).json({ ok: false, error: 'goal required' });
+  if (reliabilityState.forgeFrozen) {
+    return res.status(503).json({ ok: false, error: 'Forge is frozen', reason: reliabilityState.freezeReason });
+  }
+  const score = _forgeRiskScore(goal);
+  const label = _forgeRiskLabel(score);
+  const now = new Date().toISOString();
+  const req2 = {
+    id: `fcr-${Date.now().toString(36)}`,
+    goal,
+    risk_score: score,
+    risk_level: label,
+    status: score >= 0.7 ? 'rejected' : score < 0.3 ? 'approved' : 'pending',
+    created_at: now,
+    decided_at: score !== 0.45 ? now : null,
+    decided_by: score >= 0.7 ? 'system:risk_gate' : score < 0.3 ? 'system:auto_low_risk' : null,
+    sandbox_result: null,
+  };
+  _forgeQueue.unshift(req2);
+  if (_forgeQueue.length > MAX_FORGE_QUEUE) _forgeQueue.length = MAX_FORGE_QUEUE;
+  recordAuditEvent({ actor: body.submitted_by || 'operator', action: 'forge_submit', inputData: { goal, risk_level: label }, outputData: { request_id: req2.id, status: req2.status }, riskScore: score });
+  res.json({ ok: true, request: req2 });
+});
+
+// POST /api/forge/approve/:id
+app.post('/api/forge/approve/:id', (req, res) => {
+  const item = _forgeQueue.find((r) => r.id === req.params.id);
+  if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
+  if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
+  item.status = 'approved';
+  item.decided_at = new Date().toISOString();
+  item.decided_by = (req.body || {}).approved_by || 'operator';
+  recordAuditEvent({ actor: item.decided_by, action: 'forge_approve', inputData: { request_id: item.id }, outputData: { status: 'approved' }, riskScore: 0.5 });
+  res.json({ ok: true, request: item });
+});
+
+// POST /api/forge/reject/:id
+app.post('/api/forge/reject/:id', (req, res) => {
+  const item = _forgeQueue.find((r) => r.id === req.params.id);
+  if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
+  if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
+  item.status = 'rejected';
+  item.decided_at = new Date().toISOString();
+  item.decided_by = (req.body || {}).rejected_by || 'operator';
+  recordAuditEvent({ actor: item.decided_by, action: 'forge_reject', inputData: { request_id: item.id }, outputData: { status: 'rejected' }, riskScore: 0.3 });
+  res.json({ ok: true, request: item });
 });
 
 // ── WebSocket server ──────────────────────────────────────────────────────────
