@@ -1,0 +1,28 @@
+{
+  "id": "content_creation",
+  "name": "Content Creation",
+  "category": "marketing",
+  "description": "Create long-form and short-form content assets.",
+  "system_prompt": "You are a content strategist writing clear, conversion-oriented copy.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "type": {"type": "string"},
+      "topic": {"type": "string"},
+      "tone": {"type": "string"},
+      "length": {"type": "string"}
+    },
+    "required": ["type", "topic"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "content": {"type": "string"}
+    },
+    "required": ["content"]
+  },
+  "examples": [
+    "Write a 1200-word SEO blog post on AI sales assistants",
+    "Create a LinkedIn thought-leadership post for fintech founders"
+  ]
+}

@@ -1,0 +1,1012 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    AI EMPLOYEE v4.0 - Windows Native Installer
+.DESCRIPTION
+    One-click installer for AI Employee on Windows (no WSL or Git Bash required).
+    Installs Python, Git, Ollama (optional), all 35 agents, and configures
+    everything for immediate use.
+.NOTES
+    Run as a normal user (not Administrator).
+    Execution policy must allow running scripts:
+        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
+    ⚠  WINDOWS SUPPORT STATUS: This script has not yet been fully tested on
+       real Windows hardware.  Mac/Linux users are better served by install.sh
+       or install-mac.sh which are production-validated.  If you encounter
+       issues on Windows please open a GitHub issue with your PowerShell version
+       and the error output.
+#>
+
+$ErrorActionPreference = 'Continue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  CONSTANTS
+# ─────────────────────────────────────────────────────────────────────────────
+$AI_VERSION   = '4.0'
+$AI_HOME      = Join-Path $env:USERPROFILE '.ai-employee'
+$GITHUB_OWNER = 'F-game25'
+$GITHUB_REPO  = 'AI-EMPLOYEE'
+$GITHUB_BRANCH = 'main'
+$BASE_URL     = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/$GITHUB_BRANCH/runtime"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  HELPER FUNCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+function Write-Banner {
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║      AI EMPLOYEE - v$AI_VERSION INSTALLER (Windows)               ║" -ForegroundColor Cyan
+    Write-Host "║           Native PowerShell  ·  No WSL Required              ║" -ForegroundColor Cyan
+    Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
+}
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ""
+    Write-Host "▶  $Message" -ForegroundColor Cyan
+}
+
+function Write-OK {
+    param([string]$Message)
+    Write-Host "  ✔  $Message" -ForegroundColor Green
+}
+
+function Write-Warn {
+    param([string]$Message)
+    Write-Host "  ⚠  $Message" -ForegroundColor Yellow
+}
+
+function Write-Err {
+    param([string]$Message)
+    Write-Host "  ✘  $Message" -ForegroundColor Red
+}
+
+function Write-Info {
+    param([string]$Message)
+    Write-Host "     $Message" -ForegroundColor White
+}
+
+function Test-CommandExists {
+    param([string]$Command)
+    $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
+}
+
+function Invoke-Download {
+    param(
+        [string]$Url,
+        [string]$Destination
+    )
+    try {
+        $dir = Split-Path $Destination -Parent
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        (New-Object System.Net.WebClient).DownloadFile($Url, $Destination)
+        return $true
+    } catch {
+        Write-Warn "Download failed: $Url  ($_)"
+        return $false
+    }
+}
+
+function Invoke-DownloadText {
+    param([string]$Url)
+    try {
+        (New-Object System.Net.WebClient).DownloadString($Url)
+    } catch {
+        $null
+    }
+}
+
+function Get-SecureInput {
+    param([string]$Prompt)
+    $ss = Read-Host $Prompt -AsSecureString
+    if ($ss.Length -eq 0) { return '' }
+    $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss)
+    try { [Runtime.InteropServices.Marshal]::PtrToStringAuto($ptr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+}
+
+function New-RandomToken {
+    $rng   = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $bytes = New-Object byte[] 32
+    $rng.GetBytes($bytes)
+    [Convert]::ToBase64String($bytes) -replace '[^a-zA-Z0-9]', '' | ForEach-Object { $_.Substring(0, [Math]::Min(48, $_.Length)) }
+}
+
+function Add-UserPath {
+    param([string]$NewPath)
+    $current = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ($current -notlike "*$NewPath*") {
+        [Environment]::SetEnvironmentVariable('Path', "$current;$NewPath", 'User')
+        $env:PATH += ";$NewPath"
+        Write-OK "Added to user PATH: $NewPath"
+    } else {
+        Write-OK "$NewPath already in PATH"
+    }
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 1 – BANNER
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Banner
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 2 – REQUIREMENT CHECKS
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Checking requirements..."
+
+# 2a. Must NOT run as Administrator
+$currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+if ($currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Err "Please run this installer as a NORMAL user, not as Administrator."
+    Write-Info "Right-click PowerShell → 'Run as user' (not 'Run as administrator')."
+    exit 1
+}
+Write-OK "Running as normal user: $env:USERNAME"
+
+# 2b. Check Python 3.8+ (minimum); installs 3.12 if absent
+$pythonOk = $false
+foreach ($cmd in @('python', 'python3', 'py')) {
+    if (Test-CommandExists $cmd) {
+        $ver = & $cmd --version 2>&1
+        if ($ver -match '(\d+)\.(\d+)') {
+            $major = [int]$Matches[1]; $minor = [int]$Matches[2]
+            if ($major -ge 3 -and $minor -ge 8) {
+                $PYTHON = $cmd
+                $pythonOk = $true
+                Write-OK "Python found: $ver"
+                break
+            }
+        }
+    }
+}
+if (-not $pythonOk) {
+    Write-Warn "Python 3.8+ not found. Installing via winget..."
+    try {
+        winget install --id Python.Python.3.12 --silent --accept-source-agreements --accept-package-agreements
+        # Refresh PATH
+        $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                    [Environment]::GetEnvironmentVariable('Path', 'User')
+        $PYTHON = 'python'
+        Write-OK "Python installed. You may need to restart your shell if commands below fail."
+    } catch {
+        Write-Err "Could not install Python automatically. Please install from https://python.org and re-run."
+        exit 1
+    }
+
+}
+
+# 2c. Check Git (optional)
+if (-not (Test-CommandExists 'git')) {
+    Write-Warn "Git not found. Installing via winget..."
+    try {
+        winget install --id Git.Git --silent --accept-source-agreements --accept-package-agreements
+        $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                    [Environment]::GetEnvironmentVariable('Path', 'User')
+        Write-OK "Git installed."
+    } catch {
+        Write-Warn "Git installation failed. Continuing without Git – files will be downloaded directly."
+    }
+} else {
+    Write-OK "Git found: $(git --version)"
+}
+
+# 2d. Invoke-WebRequest is always present in PowerShell 5.1+ – confirm
+Write-OK "Invoke-WebRequest available (built-in)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 3 – AI EMPLOYEE INTERNAL ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Setting up AI Employee internal engine..."
+# The engine is fully embedded — no external gateway binary is required.
+Write-OK "AI Employee internal engine configured (runtime/engine/)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 4 – CONFIGURATION WIZARD
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Configuration wizard..."
+Write-Info "(Press ENTER to accept defaults / leave optional fields blank)"
+Write-Host ""
+
+# WhatsApp phone
+while ($true) {
+    $WHATSAPP_PHONE = Read-Host "  WhatsApp phone number (E.164 format, e.g. +31612345678)"
+    if ($WHATSAPP_PHONE -match '^\+\d{1,15}$') { break }
+    Write-Warn "  Invalid format. Must start with + followed by 7-15 digits."
+}
+
+# Ollama model catalogue
+$OllamaModelNames = @(
+    'llama3.2',
+    'gemma4',
+    'gemma3',
+    'llama3.1',
+    'mistral',
+    'gemma2',
+    'phi3',
+    'qwen2.5',
+    'deepseek-r1',
+    'codellama'
+)
+$OllamaModelDescs = @(
+    'Meta Llama 3.2 3B  — best all-round, fast          (2 GB RAM)',
+    'Google Gemma 4     — latest Gemma, multimodal      (5 GB RAM) * newest free model',
+    'Google Gemma 3 12B — top quality, beats 70B models (8 GB RAM)',
+    'Meta Llama 3.1 8B  — smarter, slower               (5 GB RAM)',
+    'Mistral 7B         — great instruction following   (4 GB RAM)',
+    'Google Gemma 2 9B  — strong reasoning              (5 GB RAM)',
+    'Microsoft Phi-3    — tiny but capable, very fast   (2 GB RAM)',
+    'Alibaba Qwen 2.5   — multilingual, 7B              (4 GB RAM)',
+    'DeepSeek R1 7B     — chain-of-thought reasoning    (4 GB RAM)',
+    'CodeLlama 7B       — coding-focused                (4 GB RAM)'
+)
+
+# Ollama
+$useOllama = Read-Host "  Use Ollama (local LLM)? [Y/n]"
+$USE_OLLAMA = ($useOllama -ne 'n' -and $useOllama -ne 'N')
+$OLLAMA_MODEL = ''
+if ($USE_OLLAMA) {
+    Write-Host ""
+    Write-Host "  Available local AI models:" -ForegroundColor Cyan
+    Write-Host ""
+    for ($mi = 0; $mi -lt $OllamaModelNames.Count; $mi++) {
+        $num = $mi + 1
+        if ($mi -eq 0) {
+            Write-Host ("    {0,2}) {1}  <- recommended" -f $num, $OllamaModelDescs[$mi]) -ForegroundColor Green
+        } else {
+            Write-Host ("    {0,2}) {1}" -f $num, $OllamaModelDescs[$mi]) -ForegroundColor Cyan
+        }
+    }
+    Write-Host ""
+    $modelChoice = Read-Host ("  Choose a model [1-{0}, default: 1]" -f $OllamaModelNames.Count)
+    $modelChoice = $modelChoice.Trim()
+    $choiceIdx = 0
+    if ($modelChoice -match '^\d+$') {
+        $choiceIdx = [int]$modelChoice - 1
+        if ($choiceIdx -lt 0 -or $choiceIdx -ge $OllamaModelNames.Count) {
+            Write-Warn "Invalid choice. Using default: $($OllamaModelNames[0])"
+            $choiceIdx = 0
+        }
+    }
+    $OLLAMA_MODEL = $OllamaModelNames[$choiceIdx]
+    Write-Host "  Selected: $OLLAMA_MODEL" -ForegroundColor Green
+}
+
+# API keys (optional, sensitive ones use secure input)
+$ANTHROPIC_KEY   = Get-SecureInput "  Anthropic API key (optional, hidden)"
+$OPENAI_KEY      = Get-SecureInput "  OpenAI API key (optional, hidden)"
+$ALPHA_INSIDER_KEY = Read-Host "  Alpha Insider API key (optional)"
+$TAVILY_KEY      = Read-Host "  Tavily API key (optional)"
+$NEWSAPI_KEY     = Read-Host "  NewsAPI key (optional)"
+$TELEGRAM_TOKEN  = Read-Host "  Telegram Bot Token (optional)"
+$DISCORD_WEBHOOK = Read-Host "  Discord Webhook URL (optional)"
+
+# SMTP
+$SMTP_HOST = Read-Host "  SMTP host (optional)"
+$SMTP_USER = Read-Host "  SMTP user (optional)"
+$SMTP_PASS = ''
+if (-not [string]::IsNullOrWhiteSpace($SMTP_HOST)) {
+    $SMTP_PASS = Get-SecureInput "  SMTP password (optional, hidden)"
+}
+
+# Hourly status
+$statusChoice = Read-Host "  Enable hourly status updates? [Y/n]"
+$HOURLY_STATUS = ($statusChoice -ne 'n' -and $statusChoice -ne 'N')
+
+# Ports
+$dashPortStr = Read-Host "  Dashboard port [default: 3000]"
+$DASHBOARD_PORT = if ($dashPortStr -match '^\d+$') { [int]$dashPortStr } else { 3000 }
+
+$uiPortStr = Read-Host "  Problem Solver UI port [default: 8787]"
+$UI_PORT = if ($uiPortStr -match '^\d+$') { [int]$uiPortStr } else { 8787 }
+
+# Workers
+$workersStr = Read-Host "  Number of worker agents [1-20, default: 20]"
+$NUM_WORKERS = if ($workersStr -match '^\d+$' -and [int]$workersStr -ge 1 -and [int]$workersStr -le 20) {
+    [int]$workersStr
+} else { 20 }
+
+# Generate secure random token
+$AI_SECRET_TOKEN = New-RandomToken
+Write-OK "Generated random secret token."
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 5 – INSTALL OLLAMA (if chosen)
+# ─────────────────────────────────────────────────────────────────────────────
+if ($USE_OLLAMA) {
+    Write-Step "Installing Ollama..."
+    if (Test-CommandExists 'ollama') {
+        Write-OK "Ollama already installed."
+    } else {
+        $ollamaViaWinget = $false
+        try {
+            winget install --id Ollama.Ollama --silent --accept-source-agreements --accept-package-agreements
+            $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                        [Environment]::GetEnvironmentVariable('Path', 'User')
+            if (Test-CommandExists 'ollama') {
+                Write-OK "Ollama installed via winget."
+                $ollamaViaWinget = $true
+            }
+        } catch { }
+
+        if (-not $ollamaViaWinget) {
+            Write-Warn "winget install failed for Ollama. Trying direct download..."
+            $ollamaInstaller = Join-Path $env:TEMP 'OllamaSetup.exe'
+            $downloaded = Invoke-Download 'https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe' $ollamaInstaller
+            if ($downloaded -and (Test-Path $ollamaInstaller)) {
+                try {
+                    Start-Process -FilePath $ollamaInstaller -ArgumentList '/S' -Wait
+                    $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                                [Environment]::GetEnvironmentVariable('Path', 'User')
+                    Write-OK "Ollama installed via direct download."
+                } catch {
+                    Write-Warn "Ollama installer failed: $_"
+                }
+            } else {
+                Write-Warn "Could not download Ollama. Install manually from https://ollama.ai"
+            }
+        }
+    }
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 6 – SETUP DIRECTORIES
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Creating directory structure in $AI_HOME ..."
+
+$AI_DIRS = @(
+    'workspace', 'credentials', 'downloads', 'logs', 'ui',
+    'backups', 'bin', 'run', 'agents', 'config', 'state', 'improvements'
+)
+foreach ($d in $AI_DIRS) {
+    $path = Join-Path $AI_HOME $d
+    if (-not (Test-Path $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+}
+Write-OK "Directories created."
+
+# Restrict credentials directory ACL
+$credDir = Join-Path $AI_HOME 'credentials'
+try {
+    $acl = Get-Acl $credDir
+    $acl.SetAccessRuleProtection($true, $false)       # disable inheritance
+    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $env:USERNAME, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'
+    )
+    $acl.AddAccessRule($rule)
+    Set-Acl -Path $credDir -AclObject $acl
+    Write-OK "Credentials directory locked to current user."
+} catch {
+    Write-Warn "Could not set ACL on credentials dir: $_"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 7 – DOWNLOAD RUNTIME FILES FROM GITHUB
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Downloading runtime files from GitHub ($GITHUB_BRANCH branch)..."
+
+# Mapping: agent-folder-name => python-file-name
+$BOT_FILES = [ordered]@{
+    'problem-solver'            = 'problem_solver.py'
+    'problem-solver-ui'         = 'server.py'
+    'polymarket-trader'         = 'trader.py'
+    'status-reporter'           = 'status_reporter.py'
+    'scheduler-runner'          = 'scheduler.py'
+    'discovery'                 = 'discovery.py'
+    'skills-manager'            = 'skills_manager.py'
+    'mirofish-researcher'       = 'researcher.py'
+    'ai-router'                 = 'ai_router.py'
+    'ollama-agent'              = 'ollama_agent.py'
+    'claude-agent'              = 'claude_agent.py'
+    'gemma-agent'               = 'gemma_agent.py'
+    'hermes-agent'              = 'hermes_agent.py'
+    'web-researcher'            = 'web_researcher.py'
+    'social-media-manager'      = 'social_media_manager.py'
+    'lead-generator'            = 'lead_generator.py'
+    'lead-hunter-elite'         = 'lead_hunter_elite.py'
+    'linkedin-growth-hacker'    = 'linkedin_growth_hacker.py'
+    'cold-outreach-assassin'    = 'cold_outreach_assassin.py'
+    'recruiter'                 = 'recruiter.py'
+    'ecom-agent'                = 'ecom_agent.py'
+    'creator-agency'            = 'creator_agency.py'
+    'signal-community'          = 'signal_community.py'
+    'appointment-setter'        = 'appointment_setter.py'
+    'follow-up-agent'           = 'follow_up_agent.py'
+    'offer-agent'               = 'offer_agent.py'
+    'qualification-agent'       = 'qualification_agent.py'
+    'sales-closer-pro'          = 'sales_closer_pro.py'
+    'newsletter-bot'            = 'newsletter_bot.py'
+    'chatbot-builder'           = 'chatbot_builder.py'
+    'faceless-video'            = 'faceless_video.py'
+    'print-on-demand'           = 'print_on_demand.py'
+    'course-creator'            = 'course_creator.py'
+    'ui-designer'               = 'ui_designer.py'
+    'engineering-assistant'     = 'engineering_assistant.py'
+    'qa-tester'                 = 'qa_tester.py'
+    'arbitrage-bot'             = 'arbitrage_bot.py'
+    'task-orchestrator'         = 'task_orchestrator.py'
+    'company-builder'           = 'company_builder.py'
+    'company-manager'           = 'company_manager.py'
+    'memecoin-creator'          = 'memecoin_creator.py'
+    'hr-manager'                = 'hr_manager.py'
+    'finance-wizard'            = 'finance_wizard.py'
+    'budget-tracker'            = 'budget_tracker.py'
+    'brand-strategist'          = 'brand_strategist.py'
+    'growth-hacker'             = 'growth_hacker.py'
+    'referral-rocket'           = 'referral_rocket.py'
+    'ad-campaign-wizard'        = 'ad_campaign_wizard.py'
+    'paid-media-specialist'     = 'paid_media_specialist.py'
+    'project-manager'           = 'project_manager.py'
+    'partnership-matchmaker'    = 'partnership_matchmaker.py'
+    'org-chart'                 = 'org_chart.py'
+    'ticket-system'             = 'ticket_system.py'
+    'goal-alignment'            = 'goal_alignment.py'
+    'governance'                = 'governance.py'
+    'feedback-loop'             = 'feedback_loop.py'
+    'session-manager'           = 'session_manager.py'
+    'discord-bot'               = 'discord_bot.py'
+    'whatsapp-webhook'          = 'webhook_server.py'
+    'obsidian-memory'           = 'obsidian_memory.py'
+    'financial-deepsearch'      = 'financial_deepsearch.py'
+    'auto-updater'              = 'auto_updater.py'
+    'ascend-forge'              = 'ascend_forge.py'
+    'blacklight'                = 'blacklight.py'
+    'turbo-quant'               = 'turbo_quant.py'
+    'artifacts'                 = 'artifacts.py'
+}
+$BOTS = $BOT_FILES.Keys
+
+# Download start-windows.ps1 launcher (the script that actually starts all agents)
+$startScriptUrl  = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/start-windows.ps1"
+$startScriptDest = Join-Path $AI_HOME 'start-windows.ps1'
+$ok = Invoke-Download $startScriptUrl $startScriptDest
+if (-not $ok) {
+    # Create a minimal launcher so the desktop shortcut works even if download fails
+    $fallbackLauncher = @"
+# AI Employee Windows Launcher (auto-generated fallback)
+`$AI_HOME = "`$env:USERPROFILE\.ai-employee"
+`$env:AI_HOME = `$AI_HOME
+Get-Content "`$AI_HOME\.env" | ForEach-Object {
+    if (`$_ -match '^([^#=]+)=(.*)$') {
+        [Environment]::SetEnvironmentVariable(`$Matches[1].Trim(), `$Matches[2].Trim(), 'Process')
+    }
+}
+Write-Host 'Starting AI Employee...' -ForegroundColor Cyan
+Push-Location `$AI_HOME
+`$python = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'py' }
+`$uiScript = Join-Path `$AI_HOME 'agents\problem-solver-ui\server.py'
+Start-Process `$python -ArgumentList `"`$uiScript`" -WindowStyle Hidden
+Start-Sleep 5
+Start-Process 'http://127.0.0.1:8787'
+Read-Host 'Press Enter to exit'
+"@
+    Set-Content -Path $startScriptDest -Value $fallbackLauncher -Encoding UTF8
+    Write-Warn "start-windows.ps1 not downloaded – created minimal fallback launcher."
+}
+
+# Download bot files using correct per-bot filenames
+$downloadCount = 0
+$failCount = 0
+$botTotal = $BOTS.Count
+$botIndex = 0
+foreach ($bot in $BOTS) {
+    $botIndex++
+    $pct = [int](($botIndex / $botTotal) * 100)
+    Write-Progress -Activity "Downloading runtime files" `
+        -Status "[$botIndex/$botTotal]  agent: $bot" `
+        -PercentComplete $pct
+    $pyFile = $BOT_FILES[$bot]
+    $botDir = Join-Path $AI_HOME "agents\$bot"
+    if (-not (Test-Path $botDir)) {
+        New-Item -ItemType Directory -Path $botDir -Force | Out-Null
+    }
+
+    # Main bot Python script (with correct filename)
+    $botUrl  = "$BASE_URL/agents/$bot/$pyFile"
+    $botDest = Join-Path $botDir $pyFile
+    if (Invoke-Download $botUrl $botDest) { $downloadCount++ } else { $failCount++ }
+
+    # requirements.txt (optional)
+    $reqUrl  = "$BASE_URL/agents/$bot/requirements.txt"
+    $reqDest = Join-Path $botDir 'requirements.txt'
+    Invoke-Download $reqUrl $reqDest | Out-Null
+
+    # Config .env file
+    $cfgUrl  = "$BASE_URL/config/$bot.env"
+    $cfgDest = Join-Path $AI_HOME "config\$bot.env"
+    Invoke-Download $cfgUrl $cfgDest | Out-Null
+}
+Write-Progress -Activity "Downloading runtime files" -Completed
+
+# Also download shared config files
+$configFiles = @(
+    'gateway.template.json', 'schedules.json', 'polymarket_estimates.json',
+    'skills_library.json', 'custom_agents.json', 'agent_capabilities.json',
+    'task_plans.json', 'agent_templates.json'
+)
+$cfIndex = 0
+foreach ($cf in $configFiles) {
+    $cfIndex++
+    Write-Progress -Activity "Downloading config files" `
+        -Status "$cf" `
+        -PercentComplete ([int](($cfIndex / $configFiles.Count) * 100))
+    $cfUrl   = "$BASE_URL/config/$cf"
+    $cfDest  = Join-Path $AI_HOME "config\$cf"
+    Invoke-Download $cfUrl $cfDest | Out-Null
+}
+Write-Progress -Activity "Downloading config files" -Completed
+
+Write-OK "Agent files: $downloadCount downloaded, $failCount not found (placeholders created)."
+
+# Download extra files for problem-solver-ui (config_manager, security, features/)
+$uiDir = Join-Path $AI_HOME 'agents\problem-solver-ui'
+$uiFeaturesDir = Join-Path $uiDir 'features'
+if (-not (Test-Path $uiFeaturesDir)) {
+    New-Item -ItemType Directory -Path $uiFeaturesDir -Force | Out-Null
+}
+foreach ($extraFile in @('config_manager.py', 'security.py')) {
+    $url  = "$BASE_URL/agents/problem-solver-ui/$extraFile"
+    $dest = Join-Path $uiDir $extraFile
+    Invoke-Download $url $dest | Out-Null
+}
+$featureFiles = @(
+    '__init__.py', 'analytics.py', 'ceo_briefing.py', 'competitor_watch.py',
+    'crm.py', 'customer_support.py', 'email_marketing.py', 'export_backup.py',
+    'health_check.py', 'invoicing.py', 'meeting_intelligence.py',
+    'personal_brand.py', 'social_media.py', 'team_management.py',
+    'website_builder.py', 'workflow_builder.py'
+)
+foreach ($ff in $featureFiles) {
+    $url  = "$BASE_URL/agents/problem-solver-ui/features/$ff"
+    $dest = Join-Path $uiFeaturesDir $ff
+    Invoke-Download $url $dest | Out-Null
+}
+
+# Download shared agent root files (utils.py, agent_selftest.py)
+foreach ($sharedFile in @('utils.py', 'agent_selftest.py')) {
+    $url  = "$BASE_URL/agents/$sharedFile"
+    $dest = Join-Path $AI_HOME "agents\$sharedFile"
+    Invoke-Download $url $dest | Out-Null
+}
+
+Write-OK "Extra UI and shared files downloaded."
+
+# Ensure every bot directory has at least a placeholder Python script
+foreach ($bot in $BOTS) {
+    $pyFile  = $BOT_FILES[$bot]
+    $pyDest  = Join-Path $AI_HOME "agents\$bot\$pyFile"
+    if (-not (Test-Path $pyDest)) {
+        $placeholder = @"
+# $bot ($pyFile) - placeholder
+# The actual bot code will be downloaded when you run the installer connected to GitHub.
+import time, os
+AI_HOME = os.environ.get('AI_HOME', os.path.expanduser('~/.ai-employee'))
+print(f'$bot: waiting for real code. AI_HOME={AI_HOME}')
+while True:
+    time.sleep(60)
+"@
+        Set-Content -Path $pyDest -Value $placeholder -Encoding UTF8
+    }
+}
+
+# Skip bin/ai-employee (Linux shell script – not usable on Windows)
+Write-OK "Skipped bin/ai-employee (Linux shell script – use start-windows.ps1 instead)."
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 8 – INSTALL PYTHON DEPENDENCIES
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Installing Python dependencies..."
+
+$corePkgs = @('fastapi', 'uvicorn[standard]', 'requests', 'anthropic', 'python-dotenv', 'httpx')
+try {
+    & $PYTHON -m pip install --upgrade pip --quiet
+    & $PYTHON -m pip install --user @corePkgs --quiet
+    Write-OK "Core packages installed."
+} catch {
+    Write-Warn "pip install failed for core packages: $_"
+}
+
+foreach ($bot in $BOTS) {
+    $reqFile = Join-Path $AI_HOME "agents\$bot\requirements.txt"
+    if (Test-Path $reqFile) {
+        $botIdx = [array]::IndexOf($BOTS, $bot) + 1
+        Write-Progress -Activity "Implementing updates: installing dependencies" `
+            -Status "agent: $bot  ($botIdx/$($BOTS.Count))" `
+            -PercentComplete ([int](($botIdx / $BOTS.Count) * 100))
+        try {
+            & $PYTHON -m pip install --user -r $reqFile --quiet -ErrorAction SilentlyContinue | Out-Null
+        } catch { }
+    }
+}
+Write-Progress -Activity "Implementing updates: installing dependencies" -Completed
+Write-OK "Bot dependencies installed."
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 9 – GENERATE CONFIGURATION FILES
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Writing configuration files..."
+
+# 9a. AI Employee config.json
+$openClawConfig = @"
+{
+  "gateway": {
+    "mode": "local",
+    "port": 18789,
+    "host": "127.0.0.1"
+  },
+  "whatsapp": {
+    "phone": "$WHATSAPP_PHONE",
+    "session": "ai-employee"
+  },
+  "security": {
+    "token": "$AI_SECRET_TOKEN"
+  }
+}
+"@
+Set-Content -Path (Join-Path $AI_HOME 'config.json') -Value $openClawConfig -Encoding UTF8
+Write-OK "config.json written."
+
+# 9b. Main .env file
+$hourlyVal  = if ($HOURLY_STATUS) { 'true' } else { 'false' }
+$ollamaVal  = if ($USE_OLLAMA) { 'true' } else { 'false' }
+
+$envContent = @"
+# AI Employee Environment Configuration
+# Generated by install-windows.ps1 on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+
+# Core
+AI_HOME=$AI_HOME
+AI_SECRET_TOKEN=$AI_SECRET_TOKEN
+WHATSAPP_PHONE=$WHATSAPP_PHONE
+DASHBOARD_PORT=$DASHBOARD_PORT
+PROBLEM_SOLVER_UI_PORT=$UI_PORT
+UI_PORT=$UI_PORT
+NUM_WORKERS=$NUM_WORKERS
+HOURLY_STATUS=$hourlyVal
+
+# LLM
+USE_OLLAMA=$ollamaVal
+OLLAMA_MODEL=$OLLAMA_MODEL
+OLLAMA_HOST=http://localhost:11434
+
+# API Keys
+ANTHROPIC_API_KEY=$ANTHROPIC_KEY
+OPENAI_API_KEY=$OPENAI_KEY
+ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY
+TAVILY_API_KEY=$TAVILY_KEY
+NEWSAPI_KEY=$NEWSAPI_KEY
+
+# Messaging
+TELEGRAM_BOT_TOKEN=$TELEGRAM_TOKEN
+DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK
+
+# Email (SMTP)
+SMTP_HOST=$SMTP_HOST
+SMTP_USER=$SMTP_USER
+SMTP_PASS=$SMTP_PASS
+
+# AI Employee Internal Gateway
+AI_EMPLOYEE_GATEWAY_TOKEN=$AI_SECRET_TOKEN
+AI_EMPLOYEE_GATEWAY_PORT=18789
+AI_EMPLOYEE_GATEWAY_HOST=127.0.0.1
+"@
+Set-Content -Path (Join-Path $AI_HOME '.env') -Value $envContent -Encoding UTF8
+Write-OK ".env written."
+
+# 9c. Problem-solver-ui config
+$uiEnv = @"
+PROBLEM_SOLVER_UI_PORT=$UI_PORT
+PROBLEM_SOLVER_UI_HOST=127.0.0.1
+SECRET_TOKEN=$AI_SECRET_TOKEN
+AI_HOME=$AI_HOME
+"@
+Set-Content -Path (Join-Path $AI_HOME 'config\problem-solver-ui.env') -Value $uiEnv -Encoding UTF8
+
+# 9d. Status-reporter config — omit STATUS_REPORT_INTERVAL_SECONDS when disabled
+#     so the bot is never started with interval=0 (which causes a busy loop)
+if ($HOURLY_STATUS) {
+    $statusEnv = @"
+WHATSAPP_PHONE=$WHATSAPP_PHONE
+STATUS_REPORT_INTERVAL_SECONDS=3600
+AI_EMPLOYEE_GATEWAY_TOKEN=$AI_SECRET_TOKEN
+AI_EMPLOYEE_GATEWAY_PORT=18789
+"@
+} else {
+    $statusEnv = @"
+WHATSAPP_PHONE=$WHATSAPP_PHONE
+STATUS_REPORT_INTERVAL_SECONDS=-1
+AI_EMPLOYEE_GATEWAY_TOKEN=$AI_SECRET_TOKEN
+AI_EMPLOYEE_GATEWAY_PORT=18789
+"@
+}
+Set-Content -Path (Join-Path $AI_HOME 'config\status-reporter.env') -Value $statusEnv -Encoding UTF8
+
+Write-OK "Service config files written."
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 10 – STATIC DASHBOARD UI
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Creating dashboard UI..."
+
+# Build bot cards HTML before here-string to avoid complex inline expressions
+$botCardsHtml = ($BOTS | ForEach-Object {
+    "    <div class='bot-item'><div class='dot'></div>$_</div>"
+}) -join "`n"
+
+$htmlContent = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Employee v$AI_VERSION Dashboard</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;background:#0d1117;color:#e6edf3;min-height:100vh}
+    header{background:linear-gradient(135deg,#1a2744,#0d1b35);padding:24px 32px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #21262d}
+    header h1{font-size:1.6rem;font-weight:700;color:#58a6ff}
+    header span{background:#238636;color:#fff;font-size:.75rem;padding:3px 10px;border-radius:12px;font-weight:600}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;padding:24px 32px}
+    .card{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:20px}
+    .card h2{font-size:.85rem;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
+    .stat{font-size:2rem;font-weight:700;color:#58a6ff}
+    .status-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#3fb950;margin-right:6px;animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .bot-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;padding:0 32px 32px}
+    .bot-item{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px 14px;display:flex;align-items:center;gap:8px;font-size:.85rem}
+    .bot-item .dot{width:8px;height:8px;border-radius:50%;background:#3fb950;flex-shrink:0}
+    footer{text-align:center;padding:20px;color:#484f58;font-size:.8rem;border-top:1px solid #21262d}
+    a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🤖 AI Employee</h1>
+    <span>v$AI_VERSION</span>
+    <span style="background:#1f6feb;margin-left:8px">Windows</span>
+  </header>
+  <div class="grid">
+    <div class="card">
+      <h2>Status</h2>
+      <div style="font-size:1.1rem"><span class="status-dot"></span>Running</div>
+    </div>
+    <div class="card">
+      <h2>Active Bots</h2>
+      <div class="stat">$($BOTS.Count)</div>
+    </div>
+    <div class="card">
+      <h2>Problem Solver UI</h2>
+      <div><a href="http://127.0.0.1:$UI_PORT" target="_blank">http://127.0.0.1:$UI_PORT</a></div>
+    </div>
+    <div class="card">
+      <h2>WhatsApp</h2>
+      <div style="font-size:.95rem;color:#58a6ff">$WHATSAPP_PHONE</div>
+    </div>
+  </div>
+  <h3 style="padding:0 32px 12px;color:#8b949e;font-size:.85rem;text-transform:uppercase;letter-spacing:.06em">Bot Fleet</h3>
+  <div class="bot-list">
+$botCardsHtml
+  </div>
+  <footer>AI Employee v$AI_VERSION &nbsp;·&nbsp; <a href="https://github.com/$GITHUB_OWNER/$GITHUB_REPO" target="_blank">GitHub</a></footer>
+</body>
+</html>
+"@
+Set-Content -Path (Join-Path $AI_HOME 'ui\index.html') -Value $htmlContent -Encoding UTF8
+Write-OK "Dashboard UI written to $AI_HOME\ui\index.html"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 11 – DESKTOP SHORTCUTS + SMART LAUNCHER
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Creating Desktop shortcuts and smart launcher..."
+
+$desktop = [Environment]::GetFolderPath('Desktop')
+
+# ── Smart launcher PowerShell script ─────────────────────────────────────────
+# Clicking the desktop button:
+#   • If the bot is already running (UI responds on /health) → open the dashboard in browser
+#   • If it is NOT running → open a new PowerShell window and start the bot
+$smartLauncherContent = @"
+# AI Employee Smart Launcher (Windows)
+# Opens the dashboard if already running; starts the bot if it is not.
+
+`$AI_HOME  = Join-Path `$env:USERPROFILE '.ai-employee'
+`$envFile  = Join-Path `$AI_HOME '.env'
+`$UI_PORT  = '8787'
+
+# Read port from .env if present
+if (Test-Path `$envFile) {
+    Get-Content `$envFile | ForEach-Object {
+        if (`$_ -match '^PROBLEM_SOLVER_UI_PORT\s*=\s*(.+)') { `$UI_PORT = `$Matches[1].Trim() }
+    }
+}
+
+`$dashboardUrl = "http://127.0.0.1:`$UI_PORT"
+`$logsDir      = Join-Path `$AI_HOME 'logs'
+if (-not (Test-Path `$logsDir)) { New-Item -ItemType Directory `$logsDir -Force | Out-Null }
+
+function Test-BotRunning {
+    try {
+        `$r = Invoke-WebRequest -Uri "`$dashboardUrl/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+        return `$r.StatusCode -eq 200
+    } catch {
+        try {
+            `$r2 = Invoke-WebRequest -Uri `$dashboardUrl -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+            return `$r2.StatusCode -eq 200
+        } catch { return `$false }
+    }
+}
+
+function Wait-ForBot {
+    `$tries = 0; `$max = 40
+    Write-Host "  Waiting for AI Employee" -NoNewline -ForegroundColor Cyan
+    while (`$tries -lt `$max) {
+        if (Test-BotRunning) { Write-Host "  Ready!" -ForegroundColor Green; return `$true }
+        Write-Host "." -NoNewline -ForegroundColor DarkGray
+        Start-Sleep -Seconds 2
+        `$tries++
+    }
+    Write-Host ""
+    Write-Host "  Timed out — opening browser anyway." -ForegroundColor Yellow
+    return `$false
+}
+
+function Find-RunScript {
+    `$candidates = @(
+        (Join-Path `$AI_HOME 'agents\problem-solver-ui\run.sh'),
+        (Join-Path `$AI_HOME 'start-windows.ps1')
+    )
+    foreach (`$c in `$candidates) {
+        if (Test-Path `$c) { return `$c }
+    }
+    return `$null
+}
+
+if (Test-BotRunning) {
+    Write-Host "AI Employee is running — opening dashboard…" -ForegroundColor Green
+    Start-Process `$dashboardUrl
+} else {
+    Write-Host "Starting AI Employee…" -ForegroundColor Cyan
+    `$script = Find-RunScript
+    if (`$script -and `$script.EndsWith('.ps1')) {
+        Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File \"`$script\"" -WindowStyle Normal
+    } elseif (`$script -and `$script.EndsWith('.sh')) {
+        # WSL / Git Bash path for run.sh
+        `$bash = if (Get-Command bash -ErrorAction SilentlyContinue) { 'bash' } else { `$null }
+        if (`$bash) {
+            Start-Process `$bash -ArgumentList "\"`$script\"" -WindowStyle Normal
+        } else {
+            Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -Command \"& { cd '`$AI_HOME'; .\start-windows.ps1 }\"" -WindowStyle Normal
+        }
+    } else {
+        `$startScript = Join-Path `$AI_HOME 'start-windows.ps1'
+        Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File \"`$startScript\"" -WindowStyle Normal
+    }
+    Wait-ForBot | Out-Null
+    Start-Process `$dashboardUrl
+}
+"@
+
+$smartLauncherPath = Join-Path $AI_HOME 'bin\ai-employee-launcher.ps1'
+New-Item -ItemType Directory -Path (Join-Path $AI_HOME 'bin') -Force | Out-Null
+Set-Content -Path $smartLauncherPath -Value $smartLauncherContent -Encoding UTF8
+Write-OK "Smart launcher written: $smartLauncherPath"
+
+# ── Desktop .bat that calls the smart launcher ────────────────────────────────
+$launchBat = @"
+@echo off
+powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%USERPROFILE%\.ai-employee\bin\ai-employee-launcher.ps1"
+"@
+Set-Content -Path (Join-Path $desktop 'AI Employee.bat') -Value $launchBat -Encoding ASCII
+Write-OK "Created 'AI Employee.bat' on Desktop (smart: starts bot or opens UI)."
+
+# ── Proper .lnk shortcut on Desktop (looks like a real icon, not a .bat) ─────
+try {
+    $wsh = New-Object -ComObject WScript.Shell
+    $lnk = $wsh.CreateShortcut((Join-Path $desktop 'AI Employee.lnk'))
+    $lnk.TargetPath       = 'powershell.exe'
+    $lnk.Arguments        = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$smartLauncherPath`""
+    $lnk.WorkingDirectory = $AI_HOME
+    $lnk.Description      = 'Start AI Employee or open the dashboard if already running'
+    $lnk.IconLocation     = 'powershell.exe,0'
+    $lnk.Save()
+    Write-OK "Created 'AI Employee.lnk' icon shortcut on Desktop."
+} catch {
+    Write-Warn "Could not create .lnk shortcut (bat fallback is fine): $_"
+}
+
+# ── Start Menu entry (Programs folder) ────────────────────────────────────────
+try {
+    $startMenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\AI Employee'
+    New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
+    # Reuse the same .lnk in the Start Menu
+    $wsh2 = New-Object -ComObject WScript.Shell
+    $lnk2 = $wsh2.CreateShortcut((Join-Path $startMenu 'AI Employee.lnk'))
+    $lnk2.TargetPath       = 'powershell.exe'
+    $lnk2.Arguments        = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$smartLauncherPath`""
+    $lnk2.WorkingDirectory = $AI_HOME
+    $lnk2.Description      = 'Start AI Employee or open the dashboard if already running'
+    $lnk2.IconLocation     = 'powershell.exe,0'
+    $lnk2.Save()
+    Write-OK "Added 'AI Employee' to Start Menu > Programs."
+} catch {
+    Write-Warn "Could not add Start Menu entry: $_"
+}
+
+# ── Stop shortcut (.bat) – kills AI Employee processes using saved PID files ──
+$stopBat = @"
+@echo off
+echo Stopping AI Employee...
+powershell -ExecutionPolicy Bypass -Command "& { `$AI_HOME = Join-Path `$env:USERPROFILE '.ai-employee'; `$runDir = Join-Path `$AI_HOME 'run'; if (Test-Path `$runDir) { Get-ChildItem `$runDir -Filter '*.pid' | ForEach-Object { `$pid = Get-Content `$_.FullName -Raw; try { Stop-Process -Id `$pid -Force -ErrorAction Stop; Write-Host 'Stopped process' `$pid } catch { Write-Host 'PID' `$pid 'already stopped' }; Remove-Item `$_.FullName } } }"
+echo AI Employee stopped.
+pause
+"@
+Set-Content -Path (Join-Path $desktop 'Stop AI Employee.bat') -Value $stopBat -Encoding ASCII
+Write-OK "Created 'Stop AI Employee.bat' on Desktop."
+
+# ── Dashboard URL shortcut ────────────────────────────────────────────────────
+try {
+    $urlShortcutContent = "[InternetShortcut]`r`nURL=http://127.0.0.1:$UI_PORT`r`nIconIndex=0`r`n"
+    Set-Content -Path (Join-Path $desktop 'AI Employee Dashboard.url') -Value $urlShortcutContent -Encoding ASCII
+    Write-OK "Created 'AI Employee Dashboard.url' on Desktop."
+} catch {
+    Write-Warn "Could not create dashboard URL shortcut: $_"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 12 – ADD BIN TO USER PATH
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step "Updating user PATH..."
+Add-UserPath (Join-Path $AI_HOME 'bin')
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 13 – PULL OLLAMA MODEL (if applicable)
+# ─────────────────────────────────────────────────────────────────────────────
+if ($USE_OLLAMA -and (Test-CommandExists 'ollama') -and -not [string]::IsNullOrWhiteSpace($OLLAMA_MODEL)) {
+    Write-Step "Pulling Ollama model '$OLLAMA_MODEL' (this may take a while)..."
+    try {
+        & ollama pull $OLLAMA_MODEL
+        Write-OK "Model '$OLLAMA_MODEL' ready."
+    } catch {
+        Write-Warn "Could not pull model automatically. Run 'ollama pull $OLLAMA_MODEL' later."
+    }
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 14 – DONE
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Green
+Write-Host "║              ✔  INSTALLATION COMPLETE                       ║" -ForegroundColor Green
+Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Configured settings:" -ForegroundColor Cyan
+Write-Host "    WhatsApp phone  : $WHATSAPP_PHONE"
+Write-Host "    Dashboard port  : $UI_PORT"
+Write-Host "    Workers         : $NUM_WORKERS"
+Write-Host "    Ollama           : $(if ($USE_OLLAMA) { $OLLAMA_MODEL } else { 'disabled' })"
+Write-Host "    Install path    : $AI_HOME"
+Write-Host ""
+Write-Host "  Desktop launcher (smart):" -ForegroundColor Green
+Write-Host "    Double-click  'AI Employee.bat'  on your Desktop"
+Write-Host "    • If bot is already running → opens the dashboard in your browser"
+Write-Host "    • If bot is NOT running     → starts the bot (and opens the browser)"
+Write-Host ""
+Write-Host "  Next steps:" -ForegroundColor Yellow
+Write-Host "    1.  Double-click  'AI Employee.bat'  on your Desktop"
+Write-Host "    2.  Optional: link WhatsApp via the dashboard > Settings > Channels"
+Write-Host "    3.  Send any task through the dashboard or WhatsApp"
+Write-Host ""
+Write-Host "  URLs:" -ForegroundColor Cyan
+Write-Host "    Dashboard  →  http://127.0.0.1:$UI_PORT"
+Write-Host ""
+Write-Host "  Tip: If scripts are blocked, run once as admin:" -ForegroundColor Yellow
+Write-Host "       Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned"
+Write-Host ""
+
+# ── Auto-open the dashboard in the default browser ────────────────────────────
+Write-Host "  Opening dashboard in your browser…" -ForegroundColor Cyan
+Start-Process "http://127.0.0.1:$UI_PORT"

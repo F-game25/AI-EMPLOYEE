@@ -1,0 +1,13 @@
+{
+  "name": "ai-employee",
+  "version": "1.0.0",
+  "description": "AI automation system for solo founders and small agencies",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "install:deps": "bash install.sh",
+    "start": "bash ./start.sh",
+    "test": "python3 -m pytest tests/ && python3 runtime/agents/agent_selftest.py",
+    "lint": "find runtime/agents -name '*.py' -exec python3 -m py_compile {} +"
+  }
+}

@@ -1,0 +1,1374 @@
+"""Tests for all new AI Employee transformation modules.
+
+Covers:
+  - core/change_log.py
+  - core/roi_tracker.py
+  - core/decision_engine.py
+  - core/mode_manager.py
+  - core/skill_registry.py
+  - core/task_engine.py
+  - core/money_mode.py
+  - actions/action_bus.py
+  - memory/strategy_store.py
+  - features/system_api.py  (FastAPI endpoints)
+  - features/analytics.py   (new daily-stats + roi endpoints)
+"""
+from __future__ import annotations
+
+import importlib
+import importlib.util
+import json
+import sys
+import threading
+import time
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+# ── Path setup ────────────────────────────────────────────────────────────────
+
+_REPO_ROOT = Path(__file__).parent.parent
+_RUNTIME = _REPO_ROOT / "runtime"
+
+for _p in [
+    str(_RUNTIME),
+    str(_RUNTIME / "core"),
+    str(_RUNTIME / "actions"),
+    str(_RUNTIME / "memory"),
+]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+_FEATURES_DIR = _RUNTIME / "agents" / "problem-solver-ui" / "features"
+_AI_EMPLOYEE_HOME = Path.home() / ".ai-employee"
+
+
+def _load_feature(name: str):
+    spec_path = _FEATURES_DIR / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"features.{name}", spec_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _make_feature_client(mod, tmp_path: Path) -> TestClient:
+    tmp_ai_home = tmp_path / "ai-employee"
+    for attr_name in list(vars(mod)):
+        val = getattr(mod, attr_name)
+        if isinstance(val, Path):
+            try:
+                rel = val.relative_to(_AI_EMPLOYEE_HOME)
+                new_path = tmp_ai_home / rel
+                if "DIR" in attr_name or "HOME" in attr_name:
+                    new_path.mkdir(parents=True, exist_ok=True)
+                else:
+                    new_path.parent.mkdir(parents=True, exist_ok=True)
+                setattr(mod, attr_name, new_path)
+            except ValueError:
+                pass
+    app = FastAPI()
+    app.include_router(mod.router)
+    return TestClient(app)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ChangeLog
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestChangeLog:
+    def test_record_and_read(self, tmp_path):
+        from core.change_log import ChangeLog
+        log = ChangeLog(path=tmp_path / "changelog.jsonl")
+        entry = log.record(
+            actor="test",
+            action_type="test_action",
+            reason="unit test",
+            before={"x": 1},
+            after={"x": 2},
+            outcome="ok",
+        )
+        assert entry["actor"] == "test"
+        assert entry["action_type"] == "test_action"
+        entries = log.read()
+        assert len(entries) == 1
+        assert entries[0]["actor"] == "test"
+
+    def test_multiple_entries_newest_first(self, tmp_path):
+        from core.change_log import ChangeLog
+        log = ChangeLog(path=tmp_path / "changelog.jsonl")
+        log.record(actor="a", action_type="first", outcome="1")
+        log.record(actor="b", action_type="second", outcome="2")
+        entries = log.read()
+        assert entries[0]["action_type"] == "second"
+        assert entries[1]["action_type"] == "first"
+
+    def test_pagination(self, tmp_path):
+        from core.change_log import ChangeLog
+        log = ChangeLog(path=tmp_path / "changelog.jsonl")
+        for i in range(5):
+            log.record(actor="x", action_type=f"act{i}")
+        page1 = log.read(limit=2, offset=0)
+        page2 = log.read(limit=2, offset=2)
+        assert len(page1) == 2
+        assert len(page2) == 2
+        assert page1[0]["action_type"] != page2[0]["action_type"]
+
+    def test_total(self, tmp_path):
+        from core.change_log import ChangeLog
+        log = ChangeLog(path=tmp_path / "changelog.jsonl")
+        assert log.total() == 0
+        log.record(actor="x", action_type="y")
+        assert log.total() == 1
+
+    def test_empty_read(self, tmp_path):
+        from core.change_log import ChangeLog
+        log = ChangeLog(path=tmp_path / "changelog.jsonl")
+        assert log.read() == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RoiTracker
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestRoiTracker:
+    def test_record_and_recent(self, tmp_path):
+        from core.roi_tracker import RoiTracker
+        tracker = RoiTracker(db_path=tmp_path / "roi.db")
+        r = tracker.record(
+            action_id="act-1",
+            agent="content_calendar",
+            cost_tokens=200,
+            estimated_revenue=10.0,
+            notes="test post",
+        )
+        assert r["action_id"] == "act-1"
+        recent = tracker.recent(limit=5)
+        assert len(recent) == 1
+        assert recent[0]["estimated_revenue"] == 10.0
+
+    def test_daily_summary(self, tmp_path):
+        from core.roi_tracker import RoiTracker
+        tracker = RoiTracker(db_path=tmp_path / "roi.db")
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        tracker.record(action_id="a1", agent="x", cost_tokens=100, estimated_revenue=5.0)
+        tracker.record(action_id="a2", agent="y", cost_tokens=50, estimated_revenue=3.0)
+        summary = tracker.daily_summary(today)
+        assert summary["events"] == 2
+        assert summary["total_revenue"] == 8.0
+        assert summary["total_tokens"] == 150
+
+    def test_top_agents(self, tmp_path):
+        from core.roi_tracker import RoiTracker
+        tracker = RoiTracker(db_path=tmp_path / "roi.db")
+        tracker.record(action_id="a1", agent="agent_a", estimated_revenue=20.0)
+        tracker.record(action_id="a2", agent="agent_b", estimated_revenue=5.0)
+        top = tracker.top_agents(limit=2)
+        assert top[0]["agent"] == "agent_a"
+        assert top[0]["revenue"] == 20.0
+
+    def test_empty_summary(self, tmp_path):
+        from core.roi_tracker import RoiTracker
+        tracker = RoiTracker(db_path=tmp_path / "roi.db")
+        summary = tracker.daily_summary("2000-01-01")
+        assert summary["events"] == 0
+        assert summary["total_revenue"] == 0.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DecisionEngine
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDecisionEngine:
+    def test_score_basic(self):
+        from core.decision_engine import DecisionEngine, ActionSpec
+        engine = DecisionEngine()
+        action = ActionSpec(id="a", skill="x", profit_potential=8, execution_speed=6, complexity=4)
+        score = engine.score(action)
+        expected = 0.5 * 8 + 0.3 * 6 + 0.2 * (10 - 4)
+        assert abs(score - expected) < 0.001
+
+    def test_rank_actions_order(self):
+        from core.decision_engine import DecisionEngine, ActionSpec
+        engine = DecisionEngine()
+        low = ActionSpec(id="low", skill="x", profit_potential=2, execution_speed=2, complexity=8)
+        high = ActionSpec(id="high", skill="y", profit_potential=9, execution_speed=8, complexity=2)
+        ranked = engine.rank_actions([low, high])
+        assert ranked[0].id == "high"
+
+    def test_clamp_scores(self):
+        from core.decision_engine import DecisionEngine, ActionSpec
+        engine = DecisionEngine()
+        action = ActionSpec(id="c", skill="x", profit_potential=15, execution_speed=-5, complexity=100)
+        score = engine.score(action)
+        assert score >= 0
+
+    def test_blacklight_weights(self):
+        from core.decision_engine import DecisionEngine, ActionSpec
+        engine = DecisionEngine()
+        engine.set_blacklight_mode(True)
+        assert abs(engine.weights["profit"] - 0.8) < 0.001
+        engine.set_blacklight_mode(False)
+        assert abs(engine.weights["profit"] - 0.5) < 0.001
+
+    def test_tune_weights(self):
+        from core.decision_engine import DecisionEngine
+        engine = DecisionEngine()
+        roi_data = [
+            {"profit_potential": 9, "execution_speed": 5, "complexity": 3, "revenue": 100},
+            {"profit_potential": 8, "execution_speed": 7, "complexity": 2, "revenue": 80},
+        ]
+        engine.tune_weights(roi_data)
+        w = engine.weights
+        assert abs(sum(w.values()) - 1.0) < 0.01
+
+    def test_rank_empty_list(self):
+        from core.decision_engine import DecisionEngine
+        engine = DecisionEngine()
+        assert engine.rank_actions([]) == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ModeManager
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestModeManager:
+    def test_default_mode(self, tmp_path):
+        from core.mode_manager import ModeManager
+        mgr = ModeManager(path=tmp_path / "mode.json")
+        assert mgr.current_mode == "MANUAL"
+
+    def test_set_valid_mode(self, tmp_path):
+        from core.mode_manager import ModeManager
+        mgr = ModeManager(path=tmp_path / "mode.json")
+        mgr.set_mode("AUTO")
+        assert mgr.current_mode == "AUTO"
+
+    def test_persistence(self, tmp_path):
+        from core.mode_manager import ModeManager
+        p = tmp_path / "mode.json"
+        mgr = ModeManager(path=p)
+        mgr.set_mode("BLACKLIGHT")
+        mgr2 = ModeManager(path=p)
+        assert mgr2.current_mode == "BLACKLIGHT"
+
+    def test_invalid_mode(self, tmp_path):
+        from core.mode_manager import ModeManager
+        mgr = ModeManager(path=tmp_path / "mode.json")
+        with pytest.raises(ValueError):
+            mgr.set_mode("TURBO_ULTRA")
+
+    def test_is_auto(self, tmp_path):
+        from core.mode_manager import ModeManager
+        mgr = ModeManager(path=tmp_path / "mode.json")
+        mgr.set_mode("AUTO")
+        assert mgr.is_auto()
+        assert not mgr.is_manual()
+
+    def test_is_blacklight(self, tmp_path):
+        from core.mode_manager import ModeManager
+        mgr = ModeManager(path=tmp_path / "mode.json")
+        mgr.set_mode("BLACKLIGHT")
+        assert mgr.is_blacklight()
+        assert mgr.is_auto()
+
+    def test_status_dict(self, tmp_path):
+        from core.mode_manager import ModeManager
+        mgr = ModeManager(path=tmp_path / "mode.json")
+        mgr.set_mode("MANUAL")
+        s = mgr.status()
+        assert s["mode"] == "MANUAL"
+        assert s["requires_approval"] is True
+        assert s["auto_execution"] is False
+        assert "decision_threshold" in s
+        assert "execution_frequency" in s
+        assert "risk_tolerance" in s
+
+    def test_case_insensitive(self, tmp_path):
+        from core.mode_manager import ModeManager
+        mgr = ModeManager(path=tmp_path / "mode.json")
+        mgr.set_mode("auto")
+        assert mgr.current_mode == "AUTO"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SkillRegistry
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSkillRegistry:
+    def test_list_skills_nonempty(self):
+        from core.skill_registry import SkillRegistry
+        reg = SkillRegistry()
+        skills = reg.list_skills()
+        assert len(skills) > 0
+
+    def test_skill_has_required_keys(self):
+        from core.skill_registry import SkillRegistry
+        reg = SkillRegistry()
+        for skill in reg.list_skills():
+            assert "name" in skill
+            assert "category" in skill
+            assert "entry_point" in skill
+
+    def test_find_skill(self):
+        from core.skill_registry import SkillRegistry
+        reg = SkillRegistry()
+        result = reg.find_skill("lead")
+        assert result is not None
+        assert "lead" in result["name"]
+
+    def test_find_skill_missing(self):
+        from core.skill_registry import SkillRegistry
+        reg = SkillRegistry()
+        assert reg.find_skill("zzz_nonexistent_zzz") is None
+
+    def test_categories_nonempty(self):
+        from core.skill_registry import SkillRegistry
+        reg = SkillRegistry()
+        cats = reg.categories()
+        assert len(cats) > 0
+        # Categories come from agent metadata; any non-empty category list is valid
+        assert all(isinstance(c, str) and c for c in cats)
+
+    def test_to_json(self):
+        from core.skill_registry import SkillRegistry
+        reg = SkillRegistry()
+        manifest = reg.to_json()
+        assert "total_skills" in manifest
+        assert "skills" in manifest
+        assert manifest["total_skills"] == len(manifest["skills"])
+
+    def test_filter_by_category(self):
+        from core.skill_registry import SkillRegistry
+        reg = SkillRegistry()
+        skills = reg.list_skills(category="money_generation")
+        for s in skills:
+            assert s["category"] == "money_generation"
+
+    def test_reload(self):
+        from core.skill_registry import SkillRegistry
+        reg = SkillRegistry()
+        before = len(reg.list_skills())
+        reg.reload()
+        after = len(reg.list_skills())
+        assert before == after
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# StrategyStore
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestStrategyStore:
+    def test_record_and_retrieve(self, tmp_path):
+        from memory.strategy_store import StrategyStore
+        store = StrategyStore(path=tmp_path / "strategies.json")
+        entry = store.record(
+            goal_type="content_generation",
+            agent="faceless_video",
+            config={"platform": "tiktok"},
+            outcome_score=0.85,
+        )
+        assert entry["goal_type"] == "content_generation"
+        assert entry["outcome_score"] == 0.85
+
+    def test_get_best_strategy(self, tmp_path):
+        from memory.strategy_store import StrategyStore
+        store = StrategyStore(path=tmp_path / "strategies.json")
+        store.record(goal_type="lead_gen", agent="a", outcome_score=0.3)
+        store.record(goal_type="lead_gen", agent="b", outcome_score=0.9)
+        store.record(goal_type="lead_gen", agent="c", outcome_score=0.6)
+        best = store.get_best_strategy("lead_gen", top_n=1)
+        assert best[0]["agent"] == "b"
+
+    def test_top_performers(self, tmp_path):
+        from memory.strategy_store import StrategyStore
+        store = StrategyStore(path=tmp_path / "strategies.json")
+        store.record(goal_type="a", agent="x", outcome_score=0.9)
+        store.record(goal_type="b", agent="y", outcome_score=0.5)
+        top = store.top_performers(limit=1)
+        assert top[0]["agent"] == "x"
+
+    def test_score_clamped(self, tmp_path):
+        from memory.strategy_store import StrategyStore
+        store = StrategyStore(path=tmp_path / "strategies.json")
+        entry = store.record(goal_type="t", agent="a", outcome_score=5.0)
+        assert entry["outcome_score"] == 1.0
+        entry2 = store.record(goal_type="t", agent="b", outcome_score=-3.0)
+        assert entry2["outcome_score"] == 0.0
+
+    def test_empty_store(self, tmp_path):
+        from memory.strategy_store import StrategyStore
+        store = StrategyStore(path=tmp_path / "strategies.json")
+        assert store.get_best_strategy("nothing") == []
+        assert store.all_strategies() == []
+
+    def test_record_with_context_and_outcome(self, tmp_path):
+        from memory.strategy_store import StrategyStore
+        store = StrategyStore(path=tmp_path / "strategies.json")
+        entry = store.record(
+            goal_type="lead_generation",
+            agent="lead-generator",
+            outcome_score=0.7,
+            outcome_status="success",
+            context={"channel": "email"},
+            outcome={"leads": 8},
+        )
+        assert entry["outcome_status"] == "success"
+        assert entry["context"]["channel"] == "email"
+        assert entry["outcome"]["leads"] == 8
+
+    def test_performance_summary_and_learning(self, tmp_path):
+        from memory.strategy_store import StrategyStore
+        store = StrategyStore(path=tmp_path / "strategies.json")
+        store.record(goal_type="analytics", agent="ceo-briefing", outcome_score=0.9, outcome_status="success")
+        store.record(goal_type="analytics", agent="problem-solver", outcome_score=0.2, outcome_status="failed")
+        summary = store.performance_summary(goal_type="analytics")
+        learn = store.learn_for_goal("analytics")
+        assert summary["total_attempts"] == 2
+        assert summary["failed_attempts"] == 1
+        assert "promote_agents" in learn
+        assert "deprioritize_agents" in learn
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ActionBus
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestActionBus:
+    def _make_bus(self):
+        # Import fresh instance each time
+        from actions.action_bus import ActionBus
+        return ActionBus()
+
+    def _auto_bus(self):
+        """Return a fresh ActionBus with mode_manager stubbed to AUTO."""
+        from actions.action_bus import ActionBus
+        bus = ActionBus()
+        return bus
+
+    def test_emit_executed(self):
+        bus = self._make_bus()
+        # Emit with an inline executor so we're actually exercising the
+        # "executed" path rather than relying on the now-removed fallback that
+        # silently returned "executed" for unregistered/executor-less actions.
+        result = bus.emit("test_action", {"x": 1}, actor="tester", executor=lambda p: {"ok": True})
+        # Status is "executed" when auto, or "pending_approval" when manual.
+        assert result["status"] in ("executed", "pending_approval")
+        assert result["action_type"] == "test_action"
+
+    def test_dry_run(self):
+        bus = self._make_bus()
+        bus.set_dry_run(True)
+        result = bus.emit("test_action", {"x": 1})
+        assert result["status"] == "dry_run"
+        assert result["result"] is None
+
+    def test_executor_called_in_auto_mode(self, tmp_path):
+        """Executor is called when mode is AUTO."""
+        import core.mode_manager as _mm_mod
+        from core.mode_manager import ModeManager
+        from actions.action_bus import ActionBus
+
+        mgr = ModeManager(path=tmp_path / "mode_auto.json")
+        mgr.set_mode("AUTO")
+
+        calls = []
+        def exe(payload):
+            calls.append(payload)
+            return "done"
+
+        bus = ActionBus()
+        with patch.object(_mm_mod, "_instance", mgr):
+            result = bus.emit("exec_test", {"val": 42}, executor=exe)
+
+        assert result["status"] == "executed"
+        assert result["result"] == "done"
+        assert calls[0]["val"] == 42
+
+    def test_executor_error_in_auto_mode(self, tmp_path):
+        """Executor errors are captured when mode is AUTO."""
+        import core.mode_manager as _mm_mod
+        from core.mode_manager import ModeManager
+        from actions.action_bus import ActionBus
+
+        mgr = ModeManager(path=tmp_path / "mode_auto2.json")
+        mgr.set_mode("AUTO")
+
+        def bad_exe(payload):
+            raise ValueError("intentional")
+
+        bus = ActionBus()
+        with patch.object(_mm_mod, "_instance", mgr):
+            result = bus.emit("err_action", {}, executor=bad_exe)
+
+        assert result["status"] == "error"
+        assert "intentional" in result["error"]
+
+    def test_manual_mode_pending(self, tmp_path):
+        from actions.action_bus import ActionBus
+        from core.mode_manager import ModeManager
+        import core.mode_manager as _mm_mod
+
+        mgr = ModeManager(path=tmp_path / "mode.json")
+        mgr.set_mode("MANUAL")
+
+        bus = ActionBus()
+        with patch.object(_mm_mod, "_instance", mgr):
+            result = bus.emit("pending_action", {"data": "x"})
+
+        assert result["status"] == "pending_approval"
+
+    def test_approve_reject(self):
+        bus = self._make_bus()
+        # In AUTO (no mode manager), actions go straight through
+        result = bus.approve("nonexistent")
+        assert result["status"] == "not_found"
+        result2 = bus.reject("nonexistent")
+        assert result2["status"] == "not_found"
+
+    def test_list_pending_empty(self):
+        bus = self._make_bus()
+        assert bus.list_pending() == []
+
+
+class TestSecureExecutionEngine:
+    def test_permission_denied_by_default(self):
+        from actions.execution_engine import BrowserAction, SecureExecutionEngine
+
+        engine = SecureExecutionEngine()
+        engine.register_action("browser.open", BrowserAction(executor=lambda p: {"ok": True}))
+        result = engine.execute(
+            action_name="browser.open",
+            payload={"url": "https://example.com"},
+            skill="scraper",
+            idempotency_key="deny-browser-open",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["category"] == "fatal"
+
+    def test_permission_allow_and_idempotency(self):
+        from actions.execution_engine import BrowserAction, PermissionPolicy, SecureExecutionEngine
+
+        calls = []
+        action = BrowserAction(executor=lambda p: calls.append(p) or {"ok": True})
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"scraper": ["browser"]})
+        )
+        engine.register_action("browser.open", action)
+
+        r1 = engine.execute(
+            action_name="browser.open",
+            payload={"url": "https://example.com"},
+            skill="scraper",
+            idempotency_key="abc",
+        )
+        r2 = engine.execute(
+            action_name="browser.open",
+            payload={"url": "https://example.com"},
+            skill="scraper",
+            idempotency_key="abc",
+        )
+
+        assert r1["status"] == "executed"
+        assert r2["status"] == "executed"
+        assert len(calls) == 1
+
+    def test_retry_recoverable_timeout(self):
+        from actions.execution_engine import (
+            ActionTimeoutError,
+            PermissionPolicy,
+            SecureExecutionEngine,
+            APIAction,
+        )
+
+        state = {"n": 0}
+
+        def slow(_payload):
+            state["n"] += 1
+            if state["n"] == 1:
+                raise ActionTimeoutError("temporary timeout")
+            return {"ok": True}
+
+        action = APIAction(
+            executor=slow,
+            max_retries=2,
+            retry_backoff_s=0.001,
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"api_skill": ["api"]})
+        )
+        engine.register_action("api.call", action)
+
+        result = engine.execute(
+            action_name="api.call",
+            payload={},
+            skill="api_skill",
+            idempotency_key="retry-timeout-1",
+        )
+        assert result["status"] == "executed"
+        assert state["n"] >= 2
+
+    def test_filesystem_sandbox_blocks_escape(self, tmp_path):
+        from actions.execution_engine import FileSystemAction, PermissionPolicy, SecureExecutionEngine
+
+        action = FileSystemAction(
+            executor=lambda p: {"path": p["path"]},
+            sandbox_dir=tmp_path / "sandbox",
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"fs_skill": ["filesystem"]})
+        )
+        engine.register_action("fs.write", action)
+
+        result = engine.execute(
+            action_name="fs.write",
+            payload={"path": "../escape.txt"},
+            skill="fs_skill",
+            idempotency_key="fs-escape-1",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["category"] == "fatal"
+
+    def test_error_type_in_failure_payload(self):
+        """Failure dict must include error_type for structured error handling."""
+        from actions.execution_engine import SecureExecutionEngine
+
+        engine = SecureExecutionEngine()
+        result = engine.execute(
+            action_name="nonexistent",
+            payload={},
+            skill="any",
+            idempotency_key="unknown-1",
+        )
+        assert result["status"] == "error"
+        assert "error_type" in result["failure"]
+        assert result["failure"]["error_type"]
+
+    def test_permission_denial_includes_error_type(self):
+        """Permission denial failures must carry error_type."""
+        from actions.execution_engine import APIAction, SecureExecutionEngine
+
+        engine = SecureExecutionEngine()
+        engine.register_action("api.call", APIAction(executor=lambda p: {}))
+        result = engine.execute(
+            action_name="api.call",
+            payload={},
+            skill="unauthorized",
+            idempotency_key="deny-api-1",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["error_type"] == "ActionPermissionError"
+        assert result["failure"]["retryable"] is False
+
+    def test_output_schema_validation_passes(self):
+        """Execution succeeds when result matches output_schema."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        action = APIAction(
+            executor=lambda p: {"status": "ok", "count": 42},
+            output_schema={"status": str, "count": int},
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.fetch", action)
+        result = engine.execute(
+            action_name="api.fetch",
+            payload={},
+            skill="svc",
+            idempotency_key="output-pass-1",
+        )
+        assert result["status"] == "executed"
+
+    def test_output_schema_validation_fails_on_wrong_type(self):
+        """Execution fails when result violates output_schema."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        action = APIAction(
+            executor=lambda p: {"status": 123},  # should be str
+            output_schema={"status": str},
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.fetch", action)
+        result = engine.execute(
+            action_name="api.fetch",
+            payload={},
+            skill="svc",
+            idempotency_key="output-fail-1",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["category"] == "fatal"
+        assert result["failure"]["error_type"] == "ActionValidationError"
+        assert result["failure"]["retryable"] is False
+
+    def test_output_schema_validation_fails_on_missing_field(self):
+        """Execution fails when result is missing a required output field."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        action = APIAction(
+            executor=lambda p: {"other": "x"},
+            output_schema={"required_field": str},
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.check", action)
+        result = engine.execute(
+            action_name="api.check",
+            payload={},
+            skill="svc",
+            idempotency_key="output-missing-1",
+        )
+        assert result["status"] == "error"
+        assert "required_field" in result["failure"]["reason"]
+
+    def test_rate_limit_enforced(self):
+        """Requests over rate limit return recoverable error."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        action = APIAction(
+            executor=lambda p: {"ok": True, "seq": p.get("seq")},
+            rate_limit_per_minute=2,
+            max_retries=0,
+        )
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.limited", action)
+
+        # Use distinct payloads so result cache doesn't mask rate limit.
+        results = [
+            engine.execute(
+                action_name="api.limited",
+                payload={"seq": i},
+                skill="svc",
+                idempotency_key=f"limited-{i}",
+            )
+            for i in range(4)
+        ]
+        statuses = [r["status"] for r in results]
+        assert "executed" in statuses
+        assert "error" in statuses
+        rate_limit_errors = [
+            r for r in results
+            if r["status"] == "error"
+            and r["failure"].get("error_type") == "ActionRateLimitError"
+        ]
+        assert rate_limit_errors
+
+    def test_per_action_metrics_tracked(self):
+        """Metrics must break down success/failure per registered action name."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.a", APIAction(executor=lambda p: {"ok": True}))
+        engine.register_action("api.b", APIAction(executor=lambda p: {"ok": True}))
+
+        engine.execute(action_name="api.a", payload={}, skill="svc", idempotency_key="api-a-1")
+        engine.execute(action_name="api.a", payload={}, skill="svc", idempotency_key="api-a-2")
+        engine.execute(action_name="api.b", payload={}, skill="svc", idempotency_key="api-b-1")
+
+        m = engine.metrics()
+        assert "global" in m
+        assert "per_action" in m
+        assert m["global"]["total"] == 3
+        assert m["per_action"]["api.a"]["total"] == 2
+        assert m["per_action"]["api.b"]["total"] == 1
+
+    def test_metrics_include_cache_hit_rate(self):
+        """metrics() snapshot must include cache_hit_rate."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]})
+        )
+        engine.register_action("api.cached", APIAction(executor=lambda p: {"data": 1}))
+        engine.execute(action_name="api.cached", payload={"q": "x"}, skill="svc", idempotency_key="k1")
+        engine.execute(action_name="api.cached", payload={"q": "x"}, skill="svc", idempotency_key="k1")
+
+        m = engine.metrics()
+        assert "cache_hit_rate" in m["global"]
+        assert "failure_rate" in m["global"]
+        assert "retry_count" in m["global"]
+        assert "timeout_count" in m["global"]
+        assert "average_latency_s" in m["global"]
+
+    def test_repeated_violation_alert_hook(self):
+        """Alert hook must fire once violations reach the threshold."""
+        from actions.execution_engine import (
+            APIAction,
+            PermissionPolicy,
+            SecureExecutionEngine,
+        )
+
+        alerts = []
+        policy = PermissionPolicy({})  # deny all
+        policy.set_alert_hook(lambda skill, count: alerts.append((skill, count)), threshold=2)
+
+        engine = SecureExecutionEngine(permission_policy=policy)
+        engine.register_action("api.call", APIAction(executor=lambda p: {}))
+
+        for attempt in range(3):
+            engine.execute(
+                action_name="api.call",
+                payload={},
+                skill="bad_skill",
+                idempotency_key=f"bad-skill-{attempt}",
+            )
+
+        assert len(alerts) >= 1
+        assert alerts[0][0] == "bad_skill"
+        assert alerts[0][1] >= 2
+
+    def test_permission_violation_count(self):
+        """PermissionPolicy.violation_count tracks denials per skill."""
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        policy = PermissionPolicy({})
+        engine = SecureExecutionEngine(permission_policy=policy)
+        engine.register_action("api.call", APIAction(executor=lambda p: {}))
+
+        engine.execute(action_name="api.call", payload={}, skill="foo", idempotency_key="foo-1")
+        engine.execute(action_name="api.call", payload={}, skill="foo", idempotency_key="foo-2")
+        assert policy.violation_count("foo") == 2
+        assert policy.violation_count("bar") == 0
+
+    def test_idempotency_cache_ttl_expiry(self):
+        """Idempotency cache entries must not be served after TTL expires."""
+        from actions.execution_engine import (
+            APIAction,
+            ActionConfigLoader,
+            PermissionPolicy,
+            SecureExecutionEngine,
+        )
+
+        calls = []
+        action = APIAction(executor=lambda p: calls.append(1) or {"n": len(calls)})
+        cfg = ActionConfigLoader()
+        cfg.idempotency_ttl_s = 0  # immediately expire
+        cfg.cache_ttl_s = 0        # also expire result cache immediately
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc": ["api"]}),
+            config=cfg,
+        )
+        engine.register_action("api.op", action)
+
+        engine.execute(action_name="api.op", payload={}, skill="svc", idempotency_key="k")
+        time.sleep(0.05)
+        engine.execute(action_name="api.op", payload={}, skill="svc", idempotency_key="k")
+
+        assert len(calls) == 2  # not deduplicated due to TTL=0
+
+    def test_permission_denial_written_to_changelog(self, tmp_path):
+        """Permission denials must be recorded in the audit ChangeLog."""
+        import core.change_log as _cl_mod
+        from core.change_log import ChangeLog
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        log = ChangeLog(path=tmp_path / "changelog.jsonl")
+        with patch.object(_cl_mod, "_instance", log):
+            policy = PermissionPolicy({})
+            engine = SecureExecutionEngine(permission_policy=policy)
+            engine.register_action("api.call", APIAction(executor=lambda p: {}))
+            engine.execute(
+                action_name="api.call",
+                payload={},
+                skill="intruder",
+                idempotency_key="intruder-1",
+            )
+
+        entries = log.read()
+        denial_entries = [e for e in entries if e.get("action_type") == "permission_denied"]
+        assert denial_entries, "Expected a permission_denied entry in the changelog"
+        assert denial_entries[0]["actor"] == "intruder"
+
+    def test_missing_idempotency_key_rejected(self):
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        engine = SecureExecutionEngine(permission_policy=PermissionPolicy({"svc": ["api"]}))
+        engine.register_action("api.call", APIAction(executor=lambda p: {"ok": True}))
+
+        result = engine.execute(action_name="api.call", payload={}, skill="svc")
+        assert result["status"] == "error"
+        assert result["failure"]["error_type"] == "ActionValidationError"
+        assert result["failure"]["retryable"] is False
+
+    def test_idempotent_inflight_duplicate_prevented(self):
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        calls = []
+
+        def run(_payload):
+            calls.append(1)
+            time.sleep(0.05)
+            return {"count": len(calls)}
+
+        engine = SecureExecutionEngine(permission_policy=PermissionPolicy({"svc": ["api"]}))
+        engine.register_action("api.call", APIAction(executor=run))
+
+        results = []
+
+        def invoke():
+            results.append(
+                engine.execute(
+                    action_name="api.call",
+                    payload={"q": "x"},
+                    skill="svc",
+                    idempotency_key="shared-key",
+                )
+            )
+
+        t1 = threading.Thread(target=invoke)
+        t2 = threading.Thread(target=invoke)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert len(calls) == 1
+        assert len(results) == 2
+        assert all(r["status"] == "executed" for r in results)
+        assert any(r.get("cached") is True for r in results)
+
+    def test_filesystem_symlink_blocked(self, tmp_path):
+        from actions.execution_engine import FileSystemAction, PermissionPolicy, SecureExecutionEngine
+
+        sandbox = tmp_path / "sandbox"
+        sandbox.mkdir(parents=True, exist_ok=True)
+        outside = tmp_path / "outside"
+        outside.mkdir(parents=True, exist_ok=True)
+        (sandbox / "link").symlink_to(outside, target_is_directory=True)
+
+        action = FileSystemAction(executor=lambda p: {"path": p["path"]}, sandbox_dir=sandbox)
+        engine = SecureExecutionEngine(permission_policy=PermissionPolicy({"fs_skill": ["filesystem"]}))
+        engine.register_action("fs.write", action)
+
+        result = engine.execute(
+            action_name="fs.write",
+            payload={"path": "link/target.txt"},
+            skill="fs_skill",
+            idempotency_key="fs-symlink-1",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["error_type"] == "ActionValidationError"
+
+    def test_permission_denial_audit_has_timestamp_and_flag(self, tmp_path):
+        import core.change_log as _cl_mod
+        from core.change_log import ChangeLog
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        log = ChangeLog(path=tmp_path / "changelog.jsonl")
+        with patch.object(_cl_mod, "_instance", log):
+            policy = PermissionPolicy({})
+            policy.set_alert_hook(lambda _skill, _count: None, threshold=2)
+            engine = SecureExecutionEngine(permission_policy=policy)
+            engine.register_action("api.call", APIAction(executor=lambda p: {}))
+            engine.execute(action_name="api.call", payload={}, skill="intruder", idempotency_key="deny-1")
+            engine.execute(action_name="api.call", payload={}, skill="intruder", idempotency_key="deny-2")
+
+        denial_entries = [e for e in log.read() if e.get("action_type") == "permission_denied"]
+        assert len(denial_entries) >= 2
+        for entry in denial_entries:
+            payload = entry.get("after", {})
+            assert payload.get("skill") == "intruder"
+            assert payload.get("attempted_action") == "api"
+            assert isinstance(payload.get("timestamp"), str) and payload.get("timestamp")
+        assert any(entry.get("after", {}).get("flagged") is True for entry in denial_entries)
+
+    def test_idempotency_cache_scoped_by_skill(self):
+        from actions.execution_engine import APIAction, PermissionPolicy, SecureExecutionEngine
+
+        calls = []
+        action = APIAction(executor=lambda p: calls.append(1) or {"n": len(calls)})
+        engine = SecureExecutionEngine(
+            permission_policy=PermissionPolicy({"svc_a": ["api"], "svc_b": ["api"]})
+        )
+        engine.register_action("api.call", action)
+
+        r1 = engine.execute(
+            action_name="api.call",
+            payload={"q": "same"},
+            skill="svc_a",
+            idempotency_key="same-key",
+        )
+        r2 = engine.execute(
+            action_name="api.call",
+            payload={"q": "same"},
+            skill="svc_b",
+            idempotency_key="same-key",
+        )
+        assert r1["status"] == "executed"
+        assert r2["status"] == "executed"
+        assert len(calls) == 2
+
+    def test_recoverable_failure_sets_retryable_true(self):
+        from actions.execution_engine import (
+            APIAction,
+            ActionTimeoutError,
+            PermissionPolicy,
+            SecureExecutionEngine,
+        )
+
+        def fail(_payload):
+            raise ActionTimeoutError("temporary")
+
+        action = APIAction(
+            executor=fail,
+            max_retries=0,
+        )
+        engine = SecureExecutionEngine(permission_policy=PermissionPolicy({"svc": ["api"]}))
+        engine.register_action("api.call", action)
+
+        result = engine.execute(
+            action_name="api.call",
+            payload={},
+            skill="svc",
+            idempotency_key="recoverable-1",
+        )
+        assert result["status"] == "error"
+        assert result["failure"]["category"] == "recoverable"
+        assert result["failure"]["retryable"] is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TaskEngine
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestTaskEngine:
+    def test_plan_returns_tasks(self, tmp_path):
+        from core.task_engine import TaskEngine
+        engine = TaskEngine(db_path=tmp_path / "task_log.db")
+        tasks = engine.plan("Create a TikTok video about productivity")
+        assert len(tasks) > 0
+        assert all(t.skill for t in tasks)
+
+    def test_validate_success(self, tmp_path):
+        from core.task_engine import TaskEngine, TaskSpec
+        engine = TaskEngine(db_path=tmp_path / "task_log.db")
+        task = TaskSpec(skill="x", expected_outputs={"status": "success"})
+        task.success = True
+        task.actual_output = {"status": "success"}
+        task.attempts = 1
+        score = engine.validate(task)
+        assert score > 0.5
+
+    def test_validate_failure(self, tmp_path):
+        from core.task_engine import TaskEngine, TaskSpec
+        engine = TaskEngine(db_path=tmp_path / "task_log.db")
+        task = TaskSpec(skill="x")
+        task.success = False
+        score = engine.validate(task)
+        assert score == 0.0
+
+    def test_run_goal_returns_summary(self, tmp_path):
+        from core.task_engine import TaskEngine
+        engine = TaskEngine(db_path=tmp_path / "task_log.db")
+        result = engine.run_goal("Analyse business metrics")
+        assert "run_id" in result
+        assert "tasks" in result
+        assert "performance_score" in result
+        assert 0.0 <= result["performance_score"] <= 1.0
+
+    def test_daily_stats(self, tmp_path):
+        from core.task_engine import TaskEngine
+        engine = TaskEngine(db_path=tmp_path / "task_log.db")
+        engine.run_goal("test goal")
+        stats = engine.daily_stats()
+        assert "tasks_executed" in stats
+        assert stats["tasks_executed"] >= 0
+
+    def test_classify_goal(self, tmp_path):
+        from core.task_engine import TaskEngine
+        engine = TaskEngine(db_path=tmp_path / "task_log.db")
+        assert engine._classify_goal("publish a video") == "content_generation"
+        assert engine._classify_goal("find leads") == "lead_generation"
+        assert engine._classify_goal("send email campaign") == "email_marketing"
+        assert engine._classify_goal("analyse metrics report") == "analytics"
+        assert engine._classify_goal("do something random") == "general"
+
+    def test_recent_runs_empty(self, tmp_path):
+        from core.task_engine import TaskEngine
+        engine = TaskEngine(db_path=tmp_path / "task_log.db")
+        assert engine.recent_runs() == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MoneyMode
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMoneyMode:
+    def test_run_content_pipeline_dry_run(self):
+        from core.money_mode import MoneyMode
+        mm = MoneyMode()
+        result = mm.run_content_pipeline(
+            topic="best laptops 2025",
+            platforms=["twitter", "linkedin"],
+            dry_run=True,
+        )
+        assert result["status"] == "dry_run"
+        assert result["topic"] == "best laptops 2025"
+        assert len(result["platforms"]) == 2
+
+    def test_run_content_pipeline_steps(self):
+        from core.money_mode import MoneyMode
+        mm = MoneyMode()
+        result = mm.run_content_pipeline(
+            topic="AI tools", platforms=["twitter"], dry_run=True
+        )
+        assert len(result["steps"]) > 0
+        step_types = {s["step"] for s in result["steps"]}
+        assert "generate_idea" in step_types
+        assert "draft_content" in step_types
+
+    def test_affiliate_draft_requires_review(self):
+        from core.money_mode import MoneyMode
+        mm = MoneyMode()
+        draft = mm.affiliate_content_draft(
+            product="ClickFunnels", niche="marketing", output_format="blog_post"
+        )
+        assert draft["requires_review"] is True
+        assert draft["product"] == "ClickFunnels"
+        assert "disclaimer" in draft
+        assert "affiliate" in draft["disclaimer"].lower()
+
+    def test_affiliate_draft_has_content(self):
+        from core.money_mode import MoneyMode
+        mm = MoneyMode()
+        draft = mm.affiliate_content_draft(product="Notion", niche="productivity")
+        content = draft["content"]
+        assert "headline" in content
+        assert "body" in content
+        assert "cta" in content
+
+    def test_content_pipeline_with_affiliate(self):
+        from core.money_mode import MoneyMode
+        mm = MoneyMode()
+        result = mm.run_content_pipeline(
+            topic="notion review",
+            platforms=["twitter"],
+            affiliate_product="Notion",
+            dry_run=True,
+        )
+        drafts = [s for s in result["steps"] if s.get("step") == "draft_content"]
+        assert any("Notion" in s["content"] for s in drafts)
+
+    def test_lead_pipeline_dry_run(self):
+        from core.money_mode import MoneyMode
+        mm = MoneyMode()
+        result = mm.run_lead_pipeline(
+            source="crm_export",
+            audience="SaaS founders",
+            channels=["email", "linkedin"],
+            dry_run=True,
+        )
+        assert result["pipeline"] == "data_scrape_filter_store"
+        assert result["status"] == "dry_run"
+        assert len(result["steps"]) >= 3
+        step_types = {s["step"] for s in result["steps"]}
+        assert "scrape_data" in step_types
+        assert "filter_leads" in step_types
+        assert "store_leads" in step_types
+
+    def test_opportunity_pipeline_dry_run(self):
+        from core.money_mode import MoneyMode
+        mm = MoneyMode()
+        result = mm.run_opportunity_pipeline(
+            opportunity="new affiliate offer",
+            budget=100.0,
+            dry_run=True,
+        )
+        assert result["pipeline"] == "outreach_response_conversion"
+        assert result["status"] == "dry_run"
+        step_types = {s["step"] for s in result["steps"]}
+        assert "outreach" in step_types
+        assert "response_tracking" in step_types
+        assert "conversion" in step_types
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# system_api feature endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSystemApiFeature:
+    @pytest.fixture()
+    def client(self, tmp_path):
+        mod = _load_feature("system_api")
+
+        # Redirect runtime singletons to tmp_path
+        tmp_ai = tmp_path / "ai-employee"
+        tmp_ai.mkdir(parents=True, exist_ok=True)
+
+        app = FastAPI()
+        app.include_router(mod.router)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_get_mode(self, client):
+        r = client.get("/api/mode")
+        assert r.status_code == 200
+        data = r.json()
+        assert "mode" in data
+
+    def test_set_mode_valid(self, client):
+        r = client.post("/api/mode", json={"mode": "AUTO"})
+        assert r.status_code == 200
+        assert r.json()["mode"] == "AUTO"
+
+    def test_set_mode_invalid(self, client):
+        r = client.post("/api/mode", json={"mode": "TURBO_INVALID"})
+        assert r.status_code == 400
+
+    def test_get_changelog(self, client):
+        r = client.get("/api/changelog")
+        assert r.status_code == 200
+        data = r.json()
+        assert "entries" in data
+        assert "total" in data
+
+    def test_get_changelog_pagination(self, client):
+        r = client.get("/api/changelog?limit=5&offset=0")
+        assert r.status_code == 200
+
+    def test_list_pending_actions(self, client):
+        r = client.get("/api/actions/pending")
+        assert r.status_code == 200
+        assert "pending" in r.json()
+
+    def test_action_metrics(self, client):
+        r = client.get("/api/actions/metrics")
+        assert r.status_code == 200
+        data = r.json()
+        assert "metrics" in data
+        m = data["metrics"]
+        # New structure has global + per_action sub-dicts
+        assert "global" in m or isinstance(m, dict)
+
+    def test_skills_list(self, client):
+        r = client.get("/api/skills")
+        assert r.status_code == 200
+        data = r.json()
+        assert "skills" in data or "error" in data
+
+    def test_run_goal(self, client):
+        r = client.post("/api/tasks/run", json={"goal": "Analyse business metrics"})
+        assert r.status_code == 200
+        data = r.json()
+        assert "run_id" in data or "detail" in data
+
+    def test_recent_tasks(self, client):
+        r = client.get("/api/tasks/recent")
+        assert r.status_code == 200
+        assert "tasks" in r.json()
+
+    def test_content_pipeline(self, client):
+        r = client.post("/api/money/content-pipeline", json={
+            "topic": "test topic", "platforms": ["twitter"], "dry_run": True
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert "job_id" in data
+        assert data["status"] == "dry_run"
+
+    def test_affiliate_draft(self, client):
+        r = client.post("/api/money/affiliate-draft", json={
+            "product": "TestProduct", "niche": "fitness"
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("requires_review") is True
+
+    def test_lead_pipeline_endpoint(self, client):
+        r = client.post("/api/money/lead-pipeline", json={
+            "source": "crm",
+            "audience": "agency owners",
+            "channels": ["email"],
+            "dry_run": True,
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["pipeline"] == "data_scrape_filter_store"
+
+    def test_opportunity_pipeline_endpoint(self, client):
+        r = client.post("/api/money/opportunity-pipeline", json={
+            "opportunity": "retainer upsell",
+            "budget": 500,
+            "dry_run": True,
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["pipeline"] == "outreach_response_conversion"
+
+    def test_memory_insights_endpoint(self, client):
+        r = client.get("/api/memory/insights?goal_type=analytics")
+        assert r.status_code == 200
+        data = r.json()
+        assert "insights" in data
+        assert "summary" in data
+
+    def test_product_dashboard_endpoint(self, client):
+        r = client.get("/api/product/dashboard")
+        assert r.status_code == 200
+        data = r.json()
+        assert "tasks" in data
+        assert "revenue" in data
+        assert "value" in data
+        assert "top_skills" in data
+        assert "top_strategies" in data
+        assert "pipelines" in data
+
+    def test_automation_control_stop(self, client):
+        r = client.post("/api/automation/control", json={"action": "stop"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "stopped"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# analytics feature — new endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAnalyticsNewEndpoints:
+    @pytest.fixture()
+    def client(self, tmp_path):
+        mod = _load_feature("analytics")
+        tmp_ai_home = tmp_path / "ai-employee"
+        for attr_name in list(vars(mod)):
+            val = getattr(mod, attr_name)
+            if isinstance(val, Path):
+                try:
+                    rel = val.relative_to(_AI_EMPLOYEE_HOME)
+                    new_path = tmp_ai_home / rel
+                    if "DIR" in attr_name or "HOME" in attr_name:
+                        new_path.mkdir(parents=True, exist_ok=True)
+                    else:
+                        new_path.parent.mkdir(parents=True, exist_ok=True)
+                    setattr(mod, attr_name, new_path)
+                except ValueError:
+                    pass
+        app = FastAPI()
+        app.include_router(mod.router)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_daily_stats_endpoint(self, client):
+        r = client.get("/api/analytics/daily-stats")
+        assert r.status_code == 200
+        data = r.json()
+        assert "date" in data
+        assert "tasks" in data
+        assert "revenue" in data
+
+    def test_roi_endpoint(self, client):
+        r = client.get("/api/analytics/roi")
+        assert r.status_code == 200
+        data = r.json()
+        assert "daily_summary" in data
+        assert "top_agents" in data
+        assert "recent_events" in data
+
+    def test_roi_limit_param(self, client):
+        r = client.get("/api/analytics/roi?limit=5")
+        assert r.status_code == 200

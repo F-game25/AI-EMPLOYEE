@@ -1,0 +1,55 @@
+# Coverage configuration for AI Employee
+# This tells coverage.py which source files to track.
+# AscendForge reads coverage/coverage.json to identify areas for improvement.
+
+[run]
+source =
+    runtime/core/skill_registry.py
+    runtime/agents/utils.py
+    runtime/agents/ascend-forge/ascend_forge.py
+    runtime/agents/turbo-quant/turbo_quant.py
+    runtime/agents/ai-router/ai_router.py
+    runtime/agents/ai-router/hybrid_mode.py
+    runtime/agents/idea-to-prompt/idea_to_prompt.py
+    runtime/agents/problem-solver-ui/features/crm.py
+    runtime/agents/problem-solver-ui/features/email_marketing.py
+    runtime/agents/problem-solver-ui/features/meeting_intelligence.py
+    runtime/agents/problem-solver-ui/features/social_media.py
+    runtime/agents/problem-solver-ui/features/ceo_briefing.py
+    runtime/agents/problem-solver-ui/features/invoicing.py
+    runtime/agents/problem-solver-ui/features/analytics.py
+    runtime/agents/problem-solver-ui/features/workflow_builder.py
+    runtime/agents/problem-solver-ui/features/team_management.py
+    runtime/agents/problem-solver-ui/features/customer_support.py
+    runtime/agents/problem-solver-ui/features/website_builder.py
+    runtime/agents/problem-solver-ui/features/competitor_watch.py
+    runtime/agents/problem-solver-ui/features/personal_brand.py
+    runtime/agents/problem-solver-ui/features/health_check.py
+    runtime/agents/problem-solver-ui/features/export_backup.py
+    runtime/agents/problem-solver-ui/features/system_api.py
+    runtime/core/__init__.py
+    runtime/core/change_log.py
+    runtime/core/roi_tracker.py
+    runtime/core/decision_engine.py
+    runtime/core/mode_manager.py
+    runtime/core/skill_registry.py
+    runtime/core/task_engine.py
+    runtime/core/money_mode.py
+    runtime/actions/__init__.py
+    runtime/actions/action_bus.py
+    runtime/memory/__init__.py
+    runtime/memory/strategy_store.py
+omit =
+    tests/*
+    */site-packages/*
+
+[report]
+show_missing = true
+precision = 1
+
+[xml]
+output = coverage/coverage.xml
+
+[json]
+output = coverage/coverage.json
+pretty_print = true
