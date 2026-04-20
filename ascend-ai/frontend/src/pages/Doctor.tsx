@@ -3,28 +3,36 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store/ascendStore'
 import { ProgressBar } from '../components/ProgressBar'
 
-const MOCK_AGENTS = [
-  'task-orchestrator', 'company-builder', 'hr-manager', 'finance-wizard',
-  'brand-strategist', 'growth-hacker', 'project-manager', 'lead-hunter',
-  'content-master', 'social-guru', 'intel-agent', 'email-ninja',
-  'support-bot', 'data-analyst', 'creative-studio', 'web-sales',
-  'skills-manager', 'polymarket-trader', 'mirofish-researcher', 'discovery',
-]
-
 type Tab = 'metrics' | 'logs' | 'errors'
+
+interface BackendError {
+  ts: number
+  bot: string
+  message: string
+  detail?: string
+}
 
 export function Doctor() {
   const { systemStats, agents, doctorChat, addDoctorChat } = useStore()
   const [input, setInput] = useState('')
   const [tab, setTab] = useState<Tab>('metrics')
-  const [selectedBot, setSelectedBot] = useState(MOCK_AGENTS[0])
+  const [selectedBot, setSelectedBot] = useState<string>('')
   const [botLogs, setBotLogs] = useState<string[]>([])
-  const [errors] = useState<{ ts: string; bot: string; message: string; stack?: string }[]>([
-    { ts: new Date().toISOString(), bot: 'task-orchestrator', message: 'Connection timeout', stack: 'Error: ECONNREFUSED\n  at TCPConnectWrap...' },
-    { ts: new Date().toISOString(), bot: 'finance-wizard', message: 'API key not configured' },
-  ])
+  const [errors, setErrors] = useState<BackendError[]>([])
   const [expandedError, setExpandedError] = useState<number | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
+
+  // Fetch real errors from backend
+  useEffect(() => {
+    const load = () =>
+      fetch('/api/errors')
+        .then((r) => r.json())
+        .then((d) => setErrors(Array.isArray(d) ? d : []))
+        .catch(() => {})
+    load()
+    const t = setInterval(load, 10000)
+    return () => clearInterval(t)
+  }, [])
 
   const send = async () => {
     if (!input.trim()) return
@@ -44,13 +52,20 @@ export function Doctor() {
   }
 
   useEffect(() => {
-    if (tab === 'logs') {
+    if (tab === 'logs' && selectedBot) {
       fetch(`/api/logs/${selectedBot}`)
         .then((r) => r.json())
         .then((d) => setBotLogs(d.lines || []))
         .catch(() => setBotLogs(['[No logs available]']))
     }
   }, [tab, selectedBot])
+
+  // Set initial selected bot from real agent list
+  useEffect(() => {
+    if (agents.length > 0 && !selectedBot) {
+      setSelectedBot(agents[0].name)
+    }
+  }, [agents, selectedBot])
 
   const runDiagnostic = async () => {
     addDoctorChat({ role: 'system', content: '🩺 Running full diagnostic...', tag: 'DOCTOR' })
@@ -66,8 +81,6 @@ export function Doctor() {
       addDoctorChat({ role: 'ai', content: 'ERROR: Diagnostic failed' })
     }
   }
-
-  const agentList = agents.length > 0 ? agents : MOCK_AGENTS.map((n) => ({ name: n, status: 'offline', pid: null, uptime: null, mock: true }))
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
@@ -136,7 +149,7 @@ export function Doctor() {
                 <ProgressBar value={systemStats.gpu_percent} label="GPU" variant="bronze" />
                 <ProgressBar value={Math.min(systemStats.temp_celsius, 100)} label="TEMPERATURE" unit="°C" variant={systemStats.temp_celsius > 70 ? 'gold' : 'bronze'} />
                 <div style={{ marginTop: 12, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
-                  <div>Agents online: {agentList.filter((a) => a.status === 'online').length} / {agentList.length}</div>
+                  <div>Agents online: {agents.filter((a) => a.status === 'online').length} / {agents.length}</div>
                   <div>Errors (recent): {errors.length}</div>
                 </div>
               </div>
@@ -153,7 +166,7 @@ export function Doctor() {
                     color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11,
                   }}
                 >
-                  {MOCK_AGENTS.map((n) => <option key={n} value={n}>{n}</option>)}
+                  {agents.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
                 </select>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7 }}>
                   {botLogs.length === 0 && <div style={{ color: 'var(--text-dim)' }}>No logs available</div>}
@@ -170,24 +183,24 @@ export function Doctor() {
 
             {tab === 'errors' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {errors.length === 0 && <div style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>No errors</div>}
+                {errors.length === 0 && <div style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>No errors recorded</div>}
                 {errors.map((err, i) => (
                   <div key={i} className="panel" style={{ padding: 10, background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.15)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--offline)' }}>{err.bot}</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)' }}>{new Date(err.ts).toLocaleTimeString()}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)' }}>{new Date(err.ts * 1000).toLocaleTimeString()}</span>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-primary)', marginBottom: 4 }}>{err.message}</div>
-                    {err.stack && (
+                    {err.detail && (
                       <button
                         onClick={() => setExpandedError(expandedError === i ? null : i)}
                         style={{ background: 'none', border: 'none', color: 'var(--bronze)', fontSize: 10, fontFamily: 'var(--font-mono)', cursor: 'pointer' }}
                       >
-                        {expandedError === i ? '▼ Hide stack' : '▶ Show stack'}
+                        {expandedError === i ? '▼ Hide detail' : '▶ Show detail'}
                       </button>
                     )}
-                    {expandedError === i && err.stack && (
-                      <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', marginTop: 4, whiteSpace: 'pre-wrap' }}>{err.stack}</pre>
+                    {expandedError === i && err.detail && (
+                      <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', marginTop: 4, whiteSpace: 'pre-wrap' }}>{err.detail}</pre>
                     )}
                   </div>
                 ))}
@@ -222,10 +235,10 @@ export function Doctor() {
 
       {/* Agent cards */}
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', letterSpacing: 2, marginBottom: 12 }}>
-        AGENT STATUS ({agentList.length})
+        AGENT STATUS ({agents.length})
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
-        {agentList.map((a) => (
+        {agents.map((a) => (
           <motion.div
             key={a.name}
             className="panel"
