@@ -97,7 +97,7 @@ export function HermesAgent() {
         body: JSON.stringify({ message: broadcastMsg }),
       })
       const d = await r.json()
-      showToast(`✓ Broadcast sent to ${d.broadcast_to?.join(', ') ?? 'all agents'}`)
+      showToast(`✓ Broadcast sent to ${d.broadcast_to?.join(', ')}`)
       setBroadcastMsg('')
       loadStatus()
     } catch {
