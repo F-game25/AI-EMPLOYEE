@@ -27,8 +27,11 @@ if [[ -z "${JWT_SECRET_KEY:-}" ]]; then
     JWT_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
     export JWT_SECRET_KEY
     mkdir -p "$AI_HOME"
-    echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}" >> "$AI_HOME/.env"
-    echo "ℹ️  JWT secret auto-generated and saved to $AI_HOME/.env"
+    # Only append if the key is not already recorded in .env (avoids duplicates)
+    if ! grep -q "^JWT_SECRET_KEY=" "$AI_HOME/.env" 2>/dev/null; then
+      echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}" >> "$AI_HOME/.env"
+      echo "ℹ️  JWT secret auto-generated and saved to $AI_HOME/.env"
+    fi
   fi
 fi
 

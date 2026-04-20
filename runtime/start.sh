@@ -178,6 +178,7 @@ else
 
   if [[ -n "$_REPO_RUN_SH" ]]; then
     log "Installed binary not found — using repo run.sh: $_REPO_RUN_SH"
+    mkdir -p "$AI_HOME/logs" "$AI_HOME/run"
     setsid bash "$_REPO_RUN_SH" >> "$AI_HOME/logs/problem-solver-ui.log" 2>&1 &
     echo $! > "$AI_HOME/run/problem-solver-ui.pid"
     ok "Problem Solver UI started from repo (pid=$!)"
