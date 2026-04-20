@@ -7,7 +7,7 @@ export default function PageHeader({ title, subtitle, children }) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginBottom: 'var(--space-5)',
+      marginBottom: '8px',
       flexWrap: 'wrap',
       gap: 'var(--space-3)',
     }}>
