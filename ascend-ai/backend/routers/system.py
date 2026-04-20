@@ -18,7 +18,10 @@ def stats():
 
 @router.get("/health")
 def health():
-    return {"status": "ok", "version": "1.0.0"}
+    import os
+    env_path = os.path.expanduser("~/.ai-employee/.env")
+    has_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.path.exists(env_path))
+    return {"status": "ok", "version": "1.0.0", "mock": not has_key}
 
 
 @router.get("/system/health")

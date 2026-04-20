@@ -5,6 +5,7 @@ const NAV = [
   { to: '/forge', icon: '⚗', label: 'Ascend Forge' },
   { to: '/money', icon: '💰', label: 'Money Mode' },
   { to: '/blacklight', icon: '🔒', label: 'Blacklight' },
+  { to: '/hermes', icon: '⚡', label: 'Hermes' },
   { to: '/doctor', icon: '🩺', label: 'Doctor' },
   { to: '/live', icon: '📡', label: 'Live Feedback' },
   { to: '/fairness', icon: '⚖', label: 'Fairness' },
