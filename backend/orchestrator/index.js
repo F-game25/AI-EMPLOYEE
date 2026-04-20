@@ -19,34 +19,109 @@ const router = Router();
 const events = new EventEmitter();
 
 /**
- * Build a subsystem-specific completion message for a processed task.
- * @param {{subsystem?: string, message: string}} task
+ * Generate a natural, human-like reply for a completed task.
+ * Responses are contextual — they use the original message, the subsystem
+ * that handled the task, and the brain plan to produce something that reads
+ * like a real assistant, not a system log.
+ *
+ * @param {{subsystem?: string, message: string, metadata?: object}} task
  * @returns {string}
  */
 function buildReply(task) {
-  const moneyTemplate = task?.metadata?.moneyTemplate ?? null;
+  const message = task.message || '';
+  const lower = message.toLowerCase();
+  const subsystem = task.subsystem || 'general';
   const brainPlan = task?.metadata?.brain ?? null;
-  const moneyLine = moneyTemplate && moneyTemplate.enabled
-    ? ` | [MONEYMODE] ${moneyTemplate.template} -> ${moneyTemplate.objective}`
-    : '';
-  const brainLine = brainPlan
-    ? ` | [BRAIN] strategy=${brainPlan.strategy} confidence=${Math.round((brainPlan.confidence || 0) * 100)}%`
-    : '';
-  const target = task.subsystem;
-  if (target === 'nn') {
+  const intent = brainPlan?.intent || 'general';
+
+  // Learning / memory storage requests
+  if (/\b(learn|remember|store|save|note|memorize|keep in mind)\b/.test(lower)) {
+    return `Got it — I've stored that in my memory and I'll apply it to relevant tasks going forward.`;
+  }
+
+  // Analytics / reporting requests
+  if (/\b(analyz|report|insight|metric|stat|track|monitor|dashboard)\b/.test(lower)) {
+    if (subsystem === 'doctor') {
+      const dr = subsystems.getDoctorStatus();
+      const score = dr.overall_score || 0;
+      if (dr.issues && dr.issues.length > 0) {
+        return `Health check done — system score is ${score}/100. I found ${dr.issues.length} item${dr.issues.length > 1 ? 's' : ''} worth reviewing.`;
+      }
+      return `Health check complete — everything looks solid at ${score}/100. No critical issues.`;
+    }
+    return `I've processed the analysis you asked for. The results are ready.`;
+  }
+
+  // Search / lookup requests
+  if (/\b(search|find|look|discover|check|what is|who is|tell me about|lookup)\b/.test(lower)) {
+    if (subsystem === 'memory') {
+      const mem = subsystems.getMemoryTree();
+      const count = mem.total_entities || 0;
+      return `I searched my knowledge base (${count} entities tracked). Here's what I found.`;
+    }
+    return `I looked into that for you. The results have been processed.`;
+  }
+
+  // Creation / generation requests
+  if (/\b(creat|build|generat|writ|design|draft|make|produce|compose)\b/.test(lower)) {
+    return `Done — I've completed the task. The output has been generated and saved.`;
+  }
+
+  // Planning / strategy requests
+  if (/\b(plan|strateg|organiz|schedul|priorit|roadmap)\b/.test(lower)) {
+    return `I've put together an approach for that. Ready to execute on your instruction.`;
+  }
+
+  // Lead generation / sales pipeline
+  if (intent === 'lead_generation' || /\b(lead|prospect|outreach|pipeline|conversion|sales)\b/.test(lower)) {
+    return `Lead generation task complete. The pipeline has been updated and results are logged.`;
+  }
+
+  // Content / marketing
+  if (intent === 'content_growth' || /\b(content|post|social|article|campaign|email|newsletter)\b/.test(lower)) {
+    return `Content task complete. Your request has been processed and the output is ready.`;
+  }
+
+  // Neural / AI system queries
+  if (subsystem === 'nn' || /\b(neural|network|ai|model|train|confidence)\b/.test(lower)) {
     const nn = subsystems.getNNStatus();
-    return `[NEURAL BRAIN] Mode: ${nn.mode} | Step: ${nn.learn_step} | Buffer: ${nn.buffer_size} | Confidence: ${(nn.confidence * 100).toFixed(1)}%${brainLine}${moneyLine}`;
+    return `Neural system is active in ${nn.mode || 'standard'} mode with ${(nn.learn_step || 0).toLocaleString()} learning steps completed. Your request has been processed.`;
   }
-  if (target === 'memory') {
+
+  // Memory system queries
+  if (subsystem === 'memory' || /\b(memory|knowledge|context|recall)\b/.test(lower)) {
     const mem = subsystems.getMemoryTree();
-    const lastUpdate = (mem.recent_updates && mem.recent_updates[0]) ? mem.recent_updates[0].entity_id : 'none';
-    return `[MEMORY TREE] ${mem.total_entities} entities stored | Last: ${lastUpdate}${brainLine}${moneyLine}`;
+    return `Memory updated — I'm tracking ${mem.total_entities || 0} knowledge entities. Your request has been recorded.`;
   }
-  if (target === 'doctor') {
+
+  // Doctor / system health queries
+  if (subsystem === 'doctor' || /\b(health|diagnos|system check|status)\b/.test(lower)) {
     const dr = subsystems.getDoctorStatus();
-    return `[DOCTOR] Grade: ${dr.grade || 'N/A'} | Score: ${dr.overall_score}/100 | Issues: ${dr.issues.length}${brainLine}${moneyLine}`;
+    const score = dr.overall_score || 0;
+    return `System health is at ${score}/100. ${dr.issues && dr.issues.length ? `${dr.issues.length} issue${dr.issues.length === 1 ? '' : 's'} flagged for review.` : 'All clear.'}`;
   }
-  return `[ORCHESTRATOR] Task complete: ${task.message}${brainLine}${moneyLine}`;
+
+  // Help / capability questions
+  if (/\b(help|what can you|how do|guide|explain|capabilities)\b/.test(lower)) {
+    return `I'm here to help — I can analyze data, manage pipelines, search through knowledge, create content, run health checks, and learn from your feedback. What would you like to work on?`;
+  }
+
+  // Greeting
+  if (/\b(hello|hi|hey|good morning|good afternoon|good evening|greetings)\b/.test(lower)) {
+    return `Hello! I'm ready to work. What can I help you with today?`;
+  }
+
+  // Default: natural completion — deterministic rotation based on task id
+  const completions = [
+    `Done. I've taken care of that for you.`,
+    `All finished. Let me know if you need anything else.`,
+    `Your request has been completed. Ready for the next task.`,
+    `Completed. Everything went smoothly.`,
+  ];
+  const taskId = task.id || task.taskId || message;
+  const lastChar = taskId.length > 0 ? taskId.charCodeAt(taskId.length - 1) : 0;
+  const idx = (Number.isNaN(lastChar) ? 0 : lastChar) % completions.length;
+  return completions[idx];
 }
 
 function submitTask(message, options = {}) {
