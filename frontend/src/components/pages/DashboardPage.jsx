@@ -101,8 +101,8 @@ function AgentPill({ agent, index }) {
 }
 
 function RadialGauge({ label, value, color, ariaUnit = 'percent', displaySuffix = '%' }) {
-  const size = 110
-  const stroke = 8
+  const size = 80
+  const stroke = 6
   const radius = (size - stroke) / 2
   const circumference = 2 * Math.PI * radius
   const offset = circumference - (Math.max(0, Math.min(value, 100)) / 100) * circumference
@@ -546,24 +546,24 @@ export default function DashboardPage() {
                 ))}
               </div>
           </div>
+
+          <section className="dashboard-glass-card dashboard-map-section" style={{ gridColumn: '1 / -1' }}>
+            <div className="dashboard-panel-header">
+              <h2>Live Activity Map</h2>
+              <span>Heartbeat {systemStatus?.heartbeat ?? 0}</span>
+            </div>
+            <ParticleMap />
+            <div className="dashboard-map-feed">
+              {(activityFeed || []).slice(0, 3).map((item, idx) => (
+                <ActivityItem key={item.id || idx} item={item} index={idx} />
+              ))}
+              {activityFeed.length === 0 && (
+                <div className="dashboard-empty">No live events streaming</div>
+              )}
+            </div>
+          </section>
         </section>
       </div>
-
-      <section className="dashboard-glass-card dashboard-map-section">
-        <div className="dashboard-panel-header">
-          <h2>Live Activity Map</h2>
-          <span>Heartbeat {systemStatus?.heartbeat ?? 0}</span>
-        </div>
-        <ParticleMap />
-        <div className="dashboard-map-feed">
-          {(activityFeed || []).slice(0, 3).map((item, idx) => (
-            <ActivityItem key={item.id || idx} item={item} index={idx} />
-          ))}
-          {activityFeed.length === 0 && (
-            <div className="dashboard-empty">No live events streaming</div>
-          )}
-        </div>
-      </section>
     </div>
   )
 }
