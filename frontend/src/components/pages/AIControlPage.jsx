@@ -67,6 +67,18 @@ function ChatMessage({ msg, index, debugMode }) {
         }}>
           {msg.content}
         </div>
+        {!isUser && debugMode && msg.debugInfo && (
+          <div style={{
+            marginTop: '8px',
+            paddingTop: '8px',
+            borderTop: '1px solid var(--border-subtle)',
+            fontSize: '11px',
+            color: 'var(--text-muted)',
+            fontFamily: 'monospace',
+          }}>
+            {msg.debugInfo}
+          </div>
+        )}
       </div>
     </motion.div>
   )
@@ -294,6 +306,8 @@ export default function AIControlPage() {
   const brainActivity = useAppStore(s => s.brainActivity)
   const nnStatus = useAppStore(s => s.nnStatus)
   const addFromPrompt = useBrainStore(s => s.addFromPrompt)
+  const debugMode = useAppStore(s => s.debugMode)
+  const toggleDebugMode = useAppStore(s => s.toggleDebugMode)
 
   const [input, setInput] = useState('')
   const [debugMode, setDebugMode] = useState(false)
@@ -413,7 +427,7 @@ export default function AIControlPage() {
               color: 'var(--text-muted)',
               fontSize: '14px',
             }}>
-              Start a conversation with your AI employee
+              How can I help you today?
             </div>
           )}
           {chatMessages.map((msg, idx) => (

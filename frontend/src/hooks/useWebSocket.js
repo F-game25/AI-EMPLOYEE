@@ -48,7 +48,13 @@ function connectSingleton() {
         case 'orchestrator:message':
           clearTimeout(_typingTimeout)
           store.setTyping(false)
-          store.addChatMessage({ role: 'ai', content: data.message, ts: Date.now(), subsystem: data.subsystem })
+          store.addChatMessage({
+            role: 'ai',
+            content: data.message || data.reply || '',
+            debugInfo: data.debugInfo || null,
+            ts: Date.now(),
+            subsystem: data.subsystem,
+          })
           break
         case 'orchestrator:queued':
           store.addHeartbeatLog({

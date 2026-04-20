@@ -302,7 +302,7 @@ export default function DashboardPage() {
             <div className="dashboard-chat-panel">
               <div className="dashboard-chat-messages">
                 {chatMessages.length === 0 && !isTyping && (
-                  <div className="dashboard-empty">Start the conversation with your orchestrator</div>
+                  <div className="dashboard-empty">How can I help you today?</div>
                 )}
                 <AnimatePresence initial={false}>
                   {chatMessages.slice(-MAX_VISIBLE_CHAT_MESSAGES).map((msg, idx) => (
@@ -319,7 +319,7 @@ export default function DashboardPage() {
                     </motion.div>
                   ))}
                 </AnimatePresence>
-                {isTyping && <div className="dashboard-msg-typing">Orchestrator is thinking…</div>}
+                {isTyping && <div className="dashboard-msg-typing">Thinking…</div>}
                 <div ref={messagesEndRef} />
               </div>
               <div className="dashboard-chat-input-wrap">
@@ -334,7 +334,7 @@ export default function DashboardPage() {
                     }
                   }}
                   className="dashboard-chat-input"
-                  placeholder="Send instruction..."
+                  placeholder="Ask me anything..."
                   aria-label="Chat message input"
                 />
                 <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="dashboard-send-btn" onClick={handleSend} aria-label="Send message">

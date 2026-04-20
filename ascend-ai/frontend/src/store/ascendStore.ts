@@ -81,7 +81,7 @@ interface AscendState {
 export const useStore = create<AscendState>((set) => ({
   wsConnected: false,
   setWsConnected: (v) => set({ wsConnected: v }),
-  mockMode: true,
+  mockMode: false,
   setMockMode: (v) => set({ mockMode: v }),
 
   agents: [],
@@ -99,19 +99,19 @@ export const useStore = create<AscendState>((set) => ({
 
   forgeMode: 'off',
   setForgeMode: (m) => set({ forgeMode: m }),
-  forgeLines: ['[FORGE STANDBY]', 'Awaiting improvement task...'],
+  forgeLines: [],
   addForgeLine: (l) => set((s) => ({ forgeLines: [...s.forgeLines.slice(-200), l] })),
 
   moneyMode: 'off',
   setMoneyMode: (m) => set({ moneyMode: m }),
-  moneyLines: ['[MONEY MODE ACTIVE]', 'Scanning business opportunities...', 'Revenue tracking: €0 today | €0 this week', 'Awaiting task input...'],
+  moneyLines: [],
   addMoneyLine: (l) => set((s) => ({ moneyLines: [...s.moneyLines.slice(-200), l] })),
   moneyRevenue: 0,
   setMoneyRevenue: (r) => set({ moneyRevenue: r }),
 
   blacklightActive: false,
   setBlacklightActive: (v) => set({ blacklightActive: v }),
-  blacklightLines: ['[BLACKLIGHT MODE]', 'Security monitoring standby', 'All connections encrypted', 'Awaiting scan...'],
+  blacklightLines: [],
   addBlacklightLine: (l) => set((s) => ({ blacklightLines: [...s.blacklightLines.slice(-200), l] })),
 
   chartData: [],
