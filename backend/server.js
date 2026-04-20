@@ -1608,8 +1608,10 @@ app.post('/api/chat', (req, res) => {
   if (!message) {
     return res.status(400).json({ ok: false, error: 'message required' });
   }
+  console.info('[AI FLOW] Input received (HTTP): message_len=%d', message.length);
   const handled = handleGoalDrivenCommand(message);
   if (handled.handled) {
+    console.info('[AI FLOW] → Response returned (goal-driven command)');
     return res.json({
       ok: true,
       handled: true,
@@ -1621,6 +1623,7 @@ app.post('/api/chat', (req, res) => {
     source: 'chat-http',
     goal: message,
   });
+  console.info('[AI FLOW] → Core AI called (orchestrator.submitTask)');
   const queued = orchestrator.submitTask(message, {
     userId: 'user:default',
     workflow: { runId: run.run_id, parentTaskId: null },
@@ -1639,6 +1642,8 @@ app.post('/api/chat', (req, res) => {
     level: 'info',
     heartbeat: heartbeatCounter,
   });
+  console.info('[AI FLOW] → Response returned (HTTP): taskId=%s', queued.taskId);
+  // MUST ALWAYS FIRE — res.json is called unconditionally
   return res.json({
     ok: true,
     taskId: queued.taskId,
@@ -2071,13 +2076,13 @@ wss.on('connection', (ws) => {
             addActivity('[AUTONOMY] ⚠ EMERGENCY STOP via chat', 'system');
             broadcaster.broadcast('orchestrator:message', {
               taskId: 'system',
-              reply: '⚠️ **EMERGENCY STOP** executed. All autonomous execution halted. Mode set to OFF.',
+              message: '⚠️ Emergency stop executed. All autonomous execution has been halted.',
             });
           } else if (cmdMatch === '_STATUS') {
             const auto = subsystems.getAutonomyStatus();
             broadcaster.broadcast('orchestrator:message', {
               taskId: 'system',
-              reply: `**System Status**\n- Mode: ${auto.mode?.mode || 'OFF'}\n- Daemon running: ${auto.daemon?.running || false}\n- Queue depth: ${auto.queue?.active || 0}\n- Tasks processed: ${auto.daemon?.tasks_processed || 0}`,
+              message: `System status — mode: ${auto.mode?.mode || 'OFF'}, daemon ${auto.daemon?.running ? 'running' : 'stopped'}, queue depth: ${auto.queue?.active || 0}, tasks processed: ${auto.daemon?.tasks_processed || 0}.`,
             });
           } else {
             // Set mode
@@ -2095,7 +2100,7 @@ wss.on('connection', (ws) => {
             addActivity(`[AUTONOMY] Mode → ${cmdMatch} (via chat)`, 'system');
             broadcaster.broadcast('orchestrator:message', {
               taskId: 'system',
-              reply: `✅ System mode set to **${cmdMatch}**.`,
+              message: `System mode set to ${cmdMatch}. Ready.`,
             });
           }
           return; // handled — don't route to orchestrator
@@ -2105,12 +2110,13 @@ wss.on('connection', (ws) => {
         if (objectiveCommand.handled) {
           broadcaster.broadcast('orchestrator:message', {
             taskId: 'objective',
-            reply: objectiveCommand.reply,
+            message: objectiveCommand.reply,
           });
           return;
         }
 
         // ── Normal chat routing ────────────────────────────────────────
+        console.info('[AI FLOW] Input received (WS): message_len=%d', parsed.message.length);
         const run = createWorkflowRun({
           name: 'Chat Workflow',
           source: 'chat',
@@ -2133,6 +2139,7 @@ wss.on('connection', (ws) => {
           level: 'info',
           heartbeat: heartbeatCounter,
         });
+        console.info('[AI FLOW] → Response returned (WS): taskId=%s', queued.taskId);
       }
     } catch (err) {
       // ignore malformed messages
