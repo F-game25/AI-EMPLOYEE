@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/ascendStore'
 import { ProgressBar } from '../components/ProgressBar'
+import { getSessionId } from '../utils/sessionId'
 
 type Tab = 'metrics' | 'logs' | 'errors'
 
@@ -13,7 +14,7 @@ interface BackendError {
 }
 
 export function Doctor() {
-  const { systemStats, agents, doctorChat, addDoctorChat } = useStore()
+  const { systemStats, agents, doctorChat, addDoctorChat, activeStream, llmStatus } = useStore()
   const [input, setInput] = useState('')
   const [tab, setTab] = useState<Tab>('metrics')
   const [selectedBot, setSelectedBot] = useState<string>('')
@@ -21,6 +22,24 @@ export function Doctor() {
   const [errors, setErrors] = useState<BackendError[]>([])
   const [expandedError, setExpandedError] = useState<number | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const isStreaming = activeStream?.context === 'doctor'
+  const loading = isStreaming
+  const streamContent = isStreaming ? activeStream!.content : ''
+
+  // "Thinking..." after 3s
+  const [showThinking, setShowThinking] = useState(false)
+  useEffect(() => {
+    if (!loading) { setShowThinking(false); return }
+    if (streamContent.length > 0) { setShowThinking(false); return }
+    const t = setTimeout(() => setShowThinking(true), 3000)
+    return () => clearTimeout(t)
+  }, [loading, streamContent])
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [doctorChat, streamContent, loading])
 
   // Fetch real errors from backend
   useEffect(() => {
@@ -35,17 +54,16 @@ export function Doctor() {
   }, [])
 
   const send = async () => {
-    if (!input.trim()) return
+    if (!input.trim() || loading) return
     addDoctorChat({ role: 'user', content: input })
+    const text = input
     setInput('')
     try {
-      const r = await fetch('/api/chat', {
+      await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input, context: 'doctor' }),
+        body: JSON.stringify({ message: text, context: 'doctor', session_id: getSessionId() }),
       })
-      const d = await r.json()
-      addDoctorChat({ role: 'ai', content: d.content })
     } catch {
       addDoctorChat({ role: 'ai', content: 'Connection error.' })
     }
@@ -94,7 +112,7 @@ export function Doctor() {
           <div style={{ padding: '10px 16px', borderBottom: 'var(--border-subtle)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--bronze)' }}>
             DOCTOR CHAT
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {doctorChat.map((m, i) => (
               <div
                 key={i}
@@ -110,25 +128,70 @@ export function Doctor() {
                   lineHeight: 1.5,
                   color: m.role === 'system' ? 'var(--text-secondary)' : 'var(--text-primary)',
                   fontStyle: m.role === 'system' ? 'italic' : undefined,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
                 }}
               >
                 {m.tag && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--bronze)', marginRight: 6 }}>[{m.tag}]</span>}
                 {m.content}
               </div>
             ))}
+
+            {/* Live streaming bubble */}
+            {isStreaming && streamContent && (
+              <div style={{
+                alignSelf: 'flex-start',
+                maxWidth: '85%',
+                background: 'rgba(205,127,50,0.06)',
+                borderLeft: '2px solid var(--bronze)',
+                padding: '8px 12px',
+                borderRadius: 8,
+                fontSize: 13,
+                lineHeight: 1.5,
+                color: 'var(--text-primary)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}>
+                {streamContent}
+              </div>
+            )}
+
+            {/* Typing / Thinking */}
+            {loading && !streamContent && (
+              showThinking
+                ? <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', padding: '4px 0' }}>Thinking...</div>
+                : (
+                  <div style={{ alignSelf: 'flex-start', maxWidth: '85%', background: 'rgba(205,127,50,0.06)', borderLeft: '2px solid var(--bronze)', padding: '8px 12px', borderRadius: 8 }}>
+                    <span className="typing-indicator">● ● ●</span>
+                  </div>
+                )
+            )}
           </div>
-          <div style={{ padding: 12, borderTop: 'var(--border-subtle)', display: 'flex', gap: 8 }}>
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && send()}
-              placeholder="Ask about system health..."
-              className="input-dark"
-              style={{ flex: 1, fontSize: 13, padding: '8px 12px' }}
-            />
-            <motion.button onClick={send} whileTap={{ scale: 0.96 }} className="btn-gold" style={{ padding: '8px 16px' }}>
-              ASK
-            </motion.button>
+          <div style={{ padding: 12, borderTop: 'var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {/* Status indicator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                background: loading ? 'var(--gold)' : llmStatus.provider === 'ollama' ? 'var(--online)' : llmStatus.provider === 'anthropic' ? 'var(--bronze)' : 'var(--text-dim)',
+              }} />
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)' }}>
+                {loading ? 'generating...' : llmStatus.provider === 'ollama' ? `${llmStatus.model ?? 'ollama'} local` : llmStatus.model ? `${llmStatus.model} backup` : 'no provider'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && send()}
+                disabled={loading}
+                placeholder="Ask about system health..."
+                className="input-dark"
+                style={{ flex: 1, fontSize: 13, padding: '8px 12px', opacity: loading ? 0.6 : 1 }}
+              />
+              <motion.button onClick={send} disabled={loading} whileTap={{ scale: 0.96 }} className="btn-gold" style={{ padding: '8px 16px', opacity: loading ? 0.6 : 1 }}>
+                {loading ? '...' : 'ASK'}
+              </motion.button>
+            </div>
           </div>
         </div>
 
