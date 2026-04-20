@@ -20,6 +20,7 @@ from routers.chat import router as chat_router
 from routers.doctor import router as doctor_router
 from routers.fairness import router as fairness_router
 from routers.governance import router as governance_router
+from routers.hermes import router as hermes_router
 from routers.memory import router as memory_router
 from routers.money_mode import router as money_router
 from routers.settings import router as settings_router
@@ -51,6 +52,7 @@ app.include_router(forge_router, prefix="/api")
 app.include_router(money_router, prefix="/api")
 app.include_router(blacklight_router, prefix="/api")
 app.include_router(doctor_router, prefix="/api")
+app.include_router(hermes_router, prefix="/api")
 app.include_router(memory_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(fairness_router, prefix="/api")
