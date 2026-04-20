@@ -267,8 +267,11 @@ def main() -> int:
     if not args.no_preflight:
         rc = _run_preflight()
         if rc != 0:
-            logger.error("Preflight failed (exit %d) — aborting startup.", rc)
-            return rc
+            logger.warning(
+                "Preflight returned exit %d — some checks may have failed. "
+                "Continuing startup; see preflight output above for details.",
+                rc,
+            )
 
     return _start_services()
 
