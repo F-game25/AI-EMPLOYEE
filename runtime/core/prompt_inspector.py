@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import random
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -165,11 +166,10 @@ class PromptInspector:
         ts = datetime.now(timezone.utc).isoformat()
         trace = PromptTrace(id=trace_id, timestamp=ts, user_input=user_input)
 
-        import time as _time
         with self._lock:
             self._traces[trace_id] = trace
             self._order.append(trace_id)
-            self._start_times[trace_id] = _time.monotonic()
+            self._start_times[trace_id] = time.monotonic()
             # Evict oldest if over capacity
             while len(self._order) > self._max_traces:
                 old_id = self._order.pop(0)
@@ -231,7 +231,6 @@ class PromptInspector:
         error: Optional[str] = None,
     ) -> None:
         """Finalise a trace after the full pipeline completes."""
-        import time as _time
         trace = self._get(trace_id)
         if trace is None:
             return
@@ -255,7 +254,7 @@ class PromptInspector:
 
             start = self._start_times.pop(trace_id, None)
             if start is not None:
-                trace.duration_ms = round((_time.monotonic() - start) * 1000, 1)
+                trace.duration_ms = round((time.monotonic() - start) * 1000, 1)
 
     def set_error(self, trace_id: str, error: str) -> None:
         """Mark a trace as failed."""
