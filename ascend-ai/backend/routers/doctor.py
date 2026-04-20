@@ -46,8 +46,8 @@ def run_diagnostic():
     # Backend connectivity — if we respond, it passes
     results.append({"check": "Backend connectivity", "status": "pass"})
 
-    # CPU usage
-    cpu = psutil.cpu_percent(interval=0.5)
+    # CPU usage — use a short interval (0.1s) to avoid blocking the request thread
+    cpu = psutil.cpu_percent(interval=0.1)
     cpu_status = "warn" if cpu > 85 else "pass"
     results.append({
         "check": "CPU usage",
@@ -75,7 +75,7 @@ def run_diagnostic():
         "detail": f"{disk_free_gb:.1f} GB free",
     })
 
-    # Running processes count
+    # Check running processes count
     proc_count = len(psutil.pids())
     results.append({
         "check": "Running processes",
