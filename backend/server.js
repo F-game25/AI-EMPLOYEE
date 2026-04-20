@@ -1407,6 +1407,40 @@ function requestPythonJSON(pathname, method = 'GET', payload = null) {
   });
 }
 
+/**
+ * Proxy a chat message to the Python backend's full LLM pipeline.
+ * Returns the response string on success, or null if the Python backend
+ * is unreachable (callers fall back to the local buildHumanReply).
+ *
+ * Timeout is generous (30 s) because LLM inference may be slow.
+ */
+function requestPythonChat(message) {
+  return new Promise((resolve) => {
+    const httpLib = require('http');
+    const body = JSON.stringify({ message });
+    const req = httpLib.request(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      timeout: 30000,
+    }, (response) => {
+      let text = '';
+      response.on('data', (chunk) => { text += chunk; });
+      response.on('end', () => {
+        try {
+          const data = JSON.parse(text || '{}');
+          resolve(data.response || data.reply || null);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.write(body);
+    req.end();
+  });
+}
+
 app.post('/api/autonomy/mode', async (req, res) => {
   const nextMode = String((req.body || {}).mode || '').toUpperCase();
   if (!['OFF', 'ON', 'AUTO'].includes(nextMode)) {
@@ -1603,7 +1637,7 @@ app.post('/api/tasks/run', (req, res) => {
 });
 
 // Compatibility endpoint used by legacy CLI flows (`ai-employee do/onboard`)
-app.post('/api/chat', (req, res) => {
+app.post('/api/chat', async (req, res) => {
   const message = String((req.body || {}).message || '').trim();
   if (!message) {
     return res.status(400).json({ ok: false, error: 'message required' });
@@ -1642,7 +1676,25 @@ app.post('/api/chat', (req, res) => {
     level: 'info',
     heartbeat: heartbeatCounter,
   });
-  console.info('[AI FLOW] → Response returned (HTTP): taskId=%s', queued.taskId);
+
+  // ── Proxy to Python LLM backend for real AI response ──────────────────────
+  let llmReply = null;
+  try {
+    llmReply = await requestPythonChat(message);
+  } catch (err) {
+    console.warn('[AI FLOW] Python chat proxy failed (HTTP path):', err && err.message);
+  }
+  if (llmReply) {
+    console.info('[AI FLOW] → LLM response returned (HTTP→Python): len=%d', llmReply.length);
+    return res.json({
+      ok: true,
+      taskId: queued.taskId,
+      workflow_run: run.run_id,
+      reply: llmReply,
+    });
+  }
+
+  console.info('[AI FLOW] → Fallback response (HTTP): taskId=%s', queued.taskId);
   // MUST ALWAYS FIRE — res.json is called unconditionally
   return res.json({
     ok: true,
@@ -2139,7 +2191,29 @@ wss.on('connection', (ws) => {
           level: 'info',
           heartbeat: heartbeatCounter,
         });
-        console.info('[AI FLOW] → Response returned (WS): taskId=%s', queued.taskId);
+
+        // ── Proxy to Python backend LLM pipeline for real AI response ──
+        // The Python backend has the full pipeline: context injection,
+        // memory, LLM call, personalised response. Use it instead of
+        // the generic keyword-matched buildHumanReply.
+        requestPythonChat(parsed.message).then((llmReply) => {
+          if (llmReply) {
+            console.info('[AI FLOW] → LLM response returned (WS→Python): len=%d', llmReply.length);
+            broadcaster.broadcast('orchestrator:message', {
+              message: llmReply,
+              subsystem: queued.subsystem || 'orchestrator',
+              taskId: queued.taskId,
+              from: queued.agentId,
+              agentId: queued.agentId,
+              timestamp: new Date().toISOString(),
+            });
+          } else {
+            console.info('[AI FLOW] → Fallback response (Python unavailable): taskId=%s', queued.taskId);
+          }
+        }).catch((err) => {
+          console.warn('[AI FLOW] Python chat proxy failed:', err && err.message);
+        });
+        console.info('[AI FLOW] → Task queued (WS): taskId=%s', queued.taskId);
       }
     } catch (err) {
       // ignore malformed messages
