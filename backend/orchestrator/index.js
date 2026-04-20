@@ -79,9 +79,7 @@ function buildHumanReply(task) {
   // General: craft a reply based on intent keywords in the original message
   const text = (task.message || '').toLowerCase();
   if (/(activate|start|enable|turn on|launch)/.test(text)) {
-    const agentMatch = task.message.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/);
-    const subject = agentMatch ? agentMatch[1] : 'the requested agent';
-    return `Done — ${subject} is now active and ready to go. What would you like to execute first?`;
+    return `Done — I've activated that. Everything is up and ready. What would you like to execute first?`;
   }
   if (/(stop|disable|deactivate|turn off|halt)/.test(text)) {
     return `Stopped. Everything has been shut down cleanly. Let me know when you want to resume.`;
