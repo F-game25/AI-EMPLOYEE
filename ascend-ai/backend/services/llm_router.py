@@ -54,7 +54,7 @@ _MAX_TOKENS: dict[str, int] = {"forge": 1024}
 _MAX_TOKENS_DEFAULT = 512
 
 # Preferred model quality order (best first)
-_MODEL_PREFERENCE = ["mistral", "llama3.1", "gemma2", "llama3.2"]
+_MODEL_PREFERENCE = ["mistral", "llama3.1", "gemma4", "gemma3", "gemma2", "llama3.2"]
 
 # Anthropic fallback model — fast and cheap
 _ANTHROPIC_FALLBACK_MODEL = "claude-haiku-4-5-20251001"
