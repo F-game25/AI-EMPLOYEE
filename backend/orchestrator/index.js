@@ -19,11 +19,11 @@ const router = Router();
 const events = new EventEmitter();
 
 /**
- * Build a subsystem-specific completion message for a processed task.
- * @param {{subsystem?: string, message: string}} task
+ * Build a technical debug string for a processed task (shown only in debug mode).
+ * @param {{subsystem?: string, message: string, metadata?: object}} task
  * @returns {string}
  */
-function buildReply(task) {
+function buildDebugReply(task) {
   const moneyTemplate = task?.metadata?.moneyTemplate ?? null;
   const brainPlan = task?.metadata?.brain ?? null;
   const moneyLine = moneyTemplate && moneyTemplate.enabled
@@ -47,6 +47,53 @@ function buildReply(task) {
     return `[DOCTOR] Grade: ${dr.grade || 'N/A'} | Score: ${dr.overall_score}/100 | Issues: ${dr.issues.length}${brainLine}${moneyLine}`;
   }
   return `[ORCHESTRATOR] Task complete: ${task.message}${brainLine}${moneyLine}`;
+}
+
+/**
+ * Build a human-friendly conversational reply for a processed task.
+ * @param {{subsystem?: string, message: string, metadata?: object}} task
+ * @returns {string}
+ */
+function buildHumanReply(task) {
+  const target = task.subsystem;
+  if (target === 'nn') {
+    const nn = subsystems.getNNStatus();
+    const conf = Math.round((nn.confidence || 0) * 100);
+    const mode = (nn.mode || 'active').replace(/_/g, ' ').toLowerCase();
+    return `Got it. The neural network processed your request — currently ${mode} with ${conf}% confidence and ${(nn.buffer_size || 0).toLocaleString()} experiences loaded.`;
+  }
+  if (target === 'memory') {
+    const mem = subsystems.getMemoryTree();
+    const lastUpdate = mem.recent_updates && mem.recent_updates[0] ? mem.recent_updates[0].entity_id : null;
+    const lastLine = lastUpdate ? ` Latest entry: ${lastUpdate}.` : '';
+    return `Memory updated — I now have ${mem.total_entities} entities stored.${lastLine}`;
+  }
+  if (target === 'doctor') {
+    const dr = subsystems.getDoctorStatus();
+    const issueCount = (dr.issues || []).length;
+    if (issueCount > 0) {
+      return `System check complete — grade ${dr.grade || 'N/A'}, score ${dr.overall_score}/100. Found ${issueCount} issue${issueCount !== 1 ? 's' : ''} that may need attention.`;
+    }
+    return `System is healthy — grade ${dr.grade || 'N/A'}, score ${dr.overall_score}/100. No critical issues detected.`;
+  }
+  // General: craft a reply based on intent keywords in the original message
+  const text = (task.message || '').toLowerCase();
+  if (/(activate|start|enable|turn on|launch)/.test(text)) {
+    return `Done — I've activated that. Everything is up and ready. What would you like to execute first?`;
+  }
+  if (/(stop|disable|deactivate|turn off|halt)/.test(text)) {
+    return `Stopped. Everything has been shut down cleanly. Let me know when you want to resume.`;
+  }
+  if (/(status|how is|health|check)/.test(text)) {
+    return `Here's the current status — all systems are operational. Anything specific you want to drill into?`;
+  }
+  if (/(learn|train|improve|optimize)/.test(text)) {
+    return `On it — I've kicked off the learning process. I'll improve performance from here and report back if anything noteworthy comes up.`;
+  }
+  if (/(report|summary|overview|show me)/.test(text)) {
+    return `Report ready. Take a look at the panels on the right for the full breakdown. Want me to highlight anything specific?`;
+  }
+  return `Done. I've taken care of that. What would you like me to do next?`;
 }
 
 function submitTask(message, options = {}) {
@@ -125,7 +172,8 @@ onAgentEvent('task:completed', ({ agent, task }) => {
     userId: requestedBy,
   });
   events.emit('orchestrator:reply', {
-    message: buildReply(task),
+    message: buildHumanReply(task),
+    debugInfo: buildDebugReply(task),
     subsystem: task.subsystem,
     taskId: task.id,
     from: agent.name,

@@ -2071,13 +2071,13 @@ wss.on('connection', (ws) => {
             addActivity('[AUTONOMY] ⚠ EMERGENCY STOP via chat', 'system');
             broadcaster.broadcast('orchestrator:message', {
               taskId: 'system',
-              reply: '⚠️ **EMERGENCY STOP** executed. All autonomous execution halted. Mode set to OFF.',
+              message: '⚠️ Emergency stop executed. All autonomous execution has been halted.',
             });
           } else if (cmdMatch === '_STATUS') {
             const auto = subsystems.getAutonomyStatus();
             broadcaster.broadcast('orchestrator:message', {
               taskId: 'system',
-              reply: `**System Status**\n- Mode: ${auto.mode?.mode || 'OFF'}\n- Daemon running: ${auto.daemon?.running || false}\n- Queue depth: ${auto.queue?.active || 0}\n- Tasks processed: ${auto.daemon?.tasks_processed || 0}`,
+              message: `System status — mode: ${auto.mode?.mode || 'OFF'}, daemon ${auto.daemon?.running ? 'running' : 'stopped'}, queue depth: ${auto.queue?.active || 0}, tasks processed: ${auto.daemon?.tasks_processed || 0}.`,
             });
           } else {
             // Set mode
@@ -2095,7 +2095,7 @@ wss.on('connection', (ws) => {
             addActivity(`[AUTONOMY] Mode → ${cmdMatch} (via chat)`, 'system');
             broadcaster.broadcast('orchestrator:message', {
               taskId: 'system',
-              reply: `✅ System mode set to **${cmdMatch}**.`,
+              message: `System mode set to ${cmdMatch}. Ready.`,
             });
           }
           return; // handled — don't route to orchestrator
@@ -2105,7 +2105,7 @@ wss.on('connection', (ws) => {
         if (objectiveCommand.handled) {
           broadcaster.broadcast('orchestrator:message', {
             taskId: 'objective',
-            reply: objectiveCommand.reply,
+            message: objectiveCommand.reply,
           });
           return;
         }

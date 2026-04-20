@@ -7,24 +7,17 @@ import { API_URL } from '../../config/api'
 
 const BASE = API_URL
 
-const SUBSYSTEM_TAG = {
-  orchestrator: { label: 'ORCHESTRATOR', color: 'var(--gold)' },
-  brain: { label: 'NEURAL BRAIN', color: 'var(--info)' },
-  memory: { label: 'MEMORY', color: 'var(--success)' },
-  doctor: { label: 'DOCTOR', color: 'var(--warning)' },
-}
-
-function identifySubsystem(content) {
-  const lower = (content || '').toLowerCase()
-  if (lower.includes('[neural') || lower.includes('[brain')) return SUBSYSTEM_TAG.brain
-  if (lower.includes('[memory')) return SUBSYSTEM_TAG.memory
-  if (lower.includes('[doctor')) return SUBSYSTEM_TAG.doctor
-  return null
-}
-
-function ChatMessage({ msg, index }) {
+function ChatMessage({ msg, index, debugMode }) {
   const isUser = msg.role === 'user'
-  const tag = !isUser ? identifySubsystem(msg.content) : null
+
+  const subsystemLabel = (subsystem) => {
+    if (subsystem === 'nn') return { label: 'NEURAL BRAIN', color: 'var(--info)' }
+    if (subsystem === 'memory') return { label: 'MEMORY', color: 'var(--success)' }
+    if (subsystem === 'doctor') return { label: 'DOCTOR', color: 'var(--warning)' }
+    return null
+  }
+
+  const tag = !isUser && debugMode ? subsystemLabel(msg.subsystem) : null
 
   return (
     <motion.div
@@ -65,6 +58,18 @@ function ChatMessage({ msg, index }) {
         }}>
           {msg.content}
         </div>
+        {!isUser && debugMode && msg.debugInfo && (
+          <div style={{
+            marginTop: '8px',
+            paddingTop: '8px',
+            borderTop: '1px solid var(--border-subtle)',
+            fontSize: '11px',
+            color: 'var(--text-muted)',
+            fontFamily: 'monospace',
+          }}>
+            {msg.debugInfo}
+          </div>
+        )}
       </div>
     </motion.div>
   )
@@ -292,6 +297,8 @@ export default function AIControlPage() {
   const brainActivity = useAppStore(s => s.brainActivity)
   const nnStatus = useAppStore(s => s.nnStatus)
   const addFromPrompt = useBrainStore(s => s.addFromPrompt)
+  const debugMode = useAppStore(s => s.debugMode)
+  const toggleDebugMode = useAppStore(s => s.toggleDebugMode)
 
   const [input, setInput] = useState('')
   const scrollRef = useRef(null)
@@ -366,7 +373,28 @@ export default function AIControlPage() {
         flexDirection: 'column',
         minWidth: 0,
       }}>
-        <PageHeader title="AI Control" subtitle="Chat with your AI employee and monitor neural brain" />
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
+          <PageHeader title="AI Control" subtitle="Chat with your AI assistant" />
+          <button
+            onClick={toggleDebugMode}
+            title={debugMode ? 'Switch to user mode' : 'Switch to debug mode'}
+            style={{
+              marginTop: 'var(--space-1)',
+              padding: '4px 10px',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+              border: `1px solid ${debugMode ? 'rgba(212,175,55,0.5)' : 'var(--border-subtle)'}`,
+              color: debugMode ? 'var(--gold)' : 'var(--text-muted)',
+              background: debugMode ? 'rgba(212,175,55,0.08)' : 'transparent',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              flexShrink: 0,
+              transition: 'all 0.15s',
+            }}
+          >
+            {debugMode ? 'DEBUG ON' : 'DEBUG'}
+          </button>
+        </div>
 
         {/* Chat messages */}
         <div
@@ -387,11 +415,11 @@ export default function AIControlPage() {
               color: 'var(--text-muted)',
               fontSize: '14px',
             }}>
-              Start a conversation with your AI employee
+              How can I help you today?
             </div>
           )}
           {chatMessages.map((msg, idx) => (
-            <ChatMessage key={idx} msg={msg} index={idx} />
+            <ChatMessage key={idx} msg={msg} index={idx} debugMode={debugMode} />
           ))}
           {isTyping && <TypingIndicator />}
         </div>
@@ -410,7 +438,7 @@ export default function AIControlPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message or command..."
+            placeholder="Message your AI..."
             style={{
               flex: 1,
               background: 'transparent',
