@@ -18,6 +18,67 @@ const { buildMoneyTemplate } = require('../money_mode');
 const router = Router();
 const events = new EventEmitter();
 
+// ── Neural-network failsafe configuration ─────────────────────────────────────
+const BYPASS_NN = process.env.BYPASS_NN === 'true' || process.env.BYPASS_NN === '1';
+const NN_TIMEOUT_MS = parseInt(process.env.NN_TIMEOUT_MS || '2000', 10);
+
+/** Safe fallback response object returned when the AI pipeline cannot produce output. */
+function fallbackResponse(msg) {
+  return {
+    text: msg,
+    status: 'fallback',
+    system: 'recovered',
+  };
+}
+
+/** Wrap a promise with a timeout; resolves with null on timeout. */
+function withTimeout(promise, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      () => { clearTimeout(timer); resolve(null); },
+    );
+  });
+}
+
+/**
+ * Neural-network enhancement layer (non-blocking).
+ * Returns enhanced input or null if the NN is unavailable or times out.
+ * NEVER throws.
+ */
+async function nnProcess(input) {
+  if (BYPASS_NN) {
+    console.info('[AI FLOW] NN bypassed (BYPASS_NN=true)');
+    return null;
+  }
+  console.info('[AI FLOW] → NN start');
+  try {
+    const nnStatus = subsystems.getNNStatus();
+    if (!nnStatus.available || !nnStatus.active) {
+      console.info('[AI FLOW] → NN unavailable — bypassing');
+      return null;
+    }
+    // The JS NN layer reads subsystem state (confidence, mode) as routing metadata
+    // but does not rewrite the input text.  getNNStatus() is synchronous; we wrap
+    // it in a timeout-guarded promise so any future async implementation is safe.
+    const nnResult = await withTimeout(
+      new Promise((resolve) => resolve(nnStatus)),
+      NN_TIMEOUT_MS,
+    );
+    if (nnResult !== null) {
+      console.info('[AI FLOW] → NN success (confidence=%s%%)', Math.round((nnStatus.confidence || 0) * 100));
+      // Return the original input — NN provides metadata only, not a rewritten message.
+      return input;
+    }
+    console.warn('[AI FLOW] → NN timeout (%dms) — bypassing', NN_TIMEOUT_MS);
+    return null;
+  } catch (err) {
+    console.warn('[AI FLOW] → NN failed — bypassing:', err && err.message);
+    return null;
+  }
+}
+
 /**
  * Build a technical debug string for a processed task (shown only in debug mode).
  * @param {{subsystem?: string, message: string, metadata?: object}} task
@@ -98,6 +159,8 @@ function buildHumanReply(task) {
 
 function submitTask(message, options = {}) {
   const userId = options.userId || 'user:default';
+  console.info('[AI FLOW] Input received: user=%s message_len=%d', userId, String(message || '').length);
+
   const subsystemHint = classifyMessage(message) || 'general';
   const categoryHint = classifyCategory(message);
   const seedTaskId = `planning-${crypto.randomUUID()}`;
@@ -109,7 +172,9 @@ function submitTask(message, options = {}) {
       subsystemHint,
       userId,
     });
+    console.info('[AI FLOW] → Brain plan: strategy=%s confidence=%s%%', plan.strategy, Math.round((plan.confidence || 0) * 100));
   } catch (err) {
+    console.warn('[AI FLOW] → Brain consult failed — using fallback plan:', err && err.message);
     plan = {
       taskId: seedTaskId,
       intent: 'general',
@@ -149,7 +214,8 @@ function submitTask(message, options = {}) {
   if (!rebound && taskBrainPlan.brain_assisted) {
     taskBrainPlan.reasoning = `${taskBrainPlan.reasoning} | plan_rebind=fallback`;
   }
-  return {
+
+  const result = {
     ...assignment,
     subsystem,
     status: 'queued',
@@ -159,6 +225,15 @@ function submitTask(message, options = {}) {
     workflow: options.workflow || null,
     timestamp: new Date().toISOString(),
   };
+
+  // Guard: verify enqueueTask returned a valid assignment with a taskId
+  if (!result.taskId) {
+    console.error('[AI FLOW] submitTask produced no taskId — returning fallback');
+    return { ...fallbackResponse('System recovered: task could not be queued.'), taskId: seedTaskId };
+  }
+
+  console.info('[AI FLOW] → Response returned: taskId=%s agent=%s', result.taskId, result.agentId);
+  return result;
 }
 
 onAgentEvent('task:completed', ({ agent, task }) => {
@@ -171,8 +246,10 @@ onAgentEvent('task:completed', ({ agent, task }) => {
     notes: task.message,
     userId: requestedBy,
   });
+  const reply = buildHumanReply(task) || fallbackResponse('Task completed.').text;
+  console.info('[AI FLOW] → Response returned to UI: taskId=%s', task.id);
   events.emit('orchestrator:reply', {
-    message: buildHumanReply(task),
+    message: reply,
     debugInfo: buildDebugReply(task),
     subsystem: task.subsystem,
     taskId: task.id,
@@ -184,6 +261,7 @@ onAgentEvent('task:completed', ({ agent, task }) => {
 
 onAgentEvent('task:failed', ({ task }) => {
   const requestedBy = task?.metadata?.requestedBy || 'user:default';
+  console.warn('[AI FLOW] Task failed: taskId=%s error=%s', task.id, task.error || task.message);
   brain.feedback({
     taskId: task.id,
     status: 'failed',
@@ -200,11 +278,13 @@ router.post('/message', (req, res) => {
   if (!message) {
     return res.status(400).json({ error: 'message is required' });
   }
-  res.json(submitTask(message));
+  const result = submitTask(message);
+  // submitTask always returns a valid object (guaranteed above); res.json always fires.
+  return res.json(result);
 });
 
 function on(eventName, handler) {
   events.on(eventName, handler);
 }
 
-module.exports = { router, submitTask, on };
+module.exports = { router, submitTask, on, fallbackResponse, nnProcess };

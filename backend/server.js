@@ -1608,12 +1608,14 @@ app.post('/api/chat', (req, res) => {
   if (!message) {
     return res.status(400).json({ ok: false, error: 'message required' });
   }
+  console.info('[AI FLOW] Input received (HTTP): message_len=%d', message.length);
   const handled = handleGoalDrivenCommand(message);
   if (handled.handled) {
+    console.info('[AI FLOW] → Response returned (goal-driven command)');
     return res.json({
       ok: true,
       handled: true,
-      response: handled.reply,
+      response: handled.reply || 'System recovered: default response generated.',
     });
   }
   const run = createWorkflowRun({
@@ -1621,6 +1623,7 @@ app.post('/api/chat', (req, res) => {
     source: 'chat-http',
     goal: message,
   });
+  console.info('[AI FLOW] → Core AI called (orchestrator.submitTask)');
   const queued = orchestrator.submitTask(message, {
     userId: 'user:default',
     workflow: { runId: run.run_id, parentTaskId: null },
@@ -1639,6 +1642,8 @@ app.post('/api/chat', (req, res) => {
     level: 'info',
     heartbeat: heartbeatCounter,
   });
+  console.info('[AI FLOW] → Response returned (HTTP): taskId=%s', queued.taskId);
+  // MUST ALWAYS FIRE — res.json is called unconditionally
   return res.json({
     ok: true,
     taskId: queued.taskId,
@@ -2111,6 +2116,7 @@ wss.on('connection', (ws) => {
         }
 
         // ── Normal chat routing ────────────────────────────────────────
+        console.info('[AI FLOW] Input received (WS): message_len=%d', parsed.message.length);
         const run = createWorkflowRun({
           name: 'Chat Workflow',
           source: 'chat',
@@ -2133,6 +2139,7 @@ wss.on('connection', (ws) => {
           level: 'info',
           heartbeat: heartbeatCounter,
         });
+        console.info('[AI FLOW] → Response returned (WS): taskId=%s', queued.taskId);
       }
     } catch (err) {
       // ignore malformed messages
