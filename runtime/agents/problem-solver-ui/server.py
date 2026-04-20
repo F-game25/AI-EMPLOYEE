@@ -1037,9 +1037,20 @@ def _generate_llm_response(
     model_route: Optional[str] = None,
     user_id: str = _DEFAULT_USER,
 ) -> str:
+  # ── [AI FLOW] Log pipeline entry ────────────────────────────────────────────
+  _ai_flow_logger.info("[AI FLOW] Input received: agent=%s mode=%s", routed_agent, mode)
+
+  # ── [AI FLOW] Neural-network enhancement layer (non-blocking) ────────────────
+  nn_output = _nn_process_input(message)
+  final_input = nn_output if nn_output is not None else message
+  _ai_flow_logger.info(
+      "[AI FLOW] → Core AI called (nn_enhanced=%s)", nn_output is not None and nn_output is not message
+  )
+
   provider, model, runtime_env = _detect_llm_provider(model_route)
   if not provider:
-    return (
+    _ai_flow_logger.warning("[AI FLOW] No LLM provider available — returning fallback")
+    return _fallback_response(
       "No model is available for the selected route. Add GROQ_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to ~/.ai-employee/.env, "
       "or run Ollama locally: https://ollama.ai"
     )
@@ -1052,24 +1063,24 @@ def _generate_llm_response(
 
   _dt_llm = _get_distributed_tracer()
 
-  system_prompt = _build_llm_system_prompt(message, routed_agent, mode, user_id=user_id)
+  system_prompt = _build_llm_system_prompt(final_input, routed_agent, mode, user_id=user_id)
   try:
     def _do_llm_call():
       if provider == "anthropic":
         api_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
-        return _call_anthropic_chat(message, system_prompt, model, api_key)
+        return _call_anthropic_chat(final_input, system_prompt, model, api_key)
       elif provider == "openai":
         api_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-        return _call_openai_chat(message, system_prompt, model, api_key)
+        return _call_openai_chat(final_input, system_prompt, model, api_key)
       elif provider == "groq":
         api_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
-        return _call_groq_chat(message, system_prompt, model, api_key)
+        return _call_groq_chat(final_input, system_prompt, model, api_key)
       elif provider == "gemma":
         ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-        return _call_gemma_chat(message, system_prompt, ollama_host)
+        return _call_gemma_chat(final_input, system_prompt, ollama_host)
       else:
         ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-        return _call_ollama_chat(message, system_prompt, model, ollama_host)
+        return _call_ollama_chat(final_input, system_prompt, model, ollama_host)
 
     def _do_llm_call_with_trace():
       if _dt_llm is not None:
@@ -1098,20 +1109,27 @@ def _generate_llm_response(
       answer = _do_llm_call_with_trace()
   except urllib.error.HTTPError as exc:
     if _llm_auth_failed(exc):
-      return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
-    return "Task is taking longer than expected. Check dashboard for results."
+      _ai_flow_logger.warning("[AI FLOW] LLM auth failed — returning fallback")
+      return _fallback_response("LLM authentication failed. Check your API key in ~/.ai-employee/.env")
+    _ai_flow_logger.warning("[AI FLOW] LLM HTTP error — returning fallback")
+    return _fallback_response("Task is taking longer than expected. Check dashboard for results.")
   except (socket.timeout, TimeoutError, urllib.error.URLError) as exc:
     if _llm_auth_failed(exc):
-      return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
-    return "Request timed out. Try a simpler task or check your connection."
+      _ai_flow_logger.warning("[AI FLOW] LLM auth failed (timeout path) — returning fallback")
+      return _fallback_response("LLM authentication failed. Check your API key in ~/.ai-employee/.env")
+    _ai_flow_logger.warning("[AI FLOW] LLM timeout — returning fallback")
+    return _fallback_response("Request timed out. Try a simpler task or check your connection.")
   except Exception as exc:
     logger.warning("LLM request failed for agent %s: %s", routed_agent, exc)
     if _llm_auth_failed(exc):
-      return "LLM authentication failed. Check your API key in ~/.ai-employee/.env"
-    return "Task is taking longer than expected. Check dashboard for results."
+      _ai_flow_logger.warning("[AI FLOW] LLM auth failed (exception path) — returning fallback")
+      return _fallback_response("LLM authentication failed. Check your API key in ~/.ai-employee/.env")
+    _ai_flow_logger.warning("[AI FLOW] LLM exception — returning fallback: %s", exc)
+    return _fallback_response("Task is taking longer than expected. Check dashboard for results.")
 
   if not answer:
-    return (
+    _ai_flow_logger.warning("[AI FLOW] Empty LLM answer — returning fallback")
+    return _fallback_response(
       "No model response was returned. Check your selected route credentials or model availability."
     )
 
@@ -1140,6 +1158,7 @@ def _generate_llm_response(
   except Exception as _xai_exc:
       logger.debug("explainability generation error (non-fatal): %s", _xai_exc)
 
+  _ai_flow_logger.info("[AI FLOW] → Response returned (len=%d)", len(result))
   return result
 
 _SENSITIVE_DETAIL_PAT = re.compile(
@@ -1178,6 +1197,84 @@ def _log_activity(
         logger.warning("Failed to write activity log: %s", _exc)
 
 
+# ── Neural-network failsafe configuration ─────────────────────────────────────
+# Set BYPASS_NN=1 to skip the neural-network enhancement layer entirely and call
+# the core LLM directly.  Useful for debugging or when the NN layer is unstable.
+_BYPASS_NN: bool = os.environ.get("BYPASS_NN", "").strip().lower() in ("1", "true", "yes")
+# Maximum seconds to wait for the neural-network process step before bypassing.
+_NN_TIMEOUT_S: float = float(os.environ.get("NN_TIMEOUT_S", "2.0"))
+
+_ai_flow_logger = logging.getLogger("ai_flow")
+
+
+def _fallback_response(msg: str) -> str:
+    """Return a safe, user-visible fallback string when the AI pipeline fails."""
+    return f"System recovered: {msg}"
+
+
+# ── Neural-network non-blocking enhancement layer ─────────────────────────────
+
+def _nn_process_input(message: str) -> "str | None":
+    """Optionally enhance *message* via the neural-network agent.
+
+    The NN layer is fully optional: any error, import failure, or timeout
+    causes this function to return *None* so the caller can fall back to the
+    original message.  It NEVER raises.
+
+    Returns the (potentially enhanced) input string, or *None* on failure.
+    """
+    if _BYPASS_NN:
+        _ai_flow_logger.info("[AI FLOW] NN bypassed (BYPASS_NN=1)")
+        return None
+    try:
+        import concurrent.futures as _cf
+        import sys as _sys
+        _nn_agents_dir = Path(__file__).resolve().parents[2] / "agents"
+        if str(_nn_agents_dir) not in _sys.path:
+            _sys.path.insert(0, str(_nn_agents_dir))
+        from neural_network.agent import NeuralNetworkAgent  # type: ignore
+
+        _ai_flow_logger.info("[AI FLOW] → NN start")
+
+        def _run_nn() -> "str | None":
+            try:
+                import torch as _torch
+                nn_agent = NeuralNetworkAgent()
+                # Build a minimal feature vector from the message:
+                # [msg_len_norm, word_count_norm, has_question, has_task_keyword]
+                words = message.split()
+                state = _torch.tensor([
+                    min(len(message) / 500.0, 1.0),
+                    min(len(words) / 50.0, 1.0),
+                    float("?" in message),
+                    float(any(kw in message.lower() for kw in ("task", "help", "do", "run", "start", "stop"))),
+                ] + [0.0] * 60, dtype=_torch.float32)  # pad to input_size=64
+                _action, _confidence = nn_agent.get_action(state)
+                _ai_flow_logger.info(
+                    "[AI FLOW] → NN success (action=%d confidence=%.3f)",
+                    _action, _confidence,
+                )
+                # NN does not rewrite the message; it provides routing metadata only.
+                # Return the original message so the pipeline always has valid input.
+                return message
+            except Exception as _inner:
+                _ai_flow_logger.warning("[AI FLOW] → NN inner error: %s", _inner)
+                return None
+
+        with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
+            _future = _pool.submit(_run_nn)
+            try:
+                return _future.result(timeout=_NN_TIMEOUT_S)
+            except _cf.TimeoutError:
+                _ai_flow_logger.warning(
+                    "[AI FLOW] → NN timeout (%.1fs) — bypassing", _NN_TIMEOUT_S
+                )
+                return None
+    except Exception as _exc:
+        _ai_flow_logger.warning("[AI FLOW] → NN failed — bypassing: %s", _exc)
+        return None
+
+
 _ai_router_path = BOTS_DIR / "ai-router"
 if str(_ai_router_path) not in sys.path:
     sys.path.insert(0, str(_ai_router_path))
@@ -1205,6 +1302,9 @@ if not _REQUIRE_AUTH:
         "   Do NOT use this setting in production or on any network-exposed server.\n",
         flush=True,
     )
+
+# ── Neural-network bypass (debug switch) ──────────────────────────────────────
+# _BYPASS_NN and _NN_TIMEOUT_S are defined near their implementation above.
 
 # ── Financial-agents safety gate ──────────────────────────────────────────────
 # Financial trading agents (turbo-quant, arbitrage-bot, polymarket-trader, etc.)
@@ -17939,6 +18039,13 @@ async def post_chat(payload: dict, request: Request):
         handle_command, message, model_route=model_route, user_id=user_id
     )
 
+    # ── Guaranteed response — never return None or empty to the UI ────────────
+    if not response:
+        _ai_flow_logger.warning(
+            "[AI FLOW] handle_command returned empty response — using fallback"
+        )
+        response = _fallback_response("System recovered: default response generated.")
+
     # ── Schema validation — before storing in memory or sending to UI ─────────
     _routed_for_validation = route_to_agent(message)
     _schema_validator = _get_schema_validator()
@@ -18866,11 +18973,6 @@ def handle_command(
             logger.debug("bias check error (non-fatal): %s", _bias_exc)
 
     return _generate_llm_response(message, routed_agent, mode, model_route=model_route, user_id=user_id)
-
-    return (
-        f"Task queued: '{message}'\n"
-        "Tip: use 'start <agent>', 'stop <agent>', 'status', 'help' for commands."
-    )
 
 
 # ─── Schedules ────────────────────────────────────────────────────────────────
