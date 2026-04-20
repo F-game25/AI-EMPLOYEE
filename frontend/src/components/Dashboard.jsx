@@ -13,6 +13,7 @@ import AgentsPage from './pages/AgentsPage'
 import SystemPage from './pages/SystemPage'
 import VoicePage from './pages/VoicePage'
 import LearningLadderPage from './pages/LearningLadderPage'
+import PromptInspectorPage from './pages/PromptInspectorPage'
 import { API_URL } from '../config/api'
 
 const BASE = API_URL
@@ -27,6 +28,7 @@ const PAGES = {
   'learning-ladder': LearningLadderPage,
   'system': SystemPage,
   'voice': VoicePage,
+  'prompt-inspector': PromptInspectorPage,
 }
 
 export default function Dashboard() {

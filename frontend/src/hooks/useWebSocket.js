@@ -124,6 +124,9 @@ function connectSingleton() {
         case 'observability:snapshot':
           store.setObservability(data)
           break
+        case 'prompt:trace':
+          if (data && data.id) store.addPromptTrace(data)
+          break
       }
     } catch (e) {
       console.error('[ws] message handling failed', e)

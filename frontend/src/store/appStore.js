@@ -292,4 +292,13 @@ export const useAppStore = create((set) => ({
     updated_at: null,
   },
   setObservability: (payload) => set({ observability: payload || {} }),
+
+  // Prompt Inspector — real-time trace stream
+  promptTraces: [],
+  inspectorEnabled: true,
+  addPromptTrace: (trace) => set((state) => ({
+    promptTraces: [trace, ...state.promptTraces].slice(0, 200),
+  })),
+  setPromptTraces: (traces) => set({ promptTraces: Array.isArray(traces) ? traces : [] }),
+  setInspectorEnabled: (v) => set({ inspectorEnabled: Boolean(v) }),
 }))
