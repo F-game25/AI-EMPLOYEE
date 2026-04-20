@@ -11,17 +11,21 @@ interface Connection {
   latency: number
 }
 
+interface BreachAlert {
+  id: number
+  message: string
+  severity: string
+  ts: number
+}
+
 export function BlacklightMode() {
   const nav = useNavigate()
   const { blacklightActive, setBlacklightActive, blacklightLines, addBlacklightLine } = useStore()
   const [mode, setMode] = useState('off')
   const [connections, setConnections] = useState<Connection[]>([])
-  const [breachAlerts] = useState<{ id: number; message: string; severity: string; ts: string }[]>([
-    { id: 1, message: 'Unusual API access pattern detected', severity: 'low', ts: new Date().toISOString() },
-    { id: 2, message: 'Rate limit threshold approaching for external endpoints', severity: 'medium', ts: new Date().toISOString() },
-  ])
+  const [breachAlerts, setBreachAlerts] = useState<BreachAlert[]>([])
 
-  useEffect(() => {
+  const loadStatus = () =>
     fetch('/api/blacklight/status')
       .then((r) => r.json())
       .then((d) => {
@@ -32,6 +36,18 @@ export function BlacklightMode() {
         }
       })
       .catch(() => {})
+
+  const loadAlerts = () =>
+    fetch('/api/blacklight/alerts')
+      .then((r) => r.json())
+      .then((d) => setBreachAlerts(Array.isArray(d) ? d : []))
+      .catch(() => {})
+
+  useEffect(() => {
+    loadStatus()
+    loadAlerts()
+    const t = setInterval(() => { loadStatus(); loadAlerts() }, 15000)
+    return () => clearInterval(t)
   }, [setBlacklightActive])
 
   const toggleMode = (v: string) => {
@@ -138,7 +154,7 @@ export function BlacklightMode() {
                 {alert.message}
               </div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
-                {new Date(alert.ts).toLocaleTimeString()} • {alert.severity.toUpperCase()}
+                {new Date(alert.ts * 1000).toLocaleTimeString()} • {alert.severity.toUpperCase()}
               </div>
             </div>
           </div>
