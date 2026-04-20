@@ -167,8 +167,25 @@ log "Starting Problem Solver UI (port $UI_PORT)..."
 if [[ -x "$AI_HOME/bin/ai-employee" ]]; then
   "$AI_HOME/bin/ai-employee" start problem-solver-ui || warn "UI bot start returned non-zero (check logs)"
 else
-  warn "ai-employee binary not found at $AI_HOME/bin/ai-employee — skipping bot start."
-  warn "  Re-run the installer: cd ~/.ai-employee && bash install.sh"
+  # Fallback for repo-only (non-installed) environments: locate and run run.sh
+  # directly so that `python main.py` and `./start.sh` work without a full install.
+  _REPO_RUN_SH=""
+  if [[ -n "${AI_EMPLOYEE_REPO_DIR:-}" && -x "$AI_EMPLOYEE_REPO_DIR/runtime/agents/problem-solver-ui/run.sh" ]]; then
+    _REPO_RUN_SH="$AI_EMPLOYEE_REPO_DIR/runtime/agents/problem-solver-ui/run.sh"
+  elif [[ -x "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agents/problem-solver-ui/run.sh" ]]; then
+    _REPO_RUN_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agents/problem-solver-ui/run.sh"
+  fi
+
+  if [[ -n "$_REPO_RUN_SH" ]]; then
+    log "Installed binary not found — using repo run.sh: $_REPO_RUN_SH"
+    setsid bash "$_REPO_RUN_SH" >> "$AI_HOME/logs/problem-solver-ui.log" 2>&1 &
+    echo $! > "$AI_HOME/run/problem-solver-ui.pid"
+    ok "Problem Solver UI started from repo (pid=$!)"
+  else
+    warn "ai-employee binary not found at $AI_HOME/bin/ai-employee — skipping bot start."
+    warn "  Re-run the installer: bash install.sh"
+    warn "  Or run directly:      ./start.sh  (from repo root)"
+  fi
 fi
 
 # ── Start remaining agents in background ────────────────────────────────────────
