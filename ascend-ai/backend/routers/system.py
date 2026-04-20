@@ -55,13 +55,16 @@ def system_health():
     }
 
 
+_HIGH_PRIORITY_NICE = -5  # Reduce niceness (increase priority) by 5 levels
+
+
 @router.post("/system/boost")
 def boost_priority():
     """Boost system priority — sets the process to high niceness where permitted."""
     try:
         import os
         proc = psutil.Process(os.getpid())
-        proc.nice(-5)
+        proc.nice(_HIGH_PRIORITY_NICE)
         return {"success": True, "message": "Priority boosted"}
     except (psutil.AccessDenied, PermissionError):
         return {"success": False, "message": "Insufficient permissions to boost priority"}

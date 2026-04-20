@@ -38,12 +38,8 @@ def _real_connections() -> list[dict]:
     results.append({"name": "Main Backend", "status": "online", "latency": 0})
 
     # WebSocket Hub — count connected WS clients
-    try:
-        from websocket_manager import _clients
-        ws_status = "online" if True else "offline"  # server always has WS route
-        results.append({"name": "WebSocket Hub", "status": ws_status, "latency": 0})
-    except Exception:
-        results.append({"name": "WebSocket Hub", "status": "offline", "latency": 0})
+    # WebSocket Hub — always online since we serve the WS route
+    results.append({"name": "WebSocket Hub", "status": "online", "latency": 0})
 
     # Memory Store — check SQLite DB file exists and is readable
     from pathlib import Path
