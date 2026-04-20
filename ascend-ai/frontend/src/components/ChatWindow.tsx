@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, KeyboardEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useStore } from '../store/ascendStore'
+import { getSessionId } from '../utils/sessionId'
 
 export interface ChatMsg {
   role: 'user' | 'ai' | 'system'
@@ -41,35 +43,50 @@ export function ChatWindow({
 }: ChatWindowProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
 
+  const { activeStream, llmStatus, showFallbackToast, setShowFallbackToast } = useStore()
+
+  const isStreaming = activeStream?.context === context
+  const loading = isStreaming
+  const streamContent = isStreaming ? activeStream!.content : ''
+
+  // "Thinking..." — show after 3s if no content yet
+  const [showThinking, setShowThinking] = useState(false)
+  useEffect(() => {
+    if (!loading) {
+      setShowThinking(false)
+      return
+    }
+    if (streamContent.length > 0) {
+      setShowThinking(false)
+      return
+    }
+    const t = setTimeout(() => setShowThinking(true), 3000)
+    return () => clearTimeout(t)
+  }, [loading, streamContent])
+
+  // Auto-scroll when messages or stream content changes
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [messages, loading])
+  }, [messages, loading, streamContent])
 
   const send = async () => {
     const text = input.trim()
     if (!text || loading) return
     onNewMessage({ role: 'user', content: text })
     setInput('')
-    setLoading(true)
     try {
-      const controller = new AbortController()
-      const r = await fetch('/api/chat', {
+      await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, context }),
-        signal: controller.signal,
+        body: JSON.stringify({ message: text, context, session_id: getSessionId() }),
       })
-      const d = await r.json()
-      onNewMessage({ role: 'ai', content: d.content || 'No response.' })
+      // Response is streamed via WebSocket — nothing to do with the HTTP body
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       onNewMessage({ role: 'ai', content: `Error: ${msg}` })
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -77,8 +94,47 @@ export function ChatWindow({
     if (e.key === 'Enter' && !e.shiftKey) send()
   }
 
+  // Status label
+  const statusLabel =
+    llmStatus.provider === 'ollama'
+      ? `${llmStatus.model ?? 'ollama'} local`
+      : llmStatus.model
+        ? `${llmStatus.model} backup`
+        : 'no provider'
+
   return (
-    <div className="panel" style={{ display: 'flex', flexDirection: 'column', height }}>
+    <div className="panel" style={{ display: 'flex', flexDirection: 'column', height, position: 'relative' }}>
+      {/* Fallback toast — bronze border, auto-dismiss */}
+      <AnimatePresence>
+        {showFallbackToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            style={{
+              position: 'absolute',
+              top: 8,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 20,
+              padding: '6px 16px',
+              background: 'rgba(10,10,10,0.95)',
+              border: '1px solid var(--bronze)',
+              borderRadius: 8,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              color: 'var(--bronze)',
+              whiteSpace: 'nowrap',
+              boxShadow: '0 0 12px rgba(205,127,50,0.3)',
+            }}
+            onClick={() => setShowFallbackToast(false)}
+          >
+            ⚡ Switched to Anthropic backup — Ollama unavailable
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Message history */}
       <div
         ref={scrollRef}
@@ -137,7 +193,48 @@ export function ChatWindow({
             </motion.div>
           ))}
         </AnimatePresence>
-        {loading && <TypingDots />}
+
+        {/* Live streaming bubble */}
+        {isStreaming && streamContent && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.15 }}
+            style={{
+              alignSelf: 'flex-start',
+              maxWidth: '85%',
+              background: 'rgba(205,127,50,0.06)',
+              borderLeft: '2px solid var(--bronze)',
+              padding: '9px 13px',
+              borderRadius: 8,
+              fontFamily: 'var(--font-body)',
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: 'var(--text-primary)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {streamContent}
+          </motion.div>
+        )}
+
+        {/* Typing dots or Thinking... */}
+        {loading && !streamContent && (
+          showThinking
+            ? (
+              <div style={{
+                alignSelf: 'flex-start',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                color: 'var(--text-dim)',
+                padding: '4px 0',
+              }}>
+                Thinking...
+              </div>
+            )
+            : <TypingDots />
+        )}
       </div>
 
       {/* Input row */}
@@ -146,36 +243,71 @@ export function ChatWindow({
           padding: '10px 12px',
           borderTop: 'var(--border-subtle)',
           display: 'flex',
-          gap: 8,
+          flexDirection: 'column',
+          gap: 4,
         }}
       >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKey}
-          disabled={loading}
-          placeholder={placeholder}
-          className="input-dark"
-          style={{
-            flex: 1,
-            fontSize: 13,
-            padding: '8px 12px',
-            opacity: loading ? 0.6 : 1,
-          }}
-        />
-        <motion.button
-          onClick={send}
-          disabled={loading}
-          whileTap={{ scale: 0.96 }}
-          className="btn-gold"
-          style={{
-            padding: '8px 18px',
-            opacity: loading ? 0.6 : 1,
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {loading ? '...' : 'SEND'}
-        </motion.button>
+        {/* Status indicator */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          paddingBottom: 4,
+        }}>
+          <span style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: loading
+              ? 'var(--gold)'
+              : llmStatus.provider === 'ollama'
+                ? 'var(--online)'
+                : llmStatus.provider === 'anthropic'
+                  ? 'var(--bronze)'
+                  : 'var(--text-dim)',
+            boxShadow: loading ? '0 0 6px var(--gold)' : undefined,
+            animation: loading ? 'pulse 1.2s ease-in-out infinite' : undefined,
+            flexShrink: 0,
+          }} />
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 9,
+            color: 'var(--text-dim)',
+            letterSpacing: 0.5,
+          }}>
+            {loading ? 'generating...' : statusLabel}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKey}
+            disabled={loading}
+            placeholder={placeholder}
+            className="input-dark"
+            style={{
+              flex: 1,
+              fontSize: 13,
+              padding: '8px 12px',
+              opacity: loading ? 0.6 : 1,
+            }}
+          />
+          <motion.button
+            onClick={send}
+            disabled={loading}
+            whileTap={{ scale: 0.96 }}
+            className="btn-gold"
+            style={{
+              padding: '8px 18px',
+              opacity: loading ? 0.6 : 1,
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {loading ? '...' : 'SEND'}
+          </motion.button>
+        </div>
       </div>
     </div>
   )

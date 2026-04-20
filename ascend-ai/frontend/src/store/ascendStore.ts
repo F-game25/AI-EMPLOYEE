@@ -18,6 +18,18 @@ interface SystemStats {
   mock?: boolean
 }
 
+export interface LLMStatus {
+  provider: string
+  model: string | null
+  ollama_available: boolean
+}
+
+export interface ActiveStream {
+  context: string
+  content: string
+  fallback: boolean
+}
+
 interface AscendState {
   // Connection
   wsConnected: boolean
@@ -32,6 +44,22 @@ interface AscendState {
   // System stats
   systemStats: SystemStats
   setSystemStats: (s: SystemStats) => void
+
+  // LLM provider status
+  llmStatus: LLMStatus
+  setLlmStatus: (s: LLMStatus) => void
+
+  // Streaming chat state (shared across all contexts)
+  activeStream: ActiveStream | null
+  startStream: (context: string, fallback: boolean) => void
+  appendStream: (content: string) => void
+  clearStream: () => void
+
+  // Fallback toast (shown once when Anthropic fallback kicks in)
+  showFallbackToast: boolean
+  setShowFallbackToast: (v: boolean) => void
+  fallbackNotified: boolean
+  setFallbackNotified: (v: boolean) => void
 
   // Main chat
   mainChat: ChatMsg[]
@@ -57,6 +85,9 @@ interface AscendState {
   // Hermes chat
   hermesChat: ChatMsg[]
   addHermesChat: (m: ChatMsg) => void
+
+  // Unified chat add — routes to the correct array by context name
+  addChatToContext: (context: string, msg: ChatMsg) => void
 
   // Forge
   forgeMode: string
@@ -89,7 +120,7 @@ interface AscendState {
   addFeedLine: (channel: 'forge' | 'money' | 'blacklight', line: string) => void
 }
 
-export const useStore = create<AscendState>((set) => ({
+export const useStore = create<AscendState>((set, get) => ({
   wsConnected: false,
   setWsConnected: (v) => set({ wsConnected: v }),
   mockMode: false,
@@ -100,6 +131,25 @@ export const useStore = create<AscendState>((set) => ({
 
   systemStats: { cpu_percent: 0, ram_used_gb: 0, ram_total_gb: 0, gpu_percent: 0, temp_celsius: 0 },
   setSystemStats: (s) => set({ systemStats: s }),
+
+  llmStatus: { provider: 'unknown', model: null, ollama_available: false },
+  setLlmStatus: (s) => set({ llmStatus: s }),
+
+  activeStream: null,
+  startStream: (context, fallback) =>
+    set({ activeStream: { context, content: '', fallback } }),
+  appendStream: (content) =>
+    set((s) =>
+      s.activeStream
+        ? { activeStream: { ...s.activeStream, content: s.activeStream.content + content } }
+        : {}
+    ),
+  clearStream: () => set({ activeStream: null }),
+
+  showFallbackToast: false,
+  setShowFallbackToast: (v) => set({ showFallbackToast: v }),
+  fallbackNotified: false,
+  setFallbackNotified: (v) => set({ fallbackNotified: v }),
 
   mainChat: [{ role: 'system', content: 'Welcome to ASCEND AI. Type a message to begin.', tag: 'SYSTEM' }],
   addMainChat: (m) => set((s) => ({ mainChat: [...s.mainChat, m] })),
@@ -119,6 +169,19 @@ export const useStore = create<AscendState>((set) => ({
 
   hermesChat: [{ role: 'system', content: 'Hermes online. I coordinate all agents. How can I help?', tag: 'HERMES' }],
   addHermesChat: (m) => set((s) => ({ hermesChat: [...s.hermesChat, m] })),
+
+  addChatToContext: (context, msg) => {
+    const s = get()
+    switch (context) {
+      case 'main':       s.addMainChat(msg); break
+      case 'forge':      s.addForgeChat(msg); break
+      case 'money':      s.addMoneyChat(msg); break
+      case 'blacklight': s.addBlacklightChat(msg); break
+      case 'hermes':     s.addHermesChat(msg); break
+      case 'doctor':     s.addDoctorChat(msg); break
+      default:           s.addMainChat(msg); break
+    }
+  },
 
   forgeMode: 'off',
   setForgeMode: (m) => set({ forgeMode: m }),
