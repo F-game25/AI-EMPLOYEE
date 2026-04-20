@@ -124,7 +124,7 @@ export default function Dashboard() {
         <div style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '10px 14px',
+          padding: 'var(--space-2) var(--space-3)',
         }}>
           <PageComponent />
         </div>
