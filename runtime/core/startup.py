@@ -17,8 +17,8 @@ from urllib.request import urlopen
 UI_HOST = "127.0.0.1"
 UI_PORT = 8787
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BOT_APP_DIR = REPO_ROOT / "runtime" / "bots" / "problem-solver-ui"
-BOT_MAIN_PATH = BOT_APP_DIR / "app" / "main.py"
+BOT_APP_DIR = REPO_ROOT / "runtime" / "agents" / "problem-solver-ui"
+BOT_MAIN_PATH = BOT_APP_DIR / "server.py"
 FRONTEND_DIR = REPO_ROOT / "frontend"
 FRONTEND_DIST = FRONTEND_DIR / "dist"
 WORKER_POOL_PATH = REPO_ROOT / "runtime" / "core" / "worker_pool.py"
@@ -151,9 +151,9 @@ def verify_uvicorn_import_target() -> None:
     runtime_path = str(REPO_ROOT / "runtime")
     env["PYTHONPATH"] = f"{runtime_path}:{current_pythonpath}" if current_pythonpath else runtime_path
     try:
-        output = subprocess.check_output(
-            [sys.executable, "-c", "import app.main as m; print(m.__file__)"],
-            cwd=BOT_APP_DIR,
+        raw = subprocess.check_output(
+            [sys.executable, "-c", "import server as m; print(m.__file__)"],
+            cwd=str(BOT_APP_DIR),
             env=env,
             text=True,
             stderr=subprocess.STDOUT,
@@ -161,6 +161,9 @@ def verify_uvicorn_import_target() -> None:
     except subprocess.CalledProcessError as exc:
         _fail(f"uvicorn import target check failed: {(exc.output or '').strip()}")
         return
+    # server.py may print startup messages; the actual file path is the last line.
+    lines = raw.splitlines()
+    output = lines[-1].strip() if lines else ""
     resolved = str(Path(output).resolve())
     expected = str(BOT_MAIN_PATH.resolve())
     if resolved != expected:
@@ -227,14 +230,13 @@ def start_server() -> subprocess.Popen[str]:
             sys.executable,
             "-m",
             "uvicorn",
-            "app.main:app",
-            "--app-dir",
-            str(BOT_APP_DIR),
+            "server:app",
             "--host",
             UI_HOST,
             "--port",
             str(UI_PORT),
         ],
+        cwd=str(BOT_APP_DIR),
         text=True,
         env=env,
     )
