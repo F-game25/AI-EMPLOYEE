@@ -94,9 +94,8 @@ async def chat(req: ChatRequest):
         logger.error(error_msg)
         return {"role": "ai", "content": error_msg, "error": True}
     except Exception as exc:
-        error_msg = f"Unexpected error calling AI: {exc}"
-        logger.error(error_msg)
-        return {"role": "ai", "content": error_msg, "error": True}
+        logger.error("Unexpected error calling AI: %s", exc)
+        return {"role": "ai", "content": "An unexpected error occurred. Please try again.", "error": True}
 
 
 def _get_key() -> str | None:
