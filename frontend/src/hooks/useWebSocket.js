@@ -127,6 +127,13 @@ function connectSingleton() {
         case 'prompt:trace':
           if (data && data.id) store.addPromptTrace(data)
           break
+        case 'chat:input_rejected':
+          // Server rejected a chat message sent over the WebSocket (chat must
+          // go via HTTP POST /api/chat).  Clear the typing indicator so the UI
+          // doesn't spin forever.
+          clearTimeout(_typingTimeout)
+          store.setTyping(false)
+          break
       }
     } catch (e) {
       console.error('[ws] message handling failed', e)
