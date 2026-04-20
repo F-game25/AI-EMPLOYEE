@@ -1040,6 +1040,15 @@ def _generate_llm_response(
   # ── [AI FLOW] Log pipeline entry ────────────────────────────────────────────
   _ai_flow_logger.info("[AI FLOW] Input received: agent=%s mode=%s", routed_agent, mode)
 
+  # ── Prompt Inspector — start trace (non-blocking, zero-disruption) ──────────
+  _pi = _get_prompt_inspector()
+  _pi_trace = None
+  if _pi is not None:
+      try:
+          _pi_trace = _pi.start_trace(user_input=message)
+      except Exception:
+          _pi_trace = None
+
   # ── [AI FLOW] Neural-network enhancement layer (non-blocking) ────────────────
   nn_output = _nn_process_input(message)
   final_input = nn_output if nn_output is not None else message
@@ -1050,10 +1059,24 @@ def _generate_llm_response(
   provider, model, runtime_env = _detect_llm_provider(model_route)
   if not provider:
     _ai_flow_logger.warning("[AI FLOW] No LLM provider available — returning fallback")
-    return _fallback_response(
+    _fb = _fallback_response(
       "No model is available for the selected route. Add GROQ_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to ~/.ai-employee/.env, "
       "or run Ollama locally: https://ollama.ai"
     )
+    if _pi is not None and _pi_trace is not None:
+        try:
+            _pi.set_agent(_pi_trace.id, agent=routed_agent, provider="none", model="none")
+            _pi.finish_trace(_pi_trace.id, final_output=_fb, execution_status="fallback")
+        except Exception:
+            pass
+    return _fb
+
+  # ── Prompt Inspector — record routing metadata ──────────────────────────────
+  if _pi is not None and _pi_trace is not None:
+      try:
+          _pi.set_agent(_pi_trace.id, agent=routed_agent, provider=provider, model=model or "")
+      except Exception:
+          pass
 
   # ── Circuit breaker for this LLM provider ───────────────────────────────────
   # ── Circuit breaker + distributed tracing for this LLM call ────────────────
@@ -1064,6 +1087,19 @@ def _generate_llm_response(
   _dt_llm = _get_distributed_tracer()
 
   system_prompt = _build_llm_system_prompt(final_input, routed_agent, mode, user_id=user_id)
+
+  # ── Prompt Inspector — record context and constructed prompt ────────────────
+  if _pi is not None and _pi_trace is not None:
+      try:
+          # Extract context block from the system prompt (it's appended after the base)
+          _ctx_marker = "\n\n"
+          _ctx_idx = system_prompt.find(_ctx_marker)
+          _ctx_block = system_prompt[_ctx_idx + len(_ctx_marker):] if _ctx_idx != -1 else ""
+          _pi.set_context(_pi_trace.id, context_used=_ctx_block)
+          _pi.set_prompt(_pi_trace.id, constructed_prompt=system_prompt)
+      except Exception:
+          pass
+
   try:
     def _do_llm_call():
       if provider == "anthropic":
@@ -1100,38 +1136,101 @@ def _generate_llm_response(
         if _cb_open_msg is not None:
           # Circuit is OPEN — fast fail with graceful degradation
           logger.warning("Circuit breaker '%s' is OPEN — degrading gracefully", _cb_name)
-          return (
+          _cb_msg = (
             f"⚡ Service temporarily unavailable ({provider} is experiencing issues). "
             "Please try again in a moment or switch to a different model route."
           )
+          if _pi is not None and _pi_trace is not None:
+              try:
+                  _pi.finish_trace(_pi_trace.id, final_output=_cb_msg, execution_status="error",
+                                   error="circuit_breaker_open")
+              except Exception:
+                  pass
+          return _cb_msg
         raise
     else:
       answer = _do_llm_call_with_trace()
   except urllib.error.HTTPError as exc:
     if _llm_auth_failed(exc):
       _ai_flow_logger.warning("[AI FLOW] LLM auth failed — returning fallback")
-      return _fallback_response("LLM authentication failed. Check your API key in ~/.ai-employee/.env")
+      _fb = _fallback_response("LLM authentication failed. Check your API key in ~/.ai-employee/.env")
+      if _pi is not None and _pi_trace is not None:
+          try:
+              _pi.set_error(_pi_trace.id, "LLM auth failed (HTTP)")
+              _pi.finish_trace(_pi_trace.id, final_output=_fb, execution_status="error")
+          except Exception:
+              pass
+      return _fb
     _ai_flow_logger.warning("[AI FLOW] LLM HTTP error — returning fallback")
-    return _fallback_response("Task is taking longer than expected. Check dashboard for results.")
+    _fb = _fallback_response("Task is taking longer than expected. Check dashboard for results.")
+    if _pi is not None and _pi_trace is not None:
+        try:
+            _pi.set_error(_pi_trace.id, f"LLM HTTP error: {exc}")
+            _pi.finish_trace(_pi_trace.id, final_output=_fb, execution_status="error")
+        except Exception:
+            pass
+    return _fb
   except (socket.timeout, TimeoutError, urllib.error.URLError) as exc:
     if _llm_auth_failed(exc):
       _ai_flow_logger.warning("[AI FLOW] LLM auth failed (timeout path) — returning fallback")
-      return _fallback_response("LLM authentication failed. Check your API key in ~/.ai-employee/.env")
+      _fb = _fallback_response("LLM authentication failed. Check your API key in ~/.ai-employee/.env")
+      if _pi is not None and _pi_trace is not None:
+          try:
+              _pi.set_error(_pi_trace.id, "LLM auth failed (timeout)")
+              _pi.finish_trace(_pi_trace.id, final_output=_fb, execution_status="error")
+          except Exception:
+              pass
+      return _fb
     _ai_flow_logger.warning("[AI FLOW] LLM timeout — returning fallback")
-    return _fallback_response("Request timed out. Try a simpler task or check your connection.")
+    _fb = _fallback_response("Request timed out. Try a simpler task or check your connection.")
+    if _pi is not None and _pi_trace is not None:
+        try:
+            _pi.set_error(_pi_trace.id, "LLM timeout")
+            _pi.finish_trace(_pi_trace.id, final_output=_fb, execution_status="error")
+        except Exception:
+            pass
+    return _fb
   except Exception as exc:
     logger.warning("LLM request failed for agent %s: %s", routed_agent, exc)
     if _llm_auth_failed(exc):
       _ai_flow_logger.warning("[AI FLOW] LLM auth failed (exception path) — returning fallback")
-      return _fallback_response("LLM authentication failed. Check your API key in ~/.ai-employee/.env")
+      _fb = _fallback_response("LLM authentication failed. Check your API key in ~/.ai-employee/.env")
+      if _pi is not None and _pi_trace is not None:
+          try:
+              _pi.set_error(_pi_trace.id, "LLM auth failed (exception)")
+              _pi.finish_trace(_pi_trace.id, final_output=_fb, execution_status="error")
+          except Exception:
+              pass
+      return _fb
     _ai_flow_logger.warning("[AI FLOW] LLM exception — returning fallback: %s", exc)
-    return _fallback_response("Task is taking longer than expected. Check dashboard for results.")
+    _fb = _fallback_response("Task is taking longer than expected. Check dashboard for results.")
+    if _pi is not None and _pi_trace is not None:
+        try:
+            _pi.set_error(_pi_trace.id, str(exc))
+            _pi.finish_trace(_pi_trace.id, final_output=_fb, execution_status="error")
+        except Exception:
+            pass
+    return _fb
 
   if not answer:
     _ai_flow_logger.warning("[AI FLOW] Empty LLM answer — returning fallback")
-    return _fallback_response(
+    _fb = _fallback_response(
       "No model response was returned. Check your selected route credentials or model availability."
     )
+    if _pi is not None and _pi_trace is not None:
+        try:
+            _pi.set_model_output(_pi_trace.id, model_raw_output="")
+            _pi.finish_trace(_pi_trace.id, final_output=_fb, execution_status="fallback")
+        except Exception:
+            pass
+    return _fb
+
+  # ── Prompt Inspector — record raw model output ──────────────────────────────
+  if _pi is not None and _pi_trace is not None:
+      try:
+          _pi.set_model_output(_pi_trace.id, model_raw_output=answer)
+      except Exception:
+          pass
 
   result = f"Agent: {routed_agent}\n\n{answer}"
   # ── Financial disclaimer — appended whenever a financial agent responds ────
@@ -1157,6 +1256,18 @@ def _generate_llm_response(
           result += f"\n<!--xai:{_exp.explain_id}-->"
   except Exception as _xai_exc:
       logger.debug("explainability generation error (non-fatal): %s", _xai_exc)
+
+  # ── Prompt Inspector — finalise trace with the full pipeline result ──────────
+  if _pi is not None and _pi_trace is not None:
+      try:
+          _pi.finish_trace(
+              _pi_trace.id,
+              final_output=result,
+              actions_triggered=[f"agent:{routed_agent}"],
+              execution_status="ok",
+          )
+      except Exception:
+          pass
 
   _ai_flow_logger.info("[AI FLOW] → Response returned (len=%d)", len(result))
   return result
@@ -1435,6 +1546,18 @@ def _get_span_kind_llm():
         return SpanKind.LLM
     except Exception:
         return "llm"
+
+
+def _get_prompt_inspector():
+    """Return the PromptInspector singleton, or None if unavailable."""
+    try:
+        _rdir = Path(__file__).resolve().parents[2]
+        if str(_rdir) not in sys.path:
+            sys.path.insert(0, str(_rdir))
+        from core.prompt_inspector import get_prompt_inspector as _gpi  # type: ignore
+        return _gpi()
+    except Exception:
+        return None
 
 
 def _get_lifecycle_manager():
@@ -18154,6 +18277,16 @@ async def post_chat(payload: dict, request: Request):
             except Exception:
                 pass
 
+    # ── Prompt Inspector — broadcast latest trace via WebSocket ───────────────
+    try:
+        _pi_bc = _get_prompt_inspector()
+        if _pi_bc is not None and _pi_bc.enabled:
+            _latest_traces = _pi_bc.list_traces(limit=1)
+            if _latest_traces:
+                await _ws_broadcast("prompt:trace", _latest_traces[0])
+    except Exception:
+        pass
+
     _resp_headers: dict[str, str] = {}
     if _trace_id:
         _resp_headers["X-Trace-ID"] = _trace_id
@@ -25085,6 +25218,97 @@ def get_latest_governance_digest(limit: int = 5, _auth: None = Depends(require_a
     limit = max(1, min(limit, 100))
     digests = gd.load_recent(limit=limit)
     return JSONResponse({"ok": True, "digests": digests})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Prompt Inspector API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/prompt-traces")
+def get_prompt_traces(limit: int = 50, _auth: None = Depends(require_auth)):
+    """Return a list of recent prompt traces (newest first).
+
+    Query params:
+        limit — max entries returned (default 50, max 200)
+
+    Response::
+
+        {
+          "ok": true,
+          "traces": [{ "id", "timestamp", "user_input", "agent",
+                       "execution_status", "flags", "duration_ms" }, ...]
+          "total": 42,
+          "inspector_status": { "enabled": true, "sample_rate": 1.0, ... }
+        }
+    """
+    pi = _get_prompt_inspector()
+    if pi is None:
+        raise HTTPException(503, "Prompt inspector unavailable")
+    limit = max(1, min(limit, 200))
+    traces = pi.list_traces(limit=limit)
+    return JSONResponse({
+        "ok": True,
+        "traces": traces,
+        "total": pi.count(),
+        "inspector_status": pi.status(),
+    })
+
+
+@app.get("/api/prompt-trace/{trace_id}")
+def get_prompt_trace(trace_id: str, _auth: None = Depends(require_auth)):
+    """Return full detail for a single prompt trace.
+
+    Response::
+
+        {
+          "ok": true,
+          "trace": {
+            "id", "timestamp", "user_input", "context_used",
+            "constructed_prompt", "model_raw_output", "final_output",
+            "actions_triggered", "execution_status", "agent",
+            "provider", "model", "flags", "error", "duration_ms"
+          }
+        }
+    """
+    pi = _get_prompt_inspector()
+    if pi is None:
+        raise HTTPException(503, "Prompt inspector unavailable")
+    trace = pi.get_trace(trace_id)
+    if trace is None:
+        raise HTTPException(404, f"Trace '{trace_id}' not found")
+    return JSONResponse({"ok": True, "trace": trace})
+
+
+@app.patch("/api/prompt-inspector/config")
+async def patch_inspector_config(payload: dict, _auth: None = Depends(require_auth)):
+    """Update inspector runtime configuration without restart.
+
+    Body (all fields optional)::
+
+        { "enabled": true, "sample_rate": 0.5 }
+    """
+    pi = _get_prompt_inspector()
+    if pi is None:
+        raise HTTPException(503, "Prompt inspector unavailable")
+    body = payload or {}
+    if "enabled" in body:
+        pi.enabled = bool(body["enabled"])
+    if "sample_rate" in body:
+        try:
+            pi.sample_rate = float(body["sample_rate"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "sample_rate must be a number 0.0–1.0")
+    return JSONResponse({"ok": True, "inspector_status": pi.status()})
+
+
+@app.delete("/api/prompt-traces")
+async def clear_prompt_traces(_auth: None = Depends(require_auth)):
+    """Clear all in-memory prompt traces."""
+    pi = _get_prompt_inspector()
+    if pi is None:
+        raise HTTPException(503, "Prompt inspector unavailable")
+    pi.clear()
+    return JSONResponse({"ok": True, "message": "All prompt traces cleared"})
 
 
 if __name__ == "__main__":

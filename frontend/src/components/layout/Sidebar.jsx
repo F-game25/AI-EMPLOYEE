@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { id: 'learning-ladder', icon: '📈', label: 'Learning Ladder' },
   { id: 'system', icon: '⚙', label: 'System' },
   { id: 'voice', icon: '◈', label: 'Voice' },
+  { id: 'prompt-inspector', icon: '🔍', label: 'Prompt Inspector' },
 ]
 
 export default function Sidebar() {
