@@ -1615,7 +1615,7 @@ app.post('/api/chat', (req, res) => {
     return res.json({
       ok: true,
       handled: true,
-      response: handled.reply || 'System recovered: default response generated.',
+      reply: handled.reply,
     });
   }
   const run = createWorkflowRun({
@@ -1648,7 +1648,7 @@ app.post('/api/chat', (req, res) => {
     ok: true,
     taskId: queued.taskId,
     workflow_run: run.run_id,
-    response: `Queued task ${queued.taskId} on ${queued.agentId}.`,
+    reply: `I'm working on that now. I'll have a response for you shortly.`,
   });
 });
 

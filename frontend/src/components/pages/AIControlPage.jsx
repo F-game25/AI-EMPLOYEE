@@ -7,17 +7,26 @@ import { API_URL } from '../../config/api'
 
 const BASE = API_URL
 
+const SUBSYSTEM_TAG = {
+  brain: { label: 'NEURAL BRAIN', color: 'var(--info)' },
+  memory: { label: 'MEMORY', color: 'var(--success)' },
+  doctor: { label: 'DOCTOR', color: 'var(--warning)' },
+  orchestrator: { label: 'ORCHESTRATOR', color: 'var(--gold)' },
+}
+
+function identifySubsystem(content) {
+  const lower = (content || '').toLowerCase()
+  if (lower.includes('[neural') || lower.includes('[brain')) return SUBSYSTEM_TAG.brain
+  if (lower.includes('[memory')) return SUBSYSTEM_TAG.memory
+  if (lower.includes('[doctor')) return SUBSYSTEM_TAG.doctor
+  if (lower.includes('[orchestrator')) return SUBSYSTEM_TAG.orchestrator
+  return null
+}
+
 function ChatMessage({ msg, index, debugMode }) {
   const isUser = msg.role === 'user'
-
-  const subsystemLabel = (subsystem) => {
-    if (subsystem === 'nn') return { label: 'NEURAL BRAIN', color: 'var(--info)' }
-    if (subsystem === 'memory') return { label: 'MEMORY', color: 'var(--success)' }
-    if (subsystem === 'doctor') return { label: 'DOCTOR', color: 'var(--warning)' }
-    return null
-  }
-
-  const tag = !isUser && debugMode ? subsystemLabel(msg.subsystem) : null
+  // Subsystem tags are only visible in debug mode
+  const tag = debugMode && !isUser ? identifySubsystem(msg.content) : null
 
   return (
     <motion.div
@@ -301,9 +310,10 @@ export default function AIControlPage() {
   const toggleDebugMode = useAppStore(s => s.toggleDebugMode)
 
   const [input, setInput] = useState('')
+  const [debugMode, setDebugMode] = useState(false)
   const scrollRef = useRef(null)
 
-  // Poll neural network status for live updates
+  // Poll neural network status for live updates (used in debug mode)
   useEffect(() => {
     const controller = new AbortController()
     const fetchNN = async () => {
@@ -373,26 +383,28 @@ export default function AIControlPage() {
         flexDirection: 'column',
         minWidth: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
-          <PageHeader title="AI Control" subtitle="Chat with your AI assistant" />
+        {/* Header with debug mode toggle */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 'var(--space-4)' }}>
+          <PageHeader title="AI Control" subtitle="Chat with your AI employee" />
           <button
-            onClick={toggleDebugMode}
-            title={debugMode ? 'Switch to user mode' : 'Switch to debug mode'}
+            onClick={() => setDebugMode(d => !d)}
             style={{
-              marginTop: 'var(--space-1)',
+              flexShrink: 0,
               padding: '4px 10px',
               fontSize: '11px',
-              fontFamily: 'monospace',
-              border: `1px solid ${debugMode ? 'rgba(212,175,55,0.5)' : 'var(--border-subtle)'}`,
+              borderRadius: '6px',
+              border: `1px solid ${debugMode ? 'var(--gold)' : 'var(--border-subtle)'}`,
+              background: debugMode ? 'rgba(212, 175, 55, 0.1)' : 'transparent',
               color: debugMode ? 'var(--gold)' : 'var(--text-muted)',
-              background: debugMode ? 'rgba(212,175,55,0.08)' : 'transparent',
-              borderRadius: '4px',
               cursor: 'pointer',
-              flexShrink: 0,
-              transition: 'all 0.15s',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              fontFamily: 'inherit',
+              marginTop: '4px',
             }}
+            title={debugMode ? 'Switch to user mode' : 'Switch to debug mode'}
           >
-            {debugMode ? 'DEBUG ON' : 'DEBUG'}
+            {debugMode ? '◉ Debug' : '○ Debug'}
           </button>
         </div>
 
@@ -438,7 +450,7 @@ export default function AIControlPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message your AI..."
+            placeholder="Type a message..."
             style={{
               flex: 1,
               background: 'transparent',
@@ -460,19 +472,33 @@ export default function AIControlPage() {
         </div>
       </div>
 
-      {/* Right rail — Brain insights + Neural Network live */}
-      <div style={{
-        width: '340px',
-        flexShrink: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-3)',
-        overflowY: 'auto',
-      }}>
-        <NeuralNetworkLive nnStatus={nnStatus} />
-        <BrainInsightCard insights={brainInsights} />
-        <DecisionFlowCard activity={brainActivity} />
-      </div>
+      {/* Debug panel — only visible in debug mode */}
+      {debugMode && (
+        <div style={{
+          width: '340px',
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-3)',
+          overflowY: 'auto',
+        }}>
+          <div style={{
+            padding: '6px 10px',
+            background: 'rgba(212,175,55,0.08)',
+            border: '1px solid rgba(212,175,55,0.2)',
+            borderRadius: '6px',
+            fontSize: '11px',
+            color: 'var(--gold)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          }}>
+            Debug Mode — Internal View
+          </div>
+          <NeuralNetworkLive nnStatus={nnStatus} />
+          <BrainInsightCard insights={brainInsights} />
+          <DecisionFlowCard activity={brainActivity} />
+        </div>
+      )}
     </div>
   )
 }
