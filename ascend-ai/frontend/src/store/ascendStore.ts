@@ -1,10 +1,5 @@
 import { create } from 'zustand'
-
-interface ChatMessage {
-  role: 'user' | 'ai' | 'system'
-  content: string
-  tag?: string
-}
+import type { ChatMsg } from '../components/ChatWindow'
 
 interface Agent {
   name: string
@@ -39,13 +34,29 @@ interface AscendState {
   setSystemStats: (s: SystemStats) => void
 
   // Main chat
-  mainChat: ChatMessage[]
-  addMainChat: (m: ChatMessage) => void
+  mainChat: ChatMsg[]
+  addMainChat: (m: ChatMsg) => void
   clearMainChat: () => void
 
   // Doctor chat
-  doctorChat: ChatMessage[]
-  addDoctorChat: (m: ChatMessage) => void
+  doctorChat: ChatMsg[]
+  addDoctorChat: (m: ChatMsg) => void
+
+  // Forge chat
+  forgeChat: ChatMsg[]
+  addForgeChat: (m: ChatMsg) => void
+
+  // Money chat
+  moneyChat: ChatMsg[]
+  addMoneyChat: (m: ChatMsg) => void
+
+  // Blacklight chat
+  blacklightChat: ChatMsg[]
+  addBlacklightChat: (m: ChatMsg) => void
+
+  // Hermes chat
+  hermesChat: ChatMsg[]
+  addHermesChat: (m: ChatMsg) => void
 
   // Forge
   forgeMode: string
@@ -96,6 +107,18 @@ export const useStore = create<AscendState>((set) => ({
 
   doctorChat: [{ role: 'system', content: 'Doctor mode active. Ask about system health or run diagnostics.', tag: 'DOCTOR' }],
   addDoctorChat: (m) => set((s) => ({ doctorChat: [...s.doctorChat, m] })),
+
+  forgeChat: [{ role: 'system', content: 'Forge AI active. Describe what to improve in the ASCEND codebase.', tag: 'FORGE' }],
+  addForgeChat: (m) => set((s) => ({ forgeChat: [...s.forgeChat, m] })),
+
+  moneyChat: [{ role: 'system', content: 'Money Mode AI active. Assign revenue tasks here.', tag: 'MONEY' }],
+  addMoneyChat: (m) => set((s) => ({ moneyChat: [...s.moneyChat, m] })),
+
+  blacklightChat: [{ role: 'system', content: 'Blacklight Security AI active. Monitoring all connections.', tag: 'BLACKLIGHT' }],
+  addBlacklightChat: (m) => set((s) => ({ blacklightChat: [...s.blacklightChat, m] })),
+
+  hermesChat: [{ role: 'system', content: 'Hermes online. I coordinate all agents. How can I help?', tag: 'HERMES' }],
+  addHermesChat: (m) => set((s) => ({ hermesChat: [...s.hermesChat, m] })),
 
   forgeMode: 'off',
   setForgeMode: (m) => set({ forgeMode: m }),
