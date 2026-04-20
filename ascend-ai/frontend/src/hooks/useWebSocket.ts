@@ -3,7 +3,21 @@ import { useStore } from '../store/ascendStore'
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
-  const { setWsConnected, setSystemStats, setAgents, addChartPoint, setMoneyRevenue, addFeedLine } = useStore()
+  const {
+    setWsConnected,
+    setSystemStats,
+    setAgents,
+    addChartPoint,
+    setMoneyRevenue,
+    addFeedLine,
+    setLlmStatus,
+    startStream,
+    appendStream,
+    clearStream,
+    addChatToContext,
+    setShowFallbackToast,
+    setFallbackNotified,
+  } = useStore()
 
   useEffect(() => {
     let reconnectTimer: ReturnType<typeof setTimeout>
@@ -40,6 +54,43 @@ export function useWebSocket() {
               else if (msg.data?.bot?.includes('money')) addFeedLine('money', msg.data.message)
               else if (msg.data?.bot?.includes('black')) addFeedLine('blacklight', msg.data.message)
               break
+            case 'llm_status':
+              setLlmStatus(msg.data)
+              break
+            case 'chat_chunk': {
+              const { content, done, context, fallback } = msg.data as {
+                content: string
+                done: boolean
+                context: string
+                fallback?: boolean
+              }
+              const state = useStore.getState()
+              if (!done) {
+                // Show fallback toast once (first chunk with fallback=true)
+                if (fallback && !state.fallbackNotified) {
+                  setFallbackNotified(true)
+                  setShowFallbackToast(true)
+                  setTimeout(() => setShowFallbackToast(false), 5000)
+                }
+                if (state.activeStream?.context === context) {
+                  appendStream(content)
+                } else {
+                  startStream(context, !!fallback)
+                  if (content) appendStream(content)
+                }
+              } else {
+                // Stream complete — persist message then clear stream
+                const accumulated = useStore.getState().activeStream
+                if (accumulated && accumulated.context === context) {
+                  const finalContent = accumulated.content
+                  if (finalContent.trim()) {
+                    addChatToContext(context, { role: 'ai', content: finalContent })
+                  }
+                }
+                clearStream()
+              }
+              break
+            }
           }
         } catch { /* ignore parse errors */ }
       }
@@ -60,5 +111,19 @@ export function useWebSocket() {
       clearTimeout(reconnectTimer)
       wsRef.current?.close()
     }
-  }, [setWsConnected, setSystemStats, setAgents, addChartPoint, setMoneyRevenue, addFeedLine])
+  }, [
+    setWsConnected,
+    setSystemStats,
+    setAgents,
+    addChartPoint,
+    setMoneyRevenue,
+    addFeedLine,
+    setLlmStatus,
+    startStream,
+    appendStream,
+    clearStream,
+    addChatToContext,
+    setShowFallbackToast,
+    setFallbackNotified,
+  ])
 }
