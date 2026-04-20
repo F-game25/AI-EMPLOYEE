@@ -217,6 +217,11 @@ export const useAppStore = create((set) => ({
   },
   setAutonomyStatus: (a) => set({ autonomyStatus: a }),
 
+  // Debug mode — when true shows internal logs, subsystem tags, and technical info
+  debugMode: false,
+  setDebugMode: (v) => set({ debugMode: v }),
+  toggleDebugMode: () => set((state) => ({ debugMode: !state.debugMode })),
+
   // Error
   errorMessage: null,
   setError: (msg) => set({ errorMessage: msg, appState: 'error' }),

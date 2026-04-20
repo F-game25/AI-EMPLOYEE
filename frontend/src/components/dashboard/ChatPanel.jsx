@@ -7,6 +7,8 @@ import { sendChatMessage } from '../../hooks/useWebSocket'
 export default function ChatPanel() {
   const messages = useAppStore(s => s.chatMessages)
   const isTyping = useAppStore(s => s.isTyping)
+  const debugMode = useAppStore(s => s.debugMode)
+  const toggleDebugMode = useAppStore(s => s.toggleDebugMode)
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
   const addChatMessage = useAppStore(s => s.addChatMessage)
@@ -34,16 +36,38 @@ export default function ChatPanel() {
     }
   }
 
+  const subsystemLabel = (subsystem) => {
+    if (subsystem === 'nn') return 'Neural Brain'
+    if (subsystem === 'memory') return 'Memory'
+    if (subsystem === 'doctor') return 'Doctor'
+    return 'AI'
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div
-        className="flex items-center px-4 py-2.5 flex-shrink-0"
+        className="flex items-center justify-between px-4 py-2.5 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border-gold-dim)' }}
       >
         <span className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
-          ORCHESTRATOR CHAT
+          AI ASSISTANT
         </span>
+        <button
+          onClick={toggleDebugMode}
+          title={debugMode ? 'Switch to user mode' : 'Switch to debug mode'}
+          className="font-mono text-xs px-2 py-1 flex-shrink-0"
+          style={{
+            border: `1px solid ${debugMode ? 'rgba(212,175,55,0.5)' : 'rgba(255,255,255,0.1)'}`,
+            color: debugMode ? 'var(--gold)' : 'var(--text-muted)',
+            background: debugMode ? 'rgba(212,175,55,0.08)' : 'transparent',
+            borderRadius: '3px',
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+          }}
+        >
+          {debugMode ? 'DEBUG ON' : 'DEBUG'}
+        </button>
       </div>
 
       {/* Messages */}
@@ -57,7 +81,7 @@ export default function ChatPanel() {
         {messages.length === 0 && !isTyping && (
           <div className="flex items-center justify-center h-full">
             <p className="font-mono text-xs text-center" style={{ color: 'var(--text-muted)' }}>
-              Send a command to the orchestrator
+              How can I help you today?
             </p>
           </div>
         )}
@@ -85,18 +109,23 @@ export default function ChatPanel() {
                   color: 'var(--text-primary)',
                 }}
               >
-                {msg.role === 'ai' && (
+                {msg.role === 'ai' && debugMode && msg.subsystem && (
                   <div
                     className="text-xs mb-1 font-semibold tracking-widest"
                     style={{ color: 'var(--text-muted)' }}
                   >
-                    {msg.subsystem === 'nn' ? 'NEURAL BRAIN' :
-                     msg.subsystem === 'memory' ? 'MEMORY TREE' :
-                     msg.subsystem === 'doctor' ? 'DOCTOR' :
-                     'ORCHESTRATOR'}
+                    {subsystemLabel(msg.subsystem).toUpperCase()}
                   </div>
                 )}
                 {msg.content}
+                {msg.role === 'ai' && debugMode && msg.debugInfo && (
+                  <div
+                    className="mt-2 pt-2 text-xs opacity-60"
+                    style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
+                  >
+                    {msg.debugInfo}
+                  </div>
+                )}
               </div>
             </motion.div>
           ))}
@@ -120,7 +149,7 @@ export default function ChatPanel() {
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '6px 6px 6px 2px',
                 }}
-                aria-label="Orchestrator is typing"
+                aria-label="AI is thinking"
               >
                 <div className="flex items-center gap-1.5">
                   {[0, 1, 2].map(i => (
@@ -147,7 +176,7 @@ export default function ChatPanel() {
         style={{ borderTop: '1px solid var(--border-gold-dim)' }}
       >
         <label htmlFor={inputId} className="sr-only">
-          Send a command to the orchestrator
+          Message your AI assistant
         </label>
         {/* Chevron prompt indicator */}
         <svg
@@ -167,7 +196,7 @@ export default function ChatPanel() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKey}
-          placeholder="Enter command..."
+          placeholder="Message your AI..."
           autoComplete="off"
           className="flex-1 font-mono text-xs outline-none bg-transparent min-w-0"
           style={{ color: 'var(--text-primary)', caretColor: 'var(--gold)' }}
