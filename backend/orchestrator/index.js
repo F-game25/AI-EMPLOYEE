@@ -59,19 +59,20 @@ async function nnProcess(input) {
       console.info('[AI FLOW] → NN unavailable — bypassing');
       return null;
     }
-    // The JS NN layer is the subsystem status monitor — it provides routing
-    // metadata (confidence, mode) but does not rewrite the input text.
-    // We honour a timeout so it never blocks the core AI call.
-    const result = await withTimeout(
-      Promise.resolve(input),
+    // The JS NN layer reads subsystem state (confidence, mode) as routing metadata
+    // but does not rewrite the input text.  getNNStatus() is synchronous; we wrap
+    // it in a timeout-guarded promise so any future async implementation is safe.
+    const nnResult = await withTimeout(
+      new Promise((resolve) => resolve(nnStatus)),
       NN_TIMEOUT_MS,
     );
-    if (result !== null) {
+    if (nnResult !== null) {
       console.info('[AI FLOW] → NN success (confidence=%s%%)', Math.round((nnStatus.confidence || 0) * 100));
-    } else {
-      console.warn('[AI FLOW] → NN timeout (%dms) — bypassing', NN_TIMEOUT_MS);
+      // Return the original input — NN provides metadata only, not a rewritten message.
+      return input;
     }
-    return result;
+    console.warn('[AI FLOW] → NN timeout (%dms) — bypassing', NN_TIMEOUT_MS);
+    return null;
   } catch (err) {
     console.warn('[AI FLOW] → NN failed — bypassing:', err && err.message);
     return null;
@@ -225,9 +226,9 @@ function submitTask(message, options = {}) {
     timestamp: new Date().toISOString(),
   };
 
-  // ── Guaranteed response — result must never be undefined/null ────────────
-  if (!result) {
-    console.error('[AI FLOW] submitTask produced no result — returning fallback');
+  // Guard: verify enqueueTask returned a valid assignment with a taskId
+  if (!result.taskId) {
+    console.error('[AI FLOW] submitTask produced no taskId — returning fallback');
     return { ...fallbackResponse('System recovered: task could not be queued.'), taskId: seedTaskId };
   }
 
@@ -278,8 +279,8 @@ router.post('/message', (req, res) => {
     return res.status(400).json({ error: 'message is required' });
   }
   const result = submitTask(message);
-  // Guaranteed: always respond even if submitTask returned a fallback object
-  return res.json(result || fallbackResponse('System recovered: no result from orchestrator.'));
+  // submitTask always returns a valid object (guaranteed above); res.json always fires.
+  return res.json(result);
 });
 
 function on(eventName, handler) {
