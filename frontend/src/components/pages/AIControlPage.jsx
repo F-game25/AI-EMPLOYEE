@@ -306,8 +306,6 @@ export default function AIControlPage() {
   const brainActivity = useAppStore(s => s.brainActivity)
   const nnStatus = useAppStore(s => s.nnStatus)
   const addFromPrompt = useBrainStore(s => s.addFromPrompt)
-  const debugMode = useAppStore(s => s.debugMode)
-  const toggleDebugMode = useAppStore(s => s.toggleDebugMode)
 
   const [input, setInput] = useState('')
   const [debugMode, setDebugMode] = useState(false)
@@ -356,7 +354,7 @@ export default function AIControlPage() {
       })
         .then(r => r.json())
         .then(data => {
-          addChatMessage({ role: 'ai', content: data.reply || data.message || 'No response.' })
+          addChatMessage({ role: 'ai', content: data.response || data.reply || data.message || 'No response.' })
           setTyping(false)
         })
         .catch((e) => {

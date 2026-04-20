@@ -195,6 +195,45 @@ function buildHumanReply(task) {
   return `Done. I've taken care of that. What would you like me to do next?`;
 }
 
+/**
+ * Build debug information string for a completed task (visible in debug mode).
+ * @param {{subsystem?: string, message: string, metadata?: object, id?: string}} task
+ * @returns {string}
+ */
+function buildDebugInfo(task) {
+  const brainPlan = task?.metadata?.brain ?? null;
+  const moneyTemplate = task?.metadata?.moneyTemplate ?? null;
+  const parts = [`[TASK] ${task.id || 'unknown'} | subsystem=${task.subsystem || 'general'}`];
+  if (brainPlan) {
+    parts.push(`strategy=${brainPlan.strategy} confidence=${Math.round((brainPlan.confidence || 0) * 100)}%`);
+  }
+  if (moneyTemplate && moneyTemplate.enabled) {
+    parts.push(`money_mode=${moneyTemplate.template}`);
+  }
+  return parts.join(' | ');
+}
+
+/**
+ * Process input through the neural network layer (non-blocking enhancement).
+ * Returns a promise that resolves with the enhanced input or null on failure/timeout.
+ */
+function nnProcess(message) {
+  if (BYPASS_NN) return Promise.resolve(null);
+  return withTimeout(
+    new Promise((resolve) => {
+      try {
+        const nn = subsystems.getNNStatus();
+        // The NN layer only enhances — if not available, return null
+        if (!nn || nn.mode === 'idle') return resolve(null);
+        resolve(message); // pass-through for now; actual NN processing is in Python
+      } catch {
+        resolve(null);
+      }
+    }),
+    NN_TIMEOUT_MS,
+  );
+}
+
 function submitTask(message, options = {}) {
   const userId = options.userId || 'user:default';
   console.info('[AI FLOW] Input received: user=%s message_len=%d', userId, String(message || '').length);
@@ -284,11 +323,20 @@ onAgentEvent('task:completed', ({ agent, task }) => {
     notes: task.message,
     userId: requestedBy,
   });
+
+  // Skip generic reply for chat tasks — the Python LLM proxy delivers the
+  // real response directly via broadcaster.broadcast('orchestrator:message').
+  const labels = task?.metadata?.labels || [];
+  if (labels.includes('chat')) {
+    console.info('[AI FLOW] → Chat task completed (LLM proxy handles reply): taskId=%s', task.id);
+    return;
+  }
+
   const reply = buildHumanReply(task) || fallbackResponse('Task completed.').text;
   console.info('[AI FLOW] → Response returned to UI: taskId=%s', task.id);
   events.emit('orchestrator:reply', {
     message: reply,
-    debugInfo: buildDebugReply(task),
+    debugInfo: buildDebugInfo(task),
     subsystem: task.subsystem,
     taskId: task.id,
     from: agent.name,
