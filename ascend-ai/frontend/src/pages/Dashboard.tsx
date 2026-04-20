@@ -1,31 +1,60 @@
-import { motion } from 'framer-motion'
-import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/ascendStore'
 import { ProgressBar } from '../components/ProgressBar'
 import { ModeButton } from '../components/ModeButton'
+import { getSessionId } from '../utils/sessionId'
 
 const page = { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.25 } }
 
 export function Dashboard() {
-  const { systemStats, mainChat, addMainChat, agents } = useStore()
+  const {
+    systemStats, mainChat, addMainChat, agents,
+    activeStream, llmStatus, showFallbackToast, setShowFallbackToast,
+  } = useStore()
   const [input, setInput] = useState('')
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const isStreaming = activeStream?.context === 'main'
+  const loading = isStreaming
+  const streamContent = isStreaming ? activeStream!.content : ''
+
+  // "Thinking..." after 3s with no content
+  const [showThinking, setShowThinking] = useState(false)
+  useEffect(() => {
+    if (!loading) { setShowThinking(false); return }
+    if (streamContent.length > 0) { setShowThinking(false); return }
+    const t = setTimeout(() => setShowThinking(true), 3000)
+    return () => clearTimeout(t)
+  }, [loading, streamContent])
+
+  // Auto-scroll
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [mainChat, streamContent, loading])
 
   const send = async () => {
-    if (!input.trim()) return
+    if (!input.trim() || loading) return
     addMainChat({ role: 'user', content: input })
+    const text = input
     setInput('')
     try {
-      const r = await fetch('/api/chat', {
+      await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({ message: text, context: 'main', session_id: getSessionId() }),
       })
-      const d = await r.json()
-      addMainChat({ role: 'ai', content: d.content })
     } catch {
       addMainChat({ role: 'ai', content: 'Connection error. Check backend.' })
     }
   }
+
+  const statusLabel =
+    llmStatus.provider === 'ollama'
+      ? `${llmStatus.model ?? 'ollama'} local`
+      : llmStatus.model
+        ? `${llmStatus.model} backup`
+        : 'no provider'
 
   const forgeStatus = (agents.find((a) => a.name.includes('forge'))?.status || 'offline') as 'online' | 'offline' | 'starting'
   const moneyStatus = (agents.find((a) => a.name.includes('money'))?.status || 'offline') as 'online' | 'offline' | 'starting'
@@ -34,11 +63,42 @@ export function Dashboard() {
   return (
     <motion.div {...page} style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20, height: '100%' }}>
       {/* Chat */}
-      <div className="panel" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
+      <div className="panel" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', position: 'relative' }}>
+        {/* Fallback toast */}
+        <AnimatePresence>
+          {showFallbackToast && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+              style={{
+                position: 'absolute',
+                top: 8,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 20,
+                padding: '6px 16px',
+                background: 'rgba(10,10,10,0.95)',
+                border: '1px solid var(--bronze)',
+                borderRadius: 8,
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                color: 'var(--bronze)',
+                whiteSpace: 'nowrap',
+                boxShadow: '0 0 12px rgba(205,127,50,0.3)',
+              }}
+              onClick={() => setShowFallbackToast(false)}
+            >
+              ⚡ Switched to Anthropic backup — Ollama unavailable
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div style={{ padding: '12px 16px', borderBottom: 'var(--border-subtle)', fontFamily: 'var(--font-heading)', fontSize: 13 }} className="metallic-text">
           MAIN AI CHAT
         </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           {mainChat.map((m, i) => (
             <motion.div
               key={i}
@@ -58,6 +118,8 @@ export function Dashboard() {
                 lineHeight: 1.6,
                 color: m.role === 'system' ? 'var(--text-secondary)' : 'var(--text-primary)',
                 fontStyle: m.role === 'system' ? 'italic' : undefined,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
               }}
             >
               {m.tag && (
@@ -68,24 +130,101 @@ export function Dashboard() {
               {m.content}
             </motion.div>
           ))}
+
+          {/* Live streaming bubble */}
+          {isStreaming && streamContent && (
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.15 }}
+              style={{
+                alignSelf: 'flex-start',
+                maxWidth: '80%',
+                background: 'rgba(205,127,50,0.06)',
+                borderLeft: '2px solid var(--bronze)',
+                padding: '10px 14px',
+                borderRadius: 8,
+                fontFamily: 'var(--font-body)',
+                fontSize: 14,
+                lineHeight: 1.6,
+                color: 'var(--text-primary)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {streamContent}
+            </motion.div>
+          )}
+
+          {/* Typing dots or Thinking... */}
+          {loading && !streamContent && (
+            showThinking
+              ? (
+                <div style={{
+                  alignSelf: 'flex-start',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 11,
+                  color: 'var(--text-dim)',
+                  padding: '4px 0',
+                }}>
+                  Thinking...
+                </div>
+              )
+              : (
+                <div style={{
+                  alignSelf: 'flex-start',
+                  maxWidth: '80%',
+                  background: 'rgba(205,127,50,0.06)',
+                  borderLeft: '2px solid var(--bronze)',
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                }}>
+                  <span className="typing-indicator">● ● ●</span>
+                </div>
+              )
+          )}
         </div>
-        <div style={{ padding: 16, borderTop: 'var(--border-subtle)', display: 'flex', gap: 8 }}>
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && send()}
-            placeholder="Send a task or ask anything..."
-            className="input-dark"
-            style={{ flex: 1 }}
-          />
-          <motion.button
-            onClick={send}
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.96 }}
-            className="btn-gold"
-          >
-            SEND
-          </motion.button>
+        <div style={{ padding: 16, borderTop: 'var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {/* Status indicator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: loading
+                ? 'var(--gold)'
+                : llmStatus.provider === 'ollama'
+                  ? 'var(--online)'
+                  : llmStatus.provider === 'anthropic'
+                    ? 'var(--bronze)'
+                    : 'var(--text-dim)',
+              flexShrink: 0,
+            }} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)' }}>
+              {loading ? 'generating...' : statusLabel}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && send()}
+              disabled={loading}
+              placeholder="Send a task or ask anything..."
+              className="input-dark"
+              style={{ flex: 1, opacity: loading ? 0.6 : 1 }}
+            />
+            <motion.button
+              onClick={send}
+              disabled={loading}
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              className="btn-gold"
+              style={{ opacity: loading ? 0.6 : 1, cursor: loading ? 'not-allowed' : 'pointer' }}
+            >
+              {loading ? '...' : 'SEND'}
+            </motion.button>
+          </div>
         </div>
       </div>
 

@@ -1,113 +1,82 @@
-"""ASCEND AI — Chat Router"""
+"""ASCEND AI — Chat Router
+All chat goes through llm_router — never call providers directly here.
+"""
 
+import asyncio
 import logging
-import os
 
-import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from services.llm_router import get_llm_router
+from websocket_manager import broadcast
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPTS: dict[str, str] = {
-    "main": (
-        "You are ASCEND AI, an autonomous multi-agent business assistant "
-        "with 20 specialist agents. Keep responses concise and actionable."
-    ),
-    "forge": (
-        "You are the ASCEND Forge AI, a self-improvement agent. You analyse the ASCEND AI "
-        "codebase, propose optimisations, run sandbox tests, and report results. "
-        "Be specific about code paths, performance gains, and test outcomes. "
-        "Always mention risk level (LOW/MEDIUM/HIGH) for proposed changes."
-    ),
-    "money": (
-        "You are the Money Mode AI, a business automation specialist focused on lead "
-        "generation, revenue optimisation, and print-on-demand automation. "
-        "Give concrete, actionable advice on leads, revenue streams, automation flows, "
-        "and business growth. Quantify impact where possible (e.g. estimated €/week)."
-    ),
-    "blacklight": (
-        "You are the Blacklight Security AI, a security monitoring specialist. "
-        "You monitor connections, detect threats, and ensure safe operation. "
-        "Report security events clearly with severity levels. "
-        "Always advise whether action is required immediately or can wait."
-    ),
-    "hermes": (
-        "You are Hermes, the coordination and communication agent for ASCEND AI. "
-        "You route tasks to the correct specialist agents, summarise system activity, "
-        "handle WhatsApp/Telegram notification routing, and act as the human-facing "
-        "coordinator. When routing tasks, specify which agent handles it and why."
-    ),
-    "doctor": (
-        "You are the Doctor AI, a diagnostics specialist for the ASCEND AI system. "
-        "Analyse system health metrics, interpret log patterns, track performance, "
-        "and recommend fixes. Be precise about error causes and remediation steps."
-    ),
-}
 
 
 class ChatRequest(BaseModel):
     message: str
     context: str = "main"
+    session_id: str = "default"
 
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    system_prompt = SYSTEM_PROMPTS.get(req.context, SYSTEM_PROMPTS["main"])
-    api_key = _get_key()
-    if not api_key:
-        from services.mock_layer import get_mock_chat_response
+    """
+    Start a streaming chat response.
+    Chunks are delivered to the frontend via WebSocket as ``chat_chunk`` messages.
+    Returns immediately so the frontend can start listening on the socket.
+    """
+    asyncio.create_task(
+        _stream_and_broadcast(req.session_id, req.context, req.message)
+    )
+    return {"status": "streaming"}
 
-        mock_msg = get_mock_chat_response()
-        return {"role": "ai", "content": mock_msg, "mock": True}
 
+@router.get("/llm/status")
+async def llm_status():
+    """Return the active provider, model, and Ollama availability."""
+    return get_llm_router().get_status()
+
+
+async def _stream_and_broadcast(
+    session_id: str, context: str, message: str
+) -> None:
+    """
+    Call the LLM router and broadcast each chunk to all WebSocket clients.
+    Chunk format: ``{ type: "chat_chunk", data: { content, done, context, session_id } }``
+    The first fallback chunk also carries ``fallback: true``.
+    """
+    llm = get_llm_router()
+    fallback_flagged = False
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
+        async for content, done, is_fallback in llm.stream_chat(
+            session_id, context, message
+        ):
+            payload: dict = {
+                "type": "chat_chunk",
+                "data": {
+                    "content": content,
+                    "done": done,
+                    "context": context,
+                    "session_id": session_id,
                 },
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 1024,
-                    "system": system_prompt,
-                    "messages": [{"role": "user", "content": req.message}],
-                },
-                timeout=30,
-            )
-        resp.raise_for_status()
-        data = resp.json()
-        text = data.get("content", [{}])[0].get("text", "")
-        if not text:
-            text = "No response received from AI. Check your API key and try again."
-        return {"role": "ai", "content": text}
-    except httpx.HTTPStatusError as exc:
-        error_msg = f"AI API error {exc.response.status_code}: {exc.response.text[:200]}"
-        logger.error(error_msg)
-        return {"role": "ai", "content": error_msg, "error": True}
-    except httpx.TimeoutException:
-        error_msg = "AI request timed out after 30s. The model may be busy — please try again."
-        logger.error(error_msg)
-        return {"role": "ai", "content": error_msg, "error": True}
+            }
+            if is_fallback and not fallback_flagged:
+                payload["data"]["fallback"] = True
+                fallback_flagged = True
+            await broadcast(payload)
     except Exception as exc:
-        logger.error("Unexpected error calling AI: %s", exc)
-        return {"role": "ai", "content": "An unexpected error occurred. Please try again.", "error": True}
-
-
-def _get_key() -> str | None:
-    """Read API key from ~/.ai-employee/.env or environment."""
-    env_path = os.path.expanduser("~/.ai-employee/.env")
-    if not os.path.exists(env_path):
-        return os.environ.get("ANTHROPIC_API_KEY")
-    try:
-        with open(env_path) as f:
-            for line in f:
-                if line.startswith("ANTHROPIC_API_KEY="):
-                    return line.split("=", 1)[1].strip().strip('"')
-    except OSError as exc:
-        logger.warning("Could not read ~/.ai-employee/.env: %s", exc)
-    return os.environ.get("ANTHROPIC_API_KEY")
+        logger.error("Unexpected error in _stream_and_broadcast: %s", exc)
+        await broadcast(
+            {
+                "type": "chat_chunk",
+                "data": {
+                    "content": "An error occurred. Please try again.",
+                    "done": True,
+                    "context": context,
+                    "session_id": session_id,
+                },
+            }
+        )

@@ -80,6 +80,14 @@ if os.path.exists(static_dir):
 # ── Startup ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
+    # Start LLM router (Ollama ping + background health check)
+    try:
+        from services.llm_router import get_llm_router
+
+        await get_llm_router().startup()
+    except Exception:
+        pass  # Never crash if LLM router fails on startup
+
     # Start system monitor background polling
     try:
         from services.system_monitor import poll_forever

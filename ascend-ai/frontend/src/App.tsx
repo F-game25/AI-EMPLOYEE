@@ -20,7 +20,7 @@ import './styles/globals.css'
 
 function AppShell() {
   useWebSocket()
-  const { setMockMode, setAgents } = useStore()
+  const { setMockMode, setAgents, setLlmStatus } = useStore()
 
   useEffect(() => {
     const controller = new AbortController()
@@ -32,8 +32,12 @@ function AppShell() {
       .then((r) => r.json())
       .then(setAgents)
       .catch(() => {})
+    fetch('/api/llm/status', { signal: controller.signal })
+      .then((r) => r.json())
+      .then(setLlmStatus)
+      .catch(() => {})
     return () => controller.abort()
-  }, [setMockMode, setAgents])
+  }, [setMockMode, setAgents, setLlmStatus])
 
   return (
     <div className="app-layout">
