@@ -22,13 +22,18 @@
 
 set -euo pipefail
 
-# ── Debug mode ────────────────────────────────────────────────────────────────
-if [[ "${1:-}" == "--debug" || "${AI_EMPLOYEE_DEBUG:-}" == "1" ]]; then
-  set -x
-  shift 2>/dev/null || true
-fi
-
-# ── Resolve repo root (works when called from any CWD or via symlink) ────────
+# ── Parse flags (before anything else so --debug activates set -x early) ────
+_PREFLIGHT_ONLY=0
+_NO_WAIT=0
+for _arg in "$@"; do
+  case "$_arg" in
+    --debug)       set -x; export AI_EMPLOYEE_DEBUG=1 ;;
+    --preflight)   _PREFLIGHT_ONLY=1 ;;
+    --no-wait)     _NO_WAIT=1 ;;
+    *) ;;
+  esac
+done
+[[ "${AI_EMPLOYEE_DEBUG:-}" == "1" ]] && set -x
 _BOOTSTRAP_SOURCE="${BASH_SOURCE[0]}"
 if command -v realpath >/dev/null 2>&1; then
   _BOOTSTRAP_SOURCE="$(realpath "$_BOOTSTRAP_SOURCE" 2>/dev/null || echo "$_BOOTSTRAP_SOURCE")"
@@ -38,18 +43,6 @@ fi
 REPO_ROOT="$(cd "$(dirname "$_BOOTSTRAP_SOURCE")" && pwd -P)"
 export AI_EMPLOYEE_REPO_DIR="$REPO_ROOT"
 export PYTHONDONTWRITEBYTECODE=1
-
-# ── Parse flags ───────────────────────────────────────────────────────────────
-_PREFLIGHT_ONLY=0
-_NO_WAIT=0
-for _arg in "$@"; do
-  case "$_arg" in
-    --preflight)   _PREFLIGHT_ONLY=1 ;;
-    --no-wait)     _NO_WAIT=1 ;;
-    --debug)       set -x ;;
-    *) ;;
-  esac
-done
 
 # ── Environment setup ─────────────────────────────────────────────────────────
 AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
@@ -72,8 +65,11 @@ if [[ -z "${JWT_SECRET_KEY:-}" ]]; then
     JWT_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
     export JWT_SECRET_KEY
     mkdir -p "$AI_HOME"
-    echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}" >> "$AI_HOME/.env"
-    echo "ℹ️  JWT secret auto-generated and saved to $AI_HOME/.env"
+    # Only append if the key is not already recorded in .env (avoids duplicates)
+    if ! grep -q "^JWT_SECRET_KEY=" "$AI_HOME/.env" 2>/dev/null; then
+      echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}" >> "$AI_HOME/.env"
+      echo "ℹ️  JWT secret auto-generated and saved to $AI_HOME/.env"
+    fi
   fi
 fi
 
@@ -113,7 +109,8 @@ echo -e "  ${_C}Repo root :${_NC} $REPO_ROOT"
 echo -e "  ${_C}AI_HOME   :${_NC} $AI_HOME"
 echo -e "  ${_C}Context   :${_NC} $_CONTEXT"
 echo -e "  ${_C}Port      :${_NC} $UI_PORT"
-echo -e "  ${_C}Commit    :${_NC} $(git -C "$REPO_ROOT" log -1 --oneline 2>/dev/null || echo unknown)"
+_commit="$(git -C "$REPO_ROOT" log -1 --oneline 2>/dev/null || echo unknown)"
+echo -e "  ${_C}Commit    :${_NC} $_commit"
 echo ""
 
 # ── Validation layer ──────────────────────────────────────────────────────────

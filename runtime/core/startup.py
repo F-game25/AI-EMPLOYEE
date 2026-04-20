@@ -162,7 +162,8 @@ def verify_uvicorn_import_target() -> None:
         _fail(f"uvicorn import target check failed: {(exc.output or '').strip()}")
         return
     # server.py may print startup messages; the actual file path is the last line.
-    output = raw.splitlines()[-1].strip() if raw else ""
+    lines = raw.splitlines()
+    output = lines[-1].strip() if lines else ""
     resolved = str(Path(output).resolve())
     expected = str(BOT_MAIN_PATH.resolve())
     if resolved != expected:
