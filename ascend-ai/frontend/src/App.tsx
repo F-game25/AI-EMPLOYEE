@@ -3,12 +3,14 @@ import { AnimatePresence } from 'framer-motion'
 import { useEffect } from 'react'
 import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useStore } from './store/ascendStore'
 import { Dashboard } from './pages/Dashboard'
 import { AscendForge } from './pages/AscendForge'
 import { MoneyMode } from './pages/MoneyMode'
 import { BlacklightMode } from './pages/BlacklightMode'
+import { HermesAgent } from './pages/HermesAgent'
 import { Doctor } from './pages/Doctor'
 import { LiveFeedback } from './pages/LiveFeedback'
 import { Settings } from './pages/Settings'
@@ -21,14 +23,16 @@ function AppShell() {
   const { setMockMode, setAgents } = useStore()
 
   useEffect(() => {
-    fetch('/api/health')
+    const controller = new AbortController()
+    fetch('/api/health', { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => setMockMode(d.mock || false))
       .catch(() => setMockMode(true))
-    fetch('/api/agents')
+    fetch('/api/agents', { signal: controller.signal })
       .then((r) => r.json())
       .then(setAgents)
       .catch(() => {})
+    return () => controller.abort()
   }, [setMockMode, setAgents])
 
   return (
@@ -38,15 +42,16 @@ function AppShell() {
       <main className="main-content">
         <AnimatePresence mode="wait">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/forge" element={<AscendForge />} />
-            <Route path="/money" element={<MoneyMode />} />
-            <Route path="/blacklight" element={<BlacklightMode />} />
-            <Route path="/doctor" element={<Doctor />} />
-            <Route path="/live" element={<LiveFeedback />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/fairness" element={<FairnessDashboard />} />
-            <Route path="/governance" element={<GovernanceDashboard />} />
+            <Route path="/" element={<ErrorBoundary fallbackTitle="Dashboard Error"><Dashboard /></ErrorBoundary>} />
+            <Route path="/forge" element={<ErrorBoundary fallbackTitle="Ascend Forge Error"><AscendForge /></ErrorBoundary>} />
+            <Route path="/money" element={<ErrorBoundary fallbackTitle="Money Mode Error"><MoneyMode /></ErrorBoundary>} />
+            <Route path="/blacklight" element={<ErrorBoundary fallbackTitle="Blacklight Error"><BlacklightMode /></ErrorBoundary>} />
+            <Route path="/hermes" element={<ErrorBoundary fallbackTitle="Hermes Error"><HermesAgent /></ErrorBoundary>} />
+            <Route path="/doctor" element={<ErrorBoundary fallbackTitle="Doctor Error"><Doctor /></ErrorBoundary>} />
+            <Route path="/live" element={<ErrorBoundary fallbackTitle="Live Feedback Error"><LiveFeedback /></ErrorBoundary>} />
+            <Route path="/settings" element={<ErrorBoundary fallbackTitle="Settings Error"><Settings /></ErrorBoundary>} />
+            <Route path="/fairness" element={<ErrorBoundary fallbackTitle="Fairness Error"><FairnessDashboard /></ErrorBoundary>} />
+            <Route path="/governance" element={<ErrorBoundary fallbackTitle="Governance Error"><GovernanceDashboard /></ErrorBoundary>} />
           </Routes>
         </AnimatePresence>
       </main>
@@ -56,8 +61,10 @@ function AppShell() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppShell />
-    </BrowserRouter>
+    <ErrorBoundary fallbackTitle="Application Error">
+      <BrowserRouter>
+        <AppShell />
+      </BrowserRouter>
+    </ErrorBoundary>
   )
 }
