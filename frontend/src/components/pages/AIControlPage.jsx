@@ -343,26 +343,36 @@ export default function AIControlPage() {
     // Add command as a node in the shared brain graph
     addFromPrompt(text, 'task', 'automation')
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'chat', message: text }))
-    } else {
-      // HTTP fallback
-      fetch(`${BASE}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+    // Always use HTTP POST — the WebSocket endpoint intentionally rejects
+    // chat messages (server says: "Use POST /chat as the control entrypoint").
+    // When the WebSocket is connected the server broadcasts an
+    // `orchestrator:message` event after processing, which the WS handler in
+    // useWebSocket.js displays.  To avoid showing the message twice we only
+    // display the HTTP response body when the socket is not available.
+    const isWsOpen = ws && ws.readyState === WebSocket.OPEN
+    fetch(`${BASE}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text }),
+    })
+      .then(r => {
+        if (!r.ok) throw new Error(`Server error ${r.status}`)
+        return r.json()
       })
-        .then(r => r.json())
-        .then(data => {
+      .then(data => {
+        if (!isWsOpen) {
+          // WS is not connected — show the HTTP response body directly.
+          // When WS IS connected the orchestrator:message WS event will arrive
+          // and display the response, so we skip it here to avoid duplicates.
           addChatMessage({ role: 'ai', content: data.response || data.reply || data.message || 'No response.' })
           setTyping(false)
-        })
-        .catch((e) => {
-          console.error('HTTP chat fallback failed', e)
-          addChatMessage({ role: 'ai', content: 'Connection error. Please try again.' })
-          setTyping(false)
-        })
-    }
+        }
+      })
+      .catch((e) => {
+        console.error('HTTP chat failed', e)
+        addChatMessage({ role: 'ai', content: 'Connection error. Please try again.' })
+        setTyping(false)
+      })
   }, [input, ws, addChatMessage, setTyping, addFromPrompt])
 
   const handleKeyDown = (e) => {
