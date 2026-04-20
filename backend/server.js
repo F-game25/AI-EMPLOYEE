@@ -1414,14 +1414,15 @@ function requestPythonJSON(pathname, method = 'GET', payload = null) {
  *
  * Timeout is generous (30 s) because LLM inference may be slow.
  */
+const PYTHON_CHAT_TIMEOUT_MS = 30000;
+
 function requestPythonChat(message) {
   return new Promise((resolve) => {
-    const httpLib = require('http');
     const body = JSON.stringify({ message });
-    const req = httpLib.request(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/chat`, {
+    const req = http.request(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-      timeout: 30000,
+      timeout: PYTHON_CHAT_TIMEOUT_MS,
     }, (response) => {
       let text = '';
       response.on('data', (chunk) => { text += chunk; });
