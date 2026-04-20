@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 
@@ -6,6 +6,45 @@ cd "$(dirname "$0")"
 REPO_ROOT="$(pwd -P)"
 export AI_EMPLOYEE_REPO_DIR="$REPO_ROOT"
 export PYTHONDONTWRITEBYTECODE=1
+
+# ── Consistent environment setup ─────────────────────────────────────────────
+# Load ~/.ai-employee/.env so that JWT_SECRET_KEY, API keys, and port overrides
+# are available regardless of which entry point is used to start the system.
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+export AI_HOME
+if [[ -f "$AI_HOME/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$AI_HOME/.env"
+  set +a
+fi
+# Re-read ports in case they were set in .env
+UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
+
+# Auto-generate JWT_SECRET_KEY if it is not already set (mirrors runtime/start.sh)
+if [[ -z "${JWT_SECRET_KEY:-}" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    JWT_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    export JWT_SECRET_KEY
+    mkdir -p "$AI_HOME"
+    echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}" >> "$AI_HOME/.env"
+    echo "ℹ️  JWT secret auto-generated and saved to $AI_HOME/.env"
+  fi
+fi
+
+# Bootstrap runtime PATH (same logic as runtime/start.sh)
+_add_to_path_if_dir() {
+  local d="$1"
+  [[ -d "$d" ]] || return 0
+  [[ ":$PATH:" == *":$d:"* ]] || PATH="$d:$PATH"
+}
+_add_to_path_if_dir "$HOME/.local/bin"
+_add_to_path_if_dir "$HOME/.npm-global/bin"
+if command -v npm >/dev/null 2>&1; then
+  _npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  [[ -n "${_npm_prefix:-}" ]] && _add_to_path_if_dir "${_npm_prefix}/bin"
+fi
+export PATH
 
 echo "Starting AI Employee..."
 echo "RUNNING FROM: $REPO_ROOT"
