@@ -1444,7 +1444,7 @@ function buildLocalFallbackReply(message, queuedTask) {
     return `Hey! I'm your AI employee, currently in ${mode} mode with ${running} active agent${running !== 1 ? 's' : ''} ready to go. What would you like to tackle?`;
   }
   if (/\b(help|what can you|capabilities)\b/.test(lower)) {
-    return `Happy to help! I can run automation pipelines, manage agents, analyse data, search your knowledge base, diagnose system health, and drive revenue goals through Money Mode or Ascend Forge. What do you need?`;
+    return `Happy to help! I can run automation pipelines, manage agents, analyze data, search your knowledge base, diagnose system health, and drive revenue goals through Money Mode or Ascend Forge. What do you need?`;
   }
   return `Got it — I've routed your request in ${mode} mode. Task ${queuedTask ? queuedTask.taskId : 'unknown'} is assigned to ${agentId} (${running} agent${running !== 1 ? 's' : ''} active). You'll see results as they come in.`;
 }
