@@ -62,6 +62,9 @@ _ANTHROPIC_FALLBACK_MODEL = "claude-haiku-4-5-20251001"
 # Ollama stop sequences — prevent model from roleplaying conversation
 _STOP_SEQUENCES = ["\n\nUser:", "\n\nHuman:", "###"]
 
+# How often to re-check Ollama availability (shorter = faster recovery)
+_OLLAMA_HEALTH_CHECK_INTERVAL = 10  # seconds
+
 
 def _read_env_file() -> dict[str, str]:
     """Read ~/.ai-employee/.env into a dict."""
@@ -127,9 +130,9 @@ class LLMRouter:
         self.active_model = _ANTHROPIC_FALLBACK_MODEL
 
     async def _health_loop(self) -> None:
-        """Re-check Ollama every 10 seconds so it auto-recovers quickly."""
+        """Re-check Ollama every _OLLAMA_HEALTH_CHECK_INTERVAL seconds so it auto-recovers quickly."""
         while True:
-            await asyncio.sleep(10)
+            await asyncio.sleep(_OLLAMA_HEALTH_CHECK_INTERVAL)
             await self._check_ollama()
 
     def _pick_model(self, models: list[dict]) -> str:

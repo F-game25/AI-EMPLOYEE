@@ -62,6 +62,9 @@ export function ChatWindow({
     }
   }, [isStreaming, pending])
 
+  // Cleanup pending timer on unmount
+  useEffect(() => () => { if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current) }, [])
+
   // "Thinking..." — show after 3s if no content yet
   const [showThinking, setShowThinking] = useState(false)
   useEffect(() => {

@@ -31,7 +31,10 @@ export function Dashboard() {
     }
   }, [isStreaming, pending])
 
-  // "Thinking..." after 3s with no content
+  // Cleanup pending timer on unmount
+  useEffect(() => () => { if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current) }, [])
+
+
   const [showThinking, setShowThinking] = useState(false)
   useEffect(() => {
     if (!loading) { setShowThinking(false); return }
