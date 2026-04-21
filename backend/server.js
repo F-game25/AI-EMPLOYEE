@@ -1422,27 +1422,31 @@ function buildLocalFallbackReply(message, queuedTask) {
     const dr = subsystems.getDoctorStatus();
     const score = dr.overall_score || 0;
     const issueCount = (dr.issues || []).length;
-    return `[DOCTOR] System health score: ${score}/100. ${issueCount ? `${issueCount} issue(s) detected.` : 'All subsystems clear.'} Grade: ${dr.grade || 'N/A'}.`;
+    if (issueCount > 0) {
+      return `Your system is currently at ${score}/100 health. I'm seeing ${issueCount} issue${issueCount !== 1 ? 's' : ''} — head over to the Doctor page for a full breakdown and recommended actions.`;
+    }
+    return `Everything looks good — your system health score is ${score}/100 and all subsystems are clear.`;
   }
   if (/\b(memory|knowledge|context|recall|entities)\b/.test(lower) || subsystem === 'memory') {
     const mem = subsystems.getMemoryTree();
-    return `[MEMORY] ${mem.total_entities || 0} knowledge entities on file. Your request has been indexed for future context.`;
+    const count = mem.total_entities || 0;
+    return `I have ${count} knowledge ${count === 1 ? 'entity' : 'entities'} on file. Your request has been indexed so I can reference it in future conversations.`;
   }
   if (/\b(neural|network|confidence|train|learn|model)\b/.test(lower) || subsystem === 'nn') {
     const nn = subsystems.getNNStatus();
     const conf = Math.round((nn.confidence || 0) * 100);
-    return `[NEURAL] Operating in ${nn.mode || 'standard'} mode — confidence ${conf}%, ${(nn.experiences || 0).toLocaleString()} experiences logged.`;
+    return `The neural network is running in ${nn.mode || 'standard'} mode with ${conf}% confidence, drawing on ${(nn.experiences || 0).toLocaleString()} logged experiences.`;
   }
   if (/\b(status|how are you|overview)\b/.test(lower)) {
-    return `[ORCHESTRATOR] Mode: ${mode}. Active agents: ${running}. Tasks processed: ${runtimeState.tasksExecuted}. All systems nominal.`;
+    return `I'm operating in ${mode} mode with ${running} active agent${running !== 1 ? 's' : ''}. ${runtimeState.tasksExecuted} tasks processed so far — everything is nominal.`;
   }
   if (/\b(hello|hi|hey|greet)\b/.test(lower)) {
-    return `Hello! I'm your AI employee operating in ${mode} mode with ${running} active agent${running !== 1 ? 's' : ''}. How can I help?`;
+    return `Hey! I'm your AI employee, currently in ${mode} mode with ${running} active agent${running !== 1 ? 's' : ''} ready to go. What would you like to tackle?`;
   }
   if (/\b(help|what can you|capabilities)\b/.test(lower)) {
-    return `I can: run automation pipelines, manage agents, analyze data, search knowledge, diagnose system health, execute goals via Money Mode or Ascend Forge. What would you like to do?`;
+    return `Happy to help! I can run automation pipelines, manage agents, analyse data, search your knowledge base, diagnose system health, and drive revenue goals through Money Mode or Ascend Forge. What do you need?`;
   }
-  return `[${agentId.toUpperCase()}] Request received and routed in ${mode} mode (${running} agent${running !== 1 ? 's' : ''} active). Task ${queuedTask ? queuedTask.taskId : 'unknown'} is being processed.`;
+  return `Got it — I've routed your request in ${mode} mode. Task ${queuedTask ? queuedTask.taskId : 'unknown'} is assigned to ${agentId} (${running} agent${running !== 1 ? 's' : ''} active). You'll see results as they come in.`;
 }
 
 /**
