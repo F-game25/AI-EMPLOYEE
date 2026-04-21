@@ -935,13 +935,15 @@ def _build_llm_system_prompt(
     return base
 
 
-def _call_groq_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
+def _call_groq_chat(prompt: str, system_prompt: str, model: str, api_key: str,
+                    history: Optional[list] = None) -> str:
+  messages: list = [{"role": "system", "content": system_prompt}]
+  if history:
+    messages.extend(history)
+  messages.append({"role": "user", "content": prompt})
   payload = {
     "model": model,
-    "messages": [
-      {"role": "system", "content": system_prompt},
-      {"role": "user", "content": prompt},
-    ],
+    "messages": messages,
     "temperature": 0.7,
   }
   req = urllib.request.Request(
@@ -958,13 +960,15 @@ def _call_groq_chat(prompt: str, system_prompt: str, model: str, api_key: str) -
   return (((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
 
 
-def _call_openai_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
+def _call_openai_chat(prompt: str, system_prompt: str, model: str, api_key: str,
+                      history: Optional[list] = None) -> str:
+  messages: list = [{"role": "system", "content": system_prompt}]
+  if history:
+    messages.extend(history)
+  messages.append({"role": "user", "content": prompt})
   payload = {
     "model": model,
-    "messages": [
-      {"role": "system", "content": system_prompt},
-      {"role": "user", "content": prompt},
-    ],
+    "messages": messages,
     "temperature": 0.7,
   }
   req = urllib.request.Request(
@@ -981,12 +985,19 @@ def _call_openai_chat(prompt: str, system_prompt: str, model: str, api_key: str)
   return (((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
 
 
-def _call_anthropic_chat(prompt: str, system_prompt: str, model: str, api_key: str) -> str:
+def _call_anthropic_chat(prompt: str, system_prompt: str, model: str, api_key: str,
+                         history: Optional[list] = None) -> str:
+  # Anthropic requires messages to alternate user/assistant and start with "user".
+  # Build from history, then append the current user message.
+  messages: list = []
+  if history:
+    messages.extend(history)
+  messages.append({"role": "user", "content": prompt})
   payload = {
     "model": model,
     "max_tokens": 1200,
     "system": system_prompt,
-    "messages": [{"role": "user", "content": prompt}],
+    "messages": messages,
   }
   req = urllib.request.Request(
     "https://api.anthropic.com/v1/messages",
@@ -1004,14 +1015,16 @@ def _call_anthropic_chat(prompt: str, system_prompt: str, model: str, api_key: s
   return "\n".join(part.get("text", "") for part in parts if part.get("type") == "text").strip()
 
 
-def _call_ollama_chat(prompt: str, system_prompt: str, model: str, ollama_host: str) -> str:
+def _call_ollama_chat(prompt: str, system_prompt: str, model: str, ollama_host: str,
+                      history: Optional[list] = None) -> str:
+  messages: list = [{"role": "system", "content": system_prompt}]
+  if history:
+    messages.extend(history)
+  messages.append({"role": "user", "content": prompt})
   payload = {
     "model": model,
     "stream": False,
-    "messages": [
-      {"role": "system", "content": system_prompt},
-      {"role": "user", "content": prompt},
-    ],
+    "messages": messages,
   }
   req = urllib.request.Request(
     f"{ollama_host.rstrip('/')}/api/chat",
@@ -1024,10 +1037,48 @@ def _call_ollama_chat(prompt: str, system_prompt: str, model: str, ollama_host: 
   return ((body.get("message") or {}).get("content") or "").strip()
 
 
-def _call_gemma_chat(prompt: str, system_prompt: str, ollama_host: str) -> str:
+def _call_gemma_chat(prompt: str, system_prompt: str, ollama_host: str,
+                     history: Optional[list] = None) -> str:
   """Call Gemma model via local Ollama using the configured GEMMA_MODEL."""
   gemma_model = os.environ.get("GEMMA_MODEL", "gemma4")
-  return _call_ollama_chat(prompt, system_prompt, gemma_model, ollama_host)
+  return _call_ollama_chat(prompt, system_prompt, gemma_model, ollama_host, history=history)
+
+
+def _load_chat_history(n_exchanges: int = 8) -> list:
+    """Load the last *n_exchanges* user/assistant pairs from CHATLOG.
+
+    Returns a list of ``{"role": "user"|"assistant", "content": str}`` dicts
+    suitable for inserting directly into the LLM messages array.  Messages are
+    ordered oldest-first so the LLM sees the conversation in chronological order.
+
+    Only ``"user"`` and ``"agent"`` log entry types are included; system/internal
+    entries are skipped.  Entries with empty content are also skipped.
+    """
+    try:
+        raw = _read_last_n_lines(CHATLOG, n_exchanges * 2 + 4)
+    except Exception:
+        return []
+    history: list = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        entry_type = entry.get("type", "")
+        content = (entry.get("message") or "").strip()
+        if not content:
+            continue
+        if entry_type == "user":
+            history.append({"role": "user", "content": content})
+        elif entry_type == "agent":
+            history.append({"role": "assistant", "content": content})
+    # Keep only the last n_exchanges pairs (2 messages each)
+    max_msgs = n_exchanges * 2
+    if len(history) > max_msgs:
+        history = history[-max_msgs:]
+    # Ensure the history ends with an "assistant" message (not the current user
+    # message, which is injected separately by the callers).
+    while history and history[-1]["role"] == "user":
+        history.pop()
+    return history
 
 
 def _generate_llm_response(
@@ -1088,6 +1139,14 @@ def _generate_llm_response(
 
   system_prompt = _build_llm_system_prompt(final_input, routed_agent, mode, user_id=user_id)
 
+  # ── Load conversation history for context-aware responses ───────────────────
+  # Injects the last 8 user/assistant exchanges into every LLM call so the
+  # model has full conversational memory and never behaves as a stateless bot.
+  _chat_history = _load_chat_history(n_exchanges=8)
+  _ai_flow_logger.info(
+      "[AI FLOW] → Conversation history loaded: %d messages", len(_chat_history)
+  )
+
   # ── Prompt Inspector — record context and constructed prompt ────────────────
   if _pi is not None and _pi_trace is not None:
       try:
@@ -1104,19 +1163,19 @@ def _generate_llm_response(
     def _do_llm_call():
       if provider == "anthropic":
         api_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
-        return _call_anthropic_chat(final_input, system_prompt, model, api_key)
+        return _call_anthropic_chat(final_input, system_prompt, model, api_key, history=_chat_history)
       elif provider == "openai":
         api_key = runtime_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-        return _call_openai_chat(final_input, system_prompt, model, api_key)
+        return _call_openai_chat(final_input, system_prompt, model, api_key, history=_chat_history)
       elif provider == "groq":
         api_key = runtime_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
-        return _call_groq_chat(final_input, system_prompt, model, api_key)
+        return _call_groq_chat(final_input, system_prompt, model, api_key, history=_chat_history)
       elif provider == "gemma":
         ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-        return _call_gemma_chat(final_input, system_prompt, ollama_host)
+        return _call_gemma_chat(final_input, system_prompt, ollama_host, history=_chat_history)
       else:
         ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-        return _call_ollama_chat(final_input, system_prompt, model, ollama_host)
+        return _call_ollama_chat(final_input, system_prompt, model, ollama_host, history=_chat_history)
 
     def _do_llm_call_with_trace():
       if _dt_llm is not None:
