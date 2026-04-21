@@ -23,10 +23,21 @@ export function Doctor() {
   const [expandedError, setExpandedError] = useState<number | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Break #3: instant loading feedback before first WS chunk arrives
+  const [pending, setPending] = useState(false)
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isStreaming = activeStream?.context === 'doctor'
-  const loading = isStreaming
+  const loading = isStreaming || pending
   const streamContent = isStreaming ? activeStream!.content : ''
+
+  // Clear pending once WS stream starts (Break #3)
+  useEffect(() => {
+    if (isStreaming && pending) {
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current)
+      setPending(false)
+    }
+  }, [isStreaming, pending])
 
   // "Thinking..." after 3s
   const [showThinking, setShowThinking] = useState(false)
@@ -58,6 +69,9 @@ export function Doctor() {
     addDoctorChat({ role: 'user', content: input })
     const text = input
     setInput('')
+    // Break #3: instant loading feedback before WS responds
+    setPending(true)
+    pendingTimerRef.current = setTimeout(() => setPending(false), 2000)
     try {
       await fetch('/api/chat', {
         method: 'POST',
@@ -65,6 +79,8 @@ export function Doctor() {
         body: JSON.stringify({ message: text, context: 'doctor', session_id: getSessionId() }),
       })
     } catch {
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current)
+      setPending(false)
       addDoctorChat({ role: 'ai', content: 'Connection error.' })
     }
   }
@@ -120,7 +136,12 @@ export function Doctor() {
                   alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
                   maxWidth: '85%',
                   background: m.role === 'user' ? 'rgba(212,175,55,0.08)' : 'rgba(205,127,50,0.06)',
-                  borderLeft: m.role !== 'user' ? '2px solid var(--bronze)' : undefined,
+                  // Break #7: error messages get a red-bronze left border
+                  borderLeft: m.role !== 'user'
+                    ? m.tag === 'ERROR'
+                      ? '2px solid #CD3232'
+                      : '2px solid var(--bronze)'
+                    : undefined,
                   borderRight: m.role === 'user' ? '2px solid var(--gold)' : undefined,
                   padding: '8px 12px',
                   borderRadius: 8,
@@ -132,7 +153,7 @@ export function Doctor() {
                   wordBreak: 'break-word',
                 }}
               >
-                {m.tag && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--bronze)', marginRight: 6 }}>[{m.tag}]</span>}
+                {m.tag && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: m.tag === 'ERROR' ? '#CD3232' : 'var(--bronze)', marginRight: 6 }}>[{m.tag}]</span>}
                 {m.content}
               </div>
             ))}

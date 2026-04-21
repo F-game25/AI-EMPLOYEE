@@ -43,12 +43,24 @@ export function ChatWindow({
 }: ChatWindowProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [input, setInput] = useState('')
+  // Break #3: instant loading feedback on send — before first WS chunk arrives
+  const [pending, setPending] = useState(false)
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { activeStream, llmStatus, showFallbackToast, setShowFallbackToast } = useStore()
 
   const isStreaming = activeStream?.context === context
-  const loading = isStreaming
+  // loading = true as soon as user sends (pending) or once WS stream starts
+  const loading = isStreaming || pending
   const streamContent = isStreaming ? activeStream!.content : ''
+
+  // Clear pending once the WS stream actually starts (Break #3)
+  useEffect(() => {
+    if (isStreaming && pending) {
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current)
+      setPending(false)
+    }
+  }, [isStreaming, pending])
 
   // "Thinking..." — show after 3s if no content yet
   const [showThinking, setShowThinking] = useState(false)
@@ -77,6 +89,9 @@ export function ChatWindow({
     if (!text || loading) return
     onNewMessage({ role: 'user', content: text })
     setInput('')
+    // Break #3: show loading indicator immediately, before WS responds
+    setPending(true)
+    pendingTimerRef.current = setTimeout(() => setPending(false), 2000)
     try {
       await fetch('/api/chat', {
         method: 'POST',
@@ -85,6 +100,8 @@ export function ChatWindow({
       })
       // Response is streamed via WebSocket — nothing to do with the HTTP body
     } catch (err: unknown) {
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current)
+      setPending(false)
       const msg = err instanceof Error ? err.message : String(err)
       onNewMessage({ role: 'ai', content: `Error: ${msg}` })
     }
@@ -161,7 +178,12 @@ export function ChatWindow({
                   m.role === 'user'
                     ? 'rgba(212,175,55,0.08)'
                     : 'rgba(205,127,50,0.06)',
-                borderLeft: m.role !== 'user' ? '2px solid var(--bronze)' : undefined,
+                // Break #7: error messages get a red-bronze left border
+                borderLeft: m.role !== 'user'
+                  ? m.tag === 'ERROR'
+                    ? '2px solid #CD3232'
+                    : '2px solid var(--bronze)'
+                  : undefined,
                 borderRight: m.role === 'user' ? '2px solid var(--gold)' : undefined,
                 padding: '9px 13px',
                 borderRadius: 8,
@@ -182,7 +204,7 @@ export function ChatWindow({
                   style={{
                     fontFamily: 'var(--font-mono)',
                     fontSize: 9,
-                    color: 'var(--bronze)',
+                    color: m.tag === 'ERROR' ? '#CD3232' : 'var(--bronze)',
                     marginRight: 6,
                   }}
                 >
