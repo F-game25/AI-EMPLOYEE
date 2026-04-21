@@ -26,6 +26,23 @@ if str(RUNTIME_DIR) not in sys.path:
 class TestMemoryIndex:
     """Verify memory index storage and retrieval."""
 
+    @pytest.fixture(autouse=True)
+    def _isolated_memory(self, tmp_path, monkeypatch):
+        """Run each test with a fresh, temp-backed MemoryIndex singleton.
+
+        Without isolation the singleton accumulates entries across the entire
+        test session (other test modules also call add_memory), which causes
+        cosine-similarity ranking to push freshly added entries out of the
+        small top_k window used by retrieval tests.
+        """
+        import core.memory_index as mi_mod
+        monkeypatch.setenv("AI_HOME", str(tmp_path))
+        with mi_mod._instance_lock:
+            mi_mod._instance = None
+        yield
+        with mi_mod._instance_lock:
+            mi_mod._instance = None
+
     def test_memory_index_importable(self) -> None:
         from core.memory_index import get_memory_index
         mi = get_memory_index()

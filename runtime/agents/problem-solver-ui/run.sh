@@ -202,6 +202,60 @@ export PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
 # http://127.0.0.1:<port> regardless of the system's IPv6 configuration.
 export LISTEN_HOST="${LISTEN_HOST:-0.0.0.0}"
 
+# ── Start Python AI backend (LLM pipeline) ──────────────────────────────────
+# The Node.js proxy calls http://127.0.0.1:${PYTHON_BACKEND_PORT}/api/chat to
+# reach the real LLM.  Without this process running, every chat message falls
+# back to keyword-matched placeholder replies.
+_PYTHON_SERVER="$REPO_ROOT_DIR/runtime/agents/problem-solver-ui/server.py"
+_PYTHON_PID=""
+if command -v python3 >/dev/null 2>&1 && [[ -f "$_PYTHON_SERVER" ]]; then
+  # Stop any stale Python backend from a previous run.
+  _PY_PID_FILE="$REPO_ROOT_DIR/python-backend.pid"
+  if [[ -f "$_PY_PID_FILE" ]]; then
+    _OLD_PYPID="$(cat "$_PY_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "${_OLD_PYPID:-}" ]] && kill -0 "$_OLD_PYPID" 2>/dev/null; then
+      kill "$_OLD_PYPID" 2>/dev/null || true
+      sleep 1
+      kill -9 "$_OLD_PYPID" 2>/dev/null || true
+    fi
+    rm -f "$_PY_PID_FILE"
+  fi
+  _info "Starting Python AI backend on port ${PYTHON_BACKEND_PORT}…"
+  mkdir -p "$REPO_ROOT_DIR/state"
+  PROBLEM_SOLVER_UI_PORT="${PYTHON_BACKEND_PORT}" \
+    PROBLEM_SOLVER_UI_HOST="127.0.0.1" \
+    AI_EMPLOYEE_REPO_DIR="$REPO_ROOT_DIR" \
+    python3 "$_PYTHON_SERVER" \
+    >> "$REPO_ROOT_DIR/state/python-backend.log" 2>&1 &
+  _PYTHON_PID=$!
+  echo "$_PYTHON_PID" > "$_PY_PID_FILE"
+
+  # Poll /health until Python is ready (up to 40 s).
+  _PY_READY=0
+  for _pj in $(seq 1 40); do
+    sleep 1
+    if curl -fsS --max-time 3 "http://127.0.0.1:${PYTHON_BACKEND_PORT}/health" > /dev/null 2>&1; then
+      _PY_READY=1
+      break
+    fi
+    _info "Waiting for Python AI backend… (${_pj}/40)"
+  done
+
+  if [[ "$_PY_READY" -eq 1 ]]; then
+    _ok "Python AI backend ready on port ${PYTHON_BACKEND_PORT}"
+  else
+    printf "  ${Y}⚠${NC}  Python AI backend did not respond within 40 s — LLM pipeline may be unavailable.\n"
+    printf "       Check %s/state/python-backend.log for details.\n" "$REPO_ROOT_DIR"
+    printf "       The system will continue with local fallback replies.\n"
+  fi
+else
+  if [[ ! -f "$_PYTHON_SERVER" ]]; then
+    printf "  ${Y}⚠${NC}  Python server not found at %s — LLM pipeline unavailable.\n" "$_PYTHON_SERVER"
+  else
+    printf "  ${Y}⚠${NC}  python3 not found — LLM pipeline unavailable.\n"
+  fi
+fi
+
 _info "Binding to http://${LISTEN_HOST}:$PORT"
 _info "Clearing port $PORT if occupied…"
 if command -v lsof >/dev/null 2>&1; then

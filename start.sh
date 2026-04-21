@@ -149,6 +149,61 @@ cat > "$REPO_ROOT/state/version.json" <<EOF
 }
 EOF
 
+_PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
+
+# ── [2.5/3] Start Python AI backend (LLM pipeline) ───────────────────────────
+# The Node.js frontend proxy calls http://127.0.0.1:${_PYTHON_BACKEND_PORT}/api/chat
+# to reach the real LLM pipeline.  Without this process, every chat message
+# falls back to keyword-matched placeholder replies.
+PYTHON_PID=""
+_PYTHON_SERVER="$REPO_ROOT/runtime/agents/problem-solver-ui/server.py"
+if command -v python3 >/dev/null 2>&1 && [[ -f "$_PYTHON_SERVER" ]]; then
+  # Stop any stale Python backend from a previous run.
+  _PY_PID_FILE="$REPO_ROOT/python-backend.pid"
+  if [[ -f "$_PY_PID_FILE" ]]; then
+    _OLD_PYPID="$(cat "$_PY_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "${_OLD_PYPID:-}" ]] && kill -0 "$_OLD_PYPID" 2>/dev/null; then
+      kill "$_OLD_PYPID" 2>/dev/null || true
+      sleep 1
+      kill -9 "$_OLD_PYPID" 2>/dev/null || true
+    fi
+    rm -f "$_PY_PID_FILE"
+  fi
+  echo "[2.5/3] Starting Python AI backend on port ${_PYTHON_BACKEND_PORT}..."
+  PROBLEM_SOLVER_UI_PORT="${_PYTHON_BACKEND_PORT}" \
+    PROBLEM_SOLVER_UI_HOST="127.0.0.1" \
+    AI_EMPLOYEE_REPO_DIR="$REPO_ROOT" \
+    python3 "$_PYTHON_SERVER" \
+    >> "$REPO_ROOT/state/python-backend.log" 2>&1 &
+  PYTHON_PID=$!
+  echo "$PYTHON_PID" > "$_PY_PID_FILE"
+
+  # Poll /health until the Python backend responds (up to 40 s).
+  _PY_READY=0
+  for _pi in $(seq 1 40); do
+    sleep 1
+    if curl -fsS --max-time 3 "http://127.0.0.1:${_PYTHON_BACKEND_PORT}/health" > /dev/null 2>&1; then
+      _PY_READY=1
+      break
+    fi
+    echo "  ⏳ Waiting for Python AI backend… (${_pi}/40)"
+  done
+
+  if [[ "$_PY_READY" -eq 1 ]]; then
+    echo "✅ Python AI backend ready on port ${_PYTHON_BACKEND_PORT}"
+  else
+    echo "⚠️  Python AI backend did not respond within 40 s — LLM pipeline may be unavailable."
+    echo "   Check $REPO_ROOT/state/python-backend.log for details."
+    echo "   The system will continue with local fallback replies."
+  fi
+else
+  if [[ ! -f "$_PYTHON_SERVER" ]]; then
+    echo "⚠️  Python AI backend not found at $_PYTHON_SERVER — LLM pipeline unavailable."
+  else
+    echo "⚠️  python3 not found — LLM pipeline unavailable."
+  fi
+fi
+
 echo "[3/3] Starting unified runtime on port ${UI_PORT}..."
 if [[ -f backend.pid ]]; then
   OLD_PID="$(cat backend.pid 2>/dev/null || true)"
@@ -161,7 +216,7 @@ if [[ -f backend.pid ]]; then
   fi
   rm -f backend.pid
 fi
-PORT="${UI_PORT}" PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}" LISTEN_HOST="${LISTEN_HOST:-0.0.0.0}" node backend/server.js &
+PORT="${UI_PORT}" PYTHON_BACKEND_PORT="${_PYTHON_BACKEND_PORT}" LISTEN_HOST="${LISTEN_HOST:-0.0.0.0}" node backend/server.js &
 BACKEND_PID=$!
 
 # Poll /health until the server responds (up to 30 s).
@@ -182,6 +237,7 @@ if [[ "$_BE_READY" -eq 1 ]]; then
   echo "✅ System running at http://localhost:${UI_PORT}"
 else
   echo "❌ Backend did not become healthy within 30 s"
+  [[ -n "${PYTHON_PID:-}" ]] && kill "$PYTHON_PID" 2>/dev/null || true
   kill "$BACKEND_PID" 2>/dev/null || true
   exit 1
 fi

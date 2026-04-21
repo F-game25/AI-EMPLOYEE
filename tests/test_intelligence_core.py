@@ -767,11 +767,18 @@ class TestIntelligenceEndpoints:
         monkeypatch.setattr(server_mod, "_brain_mod",  None)
         monkeypatch.setattr(server_mod, "_intel_mod",  None)
 
+        # Bypass auth for endpoint logic tests — FastAPI's Depends() captures
+        # the function object at route registration time, so dependency_overrides
+        # is the correct mechanism (patch.object on the module attr is not enough).
+        server_mod.app.dependency_overrides[server_mod.require_auth] = lambda: None
+
         ic = _make_intel(tmp_path, monkeypatch, with_brain=False)
         with patch.object(server_mod, "_load_intelligence", return_value=ic):
             from fastapi.testclient import TestClient
             with TestClient(server_mod.app, raise_server_exceptions=False) as c:
                 yield c, ic
+
+        server_mod.app.dependency_overrides.pop(server_mod.require_auth, None)
 
     def test_profile_endpoint_new_user(self, server_client):
         client, ic = server_client
