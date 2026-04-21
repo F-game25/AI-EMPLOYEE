@@ -244,12 +244,13 @@ if command -v python3 >/dev/null 2>&1 && [[ -f "$_PYTHON_SERVER" ]]; then
   if [[ "$_PY_READY" -eq 1 ]]; then
     _ok "Python AI backend ready on port ${PYTHON_BACKEND_PORT}"
   else
-    printf "  ${Y}⚠${NC}  Python AI backend did not respond — LLM pipeline may be unavailable.\n"
+    printf "  ${Y}⚠${NC}  Python AI backend did not respond within 40 s — LLM pipeline may be unavailable.\n"
     printf "       Check %s/state/python-backend.log for details.\n" "$REPO_ROOT_DIR"
+    printf "       The system will continue with local fallback replies.\n"
   fi
 else
   if [[ ! -f "$_PYTHON_SERVER" ]]; then
-    printf "  ${Y}⚠${NC}  Python server not found at %s\n" "$_PYTHON_SERVER"
+    printf "  ${Y}⚠${NC}  Python server not found at %s — LLM pipeline unavailable.\n" "$_PYTHON_SERVER"
   else
     printf "  ${Y}⚠${NC}  python3 not found — LLM pipeline unavailable.\n"
   fi

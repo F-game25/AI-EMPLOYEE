@@ -159,14 +159,15 @@ PYTHON_PID=""
 _PYTHON_SERVER="$REPO_ROOT/runtime/agents/problem-solver-ui/server.py"
 if command -v python3 >/dev/null 2>&1 && [[ -f "$_PYTHON_SERVER" ]]; then
   # Stop any stale Python backend from a previous run.
-  if [[ -f python-backend.pid ]]; then
-    _OLD_PYPID="$(cat python-backend.pid 2>/dev/null || true)"
+  _PY_PID_FILE="$REPO_ROOT/python-backend.pid"
+  if [[ -f "$_PY_PID_FILE" ]]; then
+    _OLD_PYPID="$(cat "$_PY_PID_FILE" 2>/dev/null || true)"
     if [[ -n "${_OLD_PYPID:-}" ]] && kill -0 "$_OLD_PYPID" 2>/dev/null; then
       kill "$_OLD_PYPID" 2>/dev/null || true
       sleep 1
       kill -9 "$_OLD_PYPID" 2>/dev/null || true
     fi
-    rm -f python-backend.pid
+    rm -f "$_PY_PID_FILE"
   fi
   echo "[2.5/3] Starting Python AI backend on port ${_PYTHON_BACKEND_PORT}..."
   PROBLEM_SOLVER_UI_PORT="${_PYTHON_BACKEND_PORT}" \
@@ -175,7 +176,7 @@ if command -v python3 >/dev/null 2>&1 && [[ -f "$_PYTHON_SERVER" ]]; then
     python3 "$_PYTHON_SERVER" \
     >> "$REPO_ROOT/state/python-backend.log" 2>&1 &
   PYTHON_PID=$!
-  echo "$PYTHON_PID" > python-backend.pid
+  echo "$PYTHON_PID" > "$_PY_PID_FILE"
 
   # Poll /health until the Python backend responds (up to 40 s).
   _PY_READY=0
