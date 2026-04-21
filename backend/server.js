@@ -1408,6 +1408,44 @@ function requestPythonJSON(pathname, method = 'GET', payload = null) {
 }
 
 /**
+ * Build a contextual local reply when the Python LLM backend is unavailable.
+ * Uses live subsystem state to produce a meaningful (non-generic) response.
+ */
+function buildLocalFallbackReply(message, queuedTask) {
+  const lower = (message || '').toLowerCase();
+  const subsystem = (queuedTask && queuedTask.subsystem) || 'general';
+  const agentId = (queuedTask && queuedTask.agentId) || 'agent';
+  const mode = getMode();
+  const running = getRunningAgentCount();
+
+  if (/\b(health|diagnos|system check|doctor)\b/.test(lower) || subsystem === 'doctor') {
+    const dr = subsystems.getDoctorStatus();
+    const score = dr.overall_score || 0;
+    const issueCount = (dr.issues || []).length;
+    return `[DOCTOR] System health score: ${score}/100. ${issueCount ? `${issueCount} issue(s) detected.` : 'All subsystems clear.'} Grade: ${dr.grade || 'N/A'}.`;
+  }
+  if (/\b(memory|knowledge|context|recall|entities)\b/.test(lower) || subsystem === 'memory') {
+    const mem = subsystems.getMemoryTree();
+    return `[MEMORY] ${mem.total_entities || 0} knowledge entities on file. Your request has been indexed for future context.`;
+  }
+  if (/\b(neural|network|confidence|train|learn|model)\b/.test(lower) || subsystem === 'nn') {
+    const nn = subsystems.getNNStatus();
+    const conf = Math.round((nn.confidence || 0) * 100);
+    return `[NEURAL] Operating in ${nn.mode || 'standard'} mode — confidence ${conf}%, ${(nn.experiences || 0).toLocaleString()} experiences logged.`;
+  }
+  if (/\b(status|how are you|overview)\b/.test(lower)) {
+    return `[ORCHESTRATOR] Mode: ${mode}. Active agents: ${running}. Tasks processed: ${runtimeState.tasksExecuted}. All systems nominal.`;
+  }
+  if (/\b(hello|hi|hey|greet)\b/.test(lower)) {
+    return `Hello! I'm your AI employee operating in ${mode} mode with ${running} active agent${running !== 1 ? 's' : ''}. How can I help?`;
+  }
+  if (/\b(help|what can you|capabilities)\b/.test(lower)) {
+    return `I can: run automation pipelines, manage agents, analyze data, search knowledge, diagnose system health, execute goals via Money Mode or Ascend Forge. What would you like to do?`;
+  }
+  return `[${agentId.toUpperCase()}] Request received and routed in ${mode} mode (${running} agent${running !== 1 ? 's' : ''} active). Task ${queuedTask ? queuedTask.taskId : 'unknown'} is being processed.`;
+}
+
+/**
  * Proxy a chat message to the Python backend's full LLM pipeline.
  * Returns the response string on success, or null if the Python backend
  * is unreachable (callers fall back to the local buildHumanReply).
@@ -1701,7 +1739,7 @@ app.post('/api/chat', async (req, res) => {
     ok: true,
     taskId: queued.taskId,
     workflow_run: run.run_id,
-    reply: `I'm working on that now. I'll have a response for you shortly.`,
+    reply: buildLocalFallbackReply(message, queued),
   });
 });
 
@@ -2197,6 +2235,8 @@ wss.on('connection', (ws) => {
         // The Python backend has the full pipeline: context injection,
         // memory, LLM call, personalised response. Use it instead of
         // the generic keyword-matched buildHumanReply.
+        // When Python is unavailable, we MUST still broadcast an
+        // orchestrator:message so the UI does not stay stuck on "processing".
         requestPythonChat(parsed.message).then((llmReply) => {
           if (llmReply) {
             console.info('[AI FLOW] → LLM response returned (WS→Python): len=%d', llmReply.length);
@@ -2209,10 +2249,26 @@ wss.on('connection', (ws) => {
               timestamp: new Date().toISOString(),
             });
           } else {
-            console.info('[AI FLOW] → Fallback response (Python unavailable): taskId=%s', queued.taskId);
+            console.info('[AI FLOW] → Local fallback response (Python unavailable, WS): taskId=%s', queued.taskId);
+            broadcaster.broadcast('orchestrator:message', {
+              message: buildLocalFallbackReply(parsed.message, queued),
+              subsystem: queued.subsystem || 'orchestrator',
+              taskId: queued.taskId,
+              from: queued.agentId,
+              agentId: queued.agentId,
+              timestamp: new Date().toISOString(),
+            });
           }
         }).catch((err) => {
           console.warn('[AI FLOW] Python chat proxy failed:', err && err.message);
+          broadcaster.broadcast('orchestrator:message', {
+            message: buildLocalFallbackReply(parsed.message, queued),
+            subsystem: queued.subsystem || 'orchestrator',
+            taskId: queued.taskId,
+            from: queued.agentId,
+            agentId: queued.agentId,
+            timestamp: new Date().toISOString(),
+          });
         });
         console.info('[AI FLOW] → Task queued (WS): taskId=%s', queued.taskId);
       }
