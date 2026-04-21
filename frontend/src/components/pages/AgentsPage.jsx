@@ -194,11 +194,22 @@ function GradeDistribution({ distribution }) {
 }
 
 export default function AgentsPage() {
-  const agents = useAppStore(s => s.agents)
+  const rawAgents = useAppStore(s => s.agents)
   const systemStatus = useAppStore(s => s.systemStatus)
   const [filter, setFilter] = useState('all')
   const [gradesMap, setGradesMap] = useState({})
   const [gradeMetrics, setGradeMetrics] = useState(null)
+
+  // Normalize backend snapshot fields (state→status, task→current_task, etc.)
+  const agents = useMemo(() => {
+    if (!rawAgents || rawAgents.length === 0) return []
+    return rawAgents.map(a => ({
+      ...a,
+      status: a.status ?? a.state,
+      current_task: a.current_task ?? a.task,
+      tasks_completed: a.tasks_completed ?? a.tasksCompleted,
+    }))
+  }, [rawAgents])
 
   const fetchGrades = useCallback(async () => {
     try {
