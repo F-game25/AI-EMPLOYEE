@@ -1680,7 +1680,8 @@ app.post('/api/tasks/run', (req, res) => {
 // Compatibility endpoint used by legacy CLI flows (`ai-employee do/onboard`)
 app.post('/api/chat', async (req, res) => {
   const message = String((req.body || {}).message || '').trim();
-  const modelRoute = String((req.body || {}).model_route || '').trim() || undefined;
+  const _modelRouteTrimmed = ((req.body || {}).model_route || '').trim();
+  const modelRoute = _modelRouteTrimmed || undefined;
   if (!message) {
     return res.status(400).json({ ok: false, error: 'message required' });
   }

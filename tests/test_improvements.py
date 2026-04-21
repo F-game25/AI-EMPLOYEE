@@ -52,10 +52,19 @@ def _load_server(tmp_path: Path):
 
 @pytest.fixture()
 def server(tmp_path):
-    """Load server module and return (module, TestClient)."""
+    """Load server module and return (module, TestClient).
+
+    ``require_auth`` is bypassed via FastAPI's dependency_overrides so that
+    tests exercise business logic rather than auth mechanics.  This is the
+    correct approach because FastAPI captures the function *object* (not the
+    module attribute name) at route-registration time, so ``patch.object``
+    alone cannot override a ``Depends(require_auth)`` dependency.
+    """
     mod = _load_server(tmp_path)
+    mod.app.dependency_overrides[mod.require_auth] = lambda: None
     client = TestClient(mod.app, raise_server_exceptions=True)
-    return mod, client
+    yield mod, client
+    mod.app.dependency_overrides.clear()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
