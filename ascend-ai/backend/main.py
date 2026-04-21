@@ -5,6 +5,7 @@ UI loads independently — dashboard works even when ALL agents are offline.
 """
 
 import asyncio
+import logging
 import os
 
 import uvicorn
@@ -12,6 +13,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+
+logger = logging.getLogger(__name__)
 
 from routers.agents import router as agents_router
 from routers.ascend_forge import router as forge_router
@@ -80,36 +83,49 @@ if os.path.exists(static_dir):
 # ── Startup ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
+    startup_results: dict[str, str] = {}
+
     # Start LLM router (Ollama ping + background health check)
     try:
         from services.llm_router import get_llm_router
 
         await get_llm_router().startup()
-    except Exception:
-        pass  # Never crash if LLM router fails on startup
+        status = get_llm_router().get_status()
+        startup_results["llm_router"] = (
+            f"OK — provider={status['provider']} model={status['model']}"
+        )
+    except Exception as e:
+        logger.error("[STARTUP] llm_router failed: %s", e)
+        startup_results["llm_router"] = f"FAILED: {e}"
 
     # Start system monitor background polling
     try:
         from services.system_monitor import poll_forever
 
         asyncio.create_task(poll_forever())
-    except Exception:
-        pass  # Never crash if monitor fails
+        startup_results["system_monitor"] = "OK"
+    except Exception as e:
+        logger.error("[STARTUP] system_monitor failed: %s", e)
+        startup_results["system_monitor"] = f"FAILED: {e}"
 
     # Initialise agent manager
     try:
         from services.agent_manager import startup as agent_startup
 
         await agent_startup()
-    except Exception:
-        pass  # Never crash if agents are broken
+        startup_results["agent_manager"] = "OK"
+    except Exception as e:
+        logger.error("[STARTUP] agent_manager failed: %s", e)
+        startup_results["agent_manager"] = f"FAILED: {e}"
 
     # Start WebSocket broadcast loops
     try:
         asyncio.create_task(stats_broadcast_loop())
         asyncio.create_task(agents_broadcast_loop())
-    except Exception:
-        pass
+        startup_results["ws_broadcast_loops"] = "OK"
+    except Exception as e:
+        logger.error("[STARTUP] ws_broadcast_loops failed: %s", e)
+        startup_results["ws_broadcast_loops"] = f"FAILED: {e}"
 
     # Start log streamer
     try:
@@ -117,8 +133,18 @@ async def startup():
         from websocket_manager import broadcast
 
         asyncio.create_task(tail_logs_forever(broadcast))
-    except Exception:
-        pass
+        startup_results["log_streamer"] = "OK"
+    except Exception as e:
+        logger.error("[STARTUP] log_streamer failed: %s", e)
+        startup_results["log_streamer"] = f"FAILED: {e}"
+
+    # ── Startup summary ────────────────────────────────────────────────
+    logger.info("=" * 60)
+    logger.info("ASCEND AI STARTUP SUMMARY")
+    for subsystem, result in startup_results.items():
+        level = "✓" if result.startswith("OK") else "✗"
+        logger.info("  %s %-22s %s", level, subsystem, result)
+    logger.info("=" * 60)
 
 
 # ── Entry point ──────────────────────────────────────────────────────

@@ -127,9 +127,9 @@ class LLMRouter:
         self.active_model = _ANTHROPIC_FALLBACK_MODEL
 
     async def _health_loop(self) -> None:
-        """Re-check Ollama every 60 seconds so it auto-recovers."""
+        """Re-check Ollama every 10 seconds so it auto-recovers quickly."""
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(10)
             await self._check_ollama()
 
     def _pick_model(self, models: list[dict]) -> str:
@@ -185,13 +185,14 @@ class LLMRouter:
         session_id: str,
         context: str,
         message: str,
-    ) -> AsyncIterator[tuple[str, bool, bool]]:
+    ) -> AsyncIterator[tuple[str, bool, bool, bool]]:
         """
-        Async generator yielding ``(content, done, is_fallback)`` tuples.
+        Async generator yielding ``(content, done, is_fallback, is_error)`` tuples.
 
-        * ``content`` — text chunk (empty string when ``done=True``)
-        * ``done``    — True on the final sentinel tuple
+        * ``content``     — text chunk (empty string when ``done=True``)
+        * ``done``        — True on the final sentinel tuple
         * ``is_fallback`` — True only on the first chunk when Anthropic is used
+        * ``is_error``    — True when both providers are unavailable
         """
         history_key = f"{session_id}:{context}"
         system_prompt = SYSTEM_PROMPTS.get(context, SYSTEM_PROMPTS["main"])
@@ -206,9 +207,9 @@ class LLMRouter:
                     messages, system_prompt, max_tokens
                 ):
                     full_response += chunk
-                    yield chunk, False, False
+                    yield chunk, False, False, False
                 self._update_history(history_key, message, full_response)
-                yield "", True, False
+                yield "", True, False, False
                 return
             except Exception as exc:
                 logger.warning(
@@ -216,6 +217,8 @@ class LLMRouter:
                 )
                 self.ollama_available = False
                 self.active_provider = "anthropic"
+                # Trigger an immediate re-check so next request can use Ollama if it recovers
+                asyncio.create_task(self._check_ollama())
 
         # ── Anthropic fallback ───────────────────────────────────────────────
         api_key = self._get_anthropic_key()
@@ -225,6 +228,7 @@ class LLMRouter:
                 "Please run `ollama serve` in your terminal to start the local AI.",
                 True,
                 False,
+                True,  # is_error
             )
             return
 
@@ -235,10 +239,10 @@ class LLMRouter:
                 messages, system_prompt, max_tokens, api_key
             ):
                 full_response += chunk
-                yield chunk, False, is_first_chunk
+                yield chunk, False, is_first_chunk, False
                 is_first_chunk = False
             self._update_history(history_key, message, full_response)
-            yield "", True, False
+            yield "", True, False, False
         except Exception as exc:
             logger.error("Anthropic fallback also failed: %s", exc)
             yield (
@@ -246,6 +250,7 @@ class LLMRouter:
                 "Please run `ollama serve` in your terminal to start the local AI.",
                 True,
                 False,
+                True,  # is_error
             )
 
     # ── Ollama streaming ─────────────────────────────────────────────────────
