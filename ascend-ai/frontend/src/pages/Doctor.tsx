@@ -39,7 +39,10 @@ export function Doctor() {
     }
   }, [isStreaming, pending])
 
-  // "Thinking..." after 3s
+  // Cleanup pending timer on unmount
+  useEffect(() => () => { if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current) }, [])
+
+
   const [showThinking, setShowThinking] = useState(false)
   useEffect(() => {
     if (!loading) { setShowThinking(false); return }
