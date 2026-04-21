@@ -1454,9 +1454,11 @@ function buildLocalFallbackReply(message, queuedTask) {
  */
 const PYTHON_CHAT_TIMEOUT_MS = 30000;
 
-function requestPythonChat(message) {
+function requestPythonChat(message, modelRoute) {
   return new Promise((resolve) => {
-    const body = JSON.stringify({ message });
+    const payload = { message };
+    if (modelRoute) payload.model_route = modelRoute;
+    const body = JSON.stringify(payload);
     const req = http.request(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
@@ -1678,6 +1680,7 @@ app.post('/api/tasks/run', (req, res) => {
 // Compatibility endpoint used by legacy CLI flows (`ai-employee do/onboard`)
 app.post('/api/chat', async (req, res) => {
   const message = String((req.body || {}).message || '').trim();
+  const modelRoute = String((req.body || {}).model_route || '').trim() || undefined;
   if (!message) {
     return res.status(400).json({ ok: false, error: 'message required' });
   }
@@ -1719,7 +1722,7 @@ app.post('/api/chat', async (req, res) => {
   // ── Proxy to Python LLM backend for real AI response ──────────────────────
   let llmReply = null;
   try {
-    llmReply = await requestPythonChat(message);
+    llmReply = await requestPythonChat(message, modelRoute);
   } catch (err) {
     console.warn('[AI FLOW] Python chat proxy failed (HTTP path):', err && err.message);
   }
@@ -2237,7 +2240,8 @@ wss.on('connection', (ws) => {
         // the generic keyword-matched buildHumanReply.
         // When Python is unavailable, we MUST still broadcast an
         // orchestrator:message so the UI does not stay stuck on "processing".
-        requestPythonChat(parsed.message).then((llmReply) => {
+        const wsModelRoute = parsed.model_route || undefined;
+        requestPythonChat(parsed.message, wsModelRoute).then((llmReply) => {
           if (llmReply) {
             console.info('[AI FLOW] → LLM response returned (WS→Python): len=%d', llmReply.length);
             broadcaster.broadcast('orchestrator:message', {
