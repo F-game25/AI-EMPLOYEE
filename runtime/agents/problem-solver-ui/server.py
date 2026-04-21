@@ -918,16 +918,19 @@ def _build_llm_system_prompt(
             logger.debug("_build_llm_system_prompt: context error — %s", exc)
 
     base = (
-        "You are AI Employee, a high-agency execution assistant with a natural human tone. "
+        "You are AI Employee — a highly capable, human-like business assistant. "
+        "You speak naturally, like a knowledgeable colleague: warm, direct, and helpful. "
         f"Current mode: {mode}. "
         f"Available agents in this mode: {available_agents}. "
         f"Routed specialist agent: {routed_agent}. "
-        f"User task: {message}. "
-        "Produce real output immediately. Do not ask follow-up questions. "
+        "Respond to the user's request immediately with real, concrete output. "
+        "Do NOT start your reply with '[AGENT]' tags, 'System:' prefixes, or any robotic phrasing. "
+        "Do NOT ask unnecessary follow-up questions — act on what you know. "
         f"{tone_hint}"
-        "Write conversationally, with clear structure, and avoid robotic phrasing. "
-        "If live data or browsing is unavailable, say that clearly and provide the exact plan, structure, or draft you would deliver instead. "
-        "Be concrete, concise, and useful."
+        "Use clear structure (short paragraphs or bullet points) where it helps readability. "
+        "If live data or internet access is unavailable, say so briefly and provide the best plan, "
+        "draft, or answer you can without it. "
+        "Be warm, concrete, and genuinely useful."
     )
 
     if context_block:
@@ -1378,8 +1381,40 @@ _ai_flow_logger = logging.getLogger("ai_flow")
 
 
 def _fallback_response(msg: str) -> str:
-    """Return a safe, user-visible fallback string when the AI pipeline fails."""
-    return f"System recovered: {msg}"
+    """Return a user-friendly message when the AI pipeline cannot produce a response."""
+    # Map internal technical messages to natural, human-readable responses.
+    _msg_lower = msg.lower()
+    if "no model is available" in _msg_lower or "add groq_api_key" in _msg_lower or "ollama" in _msg_lower:
+        return (
+            "I don't have an AI model connected right now. To fix this, either:\n\n"
+            "• **Local (free):** Install Ollama from https://ollama.ai and run `ollama serve` in your terminal.\n"
+            "• **Cloud:** Add your ANTHROPIC_API_KEY or OPENAI_API_KEY to `~/.ai-employee/.env`.\n\n"
+            "Once a model is available I'll be ready to help with anything you need."
+        )
+    if "authentication failed" in _msg_lower or "api key" in _msg_lower:
+        return (
+            "It looks like your API key isn't working. Please double-check that your key is correct "
+            "in `~/.ai-employee/.env` and try again. If you're using Ollama locally, make sure `ollama serve` "
+            "is running."
+        )
+    if "timed out" in _msg_lower or "timeout" in _msg_lower:
+        return (
+            "That took longer than expected — the AI model didn't respond in time. "
+            "This can happen when the model is loading or the system is under load. "
+            "Please try again in a moment."
+        )
+    if "temporarily unavailable" in _msg_lower or "circuit" in _msg_lower:
+        return (
+            "The AI service is temporarily unavailable — it should recover on its own shortly. "
+            "Please wait a moment and try again."
+        )
+    if "no model response" in _msg_lower or "empty" in _msg_lower:
+        return (
+            "The AI returned an empty response. This sometimes happens with local models. "
+            "Try rephrasing your question, or switch to a cloud provider in Settings."
+        )
+    # Generic fallback — still conversational
+    return f"I ran into an issue: {msg} Please try again or check the Doctor page for diagnostics."
 
 
 # ── Neural-network non-blocking enhancement layer ─────────────────────────────
