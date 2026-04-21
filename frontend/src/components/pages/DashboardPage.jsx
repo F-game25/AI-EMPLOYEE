@@ -394,7 +394,7 @@ export default function DashboardPage() {
                 sendChatMessage('Activate Hermes agent for rapid task execution')
               }} />
               <QuickAction label="◉ Blacklight Mode" onClick={() => {
-                fetch(`${BASE}/api/agents/mode`, {
+                fetch(`${BASE}/api/mode`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ mode: 'BLACKLIGHT' }),
