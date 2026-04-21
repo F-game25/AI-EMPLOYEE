@@ -45,15 +45,31 @@ async def _stream_and_broadcast(
 ) -> None:
     """
     Call the LLM router and broadcast each chunk to all WebSocket clients.
-    Chunk format: ``{ type: "chat_chunk", data: { content, done, context, session_id } }``
+    Normal chunks: ``{ type: "chat_chunk", data: { content, done, context, session_id } }``
+    Error chunks:  ``{ type: "chat_error", data: { content, context, session_id } }``
     The first fallback chunk also carries ``fallback: true``.
     """
     llm = get_llm_router()
     fallback_flagged = False
     try:
-        async for content, done, is_fallback in llm.stream_chat(
+        async for content, done, is_fallback, is_error in llm.stream_chat(
             session_id, context, message
         ):
+            # Provider-unavailable errors → distinct message type so frontend
+            # can show them without requiring an active stream.
+            if is_error:
+                await broadcast(
+                    {
+                        "type": "chat_error",
+                        "data": {
+                            "content": content,
+                            "context": context,
+                            "session_id": session_id,
+                        },
+                    }
+                )
+                return
+
             payload: dict = {
                 "type": "chat_chunk",
                 "data": {
@@ -71,10 +87,9 @@ async def _stream_and_broadcast(
         logger.error("Unexpected error in _stream_and_broadcast: %s", exc)
         await broadcast(
             {
-                "type": "chat_chunk",
+                "type": "chat_error",
                 "data": {
                     "content": "An error occurred. Please try again.",
-                    "done": True,
                     "context": context,
                     "session_id": session_id,
                 },

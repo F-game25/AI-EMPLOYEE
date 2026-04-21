@@ -14,12 +14,27 @@ export function Dashboard() {
   } = useStore()
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Break #3: instant loading feedback before first WS chunk arrives
+  const [pending, setPending] = useState(false)
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isStreaming = activeStream?.context === 'main'
-  const loading = isStreaming
+  // loading = true as soon as user sends (pending) or once WS stream starts
+  const loading = isStreaming || pending
   const streamContent = isStreaming ? activeStream!.content : ''
 
-  // "Thinking..." after 3s with no content
+  // Clear pending once WS stream starts (Break #3)
+  useEffect(() => {
+    if (isStreaming && pending) {
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current)
+      setPending(false)
+    }
+  }, [isStreaming, pending])
+
+  // Cleanup pending timer on unmount
+  useEffect(() => () => { if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current) }, [])
+
+
   const [showThinking, setShowThinking] = useState(false)
   useEffect(() => {
     if (!loading) { setShowThinking(false); return }
@@ -38,6 +53,9 @@ export function Dashboard() {
     addMainChat({ role: 'user', content: input })
     const text = input
     setInput('')
+    // Break #3: instant loading feedback before WS responds
+    setPending(true)
+    pendingTimerRef.current = setTimeout(() => setPending(false), 2000)
     try {
       await fetch('/api/chat', {
         method: 'POST',
@@ -45,6 +63,8 @@ export function Dashboard() {
         body: JSON.stringify({ message: text, context: 'main', session_id: getSessionId() }),
       })
     } catch {
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current)
+      setPending(false)
       addMainChat({ role: 'ai', content: 'Connection error. Check backend.' })
     }
   }
@@ -109,7 +129,12 @@ export function Dashboard() {
                 alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
                 maxWidth: '80%',
                 background: m.role === 'user' ? 'rgba(212,175,55,0.08)' : 'rgba(205,127,50,0.06)',
-                borderLeft: m.role === 'ai' ? '2px solid var(--bronze)' : undefined,
+                // Break #7: error messages get a red-bronze left border
+                borderLeft: m.role === 'ai'
+                  ? m.tag === 'ERROR'
+                    ? '2px solid #CD3232'
+                    : '2px solid var(--bronze)'
+                  : undefined,
                 borderRight: m.role === 'user' ? '2px solid var(--gold)' : undefined,
                 padding: '10px 14px',
                 borderRadius: 8,
@@ -123,7 +148,7 @@ export function Dashboard() {
               }}
             >
               {m.tag && (
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--bronze)', marginRight: 8 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: m.tag === 'ERROR' ? '#CD3232' : 'var(--bronze)', marginRight: 8 }}>
                   [{m.tag}]
                 </span>
               )}
