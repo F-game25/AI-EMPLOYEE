@@ -55,7 +55,7 @@ cd "$SCRIPT_DIR"
 # Wait for backend to be ready
 echo "[ASCEND] Waiting for backend to become ready..."
 _READY=0
-for i in $(seq 1 30); do
+for i in {1..30}; do
     if curl -s "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
         _READY=1
         break
