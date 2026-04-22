@@ -25105,7 +25105,7 @@ def list_pipeline_traces(_auth: None = Depends(require_auth)):
         return JSONResponse({"traces": get_pipeline_traces(limit=20)})
     except Exception as exc:
         logger.warning("pipeline-trace endpoint error: %s", exc)
-        return JSONResponse({"traces": [], "error": str(exc)})
+        return JSONResponse({"traces": [], "error": "Pipeline trace unavailable"})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
