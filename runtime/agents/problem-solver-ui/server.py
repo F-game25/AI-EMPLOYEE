@@ -19205,6 +19205,13 @@ def handle_command(
             generate_llm_response_fn=_llm_fn,
         )
     except Exception as _pui_exc:
+        # Respect STRICT_PIPELINE — when set, re-raise instead of falling back
+        try:
+            from core.unified_pipeline import STRICT_PIPELINE as _STRICT  # noqa: PLC0415
+        except Exception:
+            _STRICT = False
+        if _STRICT:
+            raise
         logger.warning(
             "unified_pipeline.process_user_input failed, falling back to direct LLM: %s",
             _pui_exc,
@@ -25080,6 +25087,25 @@ def get_trace(trace_id: str, _auth: None = Depends(require_auth)):
     if tree is None:
         raise HTTPException(404, f"Trace '{trace_id}' not found")
     return JSONResponse(tree)
+
+
+@app.get("/api/pipeline-trace")
+def list_pipeline_traces(_auth: None = Depends(require_auth)):
+    """Return the most recent unified pipeline execution traces (newest first).
+
+    Each trace includes per-phase metadata: retrieved_nodes counts, decision,
+    validated_tasks, agent_results (with real_execution flag), final_output
+    snippet, latency_ms, and whether the run was degraded.
+
+    Useful for the neural brain debug panel, regression investigations, and
+    pipeline health monitoring.
+    """
+    try:
+        from core.unified_pipeline import get_pipeline_traces  # noqa: PLC0415
+        return JSONResponse({"traces": get_pipeline_traces(limit=20)})
+    except Exception as exc:
+        logger.warning("pipeline-trace endpoint error: %s", exc)
+        return JSONResponse({"traces": [], "error": str(exc)})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
