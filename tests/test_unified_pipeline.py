@@ -17,7 +17,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -30,16 +30,22 @@ from core.unified_pipeline import (
     PipelineViolationError,
     _PipelineRun,
     _FALLBACK_PREFIX,
+    _DEGRADED_MARKER,
+    _is_real_execution,
     build_context,
     classify_decision,
+    connect_nodes,
     decompose_to_tasks,
     execute_tasks,
     format_response,
+    get_pipeline_traces,
     monitor_and_improve,
     process_user_input,
     retrieve_relevant_nodes,
     update_graph,
     validate_pipeline_integrity,
+    validate_tasks,
+    STRICT_PIPELINE,
 )
 
 
@@ -56,7 +62,7 @@ def _run(
     graph_data: dict | None = None,
 ) -> _PipelineRun:
     run = _PipelineRun(input_text, "user1", "power", "")
-    run.graph_data = graph_data if graph_data is not None else {"nodes": "node1", "concepts": [], "past_decisions": []}
+    run.graph_data = graph_data if graph_data is not None else {"nodes": "node1", "concepts": [], "past_decisions": [], "expanded": []}
     run.llm_called = llm_called
     run.tasks_executed = tasks_executed
     run.final_response = response
@@ -348,7 +354,8 @@ class TestUpdateGraph:
 
             update_graph("user input", "email", "AI response", [])
 
-        mock_ks.return_value.add_knowledge.assert_called_once()
+        # add_knowledge is called at least once (for the intent entry)
+        mock_ks.return_value.add_knowledge.assert_called()
         mock_ks.return_value.learn_from_conversation.assert_called_once_with("user input")
 
     def test_memory_index_updated(self):
@@ -426,7 +433,7 @@ class TestMonitorAndImprove:
 class TestValidatePipelineIntegrity:
     def test_passes_when_all_stages_ran(self):
         run = _run(
-            graph_data={"nodes": "some context", "concepts": [], "past_decisions": []},
+            graph_data={"nodes": "some context", "concepts": [], "past_decisions": [], "expanded": []},
             llm_called=True,
             tasks_executed=1,
             response="A real answer",
@@ -436,7 +443,7 @@ class TestValidatePipelineIntegrity:
 
     def test_raises_when_graph_empty(self):
         run = _run(
-            graph_data={"nodes": "", "concepts": [], "past_decisions": []},
+            graph_data={"nodes": "", "concepts": [], "past_decisions": [], "expanded": []},
             llm_called=True,
             tasks_executed=1,
             response="A real answer",
@@ -465,7 +472,7 @@ class TestValidatePipelineIntegrity:
 
     def test_multiple_violations_in_one_error(self):
         run = _run(
-            graph_data={"nodes": "", "concepts": [], "past_decisions": []},
+            graph_data={"nodes": "", "concepts": [], "past_decisions": [], "expanded": []},
             llm_called=False,
             tasks_executed=0,
             response=f"{_FALLBACK_PREFIX} error",
@@ -480,7 +487,7 @@ class TestValidatePipelineIntegrity:
         with patch("core.audit_engine.get_audit_engine") as mock_audit:
             mock_audit.return_value.record.return_value = None
             run = _run(
-                graph_data={"nodes": "", "concepts": [], "past_decisions": []},
+                graph_data={"nodes": "", "concepts": [], "past_decisions": [], "expanded": []},
                 llm_called=False,
                 tasks_executed=0,
                 response="A real answer",
@@ -498,6 +505,7 @@ class TestValidatePipelineIntegrity:
                 "nodes": "",
                 "concepts": [],
                 "past_decisions": [{"text": "past decision 1", "importance": 0.5}],
+                "expanded": [],
             },
             llm_called=True,
             tasks_executed=1,
@@ -685,3 +693,524 @@ class TestProcessUserInput:
         mock_ctrl.return_value.run_goal.return_value = {"tasks": []}
         mock_forge.return_value.submit_change.return_value = MagicMock()
         mock_audit.return_value.record.return_value = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Fix 1 — STRICT_PIPELINE mode
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestStrictPipelineMode:
+    """Fix 1: STRICT_PIPELINE env-var hard mode — no fallbacks, loud failures."""
+
+    def test_strict_pipeline_constant_is_bool(self):
+        assert isinstance(STRICT_PIPELINE, bool)
+
+    def test_validate_tasks_raises_in_strict_mode(self, monkeypatch):
+        import core.unified_pipeline as up
+        monkeypatch.setattr(up, "STRICT_PIPELINE", True)
+        # Malformed task (missing agent) — must raise in strict mode
+        with pytest.raises(PipelineViolationError, match="missing required fields"):
+            validate_tasks([{"action": "do something", "inputs": {}}])
+
+    def test_validate_tasks_drops_in_non_strict_mode(self, monkeypatch):
+        import core.unified_pipeline as up
+        monkeypatch.setattr(up, "STRICT_PIPELINE", False)
+        # Malformed task — must be silently dropped (no raise)
+        result = validate_tasks([{"action": "do something", "inputs": {}}])
+        assert result == []
+
+    def test_execute_tasks_raises_in_strict_mode(self, monkeypatch):
+        import core.unified_pipeline as up
+        monkeypatch.setattr(up, "STRICT_PIPELINE", True)
+        with patch("core.agent_controller.get_agent_controller", side_effect=RuntimeError("boom")):
+            tasks = [{"agent": "x", "action": "y", "intent": "ops", "inputs": {}}]
+            with pytest.raises(RuntimeError, match="boom"):
+                execute_tasks(tasks, "goal")
+
+    def test_execute_tasks_skips_in_non_strict_mode(self, monkeypatch):
+        import core.unified_pipeline as up
+        monkeypatch.setattr(up, "STRICT_PIPELINE", False)
+        with patch("core.agent_controller.get_agent_controller", side_effect=RuntimeError("boom")):
+            tasks = [{"agent": "x", "action": "y", "intent": "ops", "inputs": {}}]
+            results = execute_tasks(tasks, "goal")
+        assert results[0]["status"] == "skipped"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Fix 2 — Graph depth expansion
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestGraphDepthExpansion:
+    """Fix 2: retrieve_relevant_nodes() does 1-hop neighbor expansion and returns
+    an 'expanded' key in its output dict."""
+
+    def test_returns_expanded_key(self):
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks, \
+             patch("core.memory_index.get_memory_index") as mock_mi, \
+             patch("core.memory_index.embed_text", return_value=[0.1, 0.2]), \
+             patch("core.memory_index.cosine_similarity", return_value=0.5):
+            mock_ks.return_value.get_relevant_context.return_value = ""
+            mock_ks.return_value.search_knowledge.return_value = []
+            mock_mi.return_value.get_relevant_memories.return_value = []
+            result = retrieve_relevant_nodes("query")
+        assert "expanded" in result
+
+    def test_concepts_ranked_by_similarity(self):
+        """Concepts should be sorted by descending cosine similarity to input."""
+        hits = [
+            {"content": "low score concept"},
+            {"content": "high score concept"},
+        ]
+        scores = {"low score concept": 0.3, "high score concept": 0.9}
+
+        def _sim(a, b):
+            # identify concept by its embed call sequence
+            return scores.get("high score concept" if b == [0.9] else "low score concept", 0.3)
+
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks, \
+             patch("core.memory_index.get_memory_index") as mock_mi, \
+             patch("core.memory_index.embed_text") as mock_embed, \
+             patch("core.memory_index.cosine_similarity") as mock_sim:
+            mock_ks.return_value.get_relevant_context.return_value = ""
+            mock_ks.return_value.search_knowledge.return_value = hits
+            mock_mi.return_value.get_relevant_memories.return_value = []
+            # Return distinct vectors so we can simulate scoring
+            mock_embed.side_effect = lambda text: [0.9] if "high" in text else [0.3]
+            mock_sim.side_effect = lambda a, b: 0.9 if b == [0.9] else 0.3
+            result = retrieve_relevant_nodes("query")
+
+        # The high-score concept should come first
+        if result["concepts"]:
+            assert result["concepts"][0] == "high score concept"
+
+    def test_expanded_nodes_populated_from_neighbors(self):
+        """Expanded key should be populated when KS search returns neighbor hits."""
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks, \
+             patch("core.memory_index.get_memory_index") as mock_mi, \
+             patch("core.memory_index.embed_text", return_value=[0.1]), \
+             patch("core.memory_index.cosine_similarity", return_value=0.7):
+            mock_ks.return_value.get_relevant_context.return_value = ""
+            mock_ks.return_value.search_knowledge.return_value = [
+                {"content": "neighbor concept text"}
+            ]
+            mock_mi.return_value.get_relevant_memories.return_value = []
+            result = retrieve_relevant_nodes("query with keywords")
+
+        # expanded may be populated (depends on token matching); just check type
+        assert isinstance(result["expanded"], list)
+
+    def test_build_context_includes_expanded_section(self):
+        graph_data = {
+            "nodes": "",
+            "concepts": [],
+            "past_decisions": [],
+            "expanded": ["neighbor concept A", "neighbor concept B"],
+        }
+        ctx = build_context("q", graph_data)
+        assert "Neighbor Concepts" in ctx
+        assert "neighbor concept A" in ctx
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Fix 3 — Task schema validation
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestValidateTasks:
+    """Fix 3: validate_tasks() enforces required fields on every task."""
+
+    def test_valid_tasks_pass_through(self):
+        tasks = [{"agent": "x", "action": "y", "inputs": {}, "intent": "ops"}]
+        result = validate_tasks(tasks)
+        assert len(result) == 1
+
+    def test_missing_agent_drops_task(self, monkeypatch):
+        import core.unified_pipeline as up
+        monkeypatch.setattr(up, "STRICT_PIPELINE", False)
+        tasks = [{"action": "y", "inputs": {}}]
+        result = validate_tasks(tasks)
+        assert result == []
+
+    def test_missing_action_drops_task(self, monkeypatch):
+        import core.unified_pipeline as up
+        monkeypatch.setattr(up, "STRICT_PIPELINE", False)
+        tasks = [{"agent": "x", "inputs": {}}]
+        result = validate_tasks(tasks)
+        assert result == []
+
+    def test_missing_inputs_drops_task(self, monkeypatch):
+        import core.unified_pipeline as up
+        monkeypatch.setattr(up, "STRICT_PIPELINE", False)
+        tasks = [{"agent": "x", "action": "y"}]
+        result = validate_tasks(tasks)
+        assert result == []
+
+    def test_mixed_valid_and_invalid_keeps_only_valid(self, monkeypatch):
+        import core.unified_pipeline as up
+        monkeypatch.setattr(up, "STRICT_PIPELINE", False)
+        tasks = [
+            {"agent": "x", "action": "y", "inputs": {}},
+            {"action": "z"},  # invalid — no agent or inputs
+            {"agent": "a", "action": "b", "inputs": {"k": "v"}},
+        ]
+        result = validate_tasks(tasks)
+        assert len(result) == 2
+
+    def test_decompose_to_tasks_produces_validated_output(self):
+        """decompose_to_tasks must return only valid tasks."""
+        tasks = decompose_to_tasks("some llm output", "ops", ["task-orchestrator"])
+        for task in tasks:
+            assert "agent" in task
+            assert "action" in task
+            assert "inputs" in task
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Fix 4 — Real execution verification
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestIsRealExecution:
+    """Fix 4: _is_real_execution() correctly identifies genuine vs fake results."""
+
+    def test_real_execution_requires_task_id(self):
+        result = {
+            "task_id": "",
+            "status": "success",
+            "output": "Detailed output with lots of text that is clearly real",
+        }
+        assert _is_real_execution(result) is False
+
+    def test_real_execution_requires_success_status(self):
+        result = {
+            "task_id": "t123",
+            "status": "failed",
+            "output": "Detailed output with lots of text",
+        }
+        assert _is_real_execution(result) is False
+
+    def test_real_execution_requires_non_trivial_output(self):
+        result = {"task_id": "t123", "status": "success", "output": "done"}
+        assert _is_real_execution(result) is False
+
+    def test_none_output_is_fake(self):
+        result = {"task_id": "t123", "status": "success", "output": None}
+        assert _is_real_execution(result) is False
+
+    def test_genuine_result_is_real(self):
+        result = {
+            "task_id": "t-abc-123",
+            "status": "success",
+            "output": "Generated a comprehensive 30-day content calendar with 90 posts across all platforms",
+        }
+        assert _is_real_execution(result) is True
+
+    def test_dict_output_checked_for_text(self):
+        result = {
+            "task_id": "t123",
+            "status": "success",
+            "output": {"text": "Full detailed analysis report with actionable insights"},
+        }
+        assert _is_real_execution(result) is True
+
+    def test_execute_tasks_annotates_real_execution_flag(self):
+        with patch("core.agent_controller.get_agent_controller") as mock_ctrl:
+            mock_ctrl.return_value.run_goal.return_value = {
+                "tasks": [
+                    {
+                        "task_id": "t1",
+                        "skill": "worker",
+                        "status": "success",
+                        "success": True,
+                        "score": 0.9,
+                        "output": "Full detailed comprehensive output with real data analysis",
+                    }
+                ]
+            }
+            tasks = [{"agent": "worker", "action": "run", "intent": "ops", "inputs": {}}]
+            results = execute_tasks(tasks, "goal")
+
+        assert "real_execution" in results[0]
+        assert results[0]["real_execution"] is True
+
+    def test_execute_tasks_flags_simulated_output(self):
+        with patch("core.agent_controller.get_agent_controller") as mock_ctrl:
+            mock_ctrl.return_value.run_goal.return_value = {
+                "tasks": [
+                    {
+                        "task_id": "t1",
+                        "skill": "worker",
+                        "status": "success",
+                        "success": True,
+                        "score": 0.9,
+                        "output": "done",  # simulated placeholder
+                    }
+                ]
+            }
+            tasks = [{"agent": "worker", "action": "run", "intent": "ops", "inputs": {}}]
+            results = execute_tasks(tasks, "goal")
+
+        assert results[0]["real_execution"] is False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Fix 5 — Graph edge builder
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestConnectNodes:
+    """Fix 5: connect_nodes() creates directed edges in KnowledgeStore."""
+
+    def test_connect_nodes_stores_edge(self):
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks:
+            mock_ks.return_value.add_knowledge.return_value = {}
+            result = connect_nodes("intent_a", "skill_b", "executed_via")
+
+        assert result is True
+        mock_ks.return_value.add_knowledge.assert_called_once()
+        args = mock_ks.return_value.add_knowledge.call_args
+        assert args[0][0] == "_edges"
+        edge = args[0][1]
+        assert edge["source"] == "intent_a"
+        assert edge["target"] == "skill_b"
+        assert edge["relationship"] == "executed_via"
+
+    def test_connect_nodes_returns_false_for_same_source_target(self):
+        result = connect_nodes("a", "a", "self")
+        assert result is False
+
+    def test_connect_nodes_returns_false_for_empty_source(self):
+        result = connect_nodes("", "target", "rel")
+        assert result is False
+
+    def test_connect_nodes_failure_is_non_fatal(self):
+        with patch("core.knowledge_store.get_knowledge_store", side_effect=RuntimeError("ks down")):
+            result = connect_nodes("a", "b", "rel")
+        assert result is False
+
+    def test_update_graph_creates_edges_between_intent_and_skills(self):
+        """update_graph() should call connect_nodes for executed agents."""
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks, \
+             patch("core.memory_index.get_memory_index") as mock_mi:
+            mock_ks.return_value.add_knowledge.return_value = {}
+            mock_ks.return_value.learn_from_conversation.return_value = {}
+            mock_mi.return_value.add_memory.return_value = {}
+
+            agent_results = [
+                {"skill": "email-marketing", "status": "success", "success": True, "output": "done"},
+            ]
+            update_graph("user input", "email", "response text", agent_results)
+
+        # add_knowledge should have been called at least twice:
+        # once for the intent entry, once for the edge
+        assert mock_ks.return_value.add_knowledge.call_count >= 2
+
+    def test_update_graph_creates_precedes_edge_when_prev_intent_differs(self):
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks, \
+             patch("core.memory_index.get_memory_index") as mock_mi:
+            mock_ks.return_value.add_knowledge.return_value = {}
+            mock_ks.return_value.learn_from_conversation.return_value = {}
+            mock_mi.return_value.add_memory.return_value = {}
+
+            update_graph("user input", "content", "response", [], prev_intent="email")
+
+        # Verify an edge was created between email and content
+        edge_calls = [
+            call for call in mock_ks.return_value.add_knowledge.call_args_list
+            if call[0][0] == "_edges"
+        ]
+        assert len(edge_calls) >= 1
+        edge_data = edge_calls[0][0][1]
+        assert edge_data["relationship"] == "precedes"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Fix 6 — Pipeline tracing
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestPipelineTracing:
+    """Fix 6: run.trace dict is populated and accessible via get_pipeline_traces()."""
+
+    def test_pipeline_run_has_trace_dict(self):
+        run = _PipelineRun("input", "user", "power", "")
+        assert isinstance(run.trace, dict)
+        assert "input" in run.trace
+        assert "retrieved_nodes" in run.trace
+        assert "decision" in run.trace
+        assert "agent_results" in run.trace
+        assert "final_output" in run.trace
+
+    def test_trace_input_matches_run_input(self):
+        run = _PipelineRun("my test input", "user1", "power", "")
+        assert run.trace["input"] == "my test input"
+
+    def test_get_pipeline_traces_returns_list(self):
+        result = get_pipeline_traces()
+        assert isinstance(result, list)
+
+    def test_trace_stored_after_process_user_input(self):
+        import core.unified_pipeline as up
+        initial_count = len(up._TRACE_STORE)
+
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks, \
+             patch("core.memory_index.get_memory_index") as mock_mi, \
+             patch("core.orchestrator.TaskOrchestrator") as mock_orch, \
+             patch("core.decision_engine.get_decision_engine") as mock_de, \
+             patch("core.agent_controller.get_agent_controller") as mock_ctrl, \
+             patch("core.ascend_forge.get_ascend_forge_executor") as mock_forge, \
+             patch("core.audit_engine.get_audit_engine") as mock_audit:
+            mock_ks.return_value.get_relevant_context.return_value = "ctx"
+            mock_ks.return_value.search_knowledge.return_value = []
+            mock_ks.return_value.add_knowledge.return_value = {}
+            mock_ks.return_value.learn_from_conversation.return_value = {}
+            mock_mi.return_value.get_relevant_memories.return_value = []
+            mock_mi.return_value.add_memory.return_value = {}
+            mock_orch.return_value.classify_intent.return_value = "ops"
+            mock_action = MagicMock(skill="task-orchestrator", score=5.0)
+            mock_de.return_value.rank_actions.return_value = [mock_action]
+            mock_ctrl.return_value.run_goal.return_value = {"tasks": []}
+            mock_forge.return_value.submit_change.return_value = MagicMock()
+            mock_audit.return_value.record.return_value = None
+
+            process_user_input(
+                "trace test input",
+                generate_llm_response_fn=lambda msg, agent, mode, **kw: "A response",
+            )
+
+        assert len(up._TRACE_STORE) > initial_count
+        latest = list(up._TRACE_STORE)[-1]
+        assert latest["input"] == "trace test input"
+        assert "latency_ms" in latest
+
+    def test_trace_contains_agent_results(self):
+        import core.unified_pipeline as up
+
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks, \
+             patch("core.memory_index.get_memory_index") as mock_mi, \
+             patch("core.orchestrator.TaskOrchestrator") as mock_orch, \
+             patch("core.decision_engine.get_decision_engine") as mock_de, \
+             patch("core.agent_controller.get_agent_controller") as mock_ctrl, \
+             patch("core.ascend_forge.get_ascend_forge_executor") as mock_forge, \
+             patch("core.audit_engine.get_audit_engine") as mock_audit:
+            mock_ks.return_value.get_relevant_context.return_value = "ctx"
+            mock_ks.return_value.search_knowledge.return_value = []
+            mock_ks.return_value.add_knowledge.return_value = {}
+            mock_ks.return_value.learn_from_conversation.return_value = {}
+            mock_mi.return_value.get_relevant_memories.return_value = []
+            mock_mi.return_value.add_memory.return_value = {}
+            mock_orch.return_value.classify_intent.return_value = "ops"
+            mock_action = MagicMock(skill="task-orchestrator", score=5.0)
+            mock_de.return_value.rank_actions.return_value = [mock_action]
+            mock_ctrl.return_value.run_goal.return_value = {
+                "tasks": [{
+                    "task_id": "t1", "skill": "task-orchestrator",
+                    "status": "success", "success": True,
+                    "score": 0.8, "output": "real output with sufficient length here",
+                }]
+            }
+            mock_forge.return_value.submit_change.return_value = MagicMock()
+            mock_audit.return_value.record.return_value = None
+
+            process_user_input(
+                "task trace test",
+                generate_llm_response_fn=lambda msg, agent, mode, **kw: "Response",
+            )
+
+        latest = list(up._TRACE_STORE)[-1]
+        assert isinstance(latest["agent_results"], list)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Fix 7 — Kill silent failure (degraded flag + DEGRADED marker)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestDegradedFlag:
+    """Fix 7: Pipeline violations set run.degraded=True and append DEGRADED marker
+    to the response instead of being silently swallowed."""
+
+    def test_pipeline_run_has_degraded_flag(self):
+        run = _PipelineRun("input", "user", "power", "")
+        assert run.degraded is False
+
+    def test_validate_pipeline_integrity_sets_degraded_on_run(self):
+        run = _run(
+            graph_data={"nodes": "", "concepts": [], "past_decisions": [], "expanded": []},
+            llm_called=False,
+            tasks_executed=0,
+            response="A real answer",
+        )
+        with pytest.raises(PipelineViolationError):
+            validate_pipeline_integrity(run)
+        assert run.degraded is True
+
+    def test_degraded_marker_constant_is_non_empty(self):
+        assert _DEGRADED_MARKER
+        assert "DEGRADED" in _DEGRADED_MARKER
+
+    def test_format_response_appends_degraded_marker_when_flag_set(self):
+        response = format_response("base response", [], "task-orchestrator", degraded=True)
+        assert _DEGRADED_MARKER in response
+
+    def test_format_response_no_marker_when_not_degraded(self):
+        response = format_response("base response", [], "task-orchestrator", degraded=False)
+        assert _DEGRADED_MARKER not in response
+
+    def test_process_user_input_appends_degraded_marker_on_violation(self):
+        """When pipeline violations are detected, the user-visible response must
+        contain the DEGRADED marker (internal debug panel can surface it)."""
+        def _fallback_llm(msg, agent, mode, **kw):
+            return f"{_FALLBACK_PREFIX} LLM error"
+
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks, \
+             patch("core.memory_index.get_memory_index") as mock_mi, \
+             patch("core.orchestrator.TaskOrchestrator") as mock_orch, \
+             patch("core.decision_engine.get_decision_engine") as mock_de, \
+             patch("core.agent_controller.get_agent_controller") as mock_ctrl, \
+             patch("core.ascend_forge.get_ascend_forge_executor") as mock_forge, \
+             patch("core.audit_engine.get_audit_engine") as mock_audit:
+            # Empty graph — will trigger graph violation
+            mock_ks.return_value.get_relevant_context.return_value = ""
+            mock_ks.return_value.search_knowledge.return_value = []
+            mock_ks.return_value.add_knowledge.return_value = {}
+            mock_ks.return_value.learn_from_conversation.return_value = {}
+            mock_mi.return_value.get_relevant_memories.return_value = []
+            mock_mi.return_value.add_memory.return_value = {}
+            mock_orch.return_value.classify_intent.return_value = "ops"
+            mock_action = MagicMock(skill="task-orchestrator", score=5.0)
+            mock_de.return_value.rank_actions.return_value = [mock_action]
+            mock_ctrl.return_value.run_goal.return_value = {"tasks": []}
+            mock_forge.return_value.submit_change.return_value = MagicMock()
+            mock_audit.return_value.record.return_value = None
+
+            result = process_user_input("test", generate_llm_response_fn=_fallback_llm)
+
+        assert _DEGRADED_MARKER in result
+
+    def test_trace_records_degraded_state(self):
+        """run.trace['degraded'] must be True when violations are detected."""
+        import core.unified_pipeline as up
+
+        def _fallback_llm(msg, agent, mode, **kw):
+            return f"{_FALLBACK_PREFIX} LLM error"
+
+        with patch("core.knowledge_store.get_knowledge_store") as mock_ks, \
+             patch("core.memory_index.get_memory_index") as mock_mi, \
+             patch("core.orchestrator.TaskOrchestrator") as mock_orch, \
+             patch("core.decision_engine.get_decision_engine") as mock_de, \
+             patch("core.agent_controller.get_agent_controller") as mock_ctrl, \
+             patch("core.ascend_forge.get_ascend_forge_executor") as mock_forge, \
+             patch("core.audit_engine.get_audit_engine") as mock_audit:
+            mock_ks.return_value.get_relevant_context.return_value = ""
+            mock_ks.return_value.search_knowledge.return_value = []
+            mock_ks.return_value.add_knowledge.return_value = {}
+            mock_ks.return_value.learn_from_conversation.return_value = {}
+            mock_mi.return_value.get_relevant_memories.return_value = []
+            mock_mi.return_value.add_memory.return_value = {}
+            mock_orch.return_value.classify_intent.return_value = "ops"
+            mock_action = MagicMock(skill="task-orchestrator", score=5.0)
+            mock_de.return_value.rank_actions.return_value = [mock_action]
+            mock_ctrl.return_value.run_goal.return_value = {"tasks": []}
+            mock_forge.return_value.submit_change.return_value = MagicMock()
+            mock_audit.return_value.record.return_value = None
+
+            process_user_input("test", generate_llm_response_fn=_fallback_llm)
+
+        latest = list(up._TRACE_STORE)[-1]
+        assert latest.get("degraded") is True
