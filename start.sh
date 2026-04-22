@@ -136,7 +136,10 @@ find "$REPO_ROOT" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/nu
 find "$REPO_ROOT" -type f -name "*.pyc" -delete 2>/dev/null || true
 rm -rf frontend/dist
 APP_VERSION="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-VITE_APP_VERSION="$APP_VERSION" npm --prefix frontend run build
+if ! VITE_APP_VERSION="$APP_VERSION" npm --prefix frontend run build; then
+  echo "⚠️  Frontend build failed — backend API will still start. Check npm/Vite errors above."
+  echo "   Tip: run 'cd frontend && npm install && npm run build' manually to diagnose."
+fi
 
 # Write version state for runtime integrity checks
 mkdir -p "$REPO_ROOT/state"
