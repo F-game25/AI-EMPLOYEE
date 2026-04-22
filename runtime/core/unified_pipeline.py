@@ -816,8 +816,13 @@ def process_user_input(
     # Track previous intent for edge creation (see Phase 8)
     _prev_intent: str = ""
 
-    def _phase(name: str, fn: Callable[[], Any], fallback: Callable[[], Any]) -> Any:
-        """Run *fn()*, fall back to *fallback()* unless STRICT_PIPELINE."""
+    def _phase(name: str, fn: Callable[[], Any], fallback: Callable[[], Any], *, critical: bool = True) -> Any:
+        """Run *fn()*, fall back to *fallback()* unless STRICT_PIPELINE.
+
+        When ``critical=True`` (default), a failure marks the run as degraded.
+        Set ``critical=False`` for monitoring/write-back phases (8, 9) whose
+        failure does not degrade response quality.
+        """
         try:
             return fn()
         except Exception as exc:
@@ -825,7 +830,8 @@ def process_user_input(
                 logger.error("Phase %s failed in STRICT_PIPELINE mode: %s", name, exc)
                 raise
             logger.warning("Phase %s failed (degraded): %s", name, exc)
-            run.degraded = True
+            if critical:
+                run.degraded = True
             return fallback()
 
     # ── Phase 2: Graph retrieval ──────────────────────────────────────────────
@@ -935,7 +941,7 @@ def process_user_input(
         lambda: run.llm_output or f"{_FALLBACK_PREFIX} pipeline error",
     )
 
-    # ── Phase 8: Graph update (non-blocking) ──────────────────────────────────
+    # ── Phase 8: Graph update (non-blocking, non-critical) ────────────────────
     _phase(
         "8 (graph update)",
         lambda: update_graph(
@@ -946,13 +952,15 @@ def process_user_input(
             prev_intent=_prev_intent,
         ),
         lambda: None,
+        critical=False,
     )
 
-    # ── Phase 9: AscendForge monitoring (non-blocking) ────────────────────────
+    # ── Phase 9: AscendForge monitoring (non-blocking, non-critical) ──────────
     _phase(
         "9 (ascend forge)",
         lambda: monitor_and_improve(run),
         lambda: None,
+        critical=False,
     )
 
     # ── Phase 10: Integrity validation ────────────────────────────────────────
