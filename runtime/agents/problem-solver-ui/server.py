@@ -889,6 +889,7 @@ def _build_llm_system_prompt(
     routed_agent: str,
     mode: str,
     user_id: str = _DEFAULT_USER,
+    graph_context: str = "",
 ) -> str:
     available_agents = ", ".join(_available_agent_ids(mode))
 
@@ -933,9 +934,12 @@ def _build_llm_system_prompt(
         "Be warm, concrete, and genuinely useful."
     )
 
+    parts = [base]
     if context_block:
-        return f"{base}\n\n{context_block}"
-    return base
+        parts.append(context_block)
+    if graph_context:
+        parts.append(f"Knowledge Graph Data:\n{graph_context}")
+    return "\n\n".join(parts)
 
 
 def _call_groq_chat(prompt: str, system_prompt: str, model: str, api_key: str,
@@ -1090,6 +1094,7 @@ def _generate_llm_response(
     mode: str,
     model_route: Optional[str] = None,
     user_id: str = _DEFAULT_USER,
+    graph_context: str = "",
 ) -> str:
   # ── [AI FLOW] Log pipeline entry ────────────────────────────────────────────
   _ai_flow_logger.info("[AI FLOW] Input received: agent=%s mode=%s", routed_agent, mode)
@@ -1140,7 +1145,7 @@ def _generate_llm_response(
 
   _dt_llm = _get_distributed_tracer()
 
-  system_prompt = _build_llm_system_prompt(final_input, routed_agent, mode, user_id=user_id)
+  system_prompt = _build_llm_system_prompt(final_input, routed_agent, mode, user_id=user_id, graph_context=graph_context)
 
   # ── Load conversation history for context-aware responses ───────────────────
   # Injects the last 8 user/assistant exchanges into every LLM call so the
@@ -19199,7 +19204,54 @@ def handle_command(
         except Exception as _bias_exc:
             logger.debug("bias check error (non-fatal): %s", _bias_exc)
 
-    return _generate_llm_response(message, routed_agent, mode, model_route=model_route, user_id=user_id)
+    # ── Unified pipeline — single controlled execution path ───────────────────
+    # All remaining user inputs are routed through process_user_input() which
+    # enforces the full pipeline: graph → LLM → agents → result → forge.
+    # The already-resolved routed_agent and mode are forwarded via a closure
+    # so server-side keyword routing is preserved while the pipeline adds
+    # graph context, task decomposition, and telemetry around every LLM call.
+    try:
+        from core.unified_pipeline import process_user_input as _process_user_input  # noqa: PLC0415
+
+        def _llm_fn(
+            msg: str,
+            _agent: str,
+            _mode: str,
+            *,
+            model_route: Optional[str] = None,
+            user_id: str = _DEFAULT_USER,
+            graph_context: str = "",
+        ) -> str:
+            # Use the routed_agent/mode already computed above (closed over)
+            return _generate_llm_response(
+                msg,
+                routed_agent,
+                mode,
+                model_route=model_route,
+                user_id=user_id,
+                graph_context=graph_context,
+            )
+
+        return _process_user_input(
+            message,
+            user_id=user_id,
+            mode=mode,
+            model_route=model_route or "",
+            generate_llm_response_fn=_llm_fn,
+        )
+    except Exception as _pui_exc:
+        # Respect STRICT_PIPELINE — when set, re-raise instead of falling back
+        try:
+            from core.unified_pipeline import STRICT_PIPELINE as _STRICT  # noqa: PLC0415
+        except Exception:
+            _STRICT = False
+        if _STRICT:
+            raise
+        logger.warning(
+            "unified_pipeline.process_user_input failed, falling back to direct LLM: %s",
+            _pui_exc,
+        )
+        return _generate_llm_response(message, routed_agent, mode, model_route=model_route, user_id=user_id)
 
 
 # ─── Schedules ────────────────────────────────────────────────────────────────
@@ -25070,6 +25122,25 @@ def get_trace(trace_id: str, _auth: None = Depends(require_auth)):
     if tree is None:
         raise HTTPException(404, f"Trace '{trace_id}' not found")
     return JSONResponse(tree)
+
+
+@app.get("/api/pipeline-trace")
+def list_pipeline_traces(_auth: None = Depends(require_auth)):
+    """Return the most recent unified pipeline execution traces (newest first).
+
+    Each trace includes per-phase metadata: retrieved_nodes counts, decision,
+    validated_tasks, agent_results (with real_execution flag), final_output
+    snippet, latency_ms, and whether the run was degraded.
+
+    Useful for the neural brain debug panel, regression investigations, and
+    pipeline health monitoring.
+    """
+    try:
+        from core.unified_pipeline import get_pipeline_traces  # noqa: PLC0415
+        return JSONResponse({"traces": get_pipeline_traces(limit=20)})
+    except Exception as exc:
+        logger.warning("pipeline-trace endpoint error: %s", exc)
+        return JSONResponse({"traces": [], "error": "Pipeline trace unavailable"})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
