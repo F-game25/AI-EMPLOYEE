@@ -2,9 +2,67 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { API_URL } from '../config/api'
 
+// Particle system for immersive boot background
+class BootParticleSystem {
+  constructor(canvasRef) {
+    this.canvas = canvasRef.current
+    if (!this.canvas) return
+    this.ctx = this.canvas.getContext('2d')
+    this.particles = []
+    this.animId = null
+    this.resizeCanvas()
+    window.addEventListener('resize', () => this.resizeCanvas())
+  }
+
+  resizeCanvas() {
+    this.canvas.width = window.innerWidth
+    this.canvas.height = window.innerHeight
+  }
+
+  init() {
+    this.particles = []
+    for (let i = 0; i < 60; i++) {
+      this.particles.push({
+        x: Math.random() * this.canvas.width,
+        y: Math.random() * this.canvas.height,
+        vx: (Math.random() - 0.5) * 0.2,
+        vy: (Math.random() - 0.5) * 0.2,
+        radius: Math.random() * 0.8 + 0.3,
+        color: Math.random() > 0.5 ? 'rgba(32,214,199,' : 'rgba(229,199,107,',
+      })
+    }
+    this.animate()
+  }
+
+  animate() {
+    this.ctx.fillStyle = 'rgba(7,8,16,1)'
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
+
+    this.particles.forEach(p => {
+      p.x += p.vx
+      p.y += p.vy
+      if (p.x < 0 || p.x > this.canvas.width) p.vx *= -1
+      if (p.y < 0 || p.y > this.canvas.height) p.vy *= -1
+      p.x = Math.max(0, Math.min(this.canvas.width, p.x))
+      p.y = Math.max(0, Math.min(this.canvas.height, p.y))
+
+      this.ctx.fillStyle = p.color + '0.5)'
+      this.ctx.beginPath()
+      this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2)
+      this.ctx.fill()
+    })
+
+    this.animId = requestAnimationFrame(() => this.animate())
+  }
+
+  stop() {
+    if (this.animId) cancelAnimationFrame(this.animId)
+  }
+}
+
 function buildBootLines(agentCount) {
   return [
-    { text: '> INITIALIZING AI-EMPLOYEE OS v2.0...', delay: 0 },
+    { text: '> INITIALIZING ULTRON OS v2.0...', delay: 0 },
     { text: '> Loading neural core modules...', delay: 320 },
     { text: '> Establishing secure channels...', delay: 640 },
     { text: `> Calibrating agent network [${agentCount} agents]...`, delay: 960 },
@@ -67,11 +125,24 @@ export default function BootSequence({ onComplete }) {
   const [showLogo, setShowLogo] = useState(false)
   const [logoReady, setLogoReady] = useState(false)
 
+  const canvasRef = useRef(null)
+  const particleSystemRef = useRef(null)
+
+  // Detect Electron launch for faster boot
+  const isElectronLaunch = typeof window !== 'undefined' && window.navigator.userAgent.includes('Electron')
+
   // Keep a stable ref to the latest onComplete so the timer effect below
   // never needs to re-run (and reset all timers) when the parent re-renders
   // due to unrelated state changes (e.g. WebSocket events).
   const onCompleteRef = useRef(onComplete)
   useLayoutEffect(() => { onCompleteRef.current = onComplete })
+
+  useEffect(() => {
+    if (canvasRef.current && !particleSystemRef.current) {
+      particleSystemRef.current = new BootParticleSystem(canvasRef)
+      particleSystemRef.current.init()
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -93,9 +164,10 @@ export default function BootSequence({ onComplete }) {
       })
 
       const lastDelay = BOOT_LINES[BOOT_LINES.length - 1].delay
-      timers.push(setTimeout(() => { if (!cancelled) setShowLogo(true) }, lastDelay + 300))
-      timers.push(setTimeout(() => { if (!cancelled) setLogoReady(true) }, lastDelay + 700))
-      timers.push(setTimeout(() => { if (!cancelled) onCompleteRef.current?.() }, lastDelay + 1400))
+      const speedup = isElectronLaunch ? 0.3 : 1.0 // 3x faster boot when launched from Electron
+      timers.push(setTimeout(() => { if (!cancelled) setShowLogo(true) }, (lastDelay + 300) * speedup))
+      timers.push(setTimeout(() => { if (!cancelled) setLogoReady(true) }, (lastDelay + 700) * speedup))
+      timers.push(setTimeout(() => { if (!cancelled) onCompleteRef.current?.() }, (lastDelay + 1400) * speedup))
     }
 
     fetch(`${API_URL}/agents`)
@@ -112,23 +184,49 @@ export default function BootSequence({ onComplete }) {
   return (
     <motion.div
       className="fixed inset-0 flex flex-col items-center justify-center"
-      style={{ background: 'var(--bg-base)' }}
+      style={{ background: 'var(--bg-base)', overflow: 'hidden' }}
       initial={{ opacity: 1 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
     >
-      {/* Subtle radial background pulse */}
+      {/* Particle canvas background */}
+      <canvas
+        ref={canvasRef}
+        style={{ position: 'absolute', inset: 0, zIndex: 1 }}
+      />
+
+      {/* Scanline effect */}
       <motion.div
         className="absolute inset-0 pointer-events-none"
-        animate={{ opacity: [0.03, 0.06, 0.03] }}
-        transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
         style={{
-          background: 'radial-gradient(ellipse at 50% 50%, rgba(212,175,55,1) 0%, transparent 65%)',
+          background: 'linear-gradient(transparent 50%, rgba(32,214,199,0.015) 50%)',
+          backgroundSize: '100% 4px',
+          zIndex: 2,
         }}
       />
 
-      <div className="relative w-full max-w-2xl px-8">
+      {/* Hexgrid background */}
+      <motion.div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: 'repeating-linear-gradient(60deg, transparent, transparent 35px, rgba(229,199,107,0.02) 35px, rgba(229,199,107,0.02) 70px)',
+          zIndex: 2,
+        }}
+      />
+
+      {/* Enhanced radial glow */}
+      <motion.div
+        className="absolute inset-0 pointer-events-none"
+        animate={{ opacity: [0.10, 0.22, 0.10] }}
+        transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+        style={{
+          background: 'radial-gradient(ellipse at 50% 50%, rgba(212,175,55,1) 0%, transparent 65%)',
+          zIndex: 2,
+        }}
+      />
+
+      <div className="relative w-full px-[15%] z-10">
         {/* Terminal lines */}
         <div className="mb-6 min-h-[200px]">
           {visibleLines.map((line, idx) => (
@@ -178,26 +276,31 @@ export default function BootSequence({ onComplete }) {
               initial={{ opacity: 0, scaleX: 0 }}
               animate={{ opacity: 1, scaleX: 1 }}
               transition={{ duration: 0.4, ease: 'easeOut' }}
-              className="flex items-center justify-center"
+              className="flex items-center justify-center relative"
               style={{
-                border: '1px solid rgba(212,175,55,0.4)',
-                padding: '18px 60px',
-                borderRadius: '4px',
-                background: 'rgba(212,175,55,0.03)',
-                boxShadow: logoReady
-                  ? '0 0 60px rgba(212,175,55,0.25), inset 0 0 40px rgba(212,175,55,0.04)'
-                  : 'none',
+                border: '2px solid rgba(212,175,55,0.4)',
+                padding: '24px 80px',
+                borderRadius: '6px',
+                background: 'rgba(212,175,55,0.04)',
                 transition: 'box-shadow 0.4s ease',
               }}
             >
+              {logoReady && (
+                <motion.div
+                  className="absolute inset-0 rounded-[6px]"
+                  animate={{ boxShadow: ['0 0 20px rgba(212,175,55,0.1)', '0 0 60px rgba(212,175,55,0.3)', '0 0 20px rgba(212,175,55,0.1)'] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  style={{ pointerEvents: 'none' }}
+                />
+              )}
               <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.25, duration: 0.3 }}
-                className="font-mono text-2xl font-bold tracking-widest"
-                style={{ color: '#D4AF37' }}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.25, duration: 0.4 }}
+                className="font-mono text-4xl font-bold tracking-[0.4em]"
+                style={{ color: '#D4AF37', position: 'relative', zIndex: 1 }}
               >
-                <GlitchText>AI-EMPLOYEE</GlitchText>
+                <GlitchText>ULTRON</GlitchText>
               </motion.div>
             </motion.div>
           )}

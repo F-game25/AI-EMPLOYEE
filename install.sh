@@ -11,9 +11,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="$SCRIPT_DIR/runtime"
 START_TIME=$(date +%s)
 CONFIG_FILES_UPDATED=0
-CLAUDE_MODEL="claude-sonnet-4-5-20251022"
 OLLAMA_HOST="http://localhost:11434"
 OLLAMA_MODEL="llama3.2"
+GROQ_API_KEY=""
+GROQ_MODEL="llama-3.3-70b-versatile"
 ZERO_CONFIG="${ZERO_CONFIG:-0}"
 AUTO_INSTALL_DOCKER="${AUTO_INSTALL_DOCKER:-0}"
 
@@ -318,7 +319,6 @@ wizard() {
         WANT_OLLAMA="y"
         OLLAMA_MODEL="llama3.2"
         MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
-        ANTHROPIC_KEY=""
         OPENAI_KEY=""
         ALPHA_INSIDER_KEY=""
         TAVILY_KEY=""
@@ -330,12 +330,12 @@ wizard() {
         WANT_STATUS="y"
         STATUS_INTERVAL=3600
         UI_PORT=8787
-        WORKERS=5
-        AI_EMPLOYEE_MODE="starter"
+        WORKERS=56
+        AI_EMPLOYEE_MODE="power"
         AUTO_INSTALL_DOCKER="0"
         TZ=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
         TOKEN=$(openssl rand -hex 32)
-        ok "Zero-config defaults set (5 agents, Starter mode, local Ollama)"
+        ok "Zero-config defaults set (56 agents — Power mode, local Ollama)"
         ok "Phone: not set — run 'ai-employee setup-phone' to configure WhatsApp"
         return
     fi
@@ -372,15 +372,15 @@ wizard() {
         MODEL_PRIMARY="ollama/$OLLAMA_MODEL"
         ok "Ollama model: $OLLAMA_MODEL (primary AI -- free & private)"
     else
-        MODEL_PRIMARY="anthropic/claude-opus-4-6"
-        ok "Cloud LLM selected (Ollama will still be tried first if running)"
+        MODEL_PRIMARY="groq/$GROQ_MODEL"
+        ok "Groq cloud LLM selected (free tier — Ollama still tried first if running)"
     fi
 
-    # 3) Anthropic API key
+    # 3) Groq API key (free cloud fallback — https://console.groq.com)
     echo ""
-    ask "Anthropic API key (optional, Enter to skip):"
-    read -rs ANTHROPIC_KEY < "$tty_in"; echo
-    [[ -n "$ANTHROPIC_KEY" ]] && ok "Anthropic key: set" || info "Anthropic key: skipped"
+    ask "Groq API key (optional, free at console.groq.com — used as cloud fallback):"
+    read -rs GROQ_API_KEY < "$tty_in"; echo
+    [[ -n "$GROQ_API_KEY" ]] && ok "Groq key: set" || info "Groq key: skipped (Ollama only)"
 
     # 4) OpenAI API key
     ask "OpenAI API key (optional, Enter to skip):"
@@ -1068,32 +1068,7 @@ install_claude_bot() {
 
     mkdir -p "$AI_HOME/agents/claude-agent"
 
-    if [[ ! -f "$AI_HOME/config/claude-agent.env" ]]; then
-      cat > "$AI_HOME/config/claude-agent.env" << 'EOF'
-CLAUDE_AGENT_HOST=127.0.0.1
-CLAUDE_AGENT_PORT=8788
-EOF
-      # Append model from installer variable
-      echo "CLAUDE_MODEL=$CLAUDE_MODEL" >> "$AI_HOME/config/claude-agent.env"
-      echo "CLAUDE_MAX_TOKENS=4096" >> "$AI_HOME/config/claude-agent.env"
-      # Write API key so the agent can authenticate independently
-      if [[ -n "${ANTHROPIC_KEY:-}" ]]; then
-          echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY" >> "$AI_HOME/config/claude-agent.env"
-      fi
-      chmod 600 "$AI_HOME/config/claude-agent.env"
-    fi
-
-    log "Installing Python deps for Claude Agent (best-effort)..."
-    local req="$AI_HOME/agents/claude-agent/requirements.txt"
-    if [[ -f "$req" ]] && command -v pip3 >/dev/null 2>&1; then
-      pip3 install --user -q -r "$req" \
-        || warn "pip install failed; run manually: pip3 install --user anthropic fastapi uvicorn"
-    else
-      [[ ! -f "$req" ]] && warn "requirements.txt not found; run manually: pip3 install --user anthropic fastapi uvicorn"
-      ! command -v pip3 >/dev/null 2>&1 && warn "pip3 not found; install manually: pip3 install --user anthropic fastapi uvicorn"
-    fi
-
-    ok "Claude AI agent configured (http://127.0.0.1:8788 after start)"
+    ok "AI agent runtime ready (Ollama primary, Groq fallback)"
 }
 
 # ─── Ollama local AI bot ─────────────────────────────────────────────────────
@@ -1476,7 +1451,8 @@ CFG_END
             [[ -n "${JWT_SECRET_KEY:-}" ]] && echo "JWT_SECRET_KEY=$JWT_SECRET_KEY"
 
             # --- AI provider keys ---
-            [[ -n "${ANTHROPIC_KEY:-}" ]]        && echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY"
+            [[ -n "${GROQ_API_KEY:-}" ]]          && echo "GROQ_API_KEY=$GROQ_API_KEY"
+            echo "GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}"
             [[ -n "${OPENAI_KEY:-}" ]]            && echo "OPENAI_API_KEY=$OPENAI_KEY"
 
             # --- Service keys ---
@@ -1492,12 +1468,11 @@ CFG_END
             # --- Model configuration ---
             echo "OLLAMA_HOST=$OLLAMA_HOST"
             echo "OLLAMA_MODEL=$OLLAMA_MODEL"
-            echo "CLAUDE_MODEL=$CLAUDE_MODEL"
 
             # --- Runtime settings ---
-            echo "AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-business}"
+            echo "AI_EMPLOYEE_MODE=${AI_EMPLOYEE_MODE:-power}"
             echo "UI_PORT=${UI_PORT:-8787}"
-            echo "WORKERS=${WORKERS:-35}"
+            echo "WORKERS=${WORKERS:-56}"
             echo "AI_EMPLOYEE_AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-0}"
 
             echo "TZ=${TZ:-UTC}"
@@ -1809,10 +1784,10 @@ done_message() {
     echo -e "${G}╚══════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${C}Configuration saved:${NC}"
-    echo "  Mode:         ${AI_EMPLOYEE_MODE:-business}"
+    echo "  Mode:         Power (56 agents — full capacity)"
     echo "  Phone:        $PHONE"
-    echo "  Claude model: $CLAUDE_MODEL"
-    echo "  Ollama model: $OLLAMA_MODEL  (host: $OLLAMA_HOST)"
+    echo "  LLM primary:  Ollama / $OLLAMA_MODEL  (host: $OLLAMA_HOST)"
+    echo "  LLM fallback: Groq / $GROQ_MODEL${GROQ_API_KEY:+ (key set)}"
     echo "  Token:        ${TOKEN:0:16}...${TOKEN: -8}"
     echo "  Config:       ~/.ai-employee/config.json"
     echo "  Dashboard:    http://127.0.0.1:${UI_PORT:-8787}  ← primary control"

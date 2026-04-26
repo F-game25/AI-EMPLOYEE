@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  ai-employee:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-employee:latest
+    container_name: ai-employee
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      NODE_ENV: production
+      PORT: 8787
+      PYTHON_BACKEND_PORT: 18790
+      AI_HOME: /app
+      LLM_BACKEND: ${LLM_BACKEND:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      EVOLUTION_MODE: ${EVOLUTION_MODE:-SAFE}
+    volumes:
+      # Persist SQLite DBs, logs, and runtime state across restarts
+      - ai-state:/app/state
+      - ai-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8787/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  ai-state:
+    driver: local
+  ai-logs:
+    driver: local

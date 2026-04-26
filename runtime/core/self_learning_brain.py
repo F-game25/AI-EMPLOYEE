@@ -47,6 +47,8 @@ from core.learning_engine import LearningEngine
 from core.decision_engine import DecisionEngine, ActionSpec, get_decision_engine
 import core.brain_model as _bm
 from core.memory_index import MemoryIndex
+from core.neural.stdp_engine import get_stdp_engine
+from core.neural.pattern_memory import get_pattern_memory
 
 logger = logging.getLogger("self_learning_brain")
 
@@ -133,6 +135,13 @@ class SelfLearningBrain:
             # Retrieve relevant past experiences
             memories = self._learning_engine.search_memory(context, top_k=3)
 
+            # Pattern recognition: check if we've seen similar context before
+            pm = get_pattern_memory()
+            pattern_match = pm.recognize(context)
+            pattern_boost = 0.0
+            if pattern_match:
+                pattern_boost = pattern_match['outcome'] * pattern_match['similarity'] * 0.2
+
             # Score candidate agents using brain model weights
             agent_model = _bm.get_agent_model()
             agent_names = candidates or list(agent_model.keys())
@@ -165,6 +174,8 @@ class SelfLearningBrain:
             )
 
             confidence = min(1.0, best.score / 10.0) if best.score else 0.5
+            # Apply pattern match boost to confidence
+            confidence = min(1.0, confidence + pattern_boost)
 
             return {
                 "agent": best.id,
@@ -226,6 +237,19 @@ class SelfLearningBrain:
                 _bm.update_agent_model(action, reward)
             except (ValueError, KeyError):
                 pass  # Agent not in the brain model yet — non-fatal
+
+            # 2b. STDP learning: fire neurons and learn from timing
+            stdp = get_stdp_engine()
+            stdp.fire(stdp.neuron_for(context[:64]))
+            stdp.fire(stdp.neuron_for(action))
+            stdp.learn_pair(context[:64], action, success)
+
+            # 2c. Pattern memory: store this context+outcome for future recognition
+            get_pattern_memory().store(context[:200], action, 1.0 if success else 0.0)
+
+            # Save STDP weights every 20 outcomes
+            if len(self._outcomes) % 20 == 0:
+                stdp.save()
 
             # 3. Auto-tune decision engine weights every 20 outcomes
             history = self._learning_engine.metrics().get("reward_trend", [])

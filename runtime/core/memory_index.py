@@ -9,9 +9,50 @@ import time
 from pathlib import Path
 from typing import Any
 
-_DIM = 32
 _DECAY_PER_DAY = 0.995
 _lock = threading.RLock()
+
+# ── Embedding backend ─────────────────────────────────────────────────────────
+# When sentence-transformers is installed, use the all-MiniLM-L6-v2 model
+# (384-dim real semantic embeddings, ~80 MB, CPU-friendly, offline).
+# Falls back to the 32-dim hash-vote approach when not available.
+# Install: pip install sentence-transformers
+_ST_MODEL_NAME = "all-MiniLM-L6-v2"
+_st_model = None
+_st_lock = threading.Lock()
+
+def _get_st_model():
+    global _st_model
+    if _st_model is not None:
+        return _st_model
+    with _st_lock:
+        if _st_model is not None:
+            return _st_model
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore
+            _st_model = SentenceTransformer(_ST_MODEL_NAME)
+        except Exception:
+            _st_model = False  # explicitly mark unavailable
+    return _st_model
+
+
+def _embedding_dim() -> int:
+    model = _get_st_model()
+    return 384 if model else 32
+
+
+def _hash_embed(text: str, dim: int = 32) -> list[float]:
+    vec = [0.0] * dim
+    tokens = [t for t in (text or "").lower().split() if t]
+    if not tokens:
+        return vec
+    for tok in tokens:
+        slot = abs(hash(tok)) % dim
+        vec[slot] += 1.0
+    return _normalize(vec)
+
+
+_DIM = 32  # kept for backward-compat imports; use _embedding_dim() at runtime
 
 
 def _state_path() -> Path:
@@ -45,14 +86,13 @@ def _normalize(vec: list[float]) -> list[float]:
 
 
 def embed_text(text: str) -> list[float]:
-    vec = [0.0] * _DIM
-    tokens = [t for t in (text or "").lower().split() if t]
-    if not tokens:
-        return vec
-    for tok in tokens:
-        slot = abs(hash(tok)) % _DIM
-        vec[slot] += 1.0
-    return _normalize(vec)
+    model = _get_st_model()
+    if model:
+        try:
+            return model.encode(text or "", normalize_embeddings=True).tolist()
+        except Exception:
+            pass
+    return _hash_embed(text or "", dim=32)
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -77,16 +117,27 @@ class MemoryIndex:
         self._memories = self._load()
 
     def _load(self) -> list[dict[str, Any]]:
+        memories: list[dict[str, Any]] = []
         try:
             payload = json.loads(self._path.read_text(encoding="utf-8"))
             if isinstance(payload, list):
-                return payload
-            if isinstance(payload, dict) and isinstance(payload.get("memories"), list):
-                return payload["memories"]
+                memories = payload
+            elif isinstance(payload, dict) and isinstance(payload.get("memories"), list):
+                memories = payload["memories"]
         except Exception:
             pass
-        self._save()
-        return []
+        # Re-embed any entries whose vector dimensionality doesn't match current embedder
+        target_dim = _embedding_dim()
+        needs_save = False
+        for mem in memories:
+            emb = mem.get("embedding") or []
+            if len(emb) != target_dim and mem.get("text"):
+                mem["embedding"] = embed_text(mem["text"])
+                needs_save = True
+        if needs_save:
+            self._memories = memories
+            self._save()
+        return memories
 
     def _save(self) -> None:
         payload = {"updated_at": _ts(), "memories": self._memories}

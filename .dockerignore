@@ -1,0 +1,16 @@
+.git
+.gitignore
+node_modules
+frontend/node_modules
+frontend/dist
+**/__pycache__
+**/*.pyc
+*.log
+.env
+.ai-employee
+state/
+coverage/
+.pytest_cache
+tests/
+*.md
+.github/

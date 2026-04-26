@@ -41,6 +41,8 @@ class LLMClient:
             try:
                 if self.backend == "ollama":
                     response = self._call_ollama(prompt=prompt, system=system)
+                elif self.backend == "openrouter":
+                    response = self._call_openrouter(prompt=prompt, system=system)
                 else:
                     response = self._call_anthropic(prompt=prompt, system=system)
                 self._log_call(
@@ -110,6 +112,41 @@ class LLMClient:
             "tokens_used": int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0)),
         }
 
+    def _call_openrouter(self, *, prompt: str, system: str, model: str = "deepseek/deepseek-coder-v2") -> dict[str, Any]:
+        key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        if not key:
+            raise RuntimeError("OPENROUTER_API_KEY is not set")
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost:8787",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"OpenRouter HTTP {exc.code}: {body}") from exc
+        text = body.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        usage = body.get("usage", {})
+        return {
+            "output": text,
+            "tokens_used": int(usage.get("prompt_tokens", 0)) + int(usage.get("completion_tokens", 0)),
+            "model": model,
+        }
+
     def _call_ollama(self, *, prompt: str, system: str) -> dict[str, Any]:
         host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
         model = os.environ.get("OLLAMA_MODEL", "llama3.2")
@@ -131,6 +168,12 @@ class LLMClient:
         return {"output": text, "tokens_used": tokens}
 
     def _log_call(self, event: dict[str, Any]) -> None:
+        # Rotate at 50 MB to prevent unbounded disk growth
+        _ROTATE_BYTES = 50 * 1024 * 1024
+        if self.log_path.exists() and self.log_path.stat().st_size > _ROTATE_BYTES:
+            from datetime import datetime
+            archive = self.log_path.with_suffix(f".{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.jsonl")
+            self.log_path.rename(archive)
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
 

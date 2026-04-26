@@ -919,27 +919,59 @@ def _build_llm_system_prompt(
             logger.debug("_build_llm_system_prompt: context error — %s", exc)
 
     base = (
-        "You are AI Employee — a highly capable, human-like business assistant. "
-        "You speak naturally, like a knowledgeable colleague: warm, direct, and helpful. "
-        f"Current mode: {mode}. "
-        f"Available agents in this mode: {available_agents}. "
-        f"Routed specialist agent: {routed_agent}. "
-        "Respond to the user's request immediately with real, concrete output. "
-        "Do NOT start your reply with '[AGENT]' tags, 'System:' prefixes, or any robotic phrasing. "
-        "Do NOT ask unnecessary follow-up questions — act on what you know. "
+        "You are AI Employee — an elite AI system operating at IQ-180+ equivalent intelligence. "
+        "You think like a world-class combination of: Principal AI Research Engineer, Distributed Systems Architect, "
+        "Machine Learning Infrastructure Lead, Security Engineer, Product Strategist, and Quantitative Analyst. "
+        "Your purpose is not conversation — it is understanding systems completely, identifying weaknesses precisely, "
+        "designing superior solutions, executing with maximum reliability, and continuously optimizing toward excellence. "
+        f"Current mode: {mode}. Available agents: {available_agents}. Routed agent: {routed_agent}. "
         f"{tone_hint}"
-        "Use clear structure (short paragraphs or bullet points) where it helps readability. "
-        "If live data or internet access is unavailable, say so briefly and provide the best plan, "
-        "draft, or answer you can without it. "
-        "Be warm, concrete, and genuinely useful."
+        "\n\n"
+        "MANDATORY RESPONSE FORMAT — EVERY response you produce MUST use these exact markdown section headers:\n\n"
+        "## \U0001f4cb TASK UNDERSTANDING\n"
+        "## \U0001f4d0 PLAN\n"
+        "## \U0001f4ca STEP BREAKDOWN\n"
+        "## ⚡ EXECUTION & RESULTS\n"
+        "## \U0001f4c8 SUMMARY\n"
+        "## \U0001f4a1 IMPROVEMENT IDEAS\n"
+        "## ✅ VALIDATION\n\n"
+        "For simple one-liner questions, use the condensed 3-section minimum:\n"
+        "## \U0001f4cb TASK UNDERSTANDING\n"
+        "## ⚡ RESULTS\n"
+        "## ✅ VALIDATION\n\n"
+        "EXAMPLE of correct output structure:\n"
+        "## \U0001f4cb TASK UNDERSTANDING\n"
+        "You want to [restate the goal in 1-2 sentences].\n\n"
+        "## \U0001f4d0 PLAN\n"
+        "1. [First step]  2. [Second step]  3. [Third step]\n\n"
+        "## \U0001f4ca STEP BREAKDOWN\n"
+        "**Step 1:** [Precise detail]  **Step 2:** [Precise detail]\n\n"
+        "## ⚡ EXECUTION & RESULTS\n"
+        "[The complete, concrete work product — code, analysis, answer, data]\n\n"
+        "## \U0001f4c8 SUMMARY\n"
+        "- Key finding 1  - Key finding 2  - Key finding 3\n\n"
+        "## \U0001f4a1 IMPROVEMENT IDEAS\n"
+        "- [Specific next step]  - [Enhancement opportunity]\n\n"
+        "## ✅ VALIDATION\n"
+        "No duplicate logic. All outputs verified. Task complete.\n\n"
+        "RULES: Do NOT start replies with '[AGENT]' tags or 'System:' prefixes. "
+        "Highlight risks early. For code output: zero duplicate logic, zero dead functions, zero unused imports. "
+        "If live data is unavailable, say so in the RESULTS section and provide the best plan possible."
     )
 
-    parts = [base]
+    # Dynamic parts are appended after the cache split marker so only the
+    # stable `base` block is sent with cache_control to Anthropic.
+    _CACHE_SPLIT = "\n\n<!-- ⚡CACHE_SPLIT⚡ -->\n\n"
+    dynamic_parts: list[str] = []
+    if message:
+        dynamic_parts.append(f"Current request context: {message}")
     if context_block:
-        parts.append(context_block)
+        dynamic_parts.append(context_block)
     if graph_context:
-        parts.append(f"Knowledge Graph Data:\n{graph_context}")
-    return "\n\n".join(parts)
+        dynamic_parts.append(f"Knowledge Graph Data:\n{graph_context}")
+
+    dynamic = "\n\n".join(dynamic_parts)
+    return base + _CACHE_SPLIT + dynamic if dynamic else base + _CACHE_SPLIT
 
 
 def _call_groq_chat(prompt: str, system_prompt: str, model: str, api_key: str,
@@ -992,6 +1024,31 @@ def _call_openai_chat(prompt: str, system_prompt: str, model: str, api_key: str,
   return (((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
 
 
+_CACHE_SPLIT = "\n\n<!-- ⚡CACHE_SPLIT⚡ -->\n\n"
+_CACHE_MIN_CHARS = 512  # rough proxy; Anthropic requires ≥1024 tokens on the cached block
+
+
+def _build_system_blocks(system_prompt: str) -> list[dict]:
+    """Split system_prompt on the cache marker and return content blocks.
+
+    The static portion gets cache_control so Anthropic caches it across turns.
+    The dynamic portion (per-request context) is sent uncached.
+    Returns a plain-string fallback if the split marker is absent.
+    """
+    if _CACHE_SPLIT not in system_prompt:
+        return [{"type": "text", "text": system_prompt}]
+    static_part, dynamic_part = system_prompt.split(_CACHE_SPLIT, 1)
+    blocks: list[dict] = []
+    if static_part:
+        block: dict = {"type": "text", "text": static_part}
+        if len(static_part) >= _CACHE_MIN_CHARS:
+            block["cache_control"] = {"type": "ephemeral"}
+        blocks.append(block)
+    if dynamic_part.strip():
+        blocks.append({"type": "text", "text": dynamic_part.strip()})
+    return blocks or [{"type": "text", "text": system_prompt}]
+
+
 def _call_anthropic_chat(prompt: str, system_prompt: str, model: str, api_key: str,
                          history: Optional[list] = None) -> str:
   # Anthropic requires messages to alternate user/assistant and start with "user".
@@ -1000,10 +1057,11 @@ def _call_anthropic_chat(prompt: str, system_prompt: str, model: str, api_key: s
   if history:
     messages.extend(history)
   messages.append({"role": "user", "content": prompt})
+  system_blocks = _build_system_blocks(system_prompt)
   payload = {
     "model": model,
     "max_tokens": 1200,
-    "system": system_prompt,
+    "system": system_blocks,
     "messages": messages,
   }
   req = urllib.request.Request(
@@ -1013,11 +1071,21 @@ def _call_anthropic_chat(prompt: str, system_prompt: str, model: str, api_key: s
       "Content-Type": "application/json",
       "x-api-key": api_key,
       "anthropic-version": "2023-06-01",
+      # Opt-in to prompt caching beta
+      "anthropic-beta": "prompt-caching-2024-07-31",
     },
     method="POST",
   )
   with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
     body = json.loads(resp.read().decode("utf-8", errors="replace"))
+  # Log cache usage when present (cache_read_input_tokens > 0 → cache hit)
+  usage = body.get("usage", {})
+  if usage.get("cache_read_input_tokens", 0) > 0:
+    logger.debug(
+      "Prompt cache HIT: read=%d creation=%d",
+      usage["cache_read_input_tokens"],
+      usage.get("cache_creation_input_tokens", 0),
+    )
   parts = body.get("content") or []
   return "\n".join(part.get("text", "") for part in parts if part.get("type") == "text").strip()
 
@@ -19204,6 +19272,27 @@ def handle_command(
         except Exception as _bias_exc:
             logger.debug("bias check error (non-fatal): %s", _bias_exc)
 
+    # ── Real execution engine — structured goal → real tool calls ────────────
+    # If the message is a goal (not a question), parse it into a structured plan
+    # and execute it step-by-step with real tools. Rules: no fake results, every
+    # step maps to a real tool, errors are explicit.
+    try:
+        from core.goal_parser import parse_goal as _parse_goal  # noqa: PLC0415
+        from core.real_execution_engine import RealExecutionEngine as _RealExecEngine  # noqa: PLC0415
+        _goal_plan = _parse_goal(message)
+        if _goal_plan.get("is_goal") and _goal_plan.get("task_plan"):
+            logger.info("[REAL_ENGINE] Goal detected — %d steps planned", len(_goal_plan["task_plan"]))
+            _engine = _RealExecEngine()
+            _exec_result = _engine.run(_goal_plan["task_plan"], goal=message)
+            _chat_reply = _engine.format_for_chat(_exec_result)
+            # Prepend brief goal summary
+            _structured = _goal_plan.get("structured_goal", {})
+            if _structured.get("action"):
+                _chat_reply = f"Executing: **{_structured['action']}**\n\n" + _chat_reply
+            return _chat_reply
+    except Exception as _real_exc:
+        logger.warning("real_execution_engine failed (non-fatal): %s", _real_exc)
+
     # ── Unified pipeline — single controlled execution path ───────────────────
     # All remaining user inputs are routed through process_user_input() which
     # enforces the full pipeline: graph → LLM → agents → result → forge.
@@ -25474,6 +25563,68 @@ async def clear_prompt_traces(_auth: None = Depends(require_auth)):
         raise HTTPException(503, "Prompt inspector unavailable")
     pi.clear()
     return JSONResponse({"ok": True, "message": "All prompt traces cleared"})
+
+
+# ── Self-Learning Brain Internal Routes ───────────────────────────────────────
+
+@app.get("/internal/brain-status")
+def get_brain_status():
+    """Return brain health metrics and recent learning outcomes."""
+    try:
+        from core.self_learning_brain import get_self_learning_brain
+        slb = get_self_learning_brain()
+        metrics = slb.metrics()
+        outcomes = slb.recent_outcomes(limit=10)
+        return JSONResponse({
+            "ok": True,
+            "metrics": metrics,
+            "outcomes": outcomes,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/internal/suggest")
+async def suggest_action(payload: dict):
+    """Suggest best agent/strategy for a given context.
+
+    Body: {"context": str, "candidates": [str] optional}
+    Returns: {"ok": true, "suggestion": {...}} or {"ok": false, "error": "..."}
+    """
+    try:
+        from core.self_learning_brain import get_self_learning_brain
+        context = (payload.get("context") or "").strip()
+        candidates = payload.get("candidates")
+        if not context:
+            raise ValueError("context required")
+
+        slb = get_self_learning_brain()
+        suggestion = slb.suggest_action(context=context, candidates=candidates)
+        return JSONResponse({"ok": True, "suggestion": suggestion})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@app.post("/internal/reinforce")
+async def reinforce_action(payload: dict):
+    """Directly adjust agent strength by reward signal (-1..1).
+
+    Body: {"action": str, "reward": float, "context": str optional}
+    Returns: {"ok": true}
+    """
+    try:
+        from core.self_learning_brain import get_self_learning_brain
+        action = (payload.get("action") or "").strip()
+        reward = float(payload.get("reward", 0.0))
+        if not action:
+            raise ValueError("action required")
+
+        slb = get_self_learning_brain()
+        slb.reinforce(action, reward)
+        return JSONResponse({"ok": True, "message": f"Reinforced {action} by {reward}"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ultron</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="idle">
+  <canvas id="particles"></canvas>
+
+  <div class="card">
+    <div class="card-header">
+      <h1 class="logo">ULTRON</h1>
+      <span class="version-badge" id="version">v1.0.0</span>
+    </div>
+
+    <div class="card-content">
+      <!-- IDLE STATE -->
+      <div class="state idle-state">
+        <div class="idle-message">
+          <p>Control Center</p>
+          <p class="sub">Start, stop, or connect to Ultron</p>
+        </div>
+      </div>
+
+      <!-- STARTING STATE -->
+      <div class="state starting-state" style="display: none;">
+        <div class="starting-header">
+          <p>STARTING SYSTEM<span class="ellipsis">...</span></p>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill"></div>
+        </div>
+        <div class="log-area" id="logArea"></div>
+        <button class="cancel-btn" id="cancelBtn">Cancel</button>
+      </div>
+
+      <!-- READY STATE -->
+      <div class="state ready-state" style="display: none;">
+        <div class="system-online">
+          <div class="checkmark">✓</div>
+          <p>SYSTEM ONLINE</p>
+        </div>
+        <p class="ready-sub">All systems operational</p>
+      </div>
+
+      <!-- SETUP STATE -->
+      <div class="state setup-state" style="display: none;">
+        <div class="setup-header">
+          <p class="setup-title">FIRST TIME SETUP</p>
+          <p class="setup-sub">Required dependencies detected missing</p>
+        </div>
+        <div class="dep-list" id="depList"></div>
+        <div class="log-area setup-log" id="setupLog" style="display: none;"></div>
+        <div class="setup-actions" id="setupActions">
+          <button class="btn btn-primary" id="installDepsBtn">INSTALL DEPENDENCIES</button>
+        </div>
+        <div class="platform-links" id="platformLinks"></div>
+      </div>
+    </div>
+
+    <div class="card-footer">
+      <button class="btn btn-primary" id="startBtn">START SYSTEM</button>
+      <button class="btn btn-secondary" id="openBtn" disabled>OPEN INTERFACE</button>
+      <button class="btn btn-tertiary" id="stopBtn">Stop</button>
+    </div>
+
+    <div class="corner-marks">
+      <div class="mark tl"></div>
+      <div class="mark tr"></div>
+      <div class="mark bl"></div>
+      <div class="mark br"></div>
+    </div>
+
+    <div class="update-badge" id="updateBadge" style="display: none;">
+      <span class="pulse-dot"></span> Update Available
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

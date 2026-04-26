@@ -275,7 +275,7 @@ if ($USE_OLLAMA) {
 }
 
 # API keys (optional, sensitive ones use secure input)
-$ANTHROPIC_KEY   = Get-SecureInput "  Anthropic API key (optional, hidden)"
+$GROQ_API_KEY    = Get-SecureInput "  Groq API key (optional, free at console.groq.com)"
 $OPENAI_KEY      = Get-SecureInput "  OpenAI API key (optional, hidden)"
 $ALPHA_INSIDER_KEY = Read-Host "  Alpha Insider API key (optional)"
 $TAVILY_KEY      = Read-Host "  Tavily API key (optional)"
@@ -601,7 +601,7 @@ Write-OK "Skipped bin/ai-employee (Linux shell script – use start-windows.ps1 
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Step "Installing Python dependencies..."
 
-$corePkgs = @('fastapi', 'uvicorn[standard]', 'requests', 'anthropic', 'python-dotenv', 'httpx')
+$corePkgs = @('fastapi', 'uvicorn[standard]', 'requests', 'python-dotenv', 'httpx', 'groq')
 try {
     & $PYTHON -m pip install --upgrade pip --quiet
     & $PYTHON -m pip install --user @corePkgs --quiet
@@ -674,7 +674,8 @@ OLLAMA_MODEL=$OLLAMA_MODEL
 OLLAMA_HOST=http://localhost:11434
 
 # API Keys
-ANTHROPIC_API_KEY=$ANTHROPIC_KEY
+GROQ_API_KEY=$GROQ_API_KEY
+GROQ_MODEL=llama-3.3-70b-versatile
 OPENAI_API_KEY=$OPENAI_KEY
 ALPHA_INSIDER_API_KEY=$ALPHA_INSIDER_KEY
 TAVILY_API_KEY=$TAVILY_KEY

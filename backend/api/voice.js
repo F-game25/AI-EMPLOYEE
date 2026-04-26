@@ -4,6 +4,7 @@ const { Router } = require('express');
 const voiceManager = require('../core/voice_manager');
 const callEngine = require('../services/voice/call_engine');
 const { VOICE_PROFILES } = require('../services/voice/tts_engine');
+const personaplex = require('../services/voice/nvidia_personaplex');
 
 const router = Router();
 
@@ -206,6 +207,42 @@ router.post('/calls/test', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }
+});
+
+// ── Nvidia PersonaPlex synthesis ──────────────────────────────────────────────
+
+// POST /api/voice/synthesize
+// Body: { text: string, persona?: { gender, tone, pitch, speed, articulation, friendliness } }
+// Returns audio/wav binary on success, or JSON error.
+router.post('/synthesize', async (req, res) => {
+  const { text, persona = {} } = req.body || {};
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ ok: false, error: 'text is required.' });
+  }
+  if (!personaplex.isAvailable()) {
+    return res.status(503).json({ ok: false, error: 'Nvidia PersonaPlex is not configured. Set NVIDIA_API_KEY.' });
+  }
+  try {
+    const audioBuf = await personaplex.synthesize(text.trim(), persona);
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Content-Length', audioBuf.length);
+    res.send(audioBuf);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// GET /api/voice/personaplex/status
+router.get('/personaplex/status', async (_req, res) => {
+  const available = await personaplex.checkAvailability();
+  res.json({
+    available,
+    configured: Boolean(process.env.NVIDIA_API_KEY || process.env.NVIDIA_PERSONAPLEX_KEY),
+    model: 'nvidia/personaplex-tts-v1',
+    tones: Object.keys(personaplex.TONE_STYLE_MAP),
+    genders: Object.keys(personaplex.GENDER_VOICE_MAP),
+    defaults: personaplex.DEFAULT_PERSONA,
+  });
 });
 
 module.exports = router;

@@ -1,20 +1,33 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, lazy, Suspense } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../store/appStore'
 import { useBrainStore } from '../store/brainStore'
 import Sidebar from './layout/Sidebar'
 import ContextPanel from './layout/ContextPanel'
-import DashboardPage from './pages/DashboardPage'
-import ControlCenterPage from './pages/ControlCenterPage'
-import AIControlPage from './pages/AIControlPage'
-import NeuralBrainPage from './pages/NeuralBrainPage'
-import OperationsPage from './pages/OperationsPage'
-import AgentsPage from './pages/AgentsPage'
-import SystemPage from './pages/SystemPage'
-import VoicePage from './pages/VoicePage'
-import LearningLadderPage from './pages/LearningLadderPage'
-import PromptInspectorPage from './pages/PromptInspectorPage'
+
+const DashboardPage       = lazy(() => import('./pages/DashboardPage'))
+const ControlCenterPage   = lazy(() => import('./pages/ControlCenterPage'))
+const AIControlPage       = lazy(() => import('./pages/AIControlPage'))
+const NeuralBrainPage     = lazy(() => import('./pages/NeuralBrainPage'))
+const OperationsPage      = lazy(() => import('./pages/OperationsPage'))
+const AgentsPage          = lazy(() => import('./pages/AgentsPage'))
+const SystemPage          = lazy(() => import('./pages/SystemPage'))
+const VoicePage           = lazy(() => import('./pages/VoicePage'))
+const LearningLadderPage  = lazy(() => import('./pages/LearningLadderPage'))
+const PromptInspectorPage = lazy(() => import('./pages/PromptInspectorPage'))
+const AscendForgePage     = lazy(() => import('./pages/AscendForgePage'))
+const DoctorPage          = lazy(() => import('./pages/DoctorPage'))
+const BlacklightPage      = lazy(() => import('./pages/BlacklightPage'))
+const FairnessPage        = lazy(() => import('./pages/FairnessPage'))
+const HermesPage          = lazy(() => import('./pages/HermesPage'))
+const MoneyModePage       = lazy(() => import('./pages/MoneyModePage'))
+const WorkspacePage       = lazy(() => import('./pages/WorkspacePage'))
+const EvolutionPage       = lazy(() => import('./pages/EvolutionPage'))
+const TrainingPage        = lazy(() => import('./pages/TrainingPage'))
 import { API_URL } from '../config/api'
+import TopBar from './dashboard/TopBar'
+import ErrorBoundary from './ErrorBoundary'
 
 const BASE = API_URL
 
@@ -25,14 +38,39 @@ const PAGES = {
   'operations': OperationsPage,
   'agents': AgentsPage,
   'control-center': ControlCenterPage,
+  'ascend-forge': AscendForgePage,
+  'doctor': DoctorPage,
+  'blacklight': BlacklightPage,
+  'fairness': FairnessPage,
+  'hermes': HermesPage,
   'learning-ladder': LearningLadderPage,
   'system': SystemPage,
   'voice': VoicePage,
   'prompt-inspector': PromptInspectorPage,
+  'money-mode':       MoneyModePage,
+  'workspace':        WorkspacePage,
+  'evolution':        EvolutionPage,
+  'training':         TrainingPage,
 }
 
 export default function Dashboard() {
   const activeSection = useAppStore(s => s.activeSection)
+  const setActiveSection = useAppStore(s => s.setActiveSection)
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  // Sync URL → store when user navigates with browser back/forward
+  useEffect(() => {
+    const section = location.pathname.replace(/^\//, '') || 'dashboard'
+    if (section !== activeSection) setActiveSection(section)
+  }, [location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync store → URL when in-app navigation changes activeSection
+  useEffect(() => {
+    const target = `/${activeSection}`
+    if (location.pathname !== target) navigate(target, { replace: false })
+  }, [activeSection]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const setProductMetrics = useAppStore(s => s.setProductMetrics)
   const setAutomationStatus = useAppStore(s => s.setAutomationStatus)
   const setBrainInsights = useAppStore(s => s.setBrainInsights)
@@ -121,12 +159,21 @@ export default function Dashboard() {
         display: 'flex',
         flexDirection: 'column',
       }}>
+        <TopBar />
         <div style={{
           flex: 1,
           overflowY: 'auto',
           padding: 'var(--space-2) var(--space-3)',
         }}>
-          <PageComponent />
+          <ErrorBoundary key={activeSection} label={activeSection}>
+            <Suspense fallback={
+              <div style={{ padding: 32, color: 'var(--text-dim, #888)', fontFamily: 'var(--font-mono, monospace)', fontSize: 13 }}>
+                Loading…
+              </div>
+            }>
+              <PageComponent />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       </main>
 

@@ -630,6 +630,45 @@ function neurons() {
     });
   });
 
+  // Agent nodes (if available from catalog)
+  try {
+    const agentMgr = require('../agents/index');
+    const agents = agentMgr.getAgents ? agentMgr.getAgents() : [];
+    agents.slice(0, 24).forEach((agent) => {
+      const nodeId = _nid('agent', agent.id);
+      // Activation: time since last activity (fresh = high, stale = low)
+      let activation = 0.15; // default baseline
+      if (agent.lastActivityAt) {
+        const ageMs = Date.now() - Number(agent.lastActivityAt);
+        activation = Math.max(0, 1 - (ageMs / 120000)); // decay over 2 min
+      }
+      nodes.push({
+        id: nodeId,
+        label: agent.id,
+        type: 'Agent',
+        activation,
+        confidence: 0.75,
+        weight: agent.tasksCompleted || 0,
+        source: 'Live',
+        tag: agent.type || 'agent',
+        category: agent.type || 'general',
+      });
+      // Connect agent to its primary intent pattern if available
+      const intentKey = (agent.type || 'general').replace(/-/g, '_');
+      const patternKey = idMap.get(`pattern:${intentKey}`);
+      if (patternKey) {
+        connections.push({
+          from: nodeId,
+          to: patternKey,
+          weight: 0.5,
+          confidence: 0.6,
+        });
+      }
+    });
+  } catch (_) {
+    // Agent catalog unavailable — non-fatal
+  }
+
   // Global stats for the visualization
   const total = state.performance.total || 0;
   return {

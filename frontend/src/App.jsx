@@ -1,9 +1,11 @@
 import { useCallback } from 'react'
+import { BrowserRouter } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useAppStore } from './store/appStore'
 import BootSequence from './components/BootSequence'
 import Dashboard from './components/Dashboard'
 import ErrorScreen from './components/ErrorScreen'
+import ErrorBoundary from './components/ErrorBoundary'
 import { useWebSocket } from './hooks/useWebSocket'
 
 function AppContent() {
@@ -32,8 +34,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <div className="app">
-      <AppContent />
-    </div>
+    <BrowserRouter>
+      <ErrorBoundary label="Application">
+        <div className="app">
+          <AppContent />
+        </div>
+      </ErrorBoundary>
+    </BrowserRouter>
   )
 }
