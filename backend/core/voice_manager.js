@@ -20,24 +20,24 @@ const EVENT_VERBOSITY = {
   ai_learning_update:  VERBOSITY.VERBOSE,
 };
 
-// System channel event phrases — terse / futuristic
+// System channel event phrases — futuristic but conversational
 const SYSTEM_EVENT_PHRASES = {
-  system_boot:         (data) => data.greeting || 'Systems online.',
-  error_detected:      (data) => data.message  || 'Error detected.',
+  system_boot:         (data) => data.greeting || 'All systems ready. Standing by.',
+  error_detected:      (data) => data.message  || 'I found an issue. Working on it.',
   task_created:        (data) => {
-    if (data.count && data.count > 1) return `${data.count} tasks assigned.`;
-    if (data.priority === 'high') return 'High priority task registered.';
-    return 'Task assigned.';
+    if (data.count && data.count > 1) return `I've queued ${data.count} tasks. Starting now.`;
+    if (data.priority === 'high') return 'High priority task registered. Prioritizing.';
+    return 'Task queued. Beginning execution.';
   },
-  task_completed:      (data) => data.message  || 'Task complete.',
-  ai_learning_update:  () => 'Learning update applied.',
+  task_completed:      (data) => data.message  || 'Task finished. Ready for next.',
+  ai_learning_update:  () => 'Learning applied. Performance updated.',
 };
 
-// Customer channel event phrases — polite / conversational
+// Customer channel event phrases — warm, professional, natural
 const CUSTOMER_EVENT_PHRASES = {
-  incoming_support:    (data) => data.greeting || 'Hello! Thank you for reaching out. How can I assist you today?',
-  outbound_call:       (data) => data.greeting || 'Hello! This is an automated follow-up. How are you today?',
-  followup_reminder:   (data) => data.message  || 'Just following up on your recent request. Is there anything else we can help you with?',
+  incoming_support:    (data) => data.greeting || 'Hi there! Thanks for reaching out. I\'m here to help. What can I do for you?',
+  outbound_call:       (data) => data.greeting || 'Hi! I wanted to check in with you. Do you have a quick minute?',
+  followup_reminder:   (data) => data.message  || 'Just wanted to follow up on that. Let me know if you need anything else or if I can help with something else.',
 };
 
 const EVENT_COOLDOWN_MS = {

@@ -51,7 +51,7 @@ export default function ChatPanel() {
         style={{ borderBottom: '1px solid var(--border-gold-dim)' }}
       >
         <span className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
-          AI ASSISTANT
+          ULTRON ASSISTANT
         </span>
         <button
           onClick={toggleDebugMode}
@@ -196,7 +196,7 @@ export default function ChatPanel() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKey}
-          placeholder="Message your AI..."
+          placeholder="What do you need help with?"
           autoComplete="off"
           className="flex-1 font-mono text-xs outline-none bg-transparent min-w-0"
           style={{ color: 'var(--text-primary)', caretColor: 'var(--gold)' }}
