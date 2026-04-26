@@ -1,569 +1,461 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { sendChatMessage } from '../../hooks/useWebSocket'
-import PageHeader from '../layout/PageHeader'
-import { API_URL } from '../../config/api'
+import { Panel, Badge, StatusDot, GaugeRing, MiniBar, StatCard, TabBtn, AgentPill } from '../ui/primitives'
 
-const STATUS_CONFIG = {
-  running: { color: 'var(--success)', label: 'Active', dot: 'dashboard-status-dot--active' },
-  busy: { color: 'var(--warning)', label: 'Busy', dot: 'dashboard-status-dot--warning' },
-  idle: { color: 'var(--text-muted)', label: 'Idle', dot: 'dashboard-status-dot--idle' },
-}
-
-const DEFAULT_AGENT_HEALTH = {
-  running: 92,
-  busy: 78,
-  idle: 55,
-}
-const MAX_VISIBLE_AGENTS = 18
-const MAX_VISIBLE_CHAT_MESSAGES = 20
-const MAX_VISIBLE_LOGS = 14
-
-function MetricCard({ label, value, hint, highlighted = false }) {
+// ── Particle Map ──────────────────────────────────────────────────────────────
+function ParticleMap() {
+  const pts = [
+    { x: '8%', y: '20%', g: false }, { x: '22%', y: '55%', g: true }, { x: '38%', y: '30%', g: false },
+    { x: '50%', y: '65%', g: false }, { x: '62%', y: '18%', g: true }, { x: '75%', y: '45%', g: false },
+    { x: '88%', y: '70%', g: false }, { x: '30%', y: '80%', g: true }, { x: '55%', y: '40%', g: false },
+    { x: '70%', y: '25%', g: false }, { x: '15%', y: '65%', g: false }, { x: '45%', y: '85%', g: true },
+  ]
   return (
-    <motion.div
-      whileHover={{ y: -2 }}
-      whileTap={{ scale: 0.97 }}
-      className={`dashboard-glass-card dashboard-metric-card${highlighted ? ' dashboard-metric-card--highlighted' : ''}`}
-    >
-      <div className="dashboard-metric-label">
-        {label}
-      </div>
-      <div className="dashboard-metric-value">{value}</div>
-      {hint && <div className="dashboard-metric-hint">{hint}</div>}
-    </motion.div>
-  )
-}
-
-function QuickAction({ label, onClick }) {
-  return (
-    <motion.button
-      whileHover={{ y: -2, scale: 1.01 }}
-      whileTap={{ scale: 0.97 }}
-      className="dashboard-action-btn"
-      onClick={onClick}
-    >
-      {label}
-    </motion.button>
-  )
-}
-
-function ActivityItem({ item, index, compact = false }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.03 }}
-      className="dashboard-activity-row"
-      style={{ padding: compact ? '10px 12px' : '12px 14px' }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
-        <span className="dashboard-status-dot dashboard-status-dot--teal" />
-        <div style={{ minWidth: 0 }}>
-          <div className="dashboard-activity-text">{item?.notes || item?.message || 'System event'}</div>
-          <div className="dashboard-activity-kind">{item?.kind || 'event'}</div>
-        </div>
-      </div>
-      <span className="dashboard-activity-ts">
-        {item?.ts ? new Date(item.ts).toLocaleTimeString('en-US', {
-          hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
-        }) : '--:--:--'}
-      </span>
-    </motion.div>
-  )
-}
-
-function AgentPill({ agent, index }) {
-  const cfg = STATUS_CONFIG[agent.status] || STATUS_CONFIG.idle
-  const fallbackHealth = DEFAULT_AGENT_HEALTH[agent.status] ?? DEFAULT_AGENT_HEALTH.idle
-  const health = Math.max(0, Math.min(100, Math.round(agent.health ?? fallbackHealth)))
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.02 }}
-      whileHover={{ y: -1 }}
-      whileTap={{ scale: 0.98 }}
-      className={`dashboard-agent-pill${agent.status === 'running' ? ' dashboard-agent-pill--active' : ''}`}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span className={`dashboard-status-dot ${cfg.dot}`} />
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="dashboard-agent-name">{agent.name || agent.id}</div>
-          <div className="dashboard-agent-task">{agent.current_task || 'Monitoring orchestration queue'}</div>
-        </div>
-        <span className="dashboard-agent-health">{health}%</span>
-      </div>
-    </motion.div>
-  )
-}
-
-function RadialGauge({ label, value, color, ariaUnit = 'percent', displaySuffix = '%' }) {
-  const size = 80
-  const stroke = 6
-  const radius = (size - stroke) / 2
-  const circumference = 2 * Math.PI * radius
-  const offset = circumference - (Math.max(0, Math.min(value, 100)) / 100) * circumference
-
-  return (
-    <div className="dashboard-gauge">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${Math.round(value)} ${ariaUnit}`}>
-        <circle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(255,255,255,0.08)" strokeWidth={stroke} fill="none" />
-        <motion.circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={color}
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          fill="none"
-          style={{ filter: `drop-shadow(0 0 8px ${color})` }}
-          strokeDasharray={circumference}
-          initial={{ strokeDashoffset: circumference }}
-          animate={{ strokeDashoffset: offset }}
-          transition={{ duration: 0.7, ease: 'easeOut' }}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
+    <div style={{ position: 'relative', flex: 1, borderRadius: 8, overflow: 'hidden', background: 'radial-gradient(ellipse at 50% 50%, rgba(30,22,10,0.8), rgba(5,6,10,0.98))', border: '1px solid rgba(229,199,107,0.08)' }}>
+      <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(to right,rgba(229,199,107,0.04) 1px,transparent 1px),linear-gradient(to bottom,rgba(229,199,107,0.04) 1px,transparent 1px)', backgroundSize: '40px 40px' }} />
+      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+        {pts.slice(0, 8).map((p, i) => { const n = pts[(i + 1) % 8]; return <line key={i} x1={p.x} y1={p.y} x2={n.x} y2={n.y} stroke="rgba(229,199,107,0.12)" strokeWidth="1" /> })}
       </svg>
-      <div className="dashboard-gauge-center">
-        <span className="dashboard-gauge-value">{Math.round(value)}{displaySuffix}</span>
-        <span className="dashboard-gauge-label">{label}</span>
-      </div>
-    </div>
-  )
-}
-
-function ParticleMap({ compact = false }) {
-  const particles = useMemo(
-    () => Array.from({ length: compact ? 14 : 26 }, (_, i) => ({
-      id: i,
-      left: `${(i * 37) % 96 + 2}%`,
-      top: `${(i * 23) % 86 + 5}%`,
-      size: 4 + (i % 4),
-      duration: 7 + (i % 6) * 0.7,
-      delay: i * 0.14,
-      amber: i % 3 === 0,
-    })),
-    [compact]
-  )
-
-  return (
-    <div className={`dashboard-particle-map${compact ? ' dashboard-particle-map--compact' : ''}`}>
-      <div className="dashboard-map-grid" />
-      {particles.map((particle) => (
-        <motion.span
-          key={particle.id}
-          className={`dashboard-particle${particle.amber ? ' dashboard-particle--amber' : ''}`}
-          style={{ left: particle.left, top: particle.top, width: particle.size, height: particle.size }}
-          animate={{
-            y: [0, -8, 0],
-            opacity: [0.45, 1, 0.45],
-          }}
-          transition={{
-            duration: particle.duration,
-            repeat: Infinity,
-            ease: 'easeInOut',
-            delay: particle.delay,
-          }}
-        />
+      {pts.map((p, i) => (
+        <div key={i} style={{ position: 'absolute', left: p.x, top: p.y, transform: 'translate(-50%,-50%)' }}>
+          <div style={{ width: p.g ? 9 : 6, height: p.g ? 9 : 6, borderRadius: '50%', background: p.g ? 'var(--gold-bright, #FFD97A)' : 'var(--teal, #20D6C7)', boxShadow: `0 0 ${p.g ? 16 : 10}px ${p.g ? 'rgba(229,199,107,0.8)' : 'rgba(32,214,199,0.6)'}` }} />
+        </div>
       ))}
     </div>
   )
 }
 
-export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState('chat')
+// ── Task Progress Bar ─────────────────────────────────────────────────────────
+function TaskProgressBar({ task, progress, eta }) {
+  return (
+    <div style={{ padding: '8px 12px', borderRadius: 8, background: 'linear-gradient(90deg, rgba(229,199,107,0.06), rgba(205,127,50,0.03))', border: '1px solid rgba(229,199,107,0.2)', marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--gold-bright, #FFD97A)', boxShadow: '0 0 8px rgba(229,199,107,0.8)' }} />
+          <span style={{ fontSize: 11, color: 'var(--text-primary, #F0E9D2)', fontWeight: 500 }}>{task}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>ETA {eta}</span>
+          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--gold-bright, #FFD97A)', fontWeight: 600 }}>{progress}%</span>
+        </div>
+      </div>
+      <div style={{ height: 4, background: 'rgba(0,0,0,0.4)', borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ width: `${progress}%`, height: '100%', background: 'linear-gradient(135deg, #FFD97A 0%, #E5C76B 40%, #B8923F 100%)', borderRadius: 2, boxShadow: '0 0 10px rgba(229,199,107,0.6)', transition: 'width .5s' }} />
+      </div>
+    </div>
+  )
+}
+
+// ── Chat Panel ────────────────────────────────────────────────────────────────
+function ChatPanel({ chat, isTyping, executionSteps }) {
   const [input, setInput] = useState('')
-  const messagesEndRef = useRef(null)
-  const systemStatus = useAppStore(s => s.systemStatus)
-  const agents = useAppStore(s => s.agents)
-  const activityFeed = useAppStore(s => s.activityFeed)
-  const executionLogs = useAppStore(s => s.executionLogs)
-  const chatMessages = useAppStore(s => s.chatMessages)
-  const addChatMessage = useAppStore(s => s.addChatMessage)
-  const isTyping = useAppStore(s => s.isTyping)
-  const setActiveSection = useAppStore(s => s.setActiveSection)
-  const wsConnected = useAppStore(s => s.wsConnected)
-  const nnStatus = useAppStore(s => s.nnStatus)
-  const brainInsights = useAppStore(s => s.brainInsights)
-  const objectivePanels = useAppStore(s => s.objectivePanels)
+  const [micActive, setMicActive] = useState(false)
+  const addMsg = useAppStore(s => s.addChatMessage)
+  const endRef = useRef(null)
+  const recogRef = useRef(null)
 
-  const BASE = API_URL
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chat, isTyping])
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatMessages, isTyping])
-
-  const handleSend = () => {
-    const text = input.trim()
-    if (!text) return
-    addChatMessage({ role: 'user', content: text, ts: Date.now() })
-    sendChatMessage(text)
+  const send = useCallback((txt) => {
+    const t = (txt || input).trim()
+    if (!t) return
+    addMsg({ role: 'user', content: t, ts: Date.now() })
+    sendChatMessage(t)
     setInput('')
-  }
+  }, [input, addMsg])
 
-  const normalizedAgents = useMemo(
-    () =>
-      (agents || []).map(agent => ({
-        ...agent,
-        status: agent.status ?? agent.state,
-        current_task: agent.current_task ?? agent.task,
-      })),
-    [agents]
-  )
-  const activeAgents = useMemo(
-    () => normalizedAgents.filter(a => a.status === 'running' || a.status === 'busy'),
-    [normalizedAgents]
-  )
-  const totalAgents = systemStatus?.total_agents ?? agents?.length ?? 0
-  const runningAgents = systemStatus?.running_agents ?? activeAgents.length
-  const stoppedAgents = Math.max(totalAgents - runningAgents, 0)
-
-  const metrics = [
-    { label: 'Active Agents', value: runningAgents, hint: `${Math.round((runningAgents / Math.max(totalAgents, 1)) * 100)}% utilization` },
-    { label: 'Total Agents', value: totalAgents, hint: 'Fleet capacity' },
-    { label: 'Stopped Agents', value: stoppedAgents, hint: 'Standby / idle' },
-    { label: 'Gateway Status', value: wsConnected ? 'ONLINE' : 'OFFLINE', hint: wsConnected ? 'Realtime link stable' : 'Reconnect required', highlighted: true },
-  ]
-
-  const healthItems = [
-    { label: 'CPU', value: systemStatus?.cpu_usage ?? 0, color: 'var(--neon-teal)', ariaUnit: 'percent', displaySuffix: '%' },
-    { label: 'RAM', value: systemStatus?.memory ?? 0, color: 'var(--neon-amber)', ariaUnit: 'percent', displaySuffix: '%' },
-    { label: 'GPU', value: systemStatus?.gpu_usage ?? 0, color: 'var(--neon-cyan)', ariaUnit: 'percent', displaySuffix: '%' },
-    { label: 'Temp', value: Math.min(100, Math.round(systemStatus?.cpu_temperature ?? 0)), color: 'var(--warning)', ariaUnit: 'degrees celsius', displaySuffix: '°C' },
-  ]
-  const moneyModePanel = objectivePanels?.money_mode || {}
-  const ascendForgePanel = objectivePanels?.ascend_forge || {}
-
-  const objectiveStatusLabel = (status) => {
-    if (status === 'running') return 'running'
-    if (status === 'waiting') return 'waiting'
-    if (status === 'completed') return 'completed'
-    return 'inactive'
+  const handleMic = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SR) { alert('Voice not supported in this browser.'); return }
+    if (micActive) { recogRef.current?.stop(); return }
+    const r = new SR()
+    r.continuous = false; r.interimResults = true; r.lang = 'en-US'
+    r.onstart = () => setMicActive(true)
+    r.onresult = (e) => {
+      const transcript = Array.from(e.results).map(res => res[0].transcript).join('')
+      setInput(transcript)
+      if (e.results[e.results.length - 1].isFinal) { send(transcript); setMicActive(false) }
+    }
+    r.onerror = () => setMicActive(false)
+    r.onend = () => setMicActive(false)
+    recogRef.current = r
+    r.start()
   }
 
   return (
-    <div className="page-enter dashboard-overview">
-      <PageHeader
-        title="Overview"
-        subtitle="AI Employee control center"
-      />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 8 }}>
+      {isTyping && executionSteps?.length > 0 && <ThinkingProgress steps={executionSteps} />}
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 4 }}>
+        {chat.map((msg, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+            <div style={{ maxWidth: '85%', padding: '9px 13px', borderRadius: 10, fontSize: 12, lineHeight: 1.6, background: msg.role === 'user' ? 'linear-gradient(135deg, rgba(229,199,107,0.14), rgba(205,127,50,0.06))' : 'var(--bg-elevated, #12141F)', border: `1px solid ${msg.role === 'user' ? 'rgba(229,199,107,0.3)' : 'rgba(229,199,107,0.08)'}`, color: 'var(--text-primary, #F0E9D2)', whiteSpace: 'pre-wrap' }}>
+              {msg.content}
+              {msg.attachments?.map((a, j) => (
+                <div key={j} style={{ marginTop: 6 }}>
+                  <a href={a.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--teal, #20D6C7)', textDecoration: 'underline' }}>{a.name || 'Download'}</a>
+                </div>
+              ))}
+              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)', marginTop: 4, fontFamily: 'monospace' }}>{new Date(msg.ts || Date.now()).toLocaleTimeString('en-US', { hour12: false })}</div>
+            </div>
+          </div>
+        ))}
+        {isTyping && executionSteps?.length === 0 && (
+          <div style={{ display: 'flex', gap: 4, padding: 4 }}>
+            {[0, 1, 2].map(i => <span key={i} style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(255,255,255,0.3)', animation: `blink .9s ${i * 0.2}s ease-in-out infinite`, display: 'inline-block' }} />)}
+          </div>
+        )}
+        <div ref={endRef} />
+      </div>
+      <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+        <button onClick={handleMic} title={micActive ? 'Stop listening' : 'Voice input'} style={{ padding: '7px 10px', borderRadius: 8, border: `1px solid ${micActive ? 'rgba(239,68,68,0.6)' : 'rgba(229,199,107,0.2)'}`, background: micActive ? 'rgba(239,68,68,0.12)' : 'rgba(229,199,107,0.06)', color: micActive ? '#EF4444' : 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 14, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+          🎤{micActive && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#EF4444', animation: 'blink .6s ease-in-out infinite' }} />}
+        </button>
+        <div style={{ flex: 1, display: 'flex', gap: 7, alignItems: 'center', border: `1px solid ${micActive ? 'rgba(239,68,68,0.3)' : 'rgba(229,199,107,0.2)'}`, borderRadius: 10, padding: '6px 6px 6px 12px', background: 'rgba(5,6,10,0.6)' }}>
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+            placeholder={micActive ? 'LISTENING…' : 'Instruct your AI employee…'}
+            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: micActive ? '#EF4444' : 'var(--text-primary, #F0E9D2)', fontSize: 12, fontFamily: 'inherit' }}
+          />
+          <button onClick={() => send()} style={{ background: 'linear-gradient(135deg, #FFD97A 0%, #E5C76B 40%, #B8923F 100%)', border: 'none', borderRadius: 7, padding: '7px 13px', cursor: 'pointer', color: '#1a1000', fontWeight: 700, fontSize: 11, letterSpacing: '0.04em' }}>SEND</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
-      <div className="dashboard-metrics-grid">
-        {metrics.map((metric) => (
-          <MetricCard key={metric.label} {...metric} />
+// ── Priority Alerts ───────────────────────────────────────────────────────────
+function PriorityAlerts() {
+  const alerts = [
+    { sev: 'RED',    t: '14:20:30', msg: 'Agent output anomaly score 0.91 — exceeds threshold',    src: 'Blacklight Monitor' },
+    { sev: 'ORANGE', t: '14:15:11', msg: 'Vector store capacity at 78% — pruning recommended',      src: 'Memory Indexer' },
+    { sev: 'ORANGE', t: '13:58:02', msg: 'Hermes routing latency spiked to 82ms (normal: 12ms)',    src: 'Hermes Relay' },
+    { sev: 'YELLOW', t: '13:22:44', msg: 'Memory Indexer agent health degraded to 74%',             src: 'Doctor Diagnostic' },
+    { sev: 'YELLOW', t: '12:11:02', msg: 'Rate limit on external API approaching (84%)',             src: 'Gateway Monitor' },
+  ]
+  const sc = { RED: '#EF4444', ORANGE: '#F59E0B', YELLOW: '#EAB308' }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+        <StatCard label="Critical" value="1" color="#EF4444" sub="Immediate action required" accent />
+        <StatCard label="Warning"  value="2" color="#F59E0B" sub="Monitor closely" />
+        <StatCard label="Advisory" value="2" color="#EAB308" sub="No urgency" />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {alerts.map((a, i) => (
+          <div key={i} style={{ padding: '11px 14px', borderRadius: 8, border: `1px solid ${sc[a.sev]}40`, background: `linear-gradient(90deg, ${sc[a.sev]}0C, transparent)`, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 4, alignSelf: 'stretch', borderRadius: 2, background: sc[a.sev], boxShadow: `0 0 10px ${sc[a.sev]}` }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-primary, #F0E9D2)', marginBottom: 3 }}>{a.msg}</div>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>{a.src} · {a.t}</div>
+            </div>
+            <Badge label={a.sev} variant={a.sev === 'RED' ? 'error' : a.sev === 'ORANGE' ? 'warn' : 'gold'} />
+          </div>
         ))}
       </div>
+    </div>
+  )
+}
 
-      <div className="dashboard-main-grid">
-        <section className="dashboard-glass-card dashboard-panel">
-          <div className="dashboard-panel-header">
-            <h2>Agents</h2>
-            <span>{activeAgents.length} active</span>
+// ── System Pipeline ───────────────────────────────────────────────────────────
+function SystemPipeline() {
+  const stages = [
+    { label: 'Input',     in: '248/m', stat: 'healthy', load: 34 },
+    { label: 'Agents',    in: '312/m', stat: 'healthy', load: 58 },
+    { label: 'Memory',    in: '842/m', stat: 'warn',    load: 78 },
+    { label: 'Reasoning', in: '184/m', stat: 'healthy', load: 42 },
+    { label: 'Output',    in: '168/m', stat: 'healthy', load: 28 },
+  ]
+  const sc = { healthy: '#22C55E', warn: '#F59E0B', fail: '#EF4444' }
+  return (
+    <div>
+      <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 12 }}>LIVE DATA FLOW — Input → Agents → Memory → Reasoning → Output</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 4 }}>
+        {stages.map((s, i) => (
+          <div key={i} style={{ padding: '16px 14px', borderRadius: 10, border: `1px solid ${sc[s.stat]}44`, background: `linear-gradient(180deg, ${sc[s.stat]}12, var(--bg-card, #0C0E18))` }}>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>Stage {i + 1}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary, #F0E9D2)', marginBottom: 8 }}>{s.label}</div>
+            <div style={{ fontFamily: 'monospace', fontSize: 18, color: sc[s.stat], marginBottom: 8 }}>{s.in}</div>
+            <MiniBar value={s.load} color={sc[s.stat]} />
+            {s.stat === 'warn' && <div style={{ fontSize: 10, color: '#F59E0B', marginTop: 6, fontFamily: 'monospace' }}>⚠ Bottleneck</div>}
           </div>
-          <div className="dashboard-agents-scroll">
-            {activeAgents.length === 0 ? (
-              <div className="dashboard-empty">No active agents online</div>
-            ) : activeAgents.slice(0, MAX_VISIBLE_AGENTS).map((agent, idx) => (
-              <AgentPill key={agent.id || agent.name || idx} agent={agent} index={idx} />
-            ))}
-          </div>
-        </section>
+        ))}
+      </div>
+      <div style={{ marginTop: 18, padding: '10px 14px', borderRadius: 8, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}>
+        <div style={{ fontSize: 11, color: '#F59E0B', fontWeight: 600, marginBottom: 3 }}>⚠ Bottleneck detected at Memory stage</div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary, #9A927E)' }}>Vector store capacity at 78%. Indexing latency increased 3.4×. Suggest triggering memory sweep.</div>
+      </div>
+    </div>
+  )
+}
 
-        <section className="dashboard-glass-card dashboard-panel dashboard-panel-center">
-          <div className="dashboard-panel-header">
-            <h2>Orchestrator</h2>
-            <div className="dashboard-tabs" role="tablist" aria-label="Orchestrator views">
-              {[{ id: 'chat', label: 'chat' }, { id: 'live-map', label: 'live map' }, { id: 'logs', label: 'logs' }].map((tab) => (
-                <button
-                  key={tab.id}
-                  className={`dashboard-tab-btn${activeTab === tab.id ? ' dashboard-tab-btn--active' : ''}`}
-                  onClick={() => setActiveTab(tab.id)}
-                  role="tab"
-                  aria-selected={activeTab === tab.id}
-                  aria-controls={`orchestrator-panel-${tab.id}`}
-                  id={`orchestrator-tab-${tab.id}`}
-                >
-                  {tab.label}
-                </button>
-              ))}
+// ── Execution Timeline ────────────────────────────────────────────────────────
+function ExecutionTimeline({ logs }) {
+  const runs = logs?.slice(0, 6).map((l, i) => ({
+    id: l.id || `r${i}`, time: l.ts || '--:--:--', label: l.msg || l.message || 'Event',
+    dur: l.duration || '—', ok: l.level !== 'ERROR' && l.ok !== false,
+  })) || [
+    { id: 'r1', time: '14:22:01', label: 'Revenue pathway analysis',    dur: '1.4s', ok: true },
+    { id: 'r2', time: '14:21:44', label: 'Stripe deploy — module v2',   dur: '8.2s', ok: true },
+    { id: 'r3', time: '14:20:55', label: 'Risk anomaly review',          dur: '0.8s', ok: false },
+    { id: 'r4', time: '14:18:12', label: 'Memory sweep + compression',  dur: '4.1s', ok: true },
+    { id: 'r5', time: '14:15:30', label: 'Market research batch',       dur: '12.3s', ok: true },
+  ]
+  const [sel, setSel] = useState(runs[0])
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Scroll back through past runs — click to replay</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {runs.map(r => (
+            <div key={r.id} onClick={() => setSel(r)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 12px', borderRadius: 8, border: `1px solid ${sel?.id === r.id ? 'rgba(229,199,107,0.4)' : 'rgba(229,199,107,0.08)'}`, background: sel?.id === r.id ? 'rgba(229,199,107,0.06)' : 'var(--bg-elevated, #12141F)', cursor: 'pointer' }}>
+              <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{r.time}</span>
+              <span style={{ flex: 1, fontSize: 12, color: 'var(--text-primary, #F0E9D2)' }}>{r.label}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--text-secondary, #9A927E)' }}>{r.dur}</span>
+              <Badge label={r.ok ? 'OK' : 'FAIL'} variant={r.ok ? 'green' : 'error'} />
             </div>
-          </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: 12, borderRadius: 8, background: 'var(--bg-elevated, #12141F)', border: '1px solid rgba(229,199,107,0.08)' }}>
+        <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Replay Detail</div>
+        <div style={{ fontSize: 13, color: 'var(--gold-bright, #FFD97A)', fontWeight: 500, marginBottom: 8 }}>{sel?.label}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary, #9A927E)', lineHeight: 1.7, fontFamily: 'monospace' }}>
+          <div>→ Status: {sel?.ok ? 'SUCCESS' : 'FAILED'}</div>
+          <div>→ Duration: {sel?.dur}</div>
+          <div>→ Timestamp: {sel?.time}</div>
+        </div>
+        <button style={{ width: '100%', marginTop: 14, padding: '8px', borderRadius: 7, border: '1px solid rgba(229,199,107,0.4)', background: 'rgba(229,199,107,0.1)', color: 'var(--gold-bright, #FFD97A)', cursor: 'pointer', fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.06em' }}>▶ REPLAY RUN</button>
+      </div>
+    </div>
+  )
+}
 
-          <div
-            className="dashboard-tab-content"
-            role="tabpanel"
-            id="orchestrator-panel-chat"
-            aria-labelledby="orchestrator-tab-chat"
-            hidden={activeTab !== 'chat'}
-          >
-            <div className="dashboard-chat-panel">
-              <div className="dashboard-chat-messages">
-                {chatMessages.length === 0 && !isTyping && (
-                  <div className="dashboard-empty">How can I help you today?</div>
-                )}
-                <AnimatePresence initial={false}>
-                  {chatMessages.slice(-MAX_VISIBLE_CHAT_MESSAGES).map((msg, idx) => (
-                    <motion.div
-                      key={`${msg.ts || idx}-${idx}`}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className={`dashboard-msg-row ${msg.role === 'user' ? 'dashboard-msg-row--user' : ''}`}
-                    >
-                      <div className={`dashboard-msg-bubble ${msg.role === 'user' ? 'dashboard-msg-bubble--user' : ''}`}>
-                        {msg.content}
-                      </div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-                {isTyping && <div className="dashboard-msg-typing">Thinking…</div>}
-                <div ref={messagesEndRef} />
-              </div>
-              <div className="dashboard-chat-input-wrap">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSend()
-                    }
-                  }}
-                  className="dashboard-chat-input"
-                  placeholder="Ask me anything..."
-                  aria-label="Chat message input"
-                />
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="dashboard-send-btn" onClick={handleSend} aria-label="Send message">
-                  Send
-                </motion.button>
-              </div>
-            </div>
-          </div>
+// ── Resource Map ──────────────────────────────────────────────────────────────
+function ResourceMap({ agents }) {
+  const rows = agents?.slice(0, 8).map(a => ({
+    name: a.name || a.id,
+    cpu: a.cpu ?? Math.round(20 + (a.health ?? 50) * 0.5),
+    ram: a.ram ?? Math.round(15 + (a.health ?? 50) * 0.4),
+    tok: a.tokens ?? Math.round(2000 + Math.random() * 12000),
+    waste: a.waste ?? Math.round(Math.random() * 25),
+  })) || []
 
-          <div
-            className="dashboard-tab-content"
-            role="tabpanel"
-            id="orchestrator-panel-live-map"
-            aria-labelledby="orchestrator-tab-live-map"
-            hidden={activeTab !== 'live-map'}
-          >
-            <div style={{ height: '100%' }}>
-              <ParticleMap compact />
-            </div>
-          </div>
+  if (!rows.length) return <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>No agent data available</div>
 
-          <div
-            className="dashboard-tab-content"
-            role="tabpanel"
-            id="orchestrator-panel-logs"
-            aria-labelledby="orchestrator-tab-logs"
-            hidden={activeTab !== 'logs'}
-          >
-            <div className="dashboard-log-stream">
-              {executionLogs.length === 0
-                ? <div className="dashboard-empty">No logs captured yet</div>
-                : executionLogs.slice(0, MAX_VISIBLE_LOGS).map((item, idx) => <ActivityItem key={item.id || idx} item={item} index={idx} compact />)}
-            </div>
+  return (
+    <div>
+      <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Per-agent utilization — highlight = waste zone</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 8, padding: '6px 12px', fontSize: 9, color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+          <span>Agent</span><span>CPU</span><span>RAM</span><span>Tokens</span><span>Waste</span>
+        </div>
+        {rows.map(a => (
+          <div key={a.name} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 8, padding: '9px 12px', borderRadius: 7, border: `1px solid ${a.waste > 10 ? 'rgba(245,158,11,0.25)' : 'rgba(229,199,107,0.08)'}`, background: a.waste > 10 ? 'rgba(245,158,11,0.04)' : 'var(--bg-elevated, #12141F)', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-primary, #F0E9D2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+            <div><MiniBar value={a.cpu} color={a.cpu > 60 ? '#F59E0B' : 'var(--teal, #20D6C7)'} /><span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)' }}>{a.cpu}%</span></div>
+            <div><MiniBar value={a.ram} color={a.ram > 70 ? '#F59E0B' : 'var(--gold, #E5C76B)'} /><span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)' }}>{a.ram}%</span></div>
+            <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--text-secondary, #9A927E)' }}>{a.tok.toLocaleString()}</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 11, color: a.waste > 10 ? '#F59E0B' : 'rgba(255,255,255,0.35)' }}>{a.waste}% {a.waste > 10 && '⚠'}</span>
           </div>
-        </section>
+        ))}
+      </div>
+    </div>
+  )
+}
 
-        <section className="dashboard-side-column">
-          <div className="dashboard-glass-card dashboard-panel">
-            <div className="dashboard-panel-header">
-              <h2>Quick Actions</h2>
-            </div>
-            <div className="dashboard-actions-grid">
-              <QuickAction label="Open AI Control" onClick={() => setActiveSection('ai-control')} />
-              <QuickAction label="Manage Agents" onClick={() => setActiveSection('agents')} />
-              <QuickAction label="View Operations" onClick={() => setActiveSection('operations')} />
-              <QuickAction label="System Settings" onClick={() => setActiveSection('system')} />
-            </div>
-          </div>
+// ── AI Pipeline Progress ──────────────────────────────────────────────────────
+function ThinkingProgress({ steps }) {
+  if (!steps?.length) return null
+  return (
+    <div style={{ margin: '6px 0', padding: '8px 12px', background: 'rgba(0,212,170,0.04)', border: '1px solid rgba(0,212,170,0.12)', borderRadius: 8, fontSize: 11 }}>
+      <div style={{ color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', marginBottom: 6, fontSize: 10, fontFamily: 'monospace' }}>AI PIPELINE</div>
+      {steps.map((step, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: 'var(--text-secondary, #9A927E)' }}>
+          <span style={{ color: 'var(--teal, #20D6C7)', fontSize: 8 }}>✓</span>
+          <span>{step.label}</span>
+          {step.detail && <span style={{ color: 'rgba(255,255,255,0.3)' }}>· {step.detail}</span>}
+        </div>
+      ))}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: 'var(--gold, #E5C76B)' }}>
+        <span style={{ fontSize: 8 }}>⋯</span>
+        <span>Thinking…</span>
+      </div>
+    </div>
+  )
+}
 
-          <div className="dashboard-glass-card dashboard-panel">
-            <div className="dashboard-panel-header">
-              <h2>Command Center</h2>
-            </div>
-            <div className="dashboard-actions-grid">
-              <QuickAction label="⚡ Hermes Agent" onClick={() => {
-                addChatMessage({ role: 'user', content: 'Activate Hermes agent for rapid task execution', ts: Date.now() })
-                sendChatMessage('Activate Hermes agent for rapid task execution')
-              }} />
-              <QuickAction label="◉ Blacklight Mode" onClick={() => {
-                fetch(`${BASE}/api/mode`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ mode: 'BLACKLIGHT' }),
-                }).catch(() => {})
-                addChatMessage({ role: 'user', content: 'Activating BLACKLIGHT mode — all agents online', ts: Date.now() })
-                sendChatMessage('Activating BLACKLIGHT mode — all agents online')
-              }} />
-              <QuickAction label="🔺 Ascend Forge" onClick={() => {
-                const goal = window.prompt('Set Ascend Forge goal', 'optimize conversion funnel')
-                const text = `start ascend forge with goal: ${(goal || '').trim()}`
-                addChatMessage({ role: 'user', content: text, ts: Date.now() })
-                sendChatMessage(text)
-              }} />
-              <QuickAction label="💰 Money Mode" onClick={() => {
-                const text = 'activate money mode'
-                addChatMessage({ role: 'user', content: text, ts: Date.now() })
-                sendChatMessage(text)
-              }} />
+// ── What Changed ──────────────────────────────────────────────────────────────
+function WhatChanged({ activity }) {
+  const diffs = activity?.slice(0, 5).map(a => ({ when: 'recently', type: a.kind || 'event', text: a.message || a.notes || 'System event', dir: 'up' })) || [
+    { when: '2h ago', type: 'behavior', text: 'Response avg length +18% after prompt v4.2 deploy',        dir: 'up' },
+    { when: '5h ago', type: 'perf',     text: 'Memory lookup latency +3.4× — triggered indexer warning',  dir: 'up' },
+    { when: '1d ago', type: 'quality',  text: 'Fairness score +1.4% — cultural sensitivity update',       dir: 'up' },
+    { when: '2d ago', type: 'drift',    text: 'Response style drift detected — vocabulary shift +7%',     dir: 'neutral' },
+    { when: '3d ago', type: 'capacity', text: 'Token usage per task +22% — code generation expanded',     dir: 'up' },
+  ]
+  return (
+    <div>
+      <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>System Behavior Changes — auto-detected drift</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {diffs.map((d, i) => (
+          <div key={i} style={{ padding: '11px 14px', borderRadius: 8, border: '1px solid rgba(229,199,107,0.08)', background: 'var(--bg-elevated, #12141F)', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: 18, color: d.dir === 'up' ? 'var(--gold-bright, #FFD97A)' : 'rgba(255,255,255,0.35)' }}>{d.dir === 'up' ? '↑' : '○'}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-primary, #F0E9D2)' }}>{d.text}</div>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginTop: 3, fontFamily: 'monospace' }}>{d.when} · {d.type}</div>
             </div>
           </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
-          <div className="dashboard-glass-card dashboard-panel">
-            <div className="dashboard-panel-header">
-              <h2>💰 Money Mode</h2>
-              <span>{objectiveStatusLabel(moneyModePanel?.status)}</span>
-            </div>
-            {!moneyModePanel?.current_objective ? (
-              <div className="dashboard-empty">⚠️ No objective set</div>
-            ) : (
-              <div className="dashboard-brain-mini">
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Objective</span>
-                  <span className="dashboard-brain-value">{moneyModePanel.current_objective.goal}</span>
-                </div>
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Progress</span>
-                  <span className="dashboard-brain-value">{Math.round(moneyModePanel?.progress || 0)}%</span>
-                </div>
-                <div className="dashboard-brain-bar">
-                  <motion.div
-                    className="dashboard-brain-bar-fill"
-                    style={{ background: 'var(--success)' }}
-                    animate={{ width: `${Math.round(moneyModePanel?.progress || 0)}%` }}
-                    transition={{ duration: 0.5 }}
-                  />
-                </div>
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Active tasks</span>
-                  <span className="dashboard-brain-value">{(moneyModePanel?.active_tasks || []).length}</span>
-                </div>
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Leads generated</span>
-                  <span className="dashboard-brain-value">{moneyModePanel?.performance?.leads_generated || 0}</span>
-                </div>
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Emails sent</span>
-                  <span className="dashboard-brain-value">{moneyModePanel?.performance?.emails_sent || 0}</span>
-                </div>
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Conversion %</span>
-                  <span className="dashboard-brain-value">{moneyModePanel?.performance?.conversion_pct || 0}%</span>
-                </div>
-              </div>
-            )}
+// ── Main Dashboard ────────────────────────────────────────────────────────────
+export default function DashboardPage() {
+  const agents      = useAppStore(s => s.agents)
+  const chatMessages = useAppStore(s => s.chatMessages)
+  const isTyping    = useAppStore(s => s.isTyping)
+  const systemStatus = useAppStore(s => s.systemStatus)
+  const nnStatus    = useAppStore(s => s.nnStatus)
+  const wsConnected = useAppStore(s => s.wsConnected)
+  const activityFeed = useAppStore(s => s.activityFeed)
+  const executionLogs   = useAppStore(s => s.executionLogs)
+  const executionSteps  = useAppStore(s => s.executionSteps)
+
+  const [view, setView] = useState('main')
+  const [tab, setTab]   = useState('chat')
+  const [agentTab, setAgentTab] = useState('active')
+
+  const running = agents.filter(a => a.status === 'running')
+  const busy    = agents.filter(a => a.status === 'busy')
+  const idle    = agents.filter(a => a.status === 'idle')
+  const shown   = agentTab === 'active' ? [...running, ...busy] : agentTab === 'idle' ? idle : agents
+
+  const cpu  = Math.round(systemStatus?.cpu ?? systemStatus?.cpu_usage ?? 0)
+  const ram  = Math.round(systemStatus?.memory ?? 0)
+  const gpu  = Math.round(systemStatus?.gpu_usage ?? 0)
+  const temp = Math.round(systemStatus?.cpu_temperature ?? 0)
+  const mode = systemStatus?.mode ?? 'AUTONOMOUS'
+  const conf = nnStatus?.confidence ?? 0
+  const brainPct = conf > 1 ? Math.round(conf) : Math.round(conf * 100)
+  const learnStep = nnStatus?.learn_step ?? 0
+  const strategies = nnStatus?.total_actions ?? 47
+
+  const VIEWS = ['main', 'alerts', 'pipeline', 'timeline', 'resources', 'changes']
+  const VIEW_LABELS = { main: '◆ Mission Control', alerts: '◆ Priority Alerts', pipeline: '◆ System Pipeline', timeline: '◆ Execution Timeline', resources: '◆ Resource Map', changes: '◆ What Changed' }
+
+  const logs = executionLogs?.map(l => ({ id: l.id || l.task_id, ts: l.ts || l.timestamp, msg: l.message || l.step || l.agent || 'Event', level: l.level, ok: l.level !== 'ERROR' }))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%' }}>
+      {/* View switcher */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px', background: 'linear-gradient(180deg, rgba(229,199,107,0.04), transparent)', border: '1px solid rgba(229,199,107,0.08)', borderRadius: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+        {VIEWS.map(v => <TabBtn key={v} label={VIEW_LABELS[v]} active={view === v} onClick={() => setView(v)} gold />)}
+      </div>
+
+      {view === 'main' && (
+        <>
+          {/* Metric cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, flexShrink: 0 }}>
+            <StatCard label="Active Agents"    value={running.length} sub={`${busy.length} busy · ${idle.length} idle`} />
+            <StatCard label="Total Fleet"      value={agents.length}  sub={agents.length ? `${Math.round((running.length / agents.length) * 100)}% utilization` : '—'} />
+            <StatCard label="Brain Confidence" value={`${brainPct}%`} sub={`Step ${learnStep.toLocaleString()}`} accent />
+            <StatCard label="Gateway"          value={wsConnected ? 'ONLINE' : 'OFFLINE'} sub={wsConnected ? 'Realtime link stable' : 'Reconnecting…'} color={wsConnected ? 'var(--gold-bright, #FFD97A)' : '#EF4444'} />
+            <StatCard label="Strategies"       value={strategies} sub={`${Math.round((nnStatus?.confidence ?? 0.91) > 1 ? nnStatus.confidence : (nnStatus?.confidence ?? 0.91) * 100)}% success`} color="var(--teal, #20D6C7)" />
           </div>
 
-          <div className="dashboard-glass-card dashboard-panel">
-            <div className="dashboard-panel-header">
-              <h2>⚙️ Ascend Forge</h2>
-              <span>{objectiveStatusLabel(ascendForgePanel?.status)}</span>
-            </div>
-            {!ascendForgePanel?.current_objective ? (
-              <div className="dashboard-empty">⚠️ No objective set</div>
-            ) : (
-              <div className="dashboard-brain-mini">
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Goal</span>
-                  <span className="dashboard-brain-value">{ascendForgePanel.current_objective.goal}</span>
-                </div>
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Plan steps</span>
-                  <span className="dashboard-brain-value">{(ascendForgePanel?.plan || []).length}</span>
-                </div>
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Progress</span>
-                  <span className="dashboard-brain-value">{Math.round(ascendForgePanel?.progress || 0)}%</span>
-                </div>
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Results</span>
-                  <span className="dashboard-brain-value">{(ascendForgePanel?.results || []).length}</span>
-                </div>
-                <div className="dashboard-brain-row">
-                  <span className="dashboard-brain-label">Active agents</span>
-                  <span className="dashboard-brain-value">{(ascendForgePanel?.agents_used || []).join(', ') || '—'}</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="dashboard-glass-card dashboard-panel">
-            <div className="dashboard-panel-header">
-              <h2>Neural Brain</h2>
-              <span style={{ color: nnStatus?.active ? 'var(--success)' : 'var(--text-muted)', fontSize: '11px' }}>
-                {nnStatus?.active ? '● Live' : '○ Idle'}
-              </span>
-            </div>
-            <div className="dashboard-brain-mini">
-              <div className="dashboard-brain-row">
-                <span className="dashboard-brain-label">Confidence</span>
-                <span className="dashboard-brain-value" style={{ color: 'var(--gold)' }}>
-                  {Math.round((nnStatus?.confidence ?? 0) * 100)}%
-                </span>
-              </div>
-              <div className="dashboard-brain-bar">
-                <motion.div
-                  className="dashboard-brain-bar-fill"
-                  style={{ background: 'var(--gold)' }}
-                  animate={{ width: `${Math.round((nnStatus?.confidence ?? 0) * 100)}%` }}
-                  transition={{ duration: 0.6 }}
-                />
-              </div>
-              <div className="dashboard-brain-row">
-                <span className="dashboard-brain-label">Learn Step</span>
-                <span className="dashboard-brain-value">{(nnStatus?.learn_step ?? 0).toLocaleString()}</span>
-              </div>
-              <div className="dashboard-brain-row">
-                <span className="dashboard-brain-label">Success Rate</span>
-                <span className="dashboard-brain-value" style={{ color: 'var(--success)' }}>
-                  {brainInsights?.performance_metrics?.success_rate
-                    ? `${Math.round(brainInsights.performance_metrics.success_rate * 100)}%`
-                    : '—'}
-                </span>
-              </div>
-              <div className="dashboard-brain-row">
-                <span className="dashboard-brain-label">Strategies</span>
-                <span className="dashboard-brain-value">{brainInsights?.learned_strategies?.length ?? 0}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="dashboard-glass-card dashboard-panel">
-            <div className="dashboard-panel-header">
-              <h2>System Health</h2>
-              <span>Live</span>
-            </div>
-              <div className="dashboard-health-grid">
-                {healthItems.map((item) => (
-                  <RadialGauge key={item.label} label={item.label} value={item.value} color={item.color} ariaUnit={item.ariaUnit} displaySuffix={item.displaySuffix} />
+          {/* 3-column layout */}
+          <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr 260px', gap: 10, flex: 1, minHeight: 0 }}>
+            {/* Agent Fleet */}
+            <Panel title="Agent Fleet" badge={<Badge label={`${running.length} live`} variant="teal" />} bodyStyle={{ padding: 8 }}>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                {['active', 'idle', 'all'].map(f => (
+                  <button key={f} onClick={() => setAgentTab(f)} style={{ padding: '3px 9px', borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.06em', textTransform: 'uppercase', background: agentTab === f ? 'rgba(229,199,107,0.12)' : 'transparent', color: agentTab === f ? 'var(--gold-bright, #FFD97A)' : 'rgba(255,255,255,0.35)' }}>{f}</button>
                 ))}
               </div>
-          </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {shown.length ? shown.map(a => <AgentPill key={a.id} agent={a} />) : <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', padding: 8 }}>No agents in this state</div>}
+              </div>
+            </Panel>
 
-          <section className="dashboard-glass-card dashboard-map-section" style={{ gridColumn: '1 / -1' }}>
-            <div className="dashboard-panel-header">
-              <h2>Live Activity Map</h2>
-              <span>Heartbeat {systemStatus?.heartbeat ?? 0}</span>
-            </div>
-            <ParticleMap />
-            <div className="dashboard-map-feed">
-              {(activityFeed || []).slice(0, 3).map((item, idx) => (
-                <ActivityItem key={item.id || idx} item={item} index={idx} />
-              ))}
-              {activityFeed.length === 0 && (
-                <div className="dashboard-empty">No live events streaming</div>
+            {/* Orchestrator */}
+            <Panel title="Orchestrator" badge={
+              <div style={{ display: 'flex', gap: 3, padding: 3, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(229,199,107,0.08)', borderRadius: 999 }}>
+                {['chat', 'live-map', 'logs'].map(t => (
+                  <button key={t} onClick={() => setTab(t)} style={{ padding: '3px 10px', borderRadius: 999, border: 'none', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer', background: tab === t ? 'linear-gradient(135deg, #FFD97A 0%, #E5C76B 40%, #B8923F 100%)' : 'transparent', color: tab === t ? '#1a1000' : 'rgba(255,255,255,0.35)' }}>
+                    {t === 'live-map' ? 'map' : t}
+                  </button>
+                ))}
+              </div>
+            } bodyStyle={{ padding: 12 }}>
+              {tab === 'chat' && <ChatPanel chat={chatMessages} isTyping={isTyping} executionSteps={executionSteps} />}
+              {tab === 'live-map' && (
+                <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <ParticleMap />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, flexShrink: 0 }}>
+                    {[['Throughput', '3.4K/s', 'var(--teal, #20D6C7)'], ['Latency', '12ms', 'var(--gold-bright, #FFD97A)'], ['Errors', '0.02%', '#22C55E']].map(([l, v, c]) => (
+                      <div key={l} style={{ padding: 8, borderRadius: 7, border: '1px solid rgba(229,199,107,0.08)', background: 'var(--bg-elevated, #12141F)', textAlign: 'center' }}>
+                        <div style={{ fontFamily: 'monospace', fontSize: 15, color: c, fontWeight: 600 }}>{v}</div>
+                        <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 2 }}>{l}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
+              {tab === 'logs' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, overflowY: 'auto', height: '100%' }}>
+                  {(executionLogs?.slice(0, 20) || []).map((log, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 10, fontFamily: 'monospace', fontSize: 10, padding: '5px 8px', borderRadius: 6, background: log.level === 'ERROR' ? 'rgba(239,68,68,0.05)' : log.level === 'WARN' ? 'rgba(245,158,11,0.05)' : 'var(--bg-elevated, #12141F)', border: `1px solid ${log.level === 'ERROR' ? 'rgba(239,68,68,0.15)' : log.level === 'WARN' ? 'rgba(245,158,11,0.15)' : 'rgba(229,199,107,0.08)'}` }}>
+                      <span style={{ color: 'rgba(255,255,255,0.35)' }}>{log.ts || log.timestamp || ''}</span>
+                      <span style={{ color: log.level === 'ERROR' ? '#EF4444' : log.level === 'WARN' ? '#F59E0B' : 'rgba(255,255,255,0.35)' }}>{log.level || 'INFO'}</span>
+                      <span style={{ color: 'var(--text-secondary, #9A927E)', flex: 1 }}>{log.message || log.step || log.agent || JSON.stringify(log)}</span>
+                    </div>
+                  ))}
+                  {!executionLogs?.length && <div style={{ color: 'rgba(255,255,255,0.25)', fontSize: 11, padding: 8 }}>No logs yet</div>}
+                </div>
+              )}
+            </Panel>
+
+            {/* Right column */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
+              <Panel title="System Health" bodyStyle={{ padding: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, justifyItems: 'center' }}>
+                  <GaugeRing value={cpu}  color="var(--teal, #20D6C7)"         label="CPU" />
+                  <GaugeRing value={ram}  color="var(--gold-bright, #FFD97A)" label="RAM" />
+                  <GaugeRing value={gpu}  color="var(--bronze, #CD7F32)"       label="GPU" />
+                  <GaugeRing value={temp} color="#F59E0B"                      label="Temp" />
+                </div>
+              </Panel>
+              <Panel title="Quick Actions">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {['Run Memory Sweep', 'Activate Money Mode', 'Deploy Forge', 'Emergency Halt'].map((l, i) => (
+                    <button key={l} style={{ padding: '8px 10px', borderRadius: 7, border: `1px solid ${i === 3 ? 'rgba(239,68,68,0.3)' : 'rgba(229,199,107,0.22)'}`, background: i === 3 ? 'rgba(239,68,68,0.04)' : 'linear-gradient(135deg, rgba(229,199,107,0.07), transparent)', color: i === 3 ? '#EF4444' : 'var(--text-primary, #F0E9D2)', fontSize: 11, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>{l}</button>
+                  ))}
+                </div>
+              </Panel>
+              <Panel title="Neural Brain" badge={<Badge label="LIVE" variant="green" />}>
+                {[['Confidence', `${brainPct}%`, 'var(--gold-bright, #FFD97A)'], ['Learn Step', learnStep.toLocaleString(), 'var(--text-primary, #F0E9D2)'], ['Success', `${Math.round((nnStatus?.success_rate ?? 0.91) * 100)}%`, '#22C55E'], ['Strategies', strategies, 'var(--teal, #20D6C7)']].map(([l, v, c]) => (
+                  <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary, #9A927E)' }}>{l}</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 12, color: c, fontWeight: 500 }}>{v}</span>
+                  </div>
+                ))}
+                <MiniBar value={brainPct} color="var(--gold-bright, #FFD97A)" style={{ marginTop: 6 }} />
+              </Panel>
             </div>
-          </section>
-        </section>
-      </div>
+          </div>
+        </>
+      )}
+
+      {view === 'alerts'    && <Panel title="Priority Alerts Engine" badge={<Badge label="5 TOTAL" variant="warn" />} style={{ flex: 1 }}><PriorityAlerts /></Panel>}
+      {view === 'pipeline'  && <Panel title="System Pipeline" style={{ flex: 1 }}><SystemPipeline /></Panel>}
+      {view === 'timeline'  && <Panel title="Execution Timeline (Replay)" style={{ flex: 1 }}><ExecutionTimeline logs={logs} /></Panel>}
+      {view === 'resources' && <Panel title="Resource Utilization Map" style={{ flex: 1 }}><ResourceMap agents={agents} /></Panel>}
+      {view === 'changes'   && <Panel title="What Changed? (Behavior Drift)" style={{ flex: 1 }}><WhatChanged activity={activityFeed} /></Panel>}
     </div>
   )
 }

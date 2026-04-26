@@ -1,512 +1,181 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
-import { useBrainStore } from '../../store/brainStore'
-import PageHeader from '../layout/PageHeader'
-import { API_URL } from '../../config/api'
+import { Panel, Badge, MiniBar } from '../ui/primitives'
+import api from '../../api/client'
 
-const BASE = API_URL
+const MODE_MAP = { PRECISION: 'SUPERVISED', BALANCED: 'AUTONOMOUS', SPEED: 'PASSIVE', COST: 'BUSINESS' }
 
-const SUBSYSTEM_TAG = {
-  brain: { label: 'NEURAL BRAIN', color: 'var(--info)' },
-  memory: { label: 'MEMORY', color: 'var(--success)' },
-  doctor: { label: 'DOCTOR', color: 'var(--warning)' },
-  orchestrator: { label: 'ORCHESTRATOR', color: 'var(--gold)' },
-}
-
-function identifySubsystem(content) {
-  const lower = (content || '').toLowerCase()
-  if (lower.includes('[neural') || lower.includes('[brain')) return SUBSYSTEM_TAG.brain
-  if (lower.includes('[memory')) return SUBSYSTEM_TAG.memory
-  if (lower.includes('[doctor')) return SUBSYSTEM_TAG.doctor
-  if (lower.includes('[orchestrator')) return SUBSYSTEM_TAG.orchestrator
-  return null
-}
-
-function ChatMessage({ msg, index, debugMode }) {
-  const isUser = msg.role === 'user'
-  // Subsystem tags are only visible in debug mode
-  const tag = debugMode && !isUser ? identifySubsystem(msg.content) : null
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: Math.min(index * 0.02, 0.3) }}
-      style={{
-        display: 'flex',
-        justifyContent: isUser ? 'flex-end' : 'flex-start',
-        marginBottom: 'var(--space-2)',
-      }}
-    >
-      <div style={{
-        maxWidth: '85%',
-        padding: 'var(--space-3) var(--space-4)',
-        borderRadius: isUser ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
-        background: isUser ? 'rgba(212, 175, 55, 0.1)' : 'var(--bg-card)',
-        border: `1px solid ${isUser ? 'rgba(212, 175, 55, 0.2)' : 'var(--border-subtle)'}`,
-      }}>
-        {tag && (
-          <div style={{
-            fontSize: '10px',
-            color: tag.color,
-            marginBottom: '4px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            fontWeight: 500,
-          }}>
-            {tag.label}
-          </div>
-        )}
-        <div style={{
-          fontSize: '13px',
-          color: 'var(--text-primary)',
-          lineHeight: 1.6,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}>
-          {msg.content}
-        </div>
-        {!isUser && debugMode && msg.debugInfo && (
-          <div style={{
-            marginTop: '8px',
-            paddingTop: '8px',
-            borderTop: '1px solid var(--border-subtle)',
-            fontSize: '11px',
-            color: 'var(--text-muted)',
-            fontFamily: 'monospace',
-          }}>
-            {msg.debugInfo}
-          </div>
-        )}
-      </div>
-    </motion.div>
-  )
-}
-
-function TypingIndicator() {
-  return (
-    <div style={{
-      display: 'flex',
-      gap: '4px',
-      padding: 'var(--space-3) var(--space-4)',
-    }}>
-      {[0, 1, 2].map(i => (
-        <motion.span
-          key={i}
-          animate={{ opacity: [0.3, 1, 0.3] }}
-          transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
-          style={{
-            width: '6px',
-            height: '6px',
-            borderRadius: '50%',
-            background: 'var(--gold)',
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function BrainInsightCard({ insights }) {
-  const metrics = insights?.performance_metrics || {}
-  const strategies = insights?.learned_strategies || []
-
-  return (
-    <div className="ds-card" style={{ padding: 'var(--space-4)' }}>
-      <h3 style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>
-        Neural Brain Insights
-      </h3>
-
-      {/* Metrics */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-        <div style={{ padding: 'var(--space-2)', background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)' }}>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Success Rate</div>
-          <div style={{ fontSize: '16px', fontWeight: 500, color: 'var(--success)' }}>
-            {metrics.success_rate ? `${Math.round(metrics.success_rate * 100)}%` : '—'}
-          </div>
-        </div>
-        <div style={{ padding: 'var(--space-2)', background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)' }}>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Confidence</div>
-          <div style={{ fontSize: '16px', fontWeight: 500, color: 'var(--gold)' }}>
-            {metrics.confidence ? `${Math.round(metrics.confidence * 100)}%` : '—'}
-          </div>
-        </div>
-      </div>
-
-      {/* Strategies */}
-      {strategies.length > 0 && (
-        <div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: 'var(--space-1)' }}>
-            Learned Strategies
-          </div>
-          {strategies.slice(0, 3).map((s, i) => (
-            <div key={i} style={{
-              fontSize: '12px',
-              color: 'var(--text-secondary)',
-              padding: '4px 0',
-              borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none',
-            }}>
-              {typeof s === 'string' ? s : s.name || s.strategy || JSON.stringify(s)}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function DecisionFlowCard({ activity }) {
-  const decisions = activity?.recent_decisions || activity?.items || []
-  if (decisions.length === 0) return null
-
-  return (
-    <div className="ds-card" style={{ padding: 'var(--space-4)' }}>
-      <h3 style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>
-        Decision Flow
-      </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        {decisions.slice(0, 5).map((d, i) => (
-          <div key={i} style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--space-2)',
-            fontSize: '12px',
-          }}>
-            <span style={{
-              width: '20px',
-              height: '20px',
-              borderRadius: '50%',
-              background: 'rgba(212, 175, 55, 0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '10px',
-              color: 'var(--gold)',
-              flexShrink: 0,
-            }}>
-              {i + 1}
-            </span>
-            <span style={{ color: 'var(--text-secondary)' }}>
-              {typeof d === 'string' ? d : d.action || d.decision || d.description || JSON.stringify(d)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function NeuralNetworkLive({ nnStatus }) {
-  const confidence = Math.round((nnStatus?.confidence ?? 0) * 100)
-  const bufferPct = nnStatus?.max_buffer_size
-    ? Math.round((nnStatus.buffer_size / nnStatus.max_buffer_size) * 100)
-    : 0
-  const recentOutputs = nnStatus?.recent_outputs || []
-  const recentLearning = nnStatus?.recent_learning_events || []
-
-  return (
-    <div className="ds-card" style={{ padding: 'var(--space-4)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
-        <h3 style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)' }}>
-          Neural Network
-        </h3>
-        <span style={{
-          fontSize: '11px',
-          padding: '2px 8px',
-          borderRadius: '4px',
-          background: nnStatus?.active ? 'rgba(34,197,94,0.1)' : 'rgba(102,102,112,0.1)',
-          color: nnStatus?.active ? 'var(--success)' : 'var(--text-muted)',
-        }}>
-          {nnStatus?.mode || 'UNKNOWN'}
-        </span>
-      </div>
-
-      {/* Confidence bar */}
-      <div style={{ marginBottom: 'var(--space-3)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
-          <span style={{ color: 'var(--text-muted)' }}>Confidence</span>
-          <span style={{ color: 'var(--gold)' }}>{confidence}%</span>
-        </div>
-        <div style={{ height: '6px', background: 'var(--bg-base)', borderRadius: '3px', overflow: 'hidden' }}>
-          <motion.div
-            animate={{ width: `${confidence}%` }}
-            transition={{ duration: 0.6, ease: 'easeOut' }}
-            style={{ height: '100%', background: 'var(--gold)', borderRadius: '3px', boxShadow: '0 0 8px rgba(212,175,55,0.4)' }}
-          />
-        </div>
-      </div>
-
-      {/* Buffer bar */}
-      <div style={{ marginBottom: 'var(--space-3)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
-          <span style={{ color: 'var(--text-muted)' }}>Replay Buffer</span>
-          <span style={{ color: 'var(--neon-teal)' }}>{(nnStatus?.buffer_size ?? 0).toLocaleString()} / {(nnStatus?.max_buffer_size ?? 0).toLocaleString()}</span>
-        </div>
-        <div style={{ height: '6px', background: 'var(--bg-base)', borderRadius: '3px', overflow: 'hidden' }}>
-          <motion.div
-            animate={{ width: `${bufferPct}%` }}
-            transition={{ duration: 0.6, ease: 'easeOut' }}
-            style={{ height: '100%', background: 'var(--neon-teal)', borderRadius: '3px', boxShadow: '0 0 8px rgba(32,214,199,0.3)' }}
-          />
-        </div>
-      </div>
-
-      {/* Stats grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-        {[
-          { label: 'Learn Step', value: (nnStatus?.learn_step ?? 0).toLocaleString() },
-          { label: 'Experiences', value: (nnStatus?.experiences ?? 0).toLocaleString() },
-          { label: 'Loss', value: nnStatus?.last_loss != null ? nnStatus.last_loss.toFixed(4) : '—', color: 'var(--neon-cyan)' },
-          { label: 'Device', value: (nnStatus?.device ?? 'cpu').toUpperCase() },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{ padding: 'var(--space-2)', background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)' }}>
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{label}</div>
-            <div style={{ fontSize: '14px', fontWeight: 500, color: color || 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Recent decisions */}
-      {recentOutputs.length > 0 && (
-        <div style={{ marginBottom: 'var(--space-2)' }}>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: 'var(--space-1)' }}>Recent Decisions</div>
-          {recentOutputs.slice(0, 3).map((item, i) => (
-            <div key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', padding: '3px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: 'var(--gold)', fontSize: '10px' }}>›</span>
-              {typeof item === 'string' ? item : item.action || item.decision || JSON.stringify(item)}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Recent learning */}
-      {recentLearning.length > 0 && (
-        <div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: 'var(--space-1)' }}>Recent Learning</div>
-          {recentLearning.slice(0, 3).map((item, i) => (
-            <div key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', padding: '3px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: 'var(--neon-teal)', fontSize: '10px' }}>●</span>
-              {typeof item === 'string' ? item : item.event || item.type || JSON.stringify(item)}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+const MODES = [
+  { id: 'PRECISION', desc: 'Max accuracy · Higher cost · Slower',  sp: 25, co: 85, pr: 98, color: 'var(--gold-bright, #FFD97A)' },
+  { id: 'BALANCED',  desc: 'Adaptive tradeoffs · Default',         sp: 65, co: 55, pr: 85, color: 'var(--teal, #20D6C7)' },
+  { id: 'SPEED',     desc: 'Minimum latency · Reduced accuracy',    sp: 95, co: 45, pr: 72, color: 'var(--bronze, #CD7F32)' },
+  { id: 'COST',      desc: 'Cheapest path · Capped quality',        sp: 55, co: 15, pr: 68, color: '#22C55E' },
+]
+const MODELS = [
+  { name: 'claude-opus-4',   task: 'Reasoning', load: 42, calls: '842' },
+  { name: 'claude-sonnet-4', task: 'Chat',      load: 71, calls: '3.2K' },
+  { name: 'claude-haiku',    task: 'Quick',     load: 28, calls: '1.4K' },
+  { name: 'gpt-4-turbo',     task: 'Code',      load: 35, calls: '612' },
+]
+const FALLBACK = [
+  { step: 1, strategy: 'Primary execution',           ok: true  },
+  { step: 2, strategy: 'Retry with modified prompt',  ok: true  },
+  { step: 3, strategy: 'Escalate to Claude Opus',     ok: true  },
+  { step: 4, strategy: 'Manual review queue',         ok: false },
+]
 
 export default function AIControlPage() {
-  const chatMessages = useAppStore(s => s.chatMessages)
-  const addChatMessage = useAppStore(s => s.addChatMessage)
-  const isTyping = useAppStore(s => s.isTyping)
-  const setTyping = useAppStore(s => s.setTyping)
-  const ws = useAppStore(s => s.ws)
-  const brainInsights = useAppStore(s => s.brainInsights)
-  const brainActivity = useAppStore(s => s.brainActivity)
-  const nnStatus = useAppStore(s => s.nnStatus)
-  const addFromPrompt = useBrainStore(s => s.addFromPrompt)
+  const systemStatus  = useAppStore(s => s.systemStatus)
+  const executionLogs = useAppStore(s => s.executionLogs)
+  const mode = systemStatus?.mode || 'BALANCED'
 
-  const [input, setInput] = useState('')
-  const [debugMode, setDebugMode] = useState(false)
-  const scrollRef = useRef(null)
+  const [promptOverride, setPromptOverride] = useState('')
+  const [showPreview, setShowPreview] = useState(false)
+  const [injecting, setInjecting] = useState(false)
+  const [injectResult, setInjectResult] = useState(null)
 
-  // Poll neural network status for live updates (used in debug mode)
+  const handleModeSwitch = async (id) => {
+    try { await api.post('/api/mode', { mode: MODE_MAP[id] || 'AUTONOMOUS' }) } catch { /* ignore */ }
+  }
+
+  const handleInject = async () => {
+    if (!promptOverride.trim()) return
+    setInjecting(true); setInjectResult(null)
+    try {
+      await api.chat.send(`[SYSTEM OVERRIDE] ${promptOverride.trim()}`)
+      setInjectResult({ ok: true, msg: 'Injected successfully' })
+    } catch { setInjectResult({ ok: false, msg: 'Injection failed' }) }
+    setInjecting(false)
+  }
+
+  const [cmdInput, setCmdInput] = useState('')
+  const [cmds, setCmds] = useState([
+    { id: 'c1', cmd: 'analyze revenue pathways --depth 3',           status: 'done', dur: '1.4s' },
+    { id: 'c2', cmd: 'sync brain weights --nodes all',               status: 'done', dur: '3.1s' },
+    { id: 'c3', cmd: 'deploy code-synth module stripe-v2',           status: 'done', dur: '8.2s' },
+    { id: 'c4', cmd: 'run memory sweep --compress',                  status: 'done', dur: '4.1s' },
+    { id: 'c5', cmd: 'analyze competitor pricing --sector saas',     status: 'done', dur: '2.1s' },
+  ])
+  const termRef = useRef(null)
+
+  useEffect(() => { if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight }, [cmds])
+
   useEffect(() => {
-    const controller = new AbortController()
-    const fetchNN = async () => {
-      try {
-        const res = await fetch(`${BASE}/api/brain/status`, { signal: controller.signal })
-        const data = await res.json()
-        if (data) useAppStore.getState().setNnStatus(data)
-      } catch (e) {
-        console.error('Failed to fetch neural status', e)
-      }
-    }
-    fetchNN()
-    const i = setInterval(fetchNN, 3000)
-    return () => { clearInterval(i); controller.abort() }
-  }, [])
+    if (!executionLogs?.length) return
+    const realCmds = executionLogs.slice(0, 3).map((l, i) => ({
+      id: `real${i}${Date.now()}`, cmd: l.step || l.agent || l.message || 'system event',
+      status: l.level === 'ERROR' ? 'error' : 'done', dur: l.duration || '—',
+    }))
+    setCmds(prev => [...realCmds, ...prev].slice(0, 20))
+  }, [executionLogs?.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [chatMessages, isTyping])
-
-  const sendMessage = useCallback(() => {
-    const text = input.trim()
-    if (!text) return
-    setInput('')
-    addChatMessage({ role: 'user', content: text })
-    setTyping(true)
-    // Add command as a node in the shared brain graph
-    addFromPrompt(text, 'task', 'automation')
-
-    // Always use HTTP POST — the WebSocket endpoint intentionally rejects
-    // chat messages (server says: "Use POST /chat as the control entrypoint").
-    // When the WebSocket is connected the server broadcasts an
-    // `orchestrator:message` event after processing, which the WS handler in
-    // useWebSocket.js displays.  To avoid showing the message twice we only
-    // display the HTTP response body when the socket is not available.
-    const isWsOpen = ws && ws.readyState === WebSocket.OPEN
-    fetch(`${BASE}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text }),
-    })
-      .then(r => {
-        if (!r.ok) throw new Error(`Server error ${r.status}`)
-        return r.json()
-      })
-      .then(data => {
-        if (!isWsOpen) {
-          // WS is not connected — show the HTTP response body directly.
-          // When WS IS connected the orchestrator:message WS event will arrive
-          // and display the response, so we skip it here to avoid duplicates.
-          addChatMessage({ role: 'ai', content: data.response || data.reply || data.message || 'No response.' })
-          setTyping(false)
-        }
-      })
-      .catch((e) => {
-        console.error('HTTP chat failed', e)
-        addChatMessage({ role: 'ai', content: 'Connection error. Please try again.' })
-        setTyping(false)
-      })
-  }, [input, ws, addChatMessage, setTyping, addFromPrompt])
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
-    }
+  const runCmd = () => {
+    const t = cmdInput.trim(); if (!t) return
+    const id = `c${Date.now()}`
+    setCmds(p => [...p, { id, cmd: t, status: 'running', dur: '...' }])
+    setCmdInput('')
+    setTimeout(() => setCmds(p => p.map(c => c.id === id ? { ...c, status: 'done', dur: `${(Math.random() * 3 + .5).toFixed(1)}s` } : c)), 1500)
   }
 
   return (
-    <div className="page-enter" style={{ display: 'flex', gap: 'var(--space-4)', height: '100%' }}>
-      {/* Main Chat */}
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        minWidth: 0,
-      }}>
-        {/* Header with debug mode toggle */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 'var(--space-4)' }}>
-          <PageHeader title="AI Control" subtitle="Chat with your AI employee" />
-          <button
-            onClick={() => setDebugMode(d => !d)}
-            style={{
-              flexShrink: 0,
-              padding: '4px 10px',
-              fontSize: '11px',
-              borderRadius: '6px',
-              border: `1px solid ${debugMode ? 'var(--gold)' : 'var(--border-subtle)'}`,
-              background: debugMode ? 'rgba(212, 175, 55, 0.1)' : 'transparent',
-              color: debugMode ? 'var(--gold)' : 'var(--text-muted)',
-              cursor: 'pointer',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              fontFamily: 'inherit',
-              marginTop: '4px',
-            }}
-            title={debugMode ? 'Switch to user mode' : 'Switch to debug mode'}
-          >
-            {debugMode ? '◉ Debug' : '○ Debug'}
-          </button>
-        </div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: 'auto 220px auto', gap: 10, height: '100%' }}>
 
-        {/* Chat messages */}
-        <div
-          ref={scrollRef}
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: 'var(--space-2)',
-            marginBottom: 'var(--space-3)',
-          }}
-        >
-          {chatMessages.length === 0 && (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: 'var(--text-muted)',
-              fontSize: '14px',
-            }}>
-              How can I help you today?
+      <Panel title="Mode Switching Matrix" badge={<Badge label={mode} variant="gold" />} style={{ gridColumn: '1/3' }} bodyStyle={{ padding: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
+          {MODES.map(m => (
+            <div key={m.id} onClick={() => handleModeSwitch(m.id)} style={{ padding: '11px 13px', borderRadius: 9, border: `1px solid ${mode === m.id ? m.color + '80' : 'rgba(229,199,107,0.08)'}`, background: mode === m.id ? `linear-gradient(180deg, ${m.color}18, transparent)` : 'var(--bg-elevated, #12141F)', cursor: 'pointer', boxShadow: mode === m.id ? `0 0 18px ${m.color}22` : 'none' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: mode === m.id ? m.color : 'rgba(255,255,255,.15)', boxShadow: mode === m.id ? `0 0 8px ${m.color}` : 'none' }} />
+                <span style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 600, color: mode === m.id ? m.color : 'var(--text-secondary, #9A927E)', letterSpacing: '0.08em' }}>{m.id}</span>
+              </div>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 9, minHeight: 26 }}>{m.desc}</div>
+              {[['Speed', m.sp, 'var(--teal, #20D6C7)'], ['Cost', 100 - m.co, 'var(--gold-bright, #FFD97A)'], ['Precision', m.pr, 'var(--bronze, #CD7F32)']].map(([l, v, c]) => (
+                <div key={l} style={{ marginBottom: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)', marginBottom: 2 }}><span>{l}</span><span>{v}%</span></div>
+                  <MiniBar value={v} color={c} />
+                </div>
+              ))}
             </div>
-          )}
-          {chatMessages.map((msg, idx) => (
-            <ChatMessage key={idx} msg={msg} index={idx} debugMode={debugMode} />
           ))}
-          {isTyping && <TypingIndicator />}
         </div>
+      </Panel>
 
-        {/* Input */}
-        <div style={{
-          display: 'flex',
-          gap: 'var(--space-2)',
-          padding: 'var(--space-3)',
-          background: 'var(--bg-card)',
-          borderRadius: 'var(--radius-lg)',
-          border: '1px solid var(--border-subtle)',
-        }}>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              color: 'var(--text-primary)',
-              fontSize: '14px',
-              fontFamily: 'inherit',
-            }}
-          />
-          <button
-            className="btn-primary"
-            onClick={sendMessage}
-            disabled={!input.trim()}
-            style={{ flexShrink: 0 }}
-          >
-            Send
-          </button>
+      <Panel title="Command Terminal" badge={<Badge label={`${cmds.length} entries`} variant="teal" />} bodyStyle={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div ref={termRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, fontFamily: 'monospace' }}>
+          {cmds.map(c => (
+            <div key={c.id} style={{ fontSize: 10.5, padding: '5px 9px', borderRadius: 5, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(229,199,107,0.08)', display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ color: 'var(--gold-bright, #FFD97A)' }}>$</span>
+              <span style={{ flex: 1, color: 'var(--text-secondary, #9A927E)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.cmd}</span>
+              <span style={{ color: c.status === 'done' ? 'var(--teal, #20D6C7)' : c.status === 'error' ? '#EF4444' : '#F59E0B', fontSize: 9 }}>{c.dur}</span>
+            </div>
+          ))}
         </div>
-      </div>
+        <div style={{ display: 'flex', gap: 6, borderTop: '1px solid rgba(229,199,107,0.08)', paddingTop: 8 }}>
+          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--gold-bright, #FFD97A)', alignSelf: 'center' }}>$</span>
+          <input value={cmdInput} onChange={e => setCmdInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && runCmd()} placeholder="type command…" style={{ flex: 1, background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(229,199,107,.18)', borderRadius: 6, padding: '6px 9px', color: 'var(--text-primary, #F0E9D2)', fontFamily: 'monospace', fontSize: 11, outline: 'none' }} />
+          <button onClick={runCmd} style={{ background: 'linear-gradient(135deg, #FFD97A 0%, #E5C76B 40%, #B8923F 100%)', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', color: '#1a1000', fontWeight: 700, fontSize: 10, fontFamily: 'monospace' }}>RUN</button>
+        </div>
+      </Panel>
 
-      {/* Debug panel — only visible in debug mode */}
-      {debugMode && (
-        <div style={{
-          width: '340px',
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-3)',
-          overflowY: 'auto',
-        }}>
-          <div style={{
-            padding: '6px 10px',
-            background: 'rgba(212,175,55,0.08)',
-            border: '1px solid rgba(212,175,55,0.2)',
-            borderRadius: '6px',
-            fontSize: '11px',
-            color: 'var(--gold)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-          }}>
-            Debug Mode — Internal View
-          </div>
-          <NeuralNetworkLive nnStatus={nnStatus} />
-          <BrainInsightCard insights={brainInsights} />
-          <DecisionFlowCard activity={brainActivity} />
+      <Panel title="Live Prompt Override" bodyStyle={{ padding: 12 }}>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 8, letterSpacing: '0.06em' }}>INJECT MID-EXECUTION · APPLIED LIVE</div>
+        <textarea value={promptOverride} onChange={e => setPromptOverride(e.target.value)} placeholder={'Add instructions… e.g. "prefer shorter answers"'} style={{ width: '100%', minHeight: 62, background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(229,199,107,0.2)', borderRadius: 7, padding: '8px 10px', color: 'var(--text-primary, #F0E9D2)', fontFamily: 'monospace', fontSize: 11, outline: 'none', resize: 'none', boxSizing: 'border-box' }} />
+        {showPreview && promptOverride && (
+          <div style={{ marginTop: 6, padding: '7px 10px', borderRadius: 6, background: 'rgba(229,199,107,0.04)', border: '1px solid rgba(229,199,107,0.15)', fontSize: 10, color: 'var(--gold-bright,#FFD97A)', fontFamily: 'monospace' }}>Preview: [SYSTEM OVERRIDE] {promptOverride}</div>
+        )}
+        <div style={{ display: 'flex', gap: 6, marginTop: 7 }}>
+          <button onClick={handleInject} disabled={injecting || !promptOverride.trim()} style={{ flex: 1, padding: '7px', background: injecting ? 'rgba(229,199,107,0.1)' : 'linear-gradient(135deg, #FFD97A 0%, #E5C76B 40%, #B8923F 100%)', border: injecting ? '1px solid rgba(229,199,107,0.3)' : 'none', borderRadius: 7, color: injecting ? 'var(--gold,#E5C76B)' : '#1a1000', fontWeight: 700, fontSize: 10, cursor: injecting ? 'wait' : 'pointer', letterSpacing: '0.06em' }}>{injecting ? 'INJECTING...' : 'INJECT NOW'}</button>
+          <button onClick={() => setShowPreview(p => !p)} style={{ padding: '7px 11px', background: showPreview ? 'rgba(229,199,107,0.08)' : 'transparent', border: `1px solid rgba(229,199,107,${showPreview ? '0.3' : '0.08'})`, borderRadius: 7, color: showPreview ? 'var(--gold-bright,#FFD97A)' : 'var(--text-secondary, #9A927E)', fontSize: 10, cursor: 'pointer' }}>PREVIEW</button>
         </div>
-      )}
+        {injectResult && (
+          <div style={{ marginTop: 6, padding: '5px 8px', borderRadius: 5, fontSize: 10, fontFamily: 'monospace', color: injectResult.ok ? '#22C55E' : '#EF4444', background: injectResult.ok ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)', border: `1px solid ${injectResult.ok ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}` }}>{injectResult.ok ? '✓' : '✗'} {injectResult.msg}</div>
+        )}
+        {!injectResult && <div style={{ marginTop: 10, padding: '7px 10px', borderRadius: 6, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.18)', fontSize: 10, color: '#22C55E', fontFamily: 'monospace' }}>✓ Drift detector monitoring active</div>}
+      </Panel>
+
+      <Panel title="Multi-Model Routing">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {MODELS.map(m => (
+            <div key={m.name} style={{ padding: '8px 10px', borderRadius: 7, border: '1px solid rgba(229,199,107,0.08)', background: 'var(--bg-elevated, #12141F)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-primary, #F0E9D2)' }}>{m.name}</span>
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>{m.calls} · {m.task}</span>
+              </div>
+              <MiniBar value={m.load} color={m.load > 60 ? 'var(--gold-bright, #FFD97A)' : 'var(--teal, #20D6C7)'} />
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel title="Response Quality Scoring" style={{ gridColumn: '1/2' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 10 }}>
+          {[['Structure', '94', 'var(--gold-bright, #FFD97A)'], ['Usefulness', '89', 'var(--teal, #20D6C7)'], ['Correctness', '96', '#22C55E']].map(([l, v, c]) => (
+            <div key={l} style={{ padding: 9, borderRadius: 7, border: '1px solid rgba(229,199,107,0.08)', background: 'var(--bg-elevated, #12141F)', textAlign: 'center' }}>
+              <div style={{ fontFamily: 'monospace', fontSize: 18, color: c, fontWeight: 600 }}>{v}</div>
+              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 6, letterSpacing: '0.06em' }}>7-DAY TREND</div>
+        <svg viewBox="0 0 240 44" style={{ width: '100%', height: 44 }}>
+          <polyline points="0,30 40,28 80,22 120,25 160,16 200,14 240,10" fill="none" stroke="var(--gold-bright, #FFD97A)" strokeWidth="1.5" />
+          <polyline points="0,30 40,28 80,22 120,25 160,16 200,14 240,10 240,44 0,44" fill="rgba(229,199,107,0.12)" />
+        </svg>
+      </Panel>
+
+      <Panel title="Failure Recovery Chain" style={{ gridColumn: '2/3' }}>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 8, letterSpacing: '0.06em' }}>AUTO-RETRY WITH MODIFIED STRATEGY</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {FALLBACK.map(f => (
+            <div key={f.step} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6, border: `1px solid ${f.ok ? 'rgba(34,197,94,0.18)' : 'rgba(255,255,255,0.08)'}`, background: 'var(--bg-elevated, #12141F)' }}>
+              <div style={{ width: 22, height: 22, borderRadius: '50%', background: f.ok ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'monospace', fontSize: 10, color: f.ok ? '#22C55E' : 'rgba(255,255,255,0.35)', fontWeight: 700 }}>{f.step}</div>
+              <span style={{ flex: 1, fontSize: 11.5, color: f.ok ? 'var(--text-primary, #F0E9D2)' : 'rgba(255,255,255,0.35)' }}>{f.strategy}</span>
+              <span style={{ fontSize: 10, color: f.ok ? '#22C55E' : 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>{f.ok ? 'OK' : 'IDLE'}</span>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
     </div>
   )
 }

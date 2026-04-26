@@ -39,7 +39,12 @@ const CATEGORY_SKILLS = {
 // ── Load agent catalog from runtime/config/agent_capabilities.json ────────────
 // Falls back to a minimal built-in catalog if the config file is missing.
 function loadAgentCatalog() {
-  const configPath = path.resolve(__dirname, '../../runtime/config/agent_capabilities.json');
+  // Prefer AI_EMPLOYEE_REPO_DIR env var (set by start.sh), then fall back to
+  // relative path from __dirname (works when running directly from the repo).
+  const repoRoot = process.env.AI_EMPLOYEE_REPO_DIR
+    ? path.resolve(process.env.AI_EMPLOYEE_REPO_DIR)
+    : path.resolve(__dirname, '../..');
+  const configPath = path.join(repoRoot, 'runtime', 'config', 'agent_capabilities.json');
   try {
     const raw = fs.readFileSync(configPath, 'utf8');
     const data = JSON.parse(raw);
@@ -93,13 +98,6 @@ const IDLE_SCALE_DOWN_MS = 20000;
 // Agent runtime scheduler frequency (persistent event-driven loop tick).
 const LOOP_INTERVAL_MS = 250;
 
-const AUTO_MIN_ACTIVE = 3;
-const AUTO_ACTIVE_RATIO = 0.7;
-const MANUAL_MIN_ACTIVE = 2;
-const MANUAL_ACTIVE_RATIO = 0.4;
-// MONEYMODE keeps more workers hot to support aggressive monetization templates.
-const MONEYMODE_MIN_ACTIVE = 4;
-const MONEYMODE_ACTIVE_RATIO = 0.85;
 const HEALTH_DEGRADED_QUEUE_THRESHOLD = 3;
 const MODES = {
   MANUAL: 'MANUAL',
@@ -110,7 +108,6 @@ const MODES = {
 
 const events = new EventEmitter();
 let mode = MODES.MANUAL;
-let desiredActiveAgents = 0;
 let _seq = 0;
 let lastRobotSignal = {
   agentId: null,
@@ -123,24 +120,25 @@ let lastRobotSignal = {
 
 const agents = AGENT_CATALOG.map((profile) => ({
   ...profile,
-  state: 'idle', // idle | running | busy
-  health: 'healthy', // healthy | degraded | offline
+  state: 'running', // all agents start active at full capacity
+  health: 'healthy',
   taskQueue: [],
   currentTask: null,
-  location: 'idle',
+  location: 'standby',
   lastActivityAt: Date.now(),
   tasksCompleted: 0,
 }));
+
+// Full capacity — all agents on from the start
+let desiredActiveAgents = agents.length;
 
 function _now() {
   return Date.now();
 }
 
 function _modeMaxActive() {
-  if (mode === MODES.BLACKLIGHT) return agents.length;
-  if (mode === MODES.MONEYMODE) return Math.max(MONEYMODE_MIN_ACTIVE, Math.ceil(agents.length * MONEYMODE_ACTIVE_RATIO));
-  if (mode === MODES.AUTO) return Math.max(AUTO_MIN_ACTIVE, Math.ceil(agents.length * AUTO_ACTIVE_RATIO));
-  return Math.max(MANUAL_MIN_ACTIVE, Math.ceil(agents.length * MANUAL_ACTIVE_RATIO));
+  // Always run all agents at full capacity regardless of operational mode.
+  return agents.length;
 }
 
 // Deterministic task duration model.

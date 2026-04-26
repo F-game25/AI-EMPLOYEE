@@ -1,3 +1,4 @@
+/* global process */
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -9,6 +10,12 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/__tests__/setup.js'],
+    css: false,
+  },
   server: {
     // Dev server uses port 5173 (Vite default) so it does not conflict with
     // the Node backend that owns port 8787. Binding to 0.0.0.0 makes the dev

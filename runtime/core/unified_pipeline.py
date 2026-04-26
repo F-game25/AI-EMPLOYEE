@@ -505,45 +505,49 @@ def format_response(
     routed_agent: str,
     *,
     degraded: bool = False,
+    user_input: str = "",
+    tasks: list[dict[str, Any]] | None = None,
+    intent: str = "ops",
 ) -> str:
-    """Merge LLM output and successful agent task results into the final response.
+    """Build the 9-phase structured workflow response.
 
-    Runs through OutputValidationMiddleware.validate_or_fallback() when available.
-    Appends traceability block showing what actually executed.
-    When ``degraded=True`` appends the DEGRADED marker for internal debug visibility.
+    Delegates to WorkflowFormatter for the full structured layout.
+    Runs OutputValidationMiddleware when available.
+    Appends DEGRADED marker when ``degraded=True``.
     """
-    response = llm_output
+    # Generate downloadable artifacts from response content
+    artifacts: list[dict[str, str]] = []
+    if user_input:
+        try:
+            from core.artifact_manager import generate_artifacts  # noqa: PLC0415
+            artifacts = generate_artifacts(llm_output, intent, user_input)
+        except Exception as exc:
+            logger.debug("Artifact generation failed (non-fatal): %s", exc)
 
-    if agent_results:
-        successful = [r for r in agent_results if r.get("success") and r.get("output")]
-        if successful:
-            snippets: list[str] = []
-            for r in successful[:2]:
-                out = r.get("output")
-                if isinstance(out, dict):
-                    text = str(out.get("output") or out.get("text") or "")
-                elif isinstance(out, str):
-                    text = out
-                else:
-                    text = ""
-                # Only append if the snippet adds new content
-                if text and text[:80].lower() not in response.lower():
-                    snippets.append(text[:400])
-            if snippets:
-                response += "\n\n**Task Results:**\n" + "\n\n".join(snippets)
-
-        # Traceability block — show what actually ran
-        trace_lines = [
-            f"- {r.get('skill','?')} [{r.get('status','?')}]"
-            + (" ✓ real" if r.get("real_execution") else " ⚠ simulated")
-            for r in agent_results[:5]
-        ]
-        if trace_lines:
-            response += "\n\n**Execution Trace:**\n" + "\n".join(trace_lines)
+    # Build the 9-phase structured response
+    try:
+        from core.workflow_formatter import build_structured_response  # noqa: PLC0415
+        response = build_structured_response(
+            llm_output,
+            user_input or "Request processed.",
+            routed_agent,
+            agent_results,
+            tasks or [],
+            intent,
+            degraded=degraded,
+            artifacts=artifacts or None,
+        )
+    except Exception as exc:
+        logger.warning("WorkflowFormatter failed, using fallback: %s", exc)
+        response = (
+            f"## 📋 TASK UNDERSTANDING\nRequest processed via {routed_agent}.\n\n"
+            f"## 📊 RESULTS\n{llm_output}\n\n"
+            f"## ✅ VALIDATION\nOutput delivered."
+        )
 
     try:
         from core.agent_output_schemas import get_schema_validator  # noqa: PLC0415
-        validated, fallback = get_schema_validator().validate_or_fallback(
+        _validated, fallback = get_schema_validator().validate_or_fallback(
             routed_agent,
             response,
             ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -553,7 +557,6 @@ def format_response(
     except Exception as exc:
         logger.debug("OutputValidationMiddleware failed (non-fatal): %s", exc)
 
-    # Fix 7 — surface degraded status in response for internal debug panel
     if degraded:
         response += _DEGRADED_MARKER
 
@@ -936,7 +939,13 @@ def process_user_input(
     run.final_response = _phase(
         "7 (format response)",
         lambda: format_response(
-            run.llm_output, run.agent_results, routed_agent, degraded=run.degraded
+            run.llm_output,
+            run.agent_results,
+            routed_agent,
+            degraded=run.degraded,
+            user_input=input_text,
+            tasks=run.tasks,
+            intent=run.intent,
         ),
         lambda: run.llm_output or f"{_FALLBACK_PREFIX} pipeline error",
     )

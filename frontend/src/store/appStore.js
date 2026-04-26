@@ -12,6 +12,35 @@ export const useAppStore = create((set) => ({
   activeSection: 'dashboard', // dashboard | ai-control | operations | agents | system
   setActiveSection: (s) => set({ activeSection: s }),
 
+  // Sidebar collapse state
+  sidebarCollapsed: false,
+  setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+
+  // Shared goal for Hermes ↔ Blacklight pipeline
+  hermesGoal: '',
+  setHermesGoal: (g) => set({ hermesGoal: g }),
+
+  // Alpha archive for Blacklight (persisted to localStorage)
+  alphaArchive: (() => { try { return JSON.parse(localStorage.getItem('alphaArchive') || '[]') } catch { return [] } })(),
+  addAlphaEntry: (entry) => set((state) => {
+    const next = [entry, ...state.alphaArchive].slice(0, 100)
+    try { localStorage.setItem('alphaArchive', JSON.stringify(next)) } catch (_e) { /* ignore */ }
+    return { alphaArchive: next }
+  }),
+
+  // Automation rules (persisted to localStorage)
+  automationRules: (() => { try { return JSON.parse(localStorage.getItem('automationRules') || '[]') } catch { return [] } })(),
+  addAutomationRule: (rule) => set((state) => {
+    const next = [...state.automationRules, rule]
+    try { localStorage.setItem('automationRules', JSON.stringify(next)) } catch (_e) { /* ignore */ }
+    return { automationRules: next }
+  }),
+  removeAutomationRule: (id) => set((state) => {
+    const next = state.automationRules.filter(r => r.id !== id)
+    try { localStorage.setItem('automationRules', JSON.stringify(next)) } catch (_e) { /* ignore */ }
+    return { automationRules: next }
+  }),
+
   // Context panel (slides in from right)
   contextPanel: null, // null or { type, data }
   setContextPanel: (panel) => set({ contextPanel: panel }),
@@ -21,6 +50,10 @@ export const useAppStore = create((set) => ({
   user: null,
   login: (username) => set({ user: { username }, appState: 'dashboard' }),
   logout: () => set({ user: null, appState: 'login' }),
+
+  // Machine identity
+  identity: null,
+  setIdentity: (id) => set({ identity: id }),
 
   // WebSocket
   ws: null,
@@ -258,6 +291,13 @@ export const useAppStore = create((set) => ({
     executionLogs: [log, ...state.executionLogs].slice(0, MAX_EXECUTION_LOGS),
   })),
   setExecutionSnapshot: (logs) => set({ executionLogs: logs.slice(0, MAX_EXECUTION_LOGS) }),
+
+  // AI pipeline step progress — shown as thinking progress bar in chat
+  executionSteps: [],
+  addExecutionStep: (step) => set((state) => ({
+    executionSteps: [...state.executionSteps.slice(-8), step],
+  })),
+  clearExecutionSteps: () => set({ executionSteps: [] }),
 
   workflowState: {
     active_run: null,

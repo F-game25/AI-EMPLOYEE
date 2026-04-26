@@ -1,728 +1,154 @@
-import { useState, useCallback, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import PageHeader from '../layout/PageHeader'
-import { API_URL } from '../../config/api'
+import { useState } from 'react'
+import { Panel, Badge, StatCard } from '../ui/primitives'
+import api from '../../api/client'
 
-const BASE = API_URL
-
-const LEVEL_COLORS = {
-  1: 'var(--text-muted)',
-  2: '#6ea8fe',
-  3: 'var(--warning)',
-  4: '#e07b39',
-  5: 'var(--gold)',
+const LEVEL_LABEL = (lvl) => {
+  if (lvl >= 90) return { text: 'EXPERT',        color: 'var(--teal,#20D6C7)',  glow: '0 0 8px rgba(32,214,199,.5)' }
+  if (lvl >= 70) return { text: 'ADVANCED',       color: 'var(--gold,#E5C76B)',  glow: 'none' }
+  if (lvl >= 40) return { text: 'INTERMEDIATE',   color: 'var(--bronze,#CD7F32)',glow: 'none' }
+  return              { text: 'NOVICE',           color: 'rgba(255,255,255,.3)', glow: 'none' }
 }
 
-const STATUS_COLORS = {
-  not_started: 'var(--text-muted)',
-  failed: 'var(--error)',
-  completed: 'var(--success)',
-}
-
-const GRADE_COLORS = {
-  Ungraded: 'var(--text-muted)',
-  Beginner: '#6ea8fe',
-  Basic: '#52d9b2',
-  Mature: '#f7c948',
-  Advanced: '#e07b39',
-  Pro: 'var(--gold)',
-}
-
-// ── Agent Assignment Panel ─────────────────────────────────────────────────────
-
-function AgentAssignPanel({ currentTopic, onAssigned }) {
-  const [agentId, setAgentId] = useState('')
-  const [assignTopic, setAssignTopic] = useState(currentTopic || '')
-  const [submitting, setSubmitting] = useState(false)
-  const [msg, setMsg] = useState('')
-  const [err, setErr] = useState('')
-  const [profiles, setProfiles] = useState([])
-
-  useEffect(() => {
-    setAssignTopic(currentTopic || '')
-  }, [currentTopic])
-
-  const fetchProfiles = useCallback(async () => {
-    try {
-      const res = await fetch(`${BASE}/api/agents/grades`)
-      const data = await res.json()
-      if (data.ok) setProfiles(data.profiles || [])
-    } catch (_) {}
-  }, [])
-
-  useEffect(() => { fetchProfiles() }, [fetchProfiles])
-
-  const handleAssign = useCallback(async () => {
-    const aid = agentId.trim()
-    const top = assignTopic.trim()
-    if (!aid || !top) return
-    setSubmitting(true)
-    setMsg('')
-    setErr('')
-    try {
-      const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(aid)}/ladder/assign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: top }),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        setMsg(`Ladder '${top}' assigned to ${aid} — grade: ${data.grade}`)
-        setAgentId('')
-        await fetchProfiles()
-        onAssigned && onAssigned()
-      } else {
-        setErr(data.error || 'Failed to assign')
-      }
-    } catch (e) {
-      setErr(e.message)
-    } finally {
-      setSubmitting(false)
-    }
-  }, [agentId, assignTopic, fetchProfiles, onAssigned])
-
-  return (
-    <div className="ds-card" style={{ padding: 'var(--space-4)' }}>
-      <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 'var(--space-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-        Assign to Agent
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-        <input
-          value={agentId}
-          onChange={(e) => setAgentId(e.target.value)}
-          placeholder="Agent ID (e.g. lead-hunter)"
-          style={{
-            background: 'var(--bg-base)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            padding: 'var(--space-2) var(--space-3)',
-            color: 'var(--text-primary)',
-            fontSize: '12px',
-            outline: 'none',
-          }}
-        />
-        <input
-          value={assignTopic}
-          onChange={(e) => setAssignTopic(e.target.value)}
-          placeholder="Topic"
-          style={{
-            background: 'var(--bg-base)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            padding: 'var(--space-2) var(--space-3)',
-            color: 'var(--text-primary)',
-            fontSize: '12px',
-            outline: 'none',
-          }}
-        />
-        <button
-          className="btn-primary"
-          style={{ fontSize: '12px' }}
-          disabled={submitting || !agentId.trim() || !assignTopic.trim()}
-          onClick={handleAssign}
-        >
-          {submitting ? 'Assigning…' : 'Assign Ladder'}
-        </button>
-      </div>
-
-      {(msg || err) && (
-        <div style={{
-          fontSize: '11px',
-          color: err ? 'var(--error)' : 'var(--success)',
-          marginBottom: 'var(--space-3)',
-        }}>
-          {err || msg}
-        </div>
-      )}
-
-      {/* Agent grade list */}
-      {profiles.length > 0 && (
-        <div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: 'var(--space-2)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
-            Graded Agents
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '240px', overflowY: 'auto' }}>
-            {profiles.map((p) => (
-              <div key={p.agent_id} style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: 'var(--space-2) var(--space-3)',
-                background: 'var(--bg-base)',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '12px',
-              }}>
-                <div>
-                  <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{p.agent_id}</div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginTop: '1px' }}>{p.topic}</div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                  <div style={{ display: 'flex', gap: '2px' }}>
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <span key={n} style={{
-                        width: '6px',
-                        height: '6px',
-                        borderRadius: '1px',
-                        background: n <= (p.levels_completed || 0) ? GRADE_COLORS[p.grade] || 'var(--success)' : 'var(--border-subtle)',
-                      }} />
-                    ))}
-                  </div>
-                  <span style={{
-                    fontSize: '10px',
-                    padding: '2px 6px',
-                    borderRadius: '8px',
-                    background: `${GRADE_COLORS[p.grade] || 'var(--text-muted)'}18`,
-                    color: GRADE_COLORS[p.grade] || 'var(--text-muted)',
-                    border: `1px solid ${GRADE_COLORS[p.grade] || 'var(--text-muted)'}30`,
-                    fontWeight: 600,
-                  }}>
-                    {p.grade}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Level Card ────────────────────────────────────────────────────────────────
-
-function LevelCard({ levelData, progressRec, onComplete, topic, isNext, disabled }) {
-  const [showComplete, setShowComplete] = useState(false)
-  const [output, setOutput] = useState('')
-  const [score, setScore] = useState('0.8')
-  const [notes, setNotes] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-
-  const status = progressRec?.status || 'not_started'
-  const learned = progressRec?.learned || false
-  const attempts = progressRec?.attempts?.length || 0
-  const color = LEVEL_COLORS[levelData.level]
-
-  const handleComplete = useCallback(async (success) => {
-    setSubmitting(true)
-    try {
-      await onComplete({
-        topic,
-        level: levelData.level,
-        success,
-        milestone_output: output,
-        score: parseFloat(score) || 0,
-        notes,
-      })
-      setShowComplete(false)
-      setOutput('')
-      setNotes('')
-    } finally {
-      setSubmitting(false)
-    }
-  }, [topic, levelData.level, output, score, notes, onComplete])
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: (levelData.level - 1) * 0.06 }}
-      className="ds-card"
-      style={{
-        padding: 'var(--space-4)',
-        borderLeft: `3px solid ${learned ? 'var(--success)' : isNext ? color : 'var(--border-subtle)'}`,
-        opacity: disabled && !learned ? 0.55 : 1,
-      }}
-    >
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
-        <span style={{
-          width: '28px',
-          height: '28px',
-          borderRadius: '50%',
-          background: learned ? 'var(--success)' : isNext ? color : 'var(--bg-base)',
-          border: `2px solid ${learned ? 'var(--success)' : color}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '12px',
-          fontWeight: 600,
-          color: learned ? '#fff' : color,
-          flexShrink: 0,
-        }}>
-          {learned ? '✓' : levelData.level}
-        </span>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)' }}>
-              Level {levelData.level} — {levelData.name}
-            </span>
-            {status !== 'not_started' && (
-              <span style={{
-                fontSize: '10px',
-                padding: '2px 6px',
-                borderRadius: '4px',
-                background: `${STATUS_COLORS[status]}20`,
-                color: STATUS_COLORS[status],
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-              }}>
-                {learned ? 'LEARNED' : status}
-              </span>
-            )}
-            {isNext && !learned && (
-              <span style={{
-                fontSize: '10px',
-                padding: '2px 6px',
-                borderRadius: '4px',
-                background: `${color}20`,
-                color,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-              }}>
-                NEXT
-              </span>
-            )}
-          </div>
-          {attempts > 0 && (
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-              {attempts} attempt{attempts !== 1 ? 's' : ''}
-              {progressRec?.best_score ? ` · best score: ${(progressRec.best_score * 100).toFixed(0)}%` : ''}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Description */}
-      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: 'var(--space-3)', lineHeight: 1.5 }}>
-        {levelData.description}
-      </p>
-
-      {/* Skills */}
-      <div style={{ marginBottom: 'var(--space-3)' }}>
-        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 'var(--space-2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          Core Skills
-        </div>
-        <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          {levelData.skills.map((skill, idx) => (
-            <li key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)', fontSize: '12px', color: 'var(--text-secondary)' }}>
-              <span style={{ color, flexShrink: 0, marginTop: '1px' }}>▸</span>
-              {skill}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Milestone */}
-      <div style={{
-        padding: 'var(--space-3)',
-        background: 'var(--bg-base)',
-        borderRadius: 'var(--radius-md)',
-        marginBottom: 'var(--space-3)',
-        fontSize: '12px',
-        color: 'var(--text-secondary)',
-        lineHeight: 1.5,
-      }}>
-        <span style={{ fontWeight: 600, color, marginRight: '6px' }}>Milestone:</span>
-        {levelData.milestone}
-      </div>
-
-      {/* Skill gaps */}
-      {progressRec?.skill_gaps?.length > 0 && (
-        <div style={{ marginBottom: 'var(--space-3)', fontSize: '12px', color: 'var(--error)' }}>
-          <span style={{ fontWeight: 600 }}>Skill gaps: </span>
-          {progressRec.skill_gaps.join(' · ')}
-        </div>
-      )}
-
-      {/* Complete/Fail buttons */}
-      {!disabled && !learned && (
-        <div>
-          {!showComplete ? (
-            <button
-              className="btn-secondary"
-              style={{ fontSize: '12px' }}
-              onClick={() => setShowComplete(true)}
-            >
-              Record Milestone Attempt
-            </button>
-          ) : (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
-            >
-              <textarea
-                placeholder="Describe what was produced / executed..."
-                value={output}
-                onChange={(e) => setOutput(e.target.value)}
-                rows={3}
-                style={{
-                  width: '100%',
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: 'var(--space-2) var(--space-3)',
-                  color: 'var(--text-primary)',
-                  fontSize: '12px',
-                  resize: 'vertical',
-                  fontFamily: 'inherit',
-                  boxSizing: 'border-box',
-                }}
-              />
-              <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Score:
-                  <input
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={score}
-                    onChange={(e) => setScore(e.target.value)}
-                    style={{
-                      width: '64px',
-                      marginLeft: '6px',
-                      background: 'var(--bg-card)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-sm)',
-                      padding: '2px 6px',
-                      color: 'var(--text-primary)',
-                      fontSize: '12px',
-                    }}
-                  />
-                </label>
-                <input
-                  placeholder="Skill gaps / notes (optional)"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  style={{
-                    flex: 1,
-                    minWidth: '120px',
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: 'var(--space-2) var(--space-3)',
-                    color: 'var(--text-primary)',
-                    fontSize: '12px',
-                  }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                <button
-                  className="btn-primary"
-                  style={{ fontSize: '12px' }}
-                  disabled={submitting}
-                  onClick={() => handleComplete(true)}
-                >
-                  {submitting ? 'Saving…' : '✓ Milestone Completed'}
-                </button>
-                <button
-                  className="btn-danger"
-                  style={{ fontSize: '12px' }}
-                  disabled={submitting}
-                  onClick={() => handleComplete(false)}
-                >
-                  ✕ Milestone Failed
-                </button>
-                <button
-                  className="btn-secondary"
-                  style={{ fontSize: '12px' }}
-                  onClick={() => setShowComplete(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </div>
-      )}
-    </motion.div>
-  )
-}
-
-// ── Topic row ─────────────────────────────────────────────────────────────────
-
-function TopicRow({ item, onSelect, isActive }) {
-  return (
-    <button
-      onClick={() => onSelect(item.topic)}
-      style={{
-        width: '100%',
-        textAlign: 'left',
-        padding: 'var(--space-3) var(--space-4)',
-        background: isActive ? 'rgba(212, 175, 55, 0.08)' : 'transparent',
-        border: 'none',
-        borderLeft: `2px solid ${isActive ? 'var(--gold)' : 'transparent'}`,
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 'var(--space-3)',
-      }}
-    >
-      <div>
-        <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>
-          {item.topic}
-        </div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-          {item.levels_completed}/5 levels
-        </div>
-      </div>
-      <div style={{ display: 'flex', gap: '3px' }}>
-        {[1, 2, 3, 4, 5].map((n) => (
-          <span key={n} style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '2px',
-            background: n <= item.levels_completed ? 'var(--success)' : 'var(--border-subtle)',
-          }} />
-        ))}
-      </div>
-    </button>
-  )
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────────
+const INITIAL_SKILLS = [
+  { cat:'Reasoning', items:[{n:'Causal Inference',lvl:91},{n:'Multi-step Planning',lvl:87},{n:'Counterfactual Analysis',lvl:74}] },
+  { cat:'Code',      items:[{n:'Python Generation',lvl:95},{n:'API Integration',lvl:88},{n:'Test Writing',lvl:72}] },
+  { cat:'Research',  items:[{n:'Web Scraping',lvl:93},{n:'Data Synthesis',lvl:86},{n:'Citation Verification',lvl:61}] },
+  { cat:'Comms',     items:[{n:'Email Drafting',lvl:89},{n:'Report Writing',lvl:78},{n:'Negotiation Prompts',lvl:55}] },
+  { cat:'Finance',   items:[{n:'Revenue Analysis',lvl:82},{n:'Cost Optimization',lvl:70},{n:'Market Research',lvl:76}] },
+]
+const QUEUE = [
+  { task:'Learn Rust code generation',      priority:'HIGH', eta:'~3 sessions' },
+  { task:'Improve negotiation success rate', priority:'MED',  eta:'~5 sessions' },
+  { task:'Expand finance domain knowledge',  priority:'MED',  eta:'~4 sessions' },
+  { task:'Strengthen citation accuracy',     priority:'LOW',  eta:'~6 sessions' },
+]
+const IMPROVEMENTS = [
+  { skill:'Python Generation', delta:'+2.1%', ts:'2h ago', c:'#22C55E' },
+  { skill:'Causal Inference',  delta:'+1.4%', ts:'5h ago', c:'#22C55E' },
+  { skill:'Market Research',   delta:'+3.2%', ts:'1d ago', c:'#22C55E' },
+  { skill:'API Integration',   delta:'+0.8%', ts:'1d ago', c:'#22C55E' },
+]
 
 export default function LearningLadderPage() {
+  const [skills, setSkills] = useState(INITIAL_SKILLS)
   const [topic, setTopic] = useState('')
-  const [ladder, setLadder] = useState(null)
-  const [progress, setProgress] = useState({})
-  const [nextLevel, setNextLevel] = useState(null)
-  const [allTopics, setAllTopics] = useState([])
-  const [metrics, setMetrics] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [status, setStatus] = useState('')
+  const [teaching, setTeaching] = useState(false)
+  const [teachResult, setTeachResult] = useState(null)
 
-  const fetchAll = useCallback(async () => {
+  const allItems = skills.flatMap(s => s.items)
+  const avgMastery = Math.round(allItems.reduce((a, b) => a + b.lvl, 0) / allItems.length)
+
+  const handleTeach = async () => {
+    if (!topic.trim()) return
+    setTeaching(true); setTeachResult(null)
+    // Optimistically add to queue
+    const newSkill = { n: topic.trim(), lvl: 0, status: 'QUEUED' }
+    setSkills(prev => {
+      const updated = prev.map(cat => cat.cat === 'Research'
+        ? { ...cat, items: [...cat.items, newSkill] }
+        : cat
+      )
+      return updated
+    })
     try {
-      const res = await fetch(`${BASE}/api/learning-ladder/all`)
-      const data = await res.json()
-      if (data.ok) {
-        setAllTopics(data.topics || [])
-        setMetrics(data.metrics || null)
-      }
-    } catch (_) {}
-  }, [])
-
-  useEffect(() => { fetchAll() }, [fetchAll])
-
-  const fetchProgress = useCallback(async (t) => {
-    if (!t) return
-    try {
-      const res = await fetch(`${BASE}/api/learning-ladder/progress?topic=${encodeURIComponent(t)}`)
-      const data = await res.json()
-      if (data.ok) {
-        setLadder(data.ladder)
-        setProgress(data.progress || {})
-        setNextLevel(data.next_level)
-      }
-    } catch (_) {}
-  }, [])
-
-  const handleBuild = useCallback(async () => {
-    const t = topic.trim()
-    if (!t) return
-    setLoading(true)
-    setError('')
-    setStatus('')
-    try {
-      const res = await fetch(`${BASE}/api/learning-ladder/build`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: t }),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        setLadder(data.ladder)
-        setProgress({})
-        setNextLevel(1)
-        setStatus('Ladder built. Start at Level 1.')
-        await fetchAll()
-      } else {
-        setError(data.error || 'Failed to build ladder')
-      }
-    } catch (e) {
-      setError(e.message)
+      await api.chat.send(`Learn topic: ${topic.trim()}`)
+      setTeachResult({ ok: true, msg: `Teaching initiated: "${topic.trim()}"` })
+      setTopic('')
+    } catch {
+      setTeachResult({ ok: false, msg: 'Failed to initiate learning task' })
     } finally {
-      setLoading(false)
+      setTeaching(false)
     }
-  }, [topic, fetchAll])
-
-  const handleSelectTopic = useCallback(async (t) => {
-    setTopic(t)
-    setError('')
-    setStatus('')
-    await fetchProgress(t)
-  }, [fetchProgress])
-
-  const handleComplete = useCallback(async (payload) => {
-    setError('')
-    try {
-      const res = await fetch(`${BASE}/api/learning-ladder/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        const r = data.result
-        setNextLevel(r.next_level)
-        setStatus(
-          r.learned
-            ? `✓ Level ${r.level} marked as LEARNED (score: ${(r.best_score * 100).toFixed(0)}%). ${r.adaptation?.reason || ''}`
-            : `✕ Level ${r.level} NOT LEARNED — Anti-Illusion Protocol active. ${r.adaptation?.reason || ''}`
-        )
-        await fetchProgress(payload.topic)
-        await fetchAll()
-      } else {
-        setError(data.error || 'Failed to record completion')
-      }
-    } catch (e) {
-      setError(e.message)
-    }
-  }, [fetchProgress, fetchAll])
-
-  const activeTopic = ladder?.topic || ''
+  }
 
   return (
-    <div className="page-enter">
-      <PageHeader title="Learning Ladder" subtitle="Structured 5-level progression — Beginner · Basic · Mature · Advanced · Pro">
-        {metrics && (
-          <div style={{ display: 'flex', gap: 'var(--space-4)', fontSize: '12px', color: 'var(--text-muted)' }}>
-            <span>{metrics.total_topics} topics</span>
-            <span>{metrics.total_levels_completed} levels completed</span>
-          </div>
-        )}
-      </PageHeader>
-
-      {/* Build input */}
-      <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
-        <input
-          value={topic}
-          onChange={(e) => setTopic(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleBuild()}
-          placeholder="Enter a topic, skill, or domain…"
-          style={{
-            flex: '1 1 260px',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            padding: 'var(--space-2) var(--space-3)',
-            color: 'var(--text-primary)',
-            fontSize: '13px',
-            outline: 'none',
-          }}
-        />
-        <button className="btn-primary" onClick={handleBuild} disabled={loading || !topic.trim()}>
-          {loading ? 'Building…' : 'Build Ladder'}
-        </button>
+    <div style={{ display:'flex', flexDirection:'column', gap:10, height:'100%' }}>
+      {/* Stats */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10 }}>
+        <StatCard label="Avg Mastery"    value={`${avgMastery}%`}     color="var(--gold,#E5C76B)" sub="Across all skills"/>
+        <StatCard label="Skills Tracked" value={allItems.length}      color="var(--teal,#20D6C7)" sub={`${skills.length} categories`}/>
+        <StatCard label="Recent Gains"   value={IMPROVEMENTS.length}  color="#22C55E" sub="Skills improved this week"/>
       </div>
 
-      {/* Status / error banner */}
-      <AnimatePresence>
-        {(status || error) && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="ds-card"
-            style={{
-              padding: 'var(--space-3) var(--space-4)',
-              marginBottom: 'var(--space-4)',
-              fontSize: '13px',
-              color: error ? 'var(--error)' : 'var(--text-secondary)',
-              borderLeft: `3px solid ${error ? 'var(--error)' : 'var(--gold)'}`,
-            }}
-          >
-            {error || status}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: allTopics.length > 0 ? '220px 1fr 220px' : '1fr 220px',
-        gap: 'var(--space-4)',
-        alignItems: 'start',
-      }}>
-        {/* Topic sidebar */}
-        {allTopics.length > 0 && (
-          <div className="ds-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{
-              padding: 'var(--space-3) var(--space-4)',
-              borderBottom: '1px solid var(--border-subtle)',
-              fontSize: '11px',
-              fontWeight: 600,
-              color: 'var(--text-muted)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-            }}>
-              Topics
-            </div>
-            {allTopics.map((item) => (
-              <TopicRow
-                key={item.id}
-                item={item}
-                onSelect={handleSelectTopic}
-                isActive={item.topic === activeTopic}
-              />
-            ))}
+      {/* Topic Input */}
+      <Panel title="Teach New Topic">
+        <div style={{ display:'flex', gap:8 }}>
+          <input
+            value={topic}
+            onChange={e => setTopic(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleTeach()}
+            placeholder="Enter learning topic (e.g. 'Kubernetes deployment strategies')..."
+            style={{ flex:1, padding:'8px 12px', borderRadius:6, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.1)', color:'var(--text-primary,#F0E9D2)', fontFamily:'monospace', fontSize:12 }}
+          />
+          <button onClick={handleTeach} disabled={teaching || !topic.trim()} style={{
+            padding:'8px 20px', borderRadius:6, fontFamily:'monospace', fontSize:11, fontWeight:600,
+            background: teaching ? 'rgba(229,199,107,0.05)' : 'rgba(229,199,107,0.15)',
+            border:'1px solid rgba(229,199,107,0.4)', color:'var(--gold,#E5C76B)',
+            cursor: teaching ? 'wait' : 'pointer', whiteSpace:'nowrap',
+          }}>
+            {teaching ? 'TEACHING...' : 'TEACH SYSTEM'}
+          </button>
+        </div>
+        {teachResult && (
+          <div style={{ marginTop:8, padding:'6px 10px', borderRadius:5, fontSize:11, fontFamily:'monospace', background: teachResult.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border:`1px solid ${teachResult.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`, color: teachResult.ok ? '#22C55E' : '#ef4444' }}>
+            {teachResult.ok ? '✓ ' : '✗ '}{teachResult.msg}
           </div>
         )}
+      </Panel>
 
-        {/* Ladder view */}
-        <div>
-          {!ladder ? (
-            <div className="ds-card" style={{
-              padding: 'var(--space-8)',
-              textAlign: 'center',
-              color: 'var(--text-muted)',
-              fontSize: '13px',
-            }}>
-              Enter a topic and click <strong style={{ color: 'var(--text-secondary)' }}>Build Ladder</strong> to generate your 5-level learning progression.
+      {/* Main grid */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:10, flex:1, minHeight:0 }}>
+        <Panel title="Skill Mastery" badge={<Badge label="Live" variant="green"/>} bodyStyle={{ overflowY:'auto' }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            {skills.map(cat => (
+              <div key={cat.cat}>
+                <div style={{ fontSize:10, fontFamily:'monospace', letterSpacing:'0.1em', textTransform:'uppercase', color:'rgba(255,255,255,0.35)', marginBottom:8 }}>{cat.cat}</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                  {cat.items.map(sk => {
+                    const lvlInfo = LEVEL_LABEL(sk.lvl)
+                    return (
+                      <div key={sk.n} style={{ display:'flex', alignItems:'center', gap:10 }}>
+                        <span style={{ fontSize:12, color:'var(--text-secondary,#9A927E)', width:180, flexShrink:0 }}>{sk.n}</span>
+                        <div style={{ flex:1, height:6, background:'rgba(255,255,255,.06)', borderRadius:3, overflow:'hidden' }}>
+                          <div style={{ width:`${sk.lvl}%`, height:'100%', borderRadius:3, transition:'width .5s', background:sk.lvl>=90?'var(--teal,#20D6C7)':sk.lvl>=70?'var(--gold,#E5C76B)':sk.lvl>=40?'var(--bronze,#CD7F32)':'rgba(255,255,255,.2)', boxShadow:lvlInfo.glow }}/>
+                        </div>
+                        <span style={{ fontFamily:'monospace', fontSize:11, color: lvlInfo.color, width:34, textAlign:'right', flexShrink:0 }}>{sk.lvl}%</span>
+                        <span style={{ fontSize:8, fontFamily:'monospace', letterSpacing:'0.06em', color: lvlInfo.color, width:72, textAlign:'right', flexShrink:0, textShadow: lvlInfo.glow !== 'none' ? lvlInfo.glow : 'none' }}>{sk.status === 'QUEUED' ? 'QUEUED' : lvlInfo.text}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          <Panel title="Learning Queue">
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              {QUEUE.map((q,i) => (
+                <div key={i} style={{ padding:'9px 10px', borderRadius:8, border:'1px solid rgba(229,199,107,0.08)', background:'var(--bg-elevated,#12141F)' }}>
+                  <div style={{ fontSize:12, color:'var(--text-primary,#F0E9D2)', marginBottom:5 }}>{q.task}</div>
+                  <div style={{ display:'flex', justifyContent:'space-between' }}>
+                    <Badge label={q.priority} variant={q.priority==='HIGH'?'error':q.priority==='MED'?'warn':'default'}/>
+                    <span style={{ fontSize:11, color:'rgba(255,255,255,0.35)', fontFamily:'monospace' }}>{q.eta}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-          ) : (
-            <>
-              <div style={{ marginBottom: 'var(--space-4)' }}>
-                <h2 style={{ fontSize: '16px', fontWeight: 500, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                  {ladder.topic}
-                </h2>
-                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  ID: {ladder.id} · Built: {ladder.built_at ? new Date(ladder.built_at).toLocaleDateString() : '—'}
-                  {nextLevel ? ` · Next: Level ${nextLevel}` : ' · All levels completed'}
-                </p>
+          </Panel>
+          <Panel title="Recent Improvements" style={{ flex:1 }}>
+            {IMPROVEMENTS.map((r,i) => (
+              <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 0', borderBottom:'1px solid rgba(255,255,255,.04)' }}>
+                <span style={{ fontSize:12, color:'var(--text-secondary,#9A927E)' }}>{r.skill}</span>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <span style={{ fontFamily:'monospace', fontSize:12, color:r.c, fontWeight:600 }}>{r.delta}</span>
+                  <span style={{ fontSize:11, color:'rgba(255,255,255,0.35)' }}>{r.ts}</span>
+                </div>
               </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                {ladder.levels.map((lvl) => {
-                  const isPreviousLevelLearned = lvl.level === 1 || (progress[String(lvl.level - 1)] || {}).learned
-                  const isNext = lvl.level === nextLevel
-                  const blocked = !isPreviousLevelLearned && !(progress[String(lvl.level)] || {}).learned
-                  return (
-                    <LevelCard
-                      key={lvl.level}
-                      levelData={lvl}
-                      progressRec={progress[String(lvl.level)]}
-                      topic={ladder.topic}
-                      onComplete={handleComplete}
-                      isNext={isNext}
-                      disabled={blocked}
-                    />
-                  )
-                })}
-              </div>
-            </>
-          )}
+            ))}
+          </Panel>
         </div>
-
-        {/* Agent assignment panel */}
-        <AgentAssignPanel
-          currentTopic={activeTopic}
-          onAssigned={fetchAll}
-        />
       </div>
     </div>
   )

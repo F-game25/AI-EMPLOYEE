@@ -8,7 +8,7 @@
  *   - Memory Tree — structured entity memory
  *   - Doctor — system health checks
  *
- * Tries to fetch real data from the Python backend (port 8787).
+ * Tries to fetch real data from the Python backend (port 18790).
  * Falls back to intelligent simulated state when the Python backend
  * is not reachable, so the UI always has something to display.
  */
@@ -16,7 +16,7 @@
 const http = require('http');
 const brain = require('../brain/active_brain');
 
-const PYTHON_BACKEND = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}`;
+const PYTHON_BACKEND = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 18790}`;
 const FETCH_TIMEOUT_MS = 2000;
 
 // ── State stores ──────────────────────────────────────────────────────────────
@@ -211,6 +211,29 @@ function _simulateDoctor() {
 // ── Python backend sync ───────────────────────────────────────────────────────
 
 async function syncNNFromPython() {
+  try {
+    // Try new real Python brain (SelfLearningBrain) first
+    const brainData = await fetchJSON('/internal/brain-status');
+    if (brainData && brainData.ok && brainData.metrics) {
+      const metrics = brainData.metrics;
+      const outcomes = brainData.outcomes || [];
+      state.nn.available = true;
+      state.nn.active = true;
+      state.nn.mode = 'ONLINE';
+      state.nn.learn_step = metrics.total_outcomes_recorded || 0;
+      state.nn.confidence = metrics.avg_reward_recent || 0;
+      state.nn.bg_running = true;
+      state.nn.data_source = 'python-brain';
+      state.nn.recent_learning_events = outcomes.slice(0, 10).map((o) => ({
+        ts: o.ts || now(),
+        event: `${o.action} → ${o.success ? 'success' : 'fail'} (${o.strategy})`,
+      }));
+      state.nn.updated_at = now();
+      return true;
+    }
+  } catch (_) { /* fallback to simulation */ }
+
+  // Fallback: try old API if new one unavailable
   try {
     const data = await fetchJSON('/api/brain/status');
     if (data && data.available !== false) {

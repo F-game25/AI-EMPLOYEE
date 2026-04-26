@@ -48,9 +48,11 @@ function connectSingleton() {
         case 'orchestrator:message':
           clearTimeout(_typingTimeout)
           store.setTyping(false)
+          store.clearExecutionSteps()
           store.addChatMessage({
             role: 'ai',
             content: data.message || data.reply || '',
+            attachments: data.attachments || [],
             debugInfo: data.debugInfo || null,
             ts: Date.now(),
             subsystem: data.subsystem,
@@ -71,6 +73,9 @@ function connectSingleton() {
           break
         case 'execution:log':
           store.addExecutionLog(data)
+          break
+        case 'execution:step':
+          store.addExecutionStep(data)
           break
         case 'execution:snapshot':
           if (Array.isArray(data)) store.setExecutionSnapshot(data)
@@ -133,6 +138,9 @@ function connectSingleton() {
           // doesn't spin forever.
           clearTimeout(_typingTimeout)
           store.setTyping(false)
+          break
+        case 'identity:ready':
+          store.setIdentity(data)
           break
       }
     } catch (e) {

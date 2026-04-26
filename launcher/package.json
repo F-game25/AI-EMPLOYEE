@@ -1,0 +1,35 @@
+{
+  "name": "ai-employee-launcher",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --linux AppImage deb"
+  },
+  "devDependencies": {
+    "electron": "^27.3.11",
+    "electron-builder": "^24.13.0"
+  },
+  "build": {
+    "appId": "com.ai-employee.launcher",
+    "productName": "AI Employee",
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Utility"
+    },
+    "extraResources": [
+      {
+        "from": "../",
+        "to": "repo",
+        "filter": [
+          "start.sh",
+          "stop.sh"
+        ]
+      }
+    ]
+  }
+}

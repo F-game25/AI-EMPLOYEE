@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# AI Employee — enterprise start script (single source of truth)
+# Always run from the repo: bash /path/to/AI-EMPLOYEE/start.sh
 
 set -euo pipefail
 
@@ -6,6 +8,27 @@ cd "$(dirname "$0")"
 REPO_ROOT="$(pwd -P)"
 export AI_EMPLOYEE_REPO_DIR="$REPO_ROOT"
 export PYTHONDONTWRITEBYTECODE=1
+
+G='\033[0;32m'; C='\033[0;36m'; Y='\033[1;33m'; R='\033[0;31m'; NC='\033[0m'
+_log()  { echo -e "${C}▸${NC} $*"; }
+_ok()   { echo -e "${G}✓${NC} $*"; }
+_warn() { echo -e "${Y}⚠${NC} $*"; }
+
+echo ""
+echo -e "${G}╔══════════════════════════════════════╗${NC}"
+echo -e "${G}║        AI Employee — Starting        ║${NC}"
+echo -e "${G}╚══════════════════════════════════════╝${NC}"
+echo ""
+_log "Repo: $REPO_ROOT"
+
+# ── Stop any already-running AI Employee processes ───────────────────────────
+# Ensures a clean state before starting, regardless of which start script
+# was used previously (repo or deployed copy).
+if [[ -f "$REPO_ROOT/stop.sh" ]]; then
+  _log "Stopping any existing AI Employee processes…"
+  bash "$REPO_ROOT/stop.sh" 2>/dev/null || true
+  sleep 1
+fi
 
 # ── Consistent environment setup ─────────────────────────────────────────────
 # Load ~/.ai-employee/.env so that JWT_SECRET_KEY, API keys, and port overrides
@@ -55,34 +78,8 @@ echo "LATEST COMMIT: $(git -C "$REPO_ROOT" log -1 --oneline 2>/dev/null || echo 
 echo "PYTHON: $(command -v python3 || echo missing)"
 echo "UVICORN: $(command -v uvicorn || echo missing)"
 
-# ── Evolution mode prompt ─────────────────────────────────────────────────────
-# Ask the operator which self-evolution mode to use, but only when:
-#   • EVOLUTION_MODE has NOT already been set in the environment / .env, AND
-#   • stdin is an interactive terminal (skip in CI / non-interactive pipes).
-if [ -z "${EVOLUTION_MODE:-}" ] && [ -t 0 ]; then
-  echo ""
-  echo "┌─────────────────────────────────────────────────────┐"
-  echo "│          Self-Evolution Mode Selection              │"
-  echo "│                                                     │"
-  echo "│  AUTO  — fully autonomous (detect, patch, deploy)  │"
-  echo "│  SAFE  — generate patches; require API approval    │"
-  echo "│  OFF   — disabled (default)                        │"
-  echo "└─────────────────────────────────────────────────────┘"
-  printf "  EVOLUTION_MODE [OFF]: "
-  read -r _evo_input </dev/tty
-  _evo_input="$(echo "${_evo_input}" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
-  case "${_evo_input}" in
-    AUTO|SAFE|OFF) EVOLUTION_MODE="${_evo_input}" ;;
-    "")            EVOLUTION_MODE="OFF" ;;
-    *)
-      echo "  Unknown value '${_evo_input}'. Valid choices: AUTO, SAFE, OFF. Defaulting to OFF."
-      EVOLUTION_MODE="OFF"
-      ;;
-  esac
-  export EVOLUTION_MODE
-  echo "  → Evolution mode set to: ${EVOLUTION_MODE}"
-  echo ""
-fi
+# Evolution mode defaults to OFF unless already set in environment / .env
+export EVOLUTION_MODE="${EVOLUTION_MODE:-OFF}"
 
 UI_PORT="${PROBLEM_SOLVER_UI_PORT:-8787}"
 
