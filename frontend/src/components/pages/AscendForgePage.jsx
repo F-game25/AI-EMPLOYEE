@@ -88,6 +88,21 @@ function CodingAISection() {
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
+    // Load settings on mount
+    const loadSettings = async () => {
+      try {
+        const res = await fetch('/api/system/settings/coding-ai')
+        const data = await res.json()
+        if (data.provider) setProvider(data.provider)
+        if (data.model) setModel(data.model)
+      } catch (err) {
+        console.log('Settings load skipped:', err.message)
+      }
+    }
+    loadSettings()
+  }, [])
+
+  useEffect(() => {
     const defaultModels = { anthropic: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'], openrouter: ['deepseek/deepseek-coder-v2', 'anthropic/claude-3.5-sonnet'], ollama: [] }
     setModels(defaultModels[provider] || [])
     if (defaultModels[provider].length > 0) setModel(defaultModels[provider][0])
@@ -133,7 +148,19 @@ function CodingAISection() {
         <select value={model} onChange={e => setModel(e.target.value)} style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: `1px solid ${BR}44`, background: 'rgba(139,81,32,0.1)', color: BRB, fontSize: 10, fontFamily: 'monospace' }}>
           {models.map(m => <option key={m} value={m}>{m.split('/').pop()}</option>)}
         </select>
-        {provider === 'openrouter' && <input type="password" placeholder="API Key" value={apiKey} onChange={e => setApiKey(e.target.value)} style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: `1px solid ${BR}44`, background: 'rgba(139,81,32,0.1)', color: '#F5E6C8', fontSize: 10 }} />}
+        {provider === 'openrouter' && (
+          <>
+            <input type="password" placeholder="API Key" value={apiKey} onChange={e => setApiKey(e.target.value)} style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: `1px solid ${BR}44`, background: 'rgba(139,81,32,0.1)', color: '#F5E6C8', fontSize: 10 }} />
+            <button onClick={async () => {
+              await fetch('/api/system/settings/coding-ai', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider, model, openrouter_api_key: apiKey })
+              });
+              setApiKey('');
+            }} style={{ padding: '4px 8px', borderRadius: 4, border: `1px solid ${BR}66`, background: `rgba(139,81,32,0.15)`, color: BRB, cursor: 'pointer', fontSize: 9, fontWeight: 600 }}>SAVE</button>
+          </>
+        )}
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6, minHeight: 100, paddingBottom: 8 }}>
