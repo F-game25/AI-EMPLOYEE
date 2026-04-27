@@ -3065,6 +3065,57 @@ app.get('/api/identity', (req, res) => {
   }
 });
 
+// ── Settings Management ───────────────────────────────────────────────────────
+
+app.get('/api/system/settings/coding-ai', (req, res) => {
+  try {
+    const envPath = path.join(process.env.HOME || os.homedir(), '.ai-employee', '.env');
+    const settings = { provider: 'anthropic', model: 'claude-sonnet-4-6', has_openrouter_key: false };
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf8');
+      const match = content.match(/OPENROUTER_API_KEY=(.+)/);
+      if (match && match[1]) {
+        settings.has_openrouter_key = true;
+      }
+    }
+    res.json(settings);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/system/settings/coding-ai', (req, res) => {
+  try {
+    const { provider, model, openrouter_api_key } = req.body || {};
+    const envPath = path.join(process.env.HOME || os.homedir(), '.ai-employee', '.env');
+    const dir = path.dirname(envPath);
+    fs.mkdirSync(dir, { recursive: true });
+
+    let content = '';
+    if (fs.existsSync(envPath)) {
+      content = fs.readFileSync(envPath, 'utf8');
+      // Remove old key if present
+      content = content.replace(/OPENROUTER_API_KEY=.+\n?/g, '');
+    }
+
+    // Add new key if provided
+    if (openrouter_api_key && openrouter_api_key.trim()) {
+      content += `OPENROUTER_API_KEY=${openrouter_api_key.trim()}\n`;
+    }
+
+    fs.writeFileSync(envPath, content);
+
+    // Update process env for immediate use
+    if (openrouter_api_key) {
+      process.env.OPENROUTER_API_KEY = openrouter_api_key.trim();
+    }
+
+    res.json({ ok: true, provider, model, key_saved: !!openrouter_api_key });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Agent Catalog ─────────────────────────────────────────────────────────────
 
 app.get('/api/agents/list', (req, res) => {
