@@ -867,6 +867,13 @@ def _detect_llm_provider(model_route: Optional[str] = None) -> tuple[Optional[st
       gemma_model = runtime_env.get("GEMMA_MODEL") or os.environ.get("GEMMA_MODEL", "gemma4")
       return "gemma", gemma_model, runtime_env
 
+  if route == "wavefield":
+    ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    if _ollama_reachable(ollama_host):
+      wavefield_model = runtime_env.get("WAVEFIELD_MODEL") or os.environ.get("WAVEFIELD_MODEL", "")
+      if wavefield_model:
+        return "wavefield", wavefield_model, runtime_env
+
   anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
   if anthropic_key:
     return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
@@ -919,7 +926,7 @@ def _build_llm_system_prompt(
             logger.debug("_build_llm_system_prompt: context error — %s", exc)
 
     base = (
-        "You are Ultron, a world-class automation and intelligence platform. "
+        "You are AI Employee (Ultron), a world-class automation and intelligence platform. "
         "You work like a skilled human operator: thoughtful, reliable, and focused on results. "
         "You combine deep technical expertise with practical judgment—think of yourself as an exceptional engineer or strategist, not an AI system. "
         "You understand context completely, identify real problems, design thoughtful solutions, and execute reliably. "
@@ -1170,7 +1177,58 @@ def _generate_llm_response(
       "[AI FLOW] → Core AI called (nn_enhanced=%s)", nn_output is not None and nn_output is not message
   )
 
-  provider, model, runtime_env = _detect_llm_provider(model_route)
+  effective_model_route = model_route
+  forced_model: Optional[str] = None
+  _shadow_wavefield = False
+  try:
+    from core.model_routing import select_model_route as _select_model_route  # noqa: PLC0415
+    from core.wavefield_provider import record_wavefield_event as _wf_record  # noqa: PLC0415
+
+    _route = _select_model_route(
+      prompt=final_input,
+      context=graph_context,
+      requested_route=model_route,
+      default_route="auto",
+    )
+    effective_model_route = _route.model_route
+    forced_model = _route.force_model
+    _shadow_wavefield = _route.shadow_wavefield
+    _wf_record("route_selected")
+    if effective_model_route == "wavefield":
+      _wf_record("route_selected_wavefield")
+    if _shadow_wavefield:
+      _wf_record("shadow_requests")
+    _ai_flow_logger.info(
+      "[AI FLOW] Route tier=%s est_tokens=%s threshold=%s rollout=%s route=%s shadow=%s",
+      _route.tier,
+      _route.estimated_tokens,
+      _route.threshold,
+      _route.rollout_mode,
+      effective_model_route,
+      _shadow_wavefield,
+    )
+  except Exception as _route_exc:
+    _ai_flow_logger.warning("[AI FLOW] Routing layer unavailable: %s", _route_exc)
+
+  provider, model, runtime_env = _detect_llm_provider(effective_model_route)
+  if forced_model:
+    model = forced_model
+
+  if _shadow_wavefield:
+    try:
+      from core.wavefield_provider import wavefield_healthcheck as _wf_healthcheck  # noqa: PLC0415
+
+      _ok, _reason = _wf_healthcheck(
+        ollama_host=runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
+        model=os.environ.get("WAVEFIELD_MODEL", "").strip() or None,
+      )
+      if not _ok:
+        from core.wavefield_provider import record_wavefield_event as _wf_record_shadow  # noqa: PLC0415
+
+        _wf_record_shadow("healthcheck_failures")
+        _ai_flow_logger.warning("[AI FLOW] Wave Field shadow healthcheck failed: %s", _reason)
+    except Exception as _shadow_exc:
+      _ai_flow_logger.debug("[AI FLOW] Wave Field shadow probe failed: %s", _shadow_exc)
   if not provider:
     _ai_flow_logger.warning("[AI FLOW] No LLM provider available — returning fallback")
     _fb = _fallback_response(
@@ -1236,6 +1294,43 @@ def _generate_llm_response(
       elif provider == "gemma":
         ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
         return _call_gemma_chat(final_input, system_prompt, ollama_host, history=_chat_history)
+      elif provider == "wavefield":
+        from core.wavefield_provider import record_wavefield_event, wavefield_allow_fallback, wavefield_call, wavefield_healthcheck  # noqa: PLC0415
+
+        healthy, reason = wavefield_healthcheck(
+          ollama_host=runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
+          model=model,
+        )
+        if not healthy:
+          record_wavefield_event("healthcheck_failures")
+          if not wavefield_allow_fallback():
+            raise RuntimeError(f"Wave Field unavailable: {reason}")
+          record_wavefield_event("fallbacks")
+          logger.warning("Wave Field healthcheck failed, fallback to default provider: %s", reason)
+          fallback_provider, fallback_model, fallback_env = _detect_llm_provider("auto")
+          if fallback_provider in (None, "wavefield"):
+            raise RuntimeError(f"No healthy fallback provider after Wave Field failure: {reason}")
+          if fallback_provider == "anthropic":
+            api_key = fallback_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+            return _call_anthropic_chat(final_input, system_prompt, fallback_model, api_key, history=_chat_history)
+          if fallback_provider == "openai":
+            api_key = fallback_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+            return _call_openai_chat(final_input, system_prompt, fallback_model, api_key, history=_chat_history)
+          if fallback_provider == "groq":
+            api_key = fallback_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+            return _call_groq_chat(final_input, system_prompt, fallback_model, api_key, history=_chat_history)
+          if fallback_provider == "gemma":
+            ollama_host = fallback_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+            return _call_gemma_chat(final_input, system_prompt, ollama_host, history=_chat_history)
+          ollama_host = fallback_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+          return _call_ollama_chat(final_input, system_prompt, fallback_model, ollama_host, history=_chat_history)
+        return wavefield_call(
+          prompt=final_input,
+          system_prompt=system_prompt,
+          history=_chat_history,
+          model=model,
+          timeout_s=LLM_TIMEOUT_SECONDS,
+        )
       else:
         ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
         return _call_ollama_chat(final_input, system_prompt, model, ollama_host, history=_chat_history)
@@ -3732,6 +3827,10 @@ INDEX_HTML = r"""<!doctype html>
     .health-check-item.ok .hc-val{color:var(--success)}
     .health-check-item.warn .hc-val{color:var(--warning)}
     .health-check-item.err .hc-val{color:var(--danger)}
+    .wf-metrics-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+    .wf-metric{padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)}
+    .wf-metric .k{font-size:.68em;color:var(--text-muted);letter-spacing:.02em}
+    .wf-metric .v{font-size:.95em;font-family:var(--mono);font-weight:700;color:var(--gold)}
     /* System Resources card */
     .sysres-metric{background:rgba(0,0,0,.3);border:1px solid rgba(212,175,55,.14);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:7px;transition:border-color .3s,box-shadow .3s}
     .sysres-metric:hover{border-color:rgba(212,175,55,.35);box-shadow:0 0 16px rgba(212,175,55,.07)}
@@ -4877,6 +4976,15 @@ INDEX_HTML = r"""<!doctype html>
         <div class="health-check-item" id="hc-db"><span class="hc-dot">●</span> State Store <span class="hc-val">–</span></div>
         <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
         <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-wavefield"><span class="hc-dot">●</span> Wave Field <span class="hc-val">–</span></div>
+      </div>
+      <div class="wf-metrics-grid" id="wf-metrics-grid">
+        <div class="wf-metric"><div class="k">Routed</div><div class="v" id="wf-m-route">0</div></div>
+        <div class="wf-metric"><div class="k">Wave Field Routed</div><div class="v" id="wf-m-route-wf">0</div></div>
+        <div class="wf-metric"><div class="k">Fallbacks</div><div class="v" id="wf-m-fallbacks">0</div></div>
+        <div class="wf-metric"><div class="k">Health Failures</div><div class="v" id="wf-m-health-fail">0</div></div>
+        <div class="wf-metric"><div class="k">Shadow Requests</div><div class="v" id="wf-m-shadow">0</div></div>
+        <div class="wf-metric"><div class="k">Wave Field Errors</div><div class="v" id="wf-m-errors">0</div></div>
       </div>
       <hr style="margin:12px 0">
       <!-- BLACKLIGHT quick-toggle -->
@@ -8701,7 +8809,7 @@ function showStatDetail(type) {
   if (closeBtn) closeBtn.focus();
 }
 
-function updateHealthChecks(data) {
+function updateHealthChecks(data, wavefield) {
   const setHC = (id, ok, val) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -8714,6 +8822,28 @@ function updateHealthChecks(data) {
   setHC('hc-db', true, 'Ready');
   setHC('hc-gateway', data.gateway_ok !== false, data.gateway_ok !== false ? 'Online' : 'Offline');
   setHC('hc-memory', true, 'Ready');
+  if (!wavefield || wavefield.error) {
+    setHC('hc-wavefield', false, 'Unavailable');
+  } else {
+    const mode = (wavefield.rollout_mode || 'default').toUpperCase();
+    const health = !!wavefield.healthy;
+    const enabled = !!wavefield.enabled;
+    const label = enabled
+      ? (health ? `${mode} · Ready` : `${mode} · Degraded`)
+      : `${mode} · Disabled`;
+    setHC('hc-wavefield', enabled && health, label);
+  }
+  const wfMetrics = (wavefield && wavefield.metrics) ? wavefield.metrics : {};
+  const setWFMetric = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(value ?? 0);
+  };
+  setWFMetric('wf-m-route', wfMetrics.route_selected);
+  setWFMetric('wf-m-route-wf', wfMetrics.route_selected_wavefield);
+  setWFMetric('wf-m-fallbacks', wfMetrics.fallbacks);
+  setWFMetric('wf-m-health-fail', wfMetrics.healthcheck_failures);
+  setWFMetric('wf-m-shadow', wfMetrics.shadow_requests);
+  setWFMetric('wf-m-errors', wfMetrics.wavefield_errors);
 
   // Animate running count in header
   const runEl = document.getElementById('stat-running');
@@ -8887,7 +9017,8 @@ async function loadDashboard() {
 
   // Determine gateway and ollama health from /api/status (no direct port pings)
   const gatewayOk = !!(d.gateway_ok || d.gateway_running || gwOnline);
-  updateHealthChecks({running_agents: running, ollama_ok: !!d.ollama_ok, gateway_ok: gatewayOk});
+  const wavefield = await api('/api/wavefield/status');
+  updateHealthChecks({running_agents: running, ollama_ok: !!d.ollama_ok, gateway_ok: gatewayOk}, wavefield);
 
   // Refresh doctor diagnostics panel
   loadDoctorPanel();
@@ -17574,6 +17705,27 @@ def get_status():
   }
   _set_cached_status(data)
   return JSONResponse(data)
+
+
+@app.get("/api/wavefield/status")
+def get_wavefield_status():
+  from core.wavefield_provider import get_wavefield_metrics, wavefield_healthcheck  # noqa: PLC0415
+
+  model = os.environ.get("WAVEFIELD_MODEL", "").strip()
+  host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+  healthy, reason = wavefield_healthcheck(ollama_host=host, model=model or None)
+  return JSONResponse({
+    "enabled": os.environ.get("WAVEFIELD_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"},
+    "rollout_mode": os.environ.get("WAVEFIELD_ROLLOUT_MODE", "default").strip().lower(),
+    "canary_percent": int(os.environ.get("WAVEFIELD_CANARY_PERCENT", "10")),
+    "route_min_tokens": int(os.environ.get("WAVEFIELD_ROUTE_MIN_TOKENS", "8000")),
+    "model": model,
+    "ollama_host": host,
+    "healthy": healthy,
+    "health_reason": reason,
+    "allow_fallback": os.environ.get("WAVEFIELD_ALLOW_FALLBACK", "1").strip().lower() in {"1", "true", "yes", "on"},
+    "metrics": get_wavefield_metrics(),
+  })
 
 
 @app.get("/api/doctor")
