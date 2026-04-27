@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import { useBrainStore } from '../../store/brainStore'
 import { sendChatMessage } from '../../hooks/useWebSocket'
+import TaskProgressBlock from '../ui/TaskProgressBlock'
 
 export default function ChatPanel() {
   const messages = useAppStore(s => s.chatMessages)
@@ -87,48 +88,71 @@ export default function ChatPanel() {
         )}
 
         <AnimatePresence initial={false}>
-          {messages.map((msg, idx) => (
-            <motion.div
-              key={`${msg.ts}-${idx}`}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className="max-w-sm lg:max-w-lg px-3 py-2 font-mono text-xs leading-relaxed"
-                style={msg.role === 'user' ? {
-                  background: 'rgba(212,175,55,0.08)',
-                  border: '1px solid rgba(212,175,55,0.25)',
-                  borderRadius: '6px 6px 2px 6px',
-                  color: 'var(--gold)',
-                } : {
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '6px 6px 6px 2px',
-                  color: 'var(--text-primary)',
-                }}
+          {messages.map((msg, idx) => {
+            // Handle task progress messages
+            if (msg.type === 'task_progress') {
+              return (
+                <motion.div
+                  key={`${msg.ts}-${idx}`}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex justify-start w-full"
+                >
+                  <div className="w-full max-w-sm lg:max-w-lg">
+                    <TaskProgressBlock
+                      taskId={msg.taskId}
+                      title={msg.title || 'Processing...'}
+                    />
+                  </div>
+                </motion.div>
+              )
+            }
+
+            // Regular chat messages
+            return (
+              <motion.div
+                key={`${msg.ts}-${idx}`}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                {msg.role === 'ai' && debugMode && msg.subsystem && (
-                  <div
-                    className="text-xs mb-1 font-semibold tracking-widest"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    {subsystemLabel(msg.subsystem).toUpperCase()}
-                  </div>
-                )}
-                {msg.content}
-                {msg.role === 'ai' && debugMode && msg.debugInfo && (
-                  <div
-                    className="mt-2 pt-2 text-xs opacity-60"
-                    style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
-                  >
-                    {msg.debugInfo}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          ))}
+                <div
+                  className="max-w-sm lg:max-w-lg px-3 py-2 font-mono text-xs leading-relaxed"
+                  style={msg.role === 'user' ? {
+                    background: 'rgba(212,175,55,0.08)',
+                    border: '1px solid rgba(212,175,55,0.25)',
+                    borderRadius: '6px 6px 2px 6px',
+                    color: 'var(--gold)',
+                  } : {
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '6px 6px 6px 2px',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  {msg.role === 'ai' && debugMode && msg.subsystem && (
+                    <div
+                      className="text-xs mb-1 font-semibold tracking-widest"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      {subsystemLabel(msg.subsystem).toUpperCase()}
+                    </div>
+                  )}
+                  {msg.content}
+                  {msg.role === 'ai' && debugMode && msg.debugInfo && (
+                    <div
+                      className="mt-2 pt-2 text-xs opacity-60"
+                      style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
+                    >
+                      {msg.debugInfo}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )
+          })}
         </AnimatePresence>
 
         {/* Typing indicator */}
