@@ -186,7 +186,7 @@ def build_newsletter_content(topic: str, rss_items: list[dict], preview: bool = 
         f"## Call to Action\n(1 clear CTA relevant to the topic)\n"
         f"{rss_context}"
     )
-    content = _ai(prompt, system=f"You are the editor of '{NEWSLETTER_NAME}', a high-quality curated newsletter.")
+    content = _ai(prompt, system=f"You are the editor of '{NEWSLETTER_NAME}'. Your job: find the most useful, interesting stories this week and tell them in plain English. Sound like a smart friend catching someone up—not a content machine. Be honest about what matters and why.")
 
     sections: dict[str, str] = {}
     section_re = re.compile(r"##\s*(.+?)\n(.*?)(?=\n##\s|\Z)", re.DOTALL)
