@@ -35,8 +35,14 @@ const brain = require('./brain/active_brain');
 const persistence = require('./persistence');
 const voiceManager = require('./core/voice_manager');
 const voiceApiRouter = require('./api/voice');
+const ErrorRecoveryManager = require('./core/error_recovery');
+const TaskHistoryManager = require('./core/task_history');
 const Database = require('better-sqlite3');
 const { z } = require('zod');
+
+// Initialize error recovery and task history
+const errorRecovery = new ErrorRecoveryManager();
+const taskHistory = new TaskHistoryManager();
 
 // ── Request validation helpers ────────────────────────────────────────────────
 // Returns parsed body on success, sends 400 and returns null on failure.
@@ -3180,6 +3186,81 @@ app.post('/api/system/apply-update', (req, res) => {
   }
 });
 
+// ── Task Tracking System ──────────────────────────────────────────────────────
+// Stores live task progress; in-memory with TTL cleanup (use Redis for production)
+
+const taskStore = new Map(); // taskId → {task, steps, connections}
+const taskConnections = new Map(); // taskId → Set of WebSocket connections
+
+function initTask(taskId, title = 'Task') {
+  const task = {
+    task_id: taskId,
+    name: title,
+    status: 'running',
+    started_at: new Date().toISOString(),
+    steps: [],
+  };
+  taskStore.set(taskId, { task, steps: [] });
+  return task;
+}
+
+function updateTaskStep(taskId, stepId, updates) {
+  const entry = taskStore.get(taskId);
+  if (!entry) return;
+
+  const { steps } = entry;
+  let step = steps.find(s => s.id === stepId);
+
+  if (!step) {
+    step = { id: stepId, status: 'pending', started_at: null, elapsed_ms: 0, ...updates };
+    steps.push(step);
+  } else {
+    Object.assign(step, updates);
+  }
+
+  // Calculate elapsed time if step is/was active
+  if (step.started_at && step.status !== 'pending') {
+    step.elapsed_ms = new Date() - new Date(step.started_at);
+  }
+
+  broadcastTaskUpdate(taskId, {
+    type: 'step_update',
+    step_id: stepId,
+    data: step,
+  });
+}
+
+function completeTask(taskId, status = 'done') {
+  const entry = taskStore.get(taskId);
+  if (!entry) return;
+  entry.task.status = status;
+  broadcastTaskUpdate(taskId, {
+    type: 'task_update',
+    data: { status },
+  });
+}
+
+function broadcastTaskUpdate(taskId, update) {
+  const conns = taskConnections.get(taskId);
+  if (!conns) return;
+  const msg = JSON.stringify(update);
+  conns.forEach(ws => {
+    if (ws.readyState === 1) ws.send(msg); // OPEN = 1
+  });
+}
+
+// Cleanup old tasks every 10 minutes (keep max 1 hour in memory)
+setInterval(() => {
+  const now = Date.now();
+  const maxAge = 3600000; // 1 hour
+  for (const [taskId, entry] of taskStore) {
+    if (now - new Date(entry.task.started_at).getTime() > maxAge) {
+      taskStore.delete(taskId);
+      taskConnections.delete(taskId);
+    }
+  }
+}, 600000);
+
 // ── WebSocket server ──────────────────────────────────────────────────────────
 
 const server = http.createServer(app);
@@ -3651,6 +3732,97 @@ setInterval(() => {
   broadcaster.broadcast('observability:snapshot', buildObservabilitySnapshot());
 }, 2000);
 
+// ── Task Progress API ─────────────────────────────────────────────────────────
+
+app.get('/api/tasks/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  const entry = taskStore.get(taskId);
+  if (!entry) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  const { task, steps } = entry;
+  res.json({ task, steps });
+});
+
+app.post('/api/tasks/:taskId/init', (req, res) => {
+  const { taskId } = req.params;
+  const { title, steps } = req.body || {};
+  const task = initTask(taskId, title || 'Task');
+  if (steps && Array.isArray(steps)) {
+    const entry = taskStore.get(taskId);
+    entry.steps = steps.map(s => ({
+      id: s.id,
+      label: s.label || 'Step',
+      status: 'pending',
+      started_at: null,
+      elapsed_ms: 0,
+    }));
+  }
+  res.json({ ok: true, task });
+});
+
+app.post('/api/tasks/:taskId/steps/:stepId', (req, res) => {
+  const { taskId, stepId } = req.params;
+  const updates = req.body || {};
+  updateTaskStep(taskId, stepId, updates);
+  res.json({ ok: true });
+});
+
+app.post('/api/tasks/:taskId/complete', (req, res) => {
+  const { taskId } = req.params;
+  const { status } = req.body || {};
+  completeTask(taskId, status || 'done');
+  res.json({ ok: true });
+});
+
+// ── Task History API ──────────────────────────────────────────────────────────
+
+app.get('/api/history', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || 50), 200);
+  const filters = {
+    status: req.query.status,
+    agent: req.query.agent,
+    after: req.query.after,
+  };
+  const tasks = taskHistory.getRecent(limit, filters);
+  res.json({ tasks, total: taskHistory.cache.length });
+});
+
+app.get('/api/history/stats', (req, res) => {
+  res.json(taskHistory.getStats());
+});
+
+app.get('/api/history/agent/:agentId', (req, res) => {
+  const { agentId } = req.params;
+  res.json(taskHistory.getAgentStats(agentId));
+});
+
+app.get('/api/history/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  const task = taskHistory.getTask(taskId);
+  if (!task) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  res.json(task);
+});
+
+// ── Error Recovery API ────────────────────────────────────────────────────────
+
+app.get('/api/errors/recent', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || 10), 50);
+  res.json({ errors: errorRecovery.getRecentErrors(limit) });
+});
+
+app.post('/api/errors/report', (req, res) => {
+  const { error, context } = req.body || {};
+  if (!error) return res.status(400).json({ error: 'error required' });
+
+  const logged = errorRecovery.logError(error, context);
+  const recovery = errorRecovery.buildRecoveryAction(error, context);
+
+  res.json({ logged, recovery });
+});
+
 app.get('*', (req, res, next) => {
   if (!HAS_FRONTEND_DIST) {
     if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
@@ -3684,6 +3856,45 @@ h1{color:#f8fafc;margin-top:0}pre{background:#0f172a;border-radius:6px;padding:1
 // machine when running inside WSL, Docker, or a VM.  Set LISTEN_HOST=127.0.0.1
 // in the environment to restrict to loopback only.
 const LISTEN_HOST = process.env.LISTEN_HOST || '0.0.0.0';
+
+// ── Task Progress WebSocket Upgrade ────────────────────────────────────────────
+// Handle /api/tasks/:taskId/ws upgrade requests for live progress updates
+
+server.on('upgrade', (req, socket, head) => {
+  const match = req.url.match(/^\/api\/tasks\/([a-f0-9\-]+)\/ws$/);
+  if (!match) {
+    socket.destroy();
+    return;
+  }
+
+  const taskId = match[1];
+  const wssTask = new WebSocketServer({ noServer: true });
+
+  wssTask.handleUpgrade(req, socket, head, (ws) => {
+    // Send current task state on connection
+    const entry = taskStore.get(taskId);
+    if (entry) {
+      ws.send(JSON.stringify({
+        type: 'task_state',
+        task: entry.task,
+        steps: entry.steps,
+      }));
+    }
+
+    // Register this connection
+    if (!taskConnections.has(taskId)) {
+      taskConnections.set(taskId, new Set());
+    }
+    taskConnections.get(taskId).add(ws);
+
+    ws.on('close', () => {
+      taskConnections.get(taskId).delete(ws);
+      if (taskConnections.get(taskId).size === 0) {
+        taskConnections.delete(taskId);
+      }
+    });
+  });
+});
 
 console.log(`[SERVER] Initializing — binding to ${LISTEN_HOST}:${PORT} …`);
 

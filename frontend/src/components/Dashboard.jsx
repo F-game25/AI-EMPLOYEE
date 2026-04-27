@@ -25,6 +25,7 @@ const MoneyModePage       = lazy(() => import('./pages/MoneyModePage'))
 const WorkspacePage       = lazy(() => import('./pages/WorkspacePage'))
 const EvolutionPage       = lazy(() => import('./pages/EvolutionPage'))
 const TrainingPage        = lazy(() => import('./pages/TrainingPage'))
+const HistoryPage         = lazy(() => import('./pages/HistoryPage'))
 import { API_URL } from '../config/api'
 import TopBar from './dashboard/TopBar'
 import ErrorBoundary from './ErrorBoundary'
@@ -51,6 +52,7 @@ const PAGES = {
   'workspace':        WorkspacePage,
   'evolution':        EvolutionPage,
   'training':         TrainingPage,
+  'history':          HistoryPage,
 }
 
 export default function Dashboard() {
