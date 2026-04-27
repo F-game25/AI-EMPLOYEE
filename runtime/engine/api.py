@@ -35,6 +35,7 @@ import logging
 import re
 from typing import Any
 
+from core.model_routing import classify_request_tier as _classify_request_tier
 from .inference.llm import generate as _generate
 from .inference.llm import embed as _embed
 from .memory.store import store as _store
@@ -62,6 +63,15 @@ _ENTITY_STOP = {
     "The", "This", "That", "When", "What", "How", "Why", "Who",
     "Create", "Write", "Find", "Build", "Make", "Show",
 }
+
+
+def classify_request_tier(prompt: str, context: str | None = None) -> dict[str, int | str]:
+    """Classify request as short/long for model routing decisions.
+
+    The threshold is configurable via ``WAVEFIELD_ROUTE_MIN_TOKENS``.
+    """
+    out = _classify_request_tier(prompt=prompt, context=context)
+    return {"tier": out.tier, "estimated_tokens": out.estimated_tokens, "threshold": out.threshold}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -156,6 +166,13 @@ def generate(
     Returns:
         Generated text as a plain string.
     """
+    routing = classify_request_tier(prompt=prompt, context=context)
+    logger.info(
+        "engine.generate tier=%s est_tokens=%s threshold=%s",
+        routing["tier"],
+        routing["estimated_tokens"],
+        routing["threshold"],
+    )
     return _generate(prompt=prompt, system=system, context=context, model=model, timeout=timeout)
 
 

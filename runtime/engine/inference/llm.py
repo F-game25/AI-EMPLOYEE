@@ -6,7 +6,10 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from typing import Any
+
+from core.model_routing import select_model_route
 
 logger = logging.getLogger("engine.inference")
 
@@ -14,6 +17,24 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 DEFAULT_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 DEFAULT_TIMEOUT = int(os.environ.get("ENGINE_INFERENCE_TIMEOUT", "120"))
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    tier: str
+    estimated_tokens: int
+    chosen_model: str
+
+
+def _route_model(prompt: str, context: str | None, requested_model: str | None) -> RouteDecision:
+    default_model = requested_model or DEFAULT_MODEL
+    route = select_model_route(prompt=prompt, context=context, requested_route=None, default_route="auto")
+    is_long = route.tier == "long" and route.model_route == "wavefield"
+    return RouteDecision(
+        tier="long" if is_long else "short",
+        estimated_tokens=route.estimated_tokens,
+        chosen_model=(route.force_model or default_model) if is_long else default_model,
+    )
 
 # Optional ai_router integration — resolved lazily on first call to avoid
 # import-time path-manipulation side effects and allow AI_HOME to be set
@@ -87,7 +108,14 @@ def generate(
         Generated text as a plain string.
     """
     full_prompt = f"{context}\n\n{prompt}" if context else prompt
-    chosen_model = model or DEFAULT_MODEL
+    decision = _route_model(prompt=prompt, context=context, requested_model=model)
+    chosen_model = decision.chosen_model
+    logger.info(
+        "llm_route tier=%s estimated_tokens=%s model=%s",
+        decision.tier,
+        decision.estimated_tokens,
+        chosen_model,
+    )
 
     _ensure_ai_router()
     if _AI_ROUTER and _query_ai is not None:

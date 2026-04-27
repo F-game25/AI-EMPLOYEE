@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from core.bus import get_message_bus
+from core.model_routing import classify_request_tier
 
 INTENT_CATEGORIES = (
     "lead_gen",
@@ -36,6 +37,7 @@ class LLMClient:
         attempts = 3
         delay_s = 1.0
         last_error = ""
+        req_tier = classify_request_tier(prompt=prompt, context=system)
         for attempt in range(1, attempts + 1):
             started = time.time()
             try:
@@ -52,6 +54,9 @@ class LLMClient:
                         "attempt": attempt,
                         "duration_ms": int((time.time() - started) * 1000),
                         "prompt_chars": len(prompt),
+                        "request_tier": req_tier.tier,
+                        "estimated_tokens": req_tier.estimated_tokens,
+                        "routing_threshold": req_tier.threshold,
                         "tokens_used": response.get("tokens_used", 0),
                         "ok": True,
                     }
@@ -66,6 +71,9 @@ class LLMClient:
                         "attempt": attempt,
                         "duration_ms": int((time.time() - started) * 1000),
                         "prompt_chars": len(prompt),
+                        "request_tier": req_tier.tier,
+                        "estimated_tokens": req_tier.estimated_tokens,
+                        "routing_threshold": req_tier.threshold,
                         "ok": False,
                         "error": last_error,
                     }
