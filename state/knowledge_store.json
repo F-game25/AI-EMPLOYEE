@@ -1,15 +1,62 @@
 {
   "topics": {
-    "ecommerce": [],
-    "marketing": [],
-    "lead_generation": []
+    "ecommerce": [
+      {"term": "product_listing", "description": "Optimize product titles, images, and descriptions for search visibility and conversion."},
+      {"term": "cart_abandonment", "description": "Email sequences and incentives to recover abandoned carts (typical recovery: 15-25% of lost sales)."},
+      {"term": "upsell_cross_sell", "description": "Strategic product recommendations at checkout and post-purchase to increase AOV by 20-40%."}
+    ],
+    "marketing": [
+      {"term": "content_distribution", "description": "Multi-channel content strategy: blog, email, social, paid. Repurpose one pillar content into 10+ assets."},
+      {"term": "email_deliverability", "description": "SPF/DKIM/DMARC setup, spam score testing, list hygiene. Achieve 98%+ inbox placement."},
+      {"term": "viral_coefficient", "description": "Referral mechanics that generate k >= 1.0 (each user refers >1 new user). Examples: Slack, Figma loops."}
+    ],
+    "lead_generation": [
+      {"term": "lead_scoring", "description": "MQL → SQL conversion using firmographic (company size, industry) and behavioral (engagement) signals."},
+      {"term": "outreach_sequencing", "description": "Multi-touch cold email: 5-step sequences with email → LinkedIn → WhatsApp touches, 3-day intervals, personalization."},
+      {"term": "qualification_framework", "description": "BANT (Budget, Authority, Need, Timeline) or MEDDIC scoring to identify high-probability deals early."}
+    ]
   },
-  "insights": [],
-  "strategies": [],
+  "insights": [
+    {
+      "id": "conversion-rate-benchmarks",
+      "title": "Conversion Rate Benchmarks by Industry",
+      "content": "E-commerce: 2-3% baseline. B2B SaaS: 2-5% (sign-ups). Email campaigns: 1-5% (opens 20-30%). Paid ads: CTR 0.5-2%, CPC $0.50-$5 depending on vertical.",
+      "confidence": 0.92,
+      "updated_at": "2026-04-28"
+    },
+    {
+      "id": "customer-acquisition-cost",
+      "title": "Typical CAC by Channel",
+      "content": "Organic search: $5-$50. Email: $0.01-$0.50 per contact. Paid ads: $1-$100+ (depends on LTV). Referral: $10-$50 if incentivized. Direct sales: $500-$5000 per close.",
+      "confidence": 0.88,
+      "updated_at": "2026-04-28"
+    }
+  ],
+  "strategies": [
+    {
+      "id": "viral-loop-design",
+      "name": "Viral Loop Design Pattern",
+      "framework": "User → Friend Invite → Reward Both → Repeat. K >= 1.0 viral coefficient. Examples: Dropbox (+150% signup lift), Tesla referral ($1000 credit).",
+      "stages": [
+        "User activated and has first value moment",
+        "Prompt for referral (in-app or email)",
+        "Simplify sharing (pre-filled link, templates)",
+        "Reward immediate (both parties benefit)",
+        "Measurement and optimization"
+      ]
+    },
+    {
+      "id": "email-nurture-sequence",
+      "name": "B2B Email Nurture Sequence",
+      "framework": "Initial outreach → pain point case study → competitor comparison → pricing/demo → CTA. 5-7 touch points over 30 days.",
+      "conversion_target": 0.15,
+      "open_rate_target": 0.35
+    }
+  ],
   "user_profile": {
-    "goals": [],
-    "business_type": "",
-    "preferences": [],
-    "updated_at": null
+    "goals": ["Scale revenue", "Improve lead quality", "Automate outreach", "Build brand presence"],
+    "business_type": "B2B SaaS + E-commerce",
+    "preferences": ["Data-driven decisions", "Automation > manual", "Speed to market"],
+    "updated_at": "2026-04-28"
   }
 }

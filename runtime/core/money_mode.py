@@ -63,7 +63,7 @@ class MoneyMode:
             for platform in platforms:
                 steps.append({"step": "post_content", "platform": platform, "status": "dry_run"})
 
-        engagement_estimate = round(max(len(topic), 1) * max(len(platforms), 1) * _ENGAGEMENT_FACTOR, 3)
+        engagement_estimate = round(10 * max(len(platforms), 1) * _ENGAGEMENT_FACTOR, 3)
         steps.append({
             "step": "track_engagement",
             "output": {
@@ -74,9 +74,9 @@ class MoneyMode:
             "status": "simulated" if dry_run else "tracking",
         })
 
-        # Step 4 — ROI record (token estimate, no real revenue yet)
-        self._record_roi(job_id, topic, platforms)
-        estimated_roi = round(max(len(topic), 1) * max(len(platforms), 1) * _CONTENT_ROI_MULTIPLIER, 3)
+        # Step 4 — ROI record: estimated revenue based on engagement
+        self._record_roi(job_id, topic, platforms, estimated_revenue=engagement_estimate * _CONTENT_ROI_MULTIPLIER)
+        estimated_roi = round(engagement_estimate * _CONTENT_ROI_MULTIPLIER, 3)
         # The pipeline runs synchronously and completes in full — all steps are
         # internally processed before we return.  Record status as "executed"
         # (not "queued") so that PipelineStore.overview() counts it as a

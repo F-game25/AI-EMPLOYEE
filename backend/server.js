@@ -102,6 +102,12 @@ function latestCommit() {
 }
 const GIT_COMMIT = latestCommit();
 
+// Metrics tracking for Prometheus endpoint
+const startTime = Date.now();
+let apiCallCounter = 0;
+let taskMetrics = { completed: 0, failed: 0 };
+
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 // JWT_SECRET_KEY must be set in ~/.ai-employee/.env; fail fast if unset
 const JWT_SECRET = process.env.JWT_SECRET_KEY;
@@ -3910,6 +3916,38 @@ app.post('/api/errors/report', (req, res) => {
   const recovery = errorRecovery.buildRecoveryAction(error, context);
 
   res.json({ logged, recovery });
+});
+
+// Prometheus metrics endpoint
+app.get('/metrics', (req, res) => {
+  const now = Date.now();
+  const uptime = now - startTime;
+  const activeAgents = getAgents().length;
+  const metrics = [
+    `# HELP ai_employee_uptime_ms Application uptime in milliseconds`,
+    `# TYPE ai_employee_uptime_ms gauge`,
+    `ai_employee_uptime_ms ${uptime}`,
+    `# HELP ai_employee_agents_active Number of active agents`,
+    `# TYPE ai_employee_agents_active gauge`,
+    `ai_employee_agents_active ${activeAgents}`,
+    `# HELP ai_employee_tasks_total Total tasks processed`,
+    `# TYPE ai_employee_tasks_total counter`,
+    `ai_employee_tasks_total ${taskMetrics.completed + taskMetrics.failed}`,
+    `# HELP ai_employee_tasks_completed_total Completed tasks`,
+    `# TYPE ai_employee_tasks_completed_total counter`,
+    `ai_employee_tasks_completed_total ${taskMetrics.completed}`,
+    `# HELP ai_employee_tasks_failed_total Failed tasks`,
+    `# TYPE ai_employee_tasks_failed_total counter`,
+    `ai_employee_tasks_failed_total ${taskMetrics.failed}`,
+    `# HELP ai_employee_errors_total Total errors`,
+    `# TYPE ai_employee_errors_total counter`,
+    `ai_employee_errors_total ${errorRecovery.getTotalErrors()}`,
+    `# HELP ai_employee_api_calls_total Total API calls`,
+    `# TYPE ai_employee_api_calls_total counter`,
+    `ai_employee_api_calls_total ${apiCallCounter}`,
+  ].join('\n');
+
+  res.type('text/plain; version=0.0.4').send(metrics + '\n');
 });
 
 app.get('*', (req, res, next) => {
