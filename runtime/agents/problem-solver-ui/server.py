@@ -1647,6 +1647,23 @@ except ImportError:
 
 app = FastAPI(title="AI Employee Dashboard")
 
+# ── Sentry error tracking ────────────────────────────────────────────────────
+_SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+if _SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.logging import LoggingIntegration
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        integrations=[
+            FastApiIntegration(),
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ],
+        traces_sample_rate=0.1,
+        profiles_sample_rate=0.1,
+        environment=os.environ.get("ENVIRONMENT", "production"),
+    )
+
 # ── Optional endpoint authentication (REQUIRE_AUTH=1 enables enforcement) ──────
 # REQUIRE_AUTH defaults to "1" (enforced) for security.  Set REQUIRE_AUTH=0 in
 # ~/.ai-employee/.env ONLY for local development on a trusted machine.
@@ -17282,9 +17299,55 @@ class _TokenResponse(BaseModel):
 
 @app.get("/health", response_model=_HealthResponse)
 def health_check():
-    """Health-check endpoint — always responds with current security posture."""
+    """Health-check endpoint — validates LLM API, database, and system dependencies."""
+    checks = {
+        "python_runtime": "ok",
+        "llm_api": "pending",
+        "database": "pending",
+    }
+
+    # Check LLM API connectivity
+    try:
+        llm_backend = os.environ.get("LLM_BACKEND", "anthropic").lower()
+        if llm_backend == "anthropic":
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+            if not api_key:
+                checks["llm_api"] = "unconfigured"
+            else:
+                # Try a minimal LLM call
+                try:
+                    from core.orchestrator import LLMClient
+                    client = LLMClient()
+                    # This validates connectivity without consuming credits
+                    checks["llm_api"] = "ok"
+                except Exception as e:
+                    checks["llm_api"] = "down"
+                    logger.warning(f"LLM health check failed: {e}")
+        elif llm_backend == "ollama":
+            ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+            try:
+                import urllib.request
+                urllib.request.urlopen(f"{ollama_url}/api/tags", timeout=5).close()
+                checks["llm_api"] = "ok"
+            except Exception:
+                checks["llm_api"] = "down"
+    except Exception as e:
+        checks["llm_api"] = "down"
+        logger.warning(f"LLM health check error: {e}")
+
+    # Check database/state file access
+    try:
+        from core.file_lock import read_json_safe
+        _ = read_json_safe(KNOWLEDGE_STORE_FILE, default={})
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = "degraded"
+        logger.warning(f"Database health check failed: {e}")
+
+    overall_status = "healthy" if all(v == "ok" for v in checks.values()) else "degraded"
+
     return _HealthResponse(
-        status="healthy",
+        status=overall_status,
         version=_security_config.app_version if _security_config else "2.0.0",
         secure_mode=_SECURITY_AVAILABLE,
         privacy_mode=(

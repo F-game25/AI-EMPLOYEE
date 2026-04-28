@@ -1,6 +1,25 @@
 version: '3.9'
 
 services:
+  nginx:
+    image: nginx:latest
+    container_name: ai-employee-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - ai-employee
+    healthcheck:
+      test: ["CMD", "wget", "-O-", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   ai-employee:
     build:
       context: .
@@ -8,8 +27,8 @@ services:
     image: ai-employee:latest
     container_name: ai-employee
     restart: unless-stopped
-    ports:
-      - "8787:8787"
+    expose:
+      - "8787"
     environment:
       NODE_ENV: production
       PORT: 8787
@@ -21,6 +40,8 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EVOLUTION_MODE: ${EVOLUTION_MODE:-SAFE}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
     volumes:
       # Persist SQLite DBs, logs, and runtime state across restarts
       - ai-state:/app/state

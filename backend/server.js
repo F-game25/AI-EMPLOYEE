@@ -1,5 +1,18 @@
 'use strict';
 
+// ── Sentry initialization (must be first) ────────────────────────────────────
+if (process.env.SENTRY_DSN) {
+  const Sentry = require('@sentry/node');
+  const { nodeProfilingIntegration } = require('@sentry/profiling-node');
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    integrations: [new nodeProfilingIntegration()],
+    tracesSampleRate: 0.1,
+    profilesSampleRate: 0.1,
+    environment: process.env.ENVIRONMENT || 'production',
+  });
+}
+
 const http = require('http');
 const os = require('os');
 const path = require('path');
@@ -147,6 +160,13 @@ function wsTokenValid(req) {
 }
 
 const app = express();
+
+// Sentry error tracking middleware (if initialized)
+if (process.env.SENTRY_DSN) {
+  const Sentry = require('@sentry/node');
+  app.use(Sentry.Handlers.requestHandler());
+  app.use(Sentry.Handlers.errorHandler());
+}
 
 // Security headers — applied before all routes
 app.use(helmet({
@@ -1221,8 +1241,80 @@ function sampleSystemStatus() {
   };
 }
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
+app.get('/health', async (req, res) => {
+  const checks = {
+    node: { status: 'ok' },
+    python_backend: { status: 'pending' },
+    llm_api: { status: 'pending' },
+    database: { status: 'pending' },
+  };
+
+  // Check Python backend
+  try {
+    const pythonHealthUrl = `http://127.0.0.1:${PYTHON_BACKEND_PORT}/health`;
+    const pythonRes = await Promise.race([
+      fetch(pythonHealthUrl),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+    ]);
+    checks.python_backend.status = pythonRes.ok ? 'ok' : 'degraded';
+  } catch (e) {
+    checks.python_backend.status = 'down';
+    checks.python_backend.error = e.message;
+  }
+
+  // Check LLM API connectivity (Anthropic, OpenRouter, or Ollama)
+  try {
+    const llmBackend = process.env.LLM_BACKEND || 'anthropic';
+    if (llmBackend === 'anthropic') {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        checks.llm_api.status = 'unconfigured';
+      } else {
+        // Quick validation: fetch models list
+        const modelRes = await Promise.race([
+          fetch('https://api.anthropic.com/v1/models', {
+            headers: { Authorization: `Bearer ${apiKey}` }
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+        checks.llm_api.status = modelRes.ok ? 'ok' : 'degraded';
+        checks.llm_api.provider = 'anthropic';
+      }
+    } else if (llmBackend === 'ollama') {
+      const ollamaUrl = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
+      const ollamaRes = await Promise.race([
+        fetch(`${ollamaUrl}/api/tags`),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+      ]);
+      checks.llm_api.status = ollamaRes.ok ? 'ok' : 'down';
+      checks.llm_api.provider = 'ollama';
+    }
+  } catch (e) {
+    checks.llm_api.status = 'down';
+    checks.llm_api.error = e.message;
+  }
+
+  // Check database
+  try {
+    if (db) {
+      const result = db.prepare('SELECT 1').get();
+      checks.database.status = result ? 'ok' : 'degraded';
+    }
+  } catch (e) {
+    checks.database.status = 'down';
+    checks.database.error = e.message;
+  }
+
+  // Overall status
+  const overallStatus = Object.values(checks).every(c => c.status !== 'down') ? 'healthy' : 'degraded';
+  const statusCode = overallStatus === 'healthy' ? 200 : 503;
+
+  res.status(statusCode).json({
+    status: overallStatus,
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    checks,
+  });
 });
 
 // POST /api/auth/token — exchange the master secret for a 24h JWT
