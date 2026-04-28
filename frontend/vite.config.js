@@ -17,14 +17,16 @@ export default defineConfig({
     css: false,
   },
   server: {
-    // Dev server uses port 5173 (Vite default) so it does not conflict with
-    // the Node backend that owns port 8787. Binding to 0.0.0.0 makes the dev
-    // server reachable from the host machine when running inside WSL or Docker.
-    // The proxy below forwards all backend paths (API, WebSocket, and static
-    // assets served by Express) to the backend so relative-URL fetch calls
-    // work transparently in dev mode.
     host: '0.0.0.0',
     port: 5173,
+    // HMR must advertise the correct host when accessed from a different
+    // machine (WSL host, Docker host, LAN). Without this, Vite sends the
+    // internal container/WSL IP and the browser can't reach it.
+    hmr: {
+      host: process.env.HMR_HOST || 'localhost',
+      port: 5173,
+      protocol: 'ws',
+    },
     proxy: {
       '/api': `http://127.0.0.1:${BACKEND_PORT}`,
       '/agents': `http://127.0.0.1:${BACKEND_PORT}`,

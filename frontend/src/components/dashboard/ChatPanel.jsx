@@ -103,6 +103,8 @@ export default function ChatPanel() {
                     <TaskProgressBlock
                       taskId={msg.taskId}
                       title={msg.title || 'Processing...'}
+                      steps={msg.steps || []}
+                      graph={msg.graph || []}
                     />
                   </div>
                 </motion.div>

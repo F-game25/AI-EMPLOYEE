@@ -86,7 +86,12 @@ const FRONTEND_DIST = path.resolve(__dirname, '../frontend/dist');
 const FRONTEND_INDEX = path.join(FRONTEND_DIST, 'index.html');
 const HAS_FRONTEND_DIST = fs.existsSync(FRONTEND_INDEX);
 const SERVER_START_TIMESTAMP = new Date().toISOString();
-const FRONTEND_INDEX_TEMPLATE = HAS_FRONTEND_DIST ? fs.readFileSync(FRONTEND_INDEX, 'utf8') : '';
+
+// Read index.html fresh on each request so hot-deployed builds are served
+// immediately without requiring a server restart.
+function readFrontendIndex() {
+  try { return fs.readFileSync(FRONTEND_INDEX, 'utf8'); } catch { return ''; }
+}
 
 function latestCommit() {
   try {
@@ -145,9 +150,18 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '64kb' }));
 if (HAS_FRONTEND_DIST) {
+  // Vite content-hashes all JS/CSS filenames — safe to cache long-term.
+  // index.html is NOT hashed and must never be stale, so it gets no-store.
   app.use(express.static(FRONTEND_DIST, {
     index: false,
-    maxAge: '1h',
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.html')) {
+        res.set('Cache-Control', 'no-store, must-revalidate');
+      } else if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|ico)$/.test(filePath)) {
+        // Hashed assets — immutable cache (1 year)
+        res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    },
   }));
 }
 
@@ -2404,6 +2418,21 @@ app.get('/api/audit/stats', (req, res) => {
   res.json({ total: _auditLog.length, by_actor: byActor, by_action: byAction, risk_distribution: riskDist });
 });
 
+// POST /api/error-report — frontend unhandled errors surfaced to backend logs
+const _frontendErrors = [];
+app.post('/api/error-report', (req, res) => {
+  const { msg = '', stack = '', ts, source = 'frontend' } = req.body || {};
+  const entry = { msg: String(msg).slice(0, 500), stack: String(stack).slice(0, 2000), ts: ts || Date.now(), source };
+  _frontendErrors.unshift(entry);
+  if (_frontendErrors.length > 100) _frontendErrors.length = 100;
+  console.warn(`[FRONTEND ERROR] ${entry.msg}`);
+  res.json({ ok: true });
+});
+
+app.get('/api/error-report', (_req, res) => {
+  res.json({ errors: _frontendErrors });
+});
+
 // GET /api/reliability/status
 app.get('/api/reliability/status', (req, res) => {
   res.json({
@@ -3307,7 +3336,20 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
+// Ping/pong keepalive — terminates dead connections that never send close frames.
+// Without this, stale clients accumulate and silent disconnects go undetected.
+const WS_PING_INTERVAL = 25000; // 25s — under most NAT/proxy 30s timeout
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) { ws.terminate(); return; }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, WS_PING_INTERVAL).unref();
+
 wss.on('connection', (ws, req) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   // Reject unauthenticated connections when a JWT_SECRET_KEY is configured.
   // Pass ?token=<jwt> in the WebSocket URL from the frontend.
   // Connections from localhost (127.0.0.1 / ::1) are allowed without a token
@@ -3888,7 +3930,8 @@ h1{color:#f8fafc;margin-top:0}pre{background:#0f172a;border-radius:6px;padding:1
   if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
   if (req.path.startsWith('/gateway') || req.path.startsWith('/orchestrator')) return next();
   res.set('Cache-Control', 'no-store, must-revalidate');
-  const html = FRONTEND_INDEX_TEMPLATE.replace(/__APP_VERSION__/g, GIT_COMMIT);
+  // Read fresh on every request so hot-deployed builds are served immediately.
+  const html = readFrontendIndex().replace(/__APP_VERSION__/g, GIT_COMMIT);
   res.type('html').send(html);
 });
 

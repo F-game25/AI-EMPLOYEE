@@ -17,7 +17,7 @@ function FileIcon({ name }) {
   return <span>{map[e] || '📄'}</span>
 }
 
-function CodePreview({ content, lang }) {
+function CodePreview({ content }) {
   const [copied, setCopied] = useState(false)
   const copy = () => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   return (
@@ -33,7 +33,6 @@ function CodePreview({ content, lang }) {
 }
 
 function HtmlPreview({ url, name }) {
-  const blobRef = { current: null }
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
@@ -130,7 +129,7 @@ export default function WorkspacePage() {
             </div>
             {previewLoading && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>Loading preview…</div>}
             {preview?.type === 'html' && <HtmlPreview url={preview.url} name={selected.name} />}
-            {preview?.type === 'code' && <CodePreview content={preview.content} lang={preview.lang} />}
+            {preview?.type === 'code' && <CodePreview content={preview.content} />}
             {preview?.type === 'download' && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Binary file — <a href={preview.url} download={selected.name} style={{ color: 'var(--teal, #20D6C7)' }}>download</a> to view.</div>}
             {preview?.type === 'error' && <div style={{ fontSize: 12, color: '#EF4444' }}>{preview.msg}</div>}
           </Panel>

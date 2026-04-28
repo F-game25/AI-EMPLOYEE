@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Panel, Badge, StatCard } from '../ui/primitives'
 import { API_URL } from '../../config/api'
 

@@ -5,15 +5,19 @@ import { WS_URL as API_WS_URL } from '../config/api'
 
 const WS_URL = API_WS_URL
 
-// Module-level singleton to prevent duplicate connections
+// Module-level singleton — one connection for the app lifetime
 let _wsInstance = null
 let _reconnectTimer = null
 let _initialized = false
-// Safety timer: clears the typing indicator if no AI response arrives
 let _typingTimeout = null
+let _reconnectAttempts = 0
+const MAX_RECONNECT_DELAY = 30000 // 30s cap
 
-function getStore() {
-  return useAppStore.getState()
+function getStore() { return useAppStore.getState() }
+
+function reconnectDelay() {
+  // Exponential backoff: 1s, 2s, 4s, 8s … capped at 30s
+  return Math.min(1000 * Math.pow(2, _reconnectAttempts), MAX_RECONNECT_DELAY)
 }
 
 function connectSingleton() {
@@ -23,6 +27,7 @@ function connectSingleton() {
   _wsInstance = ws
 
   ws.onopen = () => {
+    _reconnectAttempts = 0
     const store = getStore()
     store.setWsConnected(true)
     store.setWs(ws)
@@ -96,7 +101,6 @@ function connectSingleton() {
           store.setBrainActivity(data)
           break
         case 'brain:graph': {
-          // Live graph update from backend — feed the shared brain store
           const brainState = useBrainStore.getState()
           if (data?.nodes && data?.links) {
             brainState.setGraph(data)
@@ -133,21 +137,20 @@ function connectSingleton() {
           if (data && data.id) store.addPromptTrace(data)
           break
         case 'chat:input_rejected':
-          // Server rejected a chat message sent over the WebSocket (chat must
-          // go via HTTP POST /api/chat).  Clear the typing indicator so the UI
-          // doesn't spin forever.
           clearTimeout(_typingTimeout)
           store.setTyping(false)
+          // Surface rejection so user knows the message was not processed
+          store.addHeartbeatLog({ text: '[WS] Chat message rejected — use text input', level: 'warning', ts: Date.now() })
           break
         case 'identity:ready':
           store.setIdentity(data)
           break
         case 'task_progress':
-          // Upsert live task progress by taskId — merges into existing message or appends
           store.upsertTaskProgress({
             taskId: data.taskId,
             title: data.title,
             steps: data.steps || [],
+            graph: data.graph || [],
             ts: data.ts || Date.now(),
           })
           break
@@ -157,20 +160,31 @@ function connectSingleton() {
     }
   }
 
-  ws.onclose = () => {
+  ws.onclose = (evt) => {
     const store = getStore()
     store.setWsConnected(false)
     store.setWs(null)
     clearTimeout(_typingTimeout)
     store.setTyping(false)
-    store.addHeartbeatLog({ text: '[SYSTEM] Connection lost — reconnecting...', level: 'warning', ts: Date.now() })
     _wsInstance = null
-    _reconnectTimer = setTimeout(connectSingleton, 3000)
+
+    // Don't reconnect on intentional close (code 1000) or auth failure (4401)
+    if (evt.code === 1000 || evt.code === 4401) {
+      store.addHeartbeatLog({ text: `[SYSTEM] WebSocket closed (${evt.code})`, level: 'info', ts: Date.now() })
+      return
+    }
+
+    _reconnectAttempts += 1
+    const delay = reconnectDelay()
+    store.addHeartbeatLog({
+      text: `[SYSTEM] Connection lost — reconnecting in ${Math.round(delay / 1000)}s (attempt ${_reconnectAttempts})`,
+      level: 'warning',
+      ts: Date.now(),
+    })
+    _reconnectTimer = setTimeout(connectSingleton, delay)
   }
 
-  ws.onerror = () => {
-    ws.close()
-  }
+  ws.onerror = () => { ws.close() }
 }
 
 export function useWebSocket() {
@@ -180,8 +194,6 @@ export function useWebSocket() {
       connectSingleton()
     }
     return () => {
-      // Module-level singleton intentionally persists for app lifetime.
-      // Clear any pending reconnect timer if all consumers unmount.
       clearTimeout(_reconnectTimer)
     }
   }, [])
@@ -190,7 +202,6 @@ export function useWebSocket() {
     if (_wsInstance?.readyState === WebSocket.OPEN) {
       _wsInstance.send(JSON.stringify({ type: 'chat', message }))
       getStore().setTyping(true)
-      // Safety: clear typing indicator after 30 s if no response arrives
       clearTimeout(_typingTimeout)
       _typingTimeout = setTimeout(() => getStore().setTyping(false), 30000)
     }
@@ -199,12 +210,6 @@ export function useWebSocket() {
   return { sendMessage }
 }
 
-/**
- * Standalone `sendMessage` — call without the hook to avoid
- * duplicate cleanup / reconnect-timer interference.
- * Safe to import in any component; the WebSocket singleton is
- * initialised by `useWebSocket()` in App.jsx.
- */
 export function sendChatMessage(message) {
   if (_wsInstance?.readyState === WebSocket.OPEN) {
     _wsInstance.send(JSON.stringify({ type: 'chat', message }))

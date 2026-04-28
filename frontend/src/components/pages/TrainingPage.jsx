@@ -41,7 +41,7 @@ export default function TrainingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task: taskInput, success: true }),
       })
-      const data = await res.json()
+      await res.json()
       setLogs([...logs, { type: 'task', agent: selected, task: taskInput, ts: new Date().toLocaleTimeString() }])
       setTaskInput('')
       // Reload grade
@@ -57,7 +57,7 @@ export default function TrainingPage() {
     if (!selected) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/agents/${selected}/reinforce`, {
+      await fetch(`/api/agents/${selected}/reinforce`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reward, context: context || selected }),

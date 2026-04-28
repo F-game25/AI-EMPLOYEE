@@ -21,7 +21,7 @@ export function useUpdateCheck() {
         if (baseline.current && current && current !== baseline.current) {
           setUpdateReady(true)
         }
-      } catch {}
+      } catch (_) { /* version check failed — non-fatal */ }
     }, 60000)
 
     return () => clearInterval(i)
