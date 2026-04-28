@@ -19,6 +19,8 @@ export default class ErrorBoundary extends Component {
 
     const label = this.props.label || 'component'
     const msg = this.state.error?.message || 'Unknown error'
+    // Stale chunk after rebuild — hard reload fetches fresh index.html + new hashes
+    const isChunkError = /Failed to fetch dynamically imported module|Loading chunk|Loading CSS chunk/i.test(msg)
 
     return (
       <div style={{
@@ -33,9 +35,11 @@ export default class ErrorBoundary extends Component {
         <div style={{ color: '#f87171', fontWeight: 600, marginBottom: 8 }}>
           ⚠ {label} failed to render
         </div>
-        <div style={{ fontSize: 12, marginBottom: 16, opacity: 0.7 }}>{msg}</div>
+        <div style={{ fontSize: 12, marginBottom: 16, opacity: 0.7 }}>
+          {isChunkError ? 'App was updated — reload to get the latest version.' : msg}
+        </div>
         <button
-          onClick={() => this.setState({ hasError: false, error: null })}
+          onClick={() => isChunkError ? window.location.reload() : this.setState({ hasError: false, error: null })}
           style={{
             padding: '6px 16px',
             background: 'rgba(229,199,107,0.15)',
@@ -47,7 +51,7 @@ export default class ErrorBoundary extends Component {
             fontSize: 12,
           }}
         >
-          Retry
+          {isChunkError ? 'Reload App' : 'Retry'}
         </button>
       </div>
     )

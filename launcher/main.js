@@ -7,7 +7,7 @@ const { execSync } = require('child_process')
 
 console.log('Modules loaded. app type:', typeof app)
 
-const REPO_DIR = path.dirname(path.dirname(__dirname))
+const REPO_DIR = path.dirname(__dirname)
 const HOME = require('os').homedir()
 const VERSION_PATH = path.join(HOME, '.ai-employee', 'state', 'version.json')
 const UPDATER_PATH = path.join(HOME, '.ai-employee', 'state', 'updater.json')
