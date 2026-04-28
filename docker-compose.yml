@@ -1,6 +1,27 @@
 version: '3.9'
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-employee-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_employee
+      POSTGRES_USER: ai_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_INITDB_ARGS: -c max_connections=100 -c shared_buffers=256MB
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./runtime/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_user -d ai_employee"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   nginx:
     image: nginx:latest
     container_name: ai-employee-nginx
@@ -13,6 +34,7 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - ai-employee
+      - postgres
     healthcheck:
       test: ["CMD", "wget", "-O-", "http://localhost/health"]
       interval: 30s
@@ -42,6 +64,7 @@ services:
       EVOLUTION_MODE: ${EVOLUTION_MODE:-SAFE}
       SENTRY_DSN: ${SENTRY_DSN:-}
       ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: postgresql://ai_user:${POSTGRES_PASSWORD:-changeme}@postgres:5432/ai_employee
     volumes:
       # Persist SQLite DBs, logs, and runtime state across restarts
       - ai-state:/app/state
@@ -53,8 +76,14 @@ services:
       retries: 3
       start_period: 40s
 
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   ai-state:
     driver: local
   ai-logs:
+    driver: local
+  postgres-data:
     driver: local
