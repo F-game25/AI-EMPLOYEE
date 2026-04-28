@@ -18,6 +18,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from agents.base import BaseAgent
+from core.file_lock import read_json_safe, write_json_safe
 
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 DEALS_FILE = AI_HOME / "state" / "deals.json"
@@ -70,9 +71,5 @@ class CRMPipelineAgent(BaseAgent):
         return data
 
     def _load_deals(self) -> list:
-        if not DEALS_FILE.exists():
-            return []
-        try:
-            return json.loads(DEALS_FILE.read_text())
-        except Exception:
-            return []
+        deals = read_json_safe(DEALS_FILE, default=[])
+        return deals if isinstance(deals, list) else []

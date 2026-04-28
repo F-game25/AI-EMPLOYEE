@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agents.base import BaseAgent
+from core.file_lock import read_json_safe, write_json_safe
 
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 ROSTER_FILE = AI_HOME / "state" / "team-roster.json"
@@ -66,20 +67,12 @@ class TeamManagementAgent(BaseAgent):
         return data
 
     def _load_roster(self) -> list:
-        if not ROSTER_FILE.exists():
-            return []
-        try:
-            return json.loads(ROSTER_FILE.read_text())
-        except Exception:
-            return []
+        roster = read_json_safe(ROSTER_FILE, default=[])
+        return roster if isinstance(roster, list) else []
 
     def _load_tasks(self) -> list:
-        if not TASKS_FILE.exists():
-            return []
-        try:
-            return json.loads(TASKS_FILE.read_text())
-        except Exception:
-            return []
+        tasks = read_json_safe(TASKS_FILE, default=[])
+        return tasks if isinstance(tasks, list) else []
 
     def _add_member(self, member: dict | str) -> None:
         roster = self._load_roster()
@@ -87,8 +80,7 @@ class TeamManagementAgent(BaseAgent):
             member = {"name": member, "role": "team member", "capacity": 100}
         member.setdefault("added_at", datetime.now(timezone.utc).isoformat())
         roster.append(member)
-        ROSTER_FILE.parent.mkdir(parents=True, exist_ok=True)
-        ROSTER_FILE.write_text(json.dumps(roster, indent=2))
+        write_json_safe(ROSTER_FILE, roster)
 
     def _add_task(self, task: dict | str) -> None:
         tasks = self._load_tasks()
@@ -96,5 +88,4 @@ class TeamManagementAgent(BaseAgent):
             task = {"title": task, "status": "open", "priority": "medium"}
         task.setdefault("created_at", datetime.now(timezone.utc).isoformat())
         tasks.append(task)
-        TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        TASKS_FILE.write_text(json.dumps(tasks, indent=2))
+        write_json_safe(TASKS_FILE, tasks)

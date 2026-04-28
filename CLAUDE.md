@@ -87,6 +87,52 @@ Operating modes activate different agent counts: Starter (3), Business (15), Pow
 
 Python's `runtime/` directory is inserted into `sys.path` by `main.py`, so imports like `from core.agent_controller import AgentController` work without package installation.
 
+### Data Persistence & Concurrency
+
+**JSON State Files** — Shared state (deals, tasks, leads, revenue) persists as JSON in `state/` directory. Access is protected by `runtime/core/file_lock.py` (fcntl-based exclusive locks) to prevent concurrent write corruption.
+
+Key state files:
+- `state/deals.json` — CRM pipeline deals (read/write by crm-pipeline, sales-closer-pro agents)
+- `state/tasks.json` — Task tracking (read/write by task-orchestrator, team-management)
+- `state/team-roster.json` — Team roster (read/write by team-management)
+- `state/knowledge_store.json` — Bootstrapped knowledge base (read/write by memory system)
+- `state/bus.jsonl` — Message bus event log (append-only, pub/sub metadata)
+
+**SQLite Databases** — Two WAL-mode SQLite databases:
+- `state/audit.db` — Audit trail for GDPR/compliance (immutable records)
+- `state/forge_queue.db` — Task queue (currently placeholder, not actively used in production)
+
+Future: Postgres migration recommended for horizontal scaling (see Week 4 plan).
+
+### Active Agent Architecture
+
+**Directory-Based Agents** (80+ agents in `runtime/agents/<name>/`) are the active architecture:
+- Each agent is a directory with `<name>.py` (BaseAgent subclass), `run.sh`, `requirements.txt`
+- Registered in `runtime/config/agent_capabilities.json`
+- Discovered and loaded by `backend/agents/index.js` on startup
+- Modes: Starter (3 agents), Business (15), Power (56+)
+
+**Ghost Agents** (config entries with no directory) have been eliminated as of Week 1.
+
+**Flat Legacy Files** (old .py files in `runtime/agents/`) have been removed; directory structure is the single active pattern.
+
+### Security & Authentication
+
+- **JWT Auth**: `runtime/agents/problem-solver-ui/server.py` issues signed tokens (`/auth/register`, `/auth/login`)
+- **Token Refresh**: Automatic token rotation via `/auth/refresh` with refresh token rotation
+- **Rate Limiting**: `@_auth_rate_limit` decorator on auth routes (5 req/min per IP)
+- **Password Policy**: 12+ chars, special chars, numbers, uppercase enforced at registration
+- **Route Coverage**: 44 of 119 Node routes protected via `requireAuth` middleware (up from 4 in Week 1)
+- **HITL Gates**: High-risk agents (lead-hunter-elite, qualification-agent, data-analyst) require human approval before sensitive operations
+
+### Observability
+
+- **Prometheus Metrics** (`/metrics` endpoint, port 8787): Exposes `ai_employee_*` metrics in text format
+  - `uptime_ms`, `agents_active`, `tasks_total`, `tasks_completed`, `tasks_failed`, `errors_total`, `api_calls_total`
+- **Metrics Collector** (`runtime/core/observability/metrics_collector.py`): 1-second tick, rolling window of 3600 snapshots
+- **Event Stream** (`runtime/core/observability/event_stream.py`): In-process pub/sub with JSONL persistence
+- **Audit Logger**: Logs to `state/audit.db` for compliance + `python-backend.log` (rotated, capped at 10MB)
+
 
 
 
