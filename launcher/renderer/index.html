@@ -12,7 +12,7 @@
   <div class="card">
     <div class="card-header">
       <h1 class="logo">ULTRON</h1>
-      <span class="version-badge" id="version">v1.0.0</span>
+      <span class="version-badge" id="version">—</span>
     </div>
 
     <div class="card-content">
@@ -25,19 +25,19 @@
       </div>
 
       <!-- STARTING STATE -->
-      <div class="state starting-state" style="display: none;">
+      <div class="state starting-state">
         <div class="starting-header">
           <p>STARTING SYSTEM<span class="ellipsis">...</span></p>
         </div>
         <div class="progress-bar">
-          <div class="progress-fill"></div>
+          <div class="progress-fill" id="progressFill"></div>
         </div>
         <div class="log-area" id="logArea"></div>
         <button class="cancel-btn" id="cancelBtn">Cancel</button>
       </div>
 
       <!-- READY STATE -->
-      <div class="state ready-state" style="display: none;">
+      <div class="state ready-state">
         <div class="system-online">
           <div class="checkmark">✓</div>
           <p>SYSTEM ONLINE</p>
@@ -46,17 +46,16 @@
       </div>
 
       <!-- SETUP STATE -->
-      <div class="state setup-state" style="display: none;">
+      <div class="state setup-state">
         <div class="setup-header">
           <p class="setup-title">FIRST TIME SETUP</p>
           <p class="setup-sub">Required dependencies detected missing</p>
         </div>
         <div class="dep-list" id="depList"></div>
-        <div class="log-area setup-log" id="setupLog" style="display: none;"></div>
+        <div class="log-area setup-log" id="setupLog"></div>
         <div class="setup-actions" id="setupActions">
           <button class="btn btn-primary" id="installDepsBtn">INSTALL DEPENDENCIES</button>
         </div>
-        <div class="platform-links" id="platformLinks"></div>
       </div>
     </div>
 
@@ -73,7 +72,7 @@
       <div class="mark br"></div>
     </div>
 
-    <div class="update-badge" id="updateBadge" style="display: none;">
+    <div class="update-badge" id="updateBadge">
       <span class="pulse-dot"></span> Update Available
     </div>
   </div>

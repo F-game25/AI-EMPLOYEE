@@ -55,51 +55,38 @@ console.log('Defining IPC handlers')
 
 ipcMain.handle('start-system', async event => {
   return new Promise((resolve, reject) => {
+    // Strip ANSI escape codes so log lines are clean in the UI
+    const stripAnsi = s => s.replace(/\x1B\[[0-9;]*[mGKHF]/g, '').replace(/[─-╿▀-▟]/g, '').trim()
+
     const proc = spawn('bash', ['start.sh'], { cwd: REPO_DIR, stdio: 'pipe' })
-    let isStarting = true
 
-    proc.stdout.on('data', data => {
-      const lines = data.toString().split('\n').filter(l => l.trim())
-      lines.forEach(line => {
-        const cleaned = cleanLogLine(line)
-        if (cleaned) {
-          event.sender.send('start-log', cleaned)
-          // Check for success markers in output
-          if (isStarting && (cleaned.includes('Python AI backend ready') || cleaned.includes('PERSISTENCE'))) {
-            isStarting = false
-            setTimeout(() => event.sender.send('start-ready'), 500)
-          }
-        }
+    const fwd = (raw, prefix) => {
+      raw.toString().split('\n').forEach(line => {
+        const cleaned = cleanLogLine(stripAnsi(line))
+        if (cleaned) event.sender.send('start-log', prefix ? `[ERROR] ${cleaned}` : cleaned)
       })
-    })
+    }
 
-    proc.stderr.on('data', data => {
-      const lines = data.toString().split('\n').filter(l => l.trim())
-      lines.forEach(line => {
-        const cleaned = cleanLogLine(line)
-        if (cleaned) event.sender.send('start-log', '[ERROR] ' + cleaned)
-      })
-    })
+    proc.stdout.on('data', d => fwd(d, false))
+    proc.stderr.on('data', d => fwd(d, true))
 
-    proc.on('exit', code => {
-      if (code === 0) {
-        // Health check as fallback
-        let attempts = 0
-        const poll = setInterval(async () => {
-          attempts++
-          const healthy = await checkServerHealth()
-          if (healthy && !isStarting) {
-            clearInterval(poll)
-            resolve({ success: true })
-          } else if (attempts > 20) {
-            clearInterval(poll)
-            resolve({ success: true }) // Assume success if script passed
-          }
-        }, 1000)
-      } else {
+    proc.on('exit', async code => {
+      if (code !== 0) {
         event.sender.send('start-error', `start.sh exited with code ${code}`)
-        reject(new Error(`start.sh exited with code ${code}`))
+        return reject(new Error(`start.sh exited with code ${code}`))
       }
+      // start.sh already polls /health internally and exits 0 only when ready.
+      // Do one final health check to confirm, then signal ready.
+      let attempts = 0
+      const poll = setInterval(async () => {
+        attempts++
+        const healthy = await checkServerHealth()
+        if (healthy || attempts >= 10) {
+          clearInterval(poll)
+          event.sender.send('start-ready')
+          resolve({ success: true })
+        }
+      }, 800)
     })
 
     proc.on('error', err => {
@@ -111,8 +98,12 @@ ipcMain.handle('start-system', async event => {
 
 ipcMain.handle('stop-system', async () => {
   return new Promise((resolve, reject) => {
-    const proc = spawn('bash', ['stop.sh'], { cwd: REPO_DIR })
-    proc.on('exit', code => resolve({ success: code === 0 }))
+    const proc = spawn('bash', ['stop.sh'], { cwd: REPO_DIR, stdio: 'pipe' })
+    proc.on('exit', async code => {
+      // stop.sh exits 0 even when it kills processes — confirm health is down
+      const stillUp = await checkServerHealth()
+      resolve({ success: !stillUp || code === 0 })
+    })
     proc.on('error', err => reject(err))
   })
 })
@@ -142,27 +133,20 @@ ipcMain.handle('check-updates', async () => {
 
 ipcMain.handle('check-dependencies', async () => {
   const result = {
-    setup_complete: fs.existsSync(SETUP_COMPLETE_PATH),
-    node: false,
-    node_version: null,
-    python: false,
-    python_version: null,
-    npm_packages: fs.existsSync(path.join(REPO_DIR, 'node_modules')),
+    setup_complete: false,
+    node: false, node_version: null,
+    python: false, python_version: null,
+    npm_packages: fs.existsSync(path.join(REPO_DIR, 'backend', 'node_modules')) ||
+                  fs.existsSync(path.join(REPO_DIR, 'node_modules')),
     pip_packages: false,
     platform: process.platform,
   }
-  try {
-    result.node_version = execSync('node --version').toString().trim()
-    result.node = true
-  } catch {}
-  try {
-    result.python_version = execSync('python3 --version').toString().trim()
-    result.python = true
-  } catch {}
-  try {
-    execSync('python3 -c "import fastapi"', { stdio: 'ignore' })
-    result.pip_packages = true
-  } catch {}
+  try { result.node_version = execSync('node --version').toString().trim(); result.node = true } catch {}
+  try { result.python_version = execSync('python3 --version').toString().trim(); result.python = true } catch {}
+  try { execSync('python3 -c "import fastapi"', { stdio: 'ignore' }); result.pip_packages = true } catch {}
+  // Consider setup complete if sentinel exists OR all deps are present
+  result.setup_complete = fs.existsSync(SETUP_COMPLETE_PATH) ||
+    (result.node && result.python && result.pip_packages)
   return result
 })
 

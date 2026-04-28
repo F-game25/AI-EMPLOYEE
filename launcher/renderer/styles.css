@@ -136,6 +136,12 @@ body.setup .setup-state {
   display: block;
 }
 
+.update-badge { display: none; }
+body.has-update .update-badge { display: flex; }
+
+.setup-log { display: none; }
+body.setup-installing .setup-log { display: block; }
+
 .idle-message p {
   font-size: 14px;
   margin-bottom: 8px;
