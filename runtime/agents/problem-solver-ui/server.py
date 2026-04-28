@@ -28,6 +28,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Any
@@ -1676,6 +1677,24 @@ from core.tracing import setup_tracing, setup_fastapi_instrumentation, setup_psy
 _trace_provider = setup_tracing(service_name="ai-employee")
 setup_fastapi_instrumentation(app)
 setup_psycopg_instrumentation()
+
+# ── Sentry error tracking (Phase 4) ───────────────────────────────────────────
+from core.sentry_config import init_sentry
+_sentry_ok = init_sentry(environment=os.environ.get("ENVIRONMENT", "production"))
+
+# ── Billing metrics and rate limiting (Phase 4) ──────────────────────────────
+from core.billing_metrics import get_billing_collector
+from core.rate_limiter import get_rate_limiter
+from core.embeddings import get_embeddings_manager
+from core.knowledge_bootstrap import bootstrap_knowledge
+
+_billing_collector = get_billing_collector()
+_rate_limiter = get_rate_limiter()
+_embeddings_manager = get_embeddings_manager()
+
+# Bootstrap knowledge store on startup
+_knowledge_count = bootstrap_knowledge(AI_HOME)
+logger.info(f"Knowledge bootstrap: {_knowledge_count} entries loaded")
 
 # ── Optional endpoint authentication (REQUIRE_AUTH=1 enables enforcement) ──────
 # REQUIRE_AUTH defaults to "1" (enforced) for security.  Set REQUIRE_AUTH=0 in
@@ -26190,6 +26209,172 @@ async def list_user_roles(_auth: None = Depends(require_auth)):
 
         roles = rbac.list_user_roles(tenant.tenant_id)
         return JSONResponse({"roles": roles})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Billing Metrics Routes (Phase 4) ──────────────────────────────────────────
+
+@app.get("/api/billing/metrics")
+async def get_billing_metrics(_auth: None = Depends(require_auth)):
+    """Get billing metrics for current tenant."""
+    try:
+        from core.tenancy import get_current_tenant
+        from core.billing_metrics import get_billing_collector
+        tenant = get_current_tenant()
+        collector = get_billing_collector()
+        metrics = collector.get_tenant_metrics(tenant.tenant_id, period_days=30)
+        if metrics:
+            return JSONResponse(asdict(metrics))
+        else:
+            return JSONResponse({"error": "No metrics available"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/billing/all-metrics")
+async def get_all_billing_metrics(_auth: None = Depends(require_auth)):
+    """Get billing metrics for all tenants (admin only)."""
+    try:
+        from core.tenancy import get_current_tenant
+        from core.rbac import get_rbac_manager, Role
+        from core.auth import get_current_user
+        from core.billing_metrics import get_billing_collector
+
+        user = get_current_user()
+        tenant = get_current_tenant()
+        rbac = get_rbac_manager()
+
+        # Check if admin
+        user_role = rbac.get_user_role(user.get("user_id"), tenant.tenant_id)
+        if user_role != Role.ADMIN:
+            return JSONResponse({"error": "Admin role required"}, status_code=403)
+
+        collector = get_billing_collector()
+        all_metrics = collector.get_all_tenant_metrics(period_days=30)
+        return JSONResponse({"metrics": [asdict(m) for m in all_metrics]})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Rate Limiting Routes (Phase 4) ────────────────────────────────────────────
+
+@app.get("/api/quota/usage")
+async def get_quota_usage(_auth: None = Depends(require_auth)):
+    """Get current quota usage for tenant."""
+    try:
+        from core.tenancy import get_current_tenant
+        from core.rate_limiter import get_rate_limiter
+
+        tenant = get_current_tenant()
+        limiter = get_rate_limiter()
+        usage = limiter.get_tenant_usage(tenant.tenant_id)
+        quota = limiter.get_tenant_quota(tenant.tenant_id)
+
+        return JSONResponse({
+            "usage": usage,
+            "quota": {
+                "requests_per_minute": quota.requests_per_minute,
+                "agents_per_hour": quota.agents_per_hour,
+                "api_calls_per_day": quota.api_calls_per_day,
+                "storage_gb": quota.storage_gb,
+            }
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Embeddings Routes (Phase 4) ──────────────────────────────────────────────
+
+@app.post("/api/embeddings/embed")
+async def embed_text(payload: dict, _auth: None = Depends(require_auth)):
+    """Generate embedding for text."""
+    try:
+        from core.embeddings import get_embeddings_manager
+
+        text = payload.get("text", "")
+        if not text:
+            return JSONResponse({"error": "text required"}, status_code=400)
+
+        manager = get_embeddings_manager()
+        embedding = manager.embed_text(text)
+
+        return JSONResponse({
+            "text": text,
+            "embedding": embedding,
+            "dimension": len(embedding),
+            "mode": manager.get_mode(),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/embeddings/similarity")
+async def similarity_score(payload: dict, _auth: None = Depends(require_auth)):
+    """Calculate similarity between two embeddings."""
+    try:
+        from core.embeddings import get_embeddings_manager
+
+        emb1 = payload.get("embedding_1", [])
+        emb2 = payload.get("embedding_2", [])
+
+        if not emb1 or not emb2:
+            return JSONResponse({"error": "embedding_1 and embedding_2 required"}, status_code=400)
+
+        manager = get_embeddings_manager()
+        score = manager.similarity(emb1, emb2)
+
+        return JSONResponse({"similarity": score})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Audit Logging Routes (Phase 4) ───────────────────────────────────────────
+
+@app.get("/api/audit/logs")
+async def get_audit_logs(_auth: None = Depends(require_auth)):
+    """Get audit logs for current tenant."""
+    try:
+        from core.tenancy import get_current_tenant
+
+        tenant = get_current_tenant()
+        limit = 100  # Last 100 audit events
+
+        # TODO: Fetch from database when audit_logs table available
+        return JSONResponse({"logs": [], "tenant_id": tenant.tenant_id, "count": 0})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Observability Status Routes (Phase 4) ────────────────────────────────────
+
+@app.get("/api/observability/sentry")
+async def get_sentry_status(_auth: None = Depends(require_auth)):
+    """Get Sentry error tracking status."""
+    try:
+        from core.sentry_config import get_sentry_client
+
+        client = get_sentry_client()
+        status = "enabled" if client else "disabled"
+
+        return JSONResponse({"status": status, "dsn_configured": bool(client)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/observability/embeddings")
+async def get_embeddings_status(_auth: None = Depends(require_auth)):
+    """Get embeddings system status."""
+    try:
+        from core.embeddings import get_embeddings_manager
+
+        manager = get_embeddings_manager()
+
+        return JSONResponse({
+            "mode": manager.get_mode(),
+            "available": manager.embeddings_available,
+            "dimension": 384,
+        })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
