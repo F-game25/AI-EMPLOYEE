@@ -1647,6 +1647,13 @@ except ImportError:
 
 app = FastAPI(title="AI Employee Dashboard")
 
+# ── Multi-tenancy initialization ──────────────────────────────────────────────
+from core.tenancy import init_tenant_manager
+from core.tenant_middleware import TenantMiddleware
+
+_tenant_manager = init_tenant_manager(AI_HOME)
+app.add_middleware(TenantMiddleware, secret_key=JWT_SECRET)
+
 # ── Sentry error tracking ────────────────────────────────────────────────────
 _SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
 if _SENTRY_DSN:
@@ -2013,8 +2020,18 @@ def _issue_token_pair(
     auth: AuthManager,
     username: str,
     request: Request,
+    tenant_id: Optional[str] = None,
     state: Optional[dict[str, Any]] = None,
 ) -> tuple[str, str]:
+    # If tenant_id not provided, try to load from users.json
+    if tenant_id is None:
+        _users_file = STATE_DIR / "users.json"
+        try:
+            users = json.loads(_users_file.read_text()) if _users_file.exists() else {}
+            tenant_id = users.get(username, {}).get("tenant_id", f"user-{username}")
+        except Exception:
+            tenant_id = f"user-{username}"
+
     now = _now_utc()
     fingerprint = _request_fingerprint(request)
     access_token = auth.create_access_token(
@@ -2023,6 +2040,9 @@ def _issue_token_pair(
             "type": "user",
             "jti": secrets.token_hex(16),
             "fp": fingerprint,
+            "tenant_id": tenant_id,  # Add tenant_id to JWT claim
+            "email": f"{username}@ai-employee.local",
+            "org_name": username,
         }
     )
     refresh_token = secrets.token_urlsafe(48)
@@ -17427,15 +17447,22 @@ def auth_register(request: Request, user_data: _UserCreate):
         algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
         expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
     )
+    # Create tenant for new user
+    tenant_id = _tenant_manager.create_tenant(
+        org_name=user_data.username,
+        user_email=user_data.username  # Use username as email for now
+    )
+
     users[username] = {
         "password_hash": auth.hash_password(user_data.password),
         "created_at": _now_utc().isoformat(),
+        "tenant_id": tenant_id,  # Store tenant_id with user
     }
     _users_file.parent.mkdir(parents=True, exist_ok=True)
     _users_file.write_text(json.dumps(users, indent=2))
     _users_file.chmod(0o600)
 
-    access_token, refresh_token = _issue_token_pair(auth, username, request)
+    access_token, refresh_token = _issue_token_pair(auth, username, request, tenant_id)
     _audit_logger.info(json.dumps({
         "event": "user_registered",
         "username": username,

@@ -44,23 +44,50 @@ class FileLock:
                 logger.warning(f"Error releasing lock: {e}")
 
 
-def read_json_safe(file_path: Path, default: Any = None) -> Any:
-    """Read JSON file with lock protection."""
+def read_json_safe(file_path: Path, default: Any = None, tenant_id: str = None) -> Any:
+    """Read JSON file with lock protection. Optionally filters by tenant_id."""
     try:
         with FileLock(file_path):
             if file_path.exists():
-                return json.loads(file_path.read_text(encoding='utf-8'))
+                data = json.loads(file_path.read_text(encoding='utf-8'))
+                # If tenant_id provided and data is a dict with _tenant_data, filter by tenant
+                if tenant_id and isinstance(data, dict) and "_tenant_data" in data:
+                    return data.get("_tenant_data", {}).get(tenant_id, default or {})
+                return data
     except Exception as e:
         logger.warning(f"Failed to read {file_path}: {e}")
     return default or {}
 
 
-def write_json_safe(file_path: Path, data: Any) -> bool:
-    """Write JSON file with lock protection. Returns True on success."""
+def write_json_safe(file_path: Path, data: Any, tenant_id: str = None) -> bool:
+    """Write JSON file with lock protection. Optionally segregates data by tenant_id.
+
+    If tenant_id is provided, stores data in _tenant_data[tenant_id] structure.
+    Returns True on success.
+    """
     try:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(file_path):
-            file_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+            if tenant_id:
+                # Read existing data, merge with tenant-specific write
+                existing = {}
+                if file_path.exists():
+                    try:
+                        existing = json.loads(file_path.read_text(encoding='utf-8'))
+                    except Exception:
+                        existing = {}
+
+                # Ensure _tenant_data structure exists
+                if "_tenant_data" not in existing:
+                    existing["_tenant_data"] = {}
+
+                # Update tenant data
+                existing["_tenant_data"][tenant_id] = data
+                file_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding='utf-8')
+            else:
+                # Write directly (backward compatible for non-tenant code)
+                file_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+
             file_path.chmod(0o644)
         return True
     except Exception as e:
