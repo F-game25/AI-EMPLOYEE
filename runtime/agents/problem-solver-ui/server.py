@@ -1671,6 +1671,12 @@ if _SENTRY_DSN:
         environment=os.environ.get("ENVIRONMENT", "production"),
     )
 
+# ── Jaeger distributed tracing ───────────────────────────────────────────────
+from core.tracing import setup_tracing, setup_fastapi_instrumentation, setup_psycopg_instrumentation
+_trace_provider = setup_tracing(service_name="ai-employee")
+setup_fastapi_instrumentation(app)
+setup_psycopg_instrumentation()
+
 # ── Optional endpoint authentication (REQUIRE_AUTH=1 enables enforcement) ──────
 # REQUIRE_AUTH defaults to "1" (enforced) for security.  Set REQUIRE_AUTH=0 in
 # ~/.ai-employee/.env ONLY for local development on a trusted machine.
@@ -26026,6 +26032,164 @@ async def restore_backup(backup_name: str, _auth: None = Depends(require_auth)):
             return JSONResponse({"status": "restored" if success else "failed"})
         else:
             return JSONResponse({"error": "Backup not found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Payment & Stripe Integration ──────────────────────────────────────────────
+
+@app.post("/api/billing/customer/create")
+async def create_stripe_customer(payload: dict, _auth: None = Depends(require_auth)):
+    """Create a Stripe customer for a tenant."""
+    try:
+        from core.stripe_integration import get_stripe_manager
+        from core.tenancy import get_current_tenant
+        tenant = get_current_tenant()
+        stripe_mgr = get_stripe_manager()
+        customer_id = stripe_mgr.create_customer(
+            tenant_id=tenant.tenant_id,
+            email=payload.get("email", ""),
+            name=payload.get("name", ""),
+        )
+        if customer_id:
+            return JSONResponse({"customer_id": customer_id, "status": "created"})
+        else:
+            return JSONResponse({"error": "Failed to create customer"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/payment-intent/create")
+async def create_payment_intent(payload: dict, _auth: None = Depends(require_auth)):
+    """Create a Stripe payment intent."""
+    try:
+        from core.stripe_integration import get_stripe_manager
+        stripe_mgr = get_stripe_manager()
+        result = stripe_mgr.create_payment_intent(
+            customer_id=payload.get("customer_id", ""),
+            amount_cents=int(payload.get("amount_cents", 0)),
+            currency=payload.get("currency", "usd"),
+            description=payload.get("description", ""),
+        )
+        if result:
+            return JSONResponse(result)
+        else:
+            return JSONResponse({"error": "Failed to create payment intent"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/subscription/create")
+async def create_subscription(payload: dict, _auth: None = Depends(require_auth)):
+    """Create a Stripe subscription."""
+    try:
+        from core.stripe_integration import get_stripe_manager
+        stripe_mgr = get_stripe_manager()
+        result = stripe_mgr.create_subscription(
+            customer_id=payload.get("customer_id", ""),
+            price_id=payload.get("price_id", ""),
+            metadata=payload.get("metadata", {}),
+        )
+        if result:
+            return JSONResponse(result)
+        else:
+            return JSONResponse({"error": "Failed to create subscription"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/billing/subscription/{subscription_id}")
+async def get_subscription(subscription_id: str, _auth: None = Depends(require_auth)):
+    """Get subscription status."""
+    try:
+        from core.stripe_integration import get_stripe_manager
+        stripe_mgr = get_stripe_manager()
+        result = stripe_mgr.get_subscription_status(subscription_id)
+        if result:
+            return JSONResponse(result)
+        else:
+            return JSONResponse({"error": "Subscription not found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/subscription/{subscription_id}/cancel")
+async def cancel_subscription(subscription_id: str, payload: dict = {}, _auth: None = Depends(require_auth)):
+    """Cancel a subscription."""
+    try:
+        from core.stripe_integration import get_stripe_manager
+        stripe_mgr = get_stripe_manager()
+        success = stripe_mgr.cancel_subscription(subscription_id, at_period_end=payload.get("at_period_end", False))
+        return JSONResponse({"status": "cancelled" if success else "failed"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── RBAC Routes ───────────────────────────────────────────────────────────────
+
+@app.post("/api/rbac/assign-role")
+async def assign_user_role(payload: dict, _auth: None = Depends(require_auth)):
+    """Assign a role to a user (admin only)."""
+    try:
+        from core.rbac import get_rbac_manager, Role
+        from core.tenancy import get_current_tenant
+        from core.auth import get_current_user
+        user = get_current_user()
+        tenant = get_current_tenant()
+        rbac = get_rbac_manager()
+
+        # Check if requester is admin
+        requester_role = rbac.get_user_role(user.get("user_id"), tenant.tenant_id)
+        if requester_role != Role.ADMIN:
+            return JSONResponse({"error": "Admin role required"}, status_code=403)
+
+        target_user_id = payload.get("user_id", "")
+        role_str = payload.get("role", "viewer")
+        role = Role(role_str)
+
+        success = rbac.assign_role(target_user_id, role, tenant.tenant_id)
+        return JSONResponse({"status": "assigned" if success else "failed", "user_id": target_user_id, "role": role.value})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/rbac/user-role")
+async def get_user_role(_auth: None = Depends(require_auth)):
+    """Get current user's role."""
+    try:
+        from core.rbac import get_rbac_manager
+        from core.tenancy import get_current_tenant
+        from core.auth import get_current_user
+        user = get_current_user()
+        tenant = get_current_tenant()
+        rbac = get_rbac_manager()
+
+        role = rbac.get_user_role(user.get("user_id"), tenant.tenant_id)
+        perms = get_rbac_manager().get_user_role(user.get("user_id"), tenant.tenant_id)
+
+        return JSONResponse({"user_id": user.get("user_id"), "role": role.value})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/rbac/roles")
+async def list_user_roles(_auth: None = Depends(require_auth)):
+    """List all user roles in tenant (admin only)."""
+    try:
+        from core.rbac import get_rbac_manager, Role
+        from core.tenancy import get_current_tenant
+        from core.auth import get_current_user
+        user = get_current_user()
+        tenant = get_current_tenant()
+        rbac = get_rbac_manager()
+
+        # Check if requester is admin
+        requester_role = rbac.get_user_role(user.get("user_id"), tenant.tenant_id)
+        if requester_role != Role.ADMIN:
+            return JSONResponse({"error": "Admin role required"}, status_code=403)
+
+        roles = rbac.list_user_roles(tenant.tenant_id)
+        return JSONResponse({"roles": roles})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

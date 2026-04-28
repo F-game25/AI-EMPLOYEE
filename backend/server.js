@@ -3359,7 +3359,7 @@ app.post('/api/system/check-updates', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/system/apply-update', (req, res) => {
+app.post('/api/system/apply-update', requireAuth, (req, res) => {
   const triggerPath = path.join(os.homedir(), '.ai-employee', 'run', 'updater.trigger');
   try {
     fs.mkdirSync(path.dirname(triggerPath), { recursive: true });
@@ -3942,7 +3942,7 @@ app.get('/api/tasks/:taskId', (req, res) => {
   res.json({ task, steps });
 });
 
-app.post('/api/tasks/:taskId/init', (req, res) => {
+app.post('/api/tasks/:taskId/init', requireAuth, (req, res) => {
   const { taskId } = req.params;
   const { title, steps } = req.body || {};
   const task = initTask(taskId, title || 'Task');
@@ -3959,14 +3959,14 @@ app.post('/api/tasks/:taskId/init', (req, res) => {
   res.json({ ok: true, task });
 });
 
-app.post('/api/tasks/:taskId/steps/:stepId', (req, res) => {
+app.post('/api/tasks/:taskId/steps/:stepId', requireAuth, (req, res) => {
   const { taskId, stepId } = req.params;
   const updates = req.body || {};
   updateTaskStep(taskId, stepId, updates);
   res.json({ ok: true });
 });
 
-app.post('/api/tasks/:taskId/complete', (req, res) => {
+app.post('/api/tasks/:taskId/complete', requireAuth, (req, res) => {
   const { taskId } = req.params;
   const { status } = req.body || {};
   completeTask(taskId, status || 'done');
@@ -4011,7 +4011,7 @@ app.get('/api/errors/recent', (req, res) => {
   res.json({ errors: errorRecovery.getRecentErrors(limit) });
 });
 
-app.post('/api/errors/report', (req, res) => {
+app.post('/api/errors/report', requireAuth, (req, res) => {
   const { error, context } = req.body || {};
   if (!error) return res.status(400).json({ error: 'error required' });
 
