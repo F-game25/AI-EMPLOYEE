@@ -4,9 +4,11 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from core.orchestrator import LLMClient, get_llm_client
+from core.tenancy import get_current_tenant, require_current_tenant
+from core.database import get_database
 
 
 class AgentValidationError(ValueError):
@@ -75,3 +77,35 @@ class BaseAgent:
     def _log(self, payload: dict[str, Any]) -> None:
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    def _get_tenant_id(self) -> str:
+        """Get current tenant ID from context or raise error."""
+        try:
+            tenant = get_current_tenant()
+            return tenant.tenant_id
+        except Exception:
+            # Fallback to default tenant for backward compatibility
+            return "default"
+
+    def _get_db(self):
+        """Get database client instance."""
+        return get_database()
+
+    def _save_to_db(self, table: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Save data to PostgreSQL table with automatic tenant_id injection."""
+        db = self._get_db()
+        tenant_id = self._get_tenant_id()
+        return db.insert(table, data, tenant_id=tenant_id)
+
+    def _query_db(self, table: str, where: str = "", params: tuple = ()) -> list[dict[str, Any]]:
+        """Query database with automatic tenant_id filter."""
+        db = self._get_db()
+        tenant_id = self._get_tenant_id()
+        query = f"SELECT * FROM {table} WHERE {where}" if where else f"SELECT * FROM {table}"
+        return db.execute(query, params, tenant_id=tenant_id)
+
+    def _update_db(self, table: str, data: dict[str, Any], where: str, params: tuple = ()) -> int:
+        """Update database records with automatic tenant_id filter."""
+        db = self._get_db()
+        tenant_id = self._get_tenant_id()
+        return db.update(table, data, where, params, tenant_id=tenant_id)

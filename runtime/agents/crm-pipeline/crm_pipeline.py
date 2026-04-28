@@ -1,75 +1,92 @@
-"""CRM Pipeline Agent — deal pipeline management.
-
-Tracks deals through stages, flags stale deals, sends follow-up reminders,
-and calculates pipeline conversion rates and expected revenue.
-
-Commands (via chat):
-  crm view       — view all deals by stage
-  crm advance    — advance a deal to next stage
-  crm stale      — list deals with no activity > 7 days
-  crm forecast   — expected revenue from open pipeline
-  crm stats      — conversion rates and pipeline summary
-"""
-from __future__ import annotations
-
+"""CRM Pipeline Agent — manage deal lifecycle and pipeline stages."""
 import json
-import os
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from typing import Any
 
-from agents.base import BaseAgent
-from core.file_lock import read_json_safe, write_json_safe
-
-AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
-DEALS_FILE = AI_HOME / "state" / "deals.json"
-
-STAGES = ["new_lead", "qualified", "proposal_sent", "negotiation", "closed_won", "closed_lost"]
-
-SYSTEM = """You are a CRM Pipeline Manager. Analyze deal pipeline data and return actionable insights as JSON.
-
-Output JSON with this structure:
-{
-  "pipeline_summary": {"total_deals": 0, "open_deals": 0, "closed_won": 0, "closed_lost": 0},
-  "stage_breakdown": {"stage_name": {"count": 0, "total_value": 0}},
-  "stale_deals": [{"id": "...", "company": "...", "days_inactive": 0, "recommended_action": "..."}],
-  "conversion_rate": "0%",
-  "expected_revenue": 0,
-  "top_opportunities": [{"id": "...", "company": "...", "value": 0, "next_step": "..."}],
-  "recommendations": ["action 1", "action 2"]
-}"""
+from base import BaseAgent
 
 
 class CRMPipelineAgent(BaseAgent):
+    """Manage CRM deals: create, advance stages, track pipeline."""
+
     agent_id = "crm-pipeline"
-    required_fields = ("task",)
+    required_fields = ("action", "company")
 
-    def execute(self, payload: dict) -> dict:
-        deals = self._load_deals()
-        task = payload.get("task", "view")
-        stale_threshold = int(payload.get("stale_days", 7))
+    def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        action = payload.get("action")
 
-        now = datetime.now(timezone.utc)
-        stale = []
-        for d in deals:
-            updated = d.get("updated_at") or d.get("created_at", "")
-            if updated:
-                try:
-                    dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
-                    days = (now - dt).days
-                    if days >= stale_threshold and d.get("stage") not in ("closed_won", "closed_lost"):
-                        stale.append({**d, "_days_inactive": days})
-                except Exception:
-                    pass
+        if action == "list":
+            return self._list_deals()
+        elif action == "create":
+            return self._create_deal(payload)
+        elif action == "advance":
+            return self._advance_stage(payload)
+        elif action == "status":
+            return self._pipeline_status()
+        else:
+            return {"error": f"Unknown action: {action}"}
 
-        prompt = (
-            f"Task: {task}\n"
-            f"Deals ({len(deals)} total, {len(stale)} stale):\n"
-            f"{json.dumps({'deals': deals[:30], 'stale_deals': stale}, indent=2)}"
-        )
-        data, tokens = self._ask_json(prompt=prompt, system=SYSTEM)
-        data["tokens_used"] = tokens
-        return data
+    def _list_deals(self) -> dict[str, Any]:
+        """List all deals for tenant."""
+        deals = self._query_db("deals", "stage != 'closed_lost'")
+        return {
+            "count": len(deals),
+            "deals": sorted(deals, key=lambda x: x.get("created_at", ""), reverse=True)[:10]
+        }
 
-    def _load_deals(self) -> list:
-        deals = read_json_safe(DEALS_FILE, default=[])
-        return deals if isinstance(deals, list) else []
+    def _create_deal(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create new deal."""
+        data = {
+            "title": payload.get("title", payload.get("company")),
+            "company": payload.get("company"),
+            "value": float(payload.get("value", 0)),
+            "stage": "new_lead",
+            "probability_percent": 0,
+            "notes": payload.get("notes", "")
+        }
+
+        result = self._save_to_db("deals", data)
+        return {
+            "status": "created",
+            "deal_id": result.get("deal_id"),
+            "company": data["company"]
+        }
+
+    def _advance_stage(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Advance deal to next stage."""
+        deal_id = payload.get("deal_id")
+        current_stage = payload.get("current_stage", "new_lead")
+
+        stages = ["new_lead", "qualified", "proposal_sent", "negotiation", "closed_won"]
+        if current_stage not in stages:
+            return {"error": f"Invalid stage: {current_stage}"}
+
+        idx = stages.index(current_stage)
+        next_stage = stages[min(idx + 1, len(stages) - 1)]
+
+        self._update_db("deals", {"stage": next_stage}, "deal_id = %s", (deal_id,))
+        return {"status": "advanced", "from": current_stage, "to": next_stage}
+
+    def _pipeline_status(self) -> dict[str, Any]:
+        """Get pipeline summary by stage."""
+        deals = self._query_db("deals")
+        summary = {}
+
+        for deal in deals:
+            stage = deal.get("stage", "unknown")
+            if stage not in summary:
+                summary[stage] = {"count": 0, "total_value": 0}
+
+            summary[stage]["count"] += 1
+            summary[stage]["total_value"] += float(deal.get("value", 0))
+
+        return {
+            "status": "pipeline_summary",
+            "by_stage": summary,
+            "total_deals": len(deals)
+        }
+
+
+if __name__ == "__main__":
+    agent = CRMPipelineAgent()
+    result = agent.run({"action": "status", "company": "Acme Corp"})
+    print(result)

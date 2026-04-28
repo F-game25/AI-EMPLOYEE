@@ -25918,6 +25918,118 @@ async def middleware_status():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# ── PostgreSQL Database API Routes ──────────────────────────────────────────────
+@app.post("/api/db/query")
+async def db_query(payload: dict, _auth: None = Depends(require_auth)):
+    """Execute raw SQL query (tenant-filtered)."""
+    try:
+        from core.database import get_database
+        from core.tenancy import get_current_tenant
+        db = get_database()
+        tenant = get_current_tenant()
+        sql = payload.get("sql", "")
+        params = payload.get("params", [])
+        results = db.execute(sql, tuple(params), tenant_id=tenant.tenant_id)
+        return JSONResponse({"results": results, "count": len(results)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/db/insert")
+async def db_insert(payload: dict, _auth: None = Depends(require_auth)):
+    """Insert row into table (tenant-filtered)."""
+    try:
+        from core.database import get_database
+        from core.tenancy import get_current_tenant
+        db = get_database()
+        tenant = get_current_tenant()
+        table = payload.get("table", "")
+        data = payload.get("data", {})
+        result = db.insert(table, data, tenant_id=tenant.tenant_id)
+        return JSONResponse({"inserted": result})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/db/update")
+async def db_update(payload: dict, _auth: None = Depends(require_auth)):
+    """Update rows in table (tenant-filtered)."""
+    try:
+        from core.database import get_database
+        from core.tenancy import get_current_tenant
+        db = get_database()
+        tenant = get_current_tenant()
+        table = payload.get("table", "")
+        data = payload.get("data", {})
+        where = payload.get("where", "")
+        params = tuple(payload.get("params", []))
+        count = db.update(table, data, where, params, tenant_id=tenant.tenant_id)
+        return JSONResponse({"updated": count})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/db/delete")
+async def db_delete(payload: dict, _auth: None = Depends(require_auth)):
+    """Delete rows from table (tenant-filtered)."""
+    try:
+        from core.database import get_database
+        from core.tenancy import get_current_tenant
+        db = get_database()
+        tenant = get_current_tenant()
+        table = payload.get("table", "")
+        where = payload.get("where", "")
+        params = tuple(payload.get("params", []))
+        count = db.delete(table, where, params, tenant_id=tenant.tenant_id)
+        return JSONResponse({"deleted": count})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/backup/create")
+async def create_backup(_auth: None = Depends(require_auth)):
+    """Create PostgreSQL backup."""
+    try:
+        from core.backup import get_backup_manager
+        manager = get_backup_manager()
+        backup_file = manager.create_backup_via_shell()
+        if backup_file:
+            return JSONResponse({"status": "created", "file": backup_file})
+        else:
+            return JSONResponse({"error": "Backup failed"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/backup/list")
+async def list_backups(_auth: None = Depends(require_auth)):
+    """List available backups."""
+    try:
+        from core.backup import get_backup_manager
+        manager = get_backup_manager()
+        backups = manager.list_backups()
+        return JSONResponse({"backups": backups})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/backup/restore/{backup_name}")
+async def restore_backup(backup_name: str, _auth: None = Depends(require_auth)):
+    """Restore from a backup."""
+    try:
+        from core.backup import get_backup_manager
+        from pathlib import Path
+        manager = get_backup_manager()
+        backup_path = manager.backup_dir / backup_name
+        if backup_path.exists():
+            success = manager.restore_backup(str(backup_path))
+            return JSONResponse({"status": "restored" if success else "failed"})
+        else:
+            return JSONResponse({"error": "Backup not found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 if __name__ == "__main__":
     _trim_jsonl(CHATLOG, 1000)
     _trim_jsonl(ACTIVITY_LOG, 2000)
