@@ -39,13 +39,14 @@ function setState(newState) {
 }
 
 function updateButtonStates() {
-  const isRunning = state === 'idle-running' || state === 'idle'
+  const isRunning = state === 'idle-running'
   const isStarting = state === 'starting'
+  const isReady = state === 'ready'
 
   startBtn.disabled = isRunning || isStarting
-  openBtn.disabled = !isRunning
-  stopBtn.disabled = isStarting || state === 'checking'
-  cancelBtn.disabled = false
+  openBtn.disabled = !(isRunning || isReady) // Only enable when ready or running
+  stopBtn.disabled = !isRunning
+  cancelBtn.disabled = state !== 'starting'
 }
 
 function updateVersionBadge(versionInfo) {
@@ -65,40 +66,60 @@ function setupEventListeners() {
 }
 
 async function handleStart() {
+  if (state === 'starting' || state === 'idle-running' || state === 'ready') return
   setState('starting')
   logArea.innerHTML = ''
 
-  window.ai.onStartLog(line => appendLog(line))
+  // Register listeners BEFORE calling startSystem
   window.ai.onStartReady(() => {
-    setState('ready')
-    setTimeout(() => {
-      setState('idle-running')
-    }, 2000)
+    if (state === 'starting') {
+      setState('ready')
+      setTimeout(() => { if (state === 'ready') setState('idle-running') }, 2000)
+    }
   })
+
+  window.ai.onStartLog(line => appendLog(line))
+
   window.ai.onStartError(msg => {
     appendLog('[ERROR] ' + msg)
-    setState('idle')
+    if (state === 'starting') setState('idle')
   })
 
   try {
     await window.ai.startSystem()
   } catch (err) {
-    appendLog('[ERROR] Failed to start system: ' + err.message)
-    setState('idle')
+    appendLog('[ERROR] ' + (err?.message || 'System startup failed'))
+    if (state === 'starting') setState('idle')
   }
 }
 
 async function handleStop() {
-  startBtn.disabled = true
-  const result = await window.ai.stopSystem()
-  if (result.success) {
-    setState('idle')
+  if (state !== 'idle-running') return
+  try {
+    const result = await window.ai.stopSystem()
+    if (result?.success) {
+      setState('idle')
+    }
+  } catch (err) {
+    appendLog('[ERROR] Failed to stop system: ' + err?.message)
   }
 }
 
 async function handleOpen() {
-  document.body.className = 'opening'
-  await window.ai.openInterface()
+  if (state !== 'ready' && state !== 'idle-running') return
+  openBtn.disabled = true
+  try {
+    const result = await window.ai.openInterface()
+    if (result?.success) {
+      setState('opening')
+      setTimeout(() => {
+        document.body.className = 'opening'
+      }, 100)
+    }
+  } catch (err) {
+    appendLog('[ERROR] Failed to open interface: ' + err?.message)
+    openBtn.disabled = false
+  }
 }
 
 function handleCancel() {

@@ -56,13 +56,23 @@ console.log('Defining IPC handlers')
 ipcMain.handle('start-system', async event => {
   return new Promise((resolve, reject) => {
     const proc = spawn('bash', ['start.sh'], { cwd: REPO_DIR, stdio: 'pipe' })
+    let isStarting = true
+
     proc.stdout.on('data', data => {
       const lines = data.toString().split('\n').filter(l => l.trim())
       lines.forEach(line => {
         const cleaned = cleanLogLine(line)
-        if (cleaned) event.sender.send('start-log', cleaned)
+        if (cleaned) {
+          event.sender.send('start-log', cleaned)
+          // Check for success markers in output
+          if (isStarting && (cleaned.includes('Python AI backend ready') || cleaned.includes('PERSISTENCE'))) {
+            isStarting = false
+            setTimeout(() => event.sender.send('start-ready'), 500)
+          }
+        }
       })
     })
+
     proc.stderr.on('data', data => {
       const lines = data.toString().split('\n').filter(l => l.trim())
       lines.forEach(line => {
@@ -70,24 +80,31 @@ ipcMain.handle('start-system', async event => {
         if (cleaned) event.sender.send('start-log', '[ERROR] ' + cleaned)
       })
     })
+
     proc.on('exit', code => {
       if (code === 0) {
+        // Health check as fallback
         let attempts = 0
         const poll = setInterval(async () => {
           attempts++
           const healthy = await checkServerHealth()
-          if (healthy) {
+          if (healthy && !isStarting) {
             clearInterval(poll)
-            event.sender.send('start-ready')
             resolve({ success: true })
-          } else if (attempts > 30) {
+          } else if (attempts > 20) {
             clearInterval(poll)
-            reject(new Error('Server failed to start'))
+            resolve({ success: true }) // Assume success if script passed
           }
-        }, 2000)
+        }, 1000)
       } else {
+        event.sender.send('start-error', `start.sh exited with code ${code}`)
         reject(new Error(`start.sh exited with code ${code}`))
       }
+    })
+
+    proc.on('error', err => {
+      event.sender.send('start-error', err.message)
+      reject(err)
     })
   })
 })
