@@ -125,6 +125,52 @@ Future: Postgres migration recommended for horizontal scaling (see Week 4 plan).
 - **Route Coverage**: 44 of 119 Node routes protected via `requireAuth` middleware (up from 4 in Week 1)
 - **HITL Gates**: High-risk agents (lead-hunter-elite, qualification-agent, data-analyst) require human approval before sensitive operations
 
+### Multi-Tenancy
+
+The system is now fully multi-tenant, allowing complete isolation between organizations/users.
+
+**Architecture:**
+- **Tenant Manager** (`runtime/core/tenancy.py`): Lifecycle, directory structure, request-scoped context
+- **FastAPI Middleware** (`runtime/core/tenant_middleware.py`): Automatic tenant extraction from JWT
+- **Node.js Middleware** (`backend/tenancy.js`): Automatic tenant extraction for Express routes
+- **File Locking** (`runtime/core/file_lock.py`): Tenant-aware reads/writes with _tenant_data structure
+
+**Tenant Isolation:**
+- Each tenant lives in `~/.ai-employee/tenants/{tenant_id}/`
+- JWT tokens include `tenant_id` claim (checked by middleware)
+- All state files segregated by tenant via `_tenant_data[tenant_id]` structure
+- Route middleware automatically extracts tenant from JWT and validates access
+
+**Data Storage:**
+```
+~/.ai-employee/
+├── tenants/
+│   ├── {tenant_id_1}/
+│   │   ├── state/       (deals.json, tasks.json, etc.)
+│   │   └── config/      (settings, preferences)
+│   ├── {tenant_id_2}/
+│   └── ...
+```
+
+**Register & Auth Flow:**
+1. POST `/auth/register` with credentials
+2. Server creates new tenant (with directory structure)
+3. User entry stored with tenant_id
+4. JWT issued with `tenant_id` claim
+5. All subsequent requests: middleware extracts tenant_id from JWT
+6. Routes access tenant-specific data via TenantContext
+
+**Migration:**
+```bash
+# Convert existing single-tenant data to multi-tenant format
+python3 scripts/migrate_to_multitenant.py
+# Creates default tenant, backs up original files, segregates state
+```
+
+**Testing:**
+- 10 comprehensive multi-tenancy tests in `tests/test_multitenant.py` (all passing)
+- Tests cover: tenant creation, context management, data isolation, migration scenarios
+
 ### Observability
 
 - **Prometheus Metrics** (`/metrics` endpoint, port 8787): Exposes `ai_employee_*` metrics in text format

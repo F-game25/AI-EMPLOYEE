@@ -32,6 +32,7 @@ const { SecretStore } = require('./security/secrets');
 const { createOfflineSecuritySyncPolicy } = require('./security/offline_sync_policy');
 const { createApiGatewayProtector } = require('./security/api_gateway');
 const { createAnomalyResponder } = require('./security/anomaly_response');
+const { tenantMiddleware, requireTenant } = require('./tenancy');
 const {
   getAgents,
   on: onAgentEvent,
@@ -181,6 +182,10 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '64kb' }));
+
+// ── Multi-tenancy middleware (extracts tenant from JWT) ───────────────────────
+app.use(tenantMiddleware(JWT_SECRET));
+
 if (HAS_FRONTEND_DIST) {
   // Vite content-hashes all JS/CSS filenames — safe to cache long-term.
   // index.html is NOT hashed and must never be stale, so it gets no-store.
@@ -1376,7 +1381,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
 });
 app.get('/api/agents', (req, res) => {
-  res.json(getAgents());
+  const agents = getAgents();
+  // Include tenant context if available (for debugging/admin purposes only)
+  const response = {
+    agents,
+    tenant: req.tenant ? { tenant_id: req.tenant.tenantId, org_name: req.tenant.orgName } : null,
+  };
+  res.json(response);
 });
 
 // ── Subsystem API endpoints ───────────────────────────────────────────────────
