@@ -1,5 +1,6 @@
 import { useAppStore } from '../../store/appStore'
 import { Panel, Badge, StatCard, MiniBar, DataRow } from '../ui/primitives'
+import MiddlewareStatusWidget from '../dashboard/MiddlewareStatusWidget'
 
 const APIS = [
   { name:'Anthropic Claude',  status:'ok',   calls:4241, cost:'$1.82',  p99:'340ms' },
@@ -130,6 +131,8 @@ export default function SystemPage() {
               </div>
             )}
           </Panel>
+
+          <MiddlewareStatusWidget />
 
           <Panel title="Security" style={{ flex:1 }}>
             <div style={{ display:'flex', flexDirection:'column', gap:5 }}>

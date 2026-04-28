@@ -1,4 +1,5 @@
 let state = 'checking'
+let _ellipsisInterval = null
 const particles = new ParticleSystem()
 
 // DOM elements
@@ -36,6 +37,18 @@ function setState(newState) {
   state = newState
   document.body.className = newState === 'idle-running' ? 'idle' : newState
   updateButtonStates()
+
+  // JS-driven ellipsis animation (CSS content keyframes don't work on <span>)
+  const el = document.querySelector('.ellipsis')
+  clearInterval(_ellipsisInterval)
+  if (el) {
+    if (newState === 'starting') {
+      let i = 0
+      _ellipsisInterval = setInterval(() => { el.textContent = ['.', '..', '...'][i++ % 3] }, 400)
+    } else {
+      el.textContent = '...'
+    }
+  }
 }
 
 function updateButtonStates() {
@@ -111,10 +124,8 @@ async function handleOpen() {
   try {
     const result = await window.ai.openInterface()
     if (result?.success) {
-      setState('opening')
-      setTimeout(() => {
-        document.body.className = 'opening'
-      }, 100)
+      // Show "CONNECTING TO ULTRON..." while browser navigates
+      document.body.className = 'loading'
     }
   } catch (err) {
     appendLog('[ERROR] Failed to open interface: ' + err?.message)
@@ -177,7 +188,9 @@ function appendLog(line) {
   const entry = document.createElement('div')
   entry.textContent = line
   logArea.appendChild(entry)
-  logArea.scrollTop = logArea.scrollHeight
+  // Only auto-scroll if already near the bottom
+  const atBottom = logArea.scrollHeight - logArea.scrollTop <= logArea.clientHeight + 24
+  if (atBottom) logArea.scrollTop = logArea.scrollHeight
 }
 
 // PARTICLE SYSTEM

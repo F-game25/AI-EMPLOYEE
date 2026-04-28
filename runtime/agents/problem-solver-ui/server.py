@@ -25766,6 +25766,68 @@ async def reinforce_action(payload: dict):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
+# ── AI Middleware Layer ────────────────────────────────────────────────────────
+
+@app.post("/api/middleware/process")
+async def middleware_process(body: dict):
+    """
+    Unified multi-model input processing.
+
+    Body:
+      input_type: "text" | "voice" | "image" | "sensor"
+      content:    str (text/transcription), base64 str (image), dict (sensor)
+      context:    optional dict (system_prompt, task hints, etc.)
+      requested_models: optional list of model roles to force
+      session_id: optional str
+      user_id:    optional str
+    """
+    try:
+        from core.middleware import MiddlewareOrchestrator, MiddlewareRequest, InputType, ModelRole
+        orch = MiddlewareOrchestrator()
+        input_type = InputType(body.get("input_type", "text"))
+        requested = [ModelRole(r) for r in (body.get("requested_models") or [])]
+        req = MiddlewareRequest(
+            input_type=input_type,
+            content=body.get("content", ""),
+            context=body.get("context") or {},
+            requested_models=requested,
+            session_id=body.get("session_id", ""),
+            user_id=body.get("user_id", "operator"),
+        )
+        result = orch.process(req)
+        return JSONResponse({
+            "text": result.text,
+            "model_roles_used": [r.value for r in result.model_roles_used],
+            "execution_steps": result.execution_steps,
+            "metadata": result.metadata,
+            "elapsed_ms": result.elapsed_ms,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/middleware/status")
+async def middleware_status():
+    """Return current middleware and Wave Field routing status."""
+    try:
+        from core.wavefield_provider import get_wavefield_metrics
+        from core.model_routing import wavefield_enabled, _rollout_mode
+        wf_metrics = get_wavefield_metrics()
+        return JSONResponse({
+            "wavefield_enabled": wavefield_enabled(),
+            "wavefield_rollout_mode": _rollout_mode(),
+            "wavefield_metrics": wf_metrics,
+            "active_models": ["llm", "lam"],
+            "optional_models": {
+                "vlm": bool(os.environ.get("VLM_MODEL") or os.environ.get("OPENROUTER_API_KEY")),
+                "sam": False,
+                "lcm": True,
+            },
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 if __name__ == "__main__":
     _trim_jsonl(CHATLOG, 1000)
     _trim_jsonl(ACTIVITY_LOG, 2000)

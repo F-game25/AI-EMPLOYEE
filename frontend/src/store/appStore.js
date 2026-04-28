@@ -86,6 +86,16 @@ export const useAppStore = create((set) => ({
     }
     return { chatMessages: msgs }
   }),
+  // Merge task_progress update by taskId — upserts in-place or appends new
+  upsertTaskProgress: (update) => set((state) => {
+    const msgs = [...state.chatMessages]
+    const idx = msgs.findIndex(m => m.type === 'task_progress' && m.taskId === update.taskId)
+    if (idx !== -1) {
+      msgs[idx] = { ...msgs[idx], ...update }
+      return { chatMessages: msgs }
+    }
+    return { chatMessages: [...msgs, { role: 'ai', type: 'task_progress', ...update }] }
+  }),
 
   // Typing indicator — true while waiting for AI response
   isTyping: false,

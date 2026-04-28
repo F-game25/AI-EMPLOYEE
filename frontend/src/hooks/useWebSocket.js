@@ -142,6 +142,15 @@ function connectSingleton() {
         case 'identity:ready':
           store.setIdentity(data)
           break
+        case 'task_progress':
+          // Upsert live task progress by taskId — merges into existing message or appends
+          store.upsertTaskProgress({
+            taskId: data.taskId,
+            title: data.title,
+            steps: data.steps || [],
+            ts: data.ts || Date.now(),
+          })
+          break
       }
     } catch (e) {
       console.error('[ws] message handling failed', e)

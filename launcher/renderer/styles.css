@@ -57,7 +57,32 @@ html, body {
 }
 
 body.starting .card {
-  height: 480px;
+  height: 520px;
+}
+
+body.loading .card {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.96);
+  pointer-events: none;
+}
+
+body.loading::after {
+  content: 'CONNECTING TO ULTRON...';
+  position: fixed;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: rgba(32, 214, 199, 0.7);
+  animation: loading-pulse 1s ease-in-out infinite;
+  white-space: nowrap;
+}
+
+@keyframes loading-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%       { opacity: 1;    }
 }
 
 body.setup .card {
@@ -132,14 +157,32 @@ body.setup .setup-state {
   margin-bottom: 12px;
 }
 
-.ellipsis {
-  animation: ellipsis 1s infinite;
+.starting-state {
+  position: relative;
 }
 
-@keyframes ellipsis {
-  0%, 20% { content: '.'; }
-  40% { content: '..'; }
-  60%, 100% { content: '...'; }
+.starting-state::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: rgba(32, 214, 199, 0.5);
+  animation: scan-line 2.4s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes scan-line {
+  0%   { top: 0;    opacity: 1;   }
+  85%  { top: 100%; opacity: 0.4; }
+  100% { top: 100%; opacity: 0;   }
+}
+
+.ellipsis {
+  display: inline-block;
+  min-width: 18px;
+  text-align: left;
 }
 
 .progress-bar {
@@ -165,7 +208,7 @@ body.setup .setup-state {
 }
 
 .log-area {
-  height: 120px;
+  height: 160px;
   background: rgba(0, 0, 0, 0.3);
   border-radius: 4px;
   padding: 8px;

@@ -513,6 +513,10 @@ function addActivity(notes, kind = 'system') {
   broadcaster.broadcast('activity:item', item);
 }
 
+function emitTaskProgress(taskId, title, steps) {
+  broadcaster.broadcast('task_progress', { taskId, title, steps, ts: Date.now() });
+}
+
 function emitObservabilityEvent(eventType, payload = {}) {
   const event = {
     id: `obs-${++runtimeState._seq}`,
@@ -932,6 +936,12 @@ function startAscendForgeObjective(objective) {
   });
   broadcastObjectiveUpdate('ascend_forge');
   addActivity(`[ASCEND FORGE] objective started • ${objective.goal}`, 'automation');
+
+  // Emit live task progress so chat shows a step-by-step progress block
+  emitTaskProgress(run.run_id, `Forge: ${objective.goal}`,
+    plan.map((step, idx) => ({ id: idx, label: step, status: 'pending' }))
+  );
+
   return { ok: true, message: `✅ Ascend Forge objective started: ${objective.goal}` };
 }
 
@@ -2059,6 +2069,14 @@ app.post('/api/tasks/run', (req, res) => {
     taskName: message,
   });
   addActivity(`[TASK] Submitted: ${message}`, 'task');
+
+  // Emit initial task progress so chat renders a progress block
+  emitTaskProgress(run.run_id, message, [
+    { id: 0, label: 'Planning',   status: 'active' },
+    { id: 1, label: 'Executing',  status: 'pending' },
+    { id: 2, label: 'Validating', status: 'pending' },
+  ]);
+
   res.json({ ok: true, workflow_run: run.run_id, ...result });
 });
 
@@ -2998,6 +3016,28 @@ app.post('/api/forge/code-ai', async (req, res) => {
     res.json({ ok: true, response: data.response || data.reply || data.content || 'No response', tokens: 0 });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── AI Middleware Layer ────────────────────────────────────────────────────────
+
+// POST /api/middleware/process — unified multi-model input processing
+app.post('/api/middleware/process', async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/api/middleware/process', 'POST', req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/middleware/status — active model roles + Wave Field routing status
+app.get('/api/middleware/status', async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/api/middleware/status', 'GET');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message, wavefield_enabled: false, active_models: [] });
   }
 });
 

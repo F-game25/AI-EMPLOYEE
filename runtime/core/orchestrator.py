@@ -10,8 +10,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import threading
+
 from core.bus import get_message_bus
-from core.model_routing import classify_request_tier
+from core.model_routing import classify_request_tier, select_model_route
+from core.wavefield_provider import (
+    record_wavefield_event,
+    wavefield_allow_fallback,
+    wavefield_call,
+)
 
 INTENT_CATEGORIES = (
     "lead_gen",
@@ -38,6 +45,43 @@ class LLMClient:
         delay_s = 1.0
         last_error = ""
         req_tier = classify_request_tier(prompt=prompt, context=system)
+        route = select_model_route(prompt=prompt, context=system, requested_route=None, default_route="auto")
+        record_wavefield_event("route_selected")
+
+        # Shadow mode: fire wavefield in background, continue with primary
+        if route.shadow_wavefield:
+            record_wavefield_event("shadow_requests")
+            _p, _s = prompt, system
+            threading.Thread(
+                target=lambda: wavefield_call(prompt=_p, system_prompt=_s),
+                daemon=True,
+            ).start()
+
+        # Wavefield fast path: route long-context requests to wavefield model
+        if route.model_route == "wavefield":
+            record_wavefield_event("route_selected_wavefield")
+            try:
+                text = wavefield_call(prompt=prompt, system_prompt=system)
+                response = {"output": text, "tokens_used": 0, "model": route.force_model or "wavefield", "provider": "wavefield"}
+                self._log_call({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "backend": "wavefield",
+                    "attempt": 1,
+                    "duration_ms": 0,
+                    "prompt_chars": len(prompt),
+                    "request_tier": req_tier.tier,
+                    "estimated_tokens": req_tier.estimated_tokens,
+                    "routing_threshold": req_tier.threshold,
+                    "tokens_used": 0,
+                    "ok": True,
+                })
+                return response
+            except Exception as exc:  # noqa: BLE001
+                record_wavefield_event("fallbacks")
+                if not wavefield_allow_fallback():
+                    raise RuntimeError(f"Wavefield failed (fallback disabled): {exc}") from exc
+                logger.warning("Wavefield failed, falling back to primary backend: %s", exc)
+
         for attempt in range(1, attempts + 1):
             started = time.time()
             try:
