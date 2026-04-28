@@ -12,6 +12,7 @@ const cancelBtn = document.getElementById('cancelBtn')
 
 async function init() {
   particles.init()
+  setupEventListeners()
 
   const deps = await window.ai.checkDependencies()
 
@@ -29,7 +30,6 @@ async function init() {
   if (updates.update_available) showUpdateBadge()
 
   setState(status.running ? 'idle-running' : 'idle')
-  setupEventListeners()
 }
 
 function setState(newState) {
