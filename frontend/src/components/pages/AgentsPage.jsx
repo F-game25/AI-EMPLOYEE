@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { Panel, Badge, StatusDot, MiniBar } from '../ui/primitives'
 
@@ -20,21 +20,52 @@ function DR({ label, value, color = 'var(--text-primary, #F0E9D2)' }) {
   )
 }
 
-const FALLBACK_AGENTS = [
-  { id: 'a1', name: 'Orchestrator Prime', status: 'running', task: 'Coordinating agent fleet dispatch', health: 98 },
-  { id: 'a2', name: 'Data Harvester',     status: 'running', task: 'Scraping market intelligence feeds', health: 87 },
-  { id: 'a3', name: 'Code Synthesizer',   status: 'running', task: 'Generating API integration layer',  health: 91 },
-  { id: 'a4', name: 'Memory Indexer',     status: 'busy',    task: 'Compressing knowledge store',       health: 74 },
-  { id: 'a5', name: 'Hermes Relay',       status: 'running', task: 'Processing inbound requests',       health: 96 },
-  { id: 'a6', name: 'Strategy Engine',    status: 'running', task: 'Analyzing revenue pathways',        health: 83 },
-  { id: 'a7', name: 'Risk Auditor',       status: 'idle',    task: 'Standing by',                       health: 62 },
-  { id: 'a8', name: 'Learning Loop',      status: 'running', task: 'Training on session data delta',    health: 89 },
-]
+// Loading skeleton for agents while WebSocket connects
+function AgentSkeleton() {
+  return (
+    <div style={{ padding: '7px 10px', borderRadius: 7, background: 'rgba(255,255,255,0.04)', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }}>
+      <div style={{ height: 12, borderRadius: 4, background: 'rgba(255,255,255,0.1)' }} />
+    </div>
+  )
+}
 
 export default function AgentsPage() {
   const storeAgents = useAppStore(s => s.agents)
   const setAgents   = useAppStore(s => s.setAgents)
-  const agents = storeAgents.length ? storeAgents : FALLBACK_AGENTS
+  const [httpAgents, setHttpAgents] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  // Fetch agents from HTTP API as fallback
+  useEffect(() => {
+    const fetchAgents = async () => {
+      setLoading(true)
+      try {
+        const res = await fetch('/api/agents')
+        if (res.ok) {
+          const data = await res.json()
+          const agents = Array.isArray(data.agents) ? data.agents : []
+          setHttpAgents(agents.map((a, i) => ({
+            id: a.id || `agent-${i}`,
+            name: a.name || a.description?.split(' — ')[0] || 'Unknown Agent',
+            status: a.status || 'idle',
+            task: a.description || '',
+            health: a.health ?? 80
+          })))
+        }
+      } catch (err) {
+        console.warn('Failed to fetch agents from /api/agents:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (storeAgents.length === 0) {
+      fetchAgents()
+    }
+  }, [storeAgents])
+
+  const agents = storeAgents.length ? storeAgents : httpAgents
+  const isConnecting = storeAgents.length === 0 && loading
 
   const [sel, setSel]           = useState(null)
   const [botState, setBotState] = useState('AUTO')
@@ -68,15 +99,21 @@ export default function AgentsPage() {
         {/* Fleet Roster */}
         <Panel title="Fleet Roster" bodyStyle={{ padding: 8 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {agents.map(a => (
-              <div key={a.id} onClick={() => setSel(a)} style={{ padding: '7px 10px', borderRadius: 7, border: `1px solid ${selAgent?.id === a.id ? 'rgba(229,199,107,0.4)' : 'rgba(229,199,107,0.08)'}`, background: selAgent?.id === a.id ? 'rgba(229,199,107,0.07)' : 'var(--bg-elevated,#12141F)', cursor: 'pointer' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <StatusDot status={a.status} />
-                  <span style={{ fontSize: 11.5, color: 'var(--text-primary,#F0E9D2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
-                  <span style={{ fontFamily: 'monospace', fontSize: 10, color: (a.health ?? 80) > 80 ? 'var(--teal,#20D6C7)' : (a.health ?? 80) > 50 ? 'var(--gold-bright,#FFD97A)' : '#EF4444' }}>{a.health ?? 80}%</span>
+            {isConnecting ? (
+              Array.from({ length: 5 }).map((_, i) => <AgentSkeleton key={i} />)
+            ) : agents.length > 0 ? (
+              agents.map(a => (
+                <div key={a.id} onClick={() => setSel(a)} style={{ padding: '7px 10px', borderRadius: 7, border: `1px solid ${selAgent?.id === a.id ? 'rgba(229,199,107,0.4)' : 'rgba(229,199,107,0.08)'}`, background: selAgent?.id === a.id ? 'rgba(229,199,107,0.07)' : 'var(--bg-elevated,#12141F)', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <StatusDot status={a.status} />
+                    <span style={{ fontSize: 11.5, color: 'var(--text-primary,#F0E9D2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 10, color: (a.health ?? 80) > 80 ? 'var(--teal,#20D6C7)' : (a.health ?? 80) > 50 ? 'var(--gold-bright,#FFD97A)' : '#EF4444' }}>{a.health ?? 80}%</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', padding: '12px 0', textAlign: 'center' }}>No agents connected</div>
+            )}
           </div>
         </Panel>
 
