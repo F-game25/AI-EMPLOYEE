@@ -2,7 +2,7 @@
   "_meta": {
     "version": "3.0",
     "total_skills": 147,
-    "description": "AI Employee Skills Library \u2014 147 reusable skills across 19 categories. Assign any combination to a custom agent via the Skills tab in the dashboard or via WhatsApp: 'create agent <name> with <skill1>, <skill2>'",
+    "description": "AI Employee Skills Library — 147 reusable skills across 19 categories. Assign any combination to a custom agent via the Skills tab in the dashboard or via WhatsApp: 'create agent <name> with <skill1>, <skill2>'",
     "updated_at": "2026-04-11",
     "quality_schema": "input_format/output_format/quality_standards/error_handling/best_practices/execution_steps added to every skill"
   },
@@ -32,7 +32,7 @@
       "id": "blog_writing",
       "name": "Blog Post Writing",
       "category": "Content & Writing",
-      "description": "Write long-form SEO-optimised blog posts (500\u20133000 words) on any topic with structured headings and meta descriptions.",
+      "description": "Write long-form SEO-optimised blog posts (500–3000 words) on any topic with structured headings and meta descriptions.",
       "prompt_hint": "Write a [word-count]-word blog post about [topic] targeting keyword [keyword]. Include H2/H3 headings, a meta description, and a CTA.",
       "tags": [
         "writing",
@@ -42,7 +42,7 @@
       ],
       "compatible_agents": [
         "content-master",
-        "creative-studio"
+        "social-media-manager"
       ],
       "input_format": {
         "required_fields": [
@@ -93,12 +93,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Extract topic, target keyword, word count, and desired tone from input.",
+        "Research 3–5 authoritative angles or statistics to support the post.",
+        "Outline the post: H1 title, 3–5 H2 sections with sub-points, conclusion, CTA.",
+        "Write the full post with meta description (155 chars) and internal link suggestions.",
+        "Review for keyword density (1–2%), readability, title tag length (50–60 chars)."
+      ],
+      "system_prompt": "You are an expert SEO content writer. Produce well-structured, keyword-optimized blog posts that rank and convert. Always include H2 headings, meta descriptions, and actionable CTAs."
     },
     {
       "id": "email_copywriting",
@@ -164,12 +165,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Identify the email type (cold outreach, nurture, announcement, re-engagement) and audience.",
+        "Define the single goal: open, click, reply, or purchase.",
+        "Write subject line (40 chars max), preview text (90 chars), and hook first sentence.",
+        "Write the body: hook → value → proof → CTA. One CTA only.",
+        "Review for spam triggers, mobile rendering (under 600px), and unsubscribe compliance."
+      ],
+      "system_prompt": "You are a direct response email copywriter. Write emails that get opened and clicked. Every word earns its place. Subject lines under 40 chars, one CTA per email, no filler phrases."
     },
     {
       "id": "product_descriptions",
@@ -235,12 +237,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Extract product name, key features, target buyer, and price point.",
+        "Identify the top 3 emotional/practical benefits (not just features).",
+        "Write headline (benefit-driven), bullet list (5 bullets, feature → benefit format), and full description.",
+        "Add sensory language and social proof placeholders (e.g. '4.8/5 stars').",
+        "Optimize for target keywords naturally within the first 100 words."
+      ],
+      "system_prompt": "You are a conversion copywriter specializing in e-commerce. Write product descriptions that sell benefits, not features. Use sensory language and social proof cues."
     },
     {
       "id": "social_captions",
@@ -306,12 +309,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Identify platform, content type (post/reel/story/thread), and goal (engagement/traffic/followers).",
+        "Write a scroll-stopping first line (hook) that works without seeing the image.",
+        "Draft 2–3 body sentences with personality, value, or story.",
+        "Add platform-appropriate hashtags (Instagram: 20–30, LinkedIn: 3–5, TikTok: 4–6).",
+        "End with a CTA (question, link in bio, or save for later)."
+      ],
+      "system_prompt": "You are a social media content creator. Write platform-optimized captions with scroll-stopping hooks, personality, and strategic hashtags. Match the platform's unique culture."
     },
     {
       "id": "youtube_scripts",
@@ -325,7 +329,7 @@
         "script"
       ],
       "compatible_agents": [
-        "creative-studio",
+        "social-media-manager",
         "content-master"
       ],
       "input_format": {
@@ -377,12 +381,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Define video topic, target keyword, and audience level (beginner/intermediate/advanced).",
+        "Write a 15-second hook that states the problem and promises the solution.",
+        "Outline the script: Hook → Problem → Solution (5–7 sections) → Recap → CTA.",
+        "Write each section with timestamps and b-roll suggestions.",
+        "Add SEO-optimized title (60 chars), description (first 150 chars keyword-rich), and tags."
+      ],
+      "system_prompt": "You are a YouTube content strategist and scriptwriter. Write scripts that hook viewers in 15 seconds, deliver value throughout, and drive subscriptions. Include timestamps and b-roll notes."
     },
     {
       "id": "press_releases",
@@ -447,11 +452,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the news angle: funding, product launch, partnership, milestone, or award.",
+        "Write the headline (subject + action + benefit in one sentence, AP style).",
+        "Write the lede (who, what, when, where, why in first paragraph).",
+        "Add supporting paragraphs with quotes, data, and background context.",
+        "Close with boilerplate company description and press contact details."
       ]
     },
     {
@@ -519,11 +524,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define platform (Meta/Google/LinkedIn), objective, and target audience segment.",
+        "Identify the primary angle: pain point, social proof, curiosity, or urgency.",
+        "Write 3 headline variants (30 chars for Google, 40 for Meta, 150 for LinkedIn).",
+        "Write primary text under 125 chars (before fold) with a clear benefit statement.",
+        "Add CTA button text and UTM-tagged destination URL recommendation."
       ]
     },
     {
@@ -590,11 +595,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define content goals, target platforms, and publishing frequency (daily/weekly/monthly).",
+        "Research trending topics and seasonal opportunities for the planning period.",
+        "Generate topic ideas per platform with content type (article/video/carousel/story).",
+        "Assign publish dates based on optimal times per platform and content mix.",
+        "Output calendar in structured format with status column (draft/review/scheduled/published)."
       ]
     },
     {
@@ -661,18 +666,18 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define newsletter topic, audience segment, and issue number/date.",
+        "Write the subject line and preview text (open rate matters most here).",
+        "Structure the issue: opener (1 paragraph), main story (3–5 paragraphs), 3 quick tips, CTA.",
+        "Add curated links section with 2–3 relevant external resources.",
+        "Include plain-text fallback version and unsubscribe reminder."
       ]
     },
     {
       "id": "case_study_writing",
       "name": "Case Study Writing",
       "category": "Content & Writing",
-      "description": "Write detailed customer success case studies following the problem\u2013solution\u2013results structure.",
+      "description": "Write detailed customer success case studies following the problem–solution–results structure.",
       "prompt_hint": "Write a case study for [customer]. Challenge: [challenge]. Solution: [solution]. Results: [metrics]. Length: [words].",
       "tags": [
         "b2b",
@@ -731,11 +736,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Extract: customer name/role, problem before solution, measurable results achieved.",
+        "Write the headline: '[Company] achieved [result] with [product]'.",
+        "Structure: Problem → Solution → Implementation → Results → Quote → Next steps.",
+        "Include specific metrics (%, $, time saved) in results section.",
+        "Add pull quotes from the customer and a CTA to book a demo or request the case study."
       ]
     },
     {
@@ -802,11 +807,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define thesis, target audience (technical/executive), and key argument to prove.",
+        "Research 5–10 supporting data points, studies, or industry reports.",
+        "Structure: Executive summary → Problem → Research findings → Solution framework → Conclusion.",
+        "Write each section with citations and visual data recommendations (charts/tables).",
+        "Add executive summary (1-page), table of contents, and download CTA."
       ]
     },
     {
@@ -873,11 +878,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the subject, desired outcome, and target audience for the headline.",
+        "Generate variants using 5 proven frameworks: number, how-to, curiosity gap, controversy, benefit.",
+        "Score each headline for clarity (0–10), specificity (0–10), and hook strength (0–10).",
+        "Shortlist top 3 variants and explain the psychological trigger each uses.",
+        "Test headline against common alternatives and flag any ambiguity."
       ]
     },
     {
@@ -943,11 +948,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Read the full text once for overall flow and structure before touching individual words.",
+        "Check grammar: subject-verb agreement, tense consistency, pronoun clarity.",
+        "Check style: active vs passive voice, sentence length variation, redundant phrases.",
+        "Check formatting: heading hierarchy, consistent punctuation, proper capitalization.",
+        "Final pass: read aloud test for rhythm, then verify brand voice alignment."
       ]
     },
     {
@@ -1013,11 +1018,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the original tone and the target tone (formal/casual/expert/empathetic/urgent).",
+        "List 5 specific vocabulary changes required (formal → casual: 'utilize' → 'use').",
+        "Rewrite the first paragraph as a tone sample for user approval.",
+        "Apply tone changes throughout: vocabulary, sentence length, punctuation style, contractions.",
+        "Verify the meaning is preserved and no information was lost in the adaptation."
       ]
     },
     {
@@ -1083,11 +1088,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify source language, target language, target audience (general/technical/legal), and purpose.",
+        "Translate the text maintaining original meaning, not word-for-word literal translation.",
+        "Localize idioms, currency, dates, and cultural references for the target market.",
+        "Review technical terms and proper nouns for accuracy in the target language.",
+        "Flag any ambiguous phrases where multiple translations are equally valid."
       ]
     },
     {
@@ -1154,12 +1159,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Define the competitor set (direct, indirect, aspirational) and analysis scope.",
+        "Research each competitor's: pricing, features, positioning, messaging, and recent news.",
+        "Map the competitive landscape using a comparison table or positioning matrix.",
+        "Identify differentiation opportunities: gaps, underserved segments, pricing white space.",
+        "Output ranked recommendations for competitive response or positioning adjustment."
+      ],
+      "system_prompt": "You are a competitive intelligence analyst. Provide objective, data-driven competitor assessments with specific positioning insights and actionable differentiation recommendations."
     },
     {
       "id": "market_research",
@@ -1225,11 +1231,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the research question, target market, and decision to be made.",
+        "Gather data from: industry reports, analyst estimates, public company filings, and news.",
+        "Segment the market by size (TAM/SAM/SOM), geography, and customer type.",
+        "Identify key growth drivers, barriers to entry, and macro trends.",
+        "Synthesize findings into an executive summary with 3–5 actionable insights."
       ]
     },
     {
@@ -1296,11 +1302,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the subject (company, product, strategy, or market entry).",
+        "List 3–5 strengths with evidence (competitive advantages, resources, differentiation).",
+        "List 3–5 weaknesses with honest assessment (gaps, vulnerabilities, resource constraints).",
+        "List 3–5 opportunities from market trends, competitor weaknesses, or unmet needs.",
+        "List 3–5 threats with likelihood and impact scores; suggest mitigation per threat."
       ]
     },
     {
@@ -1366,11 +1372,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the industry scope, geography, and time horizon of the report.",
+        "Research market size, CAGR, key players, and recent M&A/funding activity.",
+        "Identify regulatory environment, technology disruptions, and entry barriers.",
+        "Profile top 5 companies with revenue, market share, and strategic positioning.",
+        "Synthesize with: key takeaways, future outlook, and investment/opportunity implications."
       ]
     },
     {
@@ -1385,8 +1391,7 @@
         "strategy"
       ],
       "compatible_agents": [
-        "intel-agent",
-        "discovery"
+        "intel-agent"
       ],
       "input_format": {
         "required_fields": [
@@ -1437,11 +1442,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the domain (technology, market, consumer behavior, regulation) and time horizon.",
+        "Scan sources: news, Google Trends, social media, conference themes, VC funding patterns.",
+        "Classify trends as emerging (0–12 months), growing (1–2 years), or mainstream (2+ years).",
+        "Score each trend by impact (high/medium/low) and certainty (confirmed/probable/speculative).",
+        "Recommend which trends to act on now vs monitor vs ignore."
       ]
     },
     {
@@ -1508,11 +1513,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the customer segment or ICP to profile.",
+        "Research demographics: age, role, company size, industry, geography.",
+        "Map psychographics: goals, challenges, values, information sources, decision triggers.",
+        "Document the buying process: awareness→consideration→decision touchpoints and stakeholders.",
+        "Create a one-page persona card with name, photo suggestion, quote, and key messaging hooks."
       ]
     },
     {
@@ -1579,11 +1584,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the product/service, target market, and current pricing (if any).",
+        "Research competitor pricing: list prices, packaging, discounting patterns, and positioning.",
+        "Identify pricing model options: cost-plus, value-based, freemium, usage-based, tiered.",
+        "Calculate price sensitivity: what's the lowest a buyer expects vs the highest they'd pay.",
+        "Recommend pricing strategy with rationale and test variants to A/B validate."
       ]
     },
     {
@@ -1650,11 +1655,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the corpus: product reviews, social media mentions, support tickets, or news articles.",
+        "Classify sentiment: positive/negative/neutral per item with confidence score.",
+        "Group by theme: what specific topics drive positive vs negative sentiment.",
+        "Identify high-severity items (repeated complaints, PR risks, or viral praise).",
+        "Summarize: overall sentiment score, top 3 praise themes, top 3 complaint themes, and recommended actions."
       ]
     },
     {
@@ -1720,11 +1725,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the research goal, target respondent, and what decision the survey will inform.",
+        "Design 8–12 questions max: mix question types (likert, multiple choice, open-ended).",
+        "Write each question to be unambiguous and free of leading language.",
+        "Sequence questions: easy/non-threatening first, sensitive/demographics last.",
+        "Recommend distribution channel, sample size, and analysis plan."
       ]
     },
     {
@@ -1791,11 +1796,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the research topic, scope (years, geography, methodology types), and key questions.",
+        "Search for 8–12 relevant sources: academic papers, industry reports, and expert blogs.",
+        "Summarize each source: methodology, findings, limitations, and relevance.",
+        "Synthesize: identify consensus, contradictions, and gaps in existing research.",
+        "Conclude with research implications and recommendations for further study."
       ]
     },
     {
@@ -1861,11 +1866,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Validate the data: check for completeness, obvious errors, and representativeness.",
+        "Identify the primary question the data should answer.",
+        "Calculate key statistics: mean, median, range, growth rates, and notable outliers.",
+        "Identify 3–5 patterns or trends with supporting data points.",
+        "Translate numbers into business insights with specific, actionable recommendations."
       ]
     },
     {
@@ -1873,7 +1878,7 @@
       "name": "Risk Assessment",
       "category": "Research & Analysis",
       "description": "Identify and score business, market, or operational risks, with mitigation strategies for each.",
-      "prompt_hint": "Perform a risk assessment for [project/business/market]. List risks, rate each (likelihood \u00d7 impact), and provide mitigation plans.",
+      "prompt_hint": "Perform a risk assessment for [project/business/market]. List risks, rate each (likelihood × impact), and provide mitigation plans.",
       "tags": [
         "risk",
         "strategy",
@@ -1932,12 +1937,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Define the subject, scope, and stakeholders affected by the risk assessment.",
+        "Identify risks in 5 categories: financial, operational, strategic, legal, reputational.",
+        "Score each risk: likelihood (1–5) × impact (1–5) = risk score (1–25).",
+        "Prioritize top 5 risks; develop specific mitigation strategy for each.",
+        "Output risk register with owner, timeline, and residual risk after mitigation."
+      ],
+      "system_prompt": "You are a risk management consultant. Use a structured likelihood-impact framework. Be honest about high-severity risks and specific about mitigation strategies."
     },
     {
       "id": "technical_analysis",
@@ -2003,12 +2009,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Identify the asset, timeframe (1H/4H/D/W), and trading objective (swing/position/intraday).",
+        "Plot key price levels: recent highs/lows, support/resistance zones, and 52-week range.",
+        "Apply indicators: RSI (overbought/oversold), MACD (momentum), Bollinger Bands (volatility).",
+        "Identify chart patterns: trend lines, channels, head & shoulders, triangles, flags.",
+        "Generate trade setup: entry zone, stop-loss, take-profit targets, and risk/reward ratio."
+      ],
+      "system_prompt": "You are a professional technical analyst. Provide chart-based trading analysis with specific price levels, indicator readings, and clearly defined risk/reward trade setups."
     },
     {
       "id": "fundamental_analysis",
@@ -2074,11 +2081,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the asset (stock, crypto, commodity) and investment horizon.",
+        "Review financial health: revenue growth, profit margins, debt levels, and free cash flow.",
+        "Assess qualitative factors: moat, management quality, market position, and industry tailwinds.",
+        "Calculate valuation: P/E, P/S, EV/EBITDA, and compare to sector peers.",
+        "Produce investment thesis: bull case, bear case, fair value estimate, and conviction score."
       ]
     },
     {
@@ -2146,11 +2153,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify active prediction markets relevant to the query.",
+        "Research the underlying event: timeline, key actors, and resolution criteria.",
+        "Analyze current market probability vs base-rate probability for the event.",
+        "Identify edge: where market price diverges from your probability estimate.",
+        "Score the opportunity: expected value, confidence level, and recommended position size."
       ]
     },
     {
@@ -2216,11 +2223,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the cryptocurrency, timeframe, and signal type (entry/exit/hold).",
+        "Analyze on-chain data: wallet flows, exchange inflows/outflows, and active addresses.",
+        "Apply technical analysis: trend direction, momentum indicators, and key levels.",
+        "Check market context: BTC dominance, fear/greed index, and macro catalysts.",
+        "Output signal: direction (long/short/neutral), entry price, stop-loss, target, and confidence %."
       ]
     },
     {
@@ -2287,11 +2294,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define portfolio goals: target return, risk tolerance, investment horizon, and constraints.",
+        "List current holdings with allocation %, expected return, and volatility.",
+        "Calculate correlation matrix between assets to identify concentration risk.",
+        "Apply optimization: suggest rebalancing to improve Sharpe ratio while meeting constraints.",
+        "Output recommended allocation with rationale, expected impact on risk/return profile."
       ]
     },
     {
@@ -2357,11 +2364,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the trading strategy, capital at risk, and maximum acceptable drawdown.",
+        "Calculate position sizing using Kelly Criterion or fixed fractional method.",
+        "Set stop-loss levels based on ATR (Average True Range) or key support levels.",
+        "Define maximum open positions, sector concentration limits, and correlation exposure.",
+        "Create a risk dashboard: current exposure, max drawdown to date, risk-of-ruin estimate."
       ]
     },
     {
@@ -2428,11 +2435,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the company, reporting date, and consensus analyst estimates (EPS and revenue).",
+        "Review prior quarter results and management guidance for context.",
+        "Analyze the actual results vs estimates: beat/miss magnitude and quality.",
+        "Assess forward guidance changes and management commentary for surprises.",
+        "Output price reaction forecast: expected move, key risk factors, and trade strategy."
       ]
     },
     {
@@ -2500,11 +2507,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the prediction market event, resolution date, and current probability.",
+        "Run swarm simulation: model 100 independent agent estimates with uncertainty.",
+        "Calculate swarm probability: median estimate with confidence interval.",
+        "Compare swarm vs market price: identify edge and direction.",
+        "Output prediction: probability estimate, confidence band, and recommended position."
       ]
     },
     {
@@ -2570,18 +2577,18 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the markets or exchanges to compare (crypto, e-commerce, prediction markets).",
+        "Identify price discrepancies: calculate spread as % after fees and slippage.",
+        "Assess execution risk: liquidity depth, transfer time, and regulatory constraints.",
+        "Calculate expected profit: spread × position size − transaction costs.",
+        "Rank opportunities by risk-adjusted return; flag any requiring immediate action."
       ]
     },
     {
       "id": "market_sentiment_scoring",
       "name": "Market Sentiment Scoring",
       "category": "Trading & Finance",
-      "description": "Score overall market sentiment (0\u2013100) from news, social, and on-chain signals with a directional outlook.",
+      "description": "Score overall market sentiment (0–100) from news, social, and on-chain signals with a directional outlook.",
       "prompt_hint": "Score market sentiment for [asset/market] using: news headlines=[list], social volume=[trend], on-chain=[metric]. Output: score + outlook.",
       "tags": [
         "sentiment",
@@ -2641,11 +2648,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the asset, sector, or market to score.",
+        "Aggregate sentiment from: news headlines, social media volume, options flow, and positioning data.",
+        "Score each signal 0–100 (0=extreme fear, 100=extreme greed).",
+        "Weight signals by reliability and recency to produce composite sentiment score.",
+        "Output score with interpretation, key drivers, and contrarian vs momentum trade implications."
       ]
     },
     {
@@ -2712,11 +2719,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the protocol: name, chain, category (DEX/lending/yield/staking).",
+        "Review core metrics: TVL, 24h volume, fees generated, and token holder count.",
+        "Assess smart contract risk: audit status, code age, incident history, and admin keys.",
+        "Analyze tokenomics: supply schedule, emission rate, incentive alignment, and sell pressure.",
+        "Output investment thesis: yield estimate, risk rating, and recommended position size."
       ]
     },
     {
@@ -2782,11 +2789,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the underlying, directional view, timeframe, and risk tolerance.",
+        "Analyze implied volatility: current IV vs historical IV and IV rank.",
+        "Select strategy based on view: covered call, protective put, spread, straddle, or iron condor.",
+        "Calculate: max profit, max loss, breakeven price(s), and probability of profit.",
+        "Output trade setup: specific strikes, expiry, premium collected/paid, and Greeks summary."
       ]
     },
     {
@@ -2854,11 +2861,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the thread topic, core argument, and target audience.",
+        "Write a hook tweet that makes readers stop scrolling (stat, question, or bold claim).",
+        "Outline 6–12 tweets: each must be a standalone insight while building to a conclusion.",
+        "Write each tweet under 280 chars with a bridge to the next tweet.",
+        "End with a CTA tweet: follow, retweet, or link to deeper content."
       ]
     },
     {
@@ -2866,7 +2873,7 @@
       "name": "LinkedIn Post Writing",
       "category": "Social Media",
       "description": "Write professional LinkedIn posts that drive engagement, establish thought leadership, and grow connections.",
-      "prompt_hint": "Write a LinkedIn post about [topic/story]. Personal angle: [angle]. Goal: [engagement/leads/awareness]. Include CTA and 3\u20135 hashtags.",
+      "prompt_hint": "Write a LinkedIn post about [topic/story]. Personal angle: [angle]. Goal: [engagement/leads/awareness]. Include CTA and 3–5 hashtags.",
       "tags": [
         "linkedin",
         "b2b",
@@ -2926,18 +2933,18 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the post goal (thought leadership, engagement, lead generation, or brand building).",
+        "Write a hook first line that works without the 'see more' — the first 2 lines must compel a click.",
+        "Write 3–5 short paragraphs (2–3 sentences max each) with one key insight per paragraph.",
+        "Add a question at the end to drive comments (the algorithm rewards them).",
+        "Include 3–5 hashtags (1 niche, 1 industry, 1 broad) and tag relevant people/companies."
       ]
     },
     {
       "id": "instagram_caption",
       "name": "Instagram Caption Writing",
       "category": "Social Media",
-      "description": "Write visually evocative Instagram captions with storytelling, emojis, and 20\u201330 targeted hashtags.",
+      "description": "Write visually evocative Instagram captions with storytelling, emojis, and 20–30 targeted hashtags.",
       "prompt_hint": "Write an Instagram caption for a photo of [subject]. Brand voice: [voice]. Include 20 hashtags split between niche and broad.",
       "tags": [
         "instagram",
@@ -2947,7 +2954,7 @@
       ],
       "compatible_agents": [
         "social-guru",
-        "creative-studio"
+        "social-media-manager"
       ],
       "input_format": {
         "required_fields": [
@@ -2998,11 +3005,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the visual content type (photo, reel, carousel) and the emotional story it tells.",
+        "Write the first 125 characters as the hook — visible before 'more'.",
+        "Write 3–5 sentences of story, value, or personality.",
+        "Add a clear CTA: 'save this', 'share with someone who needs this', or 'link in bio'.",
+        "Add 20–30 hashtags in the first comment, mixing niche (10K–100K) and popular (100K+) tags."
       ]
     },
     {
@@ -3019,7 +3026,7 @@
       ],
       "compatible_agents": [
         "social-guru",
-        "creative-studio"
+        "social-media-manager"
       ],
       "input_format": {
         "required_fields": [
@@ -3070,11 +3077,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the video topic and target emotion (curiosity, surprise, relatability, or FOMO).",
+        "Write 5 pattern-interrupting openers using different frameworks: POV, 'The truth about...', 'I tried...', 'Day in the life', and 'This changed everything'.",
+        "Evaluate each hook on: clarity (will viewers understand instantly), intrigue (do they need to watch), and pattern interrupt (is it unexpected).",
+        "Score each hook out of 10 for estimated watch-through rate.",
+        "Recommend top 2 hooks with rationale for the specific platform algorithm."
       ]
     },
     {
@@ -3082,7 +3089,7 @@
       "name": "Hashtag Research",
       "category": "Social Media",
       "description": "Research and categorise optimal hashtags by volume and competition for Instagram, TikTok, and LinkedIn.",
-      "prompt_hint": "Research the best hashtags for [niche/topic] on [platform]. Group into: mega (>1M), large (100K\u20131M), niche (<100K). Return [N] per group.",
+      "prompt_hint": "Research the best hashtags for [niche/topic] on [platform]. Group into: mega (>1M), large (100K–1M), niche (<100K). Return [N] per group.",
       "tags": [
         "hashtags",
         "social",
@@ -3141,11 +3148,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the platform (Instagram/TikTok/LinkedIn/Twitter) and content niche.",
+        "Research hashtag tiers: mega (>10M posts), macro (1M–10M), micro (100K–1M), niche (<100K).",
+        "Identify 30 relevant hashtags across 3 tiers for maximum organic reach.",
+        "Check hashtag health: active community, recent posts, and no shadow bans.",
+        "Output: primary set (8–10), secondary set (10–15), niche set (5–7), with post counts for each."
       ]
     },
     {
@@ -3212,11 +3219,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the platform, current follower count, and engagement goal (comments/shares/DMs).",
+        "Audit current engagement rate vs platform benchmark (Instagram: 1–3%, LinkedIn: 2–5%, TikTok: 4–8%).",
+        "Design 3 engagement triggers: question prompts, controversy, or community challenges.",
+        "Build a response protocol: reply to every comment within 2 hours for first 24 hours.",
+        "Create a DM funnel: viral post → DM trigger → conversation → offer."
       ]
     },
     {
@@ -3283,11 +3290,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the campaign goal, budget range, and ideal influencer profile (niche, size, audience).",
+        "Build a prospect list: nano (1K–10K), micro (10K–100K), or macro (100K+) influencers.",
+        "Research each prospect: engagement rate, audience demographics, content quality, and past brand deals.",
+        "Write a personalized outreach DM/email: specific compliment + collaboration concept + clear ask.",
+        "Define deliverables, timeline, and compensation (flat fee, rev share, free product)."
       ]
     },
     {
@@ -3354,11 +3361,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the community platform (Discord/Reddit/Facebook Group/Slack), size, and health goals.",
+        "Establish community rules: 5–7 clear guidelines with enforcement protocols.",
+        "Design weekly engagement calendar: AMAs, challenges, polls, and featured member spotlights.",
+        "Build moderation workflow: flag → review → warn → remove, with escalation criteria.",
+        "Create monthly community health report: active members, engagement rate, top contributors."
       ]
     },
     {
@@ -3375,7 +3382,7 @@
       ],
       "compatible_agents": [
         "social-guru",
-        "creative-studio"
+        "social-media-manager"
       ],
       "input_format": {
         "required_fields": [
@@ -3426,11 +3433,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the brand, niche, and content goal (brand awareness/product/community).",
+        "Research currently viral formats: trending sounds (TikTok), viral post structures (LinkedIn), and meme templates.",
+        "Generate 10 content ideas across 5 formats: POV story, listicle, behind-the-scenes, hot take, and tutorial.",
+        "Score each idea for: relevance to brand (1–5), viral potential (1–5), production effort (1–5).",
+        "Select top 3 with production brief: concept, format, platform, hook, and expected reach."
       ]
     },
     {
@@ -3498,18 +3505,18 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the reporting period, platforms, and KPIs to track.",
+        "Collect metrics: reach, impressions, engagement rate, follower growth, and top content.",
+        "Compare performance vs previous period and platform benchmarks.",
+        "Identify the top 3 performing posts and analyze what made them work.",
+        "Recommend 3 specific optimizations for the next period based on the data."
       ]
     },
     {
       "id": "cold_email_outreach",
       "name": "Cold Email Outreach Sequences",
       "category": "Lead Generation & Sales",
-      "description": "Write 3\u20135 touch cold email sequences with subject lines, personalisation hooks, and automated follow-ups.",
+      "description": "Write 3–5 touch cold email sequences with subject lines, personalisation hooks, and automated follow-ups.",
       "prompt_hint": "Write a [N]-email cold outreach sequence for [ICP]. Product: [product]. Pain point: [pain]. Sequence: Day 1, 3, 7, 14. Include subject lines.",
       "tags": [
         "cold email",
@@ -3570,12 +3577,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Define the ICP: company size, industry, role, pain point, and trigger event.",
+        "Research the prospect: recent news, job postings, product launches, or funding rounds.",
+        "Write subject line (40 chars max, specific, no clickbait) and first sentence (personalized hook).",
+        "Write body: 1 sentence problem statement, 1 sentence solution, 1 sentence social proof, 1 CTA.",
+        "Set up 3-email sequence: Day 0 (cold), Day 3 (follow-up), Day 7 (breakup email)."
+      ],
+      "system_prompt": "You are a B2B sales email specialist. Write personalized, specific cold emails that get replies. No fluff, no generic openers. One CTA per email, under 150 words total."
     },
     {
       "id": "linkedin_prospecting",
@@ -3641,11 +3649,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define ICP and build a Boolean search string for LinkedIn Sales Navigator.",
+        "Filter by: title, company size, geography, seniority, and recent activity.",
+        "Write a connection request note (300 chars max) that references something specific.",
+        "Write follow-up message sequence: Day 1 (value add), Day 5 (soft ask), Day 10 (direct pitch).",
+        "Track metrics: acceptance rate target >30%, reply rate target >15%."
       ]
     },
     {
@@ -3713,11 +3721,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the audience (cold prospect/warm lead/investor), deal size, and objective (meeting/close).",
+        "Structure: 1 problem slide, 1 solution, 1 demo/product, 1 proof (case study), 1 pricing, 1 next steps.",
+        "Write each slide headline as a benefit statement, not a topic label.",
+        "Add speaker notes for each slide with key talking points and objection pre-handles.",
+        "Close with a single, specific next step (book a call, approve a proposal, start a trial)."
       ]
     },
     {
@@ -3725,7 +3733,7 @@
       "name": "Objection Handling Scripts",
       "category": "Lead Generation & Sales",
       "description": "Create objection-handling scripts for top sales objections with empathy statements and counter-questions.",
-      "prompt_hint": "Write handling scripts for these [N] sales objections for [product]: [list of objections]. Use the Feel\u2013Felt\u2013Found framework. Include pivots.",
+      "prompt_hint": "Write handling scripts for these [N] sales objections for [product]: [list of objections]. Use the Feel–Felt–Found framework. Include pivots.",
       "tags": [
         "sales",
         "objections",
@@ -3784,11 +3792,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the objection category: price, timing, competitor, authority, or need.",
+        "Acknowledge the objection with empathy: 'I completely understand why you'd say that.'",
+        "Ask a clarifying question to understand the real concern beneath the surface objection.",
+        "Respond with evidence: data, case study, or analogy that addresses the real concern.",
+        "Pivot to the next step: 'Given that, would it make sense to...?'"
       ]
     },
     {
@@ -3856,11 +3864,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define scoring dimensions: fit (company/role/size) and engagement (opens/clicks/demos requested).",
+        "Assign weights: fit (50%), engagement (50%), adjusted by deal size and urgency signals.",
+        "Set score thresholds: MQL (>40 points), SQL (>70 points), ready to close (>90 points).",
+        "Identify negative scoring triggers: competitors, wrong company size, no budget authority.",
+        "Output scored lead list with priority ranking and recommended next action per tier."
       ]
     },
     {
@@ -3927,11 +3935,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Extract key information from meeting notes: attendees, date, agenda topics discussed.",
+        "Document decisions made and commitments given by each party.",
+        "List all action items with owner, deadline, and follow-up method.",
+        "Update deal stage and expected close date based on the meeting outcome.",
+        "Write next-step summary to paste into CRM deal record (2–3 sentences)."
       ]
     },
     {
@@ -3999,11 +4007,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the trigger event (demo attended/content downloaded/free trial started) and buyer stage.",
+        "Design 4-touch sequence: Day 1 (thank you + value), Day 3 (case study), Day 7 (objection pre-handle), Day 14 (urgency close).",
+        "Write each message: subject line, 2–3 sentence body, specific CTA.",
+        "Set conditional branching: if reply → move to conversation flow; if no reply → continue sequence.",
+        "Define exit criteria: reply, unsubscribe, or booked meeting."
       ]
     },
     {
@@ -4071,11 +4079,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Gather requirements: client goals, budget, timeline, success metrics, and stakeholders.",
+        "Write executive summary: problem → proposed solution → expected outcome (1 page).",
+        "Detail the scope: deliverables, timeline with milestones, and exclusions/assumptions.",
+        "Add pricing: investment breakdown, payment terms, and what's included vs optional.",
+        "Close with next steps, signature block, and expiry date to create urgency."
       ]
     },
     {
@@ -4142,11 +4150,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Research the company: recent news, funding, headcount changes, and tech stack.",
+        "Research the contact: LinkedIn profile, past roles, shared connections, and recent posts.",
+        "Prepare 5–7 SPIN questions: 1 situation, 2 problem, 2 implication, 2 need-payoff.",
+        "Anticipate objections based on their industry and prepare 2-sentence responses.",
+        "Define success criteria for the call: what outcome qualifies it as a good discovery?"
       ]
     },
     {
@@ -4213,11 +4221,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the deal stage and buyer's primary concern (risk, price, timing, or ROI).",
+        "Choose the close type: assumptive, summary, urgency, or alternative close.",
+        "Write the opening: acknowledge progress, summarize value delivered, state the ask.",
+        "Include objection pre-handle: 'If you had one concern, what would hold you back from moving forward today?'",
+        "End with a specific, time-bound next step: 'If we got contracts to you by [day], could you review by [date]?'"
       ]
     },
     {
@@ -4225,7 +4233,7 @@
       "name": "Support Ticket Triage",
       "category": "Customer Support",
       "description": "Categorise, prioritise, and suggest responses for inbound support tickets using a structured triage framework.",
-      "prompt_hint": "Triage the following support tickets: [tickets]. For each: category, severity (P1\u2013P4), suggested team, draft response, and escalation flag.",
+      "prompt_hint": "Triage the following support tickets: [tickets]. For each: category, severity (P1–P4), suggested team, draft response, and escalation flag.",
       "tags": [
         "support",
         "triage",
@@ -4283,11 +4291,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Classify the ticket: category (refund/bug/billing/onboarding/feature/general) and priority (P0–P3).",
+        "Check for escalation flags: repeated contact, legal threat, media mention, payment dispute.",
+        "Identify the customer's emotional state and adjust tone accordingly (frustrated → empathetic).",
+        "Draft the initial response: acknowledge, investigate, and set expectations with ETA.",
+        "Route to correct team or agent with full context note."
       ]
     },
     {
@@ -4354,11 +4362,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the top 20 questions from: support tickets, sales calls, and live chat transcripts.",
+        "Group questions by category: product, pricing, onboarding, billing, and technical.",
+        "Write each answer: direct answer first, then explanation, then next step (under 100 words).",
+        "Add troubleshooting steps for technical FAQs (numbered, step-by-step).",
+        "Structure as searchable knowledge base with category headers and internal linking."
       ]
     },
     {
@@ -4424,11 +4432,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the 10 most common support scenarios from ticket data.",
+        "Write a template for each: greeting, acknowledgment, resolution steps, and closing.",
+        "Include variable placeholders: [CUSTOMER_NAME], [ORDER_NUMBER], [RESOLUTION_DATE].",
+        "Add tone guidance per template: neutral for billing, empathetic for complaints, enthusiastic for onboarding.",
+        "Test each template for completeness: does it answer the question without requiring follow-up?"
       ]
     },
     {
@@ -4494,11 +4502,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define escalation triggers: legal threat, media escalation, billing dispute >$500, data breach, executive request.",
+        "Draft the escalation acknowledgment: immediate response within 30 minutes, senior tone.",
+        "Prepare the internal briefing: summarize issue, customer history, what was already tried.",
+        "Write de-escalation scripts: acknowledge → validate → take ownership → commit to resolution.",
+        "Define resolution timeline and communication cadence: hourly/daily updates until resolved."
       ]
     },
     {
@@ -4565,11 +4573,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the check-in type: 30-day onboarding review, quarterly business review, or renewal prep.",
+        "Review customer health data: product usage, support tickets, NPS score, and billing history.",
+        "Prepare QBR agenda: wins since last meeting, metrics review, roadmap preview, and expansion discussion.",
+        "Write check-in email: short, specific, and value-focused with a clear ask (15-minute call).",
+        "Document outcomes and update the health score in CRM after the meeting."
       ]
     },
     {
@@ -4635,11 +4643,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Verify refund eligibility against policy: timeline, reason, and product condition.",
+        "Write acknowledgment: empathy first, then policy context, then decision.",
+        "If approving: clear next steps, timeline, and confirmation of amount.",
+        "If declining: explain reason clearly, offer alternative (store credit, replacement, extension).",
+        "Close with goodwill gesture and invitation to resolve the underlying issue."
       ]
     },
     {
@@ -4705,11 +4713,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Extract the specific feature requested and the underlying business problem it solves.",
+        "Check if the feature already exists or is on the roadmap (to avoid duplicate logging).",
+        "Score the request: frequency (how many customers asked), impact (business value), and effort (implementation complexity).",
+        "Format as a structured feature card: user story, acceptance criteria, and priority score.",
+        "Route to product team with a summary of supporting customer quotes."
       ]
     },
     {
@@ -4777,11 +4785,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify at-risk signals: decreased usage, support ticket increase, skipped renewals, or negative NPS.",
+        "Segment by churn reason: price, missing feature, switching to competitor, or lack of ROI.",
+        "Design intervention per segment: personal outreach call, discount offer, feature enablement, or success story sharing.",
+        "Write the save email/call script: acknowledge they seem less engaged, ask for the real reason, offer a solution.",
+        "Define win-back sequence for already-churned customers: 30/60/90-day re-engagement."
       ]
     },
     {
@@ -4848,12 +4856,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Identify the language, framework, and review focus (functionality/security/performance/style).",
+        "Check logic: does the code do what it claims? Are edge cases handled?",
+        "Check security: SQL injection, XSS, authentication flaws, sensitive data exposure, and OWASP Top 10.",
+        "Check performance: N+1 queries, unbounded loops, memory leaks, and unnecessary re-computation.",
+        "Output structured review: severity (P0/P1/P2/P3), location (file:line), issue, and specific fix recommendation."
+      ],
+      "system_prompt": "You are a senior software engineer conducting a code review. Be specific, educational, and constructive. Cite security best practices and performance benchmarks where relevant."
     },
     {
       "id": "api_documentation",
@@ -4919,19 +4928,20 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Define the API endpoints, methods, parameters, and authentication method.",
+        "Write overview section: purpose, base URL, authentication (API key/OAuth/JWT), and rate limits.",
+        "Document each endpoint: method, path, description, request params, request body schema, and response schema.",
+        "Add code examples in 2–3 languages (curl, Python, JavaScript) for each endpoint.",
+        "Include error codes section: list all possible error responses with description and resolution steps."
+      ],
+      "system_prompt": "You are a technical writer specializing in developer documentation. Write clear, complete API docs with working code examples and comprehensive error references."
     },
     {
       "id": "bug_report_analysis",
       "name": "Bug Report Analysis",
       "category": "Development & Technical",
       "description": "Analyse bug reports, identify root causes, assign severity, and suggest fixes or investigation steps.",
-      "prompt_hint": "Analyse this bug report: [report]. Identify: likely root cause, severity (P1\u2013P4), affected systems, reproduction steps, suggested fix.",
+      "prompt_hint": "Analyse this bug report: [report]. Identify: likely root cause, severity (P1–P4), affected systems, reproduction steps, suggested fix.",
       "tags": [
         "bugs",
         "debugging",
@@ -4990,11 +5000,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Extract bug details: steps to reproduce, expected behavior, actual behavior, and environment info.",
+        "Classify by severity: P0 (system down), P1 (major feature broken), P2 (significant issue), P3 (minor/cosmetic).",
+        "Identify the affected component and likely root cause based on the error message and stack trace.",
+        "Check for similar historical bugs and existing workarounds.",
+        "Draft fix recommendation: specific code change, test to add, and validation step."
       ]
     },
     {
@@ -5061,11 +5071,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the feature or system change and the problem it solves.",
+        "Document current state (as-is) and desired state (to-be) with specific measurable outcomes.",
+        "Design the technical approach: architecture diagram, data model changes, and API contract.",
+        "Define acceptance criteria: specific, testable statements that prove the feature is done.",
+        "List dependencies, risks, and open questions that need resolution before development starts."
       ]
     },
     {
@@ -5131,11 +5141,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Extract the feature requirements and identify the main user flows and data paths.",
+        "Write happy path test cases: the expected flow with valid inputs (Given/When/Then format).",
+        "Write edge case test cases: boundary values, empty inputs, maximum values, and special characters.",
+        "Write negative test cases: invalid inputs, unauthorized access, and error states.",
+        "Output test cases in structured format: ID, title, preconditions, steps, expected result, and pass/fail column."
       ]
     },
     {
@@ -5202,11 +5212,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the automation goal: CI/CD pipeline, deployment, monitoring, or infrastructure provisioning.",
+        "Map the current manual process step by step before automating.",
+        "Choose the tool stack: GitHub Actions/CircleCI for CI, Docker/Kubernetes for containers, Terraform for IaC.",
+        "Write the automation script/config with comments explaining non-obvious decisions.",
+        "Define rollback procedure and failure alerts; test in staging before production."
       ]
     },
     {
@@ -5274,11 +5284,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Analyze the slow query: execution plan (EXPLAIN ANALYZE), table sizes, and index usage.",
+        "Identify bottlenecks: full table scans, N+1 queries, missing indexes, or inefficient joins.",
+        "Write the optimized query with explanation of each change.",
+        "Add or suggest indexes with rationale; calculate expected performance improvement.",
+        "Test the optimized query on representative data and measure before/after execution time."
       ]
     },
     {
@@ -5345,11 +5355,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the system scope: components, data flows, external dependencies, and traffic patterns.",
+        "Review for scalability: will it handle 10x current load? Where are the bottlenecks?",
+        "Review for reliability: single points of failure, error handling, graceful degradation, and SLAs.",
+        "Review for security: authentication, authorization, data encryption at rest and in transit.",
+        "Produce findings prioritized by risk: critical (fix now) → high → medium → low, with specific recommendations."
       ]
     },
     {
@@ -5416,11 +5426,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the target: web app, API, mobile app, or infrastructure.",
+        "Check OWASP Top 10: injection, broken auth, sensitive data, XXE, broken access control, security misconfiguration, XSS, insecure deserialization, vulnerable components, and insufficient logging.",
+        "Check authentication: strong passwords, MFA, session management, and credential storage.",
+        "Check data handling: encryption in transit (TLS 1.3), encryption at rest, PII masking, and GDPR compliance.",
+        "Output checklist with pass/fail/manual status for each item and remediation priority."
       ]
     },
     {
@@ -5487,11 +5497,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "List all direct and indirect dependencies with current versions.",
+        "Check for known CVEs: scan against NVD/Snyk database for each dependency version.",
+        "Identify outdated packages: flag any package > 2 major versions behind latest stable.",
+        "Check for license conflicts: GPL/LGPL dependencies in commercial projects.",
+        "Produce upgrade roadmap: order by severity (security patches first, then major updates)."
       ]
     },
     {
@@ -5558,11 +5568,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Validate the dataset: check row count, column types, missing values, and obvious data errors.",
+        "Calculate key statistics per column: mean, median, min, max, and null rate.",
+        "Identify 3–5 top patterns or correlations in the data.",
+        "Flag anomalies: outliers >3 standard deviations, unexpected zeros, or impossible values.",
+        "Output structured insights: summary, key findings, anomalies, and recommended next analysis steps."
       ]
     },
     {
@@ -5629,11 +5639,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the audience (C-suite/team lead/operational) and decision they need to make.",
+        "List 5–8 primary KPIs with definition, data source, calculation formula, and target value.",
+        "Define visualization type per KPI: gauge (vs target), line (trend), bar (comparison), or table (detail).",
+        "Design the layout: summary row at top, trend charts in middle, detail tables below.",
+        "Specify data refresh rate, alerting thresholds, and drill-down capabilities."
       ]
     },
     {
@@ -5700,11 +5710,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the test: hypothesis, variant description, primary metric, and test period.",
+        "Calculate statistical significance: use chi-square for conversion rates, t-test for revenue.",
+        "Check for segment effects: does the winner vary by device, channel, or user type?",
+        "Calculate practical significance: is the lift large enough to matter business-wise?",
+        "Recommend action: implement winner, iterate, or extend test with larger sample."
       ]
     },
     {
@@ -5772,11 +5782,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Map the funnel stages from awareness to conversion with specific actions defining each stage.",
+        "Calculate step-by-step conversion rates and identify the biggest drop-off point.",
+        "Segment the funnel by traffic source, device, and user cohort to find patterns.",
+        "Benchmark against industry averages to contextualize your conversion rates.",
+        "Output: funnel visualization data, drop-off analysis, and top 3 improvement hypotheses."
       ]
     },
     {
@@ -5843,11 +5853,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the cohort type: acquisition cohort (by signup month), behavioral cohort (by action), or demographic cohort.",
+        "Calculate retention rate per cohort at 7/30/60/90-day intervals.",
+        "Identify the best-performing cohorts: which acquisition source, period, or segment retains best?",
+        "Calculate LTV per cohort based on retention curve and average revenue per user.",
+        "Recommend acquisition and activation changes based on cohort performance differences."
       ]
     },
     {
@@ -5914,11 +5924,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the metric, expected range, and time series granularity (hourly/daily/weekly).",
+        "Calculate baseline: rolling average and standard deviation over a reference period.",
+        "Flag anomalies: values outside ±2 or ±3 standard deviations from the rolling baseline.",
+        "Classify anomaly type: spike, drop, trend change, or seasonality deviation.",
+        "Investigate root cause: correlate anomaly timing with events (releases, campaigns, outages)."
       ]
     },
     {
@@ -5985,11 +5995,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the metric to forecast, historical data available, and forecast horizon.",
+        "Identify seasonality, trend direction, and any structural breaks in the historical data.",
+        "Select the forecasting model: moving average (stable), exponential smoothing (recent data matters), or linear regression (trend-driven).",
+        "Generate forecast with confidence intervals (80% and 95%).",
+        "State assumptions, key risks, and scenarios: base case, optimistic (+20%), and pessimistic (−20%)."
       ]
     },
     {
@@ -6057,11 +6067,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Profile the raw dataset: row count, column types, null rates, duplicate rows, and value distributions.",
+        "Define data quality rules per column: valid ranges, allowed values, required fields, and format standards.",
+        "Plan deduplication: define the match key (email, phone, company name) and merge strategy.",
+        "Plan normalization: standardize dates, currency symbols, country codes, and categorical values.",
+        "Output cleaning script outline with before/after examples for each transformation."
       ]
     },
     {
@@ -6129,11 +6139,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define research criteria: niche, target margin (>40%), competition level, and demand signal sources.",
+        "Research demand: Google Trends, Amazon Best Sellers, TikTok trending products, and Facebook ad library.",
+        "Analyze competition: number of sellers, review volume, average BSR, and pricing range.",
+        "Calculate margin: supplier price × (1 + markup) = target sell price; verify margin after fees.",
+        "Output top 5 opportunities with demand score, competition score, margin estimate, and validation recommendation."
       ]
     },
     {
@@ -6201,11 +6211,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Extract product name, category, top features, and primary keyword.",
+        "Write title: primary keyword + 2 secondary keywords + key feature + brand (under 200 chars).",
+        "Write 5 bullet points: each starts with a CAPS benefit, followed by feature detail (under 200 chars each).",
+        "Write product description: storytelling paragraph + features breakdown (under 2000 chars).",
+        "Research and list 250 backend keywords: no spaces, no repeats, cover synonyms and misspellings."
       ]
     },
     {
@@ -6273,11 +6283,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the product, cost structure (COGS, shipping, platform fees), and target margin.",
+        "Research competitor pricing: map the low/mid/high price tiers in the market.",
+        "Choose pricing model: cost-plus (cost × markup), value-based (what customer pays to solve the problem), or competitive (match/beat/position vs competitors).",
+        "Set price tiers if applicable: starter, professional, enterprise.",
+        "Calculate break-even point and recommend launch pricing vs steady-state pricing."
       ]
     },
     {
@@ -6345,11 +6355,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the SKU, sales velocity (units/day), and lead time (days from order to delivery).",
+        "Calculate reorder point: (average daily sales × lead time) + safety stock.",
+        "Calculate safety stock: Z-score × standard deviation of daily sales × √lead time.",
+        "Model 3 scenarios: conservative (−20% demand), expected, and aggressive (+20% demand).",
+        "Output: reorder quantity, reorder point, safety stock level, and suggested order calendar."
       ]
     },
     {
@@ -6416,11 +6426,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the niche, target market, and minimum acceptable margin (typically >30%).",
+        "Research winning products: use TikTok Creative Center, Facebook Ad Library, and AliExpress trending.",
+        "Evaluate saturation: search Google Shopping and Amazon for how many sellers exist.",
+        "Qualify suppliers: response time, product quality, shipping time, and return policy.",
+        "Output: top 3 products with profit margin estimate, supplier links, and ad angle recommendation."
       ]
     },
     {
@@ -6488,11 +6498,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define launch date, target revenue ($), marketing channels, and pre-launch goals (email list, beta users).",
+        "Plan pre-launch (4 weeks): teaser content, waitlist, influencer seeding, and press outreach.",
+        "Plan launch day: email blast, social posts, ad campaigns, and live event or webinar.",
+        "Plan post-launch (2 weeks): reviews/testimonials, retargeting ads, and referral activation.",
+        "Define success metrics: Day 1, Day 7, Day 30 KPIs and course-correct triggers."
       ]
     },
     {
@@ -6560,11 +6570,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Collect reviews from all sources: Amazon/Etsy/G2/App Store/Trustpilot/social media.",
+        "Categorize by sentiment: positive, neutral, negative.",
+        "Extract themes: group mentions by topic (quality, shipping, customer service, value, usability).",
+        "Identify the top 3 praise themes and top 3 complaint themes with example quotes.",
+        "Output: sentiment score, theme map, product improvement recommendations, and marketing copy from reviews."
       ]
     },
     {
@@ -6632,11 +6642,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the primary product and the customer's job-to-be-done.",
+        "Map the customer journey post-purchase: what do they need next? What complements what they bought?",
+        "Design upsell sequence: post-purchase pop-up (complementary product), Day 3 email (how-to + upgrade), Day 14 email (bundle offer).",
+        "Calculate the upsell economics: average order value increase and impact on LTV.",
+        "Write 3 upsell email subjects and body copy for A/B testing."
       ]
     },
     {
@@ -6704,11 +6714,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Analyze return data: top 3 return reasons, return rate by product/category/channel.",
+        "Identify root causes: sizing issues, expectation mismatch, product defect, or buyer's remorse.",
+        "Design listing improvements: better size guides, more product photos (lifestyle + dimensions), honest descriptions.",
+        "Design fulfillment improvements: better packaging, quality control checkpoints, and unboxing experience.",
+        "Create post-purchase email: Day 1 (usage tips), Day 3 (setup help), Day 7 (satisfaction check)."
       ]
     },
     {
@@ -6775,11 +6785,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define evaluation criteria: quality (30%), lead time (25%), price (20%), MOQ (15%), reliability (10%).",
+        "Score each supplier 1–5 on each criterion based on samples, references, and trial orders.",
+        "Calculate weighted score and rank suppliers.",
+        "Check due diligence: business registration, payment terms, IP protection policy, and certifications.",
+        "Recommend primary supplier and 1–2 backup suppliers to reduce single-source risk."
       ]
     },
     {
@@ -6847,19 +6857,20 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Define the topic, target audience intent (informational/commercial/transactional), and domain authority.",
+        "Generate a seed keyword list (20–30 terms) using brainstorming and competitor content.",
+        "Expand using tools (Google Suggest, related searches, PAA boxes): target 100–200 keywords.",
+        "Group keywords by intent and topic cluster for content planning.",
+        "Prioritize by opportunity score: (search volume × click-through potential) / (keyword difficulty + 1)."
+      ],
+      "system_prompt": "You are an SEO strategist. Group keywords by search intent and opportunity score. Focus on keywords the target site can actually rank for given its domain authority."
     },
     {
       "id": "on_page_seo",
       "name": "On-Page SEO Optimisation",
       "category": "Marketing & SEO",
       "description": "Audit and optimise on-page SEO: title tags, meta descriptions, headings, internal links, and schema markup.",
-      "prompt_hint": "Optimise this page for SEO: [URL or content]. Target keyword: [keyword]. Review: title tag, meta description, H1\u2013H3, internal links, schema. Return optimised versions.",
+      "prompt_hint": "Optimise this page for SEO: [URL or content]. Target keyword: [keyword]. Review: title tag, meta description, H1–H3, internal links, schema. Return optimised versions.",
       "tags": [
         "seo",
         "on-page",
@@ -6918,11 +6929,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Audit the page: title tag (50–60 chars), meta description (155 chars), H1 (includes primary keyword).",
+        "Check content: keyword in first 100 words, H2/H3 structure, LSI keywords, and content length vs top-ranking pages.",
+        "Audit images: alt text, file names, and compression (under 100KB).",
+        "Check internal links: link to 2–3 relevant pages, use keyword-rich anchor text.",
+        "Check technical: URL slug (keyword in URL), canonical tag, page speed, and mobile responsiveness."
       ]
     },
     {
@@ -6990,11 +7001,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the target page, target keyword, and domain authority goal.",
+        "Identify link building strategies: guest posts, HARO, resource page links, broken link building, and digital PR.",
+        "Build a prospect list: 50 sites with DA > your domain, relevant topic, and contact info.",
+        "Write outreach templates: personalized pitch for each strategy type.",
+        "Track outreach: sent, opened, replied, and link acquired. Target 10% conversion on outreach."
       ]
     },
     {
@@ -7062,11 +7073,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the campaign goal: awareness, leads, or ecommerce sales.",
+        "Write 15 headlines (30 chars each): include keyword in 3+, benefits in 5+, CTAs in 3+, and trust signals in 2+.",
+        "Write 4 descriptions (90 chars each): primary benefit, proof point, CTA, and urgency/offer.",
+        "Ensure all ad copy passes Google's ad policies (no excessive punctuation, no misleading claims).",
+        "Map headline and description combinations to ad groups; recommend pinning strategy."
       ]
     },
     {
@@ -7134,11 +7145,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the offer, target audience, traffic source, and conversion goal.",
+        "Write the hero: H1 (benefit statement), sub-headline (clarification), CTA (action + benefit).",
+        "Write the body: 3 features → benefits sections, social proof block, FAQ, and secondary CTA.",
+        "Write the meta title and description for organic traffic.",
+        "Optimize for conversion: above-the-fold CTA, minimal navigation, trust signals near CTA."
       ]
     },
     {
@@ -7206,11 +7217,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the trigger event and the subscriber's journey goal.",
+        "Map the automation flow: trigger → condition branches → email sequence → exit conditions.",
+        "Write each email: subject line, preheader, body (under 200 words), and single CTA.",
+        "Set timing: Day 0 (trigger), Day 1, Day 3, Day 7, Day 14, Day 30.",
+        "Test the flow: verify all branches, test sending across email clients, and check mobile rendering."
       ]
     },
     {
@@ -7278,11 +7289,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the reporting period, channels to analyze (SEA, social, email, organic), and KPIs.",
+        "Pull data: sessions, CPL, conversion rate, ROAS, email open rate, and CAC per channel.",
+        "Compare performance vs prior period and target benchmarks.",
+        "Identify top-performing channel and worst-performing; diagnose root cause for each.",
+        "Recommend budget reallocation and 3 specific optimization actions for next period."
       ]
     },
     {
@@ -7349,11 +7360,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the brand: mission, audience, competitive positioning, and personality adjectives (3–5).",
+        "Document the tone spectrum: formal to casual scale with position marked.",
+        "Write do/don't examples for vocabulary, sentence structure, and punctuation (10 examples each).",
+        "Create channel-specific tone guides: website (professional), social (conversational), email (warm), support (empathetic).",
+        "Add 'brand voice in action' examples: rewrite the same message in old voice vs new voice."
       ]
     },
     {
@@ -7421,11 +7432,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Map the current manual process: step-by-step with who does what and how long each step takes.",
+        "Identify automation candidates: repetitive tasks, rule-based decisions, and data entry steps.",
+        "Choose the tool stack: Zapier, Make, n8n, or custom Python/Node based on complexity.",
+        "Design the workflow: trigger → condition check → action → notification → error handling.",
+        "Test with edge cases and define monitoring/alerting for when the automation fails."
       ]
     },
     {
@@ -7493,11 +7504,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Capture attendees, meeting date, objective, and agenda items before writing up.",
+        "Summarize each agenda item: key discussion points in 2–3 bullet points (not verbatim transcript).",
+        "Document all decisions made with the rationale and stakeholders involved.",
+        "List all action items: owner (first name), due date, and specific deliverable.",
+        "Close with next meeting date and open questions requiring follow-up."
       ]
     },
     {
@@ -7563,11 +7574,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the project scope: objective, deliverables, constraints, and success metrics.",
+        "Break down into phases and tasks using WBS (Work Breakdown Structure).",
+        "Estimate effort per task; assign owners and dependencies.",
+        "Build timeline: Gantt chart or Kanban board with milestones and critical path.",
+        "Define risk register: top 5 risks with likelihood, impact, and mitigation plan."
       ]
     },
     {
@@ -7635,11 +7646,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the document type (SOW, NDA, proposal, report, brief) and audience.",
+        "Create the skeleton structure: sections, subsections, and purpose of each section.",
+        "Add variable placeholders for all customizable fields: [CLIENT_NAME], [DATE], [AMOUNT].",
+        "Write sample content for each section to guide users filling in the template.",
+        "Add usage instructions: what to customize, what to keep standard, and legal review note."
       ]
     },
     {
@@ -7705,11 +7716,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "List all tasks with estimated effort (hours) and deadline.",
+        "Apply the Eisenhower Matrix: urgent+important → do now; important, not urgent → schedule; urgent, not important → delegate; neither → eliminate.",
+        "Score each task with ICE (Impact × Confidence × Ease, 1–10 each).",
+        "Sort by ICE score; flag any tasks that are high-ICE but currently not prioritized.",
+        "Output a prioritized task list with rationale and recommended time blocks for the week."
       ]
     },
     {
@@ -7777,11 +7788,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the report: audience, metrics, data sources, frequency, and delivery method.",
+        "Map data source to report fields: identify API, database, or file source for each metric.",
+        "Design the automation: data extraction → transformation → formatting → distribution.",
+        "Write the automation script or Zapier/Make workflow with error handling.",
+        "Schedule delivery and set up monitoring: alert if the report fails to send or data looks anomalous."
       ]
     },
     {
@@ -7849,11 +7860,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the process: name, owner, frequency, and scope (what's included and excluded).",
+        "Document prerequisites: tools, permissions, and inputs required before starting.",
+        "Write step-by-step instructions: numbered, active voice, specific enough for a new hire to follow.",
+        "Add decision points: 'If X, do Y; if not, do Z' branching logic.",
+        "Include quality checks per section and a final sign-off step to confirm completion."
       ]
     },
     {
@@ -7861,7 +7872,7 @@
       "name": "OKR Setting & Tracking",
       "category": "Automation & Productivity",
       "description": "Define quarterly OKRs with measurable key results, confidence scores, and weekly check-in cadences.",
-      "prompt_hint": "Define [N] OKRs for [team/company] for Q[N] [year]. Focus: [strategic focus]. For each O: write 3 KRs with measurable targets, owner, and confidence score (1\u201310).",
+      "prompt_hint": "Define [N] OKRs for [team/company] for Q[N] [year]. Focus: [strategic focus]. For each O: write 3 KRs with measurable targets, owner, and confidence score (1–10).",
       "tags": [
         "okr",
         "goals",
@@ -7921,11 +7932,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the quarterly objective: ambitious but achievable, qualitative, and motivating.",
+        "Write 3–5 Key Results per objective: measurable (number-based), time-bound, and outcome-focused.",
+        "Set baseline (current state) and target for each Key Result.",
+        "Assign a confidence score (%) to each Key Result and identify top risks to achieving each.",
+        "Schedule weekly check-ins with 3 questions: progress %, top blocker, and help needed."
       ]
     },
     {
@@ -7994,12 +8005,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Define the business concept, target market, and value proposition.",
+        "Write the executive summary: problem, solution, market size, business model, and team (1 page).",
+        "Build the market analysis: TAM/SAM/SOM, customer segments, and competitive landscape.",
+        "Write the operations plan: key activities, resources, milestones, and hiring plan.",
+        "Build 3-year financial projections: P&L, cash flow, and key assumptions."
+      ],
+      "system_prompt": "You are a business plan writer and startup advisor. Write compelling, investor-ready business plans grounded in market reality and financial logic."
     },
     {
       "id": "company_simulation",
@@ -8067,11 +8079,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the company: stage, industry, current metrics (revenue, costs, team size).",
+        "Set the simulation period: 12 months, with key decision points at Month 3, 6, 9, 12.",
+        "Model 3 scenarios: base case (current trajectory), optimistic (+20% key driver), and pessimistic (−20%).",
+        "Simulate month-by-month P&L for each scenario with key driver assumptions.",
+        "Output: revenue range, cash runway, and recommended decision at each major decision point."
       ]
     },
     {
@@ -8140,11 +8152,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the organization type, stage (seed/growth/scale), and headcount range.",
+        "Design the reporting structure: departments, management layers, and span of control (5–8 direct reports max).",
+        "Define each role: title, responsibilities, level (IC1–IC5 or L1–L6), and compensation band.",
+        "Map the hiring roadmap: roles to hire in Q1, Q2, Q3, Q4 based on growth priorities.",
+        "Identify single points of failure in the org chart and succession planning gaps."
       ]
     },
     {
@@ -8214,11 +8226,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the product, ICP, and the specific problem solved for that ICP.",
+        "Choose the GTM motion: product-led (self-serve), sales-led (high-touch), or channel-led (partners).",
+        "Define the launch sequence: pre-launch (waitlist/beta), launch day (announcement), post-launch (scale).",
+        "Identify the first 10 customers: specific companies or people, and how to reach each.",
+        "Set 90-day KPIs: MQLs, SQLs, closed deals, CAC, and CAC payback period."
       ]
     },
     {
@@ -8287,11 +8299,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the token utility: what it does (governance, payment, staking, access) and why it's needed.",
+        "Design token supply: total supply, initial circulating supply, and emission schedule.",
+        "Allocate supply: team/advisors (15–20% with 1-year cliff, 4-year vest), investors (20–25%), community/ecosystem (40–50%), treasury (10–15%).",
+        "Design deflationary mechanisms: burn triggers, staking lockups, and buyback conditions.",
+        "Model token price scenarios at different market caps and create a launch parameter recommendation."
       ]
     },
     {
@@ -8362,11 +8374,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define launch goals: raise amount, community size, and initial price/market cap target.",
+        "Plan the pre-launch phase: whitepaper, community building (Discord/Telegram), KOL partnerships, and waitlist.",
+        "Design the launch structure: public sale, private sale, IDO/IEO, or fair launch.",
+        "Plan launch day: announcement coordination, CEX/DEX listing, and community activation.",
+        "Define post-launch: staking incentives, ecosystem grants, and marketing roadmap to sustain momentum."
       ]
     },
     {
@@ -8435,12 +8447,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
-      ]
+        "Define the business model: revenue streams, key drivers, and cost structure.",
+        "Build Month 1–12 P&L: revenue (units × price), COGS, gross profit, operating expenses, EBITDA.",
+        "Build Year 1–3 annual summary with growth rate assumptions.",
+        "Add unit economics: CAC, LTV, LTV:CAC ratio, and payback period.",
+        "Build cash flow projection and break-even analysis; scenario test at ±20% revenue assumptions."
+      ],
+      "system_prompt": "You are a financial analyst. Build clear, assumption-transparent models. Always include sensitivity analysis and state the key risks to your projections."
     },
     {
       "id": "investor_pitch_deck",
@@ -8508,11 +8521,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the raise: stage, amount, use of funds, and target investor type.",
+        "Build the 10-slide structure: Problem → Solution → Market → Product → Business Model → Traction → Team → Financials → Competition → Ask.",
+        "Write each slide with a benefit-driven headline, 3–5 supporting points, and 1 visual placeholder.",
+        "Add speaker notes with expected investor questions and prepared responses.",
+        "Review for narrative: does it flow from pain to opportunity to why now to why us?"
       ]
     },
     {
@@ -8580,11 +8593,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the monthly expenditures: salary, infrastructure, marketing, legal, and office.",
+        "Calculate gross burn (total spend/month) and net burn (spend minus revenue).",
+        "Calculate runway: current cash balance ÷ net burn = months of runway.",
+        "Identify the top 3 cost categories and potential reduction levers (10–30% savings each).",
+        "Recommend fundraise trigger point: start raising at 9–12 months of runway; provide timeline."
       ]
     },
     {
@@ -8602,7 +8615,7 @@
       ],
       "compatible_agents": [
         "brand-strategist",
-        "creative-studio"
+        "social-media-manager"
       ],
       "input_format": {
         "required_fields": [
@@ -8653,11 +8666,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define naming criteria: memorable, pronounceable, available as domain, and aligned with brand personality.",
+        "Generate 20 name candidates using different frameworks: invented words, metaphors, portmanteaus, and descriptive.",
+        "Screen each name: Google search (no trademark conflicts), domain availability (.com preferred), and social handle availability.",
+        "Score top 5 names on: memorability, pronunciation, meaning alignment, and availability.",
+        "Recommend 1 primary name and 2 alternatives with rationale for each."
       ]
     },
     {
@@ -8675,7 +8688,7 @@
       ],
       "compatible_agents": [
         "brand-strategist",
-        "creative-studio"
+        "social-media-manager"
       ],
       "input_format": {
         "required_fields": [
@@ -8726,11 +8739,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the brand foundation: mission, vision, values, and brand personality (5 adjectives).",
+        "Document the visual identity: logo usage rules, clear space, minimum sizes, and prohibited uses.",
+        "Define the color palette: primary (1–2 colors), secondary (2–3), and neutral colors with hex/RGB/CMYK values.",
+        "Document typography: primary typeface (headings), secondary (body), fallback (web-safe), and hierarchy rules.",
+        "Write the voice and tone guide: writing style, vocabulary do/don'ts, and channel-specific tone variations."
       ]
     },
     {
@@ -8799,11 +8812,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the product, the core value moment, and the user's motivation to share.",
+        "Identify the growth loop type: viral (invite → use → invite), content (create → attract → create), paid (buy → convert → buy more).",
+        "Map the loop mechanics: each step in the cycle with conversion rate assumptions.",
+        "Calculate the viral coefficient (K-factor): invites sent × conversion rate; K>1 means exponential growth.",
+        "Design 3 experiment ideas to improve the loop's weakest conversion step."
       ]
     },
     {
@@ -8872,11 +8885,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define retention metric: Day 1, Day 7, Day 30, Day 90 retention rates.",
+        "Segment by cohort: acquisition date, channel, and activation behavior.",
+        "Calculate retention curves and identify the 'aha moment' (the action that predicts retention).",
+        "Compare power users vs churned users: what behaviors differ in first 7 days?",
+        "Design 3 activation improvements to increase retention at the biggest drop-off point."
       ]
     },
     {
@@ -8944,11 +8957,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define sprint goal, team capacity (story points available), and velocity (from last 3 sprints).",
+        "Prioritize backlog items: must-have (committed), should-have (stretch), and nice-to-have (cut if needed).",
+        "Break selected items into tasks with time estimates; flag any item > 8 hours as needing breakdown.",
+        "Assign tasks to team members respecting capacity and skill match.",
+        "Define Definition of Done for the sprint and schedule daily standup, mid-sprint check, and retrospective."
       ]
     },
     {
@@ -9017,11 +9030,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the project, key milestones, target dates, and dependencies between milestones.",
+        "Identify the critical path: the sequence of milestones where any delay impacts the final deadline.",
+        "Calculate current status: on-track, at-risk, or delayed, with days ahead/behind for each milestone.",
+        "Flag risks: missing dependencies, resource conflicts, or scope changes threatening the timeline.",
+        "Update stakeholders with status report: green/yellow/red per milestone, blockers, and recovery plan."
       ]
     },
     {
@@ -9089,11 +9102,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the target profile: industry, company size, location, and decision-maker title.",
+        "Build search queries for directories: LinkedIn, Apollo, ZoomInfo, and Google ('site:linkedin.com/in').",
+        "Extract data fields: name, title, company, email pattern, phone, and LinkedIn URL.",
+        "Validate email patterns using domain format verification.",
+        "Output structured lead list with enrichment notes and ICP fit score."
       ]
     },
     {
@@ -9161,11 +9174,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define qualification criteria using BANT: Budget, Authority, Need, and Timeline.",
+        "Score each dimension 0–3 (0=absent, 1=weak, 2=present, 3=strong).",
+        "Calculate total BANT score (max 12); set MQL threshold at 6+, SQL at 9+.",
+        "Flag disqualifiers: no budget, no authority, no stated need, timeline > 12 months.",
+        "Output scored list with recommended action: disqualify, nurture, or advance to sales."
       ]
     },
     {
@@ -9233,11 +9246,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify records to enrich: new leads, stale records, or high-value accounts.",
+        "Enrich with firmographic data: company size, revenue estimate, funding stage, and tech stack.",
+        "Enrich with intent data: job postings, recent news, web activity signals, and hiring patterns.",
+        "Validate and deduplicate: merge duplicate records, fix email bounces, standardize fields.",
+        "Output enriched records with confidence score per field and enrichment timestamp."
       ]
     },
     {
@@ -9306,11 +9319,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the channel (cold email/LinkedIn/cold call/WhatsApp) and ICP segment.",
+        "Research personalization hooks: company news, job changes, content they published, or shared connections.",
+        "Write the opener (personalized hook referencing the research) and bridge to the ask.",
+        "Write the value proposition in one sentence: '[We help X do Y by Z]'.",
+        "Provide 3 variants per channel to test different angles (pain/benefit/social proof)."
       ]
     },
     {
@@ -9378,11 +9391,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the campaign goal, channel mix (email/LinkedIn/phone), and prospect segment.",
+        "Design multi-touch timeline: define touchpoints across 21–30 days.",
+        "Write each touchpoint: channel, timing, subject/opening, body (50–75 words max), and CTA.",
+        "Map conditional branches: reply received → conversation flow; bounce → remove; unsubscribe → suppress.",
+        "Set success metrics: reply rate >8%, meeting rate >3%, unsubscribe rate <2%."
       ]
     },
     {
@@ -9450,11 +9463,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the test element (subject line, CTA, headline, price, layout) and hypothesis.",
+        "Ensure statistical significance: calculate minimum sample size for 95% confidence.",
+        "Create variant A (control) and variant B (single change only — never test multiple variables).",
+        "Define the primary metric (CTR, open rate, conversion) and secondary metrics to monitor.",
+        "Set test duration based on traffic/volume and document the winner criteria before testing."
       ]
     },
     {
@@ -9522,11 +9535,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the outreach campaign, sequence, and expected reply benchmarks.",
+        "Track each prospect: sent date, open/click events, reply received (yes/no), reply sentiment.",
+        "Classify replies: positive (interested), neutral (not now), negative (unsubscribe).",
+        "Calculate sequence performance: reply rate, positive reply rate, and meeting booking rate.",
+        "Flag hot leads (positive replies) for immediate follow-up and update CRM stage."
       ]
     },
     {
@@ -9593,11 +9606,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Identify the objection category: price ('too expensive'), timing ('not now'), competitor ('we use X'), authority ('not my decision'), or need ('we don't need this').",
+        "Acknowledge with empathy: validate that the concern is reasonable without conceding.",
+        "Ask a clarifying question to find the real objection under the stated one.",
+        "Bridge to value: present a specific data point, case study, or guarantee that addresses it.",
+        "Move to a micro-commitment: offer a trial, introduce to a decision-maker, or schedule a follow-up."
       ]
     },
     {
@@ -9664,11 +9677,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the negotiation context: deal size, relationship stage, BATNA for both parties.",
+        "Anchor first with a specific, ambitious but defensible opening position.",
+        "Identify concessions to make (low-cost to you, high-value to them) and items to protect.",
+        "Use tactical empathy: name their concerns aloud before they do, reduce defensiveness.",
+        "Plan the close: define the walk-away point, ideal outcome, and fallback compromise."
       ]
     },
     {
@@ -9735,11 +9748,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Review the full deal history: what value was established, what objections were raised and resolved.",
+        "Confirm all stakeholders are aligned: no hidden blockers or undisclosed influencers.",
+        "Present a summary close: 'You need X, we deliver Y, the investment is Z — shall we move forward?'",
+        "Offer the final nudge: limited-time pricing, implementation timeline, or additional value add.",
+        "Draft the next step: contract, purchase order, or onboarding kickoff call invitation."
       ]
     },
     {
@@ -9807,11 +9820,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Audit the profile: headline, about section, featured, experience, skills, and endorsements.",
+        "Rewrite the headline: current role + value prop + specific outcome (under 220 chars).",
+        "Rewrite the about section: hook (2 sentences), story (3–4 paragraphs), and CTA (1 sentence).",
+        "Optimize featured section: add 3 items — a post, a case study, and contact link.",
+        "Add 10 skills in demand for the target audience; request endorsements from relevant connections."
       ]
     },
     {
@@ -9880,11 +9893,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the brand, audience, and platform for viral content.",
+        "Research current viral trends: TikTok trending audio, LinkedIn top posts this week, and Twitter/X trending topics.",
+        "Generate 5 content concepts using proven frameworks: POV, 'hot take', behind-the-scenes, number list, and story-lesson.",
+        "Score each concept: relevance (1–5), viral potential (1–5), and production effort (1–5).",
+        "Select top 2 with production brief: exact hook text, format, platform, and optimal posting time."
       ]
     },
     {
@@ -9902,7 +9915,7 @@
       ],
       "compatible_agents": [
         "ad-campaign-wizard",
-        "creative-studio"
+        "social-media-manager"
       ],
       "input_format": {
         "required_fields": [
@@ -9953,11 +9966,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define platform, objective, product, target audience, and unique value proposition.",
+        "Generate 3 angles: pain-relief, transformation, and social proof.",
+        "Write full ad copy per angle: headline, primary text, description, and CTA.",
+        "Score each variant for estimated CTR based on hook strength, clarity, and specificity.",
+        "Output A/B test plan: which two variants to test first and primary metric to measure."
       ]
     },
     {
@@ -10025,11 +10038,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define total budget, campaign objectives, and target KPIs (CPA, ROAS, CPL) per channel.",
+        "Research channel CPM benchmarks for the target audience (Google, Meta, LinkedIn, TikTok).",
+        "Calculate expected reach, clicks, and conversions per channel at proposed budget allocation.",
+        "Recommend allocation based on: historical performance, audience size, and funnel stage fit.",
+        "Output allocation table with projected metrics and monthly pacing recommendations."
       ]
     },
     {
@@ -10097,11 +10110,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the reporting period, campaigns, and success metrics (ROAS, CTR, CPA, conversion rate).",
+        "Pull actual vs target performance per campaign and ad group.",
+        "Identify underperformers: campaigns with CPA >20% above target or ROAS <target.",
+        "Diagnose root cause: creative fatigue, audience saturation, bidding issue, or landing page problem.",
+        "Recommend bid/budget/creative adjustments with estimated performance impact."
       ]
     },
     {
@@ -10169,11 +10182,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the referral goal: new user acquisition, revenue increase, or brand advocacy.",
+        "Choose the program structure: one-sided (reward referrer), two-sided (reward both), or tiered (rewards scale with referrals).",
+        "Calculate incentive economics: LTV of a referred customer vs cost of reward.",
+        "Design sharing flows: in-app share button, unique referral link, and email template.",
+        "Build fraud prevention: limits per account, IP deduplication, and cooling-off period."
       ]
     },
     {
@@ -10241,11 +10254,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the product, average LTV, and target viral coefficient.",
+        "Model incentive options: cash ($5–$50), credit (10–20% of first purchase), or feature unlock.",
+        "Calculate ROI for each incentive: referred LTV − incentive cost = net value per referral.",
+        "Model at different K-factors (0.5, 0.8, 1.2) to show growth scenarios.",
+        "Recommend incentive type and amount that maximizes ROI while meeting the viral coefficient target."
       ]
     },
     {
@@ -10313,11 +10326,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define partner evaluation criteria: audience overlap, complementary offering, reach, and brand alignment.",
+        "Score each potential partner 1–5 on each dimension.",
+        "Calculate weighted score (total/max possible) and rank the shortlist.",
+        "Research the partner's deal history, current partnerships, and decision-making structure.",
+        "Output scored shortlist with recommended approach, deal structure, and opening pitch angle."
       ]
     },
     {
@@ -10385,11 +10398,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Gather company inputs: product, market, traction, team, and funding ask.",
+        "Structure deck: Cover → Problem → Solution → Market → Business Model → Traction → Team → Financials → Ask.",
+        "Write each slide: headline (benefit-led), 3–5 bullet points, and data/visual placeholders.",
+        "Add speaker notes with key talking points and expected investor questions per slide.",
+        "Review for narrative arc: does the deck tell a compelling story from problem to opportunity?"
       ]
     },
     {
@@ -10397,7 +10410,7 @@
       "name": "Conversion Funnel Analyzer",
       "category": "Growth & Marketing",
       "description": "Analyze conversion funnels stage by stage, identify drop-off points, benchmark against industry rates, and prioritize fixes by revenue impact.",
-      "prompt_hint": "Analyze this funnel for [product/page]: [funnel_stages_with_rates]. Identify: biggest drop-off, benchmark vs industry, root causes, and top 5 fixes ranked by revenue impact \u00d7 effort.",
+      "prompt_hint": "Analyze this funnel for [product/page]: [funnel_stages_with_rates]. Identify: biggest drop-off, benchmark vs industry, root causes, and top 5 fixes ranked by revenue impact × effort.",
       "tags": [
         "funnel",
         "conversion",
@@ -10458,11 +10471,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Map the funnel: list each stage from first touch to conversion with the specific action defining each stage.",
+        "Calculate conversion rate at each step and identify the biggest absolute drop-off.",
+        "Benchmark against industry averages: flag stages that are >20% below benchmark.",
+        "Segment the funnel: is the drop-off consistent across channels/devices/cohorts?",
+        "Prioritize fixes by revenue impact: improvement × traffic × conversion value."
       ]
     },
     {
@@ -10530,11 +10543,11 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Validate required inputs and normalize task scope.",
-        "Plan execution path and identify required dependencies.",
-        "Execute core task and capture evidence or intermediate artifacts.",
-        "Run quality checks against skill standards.",
-        "Return final output in defined format with next-step recommendations."
+        "Define the test element, hypothesis, and primary metric.",
+        "Calculate required sample size for 80% power and 95% confidence at minimum detectable effect.",
+        "Create variant A (control) and variant B (one change only).",
+        "Define test duration based on traffic volume and statistical requirements.",
+        "Document pre-test baseline metrics and commit to the analysis plan before launch."
       ]
     }
   ]

@@ -3791,6 +3791,7 @@ orchestrator.on('orchestrator:reply', (data) => {
 
 setInterval(() => {
   broadcaster.broadcast('system:status', sampleSystemStatus());
+  broadcaster.broadcast('agent:update', { agents: getAgents() });
   broadcaster.broadcast('nn:status', subsystems.getNNStatus());
   broadcaster.broadcast('memory:update', subsystems.getMemoryTree());
   broadcaster.broadcast('doctor:check', subsystems.getDoctorStatus());

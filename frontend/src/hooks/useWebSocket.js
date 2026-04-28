@@ -15,6 +15,16 @@ const MAX_RECONNECT_DELAY = 30000 // 30s cap
 
 function getStore() { return useAppStore.getState() }
 
+const HEALTH_MAP = { healthy: 90, degraded: 55, warning: 55, warn: 55, error: 20, critical: 10, idle: 40, unknown: 50 }
+function normalizeAgents(agents) {
+  return agents.map(a => ({
+    ...a,
+    status: a.status || a.state || 'idle',
+    health: typeof a.health === 'number' ? a.health : (HEALTH_MAP[a.health] ?? 50),
+    task: a.task || a.currentTask || null,
+  }))
+}
+
 function reconnectDelay() {
   // Exponential backoff: 1s, 2s, 4s, 8s … capped at 30s
   return Math.min(1000 * Math.pow(2, _reconnectAttempts), MAX_RECONNECT_DELAY)
@@ -43,7 +53,7 @@ function connectSingleton() {
           store.addHeartbeatLog({ text: data.message, level: data.level || 'info', ts: Date.now() })
           break
         case 'agent:update':
-          if (data.agents) store.setAgents(data.agents)
+          if (data.agents) store.setAgents(normalizeAgents(data.agents))
           break
         case 'system:status':
           store.setSystemStatus(data)
