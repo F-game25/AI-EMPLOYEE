@@ -4,6 +4,7 @@ import CommandDock from './dock/CommandDock';
 import TopStrip from './hud/TopStrip';
 import NeuralCore from './three/NeuralCore';
 import AwakeningScene from './boot/AwakeningScene';
+import PresenceLayer from './multiplayer/PresenceLayer';
 import { moodEngine } from '../core/MoodEngine';
 import './DashboardLayout.css';
 
@@ -112,6 +113,9 @@ export const DashboardLayout = ({ children }) => {
 
   return (
     <div className='dashboard-layout'>
+      {/* Multiplayer presence layer (live cursors, avatars, focus rings) */}
+      <PresenceLayer />
+
       {/* Command dock */}
       <CommandDock />
 
