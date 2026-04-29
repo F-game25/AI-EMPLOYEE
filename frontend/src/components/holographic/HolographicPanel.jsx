@@ -56,10 +56,10 @@ export const HolographicPanel = ({
         left: customPos?.x,
         top: customPos?.y,
       }}
-      initial={{ opacity: 0, scale: 0.9 }}
+      initial={{ opacity: 0, scale: 0.92 }}
       animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      exit={{ opacity: 0, scale: 0.92 }}
+      transition={{ type: 'spring', stiffness: 350, damping: 25, mass: 0.8 }}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
