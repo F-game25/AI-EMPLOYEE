@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { HolographicPanel } from '../holographic/HolographicPanel';
 import { StatusDot, Badge, MiniBar } from '../ui/primitives';
@@ -275,4 +275,4 @@ function UpgradeCard({ name, current, next, impact }) {
   );
 }
 
-export default AgentsPageNEW;
+export default memo(AgentsPageNEW);

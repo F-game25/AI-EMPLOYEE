@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, memo } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { sendChatMessage } from '../../hooks/useWebSocket';
 import { HolographicPanel } from '../holographic/HolographicPanel';
@@ -354,4 +354,4 @@ function ChatPanel({ chat, isTyping, executionSteps, onSend }) {
   );
 }
 
-export default DashboardPageNEW;
+export default memo(DashboardPageNEW);

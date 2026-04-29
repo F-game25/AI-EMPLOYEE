@@ -4,13 +4,13 @@
  * Each page uses 12-position snap-grid layout with theme-appropriate tone variants
  */
 
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { HolographicPanel } from '../holographic/HolographicPanel';
 import './RemainingPagesNEW.css';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TRAINING PAGE — Model training, fine-tuning, experimentation
-export const TrainingPageNEW = () => (
+export const TrainingPageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="TRAINING JOBS" tone="purple" position="TL" isDraggable isResizable>
       <div className="panel-content"><div>Active jobs: 3 | Queued: 2 | Completed: 47</div></div>
@@ -37,11 +37,11 @@ export const TrainingPageNEW = () => (
       <div className="panel-content"><div>Staged: v3.2.0 | Prod: v3.1.9 | Rollout: 10%</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // WORKSPACE PAGE — Collaborative workspaces, projects, teams
-export const WorkspacePageNEW = () => (
+export const WorkspacePageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="WORKSPACES" tone="gold" position="TL" isDraggable isResizable>
       <div className="panel-content"><div>Total: 12 | Active: 8 | Team members: 34</div></div>
@@ -68,11 +68,11 @@ export const WorkspacePageNEW = () => (
       <div className="panel-content"><div>Connected: Slack, GitHub, Linear | Status: All online</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LEARNING LADDER PAGE — Progressive learning paths, skill development
-export const LearningLadderPageNEW = () => (
+export const LearningLadderPageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="LEARNING PATHS" tone="purple" position="TL" isDraggable isResizable>
       <div className="panel-content"><div>Total paths: 12 | Enrolled: 6 | Completed: 3</div></div>
@@ -99,11 +99,11 @@ export const LearningLadderPageNEW = () => (
       <div className="panel-content"><div>Earned: 12 | Locked: 5 | Mastery progress: 78%</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HERMES PAGE — Communication, messaging, notification management
-export const HermesPageNEW = () => (
+export const HermesPageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="CONVERSATIONS" tone="gold" position="TL" isDraggable isResizable>
       <div className="panel-content"><div>Total: 247 | Unread: 12 | Archived: 34</div></div>
@@ -130,11 +130,11 @@ export const HermesPageNEW = () => (
       <div className="panel-content"><div>Status: Active | Timezone: UTC | Language: English</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONTROL CENTER PAGE — System controls, settings, configurations
-export const ControlCenterPageNEW = () => (
+export const ControlCenterPageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="SYSTEM STATUS" tone="gold" position="TL" isDraggable isResizable>
       <div className="panel-content"><div>Uptime: 99.98% | Services: 48/48 online | Health: Excellent</div></div>
@@ -161,11 +161,11 @@ export const ControlCenterPageNEW = () => (
       <div className="panel-content"><div>Debug mode: Off | Telemetry: On | API rate limit: 10K/h</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PROMPT INSPECTOR PAGE — Prompt engineering, testing, optimization
-export const PromptInspectorPageNEW = () => (
+export const PromptInspectorPageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="PROMPTS" tone="gold" position="TL" isDraggable isResizable>
       <div className="panel-content"><div>Total: 247 | Active: 12 | Templates: 34 | Archived: 48</div></div>
@@ -192,11 +192,11 @@ export const PromptInspectorPageNEW = () => (
       <div className="panel-content"><div>Shared: 12 | Liked: 34 | Used by: 47 prompts</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SYSTEM PAGE — System-wide settings, diagnostics, info
-export const SystemPageNEW = () => (
+export const SystemPageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="VERSION INFO" tone="gold" position="TL" isDraggable isResizable>
       <div className="panel-content"><div>App: v3.2.1 | Build: 247 | Release: stable | Deployed: 3h ago</div></div>
@@ -223,11 +223,11 @@ export const SystemPageNEW = () => (
       <div className="panel-content"><div>AI-EMPLOYEE | Enterprise Ready | © 2026 | Support: support@ai-employee.io</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DOCTOR PAGE — Health monitoring, diagnostics, system repair
-export const DoctorPageNEW = () => (
+export const DoctorPageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="HEALTH SCORE" tone="gold" position="TL" isDraggable isResizable>
       <div className="panel-content"><div style={{color:'#22c55e', fontWeight:600}}>94/100 Excellent</div></div>
@@ -254,11 +254,11 @@ export const DoctorPageNEW = () => (
       <div className="panel-content"><div>Next scan: 2h | Auto-repair: Enabled | Maintenance window: Sat 2am</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // FAIRNESS PAGE — Bias detection, fairness monitoring, ethical AI
-export const FairnessPageNEW = () => (
+export const FairnessPageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="FAIRNESS SCORE" tone="gold" position="TL" isDraggable isResizable>
       <div className="panel-content"><div style={{color:'#22c55e', fontWeight:600}}>87/100 Good</div></div>
@@ -285,11 +285,11 @@ export const FairnessPageNEW = () => (
       <div className="panel-content"><div>Certified: 8 | Audited: 12 | Pending: 2 | Status: Compliant</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ASCEND FORGE PAGE — Feature forge, experimentation, innovation lab
-export const AscendForgePageNEW = () => (
+export const AscendForgePageNEW = memo(() => (
   <div className="page-grid">
     <HolographicPanel title="IDEAS" tone="gold" position="TL" isDraggable isResizable>
       <div className="panel-content"><div>Total: 247 | Exploring: 12 | In dev: 5 | Released: 34</div></div>
@@ -316,7 +316,7 @@ export const AscendForgePageNEW = () => (
       <div className="panel-content"><div>Q2: 3 launches | Q3: 5 launches | Q4: 2 launches | Next: Collab system</div></div>
     </HolographicPanel>
   </div>
-);
+));
 
 export default {
   TrainingPageNEW,
