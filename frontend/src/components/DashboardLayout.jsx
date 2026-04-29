@@ -6,6 +6,7 @@ import NeuralCore from './three/NeuralCore';
 import AwakeningScene from './boot/AwakeningScene';
 import PresenceLayer from './multiplayer/PresenceLayer';
 import { moodEngine } from '../core/MoodEngine';
+import useAmbientSoundscape from '../hooks/useAmbientSoundscape';
 import './DashboardLayout.css';
 
 export const DashboardLayout = ({ children }) => {
@@ -18,6 +19,8 @@ export const DashboardLayout = ({ children }) => {
     load: 0.5,
     thinking: 0.0,
   });
+  const soundscape = useAmbientSoundscape();
+  const prevMoodRef = React.useRef(null);
 
   // Boot sequence check (show once per session)
   useEffect(() => {
@@ -31,13 +34,16 @@ export const DashboardLayout = ({ children }) => {
 
     const handleBootComplete = () => {
       setBootComplete(true);
+      // Start ambient soundscape after boot completes
+      soundscape.startAmbient();
+      soundscape.playMoodTransition();
     };
 
     window.addEventListener('boot-complete', handleBootComplete);
     return () => window.removeEventListener('boot-complete', handleBootComplete);
-  }, []);
+  }, [soundscape]);
 
-  // Poll metrics to drive core visualization
+  // Poll metrics to drive core visualization + mood + ambient audio
   useEffect(() => {
     const pollMetrics = async () => {
       try {
@@ -80,6 +86,22 @@ export const DashboardLayout = ({ children }) => {
           cpuUsage,
           agentCount,
         });
+
+        // Update ambient soundscape based on mood changes
+        const currentMood = moodEngine.currentMood.id;
+        if (prevMoodRef.current !== currentMood) {
+          soundscape.updateMood();
+          soundscape.playMoodTransition();
+          prevMoodRef.current = currentMood;
+        } else {
+          // Continuous mood update (smooth frequency transitions)
+          soundscape.updateMood();
+        }
+
+        // Play activity tick on task completion
+        if (newState.taskRate > 0) {
+          soundscape.playActivityTick();
+        }
       } catch (err) {
         console.error('Failed to poll metrics:', err);
       }
@@ -90,7 +112,7 @@ export const DashboardLayout = ({ children }) => {
       const interval = setInterval(pollMetrics, 3000);
       return () => clearInterval(interval);
     }
-  }, [bootComplete]);
+  }, [bootComplete, soundscape]);
 
   // Record user activity for mood engine
   useEffect(() => {
