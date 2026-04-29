@@ -308,6 +308,10 @@ _REPO_RUNTIME_DIR = _REPO_ROOT / "runtime"
 _REPO_AGENTS_DIR = _REPO_RUNTIME_DIR / "agents"
 _REPO_BIN_FILE = _REPO_RUNTIME_DIR / "bin" / "ai-employee"
 
+# Add runtime directory to sys.path for imports like 'from core.tenancy import ...'
+if str(_REPO_RUNTIME_DIR) not in sys.path:
+    sys.path.insert(0, str(_REPO_RUNTIME_DIR))
+
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_DIR = AI_HOME / "state"
 CONFIG_DIR = AI_HOME / "config"
