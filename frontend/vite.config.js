@@ -2,6 +2,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import glsl from 'vite-plugin-glsl'
 
 const BACKEND_PORT = process.env.BACKEND_PORT || 8787
 
@@ -9,6 +10,7 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    glsl(),
   ],
   test: {
     environment: 'jsdom',

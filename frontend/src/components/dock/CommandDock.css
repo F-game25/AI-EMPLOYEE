@@ -1,0 +1,217 @@
+.command-dock {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 64px;
+  height: 100vh;
+  background: linear-gradient(180deg, #0a0b14 0%, #050608 100%);
+  border-right: 1px solid rgba(229, 199, 107, 0.15);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 40;
+  padding: 16px 0;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Operator sigil */
+.dock-sigil {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.sigil-icon {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gold, #e5c76b);
+  letter-spacing: 0.04em;
+  user-select: none;
+  transition: color 200ms ease;
+}
+
+.dock-sigil:hover .sigil-icon {
+  color: var(--gold-bright, #ffd97a);
+}
+
+.sigil-pulse {
+  position: absolute;
+  inset: -4px;
+  border: 1px solid rgba(229, 199, 107, 0.5);
+  border-radius: 50%;
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.2;
+  }
+}
+
+/* Divider */
+.dock-divider {
+  width: 70%;
+  height: 1px;
+  background: rgba(229, 199, 107, 0.12);
+  margin-bottom: 16px;
+}
+
+/* Nav items container */
+.dock-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.dock-nav::-webkit-scrollbar {
+  display: none;
+}
+
+/* Individual dock item */
+.dock-item {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 200ms ease;
+  font-size: 20px;
+}
+
+.dock-item:hover {
+  background: rgba(229, 199, 107, 0.06);
+}
+
+.dock-item.active {
+  background: rgba(229, 199, 107, 0.08);
+}
+
+.item-icon {
+  color: var(--text-secondary, #9a9aa5);
+  transition: color 200ms ease;
+  user-select: none;
+}
+
+.dock-item:hover .item-icon {
+  color: var(--gold, #e5c76b);
+}
+
+.dock-item.active .item-icon {
+  color: var(--gold-bright, #ffd97a);
+}
+
+/* Active bar */
+.item-active-bar {
+  position: absolute;
+  left: 0;
+  width: 3px;
+  height: 24px;
+  background: linear-gradient(180deg, #e5c76b 0%, #ffd97a 100%);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 12px rgba(229, 199, 107, 0.4);
+  animation: bar-glow 1.5s ease-in-out infinite;
+}
+
+@keyframes bar-glow {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(229, 199, 107, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(229, 199, 107, 0.6);
+  }
+}
+
+/* Tooltip */
+.item-tooltip {
+  position: absolute;
+  left: calc(100% + 8px);
+  background: rgba(8, 10, 18, 0.95);
+  border: 1px solid rgba(229, 199, 107, 0.3);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-primary, #eaeaf0);
+  white-space: nowrap;
+  z-index: 100;
+  animation: tooltip-slide 200ms ease;
+}
+
+@keyframes tooltip-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Footer status */
+.dock-footer {
+  width: 100%;
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid rgba(229, 199, 107, 0.12);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: all 200ms ease;
+}
+
+.status-dot.connected {
+  background: var(--success, #22c55e);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+}
+
+.status-dot.offline {
+  background: var(--error, #ef4444);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.status-label {
+  font-size: 8px;
+  color: var(--text-muted, #666670);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-dot.connected ~ .status-label {
+  color: var(--success, #22c55e);
+}
+
+.status-dot.offline ~ .status-label {
+  color: var(--error, #ef4444);
+}

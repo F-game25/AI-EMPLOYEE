@@ -1,0 +1,81 @@
+.dashboard-layout {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  background: radial-gradient(ellipse at center, #070810 0%, #050608 100%);
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+  z-index: 0;
+}
+
+/* Core container — fixed center stage */
+.core-container {
+  position: fixed;
+  top: 40px;
+  left: 64px;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  overflow: hidden;
+}
+
+.core-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gold-dim, #b8923f);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Pages container — where holographic panels appear */
+.pages-container {
+  position: fixed;
+  top: 40px;
+  left: 64px;
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.pages-container > * {
+  pointer-events: auto;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .core-container {
+    display: none;
+  }
+
+  .pages-container {
+    top: 56px;
+    left: 0;
+  }
+
+  .dashboard-layout {
+    flex-direction: column;
+  }
+}
+
+/* Smooth page transitions */
+.pages-container > div {
+  animation: page-enter 400ms var(--ease-cinematic);
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
