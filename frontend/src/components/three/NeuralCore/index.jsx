@@ -3,13 +3,13 @@ import { Canvas } from '@react-three/fiber';
 import {
   OrbitControls,
   PerspectiveCamera,
-  Bloom,
-  EffectComposer,
 } from '@react-three/drei';
+import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import CoreSphere from './CoreSphere';
 import ParticleCloud from './ParticleCloud';
 import OrbitalNodes from './OrbitalNodes';
+import DataStreamHighway from '../DataStreamHighway';
 
 const Scene = ({ metrics }) => {
   return (
@@ -35,6 +35,7 @@ const Scene = ({ metrics }) => {
         <CoreSphere metrics={metrics} />
         <ParticleCloud count={5000} metrics={metrics} />
         <OrbitalNodes metrics={metrics} />
+        <DataStreamHighway metrics={metrics} />
       </Suspense>
 
       {/* Post-processing */}
