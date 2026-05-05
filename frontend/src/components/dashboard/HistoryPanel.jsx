@@ -202,7 +202,7 @@ export default function HistoryPanel() {
             background: 'rgba(0,0,0,0.4)',
             borderTop: '1px solid var(--border-subtle)',
             maxHeight: '200px',
-            overflow: 'y-auto',
+            overflowY: 'auto',
           }}
         >
           <div className="font-mono text-8px mb-2" style={{ color: 'var(--gold)' }}>

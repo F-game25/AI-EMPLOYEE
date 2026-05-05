@@ -128,14 +128,36 @@ if [[ ! -d frontend/node_modules ]]; then
   npm --prefix frontend install
 fi
 
-echo "[2/3] Building frontend..."
+echo "[2/3] Building frontend (checking cache)..."
 find "$REPO_ROOT" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
 find "$REPO_ROOT" -type f -name "*.pyc" -delete 2>/dev/null || true
-rm -rf frontend/dist
-APP_VERSION="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-if ! VITE_APP_VERSION="$APP_VERSION" npm --prefix frontend run build; then
-  echo "⚠️  Frontend build failed — backend API will still start. Check npm/Vite errors above."
-  echo "   Tip: run 'cd frontend && npm install && npm run build' manually to diagnose."
+
+# ── Build cache: only rebuild if source changed ───────────────────────────────
+_CACHE_FILE="$REPO_ROOT/frontend/dist/.build-hash"
+# Use find + sha256sum to walk the source tree (much faster than cat-on-dir)
+_NEW_HASH=$(
+  {
+    find "$REPO_ROOT/frontend/src" -type f \( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -o -name "*.css" -o -name "*.html" \) -exec stat -c '%n %s %Y' {} + 2>/dev/null
+    cat "$REPO_ROOT/frontend/package.json" 2>/dev/null
+    cat "$REPO_ROOT/frontend/vite.config.js" 2>/dev/null
+    cat "$REPO_ROOT/frontend/index.html" 2>/dev/null
+  } | sha256sum | cut -d' ' -f1
+)
+_OLD_HASH=$(cat "$_CACHE_FILE" 2>/dev/null || echo "")
+
+if [[ "$_NEW_HASH" == "$_OLD_HASH" ]] && [[ -f "$REPO_ROOT/frontend/dist/index.html" ]]; then
+  echo "✓ Frontend cache hit (no rebuild needed)"
+else
+  echo "⚠ Frontend source changed (rebuilding)..."
+  rm -rf frontend/dist
+  APP_VERSION="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  if ! VITE_APP_VERSION="$APP_VERSION" npm --prefix frontend run build; then
+    echo "⚠️  Frontend build failed — backend API will still start. Check npm/Vite errors above."
+    echo "   Tip: run 'cd frontend && npm install && npm run build' manually to diagnose."
+  else
+    mkdir -p "$REPO_ROOT/frontend/dist"
+    echo "$_NEW_HASH" > "$_CACHE_FILE"
+  fi
 fi
 
 # Write version state for runtime integrity checks
@@ -170,29 +192,36 @@ if command -v python3 >/dev/null 2>&1 && [[ -f "$_PYTHON_SERVER" ]]; then
     rm -f "$_PY_PID_FILE"
   fi
   echo "[2.5/3] Starting Python AI backend on port ${_PYTHON_BACKEND_PORT}..."
+  # Prefer the venv created by bootstrap.js (PEP 668 systems need this)
+  _PY_BIN="python3"
+  if [[ -x "$HOME/.ai-employee/venv/bin/python3" ]]; then
+    _PY_BIN="$HOME/.ai-employee/venv/bin/python3"
+  fi
   PROBLEM_SOLVER_UI_PORT="${_PYTHON_BACKEND_PORT}" \
     PROBLEM_SOLVER_UI_HOST="127.0.0.1" \
     AI_EMPLOYEE_REPO_DIR="$REPO_ROOT" \
-    python3 "$_PYTHON_SERVER" \
+    "$_PY_BIN" "$_PYTHON_SERVER" \
     >> "$REPO_ROOT/state/python-backend.log" 2>&1 &
   PYTHON_PID=$!
   echo "$PYTHON_PID" > "$_PY_PID_FILE"
 
-  # Poll /health until the Python backend responds (up to 40 s).
+  # Poll /health until the Python backend responds (up to 15 s, 0.5s intervals).
   _PY_READY=0
-  for _pi in $(seq 1 40); do
-    sleep 1
-    if curl -fsS --max-time 3 "http://127.0.0.1:${_PYTHON_BACKEND_PORT}/health" > /dev/null 2>&1; then
+  for _pi in $(seq 1 30); do
+    sleep 0.5
+    if curl -fsS --max-time 1 "http://127.0.0.1:${_PYTHON_BACKEND_PORT}/health" > /dev/null 2>&1; then
       _PY_READY=1
       break
     fi
-    echo "  ⏳ Waiting for Python AI backend… (${_pi}/40)"
+    if [[ $((_pi % 4)) -eq 0 ]]; then
+      echo "  ⏳ Waiting for Python AI backend… (${_pi})"
+    fi
   done
 
   if [[ "$_PY_READY" -eq 1 ]]; then
     echo "✅ Python AI backend ready on port ${_PYTHON_BACKEND_PORT}"
   else
-    echo "⚠️  Python AI backend did not respond within 40 s — LLM pipeline may be unavailable."
+    echo "⚠️  Python AI backend did not respond within 15 s — LLM pipeline may be unavailable."
     echo "   Check $REPO_ROOT/state/python-backend.log for details."
     echo "   The system will continue with local fallback replies."
   fi
@@ -219,24 +248,21 @@ fi
 PORT="${UI_PORT}" PYTHON_BACKEND_PORT="${_PYTHON_BACKEND_PORT}" LISTEN_HOST="${LISTEN_HOST:-0.0.0.0}" node backend/server.js &
 BACKEND_PID=$!
 
-# Poll /health until the server responds (up to 30 s).
-# /health always returns 200 OK as soon as the server is listening.
-# We do NOT check / (root) here because that requires a built frontend dist
-# and would return 404 if the dist is somehow absent.
+# Poll /health until the server responds (up to 5 s, 0.25s intervals).
+# /health always returns 200 OK as soon as the server is listening (fast!).
 _BE_READY=0
-for _i in $(seq 1 30); do
-  sleep 1
-  if curl -fsS --max-time 3 "http://127.0.0.1:${UI_PORT}/health" > /dev/null 2>&1; then
+for _i in $(seq 1 20); do
+  sleep 0.25
+  if curl -fsS --max-time 0.5 "http://127.0.0.1:${UI_PORT}/health" > /dev/null 2>&1; then
     _BE_READY=1
     break
   fi
-  echo "  ⏳ Waiting for backend… (${_i}/30)"
 done
 
 if [[ "$_BE_READY" -eq 1 ]]; then
   echo "✅ System running at http://localhost:${UI_PORT}"
 else
-  echo "❌ Backend did not become healthy within 30 s"
+  echo "❌ Backend did not become healthy within 5 s"
   [[ -n "${PYTHON_PID:-}" ]] && kill "$PYTHON_PID" 2>/dev/null || true
   kill "$BACKEND_PID" 2>/dev/null || true
   exit 1

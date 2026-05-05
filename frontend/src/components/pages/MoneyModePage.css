@@ -1,0 +1,245 @@
+/* ════════════════════════════════════════════════════════════════════
+   MoneyModePage — Nexus OS revenue pipeline view
+   ════════════════════════════════════════════════════════════════════ */
+
+.mm-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.mm-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* ── Error banner ─────────────────────────────────────────────────── */
+.mm-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  border-radius: var(--nx-r-sm);
+  border: 1px solid rgba(232, 86, 86, 0.40);
+  background:
+    linear-gradient(180deg, rgba(232,86,86,0.10), transparent 80%),
+    var(--nx-surface-2);
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  color: var(--nx-danger);
+  letter-spacing: 0.02em;
+}
+.mm-error__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--nx-danger);
+  box-shadow: 0 0 8px var(--nx-danger);
+  animation: mm-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes mm-pulse {
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.45; }
+}
+
+/* ── Pipeline cards ───────────────────────────────────────────────── */
+.mm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mm-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "head  head"
+    "last  cta";
+  gap: 10px 14px;
+  padding: 14px 16px;
+  border-radius: var(--nx-r-md);
+  border: 1px solid var(--nx-border);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.015), transparent 60%),
+    var(--nx-surface-2);
+  transition:
+    border-color var(--nx-dur) var(--nx-ease),
+    background var(--nx-dur) var(--nx-ease),
+    transform var(--nx-dur) var(--nx-ease);
+}
+.mm-card:hover {
+  border-color: var(--nx-border-strong);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.025), transparent 60%),
+    var(--nx-surface-3);
+  transform: translateY(-1px);
+}
+
+.mm-card--cool {
+  border-color: rgba(99, 161, 255, 0.22);
+}
+.mm-card--gold {
+  border-color: rgba(229, 199, 107, 0.28);
+}
+.mm-card--success {
+  border-color: rgba(76, 217, 144, 0.22);
+}
+
+.mm-card__head {
+  grid-area: head;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.mm-card__icon {
+  font-family: var(--nx-font-display);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.mm-card__title {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mm-card__name {
+  font-family: var(--nx-font-display);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--nx-text);
+  background: var(--nx-gold-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.mm-card__desc {
+  font-family: var(--nx-font-mono);
+  font-size: 10.5px;
+  color: var(--nx-text-dim);
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mm-card__last {
+  grid-area: last;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--nx-text-dim);
+  text-transform: uppercase;
+}
+.mm-card__last-status {
+  color: var(--nx-success);
+  font-weight: 600;
+}
+
+.mm-card .nx-hex-btn {
+  grid-area: cta;
+  align-self: end;
+}
+
+/* ── History ──────────────────────────────────────────────────────── */
+.mm-empty {
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  color: var(--nx-text-dim);
+  letter-spacing: 0.04em;
+  padding: 14px 8px;
+  text-align: center;
+}
+
+.mm-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.mm-history__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 11px;
+  border-radius: var(--nx-r-sm);
+  border: 1px solid var(--nx-border);
+  background: var(--nx-surface-2);
+  font-family: var(--nx-font-mono);
+  font-size: 10.5px;
+  transition: border-color var(--nx-dur) var(--nx-ease);
+}
+.mm-history__row:hover {
+  border-color: var(--nx-border-strong);
+}
+
+.mm-history__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--nx-text-dim);
+}
+.mm-history__row--cool    .mm-history__dot { background: var(--nx-info);    box-shadow: 0 0 6px var(--nx-info);    }
+.mm-history__row--gold    .mm-history__dot { background: var(--nx-gold);    box-shadow: 0 0 6px var(--nx-gold);    }
+.mm-history__row--success .mm-history__dot { background: var(--nx-success); box-shadow: 0 0 6px var(--nx-success); }
+
+.mm-history__label {
+  color: var(--nx-text);
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-history__roi {
+  color: var(--nx-gold);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mm-history__time {
+  color: var(--nx-text-dim);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .mm-kpis { grid-template-columns: repeat(2, 1fr); }
+  .mm-card {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "head"
+      "last"
+      "cta";
+  }
+  .mm-card__head { grid-template-columns: auto 1fr; }
+  .mm-card__head > :nth-child(3) { display: none; }
+}
+@media (max-width: 600px) {
+  .mm-kpis { grid-template-columns: 1fr; }
+  .mm-history__row {
+    grid-template-columns: auto 1fr auto;
+  }
+  .mm-history__time { display: none; }
+}

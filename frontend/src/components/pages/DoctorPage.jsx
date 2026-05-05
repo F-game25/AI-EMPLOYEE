@@ -1,18 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/appStore'
-import { Panel, Badge, StatCard, DataRow } from '../ui/primitives'
+import { Panel, KPITile, StatusPill, HexButton } from '../nexus-ui'
 import api from '../../api/client'
+import './DoctorPage.css'
 
 const SUITE_ITEMS = [
-  { id:'s1', name:'DB Connection',       endpoint: () => api.get('/api/health') },
-  { id:'s2', name:'Agent Ping',          endpoint: () => api.get('/api/agents') },
-  { id:'s3', name:'Memory Integrity',    endpoint: () => api.get('/api/brain/status') },
-  { id:'s4', name:'Brain Weight Load',   endpoint: () => api.get('/api/brain/status') },
-  { id:'s5', name:'API Gateway',         endpoint: () => api.get('/api/health') },
-  { id:'s6', name:'Fairness Threshold',  endpoint: () => api.get('/api/fairness/status') },
+  { id: 's1', name: 'DB Connection', endpoint: () => api.get('/api/health') },
+  { id: 's2', name: 'Agent Ping', endpoint: () => api.get('/api/agents') },
+  { id: 's3', name: 'Memory Integrity', endpoint: () => api.get('/api/brain/status') },
+  { id: 's4', name: 'Brain Weight Load', endpoint: () => api.get('/api/brain/status') },
+  { id: 's5', name: 'API Gateway', endpoint: () => api.get('/api/health') },
+  { id: 's6', name: 'Fairness Threshold', endpoint: () => api.get('/api/fairness/status') },
 ]
-
-const STATUS_C = { ok:'#22C55E', warn:'#F59E0B', error:'#EF4444' }
 
 export default function DoctorPage() {
   const executionLogs = useAppStore(s => s.executionLogs)
@@ -26,7 +25,6 @@ export default function DoctorPage() {
       try {
         const res = await api.get('/api/doctor/status')
         setDoctorData(res)
-        // Build checks array from response
         const issues = (res?.issues || []).map(issue => ({
           name: issue.name || issue.component || 'Unknown',
           status: 'error',
@@ -52,12 +50,14 @@ export default function DoctorPage() {
 
   const errorLogs = executionLogs?.filter(l => l.level === 'ERROR' || l.level === 'WARN').slice(0, 6).map((l) => ({
     msg: l.message || l.step || 'System event',
-    count: 1, ts: typeof l.ts === 'string' ? l.ts.slice(11,19) : '--:--:--', level: l.level?.toLowerCase() || 'warn',
+    count: 1,
+    ts: typeof l.ts === 'string' ? l.ts.slice(11, 19) : '--:--:--',
+    level: l.level?.toLowerCase() || 'warn',
   })) || []
 
-  const healthy   = checks.filter(c => c.status === 'ok').length
-  const warnings  = checks.filter(c => c.status === 'warn').length
-  const critical  = checks.filter(c => c.status === 'error').length
+  const healthy = checks.filter(c => c.status === 'ok').length
+  const warnings = checks.filter(c => c.status === 'warn').length
+  const critical = checks.filter(c => c.status === 'error').length
   const healthPct = checks.length ? Math.round(healthy / checks.length * 100) : loading ? 0 : 100
 
   const [fixStates, setFixStates] = useState({})
@@ -91,60 +91,71 @@ export default function DoctorPage() {
     setSuiteRunning(false)
   }
 
+  const healthTone = healthPct > 90 ? 'success' : healthPct > 70 ? 'warning' : 'alert'
+  const statusTone = critical > 0 ? 'alert' : warnings > 0 ? 'warning' : 'success'
+
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:10, height:'100%' }}>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10, flexShrink:0 }}>
-        <StatCard label="System Health"  value={`${healthPct}%`} color={healthPct>90?'#22C55E':healthPct>70?'#F59E0B':'#EF4444'} sub={`${healthy}/${checks.length} checks passing`}/>
-        <StatCard label="Healthy"        value={healthy}          color="#22C55E"  sub="Services OK"/>
-        <StatCard label="Warnings"       value={warnings}         color="#F59E0B"  sub="Need attention"/>
-        <StatCard label="Critical"       value={critical}         color={critical>0?'#EF4444':'#22C55E'} sub="Blocking issues"/>
+    <div className="dr-grid">
+      <div className="dr-kpis">
+        <KPITile icon="❤" iconTone={healthTone} label="System Health" value={`${healthPct}%`} sub={`${healthy}/${checks.length} checks passing`} accent />
+        <KPITile icon="✓" iconTone="success" label="Healthy" value={healthy} sub="Services OK" />
+        <KPITile icon="⚠" iconTone="warning" label="Warnings" value={warnings} sub="Need attention" />
+        <KPITile icon="🔴" iconTone={critical > 0 ? 'alert' : 'success'} label="Critical" value={critical} sub="Blocking issues" />
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:10, flex:1, minHeight:0 }}>
-        <div style={{ display:'flex', flexDirection:'column', gap:10, minHeight:0 }}>
-          <Panel title="Health Checks" badge={<Badge label={loading?'LOADING':critical>0?'CRITICAL':warnings>0?'WARN':'HEALTHY'} variant={loading?'default':critical>0?'error':warnings>0?'warn':'green'}/>}>
+      <div className="dr-cols">
+        <div className="dr-col">
+          <Panel
+            icon="◐"
+            title="Health Checks"
+            className="dr-panel"
+            actions={<StatusPill tone={statusTone} label={loading ? 'LOADING' : critical > 0 ? 'CRITICAL' : warnings > 0 ? 'WARN' : 'HEALTHY'} dot={false} size="sm" />}
+          >
             {loading ? (
-              <div style={{ fontSize:12, color:'rgba(255,255,255,0.3)', fontFamily:'monospace' }}>Fetching health checks…</div>
+              <div className="dr-empty">Fetching health checks…</div>
             ) : !checks.length ? (
-              <div style={{ fontSize:12, color:'rgba(255,255,255,0.3)', fontFamily:'monospace' }}>No checks available</div>
+              <div className="dr-empty">No checks available</div>
             ) : (
-            <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
-              {checks.map((c, i) => (
-                <div key={i} style={{ padding:'9px 11px', borderRadius:7, border:`1px solid ${STATUS_C[c.status]}22`, background:'var(--bg-elevated,#12141F)', display:'flex', alignItems:'center', gap:12 }}>
-                  <div style={{ width:8, height:8, borderRadius:'50%', background:STATUS_C[c.status], boxShadow:`0 0 6px ${STATUS_C[c.status]}`, flexShrink:0 }}/>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:12, color:'var(--text-primary,#F0E9D2)', marginBottom:2 }}>{c.name}</div>
-                    <div style={{ fontSize:10, color:'var(--text-secondary,#9A927E)' }}>{c.detail}</div>
-                  </div>
-                  <div style={{ textAlign:'right', flexShrink:0, display:'flex', alignItems:'center', gap:8 }}>
-                    <div>
-                      <div style={{ fontFamily:'monospace', fontSize:10, color:STATUS_C[c.status] }}>{c.latency}</div>
-                      <div style={{ fontFamily:'monospace', fontSize:9, color:STATUS_C[c.status], letterSpacing:'0.06em' }}>{c.status.toUpperCase()}</div>
+              <div className="dr-checks">
+                {checks.map((c, i) => (
+                  <div key={i} className={`dr-check dr-check--${c.status}`}>
+                    <div className={`dr-check__dot dr-check__dot--${c.status}`} />
+                    <div className="dr-check__body">
+                      <div className="dr-check__name">{c.name}</div>
+                      <div className="dr-check__detail">{c.detail}</div>
                     </div>
-                    {c.status === 'warn' && (
-                      <button onClick={() => handleFix(c.name)} disabled={fixStates[c.name] === 'running'} style={{ padding:'3px 8px', borderRadius:5, border:`1px solid ${fixStates[c.name]==='ok'?'rgba(34,197,94,0.4)':fixStates[c.name]==='err'?'rgba(239,68,68,0.4)':'rgba(245,158,11,0.4)'}`, background:'transparent', color:fixStates[c.name]==='ok'?'#22C55E':fixStates[c.name]==='err'?'#EF4444':'#F59E0B', cursor:'pointer', fontSize:9, fontFamily:'monospace', letterSpacing:'0.06em' }}>
-                        {fixStates[c.name]==='running'?'…':fixStates[c.name]==='ok'?'✓ FIXED':fixStates[c.name]==='err'?'✗ ERR':'FIX'}
-                      </button>
-                    )}
+                    <div className="dr-check__right">
+                      <div className="dr-check__latency">{c.latency}</div>
+                      <span className={`dr-check__status dr-check__status--${c.status}`}>{c.status.toUpperCase()}</span>
+                      {c.status === 'warn' && (
+                        <HexButton onClick={() => handleFix(c.name)} disabled={fixStates[c.name] === 'running'} size="xs" tone={fixStates[c.name] === 'ok' ? 'success' : fixStates[c.name] === 'err' ? 'alert' : 'warning'}>
+                          {fixStates[c.name] === 'running' ? '…' : fixStates[c.name] === 'ok' ? '✓' : 'FIX'}
+                        </HexButton>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
             )}
           </Panel>
 
-          <Panel title="Test Suite Runner" badge={<button onClick={runAll} disabled={suiteRunning} style={{ padding:'4px 12px', borderRadius:5, border:'1px solid rgba(32,214,199,0.4)', background:'rgba(32,214,199,0.07)', color:'var(--teal,#20D6C7)', cursor:suiteRunning?'wait':'pointer', fontSize:9, fontFamily:'monospace', letterSpacing:'0.06em' }}>{suiteRunning?'RUNNING...':'RUN ALL'}</button>} style={{ flex:1 }}>
-            <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+          <Panel
+            icon="🧪"
+            title="Test Suite Runner"
+            className="dr-panel dr-col__grow"
+            actions={<HexButton onClick={runAll} disabled={suiteRunning} variant="primary" tone="cyan" size="sm">{suiteRunning ? 'RUNNING…' : 'RUN ALL'}</HexButton>}
+          >
+            <div className="dr-suite">
               {SUITE_ITEMS.map(item => {
                 const st = suiteState[item.id]
                 return (
-                  <div key={item.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 10px', borderRadius:6, border:`1px solid ${st==='pass'?'rgba(34,197,94,0.2)':st==='fail'?'rgba(239,68,68,0.2)':st==='running'?'rgba(32,214,199,0.2)':'rgba(255,255,255,0.06)'}`, background:'var(--bg-elevated,#12141F)' }}>
-                    <div style={{ width:7, height:7, borderRadius:'50%', background:st==='pass'?'#22C55E':st==='fail'?'#EF4444':st==='running'?'var(--teal,#20D6C7)':'rgba(255,255,255,0.2)', flexShrink:0, boxShadow:st==='pass'?'0 0 6px #22C55E':st==='running'?'0 0 6px #20D6C7':'none' }}/>
-                    <span style={{ flex:1, fontSize:12, color:'var(--text-primary,#F0E9D2)' }}>{item.name}</span>
-                    <span style={{ fontFamily:'monospace', fontSize:10, color:st==='pass'?'#22C55E':st==='fail'?'#EF4444':st==='running'?'var(--teal,#20D6C7)':'rgba(255,255,255,0.25)' }}>
-                      {st==='pass'?'PASS':st==='fail'?'FAIL':st==='running'?'…':'IDLE'}
+                  <div key={item.id} className={`dr-suite-item dr-suite-item--${st || 'idle'}`}>
+                    <div className={`dr-suite-item__dot dr-suite-item__dot--${st || 'idle'}`} />
+                    <span className="dr-suite-item__name">{item.name}</span>
+                    <span className={`dr-suite-item__status dr-suite-item__status--${st || 'idle'}`}>
+                      {st === 'pass' ? 'PASS' : st === 'fail' ? 'FAIL' : st === 'running' ? '…' : 'IDLE'}
                     </span>
-                    <button onClick={() => runSingle(item)} disabled={st==='running'||suiteRunning} style={{ padding:'3px 8px', borderRadius:5, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'rgba(255,255,255,0.4)', cursor:'pointer', fontSize:9, fontFamily:'monospace' }}>RUN</button>
+                    <HexButton onClick={() => runSingle(item)} disabled={st === 'running' || suiteRunning} variant="outline" size="xs">RUN</HexButton>
                   </div>
                 )
               })}
@@ -152,42 +163,51 @@ export default function DoctorPage() {
           </Panel>
         </div>
 
-        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          <Panel title="Error Log" bodyStyle={{ overflowY:'auto' }}>
-            <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+        <div className="dr-col">
+          <Panel icon="🔍" title="Error Log" className="dr-panel">
+            <div className="dr-errorlog">
               {errorLogs.length === 0 ? (
-                <div style={{ fontSize:11, color:'#22C55E', fontFamily:'monospace' }}>✓ No errors in recent history</div>
-              ) : errorLogs.map((e, i) => (
-                <div key={i} style={{ padding:'8px 10px', borderRadius:6, background:'var(--bg-elevated,#12141F)', border:`1px solid ${e.level==='error'?'rgba(239,68,68,0.2)':'rgba(245,158,11,0.15)'}`, display:'flex', gap:10, alignItems:'flex-start' }}>
-                  <div style={{ width:6, height:6, borderRadius:'50%', background:STATUS_C[e.level]||'#F59E0B', marginTop:4, flexShrink:0 }}/>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:11, color:'var(--text-primary,#F0E9D2)', lineHeight:1.4 }}>{e.msg}</div>
-                    <div style={{ fontSize:9, fontFamily:'monospace', color:'rgba(255,255,255,0.25)', marginTop:2 }}>{e.ts} · {e.count}× occurrence</div>
+                <div className="dr-empty dr-empty--ok">✓ No errors in recent history</div>
+              ) : (
+                errorLogs.map((e, i) => (
+                  <div key={i} className={`dr-error dr-error--${e.level}`}>
+                    <div className={`dr-error__dot dr-error__dot--${e.level}`} />
+                    <div className="dr-error__body">
+                      <div className="dr-error__msg">{e.msg}</div>
+                      <div className="dr-error__meta">{e.ts} · {e.count}× occurrence</div>
+                    </div>
                   </div>
+                ))
+              )}
+            </div>
+          </Panel>
+
+          <Panel icon="📊" title="Diagnostics" className="dr-panel">
+            <div className="dr-diag">
+              {[
+                ['Grade', doctorData?.grade || '—', 'bronze'],
+                ['Score', `${Math.round((doctorData?.overall_score || 0) * 100)}%`, null],
+                ['CPU', `${(doctorData?.scores?.cpu ?? '—')}`, null],
+                ['Memory', `${(doctorData?.scores?.memory ?? '—')}`, null],
+                ['Healthy', `${healthy}/${checks.length}`, 'success'],
+                ['Warnings', `${warnings}`, warnings > 0 ? 'warning' : 'success'],
+                ['Critical', `${critical}`, critical > 0 ? 'alert' : 'success'],
+                ['Last Check', doctorData?.updated_at ? new Date(doctorData.updated_at).toLocaleTimeString() : '—', null],
+              ].map(([label, value, tone]) => (
+                <div key={label} className="dr-diag__row">
+                  <span className="dr-diag__label">{label}</span>
+                  <span className={`dr-diag__val ${tone ? `dr-diag__val--${tone}` : ''}`}>{value}</span>
                 </div>
               ))}
             </div>
           </Panel>
 
-          <Panel title="Diagnostics">
-            <DataRow label="Grade"         value={doctorData?.grade || '—'}              color={doctorData?.grade ? '#22C55E' : 'rgba(255,255,255,0.3)'}/>
-            <DataRow label="Score"         value={`${Math.round((doctorData?.overall_score || 0) * 100)}%`}/>
-            <DataRow label="CPU"           value={`${(doctorData?.scores?.cpu ?? '—')}`}/>
-            <DataRow label="Memory"        value={`${(doctorData?.scores?.memory ?? '—')}`}/>
-            <DataRow label="Healthy"       value={`${healthy}/${checks.length}`}      color="#22C55E"/>
-            <DataRow label="Warnings"      value={`${warnings}`}                    color={warnings > 0 ? '#F59E0B' : '#22C55E'}/>
-            <DataRow label="Critical"      value={`${critical}`}                    color={critical > 0 ? '#EF4444' : '#22C55E'}/>
-            <DataRow label="Last Check"    value={doctorData?.updated_at ? new Date(doctorData.updated_at).toLocaleTimeString() : '—'}/>
-          </Panel>
-
-          <Panel title="Actions" style={{ flex:1 }}>
-            {[
-              ['RUN FULL SWEEP',  'var(--teal,#20D6C7)',  'rgba(32,214,199,0.07)', 'rgba(32,214,199,0.3)'],
-              ['RESTART AGENTS',  'var(--gold-bright,#FFD97A)', 'rgba(229,199,107,0.07)', 'rgba(229,199,107,0.3)'],
-              ['CLEAR ERROR LOG', '#8B8B9E',              'rgba(255,255,255,0.04)', 'rgba(255,255,255,0.12)'],
-            ].map(([l,c,bg,border]) => (
-              <button key={l} style={{ width:'100%', marginBottom:5, padding:'8px', borderRadius:6, border:`1px solid ${border}`, background:bg, color:c, cursor:'pointer', fontSize:9, fontFamily:'monospace', letterSpacing:'0.08em', fontWeight:600 }}>{l}</button>
-            ))}
+          <Panel icon="⚡" title="Actions" className="dr-panel dr-col__grow">
+            <div className="dr-actions">
+              <HexButton onClick={() => api.chat.send('Run full system sweep')} variant="primary" tone="cyan" size="sm">RUN FULL SWEEP</HexButton>
+              <HexButton onClick={() => api.chat.send('Restart all agents')} variant="primary" tone="gold" size="sm">RESTART AGENTS</HexButton>
+              <HexButton variant="primary" size="sm">CLEAR ERROR LOG</HexButton>
+            </div>
           </Panel>
         </div>
       </div>

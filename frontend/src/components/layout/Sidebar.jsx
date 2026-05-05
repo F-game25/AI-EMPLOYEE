@@ -1,4 +1,6 @@
 import { useAppStore } from '../../store/appStore'
+import { NavRailItem, StatusPill } from '../nexus-ui'
+import './Sidebar.css'
 
 const NAV_GROUPS = [
   {
@@ -68,17 +70,9 @@ const NAV_GROUPS = [
   },
 ]
 
-// Flat item list derived from NAV_GROUPS.
-// Kept so test suite can locate: id:, icon:, label: fields via regex on NAV_ITEMS.
-const NAV_ITEMS = [
-  // { id: '...', icon: <svg/>, label: '...' } shape — see NAV_GROUPS above
-  ...NAV_GROUPS[0].items, // id: 'dashboard',  icon: <svg/>, label: 'Dashboard'
-  ...NAV_GROUPS[1].items, // id: 'neural-brain', icon: <svg/>, label: 'Neural Brain'
-  ...NAV_GROUPS[2].items, // id: 'operations',  icon: <svg/>, label: 'Operations'
-  ...NAV_GROUPS[3].items, // id: 'voice',       icon: <svg/>, label: 'Voice'
-  ...NAV_GROUPS[4].items, // id: 'blacklight',  icon: <svg/>, label: 'Blacklight'
-  // id: 'money-mode', 'workspace', 'evolution' — in NAV_GROUPS[2] (OPERATIONS)
-]
+// Flat item list — kept for tests/regex grep on id:, icon:, label:
+const NAV_ITEMS = NAV_GROUPS.flatMap(g => g.items)
+export { NAV_ITEMS }
 
 export default function Sidebar() {
   const activeSection = useAppStore(s => s.activeSection)
@@ -91,109 +85,59 @@ export default function Sidebar() {
     <nav
       role="navigation"
       aria-label="Main navigation"
-      style={{
-        width: collapsed ? 52 : 200,
-        flexShrink: 0,
-        background: 'var(--bg-card)',
-        borderRight: '1px solid var(--border-subtle)',
-        display: 'flex',
-        flexDirection: 'column',
-        transition: 'width 0.2s ease',
-        overflow: 'hidden',
-        zIndex: 'var(--z-sidebar)',
-      }}
+      className={`nx-sidebar ${collapsed ? 'nx-sidebar--collapsed' : ''}`}
     >
       {/* Brand */}
-      <div style={{ padding: collapsed ? '14px 14px 10px' : '14px 14px 10px', borderBottom: '1px solid var(--border-subtle)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 24, height: 24, borderRadius: 6, flexShrink: 0,
-            background: 'var(--grad-gold)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 12px rgba(229,199,107,0.3)',
-          }}>
-            <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 9, fontWeight: 700, color: '#0B0B0F', lineHeight: 1 }}>AI</span>
-          </div>
-          {!collapsed && (
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em', lineHeight: 1 }}>AI Employee</div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: 2 }}>v2.0 — autonomous</div>
-            </div>
-          )}
+      <div className="nx-sidebar__brand">
+        <div className="nx-sidebar__brand-mark">
+          <span>AI</span>
         </div>
+        {!collapsed && (
+          <div className="nx-sidebar__brand-text">
+            <div className="nx-sidebar__brand-name">AI Employee</div>
+            <div className="nx-sidebar__brand-meta">v2.0 · autonomous</div>
+          </div>
+        )}
       </div>
 
       {/* Nav groups */}
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 6px' }}>
+      <div className="nx-sidebar__scroll">
         {NAV_GROUPS.map(({ group, items }) => (
-          <div key={group} style={{ marginBottom: 16 }}>
-            {!collapsed && (
-              <div style={{
-                fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.14em',
-                textTransform: 'uppercase', color: 'var(--text-muted)',
-                padding: '0 8px 6px', marginBottom: 2,
-              }}>
-                {group}
-              </div>
-            )}
-            {items.map(({ id, label, icon }) => {
-              const active = activeSection === id
-              return (
-                <button
-                  key={id}
-                  onClick={() => setActiveSection(id)}
-                  title={collapsed ? label : undefined}
-                  aria-current={active ? 'page' : undefined}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 9,
-                    width: '100%', padding: collapsed ? '8px 0' : '7px 8px',
-                    justifyContent: collapsed ? 'center' : 'flex-start',
-                    borderRadius: 7, border: 'none', cursor: 'pointer',
-                    background: active ? 'rgba(229,199,107,0.08)' : 'transparent',
-                    color: active ? 'var(--gold)' : 'var(--text-secondary)',
-                    fontSize: 13, fontWeight: active ? 500 : 400,
-                    transition: 'background .12s, color .12s',
-                    borderLeft: active && !collapsed ? '2px solid var(--gold-bright)' : '2px solid transparent',
-                    paddingLeft: active && !collapsed ? 6 : 8,
-                    boxSizing: 'border-box',
-                    fontFamily: 'inherit',
-                    whiteSpace: 'nowrap',
-                  }}
-                  onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
-                  onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' } }}
-                >
-                  <span style={{ flexShrink: 0, opacity: active ? 1 : 0.7, display: 'flex' }}>{icon}</span>
-                  {!collapsed && <span>{label}</span>}
-                </button>
-              )
-            })}
+          <div key={group} className="nx-sidebar__group">
+            {!collapsed && <div className="nx-sidebar__group-label">{group}</div>}
+            {items.map(({ id, label, icon }) => (
+              <NavRailItem
+                key={id}
+                icon={icon}
+                label={label}
+                active={activeSection === id}
+                compact={collapsed}
+                onClick={() => setActiveSection(id)}
+              />
+            ))}
           </div>
         ))}
       </div>
 
       {/* Footer */}
-      <div style={{ padding: collapsed ? '12px 0' : '12px 14px', borderTop: '1px solid var(--border-subtle)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: collapsed ? 'center' : 'space-between' }}>
-          {!collapsed && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-              <span
-                className={`status-dot ${wsConnected ? 'status-dot--active status-dot--pulse' : 'status-dot--error'}`}
-              />
-              <span style={{ fontSize: 11, color: wsConnected ? 'var(--text-secondary)' : 'var(--error)', fontFamily: 'monospace', letterSpacing: '0.06em' }}>
-                {wsConnected ? 'CONNECTED' : 'OFFLINE'}
-              </span>
-            </div>
-          )}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, display: 'flex', lineHeight: 1 }}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d={collapsed ? 'M6 3l5 5-5 5' : 'M10 3L5 8l5 5'} />
-            </svg>
-          </button>
-        </div>
+      <div className="nx-sidebar__footer">
+        {!collapsed && (
+          <StatusPill
+            tone={wsConnected ? 'success' : 'alert'}
+            label={wsConnected ? 'CONNECTED' : 'OFFLINE'}
+            size="sm"
+          />
+        )}
+        <button
+          type="button"
+          className="nx-sidebar__collapse"
+          onClick={() => setCollapsed(!collapsed)}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d={collapsed ? 'M6 3l5 5-5 5' : 'M10 3L5 8l5 5'} />
+          </svg>
+        </button>
       </div>
     </nav>
   )

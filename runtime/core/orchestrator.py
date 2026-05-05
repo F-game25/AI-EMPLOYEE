@@ -20,6 +20,12 @@ from core.wavefield_provider import (
     wavefield_call,
 )
 
+try:
+    from core.llm_provider_router import get_router
+    HAS_PROVIDER_ROUTER = True
+except ImportError:
+    HAS_PROVIDER_ROUTER = False
+
 INTENT_CATEGORIES = (
     "lead_gen",
     "content",

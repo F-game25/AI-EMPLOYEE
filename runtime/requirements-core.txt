@@ -1,0 +1,15 @@
+# AI-Employee Core Requirements
+# Minimal, always-installed dependencies for boot and basic operation
+# Optional extras are installed on-demand via capability system
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+psutil==6.1.1
+pyyaml>=6.0
+bcrypt==4.2.0
+python-jose[cryptography]==3.4.0
+cryptography==46.0.7
+slowapi>=0.1.9
+pydantic-settings==2.3.4
+anthropic>=0.37.0
+httpx>=0.25.0,<1.0.0

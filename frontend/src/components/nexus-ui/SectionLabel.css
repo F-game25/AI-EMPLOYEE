@@ -1,0 +1,121 @@
+/* ════════════════════════════════════════════════════════════════════
+   <SectionLabel> — Small-caps gold label with optional LIVE badge.
+   Used for header rows, sub-section titles, and stand-alone labels.
+   ════════════════════════════════════════════════════════════════════ */
+
+.nx-section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--nx-s-2);
+  font-family: var(--nx-font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: var(--nx-tracking-cap);
+  text-transform: uppercase;
+  color: var(--nx-text-muted);
+  line-height: 1;
+}
+
+.nx-section-label--gold {
+  background: var(--nx-gold-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.nx-section-label--dim {
+  color: var(--nx-text-dim);
+}
+
+.nx-section-label--lg {
+  font-size: 13px;
+  letter-spacing: var(--nx-tracking-cap);
+}
+
+.nx-section-label--sm {
+  font-size: 10px;
+  letter-spacing: var(--nx-tracking-mid);
+}
+
+.nx-section-label__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--nx-gold);
+  filter: drop-shadow(0 0 4px rgba(229,199,107,0.5));
+  flex-shrink: 0;
+}
+
+.nx-section-label__rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--nx-border-strong), transparent);
+  min-width: 20px;
+}
+
+/* ── LIVE badge ────────────────────────────────────────────────────── */
+.nx-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: rgba(34,197,94,0.10);
+  color: var(--nx-success);
+  border: 1px solid rgba(34,197,94,0.30);
+  line-height: 1;
+}
+
+.nx-live-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--nx-success);
+  box-shadow: 0 0 6px var(--nx-success-glow);
+  animation: nx-live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes nx-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.85); }
+}
+
+.nx-live-badge--idle {
+  background: rgba(255,255,255,0.04);
+  color: var(--nx-text-dim);
+  border-color: rgba(255,255,255,0.08);
+}
+.nx-live-badge--idle::before {
+  background: var(--nx-text-dim);
+  box-shadow: none;
+  animation: none;
+}
+
+.nx-live-badge--warn {
+  background: rgba(245,158,11,0.10);
+  color: var(--nx-warning);
+  border-color: rgba(245,158,11,0.30);
+}
+.nx-live-badge--warn::before {
+  background: var(--nx-warning);
+  box-shadow: 0 0 6px var(--nx-warning-glow);
+}
+
+.nx-live-badge--alert {
+  background: rgba(239,68,68,0.10);
+  color: var(--nx-danger);
+  border-color: rgba(239,68,68,0.30);
+}
+.nx-live-badge--alert::before {
+  background: var(--nx-danger);
+  box-shadow: 0 0 6px var(--nx-danger-glow);
+}

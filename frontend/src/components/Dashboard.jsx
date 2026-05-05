@@ -6,26 +6,27 @@ import { useBrainStore } from '../store/brainStore'
 import Sidebar from './layout/Sidebar'
 import ContextPanel from './layout/ContextPanel'
 
-const DashboardPage       = lazy(() => import('./pages/DashboardPageNEW'))
-const ControlCenterPage   = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.ControlCenterPageNEW })))
+const DashboardPage       = lazy(() => import('./pages/NexusOSDashboard'))
+const AscendForgePage     = lazy(() => import('./pages/AscendForgePage'))
+const ControlCenterPage   = lazy(() => import('./pages/ControlCenterPage'))
+const DoctorPage          = lazy(() => import('./pages/DoctorPage'))
+const FairnessPage        = lazy(() => import('./pages/FairnessPage'))
+const HermesPage          = lazy(() => import('./pages/HermesPage'))
+const LearningLadderPage  = lazy(() => import('./pages/LearningLadderPage'))
+const PromptInspectorPage = lazy(() => import('./pages/PromptInspectorPage'))
+const TrainingPage        = lazy(() => import('./pages/TrainingPage'))
+const WorkspacePage       = lazy(() => import('./pages/WorkspacePage'))
 const AIControlPage       = lazy(() => import('./pages/AIControlPage'))
 const NeuralBrainPage     = lazy(() => import('./pages/NeuralBrainPage'))
 const OperationsPage      = lazy(() => import('./pages/OperationsPage'))
 const AgentsPage          = lazy(() => import('./pages/AgentsPageNEW'))
-const SystemPage          = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.SystemPageNEW })))
+const SystemPage          = lazy(() => import('./pages/SystemPage'))
 const VoicePage           = lazy(() => import('./pages/VoicePage'))
-const LearningLadderPage  = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.LearningLadderPageNEW })))
-const PromptInspectorPage = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.PromptInspectorPageNEW })))
-const AscendForgePage     = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.AscendForgePageNEW })))
-const DoctorPage          = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.DoctorPageNEW })))
 const BlacklightPage      = lazy(() => import('./pages/BlacklightPage'))
-const FairnessPage        = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.FairnessPageNEW })))
-const HermesPage          = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.HermesPageNEW })))
 const MoneyModePage       = lazy(() => import('./pages/MoneyModePage'))
-const WorkspacePage       = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.WorkspacePageNEW })))
 const EvolutionPage       = lazy(() => import('./pages/EvolutionPage'))
-const TrainingPage        = lazy(() => import('./pages/RemainingPagesNEW').then(m => ({ default: m.TrainingPageNEW })))
 const HistoryPage         = lazy(() => import('./pages/HistoryPage'))
+const SettingsPage        = lazy(() => import('./pages/SettingsPage'))
 import { API_URL } from '../config/api'
 import TopBar from './dashboard/TopBar'
 import ErrorBoundary from './ErrorBoundary'
@@ -53,6 +54,7 @@ const PAGES = {
   'evolution':        EvolutionPage,
   'training':         TrainingPage,
   'history':          HistoryPage,
+  'settings':         SettingsPage,
 }
 
 export default function Dashboard() {
@@ -164,8 +166,11 @@ export default function Dashboard() {
         <TopBar />
         <div style={{
           flex: 1,
-          overflowY: 'auto',
-          padding: 'var(--space-2) var(--space-3)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: activeSection === 'dashboard' ? 0 : 'var(--space-2) var(--space-3)',
+          overflowY: activeSection === 'dashboard' ? 'hidden' : 'auto',
         }}>
           <ErrorBoundary key={activeSection} label={activeSection}>
             <Suspense fallback={
@@ -173,7 +178,9 @@ export default function Dashboard() {
                 Loading…
               </div>
             }>
-              <PageComponent />
+              <div style={activeSection === 'dashboard' ? { flex:1, height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' } : {}}>
+                <PageComponent />
+              </div>
             </Suspense>
           </ErrorBoundary>
         </div>

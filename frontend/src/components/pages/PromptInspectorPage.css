@@ -1,0 +1,268 @@
+/* ════════════════════════════════════════════════════════════════════
+   PROMPT INSPECTOR PAGE — Trace Analysis & Quality Metrics
+   Gold-on-black, prompt editor + quality analysis + trend sparkline
+   ════════════════════════════════════════════════════════════════════ */
+
+@import '../nexus-ui/tokens.css';
+
+.pi-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-5);
+  height: 100%;
+  padding: var(--nx-s-4);
+  background: var(--nx-bg);
+}
+
+/* ── KPI Row (4 tiles) ──────────────────────────────────────────────── */
+.pi-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--nx-s-5);
+  flex-shrink: 0;
+}
+
+/* ── Main Grid (2-column) ───────────────────────────────────────────── */
+.pi-main-grid {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: var(--nx-s-5);
+  flex: 1;
+  min-height: 0;
+}
+
+.pi-left,
+.pi-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-5);
+  min-height: 0;
+}
+
+/* ── Trace List ────────────────────────────────────────────────────── */
+.pi-trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pi-trace-item {
+  padding: 9px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(229, 199, 107, 0.08);
+  background: rgba(18, 20, 31, 1);
+  cursor: pointer;
+  transition: all 150ms var(--nx-ease);
+}
+
+.pi-trace-item:hover {
+  border-color: rgba(229, 199, 107, 0.2);
+  background: rgba(229, 199, 107, 0.04);
+}
+
+.pi-trace-item--selected {
+  border-color: rgba(229, 199, 107, 0.4);
+  background: rgba(229, 199, 107, 0.06);
+}
+
+.pi-trace-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.pi-trace-agent {
+  font-size: 11.5px;
+  color: var(--nx-text);
+  flex: 1;
+  font-weight: 500;
+}
+
+.pi-trace-flag {
+  font-size: 8px;
+  font-family: var(--nx-font-mono);
+  padding: 1px 4px;
+  border: 1px solid;
+  border-radius: 3px;
+  opacity: 0.8;
+}
+
+.pi-trace-score {
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pi-trace-score--high {
+  color: #22C55E;
+}
+
+.pi-trace-score--med {
+  color: #E5C76B;
+}
+
+.pi-trace-score--low {
+  color: #EF4444;
+}
+
+.pi-trace-prompt {
+  font-size: 10.5px;
+  color: #9A927E;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 4px;
+}
+
+.pi-trace-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 9px;
+  font-family: var(--nx-font-mono);
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Prompt Editor ────────────────────────────────────────────────── */
+.pi-editor-label {
+  font-size: 9px;
+  font-family: var(--nx-font-mono);
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.08em;
+  margin-bottom: var(--nx-s-3);
+}
+
+.pi-editor-textarea {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(229, 199, 107, 0.18);
+  border-radius: 7px;
+  padding: 8px 10px;
+  color: var(--nx-text);
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  outline: none;
+  resize: none;
+  line-height: 1.5;
+  margin-bottom: var(--nx-s-3);
+  box-sizing: border-box;
+}
+
+.pi-editor-textarea:focus {
+  border-color: rgba(229, 199, 107, 0.4);
+}
+
+.pi-editor-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+/* ── Detail Panel ───────────────────────────────────────────────────── */
+.pi-detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: var(--nx-s-3);
+}
+
+.pi-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(229, 199, 107, 0.06);
+}
+
+.pi-detail-row:last-child {
+  border-bottom: none;
+}
+
+.pi-detail-label {
+  font-size: 9px;
+  font-family: var(--nx-font-mono);
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.pi-detail-value {
+  font-size: 11px;
+  font-family: var(--nx-font-mono);
+}
+
+.pi-detail-flags {
+  margin-top: var(--nx-s-3);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  font-size: 10px;
+  color: #EF4444;
+  font-family: var(--nx-font-mono);
+}
+
+.pi-detail-output {
+  margin-top: var(--nx-s-3);
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  color: #9A927E;
+  font-family: var(--nx-font-mono);
+  line-height: 1.5;
+}
+
+/* ── Quality Analysis ───────────────────────────────────────────────── */
+.pi-quality-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-3);
+}
+
+.pi-quality-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pi-quality-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  font-family: var(--nx-font-mono);
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pi-quality-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pi-quality-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+}
+
+/* ── Trend Sparkline ────────────────────────────────────────────────── */
+.pi-trend-svg {
+  width: 100%;
+  height: 50px;
+  display: block;
+  margin-bottom: var(--nx-s-3);
+}
+
+.pi-trend-label {
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  color: #E5C76B;
+}
+
+/* ── Right Column ───────────────────────────────────────────────────── */
+.pi-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-5);
+}

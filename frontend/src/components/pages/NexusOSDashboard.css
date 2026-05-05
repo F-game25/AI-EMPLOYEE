@@ -1,0 +1,476 @@
+/* ═══════════════════════════════════════════════════════════
+   NexusOS Dashboard — Phase 1
+   Gold-on-black enterprise intelligence interface
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  --nexus-bg:        #07080f;
+  --nexus-card:      #0c0e1a;
+  --nexus-border:    rgba(229,199,107,0.18);
+  --nexus-border-hi: rgba(229,199,107,0.45);
+  --nexus-gold:      #e5c76b;
+  --nexus-gold-dim:  #c9a94a;
+  --nexus-purple:    #a855f7;
+  --nexus-crimson:   #ef4444;
+  --nexus-cyan:      #06b6d4;
+  --nexus-silver:    #94a3b8;
+  --nexus-green:     #22c55e;
+  --nexus-text:      #f0e9d6;
+  --nexus-dim:       #8b7e5a;
+  --nexus-muted:     #2a2520;
+  --font-mono:       'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+/* ── root layout ────────────────────────────────────────── */
+.nexus-os {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--nexus-bg);
+  font-family: var(--font-mono);
+  color: var(--nexus-text);
+  overflow: hidden;
+  gap: 0;
+}
+
+/* ── KPI strip ──────────────────────────────────────────── */
+.nexus-kpi-strip {
+  display: flex;
+  align-items: stretch;
+  background: var(--nexus-card);
+  border-bottom: 1px solid var(--nexus-border);
+  flex-shrink: 0;
+  height: 72px;
+}
+
+.nexus-kpi-tile {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-right: 1px solid var(--nexus-border);
+  cursor: default;
+  transition: background 0.2s;
+}
+.nexus-kpi-tile:hover {
+  background: rgba(229,199,107,0.05);
+}
+
+.kpi-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.kpi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.kpi-value {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  white-space: nowrap;
+}
+
+.kpi-label {
+  font-size: 8px;
+  letter-spacing: 1.5px;
+  color: var(--nexus-dim);
+  text-transform: uppercase;
+}
+
+.kpi-delta {
+  font-size: 9px;
+  font-weight: 700;
+}
+.kpi-delta.up   { color: var(--nexus-green); }
+.kpi-delta.down { color: var(--nexus-crimson); }
+.kpi-sub { color: var(--nexus-dim); font-weight: 400; }
+
+.nexus-kpi-nav {
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  color: var(--nexus-dim);
+  cursor: pointer;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+/* ── main area ──────────────────────────────────────────── */
+.nexus-main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── neural core area ───────────────────────────────────── */
+.nexus-core-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  border-right: 1px solid var(--nexus-border);
+}
+
+.nexus-core-label {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  z-index: 10;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--nexus-dim);
+  pointer-events: none;
+}
+
+.nexus-badge {
+  display: inline-block;
+  background: rgba(229,199,107,0.15);
+  color: var(--nexus-gold);
+  border: 1px solid var(--nexus-border);
+  border-radius: 3px;
+  font-size: 8px;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  margin-left: 8px;
+}
+
+/* ── node label overlay ─────────────────────────────────── */
+.nexus-node-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.node-label-card {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  background: rgba(7,8,15,0.80);
+  border: 1px solid;
+  border-radius: 4px;
+  padding: 5px 8px;
+  min-width: 120px;
+  backdrop-filter: blur(4px);
+  text-align: center;
+}
+.node-label-name {
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: var(--nexus-dim);
+  text-transform: uppercase;
+}
+.node-label-pct {
+  font-size: 13px;
+  font-weight: 800;
+}
+.node-label-tps {
+  font-size: 8px;
+  color: var(--nexus-dim);
+}
+
+/* ── system status (left lower) ─────────────────────────── */
+.nexus-system-status {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 10;
+  background: rgba(12,14,26,0.90);
+  border: 1px solid var(--nexus-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-width: 140px;
+  backdrop-filter: blur(8px);
+}
+.ss-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--nexus-dim);
+  margin-bottom: 4px;
+}
+.ss-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--nexus-gold);
+  flex-shrink: 0;
+  box-shadow: 0 0 6px var(--nexus-gold);
+  animation: ss-pulse 2s infinite;
+}
+.ss-dot.active { background: var(--nexus-green); box-shadow: 0 0 6px var(--nexus-green); }
+@keyframes ss-pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+.ss-close {
+  margin-left: auto;
+  background: none; border: none;
+  color: var(--nexus-dim); cursor: pointer; font-size: 12px;
+}
+.ss-figure { display: flex; justify-content: center; margin: 8px 0; }
+.ss-score { text-align: center; }
+
+/* ── right column ───────────────────────────────────────── */
+.nexus-right-col {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--nexus-border);
+}
+.nexus-right-col > * {
+  border-bottom: 1px solid var(--nexus-border);
+}
+.nexus-right-col > *:last-child {
+  border-bottom: none;
+}
+
+/* ── panel base ─────────────────────────────────────────── */
+.nexus-panel {
+  background: var(--nexus-card);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.nexus-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--nexus-border);
+  flex-shrink: 0;
+}
+.nexus-panel-title {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--nexus-dim);
+  text-transform: uppercase;
+}
+.nexus-panel-badge {
+  font-size: 7px;
+  letter-spacing: 1px;
+  color: var(--nexus-gold);
+  background: rgba(229,199,107,0.1);
+  border: 1px solid var(--nexus-border);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.nexus-panel-body {
+  flex: 1;
+  padding: 10px 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ── cognition stream ───────────────────────────────────── */
+.cognition-brain-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+.cognition-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 10px;
+}
+.cog-dot { color: var(--nexus-gold); font-size: 8px; flex-shrink: 0; }
+.cog-label { color: var(--nexus-text); flex: 1; font-size: 10px; }
+.cog-time { color: var(--nexus-dim); font-size: 9px; }
+.cognition-total {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--nexus-border);
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--nexus-dim);
+}
+
+/* ── agent swarm heatmap ────────────────────────────────── */
+.swarm-hex-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.swarm-hex {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  opacity: 0.75;
+  transition: opacity 0.5s;
+}
+.swarm-legend {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+.swarm-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+/* ── telemetry ──────────────────────────────────────────── */
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.telemetry-item { display: flex; flex-direction: column; gap: 3px; }
+.tel-top { display: flex; justify-content: space-between; align-items: baseline; }
+.tel-label { font-size: 9px; letter-spacing: 1px; color: var(--nexus-dim); }
+.tel-val { font-size: 16px; font-weight: 800; }
+
+/* ── bottom row ─────────────────────────────────────────── */
+.nexus-bottom-row {
+  display: flex;
+  height: 220px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--nexus-border);
+  overflow: hidden;
+}
+.nexus-bottom-row > * {
+  border-right: 1px solid var(--nexus-border);
+}
+.nexus-bottom-row > *:last-child {
+  border-right: none;
+}
+
+/* ── revenue ────────────────────────────────────────────── */
+.rev-body {
+  display: flex;
+  gap: 12px;
+  height: 100%;
+}
+.rev-overview { flex: 1.2; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rev-total { display: flex; align-items: baseline; gap: 8px; }
+.rev-delta { font-size: 10px; font-weight: 700; }
+.rev-delta.up   { color: var(--nexus-green); }
+.rev-delta.down { color: var(--nexus-crimson); }
+
+.rev-by-source { flex: 1; min-width: 0; }
+.rev-donut-placeholder { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.donut-legend { display: flex; flex-direction: column; gap: 2px; }
+.donut-item { display: flex; align-items: center; gap: 4px; font-size: 9px; }
+
+.rev-campaigns { flex: 1.2; min-width: 0; display: flex; flex-direction: column; }
+.campaign-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(229,199,107,0.06);
+}
+.camp-rank { color: var(--nexus-gold); font-size: 10px; }
+.camp-name { flex: 1; font-size: 10px; color: var(--nexus-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── mission timeline ───────────────────────────────────── */
+.timeline-phases {
+  display: flex;
+  gap: 0;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.tl-phase {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.tl-phase-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+.tl-phase-label {
+  font-size: 7px;
+  letter-spacing: 0.5px;
+  color: var(--nexus-dim);
+  text-align: center;
+}
+.timeline-items { display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
+.tl-row { display: flex; align-items: center; gap: 8px; }
+.tl-name { font-size: 9px; color: var(--nexus-text); width: 130px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(229,199,107,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.tl-bar-fill { height: 100%; border-radius: 3px; }
+.tl-avatars { display: flex; gap: 2px; flex-shrink: 0; }
+.tl-avatar {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--nexus-muted);
+  border: 1px solid var(--nexus-border);
+}
+
+/* ── security ───────────────────────────────────────────── */
+.sec-body { display: flex; flex-direction: column; gap: 8px; height: 100%; }
+.sec-stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.sec-stat-block { display: flex; flex-direction: column; gap: 1px; min-width: 70px; }
+.sec-worldmap { flex-shrink: 0; }
+.sec-events { display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+.sec-event { display: flex; align-items: center; gap: 4px; }
+
+/* ── bottom strip ───────────────────────────────────────── */
+.nexus-bottom-strip {
+  display: flex;
+  align-items: center;
+  background: var(--nexus-card);
+  border-top: 1px solid var(--nexus-border);
+  padding: 8px 14px;
+  gap: 20px;
+  flex-shrink: 0;
+  height: 62px;
+  overflow: hidden;
+}
+
+.bs-collaborators { flex-shrink: 0; }
+.bs-avatar {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(229,199,107,0.15);
+  border: 1px solid var(--nexus-border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; color: var(--nexus-gold);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.bs-avatar:hover { background: rgba(229,199,107,0.25); }
+.bs-avatar-more { color: var(--nexus-dim); }
+
+.bs-commands { flex: 1; }
+.bs-cmd-btn {
+  background: rgba(229,199,107,0.08);
+  border: 1px solid var(--nexus-border);
+  border-radius: 4px;
+  color: var(--nexus-gold);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.bs-cmd-btn:hover {
+  background: rgba(229,199,107,0.18);
+  border-color: var(--nexus-border-hi);
+  box-shadow: 0 0 8px rgba(229,199,107,0.15);
+}
+.bs-voice { flex-shrink: 0; min-width: 200px; }
+
+/* ── scrollbar ──────────────────────────────────────────── */
+.nexus-os *::-webkit-scrollbar { width: 3px; }
+.nexus-os *::-webkit-scrollbar-track { background: transparent; }
+.nexus-os *::-webkit-scrollbar-thumb { background: var(--nexus-border); border-radius: 2px; }

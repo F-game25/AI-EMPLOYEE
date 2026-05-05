@@ -1,0 +1,131 @@
+/* ════════════════════════════════════════════════════════════════════
+   NEXUS DESIGN SYSTEM — TOKENS
+   Cinematic enterprise OS look (gold-on-black, chamfered frames,
+   layered glows, hex accents). Used by all <nexus-ui> primitives.
+   ════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Surface palette ─────────────────────────────────────────────── */
+  --nx-bg:            #07080f;
+  --nx-bg-deep:       #04050a;
+  --nx-surface:       #0b0d18;
+  --nx-surface-2:     #10131f;
+  --nx-surface-3:     #161a28;
+
+  /* Panel material (layered glass + warm tint) */
+  --nx-panel-bg:
+    radial-gradient(120% 80% at 50% 0%, rgba(229,199,107,0.05) 0%, transparent 60%),
+    linear-gradient(180deg, rgba(20,18,14,0.72) 0%, rgba(8,9,16,0.82) 100%);
+  --nx-panel-bg-hover:
+    radial-gradient(120% 80% at 50% 0%, rgba(229,199,107,0.09) 0%, transparent 60%),
+    linear-gradient(180deg, rgba(28,24,16,0.78) 0%, rgba(10,12,20,0.88) 100%);
+
+  /* ── Gold spectrum ──────────────────────────────────────────────── */
+  --nx-gold:          #e5c76b;
+  --nx-gold-bright:   #ffd97a;
+  --nx-gold-warm:     #d4a82e;
+  --nx-gold-deep:     #8b6914;
+  --nx-amber:         #f5b94a;
+  --nx-bronze:        #a87432;
+
+  --nx-gold-grad:     linear-gradient(135deg, #ffe089 0%, #e5c76b 45%, #c79a3e 100%);
+  --nx-gold-grad-soft: linear-gradient(135deg, rgba(229,199,107,0.18) 0%, rgba(199,154,62,0.08) 100%);
+
+  /* ── Borders (hairline + chamfered) ─────────────────────────────── */
+  --nx-border:        rgba(229,199,107,0.14);
+  --nx-border-strong: rgba(229,199,107,0.28);
+  --nx-border-faint:  rgba(229,199,107,0.06);
+  --nx-border-cool:   rgba(180,200,255,0.08);
+  --nx-divider:       rgba(229,199,107,0.10);
+
+  /* Top hairline gradient (used on every panel header) */
+  --nx-hairline:      linear-gradient(90deg, transparent, rgba(229,199,107,0.55) 50%, transparent);
+  --nx-hairline-dim:  linear-gradient(90deg, transparent, rgba(229,199,107,0.25) 50%, transparent);
+  --nx-hairline-vert: linear-gradient(180deg, transparent, rgba(229,199,107,0.45) 50%, transparent);
+
+  /* ── Glows & shadows (layered) ──────────────────────────────────── */
+  --nx-glow-gold-sm:  0 0 12px rgba(229,199,107,0.25);
+  --nx-glow-gold:     0 0 24px rgba(229,199,107,0.30), 0 0 60px rgba(229,199,107,0.12);
+  --nx-glow-gold-lg:  0 0 32px rgba(229,199,107,0.45), 0 0 80px rgba(229,199,107,0.18);
+
+  --nx-shadow-panel:
+    0 1px 0 rgba(255,255,255,0.04) inset,
+    0 0 0 1px rgba(229,199,107,0.10) inset,
+    0 18px 48px rgba(0,0,0,0.55),
+    0 2px 8px rgba(0,0,0,0.4);
+  --nx-shadow-panel-hover:
+    0 1px 0 rgba(255,255,255,0.06) inset,
+    0 0 0 1px rgba(229,199,107,0.20) inset,
+    0 22px 60px rgba(0,0,0,0.62),
+    0 0 24px rgba(229,199,107,0.10);
+  --nx-shadow-inset:
+    0 0 0 1px rgba(229,199,107,0.08) inset,
+    0 1px 2px rgba(0,0,0,0.5) inset;
+
+  /* ── Status accents ─────────────────────────────────────────────── */
+  --nx-success:       #22c55e;
+  --nx-success-glow:  rgba(34,197,94,0.6);
+  --nx-warning:       #f59e0b;
+  --nx-warning-glow:  rgba(245,158,11,0.6);
+  --nx-danger:        #ef4444;
+  --nx-danger-glow:   rgba(239,68,68,0.6);
+  --nx-info:          #60a5fa;
+  --nx-info-glow:     rgba(96,165,250,0.55);
+  --nx-cyan:          #20d6c7;
+  --nx-purple:        #a855f7;
+  --nx-crimson:       #dc2626;
+
+  /* ── Text ───────────────────────────────────────────────────────── */
+  --nx-text:          #ecead8;
+  --nx-text-muted:    #9a927e;
+  --nx-text-dim:      #5a5747;
+  --nx-text-faint:    #36342a;
+  --nx-text-on-gold:  #14110a;
+
+  /* ── Typography ─────────────────────────────────────────────────── */
+  --nx-font-display:  'Inter', system-ui, -apple-system, sans-serif;
+  --nx-font-mono:     'JetBrains Mono', ui-monospace, monospace;
+  --nx-tracking-cap:  0.18em;
+  --nx-tracking-mid:  0.08em;
+  --nx-tracking-tight: -0.01em;
+
+  /* ── Geometry ───────────────────────────────────────────────────── */
+  --nx-r-sm:          4px;
+  --nx-r:             8px;
+  --nx-r-md:          10px;
+  --nx-r-lg:          12px;
+  --nx-r-xl:          16px;
+
+  --nx-chamfer:       10px;   /* corner clip distance for chamfered frames */
+  --nx-chamfer-sm:    6px;
+  --nx-chamfer-lg:    14px;
+
+  /* ── Spacing (8px grid) ─────────────────────────────────────────── */
+  --nx-s-1: 4px;
+  --nx-s-2: 8px;
+  --nx-s-3: 12px;
+  --nx-s-4: 16px;
+  --nx-s-5: 20px;
+  --nx-s-6: 24px;
+  --nx-s-8: 32px;
+  --nx-s-10: 40px;
+
+  /* ── Motion ─────────────────────────────────────────────────────── */
+  --nx-ease:          cubic-bezier(0.4, 0, 0.2, 1);
+  --nx-ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --nx-ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --nx-dur-fast:      160ms;
+  --nx-dur:           240ms;
+  --nx-dur-slow:      480ms;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Reduced-motion compliance
+   ════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --nx-dur-fast: 0ms;
+    --nx-dur: 0ms;
+    --nx-dur-slow: 0ms;
+  }
+}

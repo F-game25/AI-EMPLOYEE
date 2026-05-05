@@ -226,6 +226,7 @@ app.get('/api/artifacts', (_req, res) => {
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
 app.use('/api/voice', voiceApiRouter);
+app.use('/api/settings', require('./routes/settings'));
 
 const GPU_USAGE_BASELINE = 18;
 let currentGpuUsage = GPU_USAGE_BASELINE;
@@ -1246,7 +1247,19 @@ function sampleSystemStatus() {
   };
 }
 
-app.get('/health', async (req, res) => {
+// GET /health — FAST health check for boot polling (no external calls)
+// Returns immediately with Node.js uptime and status.
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  });
+});
+
+// GET /health/full — detailed health check (external calls, slow)
+// Called by dashboard, not by boot scripts. Includes all subsystem checks.
+app.get('/health/full', async (req, res) => {
   const checks = {
     node: { status: 'ok' },
     python_backend: { status: 'pending' },
@@ -1334,6 +1347,116 @@ app.post('/api/auth/token', (req, res) => {
   res.json({ ok: true, token, expires_in: JWT_EXPIRES_IN });
 });
 
+// GET /api/identity/public — public identity info (no auth required)
+// Returns instance name and color palette for onboarding/branding
+app.get('/api/identity/public', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const identityFile = path.join(process.env.HOME || process.env.USERPROFILE, '.ai-employee', 'identity.json');
+    if (!fs.existsSync(identityFile)) {
+      return res.json({
+        instance_name: 'Initializing...',
+        color_palette: { primary: '#a855f7', accent: '#e5c76b' },
+        user_chosen: null
+      });
+    }
+    const identity = JSON.parse(fs.readFileSync(identityFile, 'utf8'));
+    res.json({
+      instance_name: identity.instance_name,
+      user_chosen: identity.user_chosen,
+      color_palette: identity.color_palette,
+      tenant_id: identity.tenant_id
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to read identity' });
+  }
+});
+
+// GET /api/onboarding/palettes — generate 3 color palettes for onboarding
+app.get('/api/onboarding/palettes', (req, res) => {
+  const generatePalette = () => {
+    const hue = Math.random() * 0.3 + 0.65;  // 65-95% of hue circle (purples/magentas)
+    const saturation = 0.6 + Math.random() * 0.3;  // 60-90%
+    const toHex = (h, s, l) => {
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+      const m = l - c / 2;
+      let r = 0, g = 0, b = 0;
+      if (h < 1/6) [r, g, b] = [c, x, 0];
+      else if (h < 1/3) [r, g, b] = [x, c, 0];
+      else if (h < 1/2) [r, g, b] = [0, c, x];
+      else if (h < 2/3) [r, g, b] = [0, x, c];
+      else if (h < 5/6) [r, g, b] = [x, 0, c];
+      else [r, g, b] = [c, 0, x];
+      return '#' + [r + m, g + m, b + m].map(x => Math.round((x) * 255).toString(16).padStart(2, '0')).join('');
+    };
+    return {
+      primary: toHex(hue, saturation, 0.4),
+      accent: toHex(hue, saturation * 0.8, 0.55),
+      secondary: toHex((hue + 0.15) % 1.0, saturation * 0.7, 0.4)
+    };
+  };
+  res.json({
+    palettes: [generatePalette(), generatePalette(), generatePalette()]
+  });
+});
+
+// POST /api/identity/finalize — save user onboarding choices
+app.post('/api/identity/finalize', async (req, res) => {
+  try {
+    const { user_chosen, instance_name, voice_preset, color_palette } = req.body;
+    const fs = require('fs');
+    const path = require('path');
+    const homedir = process.env.HOME || process.env.USERPROFILE;
+    const identityFile = path.join(homedir, '.ai-employee', 'identity.json');
+
+    // Ensure directory exists
+    const dir = path.dirname(identityFile);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    // Load or create identity
+    let identity;
+    if (fs.existsSync(identityFile)) {
+      identity = JSON.parse(fs.readFileSync(identityFile, 'utf8'));
+    } else {
+      // Create minimal identity if doesn't exist
+      identity = {
+        tenant_id: `tnt_${Math.random().toString(36).substr(2, 12)}`,
+        instance_name: instance_name || 'Aurora-Prime',
+        user_chosen: null,
+        color_palette: color_palette || { primary: '#a855f7', accent: '#e5c76b' },
+        voice_preset: voice_preset || 'professional',
+        emergent: { vocabulary_signature: [], favorite_agents: [], work_pattern: null, tone_drift: 0.0 },
+        created_at: new Date().toISOString(),
+        evolution_log: []
+      };
+    }
+
+    // Update with user choices
+    if (user_chosen) identity.user_chosen = user_chosen;
+    if (instance_name) identity.instance_name = instance_name;
+    if (voice_preset) identity.voice_preset = voice_preset;
+    if (color_palette) identity.color_palette = color_palette;
+
+    // Log finalization
+    identity.evolution_log = identity.evolution_log || [];
+    identity.evolution_log.push({
+      event: 'identity_finalized',
+      timestamp: new Date().toISOString(),
+      user_chosen,
+      voice_preset
+    });
+
+    // Write back
+    fs.writeFileSync(identityFile, JSON.stringify(identity, null, 2));
+    res.json({ ok: true, identity });
+  } catch (e) {
+    console.error('Failed to finalize identity:', e);
+    res.status(500).json({ error: 'Failed to save identity' });
+  }
+});
+
 app.get('/version', (req, res) => {
   res.set('Cache-Control', 'no-store, must-revalidate');
   let versionState = null;
@@ -1373,14 +1496,14 @@ app.get('/status', (req, res) => {
 });
 
 // Aliases for tests and external callers that expect /api/ prefix
-app.get('/api/status', (req, res) => {
+app.get('/api/status', requireAuth, (req, res) => {
   const stats = sampleSystemStatus();
   res.json({ status: 'online', agents: stats.total_agents, running_agents: stats.running_agents, timestamp: stats.timestamp });
 });
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
 });
-app.get('/api/agents', (req, res) => {
+app.get('/api/agents', requireAuth, (req, res) => {
   const agents = getAgents();
   // Include tenant context if available (for debugging/admin purposes only)
   const response = {
@@ -1392,7 +1515,7 @@ app.get('/api/agents', (req, res) => {
 
 // ── Subsystem API endpoints ───────────────────────────────────────────────────
 
-app.get('/api/system/stats', (req, res) => {
+app.get('/api/system/stats', requireAuth, (req, res) => {
   const stats = sampleSystemStatus();
   // Expose cpu_percent as canonical field (alias of cpu_usage) for test/e2e compatibility
   res.json({ ...stats, cpu_percent: stats.cpu_usage ?? stats.cpu ?? 0 });

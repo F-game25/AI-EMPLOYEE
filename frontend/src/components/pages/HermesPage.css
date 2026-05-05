@@ -1,0 +1,278 @@
+/* ════════════════════════════════════════════════════════════════════
+   HERMES PAGE — Strategic Reasoning UI
+   Gold-on-black theme, 3-layer goal decomposition + multi-path planning
+   ════════════════════════════════════════════════════════════════════ */
+
+@import '../nexus-ui/tokens.css';
+
+.he-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-5);
+  height: 100%;
+  padding: var(--nx-s-4);
+  background: var(--nx-bg);
+}
+
+/* ── KPI Row ────────────────────────────────────────────────────────── */
+.he-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--nx-s-5);
+  flex-shrink: 0;
+}
+
+/* ── Main Layout (2-column grid) ────────────────────────────────────── */
+.he-main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--nx-s-5);
+  flex: 1;
+  min-height: 0;
+}
+
+.he-left,
+.he-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-5);
+  min-height: 0;
+}
+
+/* ── Text Input ─────────────────────────────────────────────────────── */
+.he-textarea {
+  width: 100%;
+  padding: var(--nx-s-3) var(--nx-s-3);
+  border-radius: var(--nx-r);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--nx-border);
+  color: var(--nx-text);
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  resize: none;
+  margin-bottom: var(--nx-s-3);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.he-textarea:focus {
+  border-color: var(--nx-gold);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Goal Decomposition Layers ─────────────────────────────────────── */
+.he-decomp-layers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-3);
+  margin-top: var(--nx-s-3);
+}
+
+.he-layer {
+  border-left: 2px solid rgba(229, 199, 107, 0.2);
+  padding-left: var(--nx-s-3);
+}
+
+.he-layer-title {
+  font-size: 8px;
+  font-family: var(--nx-font-mono);
+  color: #8B8B9E;
+  margin-bottom: 3px;
+  letter-spacing: 0.06em;
+}
+
+.he-layer-task {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 1px;
+}
+
+/* ── Constraint Inputs ─────────────────────────────────────────────── */
+.he-constraint-group {
+  margin-bottom: var(--nx-s-3);
+}
+
+.he-constraint-label {
+  font-size: 9px;
+  font-family: var(--nx-font-mono);
+  color: rgba(255, 255, 255, 0.35);
+  margin-bottom: 3px;
+  display: block;
+}
+
+.he-input {
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: var(--nx-r);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--nx-border);
+  color: var(--nx-text);
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.he-input:focus {
+  outline: none;
+  border-color: var(--nx-gold);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Tool Checklist Grid ────────────────────────────────────────────── */
+.he-tool-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.he-tool-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: 10px;
+  font-family: var(--nx-font-mono);
+}
+
+.he-tool-checkbox input {
+  accent-color: var(--nx-gold);
+}
+
+.he-tool-checkbox span {
+  color: rgba(255, 255, 255, 0.3);
+  transition: color 150ms var(--nx-ease);
+}
+
+.he-tool-checkbox input:checked + span {
+  color: var(--nx-gold);
+}
+
+/* ── Strategy Cards ────────────────────────────────────────────────── */
+.he-strategy {
+  padding: 10px 12px;
+  border-radius: 7px;
+  margin-bottom: 6px;
+  border: 1px solid rgba(229, 199, 107, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: all 150ms var(--nx-ease);
+}
+
+.he-strategy:hover {
+  border-color: rgba(229, 199, 107, 0.25);
+  background: rgba(229, 199, 107, 0.03);
+}
+
+.he-strategy--active {
+  border-color: rgba(229, 199, 107, 0.4);
+  background: rgba(229, 199, 107, 0.06);
+}
+
+.he-strategy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.he-strategy-label {
+  font-size: 12px;
+  color: var(--nx-gold);
+  font-weight: 600;
+}
+
+.he-strategy-desc {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 6px;
+}
+
+.he-strategy-risk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.he-risk-label {
+  font-size: 8px;
+  font-family: var(--nx-font-mono);
+  color: rgba(255, 255, 255, 0.3);
+  width: 28px;
+}
+
+.he-risk-bar {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.he-risk-fill {
+  height: 100%;
+  border-radius: 2px;
+}
+
+.he-strategy-check {
+  margin-top: 6px;
+  font-size: 9px;
+  font-family: var(--nx-font-mono);
+  color: var(--nx-gold);
+}
+
+/* ── Execution Bridge Button Grid ───────────────────────────────────── */
+.he-button-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: var(--nx-s-4);
+}
+
+.he-result-box {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: var(--nx-r);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  font-family: var(--nx-font-mono);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ── Thought Map ────────────────────────────────────────────────────── */
+.he-thoughtmap {
+  display: flex;
+  gap: 10px;
+}
+
+.he-thoughtmap-svg {
+  flex-shrink: 0;
+}
+
+.he-thoughtnode {
+  cursor: pointer;
+  transition: all 150ms var(--nx-ease);
+}
+
+.he-thoughtnode-detail {
+  flex: 1;
+  padding: 8px;
+  background: rgba(229, 199, 107, 0.04);
+  border-radius: var(--nx-r);
+  border: 1px solid rgba(229, 199, 107, 0.12);
+  min-width: 0;
+}
+
+.he-thoughtnode-title {
+  font-size: 9px;
+  font-family: var(--nx-font-mono);
+  color: #8B8B9E;
+  margin-bottom: 4px;
+}
+
+.he-thoughtnode-desc {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.5;
+}

@@ -1,0 +1,221 @@
+/* Onboarding Modal Styles */
+
+.onboarding-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.onboarding-modal {
+  width: 90%;
+  max-width: 500px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95));
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  padding: 2.5rem;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 60px rgba(168, 85, 247, 0.15);
+  backdrop-filter: blur(20px);
+}
+
+.onboarding-header {
+  margin-bottom: 2rem;
+}
+
+.onboarding-header h2 {
+  font-size: 2rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, #e5c76b, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0 0 1.5rem 0;
+}
+
+.progress-bar {
+  height: 4px;
+  background: rgba(94, 109, 122, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #e5c76b, #a855f7);
+  transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.onboarding-step {
+  margin-bottom: 2rem;
+}
+
+.onboarding-step h3 {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: #f1f5f9;
+  margin: 0 0 0.5rem 0;
+}
+
+.onboarding-step p {
+  color: #cbd5e1;
+  font-size: 0.95rem;
+  margin: 0 0 1.5rem 0;
+}
+
+.onboarding-input {
+  width: 100%;
+  padding: 0.875rem 1rem;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  font-size: 1rem;
+  color: #f1f5f9;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+
+.onboarding-input:focus {
+  outline: none;
+  border-color: #a855f7;
+  background: rgba(30, 41, 59, 0.8);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.2);
+}
+
+.onboarding-input::placeholder {
+  color: #64748b;
+}
+
+/* Voice preset chips */
+.voice-chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.voice-chip {
+  padding: 0.875rem;
+  background: rgba(30, 41, 59, 0.6);
+  border: 2px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  color: #cbd5e1;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.voice-chip:hover {
+  border-color: #a855f7;
+  background: rgba(30, 41, 59, 0.8);
+}
+
+.voice-chip.active {
+  border-color: #a855f7;
+  background: rgba(168, 85, 247, 0.15);
+  color: #d8b4fe;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.2);
+}
+
+/* Color palette grid */
+.color-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.palette-swatch {
+  aspect-ratio: 1;
+  border: 3px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.palette-swatch:hover {
+  border-color: rgba(148, 163, 184, 0.5);
+  transform: scale(1.05);
+}
+
+.palette-swatch.selected {
+  border-color: #fff;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+}
+
+/* Footer buttons */
+.onboarding-footer {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.btn-secondary,
+.btn-primary {
+  flex: 1;
+  padding: 0.875rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.btn-secondary {
+  background: rgba(30, 41, 59, 0.6);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(30, 41, 59, 0.8);
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #e5c76b, #a855f7);
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
+  transform: translateY(-2px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .onboarding-modal {
+    width: 95%;
+    padding: 2rem;
+  }
+
+  .onboarding-header h2 {
+    font-size: 1.5rem;
+  }
+
+  .voice-chips {
+    grid-template-columns: 1fr;
+  }
+
+  .color-palette-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

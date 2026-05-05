@@ -1,0 +1,128 @@
+/* ════════════════════════════════════════════════════════════════════
+   <NavRailItem> — Sidebar nav row
+   Anatomy:
+     ▎  ⬢   LABEL          [12]
+       sublabel
+   spine▲ hex  text         badge
+   ════════════════════════════════════════════════════════════════════ */
+
+.nx-rail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px 8px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--nx-text-muted);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: var(--nx-r-md);
+  transition: background var(--nx-dur) var(--nx-ease),
+              color var(--nx-dur) var(--nx-ease);
+  font-family: inherit;
+}
+
+.nx-rail:hover {
+  background: var(--nx-surface-2);
+  color: var(--nx-text);
+}
+.nx-rail:focus-visible {
+  outline: 1px solid var(--nx-gold);
+  outline-offset: 2px;
+}
+
+/* ── Active spine ─────────────────────────────────────────────────── */
+.nx-rail__spine {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: transparent;
+  transition: background var(--nx-dur) var(--nx-ease),
+              box-shadow var(--nx-dur) var(--nx-ease);
+}
+
+.nx-rail--active {
+  background: linear-gradient(90deg,
+    rgba(229,199,107,0.10) 0%,
+    rgba(229,199,107,0.02) 100%);
+  color: var(--nx-text);
+}
+.nx-rail--active .nx-rail__spine {
+  background: var(--nx-gold-grad);
+  box-shadow: 0 0 8px rgba(229,199,107,0.55);
+}
+
+/* ── Text block ───────────────────────────────────────────────────── */
+.nx-rail__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.nx-rail__label {
+  font-family: var(--nx-font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: var(--nx-tracking-cap);
+  text-transform: uppercase;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-rail--active .nx-rail__label {
+  background: var(--nx-gold-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.nx-rail__sub {
+  font-family: var(--nx-font-mono);
+  font-size: 9.5px;
+  letter-spacing: var(--nx-tracking-mid);
+  color: var(--nx-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: none;
+}
+
+/* ── Badge ────────────────────────────────────────────────────────── */
+.nx-rail__badge {
+  flex-shrink: 0;
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--nx-surface-3);
+  border: 1px solid var(--nx-border);
+  color: var(--nx-text-muted);
+}
+.nx-rail--active .nx-rail__badge {
+  background: rgba(229,199,107,0.12);
+  border-color: rgba(229,199,107,0.30);
+  color: var(--nx-gold);
+}
+
+/* ── Compact (collapsed rail) ─────────────────────────────────────── */
+.nx-rail--compact {
+  justify-content: center;
+  padding: 8px 6px;
+  gap: 0;
+}
+.nx-rail--compact .nx-rail__text,
+.nx-rail--compact .nx-rail__badge {
+  display: none;
+}

@@ -1,0 +1,109 @@
+/* ════════════════════════════════════════════════════════════════════
+   <CommandPill> — Chamfered command/search trigger for TopBar
+   Anatomy:
+     ◢───────────────────────────────────────◣
+     │ ⌖   Search or run a command…    [⌘K] │
+     ◥───────────────────────────────────────◤
+   ════════════════════════════════════════════════════════════════════ */
+
+.nx-cmd {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 14px;
+  height: 34px;
+  background: var(--nx-surface-2);
+  color: var(--nx-text-muted);
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  clip-path: polygon(
+    var(--nx-chamfer-sm) 0,
+    calc(100% - var(--nx-chamfer-sm)) 0,
+    100% var(--nx-chamfer-sm),
+    100% calc(100% - var(--nx-chamfer-sm)),
+    calc(100% - var(--nx-chamfer-sm)) 100%,
+    var(--nx-chamfer-sm) 100%,
+    0 calc(100% - var(--nx-chamfer-sm)),
+    0 var(--nx-chamfer-sm)
+  );
+  isolation: isolate;
+  transition: background var(--nx-dur) var(--nx-ease),
+              color var(--nx-dur) var(--nx-ease);
+}
+
+/* Hairline border via "padding-via-clipped-backdrop" trick */
+.nx-cmd::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--nx-border-strong);
+  clip-path: inherit;
+  z-index: -1;
+  padding: 1px;
+}
+
+.nx-cmd--trigger {
+  cursor: pointer;
+}
+.nx-cmd--trigger:hover {
+  background: var(--nx-surface-3);
+  color: var(--nx-text);
+}
+.nx-cmd--trigger:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px var(--nx-gold) inset,
+    0 0 0 3px rgba(229,199,107,0.20);
+}
+
+/* ── Pieces ───────────────────────────────────────────────────────── */
+.nx-cmd__icon {
+  font-size: 13px;
+  line-height: 1;
+  color: var(--nx-gold);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.nx-cmd__placeholder {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--nx-text-dim);
+  user-select: none;
+}
+
+.nx-cmd__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--nx-text);
+}
+.nx-cmd__input::placeholder { color: var(--nx-text-dim); }
+
+.nx-cmd__kbd {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 20px;
+  padding: 0 6px;
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--nx-text-muted);
+  background: var(--nx-surface-3);
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}

@@ -16,19 +16,43 @@ let jwtSecret = process.env.JWT_SECRET_KEY || 'default-secret';
  */
 function tenantMiddleware(secret = jwtSecret) {
   const exemptRoutes = new Set([
+    '/',
     '/health',
+    '/health/full',
     '/api/health',
+    '/api/auth/token',
     '/auth/register',
     '/auth/login',
     '/auth/refresh',
     '/auth/token',
     '/version',
     '/metrics',
+    '/api/identity/public',
+    '/api/onboarding/palettes',
+    '/api/identity/finalize',
+    '/api/bootstrap/status',
+    '/api/bootstrap/start',
+    '/api/settings',
   ]);
 
+  // Static asset extensions (frontend bundle) — never require auth
+  const staticAssetRe = /\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|map|webp|html)$/i;
+
   return (req, res, next) => {
-    // Skip tenant extraction for exempt routes
-    if (exemptRoutes.has(req.path) || req.path.startsWith('/openapi') || req.path.startsWith('/docs')) {
+    // Skip tenant extraction for exempt routes, openapi/docs, and static assets
+    if (
+      exemptRoutes.has(req.path) ||
+      req.path.startsWith('/openapi') ||
+      req.path.startsWith('/docs') ||
+      req.path.startsWith('/assets/') ||
+      req.path.startsWith('/workspace/') ||
+      staticAssetRe.test(req.path)
+    ) {
+      return next();
+    }
+
+    // Allow GET on root and any non-API path (frontend SPA routes)
+    if (req.method === 'GET' && !req.path.startsWith('/api/')) {
       return next();
     }
 

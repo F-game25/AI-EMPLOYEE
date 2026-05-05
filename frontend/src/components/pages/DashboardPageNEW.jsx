@@ -42,7 +42,9 @@ export const DashboardPageNEW = () => {
         gpu: status.gpuUsage || 0,
         latency: status.latency || 0,
         tokens: status.tokensPerSecond || 0,
-        taskCompletion: Math.random() * 100,
+        taskCompletion: status.tasksTotal > 0
+          ? (status.tasksCompleted / status.tasksTotal) * 100
+          : 0,
         agentActivation: activeAgents.length,
       });
     };

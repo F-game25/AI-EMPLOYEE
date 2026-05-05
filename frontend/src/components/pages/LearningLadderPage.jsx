@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Panel, Badge, StatCard } from '../ui/primitives'
+import { Panel, KPITile, StatusPill, HexButton, SectionLabel, LiveBadge } from '../nexus-ui'
 import api from '../../api/client'
+import './LearningLadderPage.css'
 
 const LEVEL_LABEL = (lvl) => {
-  if (lvl >= 90) return { text: 'EXPERT',        color: 'var(--teal,#20D6C7)',  glow: '0 0 8px rgba(32,214,199,.5)' }
-  if (lvl >= 70) return { text: 'ADVANCED',       color: 'var(--gold,#E5C76B)',  glow: 'none' }
-  if (lvl >= 40) return { text: 'INTERMEDIATE',   color: 'var(--bronze,#CD7F32)',glow: 'none' }
+  if (lvl >= 90) return { text: 'EXPERT',        color: '#20D6C7',  glow: '0 0 8px rgba(32,214,199,.5)' }
+  if (lvl >= 70) return { text: 'ADVANCED',       color: '#E5C76B',  glow: 'none' }
+  if (lvl >= 40) return { text: 'INTERMEDIATE',   color: '#CD7F32',glow: 'none' }
   return              { text: 'NOVICE',           color: 'rgba(255,255,255,.3)', glow: 'none' }
 }
 
@@ -62,58 +63,59 @@ export default function LearningLadderPage() {
   }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:10, height:'100%' }}>
-      {/* Stats */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10 }}>
-        <StatCard label="Avg Mastery"    value={`${avgMastery}%`}     color="var(--gold,#E5C76B)" sub="Across all skills"/>
-        <StatCard label="Skills Tracked" value={allItems.length}      color="var(--teal,#20D6C7)" sub={`${skills.length} categories`}/>
-        <StatCard label="Recent Gains"   value={IMPROVEMENTS.length}  color="#22C55E" sub="Skills improved this week"/>
+    <div className="ll-page">
+      <div className="ll-kpi-row">
+        <KPITile label="Avg Mastery" value={`${avgMastery}%`} sub="Across all skills" icon="📊" iconTone="gold" accent />
+        <KPITile label="Skills Tracked" value={allItems.length} sub={`${skills.length} categories`} icon="🎯" iconTone="cool" />
+        <KPITile label="Recent Gains" value={IMPROVEMENTS.length} sub="Skills improved this week" icon="📈" iconTone="success" />
       </div>
 
-      {/* Topic Input */}
-      <Panel title="Teach New Topic">
-        <div style={{ display:'flex', gap:8 }}>
+      <Panel title="Teach New Topic" tone="gold">
+        <div className="ll-teach-row">
           <input
             value={topic}
             onChange={e => setTopic(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleTeach()}
             placeholder="Enter learning topic (e.g. 'Kubernetes deployment strategies')..."
-            style={{ flex:1, padding:'8px 12px', borderRadius:6, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.1)', color:'var(--text-primary,#F0E9D2)', fontFamily:'monospace', fontSize:12 }}
+            className="ll-teach-input"
           />
-          <button onClick={handleTeach} disabled={teaching || !topic.trim()} style={{
-            padding:'8px 20px', borderRadius:6, fontFamily:'monospace', fontSize:11, fontWeight:600,
-            background: teaching ? 'rgba(229,199,107,0.05)' : 'rgba(229,199,107,0.15)',
-            border:'1px solid rgba(229,199,107,0.4)', color:'var(--gold,#E5C76B)',
-            cursor: teaching ? 'wait' : 'pointer', whiteSpace:'nowrap',
-          }}>
+          <HexButton onClick={handleTeach} disabled={teaching || !topic.trim()} variant="primary" tone="gold" size="md">
             {teaching ? 'TEACHING...' : 'TEACH SYSTEM'}
-          </button>
+          </HexButton>
         </div>
         {teachResult && (
-          <div style={{ marginTop:8, padding:'6px 10px', borderRadius:5, fontSize:11, fontFamily:'monospace', background: teachResult.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border:`1px solid ${teachResult.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`, color: teachResult.ok ? '#22C55E' : '#ef4444' }}>
+          <div className={`ll-teach-result ${teachResult.ok ? 'll-teach-result--ok' : 'll-teach-result--err'}`}>
             {teachResult.ok ? '✓ ' : '✗ '}{teachResult.msg}
           </div>
         )}
       </Panel>
 
-      {/* Main grid */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:10, flex:1, minHeight:0 }}>
-        <Panel title="Skill Mastery" badge={<Badge label="Live" variant="green"/>} bodyStyle={{ overflowY:'auto' }}>
-          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+      <div className="ll-main-grid">
+        <Panel title="Skill Mastery" tone="gold" actions={<LiveBadge variant="live" />}>
+          <div className="ll-skill-grid">
             {skills.map(cat => (
               <div key={cat.cat}>
-                <div style={{ fontSize:10, fontFamily:'monospace', letterSpacing:'0.1em', textTransform:'uppercase', color:'rgba(255,255,255,0.35)', marginBottom:8 }}>{cat.cat}</div>
-                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                <SectionLabel tone="muted">{cat.cat}</SectionLabel>
+                <div className="ll-skill-list">
                   {cat.items.map(sk => {
                     const lvlInfo = LEVEL_LABEL(sk.lvl)
                     return (
-                      <div key={sk.n} style={{ display:'flex', alignItems:'center', gap:10 }}>
-                        <span style={{ fontSize:12, color:'var(--text-secondary,#9A927E)', width:180, flexShrink:0 }}>{sk.n}</span>
-                        <div style={{ flex:1, height:6, background:'rgba(255,255,255,.06)', borderRadius:3, overflow:'hidden' }}>
-                          <div style={{ width:`${sk.lvl}%`, height:'100%', borderRadius:3, transition:'width .5s', background:sk.lvl>=90?'var(--teal,#20D6C7)':sk.lvl>=70?'var(--gold,#E5C76B)':sk.lvl>=40?'var(--bronze,#CD7F32)':'rgba(255,255,255,.2)', boxShadow:lvlInfo.glow }}/>
+                      <div key={sk.n} className="ll-skill-item">
+                        <span className="ll-skill-name">{sk.n}</span>
+                        <div className="ll-skill-bar">
+                          <div
+                            className="ll-skill-bar-fill"
+                            style={{
+                              width: `${sk.lvl}%`,
+                              background: lvlInfo.color,
+                              boxShadow: lvlInfo.glow !== 'none' ? lvlInfo.glow : 'none'
+                            }}
+                          />
                         </div>
-                        <span style={{ fontFamily:'monospace', fontSize:11, color: lvlInfo.color, width:34, textAlign:'right', flexShrink:0 }}>{sk.lvl}%</span>
-                        <span style={{ fontSize:8, fontFamily:'monospace', letterSpacing:'0.06em', color: lvlInfo.color, width:72, textAlign:'right', flexShrink:0, textShadow: lvlInfo.glow !== 'none' ? lvlInfo.glow : 'none' }}>{sk.status === 'QUEUED' ? 'QUEUED' : lvlInfo.text}</span>
+                        <span className="ll-skill-level" style={{ color: lvlInfo.color }}>{sk.lvl}%</span>
+                        <span className="ll-skill-badge" style={{ color: lvlInfo.color, textShadow: lvlInfo.glow !== 'none' ? lvlInfo.glow : 'none' }}>
+                          {sk.status === 'QUEUED' ? 'QUEUED' : lvlInfo.text}
+                        </span>
                       </div>
                     )
                   })}
@@ -123,30 +125,38 @@ export default function LearningLadderPage() {
           </div>
         </Panel>
 
-        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          <Panel title="Learning Queue">
-            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-              {QUEUE.map((q,i) => (
-                <div key={i} style={{ padding:'9px 10px', borderRadius:8, border:'1px solid rgba(229,199,107,0.08)', background:'var(--bg-elevated,#12141F)' }}>
-                  <div style={{ fontSize:12, color:'var(--text-primary,#F0E9D2)', marginBottom:5 }}>{q.task}</div>
-                  <div style={{ display:'flex', justifyContent:'space-between' }}>
-                    <Badge label={q.priority} variant={q.priority==='HIGH'?'error':q.priority==='MED'?'warn':'default'}/>
-                    <span style={{ fontSize:11, color:'rgba(255,255,255,0.35)', fontFamily:'monospace' }}>{q.eta}</span>
+        <div className="ll-right">
+          <Panel title="Learning Queue" tone="gold">
+            <div className="ll-queue-list">
+              {QUEUE.map((q, i) => (
+                <div key={i} className="ll-queue-item">
+                  <div className="ll-queue-task">{q.task}</div>
+                  <div className="ll-queue-meta">
+                    <StatusPill
+                      label={q.priority}
+                      tone={q.priority === 'HIGH' ? 'alert' : q.priority === 'MED' ? 'warning' : 'cool'}
+                      size="sm"
+                      dot={false}
+                    />
+                    <span className="ll-queue-eta">{q.eta}</span>
                   </div>
                 </div>
               ))}
             </div>
           </Panel>
-          <Panel title="Recent Improvements" style={{ flex:1 }}>
-            {IMPROVEMENTS.map((r,i) => (
-              <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 0', borderBottom:'1px solid rgba(255,255,255,.04)' }}>
-                <span style={{ fontSize:12, color:'var(--text-secondary,#9A927E)' }}>{r.skill}</span>
-                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  <span style={{ fontFamily:'monospace', fontSize:12, color:r.c, fontWeight:600 }}>{r.delta}</span>
-                  <span style={{ fontSize:11, color:'rgba(255,255,255,0.35)' }}>{r.ts}</span>
+
+          <Panel title="Recent Improvements" tone="gold" style={{ flex: 1 }}>
+            <div className="ll-improvements-list">
+              {IMPROVEMENTS.map((r, i) => (
+                <div key={i} className="ll-improvement-row">
+                  <span className="ll-improvement-skill">{r.skill}</span>
+                  <div className="ll-improvement-value">
+                    <span className="ll-improvement-delta" style={{ color: r.c }}>{r.delta}</span>
+                    <span className="ll-improvement-ts">{r.ts}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </Panel>
         </div>
       </div>

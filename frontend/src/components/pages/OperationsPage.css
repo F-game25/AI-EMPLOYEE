@@ -1,0 +1,266 @@
+/* ════════════════════════════════════════════════════════════════════
+   OperationsPage — Nexus OS kanban + control row
+   ════════════════════════════════════════════════════════════════════ */
+
+.ops-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── Kanban (top) ─────────────────────────────────────────────────── */
+.ops-kanban {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.ops-col {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.ops-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 11px;
+  border-radius: var(--nx-r-md);
+  border: 1px solid var(--nx-border);
+  background: var(--nx-surface-2);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--nx-dur) var(--nx-ease),
+              border-color var(--nx-dur) var(--nx-ease),
+              transform var(--nx-dur) var(--nx-ease);
+}
+.ops-card:hover {
+  background: var(--nx-surface-3);
+  border-color: var(--nx-border-strong);
+  transform: translateY(-1px);
+}
+.ops-card.is-selected {
+  border-color: rgba(229,199,107,0.50);
+  background:
+    linear-gradient(180deg, rgba(229,199,107,0.08), transparent 65%),
+    var(--nx-surface-2);
+  box-shadow: 0 0 0 1px rgba(229,199,107,0.25) inset;
+}
+
+.ops-card__title {
+  font-family: var(--nx-font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--nx-text);
+  margin-bottom: 7px;
+  line-height: 1.4;
+  letter-spacing: 0.005em;
+}
+.ops-card__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.ops-card__agent {
+  font-family: var(--nx-font-mono);
+  font-size: 9.5px;
+  color: var(--nx-text-dim);
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Bottom row ───────────────────────────────────────────────────── */
+.ops-bottom {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 12px;
+  height: 240px;
+  flex-shrink: 0;
+}
+
+.ops-empty {
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  color: var(--nx-text-dim);
+  letter-spacing: 0.04em;
+  padding: 10px;
+  text-align: center;
+}
+.ops-empty--center {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--nx-text-dim);
+}
+
+/* ── Task Detail ──────────────────────────────────────────────────── */
+.ops-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.ops-detail__head {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--nx-divider);
+  margin-bottom: 4px;
+}
+.ops-detail__title {
+  font-family: var(--nx-font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nx-text);
+  letter-spacing: 0.005em;
+  background: var(--nx-gold-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.ops-detail__sub {
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  color: var(--nx-text-dim);
+  letter-spacing: 0.04em;
+  margin-top: 3px;
+}
+
+.ops-detail__line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.ops-detail__prefix {
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  width: 52px;
+}
+.ops-detail__prefix--gold   { color: var(--nx-gold);    }
+.ops-detail__prefix--cool   { color: var(--nx-info);    }
+.ops-detail__prefix--bronze { color: var(--nx-warning); }
+.ops-detail__prefix--muted  { color: var(--nx-text-dim); }
+
+.ops-detail__text {
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  color: var(--nx-text-muted);
+  flex: 1;
+}
+.ops-detail__line:first-of-type .ops-detail__text { color: var(--nx-text); }
+
+.ops-detail__cta {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--nx-divider);
+}
+
+/* ── Error Clustering ─────────────────────────────────────────────── */
+.ops-err {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ops-err__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 11px;
+  border-radius: var(--nx-r-sm);
+  border: 1px solid var(--nx-border);
+  background: var(--nx-surface-2);
+}
+.ops-err__name {
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  color: var(--nx-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-err__count {
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  color: var(--nx-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ops-err__count--up   { color: var(--nx-danger); }
+.ops-err__count--down { color: var(--nx-success); }
+
+.ops-err__arrow      { font-size: 13px; line-height: 1; }
+.ops-err__arrow--up   { color: var(--nx-danger); }
+.ops-err__arrow--down { color: var(--nx-success); }
+.ops-err__arrow--flat { color: var(--nx-text-dim); }
+
+/* ── Rules + Optimizer ────────────────────────────────────────────── */
+.ops-rules {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 0 4px;
+}
+.ops-rule {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--nx-divider);
+}
+.ops-rule:last-child { border-bottom: 0; }
+.ops-rule__text {
+  font-family: var(--nx-font-mono);
+  font-size: 10.5px;
+  color: var(--nx-text);
+  flex: 1;
+}
+.ops-rule.is-off .ops-rule__text { color: var(--nx-text-dim); }
+
+.ops-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.ops-opt__row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-family: var(--nx-font-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.ops-opt__gain {
+  flex-shrink: 0;
+  width: 56px;
+  color: var(--nx-gold);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ops-opt__sug { color: var(--nx-text-muted); }
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+  .ops-kanban  { grid-template-columns: repeat(2, 1fr); }
+  .ops-bottom  { grid-template-columns: 1fr; height: auto; }
+}
+@media (max-width: 720px) {
+  .ops-kanban { grid-template-columns: 1fr; }
+}

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useAppStore } from '../../store/appStore'
-import { Panel, Badge, StatCard } from '../ui/primitives'
+import { Panel, KPITile, StatusPill, HexButton, SectionLabel, LiveBadge } from '../nexus-ui'
 import api from '../../api/client'
+import './HermesPage.css'
 
 const STRATEGIES = [
   { id:'fast',   label:'Fast / Risky',    risk:0.8, resources:'Low',  desc:'Prioritize speed, skip validation steps' },
@@ -10,30 +11,7 @@ const STRATEGIES = [
 ]
 const TOOLS = ['Web Search', 'Code Runner', 'Database', 'Email', 'File System', 'External APIs']
 
-function SilverPanel({ title, children, style, badge }) {
-  return (
-    <div style={{ background:'linear-gradient(180deg,rgba(216,216,224,0.04) 0%,transparent 40%),linear-gradient(180deg,#101218,#080A10)', border:'1px solid rgba(216,216,224,0.14)', borderRadius:10, display:'flex', flexDirection:'column', overflow:'hidden', ...style }}>
-      {(title || badge) && (
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 14px 8px', borderBottom:'1px solid rgba(216,216,224,0.08)', flexShrink:0 }}>
-          {title && <span style={{ fontFamily:'monospace', fontSize:10, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--silver,#D8D8E0)' }}>{title}</span>}
-          {badge}
-        </div>
-      )}
-      <div style={{ padding:'12px 14px', flex:1, overflowY:'auto' }}>{children}</div>
-    </div>
-  )
-}
-
-function MiniBar({ value, color = 'var(--silver,#D8D8E0)' }) {
-  return (
-    <div style={{ height:3, background:'rgba(255,255,255,0.06)', borderRadius:2 }}>
-      <div style={{ width:`${value*100}%`, height:'100%', background:color, borderRadius:2 }}/>
-    </div>
-  )
-}
-
 export default function HermesPage() {
-  const setActiveSection = useAppStore(s => s.setActiveSection)
   const setHermesGoal = useAppStore(s => s.setHermesGoal)
   const hermesGoal = useAppStore(s => s.hermesGoal)
 
@@ -88,122 +66,130 @@ export default function HermesPage() {
   const npos = Object.fromEntries(THOUGHT_NODES.map(n => [n.id, { cx: n.x+40, cy: n.y+15 }]))
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:10, height:'100%' }}>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, flexShrink:0 }}>
-        <StatCard label="Strategy Mode"  value="HERMES"             color="var(--silver,#D8D8E0)" sub="Strategic Reasoning OS"/>
-        <StatCard label="Active Path"    value={activePath ?? '—'}  color="var(--silver-dim,#8B8B9E)" sub="Selected strategy"/>
-        <StatCard label="Constraints"    value={`€${budget} · ${timeDays}d`} color="var(--silver,#D8D8E0)" sub="Budget · Timeline"/>
+    <div className="he-page">
+      <div className="he-kpi-row">
+        <KPITile label="Strategy Mode" value="HERMES" sub="Strategic Reasoning OS" icon="⚙" iconTone="gold" accent />
+        <KPITile label="Active Path" value={activePath ?? '—'} sub="Selected strategy" icon="📍" iconTone="gold" />
+        <KPITile label="Constraints" value={`€${budget} · ${timeDays}d`} sub="Budget · Timeline" icon="⏱" iconTone="gold" />
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, flex:1, minHeight:0 }}>
-        {/* Left */}
-        <div style={{ display:'flex', flexDirection:'column', gap:10, minHeight:0 }}>
-          <SilverPanel title="Goal Decomposition Engine">
-            <textarea value={goal} onChange={e => setGoal(e.target.value)} rows={2} placeholder="Enter a strategic goal to decompose..."
-              style={{ width:'100%', resize:'none', padding:'7px 9px', borderRadius:5, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(216,216,224,0.15)', color:'var(--text-primary,#F0E9D2)', fontFamily:'monospace', fontSize:12, boxSizing:'border-box', marginBottom:8 }}/>
-            <button onClick={handleDecompose} style={{ width:'100%', padding:'6px', borderRadius:5, background:'rgba(216,216,224,0.1)', border:'1px solid rgba(216,216,224,0.3)', color:'var(--silver,#D8D8E0)', cursor:'pointer', fontFamily:'monospace', fontSize:10, fontWeight:600, letterSpacing:'0.06em', marginBottom:10 }}>DECOMPOSE</button>
+      <div className="he-main-grid">
+        <div className="he-left">
+          <Panel title="Goal Decomposition Engine" tone="gold">
+            <textarea
+              value={goal}
+              onChange={e => setGoal(e.target.value)}
+              rows={2}
+              placeholder="Enter a strategic goal to decompose..."
+              className="he-textarea"
+            />
+            <HexButton onClick={handleDecompose} full size="md" variant="primary" tone="gold">
+              DECOMPOSE
+            </HexButton>
             {decomposed && goal && (
-              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                {[['LAYER 1: Strategic Analysis',['Identify market positioning','Define competitive moat','Map key stakeholders']],
+              <div className="he-decomp-layers">
+                {[
+                  ['LAYER 1: Strategic Analysis',['Identify market positioning','Define competitive moat','Map key stakeholders']],
                   ['LAYER 2: Resource Planning',['Allocate budget by workstream','Identify capability gaps']],
                   ['LAYER 3: Execution Roadmap',['Set validation checkpoints','Assign agents to tasks']]
                 ].map(([title, tasks]) => (
-                  <div key={title} style={{ borderLeft:'2px solid rgba(216,216,224,0.2)', paddingLeft:10 }}>
-                    <div style={{ fontSize:8, fontFamily:'monospace', color:'var(--silver-dim,#8B8B9E)', marginBottom:3, letterSpacing:'0.06em' }}>{title}</div>
-                    {tasks.map(t => <div key={t} style={{ fontSize:11, color:'rgba(255,255,255,0.45)', marginBottom:1 }}>→ {t}</div>)}
+                  <div key={title} className="he-layer">
+                    <div className="he-layer-title">{title}</div>
+                    {tasks.map(t => <div key={t} className="he-layer-task">→ {t}</div>)}
                   </div>
                 ))}
               </div>
             )}
-          </SilverPanel>
+          </Panel>
 
-          <SilverPanel title="Constraint Reasoning" style={{ flex:1 }}>
-            <div style={{ marginBottom:10 }}>
-              <div style={{ fontSize:9, fontFamily:'monospace', color:'rgba(255,255,255,0.35)', marginBottom:3 }}>BUDGET (€)</div>
+          <Panel title="Constraint Reasoning" tone="gold" style={{ flex: 1 }}>
+            <div className="he-constraint-group">
+              <label className="he-constraint-label">BUDGET (€)</label>
               <input type="number" value={budget} onChange={e => setBudget(+e.target.value)} min={0} step={100}
-                style={{ width:'100%', padding:'5px 8px', borderRadius:5, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(216,216,224,0.15)', color:'var(--text-primary,#F0E9D2)', fontFamily:'monospace', fontSize:12, boxSizing:'border-box' }}/>
+                className="he-input" />
             </div>
-            <div style={{ marginBottom:10 }}>
-              <div style={{ fontSize:9, fontFamily:'monospace', color:'rgba(255,255,255,0.35)', marginBottom:3 }}>TIMELINE (days)</div>
+            <div className="he-constraint-group">
+              <label className="he-constraint-label">TIMELINE (days)</label>
               <input type="number" value={timeDays} onChange={e => setTimeDays(+e.target.value)} min={1}
-                style={{ width:'100%', padding:'5px 8px', borderRadius:5, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(216,216,224,0.15)', color:'var(--text-primary,#F0E9D2)', fontFamily:'monospace', fontSize:12, boxSizing:'border-box' }}/>
+                className="he-input" />
             </div>
             <div>
-              <div style={{ fontSize:9, fontFamily:'monospace', color:'rgba(255,255,255,0.35)', marginBottom:5 }}>TOOLS</div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:4 }}>
+              <label className="he-constraint-label">TOOLS</label>
+              <div className="he-tool-grid">
                 {TOOLS.map(t => (
-                  <label key={t} style={{ display:'flex', alignItems:'center', gap:5, cursor:'pointer' }}>
-                    <input type="checkbox" checked={enabledTools.has(t)} onChange={() => toggleTool(t)} style={{ accentColor:'var(--silver,#D8D8E0)' }}/>
-                    <span style={{ fontSize:10, fontFamily:'monospace', color: enabledTools.has(t)?'var(--silver,#D8D8E0)':'rgba(255,255,255,0.3)' }}>{t}</span>
+                  <label key={t} className="he-tool-checkbox">
+                    <input type="checkbox" checked={enabledTools.has(t)} onChange={() => toggleTool(t)} />
+                    <span>{t}</span>
                   </label>
                 ))}
               </div>
             </div>
-          </SilverPanel>
+          </Panel>
         </div>
 
-        {/* Right */}
-        <div style={{ display:'flex', flexDirection:'column', gap:10, minHeight:0 }}>
-          <SilverPanel title="Multi-Path Planning">
+        <div className="he-right">
+          <Panel title="Multi-Path Planning" tone="gold">
             {STRATEGIES.map(s => (
-              <div key={s.id} onClick={() => setActivePath(s.id)} style={{ padding:'10px 12px', borderRadius:7, marginBottom:6, border:`1px solid ${activePath===s.id?'rgba(216,216,224,0.4)':'rgba(216,216,224,0.1)'}`, background:activePath===s.id?'rgba(216,216,224,0.06)':'rgba(255,255,255,0.02)', cursor:'pointer' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
-                  <span style={{ fontSize:12, color:'var(--silver,#D8D8E0)', fontWeight:600 }}>{s.label}</span>
-                  <Badge label={s.resources} variant="default"/>
+              <div key={s.id} className={`he-strategy ${activePath === s.id ? 'he-strategy--active' : ''}`} onClick={() => setActivePath(s.id)}>
+                <div className="he-strategy-header">
+                  <span className="he-strategy-label">{s.label}</span>
+                  <StatusPill label={s.resources} tone="cool" size="sm" dot={false} />
                 </div>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', marginBottom:6 }}>{s.desc}</div>
-                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  <span style={{ fontSize:8, fontFamily:'monospace', color:'rgba(255,255,255,0.3)', width:28 }}>RISK</span>
-                  <div style={{ flex:1 }}><MiniBar value={s.risk} color={s.risk>0.6?'#ef4444':s.risk>0.3?'#f59e0b':'#22C55E'}/></div>
+                <div className="he-strategy-desc">{s.desc}</div>
+                <div className="he-strategy-risk">
+                  <span className="he-risk-label">RISK</span>
+                  <div className="he-risk-bar">
+                    <div className="he-risk-fill" style={{ width: `${s.risk*100}%`, background: s.risk>0.6?'#ef4444':s.risk>0.3?'#f59e0b':'#22C55E' }} />
+                  </div>
                 </div>
-                {activePath===s.id && (
-                  <div style={{ marginTop:6, fontSize:9, fontFamily:'monospace', color:'var(--silver,#D8D8E0)' }}>✓ SELECTED</div>
-                )}
+                {activePath === s.id && <div className="he-strategy-check">✓ SELECTED</div>}
               </div>
             ))}
-          </SilverPanel>
+          </Panel>
 
-          <SilverPanel title="Execution Bridge">
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
-              {[
-                { label:'SEND TO AGENTS', action:handleSendToAgents, loading:sending, color:'rgba(216,216,224,0.3)', bg:'rgba(216,216,224,0.08)' },
-                { label:'REQUEST MEMORY', action:handleRequestMemory, color:'rgba(32,214,199,0.3)', bg:'rgba(32,214,199,0.06)' },
-                { label:'MONITOR OPS',    action:() => setActiveSection('operations'), color:'rgba(229,199,107,0.3)', bg:'rgba(229,199,107,0.06)' },
-                { label:'REPORT STATUS',  action:handleProductDashboard, color:'rgba(168,85,247,0.3)', bg:'rgba(168,85,247,0.06)' },
-              ].map(b => (
-                <button key={b.label} onClick={b.action} disabled={b.loading} style={{ padding:'8px', borderRadius:6, border:`1px solid ${b.color}`, background:b.bg, color:'rgba(255,255,255,0.7)', cursor:'pointer', fontFamily:'monospace', fontSize:9, fontWeight:600, letterSpacing:'0.05em' }}>
-                  {b.loading ? '...' : b.label}
-                </button>
-              ))}
+          <Panel title="Execution Bridge" tone="gold">
+            <div className="he-button-grid">
+              <HexButton onClick={handleSendToAgents} variant="primary" tone="gold" size="sm" loading={sending}>
+                SEND TO AGENTS
+              </HexButton>
+              <HexButton onClick={handleRequestMemory} variant="outline" tone="cool" size="sm">
+                REQUEST MEMORY
+              </HexButton>
+              <HexButton onClick={() => {}} variant="outline" tone="gold" size="sm">
+                MONITOR OPS
+              </HexButton>
+              <HexButton onClick={handleProductDashboard} variant="outline" tone="purple" size="sm">
+                REPORT STATUS
+              </HexButton>
             </div>
             {(memoryResult || productResult) && (
-              <div style={{ marginTop:8, padding:'7px 9px', borderRadius:5, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.06)', fontSize:10, fontFamily:'monospace', color:'rgba(255,255,255,0.5)' }}>
+              <div className="he-result-box">
                 {memoryResult || productResult}
               </div>
             )}
-          </SilverPanel>
+          </Panel>
 
-          <SilverPanel title="Reasoning Thought Map" style={{ flex:1 }}>
-            <div style={{ display:'flex', gap:10 }}>
-              <svg width="430" height="215" viewBox="0 0 430 215" style={{ flexShrink:0 }}>
+          <Panel title="Reasoning Thought Map" tone="gold" style={{ flex: 1 }}>
+            <div className="he-thoughtmap">
+              <svg width="430" height="215" viewBox="0 0 430 215" className="he-thoughtmap-svg">
                 {EDGES.map(([f,t], i) => (
-                  <line key={i} x1={npos[f].cx} y1={npos[f].cy} x2={npos[t].cx} y2={npos[t].cy} stroke="rgba(216,216,224,0.2)" strokeWidth="1.5" strokeDasharray="4 3"/>
+                  <line key={i} x1={npos[f].cx} y1={npos[f].cy} x2={npos[t].cx} y2={npos[t].cy} stroke="rgba(229,199,107,0.2)" strokeWidth="1.5" strokeDasharray="4 3"/>
                 ))}
                 {THOUGHT_NODES.map(n => (
-                  <g key={n.id} onClick={() => setThoughtNode(thoughtNode?.id===n.id ? null : n)} style={{ cursor:'pointer' }}>
-                    <circle cx={npos[n.id].cx} cy={npos[n.id].cy} r={22} fill={thoughtNode?.id===n.id?'rgba(216,216,224,0.12)':'rgba(255,255,255,0.03)'} stroke={thoughtNode?.id===n.id?'rgba(216,216,224,0.4)':'rgba(216,216,224,0.15)'} strokeWidth="1"/>
+                  <g key={n.id} onClick={() => setThoughtNode(thoughtNode?.id===n.id ? null : n)} className="he-thoughtnode" style={{ cursor:'pointer' }}>
+                    <circle cx={npos[n.id].cx} cy={npos[n.id].cy} r={22} fill={thoughtNode?.id===n.id?'rgba(229,199,107,0.12)':'rgba(255,255,255,0.03)'} stroke={thoughtNode?.id===n.id?'rgba(229,199,107,0.4)':'rgba(229,199,107,0.15)'} strokeWidth="1"/>
                     <text x={npos[n.id].cx} y={npos[n.id].cy+4} textAnchor="middle" fontSize="7" fill="rgba(255,255,255,0.6)" fontFamily="monospace">{n.label}</text>
                   </g>
                 ))}
               </svg>
               {thoughtNode && (
-                <div style={{ flex:1, padding:'8px', background:'rgba(216,216,224,0.04)', borderRadius:6, border:'1px solid rgba(216,216,224,0.12)', minWidth:0 }}>
-                  <div style={{ fontSize:9, fontFamily:'monospace', color:'var(--silver-dim,#8B8B9E)', marginBottom:4 }}>{thoughtNode.label}</div>
-                  <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', lineHeight:1.5 }}>{thoughtNode.desc}</div>
+                <div className="he-thoughtnode-detail">
+                  <div className="he-thoughtnode-title">{thoughtNode.label}</div>
+                  <div className="he-thoughtnode-desc">{thoughtNode.desc}</div>
                 </div>
               )}
             </div>
-          </SilverPanel>
+          </Panel>
         </div>
       </div>
     </div>

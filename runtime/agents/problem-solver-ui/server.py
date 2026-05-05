@@ -1676,52 +1676,88 @@ if _SENTRY_DSN:
         environment=os.environ.get("ENVIRONMENT", "production"),
     )
 
-# ── Jaeger distributed tracing (optional, non-fatal if unavailable) ───────────
-try:
-    from core.tracing import setup_tracing, setup_fastapi_instrumentation, setup_psycopg_instrumentation
-    _trace_provider = setup_tracing(service_name="ai-employee")
-    setup_fastapi_instrumentation(app)
-    setup_psycopg_instrumentation()
-except Exception as e:
-    logger.warning(f"Tracing initialization failed (non-fatal): {e}")
-    _trace_provider = None
+# ── Jaeger distributed tracing (deferred, optional) ──────────────────────────
+_trace_provider = None
+_tracing_initialized = False
 
-# ── Sentry error tracking (Phase 4, optional) ────────────────────────────────
-try:
-    from core.sentry_config import init_sentry
-    _sentry_ok = init_sentry(environment=os.environ.get("ENVIRONMENT", "production"))
-except Exception as e:
-    logger.warning(f"Sentry initialization failed (non-fatal): {e}")
-    _sentry_ok = False
+def _init_tracing():
+    global _trace_provider, _tracing_initialized
+    if _tracing_initialized:
+        return
+    try:
+        from core.tracing import setup_tracing, setup_fastapi_instrumentation, setup_psycopg_instrumentation
+        _trace_provider = setup_tracing(service_name="ai-employee")
+        setup_fastapi_instrumentation(app)
+        setup_psycopg_instrumentation()
+        _tracing_initialized = True
+        logger.info("Tracing initialized (Jaeger)")
+    except Exception as e:
+        logger.warning(f"Tracing initialization failed (non-fatal): {e}")
+        _trace_provider = None
 
-# ── Billing metrics and rate limiting (Phase 4, lazy initialization) ─────────
+# ── Sentry error tracking (deferred, optional) ────────────────────────────────
+_sentry_ok = False
+_sentry_initialized = False
+
+def _init_sentry():
+    global _sentry_ok, _sentry_initialized
+    if _sentry_initialized:
+        return
+    try:
+        from core.sentry_config import init_sentry
+        _sentry_ok = init_sentry(environment=os.environ.get("ENVIRONMENT", "production"))
+        _sentry_initialized = True
+        logger.info("Sentry initialized")
+    except Exception as e:
+        logger.warning(f"Sentry initialization failed (non-fatal): {e}")
+        _sentry_ok = False
+
+# ── Billing metrics (Phase 4, optional) ───────────────────────────────────────
+_billing_collector = None
 try:
     from core.billing_metrics import get_billing_collector
-    from core.rate_limiter import get_rate_limiter
-    from core.embeddings import get_embeddings_manager
-    from core.knowledge_bootstrap import bootstrap_knowledge
-
     _billing_collector = get_billing_collector()
+except Exception as e:
+    logger.warning(f"Billing metrics unavailable (non-fatal): {e}")
+
+# ── Rate limiter (optional) ────────────────────────────────────────────────────
+_rate_limiter = None
+try:
+    from core.rate_limiter import get_rate_limiter
     _rate_limiter = get_rate_limiter()
+except Exception as e:
+    logger.warning(f"Rate limiter unavailable (non-fatal): {e}")
+
+# ── Embeddings manager (optional) ──────────────────────────────────────────────
+_embeddings_manager = None
+try:
+    from core.embeddings import get_embeddings_manager
     _embeddings_manager = get_embeddings_manager()
 except Exception as e:
-    logger.warning(f"Billing/rate-limit/embeddings init failed (non-fatal): {e}")
-    _billing_collector = None
-    _rate_limiter = None
-    _embeddings_manager = None
+    logger.warning(f"Embeddings manager unavailable (non-fatal): {e}")
 
-# Bootstrap knowledge store in background (non-blocking)
+# ── Knowledge bootstrap daemon (non-blocking) ──────────────────────────────────
+bootstrap_knowledge = None
 _knowledge_count = 0
+
 def _bootstrap_knowledge_bg():
-    global _knowledge_count
+    global _knowledge_count, bootstrap_knowledge
+    if bootstrap_knowledge is None:
+        logger.debug("Knowledge bootstrap not available; skipping")
+        return
     try:
         _knowledge_count = bootstrap_knowledge(AI_HOME)
         logger.info(f"Knowledge bootstrap: {_knowledge_count} entries loaded")
     except Exception as e:
         logger.warning(f"Knowledge bootstrap failed: {e}")
 
-_kb_thread = threading.Thread(target=_bootstrap_knowledge_bg, daemon=True, name="knowledge-bootstrap")
-_kb_thread.start()
+try:
+    from core.knowledge_bootstrap import bootstrap_knowledge
+    _kb_thread = threading.Thread(target=_bootstrap_knowledge_bg, daemon=True, name="knowledge-bootstrap")
+    _kb_thread.start()
+except Exception as e:
+    logger.warning(f"Knowledge bootstrap import failed (non-fatal): {e}")
+    bootstrap_knowledge = None
 
 # ── Optional endpoint authentication (REQUIRE_AUTH=1 enables enforcement) ──────
 # REQUIRE_AUTH defaults to "1" (enforced) for security.  Set REQUIRE_AUTH=0 in
@@ -2310,6 +2346,54 @@ async def audit_logging_middleware(request: Request, call_next):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _profile_audit_stats(user_id: str, tenant_id: str) -> tuple[int, list[dict]]:
+    """Return (interaction_count, top_5_agents) for the user's audit history.
+
+    Probes both legacy (audit.db/audit_events) and current (audit_log.db/audit_log)
+    layouts; returns (0, []) if neither exists. Agent name is extracted from the
+    `meta` JSON when present, else from `action`.
+    """
+    import sqlite3
+    from pathlib import Path
+    base = Path(os.environ.get("AI_HOME", Path(__file__).resolve().parents[3]))
+    candidates = [
+        (base / "state" / "audit_log.db", "audit_log"),
+        (base / "state" / "audit.db", "audit_events"),
+    ]
+    for db_path, table in candidates:
+        if not db_path.exists():
+            continue
+        try:
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                count = conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE actor = ?", (user_id,)
+                ).fetchone()[0]
+                rows = conn.execute(
+                    f"SELECT action, meta FROM {table} WHERE actor = ? "
+                    f"ORDER BY ts DESC LIMIT 500", (user_id,)
+                ).fetchall()
+            tally: dict[str, int] = {}
+            for r in rows:
+                agent = ""
+                try:
+                    m = json.loads(r["meta"] or "{}")
+                    agent = m.get("agent") or m.get("agent_id") or ""
+                except Exception:
+                    pass
+                if not agent:
+                    a = r["action"] or ""
+                    agent = a.split(":", 1)[1] if ":" in a else a
+                if agent:
+                    tally[agent] = tally.get(agent, 0) + 1
+            top = [{"agent": k, "count": v} for k, v in
+                   sorted(tally.items(), key=lambda x: -x[1])[:5]]
+            return int(count), top
+        except Exception:
+            continue
+    return 0, []
 
 
 # ── In-memory file read cache (reduces disk I/O for high-frequency reads) ─────
@@ -26384,7 +26468,8 @@ async def get_user_profile(_auth: None = Depends(require_auth)):
         tenant = get_current_tenant()
         user_id = user.get("user_id", "unknown")
 
-        # Profile: user preferences, interaction stats, personalization
+        interaction_count, favorite_agents = _profile_audit_stats(user_id, tenant.tenant_id)
+
         profile = {
             "user_id": user_id,
             "tenant_id": tenant.tenant_id,
@@ -26395,8 +26480,8 @@ async def get_user_profile(_auth: None = Depends(require_auth)):
                 "output_format": "json",
                 "auto_execute": False,
             },
-            "interaction_count": 0,  # TODO: query from audit logs
-            "favorite_agents": [],  # TODO: query from usage tracking
+            "interaction_count": interaction_count,
+            "favorite_agents": favorite_agents,
             "intelligence_score": 0.75,
         }
         return JSONResponse(profile)
@@ -26505,6 +26590,23 @@ async def add_security_headers(request: Request, call_next):
 
 # Track startup time for uptime metric
 _startup_time = time.time()
+
+# ── Lazy init trigger: on first non-health request, initialize observability ───
+_observability_init_lock = False
+
+@app.middleware("http")
+async def init_observability_on_first_request(request, call_next):
+    global _observability_init_lock
+    if not _observability_init_lock and request.url.path not in ("/health", "/api/health"):
+        _observability_init_lock = True
+        # Trigger lazy init in background (non-blocking)
+        try:
+            _init_tracing()
+            _init_sentry()
+        except Exception as e:
+            logger.debug(f"Observability lazy-init had issues: {e}")
+    response = await call_next(request)
+    return response
 
 
 if __name__ == "__main__":
