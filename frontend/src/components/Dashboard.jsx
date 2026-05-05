@@ -27,6 +27,7 @@ const MoneyModePage       = lazy(() => import('./pages/MoneyModePage'))
 const EvolutionPage       = lazy(() => import('./pages/EvolutionPage'))
 const HistoryPage         = lazy(() => import('./pages/HistoryPage'))
 const SettingsPage        = lazy(() => import('./pages/SettingsPage'))
+const ExecutionPage  = lazy(() => import('./pages/ExecutionPage'))
 import { API_URL } from '../config/api'
 import TopBar from './dashboard/TopBar'
 import ErrorBoundary from './ErrorBoundary'
@@ -35,6 +36,7 @@ const BASE = API_URL
 
 const PAGES = {
   'dashboard': DashboardPage,
+  'execution': ExecutionPage,
   'ai-control': AIControlPage,
   'neural-brain': NeuralBrainPage,
   'operations': OperationsPage,
@@ -174,7 +176,7 @@ export default function Dashboard() {
         }}>
           <ErrorBoundary key={activeSection} label={activeSection}>
             <Suspense fallback={
-              <div style={{ padding: 32, color: 'var(--text-dim, #888)', fontFamily: 'var(--font-mono, monospace)', fontSize: 13 }}>
+              <div style={{ padding: 32, color: 'var(--text-dim, #888)', fontFamily: 'var(--nx-font-mono, monospace)', fontSize: 13 }}>
                 Loading…
               </div>
             }>

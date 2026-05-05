@@ -2,6 +2,7 @@ const express = require('express')
 const fs = require('fs').promises
 const path = require('path')
 const crypto = require('crypto')
+const validator = require('../validators/settings-validator')
 
 const router = express.Router()
 
@@ -35,66 +36,132 @@ function decryptKey(encrypted) {
   }
 }
 
-// GET /api/settings
+// Mask sensitive values for API responses
+function maskSensitiveValue(value) {
+  if (!value || typeof value !== 'string') return ''
+  return value.length > 4 ? value.slice(0, 2) + '****' + value.slice(-2) : '****'
+}
+
+// Helper: Load settings from file for a tenant
+async function loadSettingsForTenant(tenantId) {
+  const settingsPath = getSettingsPath(tenantId)
+  let settings = validator.getDefaultSettings()
+
+  try {
+    const data = await fs.readFile(settingsPath, 'utf8')
+    const stored = JSON.parse(data)
+
+    // Merge stored settings with defaults (preserve new fields)
+    settings = {
+      ...settings,
+      ...stored,
+      apiKeys: {
+        ...settings.apiKeys,
+        ...(stored.apiKeys || {}),
+      },
+      llmSettings: {
+        ...settings.llmSettings,
+        ...(stored.llmSettings || {}),
+      },
+      workspace: {
+        ...settings.workspace,
+        ...(stored.workspace || {}),
+      },
+      notifications: {
+        ...settings.notifications,
+        ...(stored.notifications || {}),
+      },
+      security: {
+        ...settings.security,
+        ...(stored.security || {}),
+      },
+      advanced: {
+        ...settings.advanced,
+        ...(stored.advanced || {}),
+      },
+    }
+
+    // Decrypt API keys and Slack webhook
+    if (settings.apiKeys) {
+      settings.apiKeys.anthropic = decryptKey(settings.apiKeys.anthropic)
+      settings.apiKeys.openrouter = decryptKey(settings.apiKeys.openrouter)
+    }
+    if (settings.notifications?.slackWebhookUrl) {
+      settings.notifications.slackWebhookUrl = decryptKey(settings.notifications.slackWebhookUrl)
+    }
+  } catch (e) {
+    console.log(`Settings file not found for tenant ${tenantId}, returning defaults`)
+  }
+
+  return settings
+}
+
+// Helper: Format settings for API response (mask sensitive values)
+function formatSettingsResponse(settings) {
+  return {
+    apiKeys: {
+      anthropic: maskSensitiveValue(settings.apiKeys?.anthropic),
+      openrouter: maskSensitiveValue(settings.apiKeys?.openrouter),
+      ollama_endpoint: settings.apiKeys?.ollama_endpoint || 'http://localhost:11434',
+    },
+    llmSettings: settings.llmSettings || {},
+    workspace: settings.workspace || {},
+    notifications: {
+      ...settings.notifications,
+      slackWebhookUrl: maskSensitiveValue(settings.notifications?.slackWebhookUrl),
+    },
+    security: settings.security || {},
+    advanced: settings.advanced || {},
+    updatedAt: settings.updatedAt || new Date().toISOString(),
+  }
+}
+
+// GET /api/settings — fetch all settings
 router.get('/', async (req, res) => {
   try {
-    // Use tenant from context, or fall back to default tenant for development
     const tenantId = req.tenant?.id || 'default'
-
-    const settingsPath = getSettingsPath(tenantId)
-    let settings = {
-      apiKeys: { anthropic: '', openrouter: '', ollama_endpoint: 'http://localhost:11434' },
-      llmSettings: { provider: 'anthropic', model: 'claude-3-5-sonnet', temperature: 0.7, maxTokens: 2048 },
-    }
-
-    try {
-      const data = await fs.readFile(settingsPath, 'utf8')
-      const stored = JSON.parse(data)
-
-      // Decrypt API keys before returning
-      if (stored.apiKeys) {
-        settings.apiKeys = {
-          anthropic: decryptKey(stored.apiKeys.anthropic),
-          openrouter: decryptKey(stored.apiKeys.openrouter),
-          ollama_endpoint: stored.apiKeys.ollama_endpoint || 'http://localhost:11434',
-        }
-      }
-      if (stored.llmSettings) {
-        settings.llmSettings = stored.llmSettings
-      }
-    } catch (e) {
-      // File doesn't exist yet, return defaults
-      console.log(`Settings file not found for tenant ${tenantId}, returning defaults`)
-    }
-
-    res.json(settings)
+    const settings = await loadSettingsForTenant(tenantId)
+    const response = formatSettingsResponse(settings)
+    res.json(response)
   } catch (e) {
     console.error('GET /api/settings error:', e)
     res.status(500).json({ error: 'Failed to load settings' })
   }
 })
 
-// POST /api/settings (save all settings)
+// POST /api/settings — save all settings with validation
 router.post('/', async (req, res) => {
   try {
-    // Use tenant from context, or fall back to default tenant for development
     const tenantId = req.tenant?.id || 'default'
+    const newSettings = req.body
 
-    const { apiKeys, llmSettings } = req.body
-    if (!apiKeys || !llmSettings) {
-      return res.status(400).json({ error: 'Missing apiKeys or llmSettings' })
+    // Validate all settings
+    const validation = validator.validateAll(newSettings)
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validation.errors,
+      })
     }
 
     const settingsPath = getSettingsPath(tenantId)
 
-    // Encrypt API keys before saving
+    // Encrypt sensitive fields before saving
     const toSave = {
       apiKeys: {
-        anthropic: encryptKey(apiKeys.anthropic),
-        openrouter: encryptKey(apiKeys.openrouter),
-        ollama_endpoint: apiKeys.ollama_endpoint || 'http://localhost:11434',
+        anthropic: encryptKey(newSettings.apiKeys?.anthropic || ''),
+        openrouter: encryptKey(newSettings.apiKeys?.openrouter || ''),
+        ollama_endpoint: newSettings.apiKeys?.ollama_endpoint || 'http://localhost:11434',
       },
-      llmSettings,
+      llmSettings: newSettings.llmSettings || {},
+      workspace: newSettings.workspace || {},
+      notifications: {
+        ...newSettings.notifications,
+        slackWebhookUrl: encryptKey(newSettings.notifications?.slackWebhookUrl || ''),
+      },
+      security: newSettings.security || {},
+      advanced: newSettings.advanced || {},
       updatedAt: new Date().toISOString(),
     }
 
@@ -105,18 +172,190 @@ router.post('/', async (req, res) => {
     // Save settings
     await fs.writeFile(settingsPath, JSON.stringify(toSave, null, 2), 'utf8')
 
-    // Also save to environment variables (in-memory)
-    process.env.ANTHROPIC_API_KEY = apiKeys.anthropic
-    process.env.OPENROUTER_API_KEY = apiKeys.openrouter
-    process.env.OLLAMA_ENDPOINT = apiKeys.ollama_endpoint
-    process.env.LLM_PROVIDER = llmSettings.provider
-    process.env.LLM_MODEL = llmSettings.model
-    process.env.OLLAMA_MODEL = llmSettings.ollama_model || 'llama2'
+    // Update environment variables
+    if (newSettings.apiKeys?.anthropic) {
+      process.env.ANTHROPIC_API_KEY = newSettings.apiKeys.anthropic
+    }
+    if (newSettings.apiKeys?.openrouter) {
+      process.env.OPENROUTER_API_KEY = newSettings.apiKeys.openrouter
+    }
+    if (newSettings.apiKeys?.ollama_endpoint) {
+      process.env.OLLAMA_ENDPOINT = newSettings.apiKeys.ollama_endpoint
+    }
+    if (newSettings.llmSettings?.provider) {
+      process.env.LLM_PROVIDER = newSettings.llmSettings.provider
+    }
+    if (newSettings.llmSettings?.model) {
+      process.env.LLM_MODEL = newSettings.llmSettings.model
+    }
+    if (newSettings.llmSettings?.ollama_model) {
+      process.env.OLLAMA_MODEL = newSettings.llmSettings.ollama_model
+    }
+    if (newSettings.advanced?.logLevel) {
+      process.env.LOG_LEVEL = newSettings.advanced.logLevel
+    }
+    if (newSettings.security?.enableMultiTenancy !== undefined) {
+      process.env.MULTI_TENANCY_ENABLED = String(newSettings.security.enableMultiTenancy)
+    }
 
-    res.json({ success: true, message: 'Settings saved' })
+    // Return masked response
+    const response = formatSettingsResponse(newSettings)
+    res.json({
+      success: true,
+      message: 'Settings saved successfully',
+      settings: response,
+    })
   } catch (e) {
     console.error('POST /api/settings error:', e)
     res.status(500).json({ error: 'Failed to save settings' })
+  }
+})
+
+// POST /api/settings/validate — validate settings without saving
+router.post('/validate', async (req, res) => {
+  try {
+    const newSettings = req.body
+    const validation = validator.validateAll(newSettings)
+
+    if (!validation.valid) {
+      return res.status(400).json({
+        valid: false,
+        message: 'Validation failed',
+        errors: validation.errors,
+      })
+    }
+
+    res.json({
+      valid: true,
+      message: 'Settings are valid',
+    })
+  } catch (e) {
+    console.error('POST /api/settings/validate error:', e)
+    res.status(500).json({ error: 'Validation failed' })
+  }
+})
+
+// POST /api/settings/reset — reset to factory defaults
+router.post('/reset', async (req, res) => {
+  try {
+    const tenantId = req.tenant?.id || 'default'
+    const { confirmed } = req.body
+
+    if (!confirmed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reset not confirmed. Include confirmed: true in request body.',
+      })
+    }
+
+    const settingsPath = getSettingsPath(tenantId)
+    const defaultSettings = validator.getDefaultSettings()
+
+    // Encrypt sensitive fields
+    const toSave = {
+      ...defaultSettings,
+      apiKeys: {
+        anthropic: encryptKey(defaultSettings.apiKeys.anthropic),
+        openrouter: encryptKey(defaultSettings.apiKeys.openrouter),
+        ollama_endpoint: defaultSettings.apiKeys.ollama_endpoint,
+      },
+      notifications: {
+        ...defaultSettings.notifications,
+        slackWebhookUrl: encryptKey(defaultSettings.notifications.slackWebhookUrl),
+      },
+      updatedAt: new Date().toISOString(),
+    }
+
+    // Ensure directory exists
+    const dir = path.dirname(settingsPath)
+    await fs.mkdir(dir, { recursive: true })
+
+    // Save default settings
+    await fs.writeFile(settingsPath, JSON.stringify(toSave, null, 2), 'utf8')
+
+    const response = formatSettingsResponse(defaultSettings)
+    res.json({
+      success: true,
+      message: 'Settings reset to factory defaults',
+      settings: response,
+    })
+  } catch (e) {
+    console.error('POST /api/settings/reset error:', e)
+    res.status(500).json({ error: 'Failed to reset settings' })
+  }
+})
+
+// DELETE /api/settings/:section/:key — delete specific setting
+router.delete('/:section/:key', async (req, res) => {
+  try {
+    const tenantId = req.tenant?.id || 'default'
+    const { section, key } = req.params
+
+    // Allowed sections for deletion
+    const allowedSections = ['apiKeys', 'notifications', 'advanced']
+    if (!allowedSections.includes(section)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete from section "${section}". Allowed sections: ${allowedSections.join(', ')}`,
+      })
+    }
+
+    // Load current settings
+    const settingsPath = getSettingsPath(tenantId)
+    let currentSettings = validator.getDefaultSettings()
+
+    try {
+      const data = await fs.readFile(settingsPath, 'utf8')
+      const stored = JSON.parse(data)
+      currentSettings = {
+        ...currentSettings,
+        ...stored,
+      }
+    } catch (e) {
+      // File doesn't exist, use defaults
+    }
+
+    // Delete the specific key from section
+    if (currentSettings[section] && currentSettings[section][key]) {
+      delete currentSettings[section][key]
+
+      // Encrypt sensitive fields before saving
+      const toSave = {
+        ...currentSettings,
+        apiKeys: {
+          anthropic: encryptKey(currentSettings.apiKeys?.anthropic || ''),
+          openrouter: encryptKey(currentSettings.apiKeys?.openrouter || ''),
+          ollama_endpoint: currentSettings.apiKeys?.ollama_endpoint || 'http://localhost:11434',
+        },
+        notifications: {
+          ...currentSettings.notifications,
+          slackWebhookUrl: encryptKey(currentSettings.notifications?.slackWebhookUrl || ''),
+        },
+        updatedAt: new Date().toISOString(),
+      }
+
+      // Ensure directory exists
+      const dir = path.dirname(settingsPath)
+      await fs.mkdir(dir, { recursive: true })
+
+      // Save updated settings
+      await fs.writeFile(settingsPath, JSON.stringify(toSave, null, 2), 'utf8')
+
+      const response = formatSettingsResponse(currentSettings)
+      return res.json({
+        success: true,
+        message: `Deleted ${section}.${key}`,
+        settings: response,
+      })
+    }
+
+    res.status(404).json({
+      success: false,
+      message: `Setting ${section}.${key} not found`,
+    })
+  } catch (e) {
+    console.error('DELETE /api/settings/:section/:key error:', e)
+    res.status(500).json({ error: 'Failed to delete setting' })
   }
 })
 

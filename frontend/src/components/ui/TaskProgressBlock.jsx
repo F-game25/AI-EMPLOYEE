@@ -51,7 +51,7 @@ export default function TaskProgressBlock({ taskId, title, steps = [], graph = [
       borderLeft: '3px solid rgba(229,199,107,0.4)',
       borderRadius: 6,
       padding: '10px 12px',
-      fontFamily: 'var(--font-mono, monospace)',
+      fontFamily: 'var(--nx-font-mono, monospace)',
       fontSize: 11,
       maxWidth: 480,
     }}>

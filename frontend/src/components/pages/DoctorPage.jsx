@@ -19,11 +19,16 @@ export default function DoctorPage() {
   const [doctorData, setDoctorData] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Fetch live doctor status on mount and every 8s
   useEffect(() => {
-    const fetch_doctor = async () => {
+    const fetchDoctor = async () => {
       try {
-        const res = await api.get('/api/doctor/status')
+        let res
+        if (typeof api.get === 'function') {
+          res = await api.get('/api/doctor/status')
+        } else {
+          const response = await fetch('/api/doctor/status')
+          res = await response.json()
+        }
         setDoctorData(res)
         const issues = (res?.issues || []).map(issue => ({
           name: issue.name || issue.component || 'Unknown',
@@ -40,11 +45,12 @@ export default function DoctorPage() {
         setChecks([...strengths, ...issues])
         setLoading(false)
       } catch (e) {
+        console.error('Doctor status fetch failed:', e)
         setLoading(false)
       }
     }
-    fetch_doctor()
-    const t = setInterval(fetch_doctor, 8000)
+    fetchDoctor()
+    const t = setInterval(fetchDoctor, 8000)
     return () => clearInterval(t)
   }, [])
 
@@ -64,7 +70,15 @@ export default function DoctorPage() {
   const handleFix = async (name) => {
     setFixStates(p => ({ ...p, [name]: 'running' }))
     try {
-      await api.chat.send(`Fix issue: ${name}`)
+      if (typeof api.chat?.send === 'function') {
+        await api.chat.send(`Fix issue: ${name}`)
+      } else {
+        await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: `Fix issue: ${name}` })
+        })
+      }
       setFixStates(p => ({ ...p, [name]: 'ok' }))
     } catch {
       setFixStates(p => ({ ...p, [name]: 'err' }))
@@ -76,7 +90,11 @@ export default function DoctorPage() {
   const runSingle = async (item) => {
     setSuiteState(p => ({ ...p, [item.id]: 'running' }))
     try {
-      await item.endpoint()
+      if (typeof item.endpoint === 'function') {
+        await item.endpoint()
+      } else {
+        await fetch(item.endpoint || '/api/health')
+      }
       setSuiteState(p => ({ ...p, [item.id]: 'pass' }))
     } catch {
       setSuiteState(p => ({ ...p, [item.id]: 'fail' }))
@@ -204,8 +222,28 @@ export default function DoctorPage() {
 
           <Panel icon="⚡" title="Actions" className="dr-panel dr-col__grow">
             <div className="dr-actions">
-              <HexButton onClick={() => api.chat.send('Run full system sweep')} variant="primary" tone="cyan" size="sm">RUN FULL SWEEP</HexButton>
-              <HexButton onClick={() => api.chat.send('Restart all agents')} variant="primary" tone="gold" size="sm">RESTART AGENTS</HexButton>
+              <HexButton onClick={() => {
+                if (typeof api.chat?.send === 'function') {
+                  api.chat.send('Run full system sweep')
+                } else {
+                  fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: 'Run full system sweep' })
+                  }).catch(() => {})
+                }
+              }} variant="primary" tone="cyan" size="sm">RUN FULL SWEEP</HexButton>
+              <HexButton onClick={() => {
+                if (typeof api.chat?.send === 'function') {
+                  api.chat.send('Restart all agents')
+                } else {
+                  fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: 'Restart all agents' })
+                  }).catch(() => {})
+                }
+              }} variant="primary" tone="gold" size="sm">RESTART AGENTS</HexButton>
               <HexButton variant="primary" size="sm">CLEAR ERROR LOG</HexButton>
             </div>
           </Panel>

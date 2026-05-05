@@ -26,7 +26,6 @@
   opacity: 0.6;
 }
 
-/* ── Two-column layout ─────────────────────────────────────────────── */
 .dr-cols {
   display: grid;
   grid-template-columns: 1fr 280px;
@@ -43,7 +42,6 @@
 }
 .dr-col__grow { flex: 1; }
 
-/* ── Empty state ───────────────────────────────────────────────────── */
 .dr-empty {
   font-family: var(--nx-font-mono);
   font-size: 11px;
@@ -53,7 +51,6 @@
 }
 .dr-empty--ok { color: var(--nx-success); }
 
-/* ── Health checks list ─────────────────────────────────────────────── */
 .dr-checks {
   display: flex;
   flex-direction: column;
@@ -128,7 +125,6 @@
 .dr-check--warn .dr-check__status { color: var(--nx-warning); }
 .dr-check--error .dr-check__status { color: var(--nx-danger); }
 
-/* ── Test suite runner ──────────────────────────────────────────────── */
 .dr-suite {
   display: flex;
   flex-direction: column;
@@ -175,7 +171,6 @@
 .dr-suite-item--fail .dr-suite-item__status { color: var(--nx-danger); }
 .dr-suite-item--running .dr-suite-item__status { color: var(--nx-cyan); }
 
-/* ── Error log ──────────────────────────────────────────────────────– */
 .dr-errorlog {
   display: flex;
   flex-direction: column;
@@ -223,7 +218,6 @@
   margin-top: 2px;
 }
 
-/* ── Diagnostics panel ───────────────────────────────────────────────– */
 .dr-diag {
   display: flex;
   flex-direction: column;
@@ -257,14 +251,12 @@
 .dr-diag__val--warning { color: var(--nx-warning); }
 .dr-diag__val--alert { color: var(--nx-danger); }
 
-/* ── Actions panel ───────────────────────────────────────────────────– */
 .dr-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-/* ── Responsive ────────────────────────────────────────────────────– */
 @media (max-width: 1100px) {
   .dr-cols { grid-template-columns: 1fr; }
   .dr-kpis { grid-template-columns: repeat(2, 1fr); }

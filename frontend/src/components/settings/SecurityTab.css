@@ -1,0 +1,192 @@
+/* SecurityTab.css */
+
+.security-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+  padding: 0.5rem 0;
+  position: relative;
+}
+
+.security-toggle__input {
+  appearance: none;
+  width: 0;
+  height: 0;
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.security-toggle__input:disabled {
+  cursor: not-allowed;
+}
+
+.security-toggle__label {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-text-primary, #e0e0e0);
+  flex: 1;
+}
+
+.security-toggle__input:disabled ~ .security-toggle__label {
+  opacity: 0.6;
+}
+
+.security-toggle__switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 2.5rem;
+  height: 1.375rem;
+  background-color: var(--color-input-border, #333);
+  border-radius: 1rem;
+  position: relative;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.security-toggle__input:disabled ~ .security-toggle__label ~ .security-toggle__switch {
+  opacity: 0.6;
+}
+
+.security-toggle__switch::after {
+  content: '';
+  display: block;
+  width: 1.125rem;
+  height: 1.125rem;
+  background-color: white;
+  border-radius: 50%;
+  position: absolute;
+  left: 0.125rem;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.security-toggle__input:checked + .security-toggle__label ~ .security-toggle__switch {
+  background-color: var(--color-gold, #ffd700);
+}
+
+.security-toggle__input:checked + .security-toggle__label ~ .security-toggle__switch::after {
+  left: 1.25rem;
+}
+
+.security-toggle__badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background-color: rgba(255, 215, 0, 0.15);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-gold, #ffd700);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Warning banner */
+.security-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background-color: rgba(255, 215, 0, 0.08);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  border-radius: 4px;
+  margin-top: 0.75rem;
+}
+
+.security-warning__icon {
+  font-size: 1.125rem;
+  flex-shrink: 0;
+}
+
+.security-warning__text {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #b0b0b0);
+  line-height: 1.4;
+}
+
+/* Input group with unit */
+.security-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.security-input-group__input {
+  flex: 1;
+  min-width: 100px;
+}
+
+.security-input-group__unit {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #b0b0b0);
+  white-space: nowrap;
+}
+
+/* Password policy group */
+.security-policy-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.security-policy-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--color-input-border, #333);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: var(--color-input-bg, #1a1a1a);
+}
+
+.security-policy-item:hover {
+  border-color: var(--color-gold, #ffd700);
+  background-color: rgba(255, 215, 0, 0.03);
+}
+
+.security-policy-radio {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--color-input-border, #333);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: var(--color-input-bg, #1a1a1a);
+  margin-top: 0.125rem;
+  flex-shrink: 0;
+}
+
+.security-policy-radio:hover {
+  border-color: var(--color-gold, #ffd700);
+}
+
+.security-policy-radio:checked {
+  border-color: var(--color-gold, #ffd700);
+  background: radial-gradient(circle, var(--color-gold, #ffd700) 35%, transparent 70%);
+  box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.2);
+}
+
+.security-policy-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.security-policy-label {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-text-primary, #e0e0e0);
+}
+
+.security-policy-description {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary, #888);
+}

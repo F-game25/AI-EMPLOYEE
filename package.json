@@ -9,6 +9,15 @@
     "start": "bash ./start.sh",
     "dev": "bash ./dev.sh",
     "test": "python3 -m pytest tests/ && python3 runtime/agents/agent_selftest.py",
-    "lint": "find runtime/agents -name '*.py' -exec python3 -m py_compile {} +"
+    "lint": "find runtime/agents -name '*.py' -exec python3 -m py_compile {} +",
+    "test:settings": "python3 -m pytest tests/test_settings_e2e.py -v",
+    "test:settings:frontend": "node tests/test_settings_frontend.js",
+    "test:settings:integration": "node tests/test_settings_integration.js",
+    "test:settings:all": "npm run test:settings && npm run test:settings:frontend && npm run test:settings:integration",
+    "verify:settings": "bash scripts/verify-settings.sh"
+  },
+  "dependencies": {
+    "multer": "^2.1.1",
+    "uuid": "^14.0.0"
   }
 }

@@ -29,7 +29,7 @@ export default class ErrorBoundary extends Component {
         background: 'rgba(255,60,60,0.08)',
         border: '1px solid rgba(255,60,60,0.3)',
         borderRadius: '10px',
-        fontFamily: 'var(--font-mono, monospace)',
+        fontFamily: 'var(--nx-font-mono, monospace)',
         color: 'var(--text-dim, #aaa)',
       }}>
         <div style={{ color: '#f87171', fontWeight: 600, marginBottom: 8 }}>

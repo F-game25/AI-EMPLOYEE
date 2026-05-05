@@ -1,0 +1,114 @@
+.agent-activity-widget {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: linear-gradient(180deg, rgba(168,85,247,0.03) 0%, transparent 40%), linear-gradient(180deg, #0D0A14, #070510);
+  border: 1px solid rgba(168,85,247,0.1);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4) var(--space-3);
+  border-bottom: 1px solid rgba(168,85,247,0.1);
+}
+
+.widget-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.agent-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gold);
+  background: rgba(229, 199, 107, 0.1);
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.agents-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: var(--space-4);
+}
+
+.agent-card {
+  padding: var(--space-3);
+  background: rgba(60, 231, 255, 0.02);
+  border: 1px solid rgba(168,85,247,0.15);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 150ms var(--ease-out);
+}
+
+.agent-card:hover {
+  background: rgba(168,85,247,0.08);
+  border-color: rgba(168,85,247,0.25);
+  transform: translateY(-1px);
+}
+
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.agent-icon {
+  font-size: 14px;
+  font-weight: bold;
+  width: 18px;
+  text-align: center;
+}
+
+.agent-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.current-task {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+}
+
+.uptime-badge {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--nx-font-mono);
+}

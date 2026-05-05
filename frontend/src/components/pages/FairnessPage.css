@@ -234,6 +234,11 @@
   font-family: var(--nx-font-mono);
   color: rgba(255, 255, 255, 0.35);
   letter-spacing: 0.06em;
+  margin-top: 8px;
+}
+
+.fa-detail__label:first-of-type {
+  margin-top: 0;
 }
 
 .fa-detail__box {
@@ -248,10 +253,16 @@
   max-height: 100px;
   overflow-y: auto;
 }
+
 .fa-detail__box--corrected {
   background: rgba(34, 197, 94, 0.05);
   border-color: rgba(34, 197, 94, 0.18);
   color: var(--nx-text);
+}
+
+.fa-apply-btn {
+  width: 100%;
+  margin-top: 12px;
 }
 
 /* ── Responsive ────────────────────────────────────────────────────– */

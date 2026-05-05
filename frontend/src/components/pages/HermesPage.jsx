@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAppStore } from '../../store/appStore'
-import { Panel, KPITile, StatusPill, HexButton, SectionLabel, LiveBadge } from '../nexus-ui'
+import { Panel, KPITile, StatusPill, HexButton } from '../nexus-ui'
 import api from '../../api/client'
 import './HermesPage.css'
 
@@ -14,6 +14,7 @@ const TOOLS = ['Web Search', 'Code Runner', 'Database', 'Email', 'File System', 
 export default function HermesPage() {
   const setHermesGoal = useAppStore(s => s.setHermesGoal)
   const hermesGoal = useAppStore(s => s.hermesGoal)
+  const setActiveSection = useAppStore(s => s.setActiveSection)
 
   const [goal, setGoal] = useState(hermesGoal || '')
   const [decomposed, setDecomposed] = useState(false)
@@ -22,7 +23,11 @@ export default function HermesPage() {
   const [timeDays, setTimeDays] = useState(14)
   const [enabledTools, setEnabledTools] = useState(new Set(['Web Search', 'Code Runner', 'Database']))
   const [sending, setSending] = useState(false)
+  const [memoryLoading, setMemoryLoading] = useState(false)
   const [memoryResult, setMemoryResult] = useState(null)
+  const [opsLoading, setOpsLoading] = useState(false)
+  const [opsResult, setOpsResult] = useState(null)
+  const [productLoading, setProductLoading] = useState(false)
   const [productResult, setProductResult] = useState(null)
   const [thoughtNode, setThoughtNode] = useState(null)
 
@@ -34,18 +39,45 @@ export default function HermesPage() {
 
   const handleSendToAgents = async () => {
     setSending(true)
-    try { await api.tasks.run(goal.trim()) } catch { /* ignore */ }
+    try {
+      await api.tasks.run(goal.trim())
+    } catch (e) {
+      console.error('Failed to send goal to agents:', e)
+    }
     setSending(false)
   }
 
   const handleRequestMemory = async () => {
-    try { const d = await api.brain.insights(); setMemoryResult(JSON.stringify(d).slice(0, 200)) }
-    catch { setMemoryResult('Memory retrieval unavailable') }
+    setMemoryLoading(true)
+    setMemoryResult(null)
+    try {
+      const d = await api.brain.insights()
+      setMemoryResult(JSON.stringify(d).slice(0, 200))
+    } catch (e) {
+      setMemoryResult('Memory retrieval unavailable')
+    }
+    setMemoryLoading(false)
+  }
+
+  const handleMonitorOps = () => {
+    setOpsLoading(true)
+    setOpsResult(null)
+    setTimeout(() => {
+      setActiveSection('operations')
+      setOpsLoading(false)
+    }, 300)
   }
 
   const handleProductDashboard = async () => {
-    try { const d = await api.product.dashboard(); setProductResult(`Revenue: ${d.revenue?.total ?? 'N/A'} | Agents: ${d.agents?.running ?? 'N/A'}`) }
-    catch { setProductResult('Dashboard data unavailable') }
+    setProductLoading(true)
+    setProductResult(null)
+    try {
+      const d = await api.product.dashboard()
+      setProductResult(`Revenue: ${d.revenue?.total ?? 'N/A'} | Agents: ${d.agents?.running ?? 'N/A'}`)
+    } catch (e) {
+      setProductResult('Dashboard data unavailable')
+    }
+    setProductLoading(false)
   }
 
   const toggleTool = (t) => setEnabledTools(prev => {
@@ -83,7 +115,7 @@ export default function HermesPage() {
               placeholder="Enter a strategic goal to decompose..."
               className="he-textarea"
             />
-            <HexButton onClick={handleDecompose} full size="md" variant="primary" tone="gold">
+            <HexButton onClick={handleDecompose} disabled={!goal.trim()} variant="primary" tone="gold">
               DECOMPOSE
             </HexButton>
             {decomposed && goal && (
@@ -102,7 +134,7 @@ export default function HermesPage() {
             )}
           </Panel>
 
-          <Panel title="Constraint Reasoning" tone="gold" style={{ flex: 1 }}>
+          <Panel title="Constraint Reasoning" tone="gold">
             <div className="he-constraint-group">
               <label className="he-constraint-label">BUDGET (€)</label>
               <input type="number" value={budget} onChange={e => setBudget(+e.target.value)} min={0} step={100}
@@ -152,24 +184,24 @@ export default function HermesPage() {
               <HexButton onClick={handleSendToAgents} variant="primary" tone="gold" size="sm" loading={sending}>
                 SEND TO AGENTS
               </HexButton>
-              <HexButton onClick={handleRequestMemory} variant="outline" tone="cool" size="sm">
+              <HexButton onClick={handleRequestMemory} variant="outline" tone="cool" size="sm" loading={memoryLoading}>
                 REQUEST MEMORY
               </HexButton>
-              <HexButton onClick={() => {}} variant="outline" tone="gold" size="sm">
+              <HexButton onClick={handleMonitorOps} variant="outline" tone="gold" size="sm" loading={opsLoading}>
                 MONITOR OPS
               </HexButton>
-              <HexButton onClick={handleProductDashboard} variant="outline" tone="purple" size="sm">
+              <HexButton onClick={handleProductDashboard} variant="outline" tone="purple" size="sm" loading={productLoading}>
                 REPORT STATUS
               </HexButton>
             </div>
-            {(memoryResult || productResult) && (
+            {(memoryResult || opsResult || productResult) && (
               <div className="he-result-box">
-                {memoryResult || productResult}
+                {memoryResult || opsResult || productResult}
               </div>
             )}
           </Panel>
 
-          <Panel title="Reasoning Thought Map" tone="gold" style={{ flex: 1 }}>
+          <Panel title="Reasoning Thought Map" tone="gold" className="he-thoughtmap-panel">
             <div className="he-thoughtmap">
               <svg width="430" height="215" viewBox="0 0 430 215" className="he-thoughtmap-svg">
                 {EDGES.map(([f,t], i) => (

@@ -25,7 +25,7 @@ export default function MiddlewareStatusWidget() {
     border: '1px solid rgba(229,199,107,0.12)',
     borderRadius: 8,
     padding: '14px 16px',
-    fontFamily: 'var(--font-mono, monospace)',
+    fontFamily: 'var(--nx-font-mono, monospace)',
   }
   const label = { fontSize: 9, letterSpacing: '0.12em', color: 'rgba(255,255,255,0.35)', marginBottom: 10 }
   const row   = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }

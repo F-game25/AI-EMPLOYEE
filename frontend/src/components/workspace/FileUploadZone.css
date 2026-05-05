@@ -1,0 +1,128 @@
+@import '../nexus-ui/tokens.css';
+
+.fuz-container {
+  flex-shrink: 0;
+}
+
+/* ── Drag-Drop Zone ────────────────────────────────────────────────── */
+.fuz-zone {
+  padding: var(--nx-s-4);
+  border-radius: 12px;
+  border: 2px dashed rgba(229, 199, 107, 0.2);
+  background: rgba(229, 199, 107, 0.02);
+  transition: all 200ms var(--nx-ease);
+  cursor: pointer;
+}
+
+.fuz-zone:hover {
+  border-color: rgba(229, 199, 107, 0.3);
+  background: rgba(229, 199, 107, 0.04);
+}
+
+.fuz-zone--dragging {
+  border-color: var(--nx-gold);
+  background: rgba(229, 199, 107, 0.1);
+  box-shadow: 0 0 24px rgba(229, 199, 107, 0.15);
+}
+
+.fuz-zone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--nx-s-3);
+  text-align: center;
+}
+
+.fuz-icon {
+  font-size: 32px;
+  opacity: 0.7;
+}
+
+.fuz-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.fuz-label {
+  font-size: 13px;
+  color: var(--nx-text);
+}
+
+.fuz-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+  font-family: var(--nx-font-mono);
+  line-height: 1.4;
+}
+
+/* ── Uploading State ───────────────────────────────────────────────── */
+.fuz-uploading {
+  padding: var(--nx-s-3);
+  border-radius: 12px;
+  border: 1px solid var(--nx-border);
+  background: rgba(229, 199, 107, 0.03);
+}
+
+.fuz-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fuz-file-name {
+  font-size: 12px;
+  color: var(--nx-text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fuz-progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--nx-border);
+  overflow: hidden;
+}
+
+.fuz-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--nx-gold) 0%, var(--nx-gold-bright) 100%);
+  transition: width 300ms var(--nx-ease);
+  border-radius: 2px;
+}
+
+.fuz-progress-text {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  font-family: var(--nx-font-mono);
+  text-align: right;
+}
+
+/* ── Error State ───────────────────────────────────────────────────── */
+.fuz-error {
+  padding: var(--nx-s-3);
+  border-radius: 12px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.fuz-error-icon {
+  font-size: 24px;
+  color: var(--nx-danger);
+  font-weight: bold;
+}
+
+.fuz-error-text {
+  font-size: 12px;
+  color: var(--nx-danger);
+  line-height: 1.4;
+}

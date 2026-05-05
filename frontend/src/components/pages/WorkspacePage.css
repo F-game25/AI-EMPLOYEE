@@ -16,12 +16,13 @@
 
 /* ── Sidebar (fixed width) ──────────────────────────────────────────── */
 .ws-sidebar {
-  width: 260px;
+  width: 320px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: var(--nx-s-3);
   overflow: hidden;
+  overflow-y: auto;
 }
 
 .ws-sidebar-header {
@@ -65,6 +66,15 @@
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+/* ── List Section ──────────────────────────────────────────────────── */
+.ws-list-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-3);
+  flex: 1;
+  min-height: 0;
+}
+
 /* ── File List ──────────────────────────────────────────────────────── */
 .ws-file-list {
   flex: 1;
@@ -76,7 +86,7 @@
 }
 
 .ws-file-item {
-  padding: 7px 10px;
+  padding: 7px 8px;
   border-radius: 7px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.02);
@@ -85,6 +95,7 @@
   align-items: center;
   gap: 8px;
   transition: all 150ms var(--nx-ease);
+  position: relative;
 }
 
 .ws-file-item:hover {
@@ -92,14 +103,50 @@
   background: rgba(32, 214, 199, 0.04);
 }
 
+.ws-file-item:hover .ws-file-delete-btn {
+  opacity: 1;
+}
+
 .ws-file-item--selected {
   border-color: rgba(32, 214, 199, 0.3);
   background: rgba(32, 214, 199, 0.07);
 }
 
+.ws-file-delete-btn {
+  opacity: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.05);
+  color: var(--nx-danger);
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 150ms var(--nx-ease);
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.ws-file-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.6);
+}
+
+.ws-file-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .ws-file-info {
   flex: 1;
   overflow: hidden;
+  min-width: 0;
 }
 
 .ws-file-name {
@@ -108,6 +155,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.3;
 }
 
 .ws-file-size {
@@ -116,13 +164,6 @@
   font-family: var(--nx-font-mono);
 }
 
-.ws-file-count {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.25);
-  font-family: var(--nx-font-mono);
-  padding: 4px 0;
-  flex-shrink: 0;
-}
 
 /* ── Preview Area ───────────────────────────────────────────────────── */
 .ws-preview-area {

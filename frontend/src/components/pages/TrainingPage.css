@@ -1,11 +1,11 @@
 /* ════════════════════════════════════════════════════════════════════
    TRAINING PAGE — Agent Training & Reinforcement UI
-   Gold-on-black, tabbed training session + agent selector + training log
+   Teal/gold highlighting, KPI row + tabbed session + agent selector
    ════════════════════════════════════════════════════════════════════ */
 
 @import '../nexus-ui/tokens.css';
 
-.tr-page {
+.trp-page {
   display: flex;
   flex-direction: column;
   gap: var(--nx-s-5);
@@ -16,15 +16,15 @@
 }
 
 /* ── KPI Row ────────────────────────────────────────────────────────── */
-.tr-kpi-row {
+.trp-kpi-row {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--nx-s-5);
   flex-shrink: 0;
 }
 
-/* ── Main Grid (left: training, right: agent selector + log) ─────────── */
-.tr-main-grid {
+/* ── Main Grid (left: training session, right: agent + log) ─────────── */
+.trp-main-grid {
   display: grid;
   grid-template-columns: 1fr 260px;
   gap: var(--nx-s-5);
@@ -32,13 +32,13 @@
   min-height: 0;
 }
 
-.tr-left {
+.trp-left {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.tr-right {
+.trp-right {
   display: flex;
   flex-direction: column;
   gap: var(--nx-s-5);
@@ -47,7 +47,7 @@
 }
 
 /* ── Tabs ────────────────────────────────────────────────────────────── */
-.tr-tabs {
+.trp-tabs {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
@@ -55,7 +55,7 @@
   padding-bottom: 10px;
 }
 
-.tr-tab {
+.trp-tab {
   padding: 6px 12px;
   border-radius: var(--nx-r-sm);
   border: none;
@@ -68,14 +68,14 @@
   font-family: var(--nx-font-mono);
 }
 
-.tr-tab--active {
+.trp-tab--active {
   background: rgba(32, 214, 199, 0.15);
   color: #20D6C7;
   font-weight: 600;
 }
 
 /* ── Tab Content ────────────────────────────────────────────────────── */
-.tr-tab-content {
+.trp-tab-content {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -83,13 +83,13 @@
 }
 
 /* ── Form Elements ───────────────────────────────────────────────────── */
-.tr-form-group {
+.trp-form-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.tr-label {
+.trp-label {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.5);
   text-transform: uppercase;
@@ -97,19 +97,19 @@
   font-family: var(--nx-font-mono);
 }
 
-.tr-label-row {
+.trp-label-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.tr-reward-value {
+.trp-reward-value {
   font-size: 12px;
   font-family: var(--nx-font-mono);
   color: #20D6C7;
 }
 
-.tr-textarea {
+.trp-textarea {
   padding: 8px 10px;
   border-radius: var(--nx-r-sm);
   border: 1px solid rgba(32, 214, 199, 0.2);
@@ -123,12 +123,12 @@
   box-sizing: border-box;
 }
 
-.tr-textarea:focus {
+.trp-textarea:focus {
   border-color: rgba(32, 214, 199, 0.4);
   background: rgba(0, 0, 0, 0.3);
 }
 
-.tr-input {
+.trp-input {
   padding: 8px 10px;
   border-radius: var(--nx-r-sm);
   border: 1px solid rgba(32, 214, 199, 0.2);
@@ -140,22 +140,46 @@
   box-sizing: border-box;
 }
 
-.tr-input:focus {
+.trp-input:focus {
   border-color: rgba(32, 214, 199, 0.4);
   background: rgba(0, 0, 0, 0.3);
 }
 
-.tr-slider {
+.trp-slider {
+  cursor: pointer;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+.trp-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #20D6C7;
   cursor: pointer;
 }
 
+.trp-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #20D6C7;
+  cursor: pointer;
+  border: none;
+}
+
 /* ── Parameters Tab ─────────────────────────────────────────────────── */
-.tr-param-note {
+.trp-param-note {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.5);
 }
 
-.tr-param-box {
+.trp-param-box {
   padding: 8px;
   background: rgba(0, 0, 0, 0.2);
   border-radius: var(--nx-r-sm);
@@ -166,7 +190,7 @@
 }
 
 /* ── History Tab ────────────────────────────────────────────────────── */
-.tr-history-list {
+.trp-history-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -176,36 +200,38 @@
   overflow-y: auto;
 }
 
-.tr-history-item {
+.trp-history-item {
   display: flex;
   gap: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.tr-history-item:last-child {
+.trp-history-item:last-child {
   border-bottom: none;
 }
 
-.tr-history-ts {
+.trp-history-ts {
   color: rgba(255, 255, 255, 0.3);
   flex-shrink: 0;
   font-family: var(--nx-font-mono);
   min-width: 60px;
 }
 
-.tr-history-text {
+.trp-history-text {
   flex: 1;
 }
 
 /* ── Agent List ─────────────────────────────────────────────────────── */
-.tr-agent-list {
+.trp-agent-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
-.tr-agent-item {
+.trp-agent-item {
   padding: 8px 10px;
   border-radius: var(--nx-r-sm);
   background: rgba(32, 214, 199, 0.04);
@@ -219,17 +245,17 @@
   gap: 6px;
 }
 
-.tr-agent-item:hover {
+.trp-agent-item:hover {
   border-color: rgba(32, 214, 199, 0.25);
   background: rgba(32, 214, 199, 0.08);
 }
 
-.tr-agent-item--active {
+.trp-agent-item--active {
   background: rgba(229, 199, 107, 0.1);
   border-color: rgba(229, 199, 107, 0.3);
 }
 
-.tr-agent-dot {
+.trp-agent-dot {
   width: 4px;
   height: 4px;
   border-radius: 50%;
@@ -237,15 +263,15 @@
   transition: background 200ms var(--nx-ease);
 }
 
-.tr-agent-item--active .tr-agent-dot {
+.trp-agent-item--active .trp-agent-dot {
   background: #E5C76B;
 }
 
-.tr-agent-item:not(.tr-agent-item--active) .tr-agent-dot {
+.trp-agent-item:not(.trp-agent-item--active) .trp-agent-dot {
   background: rgba(32, 214, 199, 0.3);
 }
 
-.tr-agent-name {
+.trp-agent-name {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -253,7 +279,7 @@
 }
 
 /* ── Training Log ────────────────────────────────────────────────────── */
-.tr-log-list {
+.trp-log-list {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -263,27 +289,33 @@
   overflow-y: auto;
 }
 
-.tr-log-item {
+.trp-log-item {
   padding: 4px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.tr-log-item:last-child {
+.trp-log-item:last-child {
   border-bottom: none;
 }
 
-.tr-log-ts {
+.trp-log-ts {
   font-family: var(--nx-font-mono);
   color: rgba(255, 255, 255, 0.3);
   font-size: 8px;
+  flex-shrink: 0;
+  min-width: 50px;
 }
 
-.tr-log-text {
+.trp-log-text {
   font-size: 9px;
+  flex: 1;
 }
 
 /* ── Empty States ───────────────────────────────────────────────────── */
-.tr-empty {
+.trp-empty {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.3);
   padding: 8px 0;

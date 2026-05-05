@@ -33,6 +33,9 @@ const { createOfflineSecuritySyncPolicy } = require('./security/offline_sync_pol
 const { createApiGatewayProtector } = require('./security/api_gateway');
 const { createAnomalyResponder } = require('./security/anomaly_response');
 const { tenantMiddleware, requireTenant } = require('./tenancy');
+const ConnectionManager = require('./websocket/connection-manager');
+const HeartbeatManager = require('./websocket/heartbeat');
+const { createUpgradeHandler } = require('./websocket/upgrade-handlers');
 const {
   getAgents,
   on: onAgentEvent,
@@ -228,8 +231,31 @@ app.use('/orchestrator', orchestrator.router);
 app.use('/api/voice', voiceApiRouter);
 app.use('/api/settings', require('./routes/settings'));
 
+// Tasks API (real-time execution visibility)
+const taskGateway = require('./orchestrator/task-dashboard-gateway');
+const createTasksRouter = require('./routes/tasks');
+app.use('/api/tasks', createTasksRouter(taskGateway));
+
 const GPU_USAGE_BASELINE = 18;
 let currentGpuUsage = GPU_USAGE_BASELINE;
+
+// Agents monitoring API — Phase 3.2 agent activity monitor
+const { createAgentsMonitorRouter, AgentStateRegistry } = require('./routes/agents-monitor');
+const agentStateRegistry = new AgentStateRegistry();
+const agentsMonitorRouter = createAgentsMonitorRouter(broadcaster, requireAuth, agentStateRegistry);
+app.use('/api/agents', agentsMonitorRouter);
+
+// Start agent heartbeat collector for real-time status monitoring
+const { startHeartbeatCollector } = require('./agents-monitor/heartbeat-collector');
+startHeartbeatCollector(broadcaster);
+
+// Pipeline Execution API (real-time pipeline visualization)
+const { createExecutionRouter } = require('./routes/execution');
+const { router: executionRouter, pipelineTraces } = createExecutionRouter({
+  broadcaster,
+});
+app.use('/api/execution', executionRouter);
+
 // Incremented by broadcaster heartbeat loop; sampled into system status.
 let heartbeatCounter = 0;
 
@@ -3574,6 +3600,14 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
+// Initialize WebSocket infrastructure for multi-tenant real-time updates
+const connManager = new ConnectionManager();
+const heartbeatManager = new HeartbeatManager();
+heartbeatManager.start(wss, connManager);
+
+// Initialize task gateway with connection manager for real-time updates
+taskGateway.setConnectionManager(connManager);
+
 // Ping/pong keepalive — terminates dead connections that never send close frames.
 // Without this, stale clients accumulate and silent disconnects go undetected.
 const WS_PING_INTERVAL = 25000; // 25s — under most NAT/proxy 30s timeout
@@ -3834,6 +3868,10 @@ broadcaster.startHeartbeat({
     return `[SYSTEM] heartbeat=${seq} mode=${stats.mode} running=${stats.running_agents}/${stats.total_agents}`;
   },
 });
+
+// Start agent heartbeat collector for real-time monitoring (Phase 3.2)
+startHeartbeatCollector(broadcaster);
+
 markBootEvent('ai_core_ready');
 
 onAgentEvent('agent:update', (agents) => {
@@ -4213,8 +4251,18 @@ const LISTEN_HOST = process.env.LISTEN_HOST || '0.0.0.0';
 
 // ── Task Progress WebSocket Upgrade ────────────────────────────────────────────
 // Handle /api/tasks/:taskId/ws upgrade requests for live progress updates
+// Also route channel-based subscriptions: /ws/tasks, /ws/agents, /ws/execution-trace
+
+const channelUpgradeHandler = createUpgradeHandler(connManager, JWT_SECRET);
 
 server.on('upgrade', (req, socket, head) => {
+  // Route channel subscriptions (/ws/*)
+  if (req.url.startsWith('/ws/')) {
+    channelUpgradeHandler(req, socket, head);
+    return;
+  }
+
+  // Route legacy task progress upgrades (/api/tasks/:taskId/ws)
   const match = req.url.match(/^\/api\/tasks\/([a-f0-9\-]+)\/ws$/);
   if (!match) {
     socket.destroy();

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAppStore } from '../../store/appStore'
-import { Panel, KPITile, StatusPill, HexButton, SectionLabel } from '../nexus-ui'
+import { Panel, KPITile, StatusPill, HexButton, Sparkline } from '../nexus-ui'
 import './PromptInspectorPage.css'
 
 const FALLBACK_TRACES = [
@@ -11,7 +11,8 @@ const FALLBACK_TRACES = [
   { id:'pt-005', agent:'Memory Indexer',     prompt:'',                                                                                    output:'',                                                                                   tokens:{ in:0,   out:0   }, latency:'—',    score:0,  flags:['empty_prompt','empty_output'] },
 ]
 const FLAG_C = { empty_prompt:'#EF4444', empty_output:'#EF4444', generic_output:'#F59E0B', missing_context:'#F59E0B', error:'#EF4444' }
-const QUALITY = [['Structure','94','#e5c76b'],['Clarity','88','#60a5fa'],['Specificity','82','#22C55E'],['Token Eff.','91','#8B8B9E']]
+const QUALITY = [['Structure','94','#E5C76B'],['Clarity','88','#60a5fa'],['Specificity','82','#22C55E'],['Token Eff.','91','#8B8B9E']]
+const SPARKLINE_DATA = [78, 80, 82, 81, 84, 86, 87, 88, 90, 92, 94]
 
 export default function PromptInspectorPage() {
   const promptTraces = useAppStore(s => s.promptTraces)
@@ -22,41 +23,39 @@ export default function PromptInspectorPage() {
   const selT = sel ?? traces[0]
 
   const avgScore = Math.round(traces.filter(t=>t.score>0).reduce((a,t)=>a+t.score,0) / traces.filter(t=>t.score>0).length || 0)
-  const flagged  = traces.filter(t => t.flags?.length > 0).length
+  const flagged = traces.filter(t => t.flags?.length > 0).length
   const totalTok = traces.reduce((a,t) => a + (t.tokens?.in||0) + (t.tokens?.out||0), 0)
 
   return (
-    <div className="pi-page">
-      <div className="pi-kpi-row">
+    <div className="pip-page">
+      <div className="pip-kpi-row">
         <KPITile label="Avg Quality" value={`${avgScore}/100`} sub="Across all traces" icon="⭐" iconTone="gold" accent />
         <KPITile label="Prompts Today" value={traces.length} sub="Traced executions" icon="📋" iconTone="cool" />
         <KPITile label="Flagged" value={flagged} sub="Needs review" icon="⚠" iconTone={flagged > 0 ? 'alert' : 'success'} />
         <KPITile label="Total Tokens" value={totalTok.toLocaleString()} sub="In + out" icon="🔢" iconTone="purple" />
       </div>
 
-      <div className="pi-main-grid">
-        <div className="pi-left">
+      <div className="pip-main-grid">
+        <div className="pip-left">
           <Panel title="Prompt Traces" tone="gold" actions={<StatusPill label="LIVE INSPECTION" tone="cool" size="sm" dot={true} />}>
-            <div className="pi-trace-list">
+            <div className="pip-trace-list">
               {traces.map(t => (
                 <div
                   key={t.id}
                   onClick={() => { setSel(t); setEditText(t.prompt) }}
-                  className={`pi-trace-item ${selT?.id === t.id ? 'pi-trace-item--selected' : ''}`}
+                  className={`pip-trace-item ${selT?.id === t.id ? 'pip-trace-item--selected' : ''}`}
                 >
-                  <div className="pi-trace-header">
-                    <span className="pi-trace-agent">{t.agent}</span>
+                  <div className="pip-trace-header">
+                    <span className="pip-trace-agent">{t.agent}</span>
                     {t.flags?.length > 0 && t.flags.map(f => (
-                      <span key={f} className="pi-trace-flag" style={{ color: FLAG_C[f] || '#9A927E', borderColor: FLAG_C[f] || '#9A927E' }}>
-                        {f.replace('_', ' ')}
-                      </span>
+                      <StatusPill key={f} label={f.replace('_', ' ')} tone={f.includes('error') || f.includes('empty') ? 'alert' : 'warn'} size="xs" />
                     ))}
-                    <span className={`pi-trace-score ${t.score > 85 ? 'pi-trace-score--high' : t.score > 60 ? 'pi-trace-score--med' : 'pi-trace-score--low'}`}>
+                    <span className={`pip-trace-score ${t.score > 85 ? 'pip-trace-score--high' : t.score > 60 ? 'pip-trace-score--med' : 'pip-trace-score--low'}`}>
                       {t.score || '—'}
                     </span>
                   </div>
-                  <div className="pi-trace-prompt">{t.prompt || <span style={{ color: 'rgba(255,255,255,0.2)', fontStyle: 'italic' }}>empty prompt</span>}</div>
-                  <div className="pi-trace-meta">
+                  <div className="pip-trace-prompt">{t.prompt || <span className="pip-trace-empty">empty prompt</span>}</div>
+                  <div className="pip-trace-meta">
                     <span>IN: {t.tokens?.in||0}</span>
                     <span>OUT: {t.tokens?.out||0}</span>
                     <span>⏱ {t.latency}</span>
@@ -67,14 +66,14 @@ export default function PromptInspectorPage() {
           </Panel>
 
           <Panel title="Prompt Editor" tone="gold" style={{ flex: 1 }}>
-            <div className="pi-editor-label">EDIT · RE-RUN · INJECT LIVE</div>
+            <div className="pip-editor-label">EDIT · RE-RUN · INJECT LIVE</div>
             <textarea
               value={editText}
               onChange={e => setEditText(e.target.value)}
               placeholder="Select a trace to edit its prompt…"
-              className="pi-editor-textarea"
+              className="pip-editor-textarea"
             />
-            <div className="pi-editor-buttons">
+            <div className="pip-editor-buttons">
               <HexButton variant="primary" tone="gold" size="md">RE-RUN</HexButton>
               <HexButton variant="outline" tone="cool" size="md">INJECT</HexButton>
               <HexButton variant="ghost" size="md">CLEAR</HexButton>
@@ -82,54 +81,60 @@ export default function PromptInspectorPage() {
           </Panel>
         </div>
 
-        <div className="pi-right">
+        <div className="pip-right">
           {selT && (
             <Panel title="Trace Detail" tone="gold" actions={<StatusPill label={selT.flags?.length > 0 ? 'FLAGGED' : 'CLEAN'} tone={selT.flags?.length > 0 ? 'alert' : 'success'} size="sm" dot={false} />}>
-              <div className="pi-detail-rows">
-                <div className="pi-detail-row">
-                  <span className="pi-detail-label">Agent</span>
-                  <span className="pi-detail-value" style={{ color: '#20D6C7' }}>{selT.agent}</span>
+              <div className="pip-detail-rows">
+                <div className="pip-detail-row">
+                  <span className="pip-detail-label">Agent</span>
+                  <span className="pip-detail-value pip-detail-value--teal">{selT.agent}</span>
                 </div>
-                <div className="pi-detail-row">
-                  <span className="pi-detail-label">Score</span>
-                  <span className="pi-detail-value" style={{ color: selT.score > 85 ? '#22C55E' : '#E5C76B' }}>{selT.score || '—'}</span>
+                <div className="pip-detail-row">
+                  <span className="pip-detail-label">Score</span>
+                  <span className="pip-detail-value" style={{ color: selT.score > 85 ? '#22C55E' : selT.score > 60 ? '#E5C76B' : '#EF4444' }}>{selT.score || '—'}</span>
                 </div>
-                <div className="pi-detail-row">
-                  <span className="pi-detail-label">Latency</span>
-                  <span className="pi-detail-value">{selT.latency}</span>
+                <div className="pip-detail-row">
+                  <span className="pip-detail-label">Latency</span>
+                  <span className="pip-detail-value">{selT.latency}</span>
                 </div>
-                <div className="pi-detail-row">
-                  <span className="pi-detail-label">Tokens In</span>
-                  <span className="pi-detail-value">{(selT.tokens?.in||0).toLocaleString()}</span>
+                <div className="pip-detail-row">
+                  <span className="pip-detail-label">Tokens In</span>
+                  <span className="pip-detail-value">{(selT.tokens?.in||0).toLocaleString()}</span>
                 </div>
-                <div className="pi-detail-row">
-                  <span className="pi-detail-label">Tokens Out</span>
-                  <span className="pi-detail-value">{(selT.tokens?.out||0).toLocaleString()}</span>
+                <div className="pip-detail-row">
+                  <span className="pip-detail-label">Tokens Out</span>
+                  <span className="pip-detail-value">{(selT.tokens?.out||0).toLocaleString()}</span>
                 </div>
               </div>
               {selT.flags?.length > 0 && (
-                <div className="pi-detail-flags">
-                  FLAGS: {selT.flags.join(', ')}
+                <div className="pip-detail-flags">
+                  <div className="pip-flags-label">FLAGS</div>
+                  <div className="pip-flags-grid">
+                    {selT.flags.map(f => (
+                      <StatusPill key={f} label={f.replace('_', ' ')} tone={f.includes('error') || f.includes('empty') ? 'alert' : 'warn'} size="xs" />
+                    ))}
+                  </div>
                 </div>
               )}
               {selT.output && (
-                <div className="pi-detail-output">
-                  {selT.output.slice(0, 120)}{selT.output.length > 120 ? '…' : ''}
+                <div className="pip-detail-output">
+                  <div className="pip-output-label">OUTPUT</div>
+                  <pre className="pip-output-block">{selT.output.slice(0, 200)}{selT.output.length > 200 ? '…' : ''}</pre>
                 </div>
               )}
             </Panel>
           )}
 
           <Panel title="Quality Analysis" tone="gold">
-            <div className="pi-quality-items">
+            <div className="pip-quality-items">
               {QUALITY.map(([label, value, color]) => (
-                <div key={label} className="pi-quality-item">
-                  <div className="pi-quality-header">
+                <div key={label} className="pip-quality-item">
+                  <div className="pip-quality-header">
                     <span>{label}</span>
                     <span>{value}</span>
                   </div>
-                  <div className="pi-quality-bar">
-                    <div className="pi-quality-bar-fill" style={{ width: `${value}%`, background: color }} />
+                  <div className="pip-quality-bar">
+                    <div className="pip-quality-bar-fill" style={{ width: `${value}%`, background: color }} />
                   </div>
                 </div>
               ))}
@@ -137,11 +142,8 @@ export default function PromptInspectorPage() {
           </Panel>
 
           <Panel title="Quality Trend" tone="gold" style={{ flex: 1 }}>
-            <svg viewBox="0 0 240 50" className="pi-trend-svg">
-              <polyline points="0,40 30,36 60,30 90,34 120,24 150,20 180,16 210,18 240,12" fill="none" stroke="#E5C76B" strokeWidth="1.5" />
-              <polygon points="0,40 30,36 60,30 90,34 120,24 150,20 180,16 210,18 240,12 240,50 0,50" fill="rgba(229,199,107,0.1)" />
-            </svg>
-            <div className="pi-trend-label">+18% quality over 7 days</div>
+            <Sparkline data={SPARKLINE_DATA} />
+            <div className="pip-trend-label">+18% quality over 7 days</div>
           </Panel>
         </div>
       </div>

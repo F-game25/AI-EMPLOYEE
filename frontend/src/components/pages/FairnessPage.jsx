@@ -13,7 +13,7 @@ export default function FairnessPage() {
   const [corrected, setCorrected] = useState(null)
 
   useEffect(() => {
-    const fetch_fairness = async () => {
+    const fetchFairness = async () => {
       try {
         const fairness = await api.get('/api/fairness/report')
         setCategories(fairness?.categories || [])
@@ -36,8 +36,8 @@ export default function FairnessPage() {
         setLoading(false)
       }
     }
-    fetch_fairness()
-    const t = setInterval(fetch_fairness, 8000)
+    fetchFairness()
+    const t = setInterval(fetchFairness, 8000)
     return () => clearInterval(t)
   }, [])
 
@@ -58,6 +58,7 @@ export default function FairnessPage() {
 
   const avgScore = categories.length ? Math.round(categories.reduce((a, c) => a + (c.score || 0), 0) / categories.length) : loading ? 0 : 100
   const totalFlagged = categories.reduce((a, c) => a + (c.flagged || 0), 0)
+  const passedAudits = audits.filter(a => a.passed).length
 
   const avgScoreTone = avgScore > 90 ? 'success' : 'warning'
 
@@ -67,7 +68,7 @@ export default function FairnessPage() {
         <KPITile icon="⚖" iconTone={avgScoreTone} label="Fairness Score" value={loading ? '—' : `${avgScore}/100`} sub="Avg across categories" accent />
         <KPITile icon="◈" iconTone="cyan" label="Outputs Audited" value={loading ? '—' : categories[0]?.samples || '0'} sub="Latest audit" />
         <KPITile icon="🚩" iconTone={totalFlagged > 5 ? 'warning' : 'success'} label="Flags Raised" value={loading ? '—' : totalFlagged} sub="This batch" />
-        <KPITile icon="✓" iconTone="success" label="Passed Audits" value={loading ? '—' : `${audits.filter(a => a.passed).length}/${audits.length}`} sub="Recent history" />
+        <KPITile icon="✓" iconTone="success" label="Passed Audits" value={loading ? '—' : `${passedAudits}/${audits.length}`} sub="Recent history" />
       </div>
 
       <div className="fa-cols">
@@ -147,7 +148,7 @@ export default function FairnessPage() {
                 <div className="fa-detail__label">ORIGINAL</div>
                 <div className="fa-detail__box fa-detail__box--original">{selS.output}</div>
 
-                <div className="fa-detail__label" style={{ marginTop: 12 }}>CORRECTED</div>
+                <div className="fa-detail__label">CORRECTED</div>
                 <div className="fa-detail__box fa-detail__box--corrected">{selS.corrected}</div>
 
                 <HexButton
@@ -156,7 +157,7 @@ export default function FairnessPage() {
                   variant="primary"
                   tone={corrected?.ok && corrected?.id === selS?.id ? 'success' : corrected?.id === selS?.id ? 'alert' : 'gold'}
                   size="sm"
-                  style={{ width: '100%', marginTop: 12 }}
+                  className="fa-apply-btn"
                 >
                   {correcting ? 'APPLYING…' : corrected?.ok && corrected?.id === selS?.id ? '✓ APPLIED' : corrected?.id === selS?.id ? '✗ FAILED' : 'APPLY CORRECTION'}
                 </HexButton>

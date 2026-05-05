@@ -29,7 +29,6 @@ const AUDIT = [
   { action: 'Fairness audit batch 12 run', actor: 'Auto-rule', ts: '13:50:12', type: 'system' },
 ]
 
-// System map nodes
 const SYS_NODES = [
   { label: 'User', x: 40, y: 50, key: 'user' },
   { label: 'Node :8787', x: 200, y: 50, key: 'node' },
@@ -50,12 +49,10 @@ export default function ControlCenterPage() {
   const [sel, setSel] = useState(null)
   const [rules, setRules] = useState(null)
 
-  // Kill switch state
   const [halted, setHalted] = useState(false)
   const [haltConfirm, setHaltConfirm] = useState(false)
   const [halting, setHalting] = useState(false)
 
-  // Recovery mode
   const [recoveryMode, setRecoveryMode] = useState(false)
 
   const automationRules = rules ?? (storeRules?.length ? storeRules : FALLBACK_RULES)
@@ -66,27 +63,57 @@ export default function ControlCenterPage() {
   const confirmHalt = async () => {
     setHalting(true)
     try {
-      await api.system.halt('Emergency halt via Control Center')
+      const endpoint = typeof api.system?.halt === 'function' ? api.system.halt : api.post
+      if (typeof api.system?.halt === 'function') {
+        await api.system.halt('Emergency halt via Control Center')
+      } else {
+        await fetch('/api/system/halt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'Emergency halt via Control Center' })
+        })
+      }
       setHalted(true)
-    } catch { /* fire-and-forget */ setHalted(true) }
+    } catch (err) {
+      console.error('Halt failed:', err)
+    }
     setHaltConfirm(false)
     setHalting(false)
   }
 
   const handleRestart = async () => {
-    try { await api.system.restart() } catch { /* ignore */ }
-    setHalted(false)
+    try {
+      if (typeof api.system?.restart === 'function') {
+        await api.system.restart()
+      } else {
+        await fetch('/api/system/restart', { method: 'POST' })
+      }
+      setHalted(false)
+    } catch (err) {
+      console.error('Restart failed:', err)
+    }
   }
 
   const toggleRecovery = async () => {
     const next = !recoveryMode
     setRecoveryMode(next)
     if (next) {
-      try { await api.chat.send('Enter safe mode: disable auto-evolution, suspend external API calls, set agents to READ-ONLY') } catch { /* ignore */ }
+      try {
+        if (typeof api.chat?.send === 'function') {
+          await api.chat.send('Enter safe mode: disable auto-evolution, suspend external API calls, set agents to READ-ONLY')
+        } else {
+          await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: 'Enter safe mode: disable auto-evolution, suspend external API calls, set agents to READ-ONLY' })
+          })
+        }
+      } catch (err) {
+        console.error('Recovery mode toggle failed:', err)
+      }
     }
   }
 
-  // SVG system map node position lookup
   const nodePos = Object.fromEntries(SYS_NODES.map(n => [n.key, n]))
 
   return (
@@ -98,7 +125,6 @@ export default function ControlCenterPage() {
         <KPITile icon="◯" iconTone={halted ? 'alert' : wsConnected ? 'success' : 'warning'} label="System" value={halted ? 'HALTED' : wsConnected ? 'ONLINE' : 'OFFLINE'} sub="Current status" />
       </div>
 
-      {/* Kill switch */}
       <Panel
         icon="⛨"
         title="Emergency Controls"
@@ -120,7 +146,6 @@ export default function ControlCenterPage() {
             <HexButton onClick={handleRestart} variant="primary" tone="success" size="lg">RESTART SYSTEM</HexButton>
           )}
 
-          {/* Recovery mode toggle */}
           <div className="cc-recovery-toggle">
             <span className="cc-recovery-label">RECOVERY MODE</span>
             <div onClick={toggleRecovery} className={`cc-toggle ${recoveryMode ? 'is-on' : ''}`}>
@@ -138,7 +163,6 @@ export default function ControlCenterPage() {
         )}
       </Panel>
 
-      {/* Live System Map */}
       <Panel icon="◐" title="Live System Map" className="cc-panel">
         <svg width="100%" height="160" viewBox="0 0 660 170" className="cc-sysmap" preserveAspectRatio="xMidYMid meet">
           <defs>
@@ -216,7 +240,17 @@ export default function ControlCenterPage() {
                   </div>
                 </div>
                 <div className="cc-rule-detail__cta">
-                  <HexButton onClick={() => api.chat.send(`Execute rule: ${selR.name}`).catch(() => {})} variant="primary" tone="cyan" size="sm">RUN NOW</HexButton>
+                  <HexButton onClick={() => {
+                    if (typeof api.chat?.send === 'function') {
+                      api.chat.send(`Execute rule: ${selR.name}`).catch(() => {})
+                    } else {
+                      fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: `Execute rule: ${selR.name}` })
+                      }).catch(() => {})
+                    }
+                  }} variant="primary" tone="cyan" size="sm">RUN NOW</HexButton>
                   <HexButton onClick={() => setRules(automationRules.filter(r => r.id !== selR.id))} variant="primary" tone="alert" size="sm">DELETE</HexButton>
                 </div>
               </div>

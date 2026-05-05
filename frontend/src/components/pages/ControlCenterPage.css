@@ -26,7 +26,6 @@
   opacity: 0.6;
 }
 
-/* ── Emergency controls ────────────────────────────────────────────── */
 .cc-emergency {
   display: flex;
   gap: 16px;
@@ -46,7 +45,6 @@
   color: var(--nx-danger);
 }
 
-/* ── Recovery toggle ───────────────────────────────────────────────── */
 .cc-recovery-toggle {
   display: flex;
   align-items: center;
@@ -104,7 +102,6 @@
   flex-wrap: wrap;
 }
 
-/* ── System map SVG ────────────────────────────────────────────────── */
 .cc-sysmap {
   width: 100%;
   height: auto;
@@ -112,7 +109,6 @@
   display: block;
 }
 
-/* ── Two-column layout ─────────────────────────────────────────────── */
 .cc-cols {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -129,7 +125,6 @@
 }
 .cc-col__grow { flex: 1; }
 
-/* ── Automation rules list ─────────────────────────────────────────── */
 .cc-rules {
   display: flex;
   flex-direction: column;
@@ -197,7 +192,6 @@
   font-size: 11px;
   color: rgba(255, 255, 255, 0.70);
 }
-.cc-rule.is-active .cc-rule__name { color: var(--nx-text); }
 
 .cc-rule__runs {
   font-family: var(--nx-font-mono);
@@ -212,7 +206,6 @@
   padding-left: 28px;
 }
 
-/* ── Governance rules ──────────────────────────────────────────────── */
 .cc-governance {
   display: flex;
   flex-direction: column;
@@ -256,7 +249,6 @@
 }
 .cc-gov-rule.is-enforced .cc-gov-rule__status { color: var(--nx-success); }
 
-/* ── Rule detail ───────────────────────────────────────────────────── */
 .cc-rule-detail {
   display: flex;
   flex-direction: column;
@@ -311,7 +303,6 @@
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* ── Audit trail ───────────────────────────────────────────────────── */
 .cc-audit {
   display: flex;
   flex-direction: column;
@@ -369,7 +360,6 @@
 .cc-audit-entry--agent .cc-audit-entry__type { color: var(--nx-cyan); }
 .cc-audit-entry--user .cc-audit-entry__type { color: var(--nx-gold); }
 
-/* ── Responsive ────────────────────────────────────────────────────– */
 @media (max-width: 1100px) {
   .cc-cols { grid-template-columns: 1fr; }
   .cc-kpis { grid-template-columns: repeat(2, 1fr); }

@@ -6,7 +6,7 @@ import './LearningLadderPage.css'
 const LEVEL_LABEL = (lvl) => {
   if (lvl >= 90) return { text: 'EXPERT',        color: '#20D6C7',  glow: '0 0 8px rgba(32,214,199,.5)' }
   if (lvl >= 70) return { text: 'ADVANCED',       color: '#E5C76B',  glow: 'none' }
-  if (lvl >= 40) return { text: 'INTERMEDIATE',   color: '#CD7F32',glow: 'none' }
+  if (lvl >= 40) return { text: 'INTERMEDIATE',   color: '#CD7F32',  glow: 'none' }
   return              { text: 'NOVICE',           color: 'rgba(255,255,255,.3)', glow: 'none' }
 }
 
@@ -41,21 +41,21 @@ export default function LearningLadderPage() {
 
   const handleTeach = async () => {
     if (!topic.trim()) return
-    setTeaching(true); setTeachResult(null)
-    // Optimistically add to queue
+    setTeaching(true)
+    setTeachResult(null)
+
     const newSkill = { n: topic.trim(), lvl: 0, status: 'QUEUED' }
-    setSkills(prev => {
-      const updated = prev.map(cat => cat.cat === 'Research'
+    setSkills(prev => prev.map(cat =>
+      cat.cat === 'Research'
         ? { ...cat, items: [...cat.items, newSkill] }
         : cat
-      )
-      return updated
-    })
+    ))
+
     try {
       await api.chat.send(`Learn topic: ${topic.trim()}`)
       setTeachResult({ ok: true, msg: `Teaching initiated: "${topic.trim()}"` })
       setTopic('')
-    } catch {
+    } catch (e) {
       setTeachResult({ ok: false, msg: 'Failed to initiate learning task' })
     } finally {
       setTeaching(false)
@@ -79,8 +79,15 @@ export default function LearningLadderPage() {
             placeholder="Enter learning topic (e.g. 'Kubernetes deployment strategies')..."
             className="ll-teach-input"
           />
-          <HexButton onClick={handleTeach} disabled={teaching || !topic.trim()} variant="primary" tone="gold" size="md">
-            {teaching ? 'TEACHING...' : 'TEACH SYSTEM'}
+          <HexButton
+            onClick={handleTeach}
+            disabled={teaching || !topic.trim()}
+            variant="primary"
+            tone="gold"
+            size="md"
+            loading={teaching}
+          >
+            {teaching ? 'TEACHING…' : 'TEACH SYSTEM'}
           </HexButton>
         </div>
         {teachResult && (
@@ -145,7 +152,7 @@ export default function LearningLadderPage() {
             </div>
           </Panel>
 
-          <Panel title="Recent Improvements" tone="gold" style={{ flex: 1 }}>
+          <Panel title="Recent Improvements" tone="gold">
             <div className="ll-improvements-list">
               {IMPROVEMENTS.map((r, i) => (
                 <div key={i} className="ll-improvement-row">

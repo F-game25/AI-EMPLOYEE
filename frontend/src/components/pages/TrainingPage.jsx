@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Panel, KPITile, HexButton, SectionLabel } from '../nexus-ui'
+import { Panel, KPITile, HexButton, StatusPill } from '../nexus-ui'
 import './TrainingPage.css'
+
+const GRADE_COLORS = { 0: '#8B8B9E', 1: '#20D6C7', 2: '#E5C76B', 3: '#E5C76B', 4: '#22C55E', 5: '#22C55E' }
+const GRADE_NAMES = ['Ungraded', 'Beginner', 'Basic', 'Mature', 'Advanced', 'Pro']
 
 export default function TrainingPage() {
   const [agents, setAgents] = useState([])
@@ -8,46 +11,43 @@ export default function TrainingPage() {
   const [grade, setGrade] = useState(null)
   const [tab, setTab] = useState('tasks')
   const [taskInput, setTaskInput] = useState('')
-  const [reward, setReward] = useState(0.5)
+  const [reward, setReward] = useState(0)
   const [context, setContext] = useState('')
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(false)
 
-  // Load agents on mount
   useEffect(() => {
-    fetch('/api/agents/list').then(r => r.json())
+    fetch('/api/agents/list')
+      .then(r => r.json())
       .then(d => setAgents(d.agents || []))
-      .catch(() => {})
+      .catch(() => setAgents([]))
   }, [])
 
-  // Load grade when agent selected
   useEffect(() => {
     if (!selected) return
-    fetch(`/api/agents/${selected}/grade`).then(r => r.json())
+    fetch(`/api/agents/${selected}/grade`)
+      .then(r => r.json())
       .then(d => setGrade(d))
-      .catch(() => {})
+      .catch(() => setGrade(null))
   }, [selected])
 
-  const gradeMap = { 'Ungraded': 0, 'Beginner': 1, 'Basic': 2, 'Mature': 3, 'Advanced': 4, 'Pro': 5 }
-  const gradeName = grade?.grade || 'Ungraded'
-  const gradeValue = gradeMap[gradeName] || 0
+  const gradeIdx = grade?.grade_index ?? 0
+  const gradeName = grade?.grade || GRADE_NAMES[gradeIdx]
   const maxGrade = 5
 
   const handleSubmitTask = async () => {
     if (!selected || !taskInput.trim()) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/agents/${selected}/ladder/advance`, {
+      await fetch(`/api/agents/${selected}/ladder/advance`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task: taskInput, success: true }),
       })
-      await res.json()
-      setLogs([...logs, { type: 'task', agent: selected, task: taskInput, ts: new Date().toLocaleTimeString() }])
+      setLogs(prev => [...prev, { type: 'task', agent: selected, task: taskInput, ts: new Date().toLocaleTimeString() }])
       setTaskInput('')
-      // Reload grade
-      const gradeRes = await fetch(`/api/agents/${selected}/grade`).then(r => r.json())
-      setGrade(gradeRes)
+      const res = await fetch(`/api/agents/${selected}/grade`)
+      setGrade(await res.json())
     } catch (e) {
       console.error(e)
     }
@@ -63,9 +63,9 @@ export default function TrainingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reward, context: context || selected }),
       })
-      setLogs([...logs, { type: 'reinforce', agent: selected, reward, ts: new Date().toLocaleTimeString() }])
+      setLogs(prev => [...prev, { type: 'reinforce', agent: selected, reward, ts: new Date().toLocaleTimeString() }])
       setContext('')
-      setReward(0.5)
+      setReward(0)
     } catch (e) {
       console.error(e)
     }
@@ -73,112 +73,64 @@ export default function TrainingPage() {
   }
 
   return (
-    <div className="tr-page">
-      <div className="tr-kpi-row">
-        <KPITile
-          label="Selected Agent"
-          value={selected ? selected.slice(0, 12) : '—'}
-          sub="Training target"
-          icon="🤖"
-          iconTone="cool"
-        />
-        <KPITile
-          label="Current Grade"
-          value={gradeName}
-          sub={`${gradeValue}/${maxGrade}`}
-          icon="📈"
-          iconTone={gradeValue >= 4 ? 'success' : gradeValue >= 2 ? 'gold' : 'warn'}
-        />
+    <div className="trp-page">
+      <div className="trp-kpi-row">
+        <KPITile label="Selected Agent" value={selected || '—'} sub="Training target" icon="🤖" iconTone="cool" />
+        <KPITile label="Current Grade" value={gradeName} sub={`${gradeIdx}/${maxGrade}`} icon="📈"
+          iconTone={gradeIdx >= 4 ? 'success' : gradeIdx >= 2 ? 'gold' : 'warn'} />
       </div>
 
-      <div className="tr-main-grid">
-        <div className="tr-left">
+      <div className="trp-main-grid">
+        <div className="trp-left">
           <Panel title="Training Session" tone="gold" style={{ flex: 1 }}>
-            <div className="tr-tabs">
-              {[
-                { id: 'tasks', label: 'Tasks' },
-                { id: 'reinforce', label: 'Reinforce' },
-                { id: 'parameters', label: 'Parameters' },
-                { id: 'history', label: 'History' },
-              ].map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={`tr-tab ${tab === t.id ? 'tr-tab--active' : ''}`}
-                >
-                  {t.label}
+            <div className="trp-tabs">
+              {['tasks', 'reinforce', 'parameters', 'history'].map(t => (
+                <button key={t} onClick={() => setTab(t)} className={`trp-tab ${tab === t ? 'trp-tab--active' : ''}`}>
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
                 </button>
               ))}
             </div>
 
             {tab === 'tasks' && (
-              <div className="tr-tab-content">
-                <div className="tr-form-group">
-                  <label className="tr-label">Task Description</label>
-                  <textarea
-                    value={taskInput}
-                    onChange={e => setTaskInput(e.target.value)}
-                    placeholder="e.g., write an email to a lead about our SaaS product"
-                    className="tr-textarea"
-                  />
+              <div className="trp-tab-content">
+                <div className="trp-form-group">
+                  <label className="trp-label">Task Description</label>
+                  <textarea value={taskInput} onChange={e => setTaskInput(e.target.value)}
+                    placeholder="Describe the task to train on…" className="trp-textarea" />
                 </div>
-                <HexButton
-                  onClick={handleSubmitTask}
-                  disabled={!selected || !taskInput.trim() || loading}
-                  variant="primary"
-                  tone="gold"
-                  full
-                  loading={loading}
-                >
+                <HexButton onClick={handleSubmitTask} disabled={!selected || !taskInput.trim() || loading}
+                  variant="primary" tone="gold" full loading={loading}>
                   {loading ? 'SUBMITTING...' : 'SUBMIT TASK'}
                 </HexButton>
               </div>
             )}
 
             {tab === 'reinforce' && (
-              <div className="tr-tab-content">
-                <div className="tr-form-group">
-                  <div className="tr-label-row">
-                    <label className="tr-label">Reward</label>
-                    <span className="tr-reward-value">{reward.toFixed(2)}</span>
+              <div className="trp-tab-content">
+                <div className="trp-form-group">
+                  <div className="trp-label-row">
+                    <label className="trp-label">Reward</label>
+                    <span className="trp-reward-value">{reward.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="-1"
-                    max="1"
-                    step="0.1"
-                    value={reward}
-                    onChange={e => setReward(parseFloat(e.target.value))}
-                    className="tr-slider"
-                  />
+                  <input type="range" min="-1" max="1" step="0.1" value={reward}
+                    onChange={e => setReward(parseFloat(e.target.value))} className="trp-slider" />
                 </div>
-                <div className="tr-form-group">
-                  <label className="tr-label">Context (Optional)</label>
-                  <input
-                    type="text"
-                    value={context}
-                    onChange={e => setContext(e.target.value)}
-                    placeholder="e.g., handled objection well"
-                    className="tr-input"
-                  />
+                <div className="trp-form-group">
+                  <label className="trp-label">Context (Optional)</label>
+                  <input type="text" value={context} onChange={e => setContext(e.target.value)}
+                    placeholder="e.g., handled objection well" className="trp-input" />
                 </div>
-                <HexButton
-                  onClick={handleReinforce}
-                  disabled={!selected || loading}
-                  variant="primary"
-                  tone="success"
-                  full
-                  loading={loading}
-                >
+                <HexButton onClick={handleReinforce} disabled={!selected || loading}
+                  variant="primary" tone="success" full loading={loading}>
                   {loading ? 'APPLYING...' : 'APPLY REWARD'}
                 </HexButton>
               </div>
             )}
 
             {tab === 'parameters' && (
-              <div className="tr-tab-content">
-                <div className="tr-param-note">Behavioral parameters (not yet editable via UI)</div>
-                <div className="tr-param-box">
+              <div className="trp-tab-content">
+                <div className="trp-param-note">Behavioral parameters (read-only)</div>
+                <div className="trp-param-box">
                   <div>preferred_strategy: balanced</div>
                   <div>confidence_floor: 0.5</div>
                   <div>learning_rate_multiplier: 1.0</div>
@@ -187,15 +139,15 @@ export default function TrainingPage() {
             )}
 
             {tab === 'history' && (
-              <div className="tr-history-list">
-                {logs.filter(l => !selected || l.agent === selected).length === 0 ? (
-                  <div className="tr-empty">No training events yet</div>
+              <div className="trp-history-list">
+                {logs.length === 0 ? (
+                  <div className="trp-empty">No training events yet</div>
                 ) : (
-                  logs.filter(l => !selected || l.agent === selected).map((log, i) => (
-                    <div key={i} className="tr-history-item">
-                      <span className="tr-history-ts">{log.ts}</span>
-                      <span className="tr-history-text">
-                        {log.type === 'task' ? `Task submitted: ${log.task.slice(0, 30)}...` : `Reward ${log.reward > 0 ? '+' : ''} ${log.reward.toFixed(2)}`}
+                  logs.filter(l => !selected || l.agent === selected).reverse().map((log, i) => (
+                    <div key={i} className="trp-history-item">
+                      <span className="trp-history-ts">{log.ts}</span>
+                      <span className="trp-history-text">
+                        {log.type === 'task' ? `Task: ${log.task.slice(0, 28)}...` : `Reward ${log.reward > 0 ? '+' : ''}${log.reward.toFixed(2)}`}
                       </span>
                     </div>
                   ))
@@ -205,31 +157,29 @@ export default function TrainingPage() {
           </Panel>
         </div>
 
-        <div className="tr-right">
-          <Panel title="Select Agent" tone="gold" style={{ flex: 0, maxHeight: '50%', overflowY: 'auto' }}>
-            <div className="tr-agent-list">
+        <div className="trp-right">
+          <Panel title="Select Agent" tone="gold">
+            <div className="trp-agent-list">
               {agents.slice(0, 20).map(a => (
-                <div
-                  key={a.id}
-                  onClick={() => setSelected(selected === a.id ? null : a.id)}
-                  className={`tr-agent-item ${selected === a.id ? 'tr-agent-item--active' : ''}`}
-                >
-                  <div className="tr-agent-dot" />
-                  <span className="tr-agent-name">{a.id.slice(0, 16)}</span>
+                <div key={a.id} onClick={() => setSelected(selected === a.id ? null : a.id)}
+                  className={`trp-agent-item ${selected === a.id ? 'trp-agent-item--active' : ''}`}>
+                  <div className="trp-agent-dot" />
+                  <span className="trp-agent-name">{a.id.slice(0, 16)}</span>
                 </div>
               ))}
             </div>
           </Panel>
 
           <Panel title="Training Log" tone="gold" style={{ flex: 1, minHeight: 0 }}>
-            <div className="tr-log-list">
+            <div className="trp-log-list">
               {logs.length === 0 ? (
-                <div className="tr-empty">No activity yet</div>
+                <div className="trp-empty">No activity yet</div>
               ) : (
                 logs.slice(-10).reverse().map((log, i) => (
-                  <div key={i} className="tr-log-item">
-                    <div className="tr-log-ts">{log.ts}</div>
-                    <div className="tr-log-text">{log.type === 'task' ? '📝 Task' : '⚡ Reinforce'}: {log.agent.slice(0, 12)}</div>
+                  <div key={i} className="trp-log-item">
+                    <div className="trp-log-ts">{log.ts}</div>
+                    <div className="trp-log-text">{log.type === 'task' ? '📝 Task' : '⚡ Reward'}: {log.agent.slice(0, 12)}</div>
+                    {log.type === 'reinforce' && <StatusPill label={`+${log.reward.toFixed(1)}`} tone="success" size="xs" />}
                   </div>
                 ))
               )}
