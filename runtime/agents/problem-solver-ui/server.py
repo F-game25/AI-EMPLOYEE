@@ -2278,6 +2278,14 @@ try:
 except Exception as _feat_err:
     logger.warning("⚠️  Feature modules failed to load: %s", _feat_err)
 
+# ── Neural Brain API (LangGraph + Mem0 + Neo4j cognitive stack) ────
+try:
+    from neural_brain.api import router as _neural_brain_router
+    app.include_router(_neural_brain_router)
+    logger.info("✅ Neural Brain API loaded")
+except Exception as _nb_err:
+    logger.warning("⚠️  Neural Brain API failed to load: %s", _nb_err)
+
 # ── Security headers middleware ──────────────────────────────────
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
@@ -26607,6 +26615,18 @@ async def init_observability_on_first_request(request, call_next):
             logger.debug(f"Observability lazy-init had issues: {e}")
     response = await call_next(request)
     return response
+
+
+# ── Neural Brain initialization ──────────────────────────────────────
+@app.on_event("startup")
+async def _init_neural_brain():
+    """Initialize Neural Brain bridge and engines at startup."""
+    try:
+        from neural_brain.api.node_bridge import get_bridge
+        _bridge = get_bridge()
+        logger.info("✅ Neural Brain NodeBridge initialized")
+    except Exception as e:
+        logger.warning(f"⚠️  Neural Brain bridge failed to initialize: {e}")
 
 
 if __name__ == "__main__":
