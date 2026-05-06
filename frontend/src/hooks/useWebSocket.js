@@ -164,6 +164,31 @@ function connectSingleton() {
             ts: data.ts || Date.now(),
           })
           break
+        // Neural Brain events (from Python LangGraph + Mem0 + Neo4j)
+        case 'nb:reasoning_step':
+          useBrainStore.getState().appendReasoningStep(data)
+          break
+        case 'nb:memory_write':
+          useBrainStore.getState().flashMemoryWrite(data)
+          break
+        case 'nb:memory_read':
+          useBrainStore.getState().pulseMemory(data.ids || [])
+          break
+        case 'nb:graph_update':
+          useBrainStore.getState().mergeGraphDelta(data)
+          break
+        case 'nb:model_call':
+          useBrainStore.getState().recordModelCall(data)
+          break
+        case 'nb:action_call':
+          // Reuse existing agent:update shape for consistency
+          store.addActivityItem({
+            id: data.id || `action-${Date.now()}`,
+            kind: 'agent_action',
+            notes: `${data.skill || 'action'} · ${data.status || 'pending'}`,
+            ts: Date.now(),
+          })
+          break
       }
     } catch (e) {
       console.error('[ws] message handling failed', e)

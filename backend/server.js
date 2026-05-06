@@ -1361,6 +1361,26 @@ app.get('/health/full', async (req, res) => {
   });
 });
 
+// POST /internal/events — Neural Brain bridge: localhost-only ingress used by
+// the Python runtime (problem-solver-ui :18790) to push events onto the
+// Node WebSocket broadcaster. Body: { event: string, data: object }.
+// Locked to loopback so external clients cannot inject dashboard events.
+app.post('/internal/events', express.json({ limit: '2mb' }), (req, res) => {
+  const ip = req.ip || req.connection?.remoteAddress || '';
+  const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  if (!isLocal) return res.status(403).json({ ok: false, error: 'localhost only' });
+  const { event, data } = req.body || {};
+  if (typeof event !== 'string' || !event) {
+    return res.status(400).json({ ok: false, error: 'event required' });
+  }
+  try {
+    broadcaster.broadcast(event, data || {});
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e && e.message || e) });
+  }
+});
+
 // POST /api/auth/token — exchange the master secret for a 24h JWT
 // Body: { secret: "<JWT_SECRET_KEY from ~/.ai-employee/.env>" }
 app.post('/api/auth/token', (req, res) => {
@@ -1739,7 +1759,7 @@ app.get('/api/brain/neurons', (req, res) => {
  * Returns { nodes, links, stats } using a normalized schema so the
  * frontend brainStore can consume it directly.
  */
-app.get('/api/brain/graph', (req, res) => {
+app.get('/api/brain/graph', async (req, res) => {
   const raw = brain.neurons();
   const memoryTree = subsystems.getMemoryTree();
   const nodes = (raw.nodes || []).map((n) => ({
@@ -1785,6 +1805,35 @@ app.get('/api/brain/graph', (req, res) => {
     target: c.to,
     strength: c.weight ?? c.confidence ?? 0.5,
   }));
+
+  // Attempt to merge Neural Brain graph (Python LangGraph + Neo4j)
+  let nbGraph = null;
+  try {
+    const nbResp = await Promise.race([
+      fetch('http://localhost:18790/api/neural-brain/graph', { timeout: 1000 }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000)),
+    ]);
+    if (nbResp?.ok) {
+      nbGraph = await nbResp.json();
+      if (nbGraph?.nodes && Array.isArray(nbGraph.nodes)) {
+        nbGraph.nodes.forEach((n) => {
+          const existing = nodes.some((x) => x.id === n.id);
+          if (!existing) nodes.push(n);
+        });
+      }
+      if (nbGraph?.links && Array.isArray(nbGraph.links)) {
+        const linkSet = new Set(links.map((l) => `${l.source}→${l.target}`));
+        nbGraph.links.forEach((l) => {
+          if (!linkSet.has(`${l.source}→${l.target}`)) {
+            links.push(l);
+            linkSet.add(`${l.source}→${l.target}`);
+          }
+        });
+      }
+    }
+  } catch (_nbErr) {
+    // Neural Brain offline or slow — continue with regular graph
+  }
 
   res.json({
     nodes,

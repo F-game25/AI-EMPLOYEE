@@ -128,4 +128,47 @@ export const useBrainStore = create((set, get) => ({
     get().addNode({ id, label: text.slice(0, 60), type, group, weight: 1, confidence: 0.5 })
     return id
   },
+
+  // ── Neural Brain integration ──────────────────────────────────────────
+  reasoningSteps: [],
+  appendReasoningStep: (step) => {
+    set((state) => ({
+      reasoningSteps: [...state.reasoningSteps, step].slice(-50),
+      updatedAt: new Date().toISOString(),
+    }))
+  },
+
+  memoryWrites: [],
+  flashMemoryWrite: (write) => {
+    set((state) => ({
+      memoryWrites: [...state.memoryWrites, { ...write, ts: Date.now() }].slice(-20),
+      updatedAt: new Date().toISOString(),
+    }))
+  },
+
+  pulseMemory: (memoryIds) => {
+    // Mark memory chunks as recently accessed for visual feedback
+    set((state) => ({
+      updatedAt: new Date().toISOString(),
+      // Could highlight memory nodes here if we track them
+    }))
+  },
+
+  mergeGraphDelta: (delta) => {
+    // Merge graph delta (new/updated nodes/links) from Neural Brain
+    if (delta?.nodes && Array.isArray(delta.nodes)) {
+      delta.nodes.forEach((n) => get().addNode({ ...n, source: 'neural_brain' }))
+    }
+    if (delta?.links && Array.isArray(delta.links)) {
+      delta.links.forEach((l) => get().addLink(l))
+    }
+  },
+
+  modelCalls: [],
+  recordModelCall: (call) => {
+    set((state) => ({
+      modelCalls: [...state.modelCalls, call].slice(-100),
+      updatedAt: new Date().toISOString(),
+    }))
+  },
 }))
