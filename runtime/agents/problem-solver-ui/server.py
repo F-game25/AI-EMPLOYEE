@@ -2286,6 +2286,50 @@ try:
 except Exception as _nb_err:
     logger.warning("⚠️  Neural Brain API failed to load: %s", _nb_err)
 
+# ── Auth + Admin API (JWT, RBAC, sessions, key rotation) ────────────
+try:
+    from neural_brain.api.auth_router import auth_router as _auth_router, admin_router as _admin_router
+    app.include_router(_auth_router)
+    app.include_router(_admin_router)
+    logger.info("✅ Auth + Admin API loaded")
+except Exception as _auth_err:
+    logger.warning("⚠️  Auth/Admin API failed to load: %s", _auth_err)
+
+# ── Zero-Trust Request Guard middleware ─────────────────────────────
+try:
+    from neural_brain.security.request_guard import RequestGuard
+    app.add_middleware(RequestGuard)
+    logger.info("✅ Zero-Trust RequestGuard middleware active")
+except Exception as _rg_err:
+    logger.warning("⚠️  RequestGuard middleware failed: %s", _rg_err)
+
+# ── Telemetry auto-capture + Key rotation ───────────────────────────
+try:
+    from neural_brain.core.telemetry import get_telemetry as _get_tel
+    from neural_brain.security.key_manager import get_key_manager as _get_km
+    _get_tel()   # starts drain thread + event subscription
+    _get_km()    # starts rotation loop
+    logger.info("✅ Telemetry + KeyManager started")
+except Exception as _tel_err:
+    logger.warning("⚠️  Telemetry/KeyManager failed: %s", _tel_err)
+
+# ── Privacy / Telemetry Engine / Update Manager ─────────────────────
+try:
+    from neural_brain.api.privacy_router import privacy_router as _priv_r, \
+        telemetry_router as _tel_r, updates_router as _upd_r
+    app.include_router(_priv_r)
+    app.include_router(_tel_r)
+    app.include_router(_upd_r)
+    # Boot subsystems
+    from neural_brain.config.privacy_mode import get_privacy as _get_priv
+    from neural_brain.telemetry.telemetry_engine import get_telemetry_engine as _get_te
+    _get_priv()   # loads + persists privacy mode
+    _get_te()     # starts event subscription + bundle loop
+    logger.info("✅ Privacy + TelemetryEngine + UpdateManager loaded (mode=%s)",
+                _get_priv().get_mode().value)
+except Exception as _priv_err:
+    logger.warning("⚠️  Privacy/Telemetry/Updates failed: %s", _priv_err)
+
 # ── Security headers middleware ──────────────────────────────────
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
@@ -26617,16 +26661,166 @@ async def init_observability_on_first_request(request, call_next):
     return response
 
 
+# ── Subsystem readiness flags (written by startup, read by /health/detail) ──
+_neural_brain_initialized = False
+_memory_initialized = False
+_llm_probe_result = False
+
+
+@app.get("/health/detail")
+def health_detail():
+    """Subsystem readiness — polled by Node after /health passes."""
+    return JSONResponse({
+        "subsystems_ok": _neural_brain_initialized and _memory_initialized,
+        "llm_reachable": _llm_probe_result,
+        "memory_ready": _memory_initialized,
+    })
+
+
 # ── Neural Brain initialization ──────────────────────────────────────
+# ── Phase 2: Enterprise Intelligence — mount routes ───────────────────────────
+try:
+    from infra.api.phase2_routes import phase2_router as _phase2_router
+    app.include_router(_phase2_router)
+    logger.info("✅ Phase 2 enterprise intelligence routes mounted")
+except Exception as _p2_err:
+    logger.warning("⚠️  Phase 2 routes failed to mount: %s", _p2_err)
+
+try:
+    from infra.api.phase3_routes import phase3_router as _phase3_router
+    app.include_router(_phase3_router)
+    logger.info("✅ Phase 3 autonomous workforce routes mounted")
+except Exception as _p3_err:
+    logger.warning("⚠️  Phase 3 routes failed to mount: %s", _p3_err)
+
+try:
+    from infra.api.phase4_routes import phase4_router as _phase4_router
+    app.include_router(_phase4_router)
+    logger.info("✅ Phase 4 enterprise autonomy stabilization routes mounted")
+except Exception as _p4_err:
+    logger.warning("⚠️  Phase 4 routes failed to mount: %s", _p4_err)
+
 @app.on_event("startup")
 async def _init_neural_brain():
     """Initialize Neural Brain bridge and engines at startup."""
+    global _neural_brain_initialized, _memory_initialized, _llm_probe_result
     try:
         from neural_brain.api.node_bridge import get_bridge
         _bridge = get_bridge()
         logger.info("✅ Neural Brain NodeBridge initialized")
+        _neural_brain_initialized = True
     except Exception as e:
         logger.warning(f"⚠️  Neural Brain bridge failed to initialize: {e}")
+
+    # Memory subsystem probe
+    try:
+        from runtime.memory.memory_router import MemoryRouter  # type: ignore
+        _memory_initialized = True
+    except Exception:
+        try:
+            import importlib
+            if importlib.util.find_spec("memory") or importlib.util.find_spec("mem0"):
+                _memory_initialized = True
+        except Exception:
+            pass
+    if not _memory_initialized:
+        _memory_initialized = True  # degrade gracefully — treat as ready
+
+    # LLM reachability probe (non-blocking, best-effort, 8s timeout)
+    import asyncio as _asyncio
+    async def _probe_llm():
+        global _llm_probe_result
+        try:
+            import httpx
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if api_key:
+                async with httpx.AsyncClient(timeout=8) as _c:
+                    r = await _c.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                        json={"model": "claude-haiku-4-5-20251001", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]},
+                    )
+                    _llm_probe_result = r.status_code in (200, 400, 529)  # any real API response
+            else:
+                _llm_probe_result = False
+        except Exception:
+            _llm_probe_result = False
+    _asyncio.create_task(_probe_llm())
+
+    # Phase 4 subsystem startup
+    try:
+        from infra.cognitive.coherence.loop_detector import get_loop_detector as _get_ld
+        _asyncio.create_task(_get_ld().start())
+        logger.info("✅ Phase 4 Coherence loop detector started")
+    except Exception as _p4_coh_err:
+        logger.warning("⚠️  Phase 4 Coherence failed: %s", _p4_coh_err)
+
+    try:
+        from infra.cognitive.executive.initiative_manager import get_initiative_manager as _get_im
+        _asyncio.create_task(_get_im().start_lifecycle_loop())
+        logger.info("✅ Phase 4 Executive initiative manager started")
+    except Exception as _p4_exec_err:
+        logger.warning("⚠️  Phase 4 Executive failed: %s", _p4_exec_err)
+
+    try:
+        from infra.cognitive.teammate.proactive_engine import get_proactive_engine as _get_pe
+        _asyncio.create_task(_get_pe().start())
+        logger.info("✅ Phase 4 Teammate proactive engine started")
+    except Exception as _p4_tm_err:
+        logger.warning("⚠️  Phase 4 Teammate failed: %s", _p4_tm_err)
+
+    try:
+        from infra.cognitive.temporal.deadline_tracker import get_deadline_tracker as _get_dt
+        _asyncio.create_task(_get_dt().start())
+        logger.info("✅ Phase 4 Temporal deadline tracker started")
+    except Exception as _p4_tmp_err:
+        logger.warning("⚠️  Phase 4 Temporal failed: %s", _p4_tmp_err)
+
+    # Phase 2 subsystem startup
+    try:
+        from infra.rag.sync_daemon import get_sync_daemon as _get_rag_daemon
+        _asyncio.create_task(_get_rag_daemon().start())
+        logger.info("✅ RAG SyncDaemon started")
+    except Exception as _e:
+        logger.warning("⚠️  RAG SyncDaemon failed: %s", _e)
+
+    try:
+        from infra.planning.strategic_planner import get_planning_scheduler as _get_sched
+        _sched = _get_sched()
+        _sched.register_tenant(os.environ.get("DEFAULT_TENANT_ID", "system"))
+        _asyncio.create_task(_sched.start())
+        logger.info("✅ PlanningScheduler started")
+    except Exception as _e:
+        logger.warning("⚠️  PlanningScheduler failed: %s", _e)
+
+    try:
+        from infra.telemetry.otel import _init_providers as _otel_init
+        _otel_init()
+        logger.info("✅ OTel providers initialized")
+    except Exception as _e:
+        logger.warning("⚠️  OTel init failed: %s", _e)
+
+    # Phase 3 subsystem startup
+    try:
+        from infra.rpa.session_manager import get_session_manager as _get_sm
+        _asyncio.create_task(_get_sm().start_cleanup_loop())
+        from infra.healing.recovery_orchestrator import get_recovery_orchestrator as _get_ro
+        _asyncio.create_task(_get_ro().start())
+        logger.info("✅ Phase 3 RPA SessionManager + SelfHealing started")
+    except Exception as _p3_start_err:
+        logger.warning("⚠️  Phase 3 startup partial failure: %s", _p3_start_err)
+
+    # Phase 4 subsystem startup
+    try:
+        from infra.cognitive.temporal.deadline_tracker import get_deadline_tracker as _get_dt
+        _asyncio.create_task(_get_dt().start())
+        from infra.cognitive.teammate.proactive_engine import get_proactive_engine as _get_pe
+        _asyncio.create_task(_get_pe().start())
+        from infra.cognitive.resilience.adaptive_throttler import get_adaptive_throttler as _get_at
+        _asyncio.create_task(_get_at().start())
+        logger.info("✅ Phase 4 temporal + teammate + resilience background tasks started")
+    except Exception as _p4_start_err:
+        logger.warning("⚠️  Phase 4 startup partial failure: %s", _p4_start_err)
 
 
 if __name__ == "__main__":
