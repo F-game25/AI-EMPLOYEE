@@ -2,6 +2,8 @@
 
 @import "tailwindcss";
 @import "./components/nexus-ui/tokens.css";
+@import "./styles/mission-control-theme.css";
+@import "./styles/mission-control-keyframes.css";
 
 :root {
   /* Brand */
@@ -23,7 +25,7 @@
   /* Backgrounds — strict palette */
   --bg-base:     #070810;
   --bg-deep:     #050608;
-  --bg-card:     #0C0E18;
+  --bg-card:     #0E1020;
   --bg-card-hover: #12141F;
   --bg-hover:    rgba(229,199,107,0.06);
   --bg-elevated: #12141F;
@@ -53,10 +55,10 @@
   --glow-bronze: 0 0 20px rgba(205,127,50,0.2);
 
   /* Text — WCAG AA compliant */
-  --text-primary: #EAEAF0;
-  --text-secondary: #9A9AA5;
-  --text-muted: #666670;
-  --text-dim: #444450;
+  --text-primary: #F4F4F8;
+  --text-secondary: #B8B8C4;
+  --text-muted: #8A8A96;
+  --text-dim: #666672;
 
   /* Status */
   --success: #22C55E;
@@ -108,9 +110,9 @@
   --ease-cinematic: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
   --perspective-stage: 1400px;
-  --blur-light: blur(8px);
-  --blur-medium: blur(16px);
-  --blur-heavy: blur(24px);
+  --blur-light: drop-shadow(0 0 8px rgba(0, 0, 0, 0.3));
+  --blur-medium: drop-shadow(0 0 16px rgba(0, 0, 0, 0.4));
+  --blur-heavy: drop-shadow(0 0 24px rgba(0, 0, 0, 0.5));
 
   /* Depth shadows */
   --shadow-depth-0: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -147,6 +149,14 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Mission Control Theme Override */
+  background-color: var(--mc-black);
+  color: var(--mc-text-primary);
+}
+
+#root {
+  background-color: var(--mc-black);
+  background-image: radial-gradient(ellipse at center top, var(--mc-cyan-glow) 0%, transparent 50%);
 }
 
 /* Focus ring — keyboard navigation */
@@ -1145,4 +1155,10 @@ body {
   100% {
     top: 100vh;
   }
+}
+
+.nx-sidebar__group-label {
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+  font-size: 10px;
 }

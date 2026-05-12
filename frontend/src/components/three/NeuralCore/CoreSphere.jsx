@@ -1,14 +1,16 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useShaderMaterial, Float } from '@react-three/drei';
+import { Float } from '@react-three/drei';
 import * as THREE from 'three';
 import coreVertShader from './shaders/core.vert.glsl';
 import coreFragShader from './shaders/core.frag.glsl';
+import { useAdaptiveQuality } from '../../../hooks/useAdaptiveQuality';
 
 export const CoreSphere = ({ metrics = {} }) => {
   const meshRef = useRef();
   const materialRef = useRef();
   const startTimeRef = useRef(Date.now());
+  const { particleCount } = useAdaptiveQuality();
 
   const {
     rotationSpeed = 0.05,
@@ -43,10 +45,17 @@ export const CoreSphere = ({ metrics = {} }) => {
     }
   });
 
+  // Optimize geometry detail based on quality
+  const geometryDetail = useMemo(() => {
+    if (particleCount < 0.25) return 3;
+    if (particleCount < 0.5) return 4;
+    return 5;
+  }, [particleCount]);
+
   return (
     <Float speed={0.8} rotationIntensity={0.3} floatIntensity={0.1}>
       <mesh ref={meshRef} scale={1}>
-        <icosahedronGeometry args={[1, 5]} />
+        <icosahedronGeometry args={[1, geometryDetail]} />
         <shaderMaterial
           ref={materialRef}
           vertexShader={coreVertShader}

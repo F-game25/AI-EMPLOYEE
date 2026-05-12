@@ -21,9 +21,6 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    // HMR must advertise the correct host when accessed from a different
-    // machine (WSL host, Docker host, LAN). Without this, Vite sends the
-    // internal container/WSL IP and the browser can't reach it.
     hmr: {
       host: process.env.HMR_HOST || 'localhost',
       port: 5173,
@@ -44,20 +41,75 @@ export default defineConfig({
     },
   },
   build: {
+    // Phase 3.3: Performance optimization
+    minify: 'terser',
+    sourcemap: false,
+    reportCompressedSize: true,
+    chunkSizeWarningLimit: 600,
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        passes: 2,
+        pure_funcs: ['console.log', 'console.debug'],
+      },
+      format: {
+        comments: false,
+      },
+    },
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          if (id.includes('node_modules/three') || id.includes('node_modules/@react-three')) {
+          // Vendor chunks
+          if (id.includes('node_modules/react') && !id.includes('react-three') && !id.includes('react-force')) {
+            return 'vendor-react';
+          }
+          if (id.includes('node_modules/three') || id.includes('@react-three')) {
             return 'vendor-three';
           }
-          if (id.includes('node_modules/framer-motion')) {
+          if (id.includes('node_modules/framer-motion') || id.includes('node_modules/gsap')) {
             return 'vendor-motion';
           }
-          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
-            return 'vendor-react';
+          if (id.includes('node_modules/zustand') || id.includes('node_modules/leva') || id.includes('node_modules/howler')) {
+            return 'vendor-utils';
+          }
+
+          // Route-based splits
+          if (id.includes('NexusOSDashboard')) {
+            return 'page-dashboard';
+          }
+          if (id.includes('OperationsPage')) {
+            return 'page-operations';
+          }
+          if (id.includes('NeuralNetworkPage')) {
+            return 'page-neural';
+          }
+          if (id.includes('SettingsPage')) {
+            return 'page-settings';
+          }
+          if (id.includes('IntelligencePage')) {
+            return 'page-intelligence';
+          }
+          if (id.includes('IntegrationsPage')) {
+            return 'page-integrations';
+          }
+          if (id.includes('AscendForgePage') || id.includes('WorkspacePage') ||
+              id.includes('VoicePage') || id.includes('BlacklightPage') ||
+              id.includes('OutputPage') || id.includes('DevPanel') ||
+              id.includes('SystemHealthPage')) {
+            return 'page-others';
+          }
+
+          // Core UI (immediate load)
+          if (id.includes('Sidebar.jsx') || id.includes('TopBar.jsx') ||
+              id.includes('SystemBar.jsx') || id.includes('CommandDock.jsx')) {
+            return 'core-ui';
           }
         },
       },
     },
+  },
+  define: {
+    // Optimize build flags
+    __VITE_PROD__: JSON.stringify(process.env.NODE_ENV === 'production'),
   },
 })
