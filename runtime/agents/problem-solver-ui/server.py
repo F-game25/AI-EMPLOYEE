@@ -67,7 +67,7 @@ if sys.version_info < (3, 10):
           f"{sys.version_info.major}.{sys.version_info.minor}")
     sys.exit(1)
 
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -555,10 +555,29 @@ INFRA_AGENTS = {
   "discovery",
 }
 
+class _TruncatingFormatter(logging.Formatter):
+    """Caps every log line at 4 KB so a runaway repr() can't flood the disk.
+
+    Single events that try to log e.g. an entire bounded Queue's contents
+    (which produced multi-MB lines in the past) get clipped with a marker.
+    """
+    _MAX_LINE_BYTES = 4096
+
+    def format(self, record: logging.LogRecord) -> str:
+        out = super().format(record)
+        if len(out) > self._MAX_LINE_BYTES:
+            kept = out[: self._MAX_LINE_BYTES - 32]
+            out = f"{kept}…[truncated {len(out) - len(kept)} chars]"
+        return out
+
+
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(message)s",
 )
+# Replace root handler formatters so the cap applies to all log emissions.
+for _h in logging.getLogger().handlers:
+    _h.setFormatter(_TruncatingFormatter("%(message)s"))
 logger = logging.getLogger("problem-solver-ui")
 
 _ACTIVITY_LOCK = threading.Lock()
@@ -1153,6 +1172,28 @@ def _load_chat_history(n_exchanges: int = 8) -> list:
     while history and history[-1]["role"] == "user":
         history.pop()
     return history
+
+
+def _direct_conversation_reply(goal_plan: dict, message: str) -> str | None:
+    """Handle utility/chat turns that must never enter the task executor."""
+    response_type = str(goal_plan.get("response_type") or "").lower()
+    if response_type == "time":
+        from datetime import datetime
+
+        now = datetime.now().astimezone()
+        return f"It is {now.strftime('%H:%M:%S')} ({now.tzname() or 'local time'})."
+    if response_type == "date":
+        from datetime import datetime
+
+        now = datetime.now().astimezone()
+        day = str(now.day)
+        return f"Today is {now.strftime('%A, %B')} {day}, {now.year}."
+    if response_type == "greeting":
+        return "I’m here. Tell me what you want to build, fix, research, or run."
+    if response_type == "empty":
+        return "Send me a question or a task and I’ll route it properly."
+    # Let normal questions use the conversational LLM path.
+    return None
 
 
 def _generate_llm_response(
@@ -2280,8 +2321,9 @@ except Exception as _feat_err:
 
 # ── Neural Brain API (LangGraph + Mem0 + Neo4j cognitive stack) ────
 try:
-    from neural_brain.api import router as _neural_brain_router
+    from neural_brain.api import router as _neural_brain_router, forge_compat_router as _forge_compat_router
     app.include_router(_neural_brain_router)
+    app.include_router(_forge_compat_router)
     logger.info("✅ Neural Brain API loaded")
 except Exception as _nb_err:
     logger.warning("⚠️  Neural Brain API failed to load: %s", _nb_err)
@@ -17891,6 +17933,70 @@ async def sse_events(request: Request):
     )
 
 
+@app.get("/events")
+async def stream_observability_events(request: Request):
+    """Real-time observability SSE feed for the Node WS bridge.
+
+    Subscribes to the in-process EventStream and yields each published event
+    (metrics_tick, cognition_tick, etc.) as a Server-Sent Event so the Node
+    backend can re-broadcast them to dashboard WS clients.
+    """
+    from starlette.responses import StreamingResponse
+    from core.observability.event_stream import get_event_stream
+
+    stream = get_event_stream()
+    queue: "asyncio.Queue[dict]" = asyncio.Queue(maxsize=512)
+    loop = asyncio.get_event_loop()
+
+    def _enqueue_drop_oldest(evt: dict) -> None:
+        # Always runs ON the event loop thread (via call_soon_threadsafe).
+        # If full, drop the OLDEST event and append the newest — never raise.
+        # Raising QueueFull inside the loop's default exception handler causes
+        # the entire queue contents to be repr()'d into the log (multi-MB
+        # traceback every second when no SSE consumer is connected).
+        if queue.full():
+            try:
+                queue.get_nowait()
+            except Exception:
+                pass
+        try:
+            queue.put_nowait(evt)
+        except Exception:
+            pass
+
+    def _on_event(evt: dict) -> None:
+        try:
+            loop.call_soon_threadsafe(_enqueue_drop_oldest, evt)
+        except Exception:
+            # Loop closed — drop silently rather than crash.
+            pass
+
+    stream.subscribe(_on_event)
+
+    async def generate():
+        # Initial comment keeps the connection open and signals readiness.
+        yield ": connected\n\n"
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                evt = await asyncio.wait_for(queue.get(), timeout=15.0)
+                yield f"data: {json.dumps(evt, default=str)}\n\n"
+            except asyncio.TimeoutError:
+                # Heartbeat comment — keeps proxies from killing the connection.
+                yield ": keepalive\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @app.get("/api/status")
 def get_status():
   # Return cached response if still fresh
@@ -19661,6 +19767,10 @@ def handle_command(
         from core.goal_parser import parse_goal as _parse_goal  # noqa: PLC0415
         from core.real_execution_engine import RealExecutionEngine as _RealExecEngine  # noqa: PLC0415
         _goal_plan = _parse_goal(message)
+        if not _goal_plan.get("is_goal"):
+            _direct_reply = _direct_conversation_reply(_goal_plan, message)
+            if _direct_reply:
+                return _direct_reply
         if _goal_plan.get("is_goal") and _goal_plan.get("task_plan"):
             logger.info("[REAL_ENGINE] Goal detected — %d steps planned", len(_goal_plan["task_plan"]))
             _engine = _RealExecEngine()
@@ -20239,6 +20349,105 @@ def submit_task(payload: dict):
                         pass
 
     return JSONResponse({"ok": True, "task_id": task_id, "message": f"Task submitted: {description[:60]}", "agents": agents, "mode": mode})
+
+
+@app.post("/api/tasks/run")
+def run_task_with_agent_controller(payload: dict, _auth: None = Depends(require_auth)):
+    """Run a goal through the core AgentController contract.
+
+    This is the canonical HTTP surface for Node's /api/tasks/run proxy.  It
+    keeps task execution on the documented Planner -> Executor -> Validator path
+    instead of the dashboard-only task-plan queue.
+    """
+    goal = (
+        payload.get("task")
+        or payload.get("goal")
+        or payload.get("message")
+        or payload.get("description")
+        or ""
+    )
+    goal = str(goal).strip()
+    if not goal:
+        raise HTTPException(400, "task required")
+
+    try:
+        from core.agent_controller import get_agent_controller  # noqa: PLC0415
+        summary = get_agent_controller().run_goal(goal)
+    except Exception as exc:
+        logger.exception("AgentController task run failed")
+        raise HTTPException(500, f"AgentController failed: {exc}") from exc
+
+    return JSONResponse({
+        "ok": True,
+        "source": "agent_controller",
+        "task": goal,
+        **summary,
+    })
+
+
+@app.post("/api/money/content-pipeline")
+def money_content_pipeline(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import get_money_mode  # noqa: PLC0415
+
+    topic = str(payload.get("topic") or payload.get("task") or "").strip()
+    if not topic:
+        raise HTTPException(400, "topic required")
+    platforms = payload.get("platforms") if isinstance(payload.get("platforms"), list) else None
+    result = get_money_mode().run_content_pipeline(
+        topic=topic,
+        platforms=platforms,
+        affiliate_product=str(payload.get("affiliate_product") or ""),
+        dry_run=bool(payload.get("dry_run", True)),
+    )
+    return JSONResponse(result)
+
+
+@app.post("/api/money/lead-pipeline")
+def money_lead_pipeline(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import get_money_mode  # noqa: PLC0415
+
+    source = str(payload.get("source") or "").strip()
+    audience = str(payload.get("audience") or "").strip()
+    if not source or not audience:
+        raise HTTPException(400, "source and audience required")
+    channels = payload.get("channels") if isinstance(payload.get("channels"), list) else None
+    result = get_money_mode().run_lead_pipeline(
+        source=source,
+        audience=audience,
+        channels=channels,
+        dry_run=bool(payload.get("dry_run", True)),
+    )
+    return JSONResponse(result)
+
+
+@app.post("/api/money/opportunity-pipeline")
+def money_opportunity_pipeline(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import get_money_mode  # noqa: PLC0415
+
+    opportunity = str(payload.get("opportunity") or payload.get("task") or "").strip()
+    if not opportunity:
+        raise HTTPException(400, "opportunity required")
+    result = get_money_mode().run_opportunity_pipeline(
+        opportunity=opportunity,
+        budget=float(payload.get("budget") or 0.0),
+        dry_run=bool(payload.get("dry_run", True)),
+    )
+    return JSONResponse(result)
+
+
+@app.post("/api/money/affiliate-draft")
+def money_affiliate_draft(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import get_money_mode  # noqa: PLC0415
+
+    product = str(payload.get("product") or "").strip()
+    niche = str(payload.get("niche") or "").strip()
+    if not product or not niche:
+        raise HTTPException(400, "product and niche required")
+    return JSONResponse(get_money_mode().affiliate_content_draft(
+        product=product,
+        niche=niche,
+        output_format=str(payload.get("output_format") or "blog_post"),
+    ))
 
 
 @app.post("/api/task/cancel")
@@ -20988,6 +21197,20 @@ def _save_memory(data: dict) -> None:
     _invalidate_cache(MEMORY_FILE)
 
 
+def _vector_store_memory(key: str, text: str, metadata: dict | None = None, importance: float = 0.5) -> None:
+    try:
+        from memory.vector_store import get_vector_store  # type: ignore
+    except Exception:
+        try:
+            from runtime.memory.vector_store import get_vector_store  # type: ignore
+        except Exception:
+            return
+    try:
+        get_vector_store().store(key, text, metadata=metadata or {}, importance=importance)
+    except Exception:
+        logger.debug("memory vector store write failed", exc_info=True)
+
+
 @app.get("/api/memory")
 def get_memory():
     data = _load_memory()
@@ -21027,6 +21250,78 @@ def get_memory_conversations():
     return JSONResponse({"conversations": conversations[-50:], "total": len(conversations)})
 
 
+@app.get("/api/memory/search")
+def search_memory(q: str = Query(..., min_length=1, max_length=500), top_k: int = Query(8, ge=1, le=25), memory_type: str | None = None):
+    """Semantic memory search backed by the local vector store with JSON-memory fallback."""
+    results: list[dict] = []
+    vector_available = False
+    try:
+        from memory.vector_store import get_vector_store  # type: ignore
+    except Exception:
+        try:
+            from runtime.memory.vector_store import get_vector_store  # type: ignore
+        except Exception:
+            get_vector_store = None  # type: ignore
+    if get_vector_store is not None:  # type: ignore[name-defined]
+        try:
+            raw = get_vector_store().search(q, top_k=top_k, memory_type=memory_type)  # type: ignore[name-defined]
+            vector_available = True
+            for item in raw:
+                results.append({
+                    "id": item.get("key"),
+                    "type": item.get("metadata", {}).get("memory_type") or "semantic",
+                    "title": item.get("metadata", {}).get("title") or item.get("key"),
+                    "content": item.get("text") or "",
+                    "source": item.get("metadata", {}).get("source") or "vector-store",
+                    "score": item.get("_score", 0),
+                    "metadata": item.get("metadata", {}),
+                    "last_accessed": item.get("last_accessed"),
+                    "access_count": item.get("access_count", 0),
+                })
+        except Exception:
+            logger.debug("memory vector search failed", exc_info=True)
+
+    if len(results) < top_k:
+        data = _load_memory()
+        ql = q.lower()
+        for client in data.get("clients", {}).values():
+            text = " ".join(str(client.get(k) or "") for k in ("name", "company", "email", "status", "notes"))
+            if ql in text.lower():
+                results.append({
+                    "id": client.get("id"),
+                    "type": "semantic",
+                    "title": client.get("name") or client.get("id"),
+                    "content": text,
+                    "source": "json-memory:clients",
+                    "score": 0.5,
+                    "metadata": {"client_id": client.get("id")},
+                    "last_accessed": client.get("updated_at") or client.get("added_at"),
+                    "access_count": client.get("interactions", 0),
+                })
+        for idx, item in enumerate(data.get("recent_interactions", [])):
+            text = str(item.get("summary") or item.get("message") or "")
+            if ql in text.lower():
+                results.append({
+                    "id": item.get("ts") or f"interaction-{idx}",
+                    "type": "episodic",
+                    "title": text[:80],
+                    "content": text,
+                    "source": item.get("agent") or "json-memory:interactions",
+                    "score": 0.45,
+                    "metadata": {"client_id": item.get("client_id")},
+                    "last_accessed": item.get("ts"),
+                    "access_count": 0,
+                })
+
+    return JSONResponse({
+        "ok": True,
+        "query": q,
+        "source": "vector-store" if vector_available else "json-fallback",
+        "results": results[:top_k],
+        "total": len(results[:top_k]),
+    })
+
+
 @app.post("/api/memory/clients")
 def add_memory_client(payload: dict):
     import uuid as _uuid
@@ -21059,6 +21354,12 @@ def add_memory_client(payload: dict):
     clients[client_id] = client
     data["clients"] = clients
     _save_memory(data)
+    _vector_store_memory(
+        f"client:{client_id}",
+        " ".join(str(client.get(k) or "") for k in ("name", "company", "email", "status", "notes")),
+        metadata={"source": "python-memory:clients", "memory_type": "semantic", "client_id": client_id, "title": name},
+        importance=0.7,
+    )
     return JSONResponse({"ok": True, "id": client_id})
 
 
@@ -21101,6 +21402,13 @@ def record_interaction(payload: dict):
     interactions = data.get("recent_interactions", [])
     interactions.append(interaction)
     data["recent_interactions"] = interactions[-200:]
+    if interaction["summary"]:
+        _vector_store_memory(
+            f"interaction:{interaction['ts']}:{len(interactions)}",
+            interaction["summary"],
+            metadata={"source": interaction["agent"], "memory_type": "episodic", "client_id": interaction.get("client_id")},
+            importance=0.55,
+        )
 
     # Increment interaction count for client if specified
     client_id = interaction.get("client_id")
@@ -26677,6 +26985,329 @@ def health_detail():
     })
 
 
+# ── Web Search + CloakBrowser endpoint ───────────────────────────────────────
+
+class _SearchRequest(BaseModel):
+    query: str
+    sources: list = Field(default_factory=lambda: ["WEB"])
+    max_results: int = Field(default=8, ge=1, le=20)
+    include_screenshot: bool = False
+
+
+@app.post("/search")
+async def web_search_endpoint(body: _SearchRequest):
+    """Multi-provider web search with optional stealth visual browsing.
+
+    sources may include: WEB (API search), SCREENSHOT (CloakBrowser visual fetch).
+    Results are merged and returned as a flat list with relevance scores.
+    """
+    import time as _time
+    started = _time.time()
+    results = []
+    providers_used = []
+
+    # ── 1. API-based search providers (Tavily / SerpAPI / DDG / Wiki) ────────
+    if "WEB" in body.sources or not body.sources:
+        try:
+            from ai_router import search_web as _search_web
+            raw = await run_in_threadpool(_search_web, body.query, body.max_results)
+            for r in raw:
+                src = str(r.get("source", "WEB")).upper()
+                snippet = r.get("snippet") or r.get("body") or ""
+                results.append({
+                    "title":         r.get("title", ""),
+                    "url":           r.get("url", ""),
+                    "snippet":       snippet[:500],
+                    "source":        "WEB",
+                    "provider":      src,
+                    "screenshot_b64": None,
+                    "page_text":     None,
+                    "relevance":     _relevance(body.query, r.get("title", "") + " " + snippet),
+                })
+            if raw:
+                providers_used.append("api_search")
+        except Exception as exc:
+            logger.warning("web_search_endpoint: search_web error: %s", exc)
+
+    # ── 2. CloakBrowser visual fetch for top results ─────────────────────────
+    if "SCREENSHOT" in body.sources:
+        try:
+            from infra.rpa.cloak_browser import fetch_url, _PLAYWRIGHT_OK
+            if not _PLAYWRIGHT_OK:
+                logger.warning("SCREENSHOT requested but playwright not installed")
+            else:
+                # Fetch top 3 URLs that have a URL
+                top_urls = [r for r in results if r.get("url")][:3]
+                # Also fetch standalone if no WEB results
+                if not top_urls and body.query.startswith("http"):
+                    top_urls = [{"url": body.query, "title": "", "snippet": "", "source": "SCREENSHOT",
+                                 "provider": "cloak", "screenshot_b64": None, "page_text": None, "relevance": 80}]
+                fetch_tasks = [fetch_url(r["url"]) for r in top_urls]
+                fetched = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+                for result_item, page_data in zip(top_urls, fetched):
+                    if isinstance(page_data, dict) and not page_data.get("error"):
+                        result_item["screenshot_b64"] = page_data.get("screenshot_b64")
+                        result_item["page_text"] = (page_data.get("text") or "")[:1000]
+                        result_item["source"] = "SCREENSHOT"
+                        if page_data.get("title"):
+                            result_item["title"] = page_data["title"]
+                providers_used.append("cloak_browser")
+        except Exception as exc:
+            logger.warning("web_search_endpoint: cloak_browser error: %s", exc)
+
+    # Sort by relevance desc
+    results.sort(key=lambda r: r["relevance"], reverse=True)
+
+    return JSONResponse({
+        "results":        results,
+        "query":          body.query,
+        "elapsed_ms":     round((_time.time() - started) * 1000),
+        "providers_used": providers_used,
+        "total":          len(results),
+    })
+
+
+def _relevance(query: str, text: str) -> int:
+    """Simple keyword overlap relevance score 0–100."""
+    if not text:
+        return 50
+    q_words = set(query.lower().split())
+    t_words = set(text.lower().split())
+    if not q_words:
+        return 50
+    overlap = len(q_words & t_words) / len(q_words)
+    return min(100, int(50 + overlap * 50))
+
+
+# ── Boot telemetry ───────────────────────────────────────────────────────
+
+
+@app.get("/api/system/startup-timings")
+async def system_startup_timings():
+    """Per-subsystem boot durations recorded by the Wave-B hook wrapper.
+
+    Used by the Electron launcher to render a `--- PYTHON SUBSYSTEMS ---`
+    block under the main phase rail. Subsystems with ``ms > 2000`` are
+    highlighted amber, ``> 5000`` red — a visible budget gate.
+    """
+    timings = list(_STARTUP_TIMINGS) if "_STARTUP_TIMINGS" in globals() else []
+    return JSONResponse({"timings": timings})
+
+
+# ── Autonomous Research API ──────────────────────────────────────────────
+
+
+class _ContextResponseRequest(BaseModel):
+    choice: str = "continue"  # "continue" | "research"
+
+
+@app.post("/api/tasks/{task_id}/context-response")
+async def task_context_response(task_id: str, body: _ContextResponseRequest):
+    """User clicked YES (continue) or NO (learn first) on the context-check modal."""
+    try:
+        from core.agent_controller import get_agent_controller
+        controller = get_agent_controller()
+        ok = controller.respond_to_context_check(task_id, body.choice)
+        return JSONResponse({"ok": bool(ok), "task_id": task_id, "choice": body.choice})
+    except Exception as exc:
+        logger.warning("context-response failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/research/recent")
+async def research_recent(limit: int = 20):
+    """Recent autonomous-research sessions read from knowledge_store.json."""
+    try:
+        from core.knowledge_store import get_knowledge_store
+        ks = get_knowledge_store()
+        snap = ks.snapshot()
+        sessions: list[dict] = []
+        for item in (snap.get("insights") or [])[-200:]:
+            content = item.get("content") or {}
+            if isinstance(content, dict) and content.get("source") == "auto-research":
+                sessions.append({
+                    "topic": item.get("topic"),
+                    "goal": content.get("goal", ""),
+                    "gap": content.get("gap", ""),
+                    "findings": content.get("findings", []),
+                    "stored_at": item.get("stored_at"),
+                })
+        sessions.reverse()
+        return JSONResponse({"sessions": sessions[:max(1, int(limit))]})
+    except Exception as exc:
+        logger.warning("research_recent failed: %s", exc)
+        return JSONResponse({"sessions": [], "error": str(exc)})
+
+
+@app.post("/api/research/discover")
+async def research_discover(req: dict):
+    """Research v2 phase 1: discover candidate sources without fetching them."""
+    query = (req or {}).get("query", "").strip()
+    max_sources = int((req or {}).get("max_sources", 10))
+    if not query:
+        raise HTTPException(400, "query required")
+    try:
+        from core.auto_research_agent import get_auto_researcher
+        agent = get_auto_researcher()
+        sources = await agent.discover_sources(query, max_results=max_sources)
+        return JSONResponse({"sources": sources, "query": query, "discovered_at": time.time()})
+    except Exception as exc:
+        logger.warning("research_discover failed: %s", exc)
+        raise HTTPException(500, f"discover failed: {exc}")
+
+
+@app.post("/api/research/execute")
+async def research_execute(req: dict, background: BackgroundTasks):
+    """Research v2 phase 2: run full research pipeline on user-selected URLs."""
+    import uuid as _uuid
+    query = (req or {}).get("query", "").strip()
+    source_ids = list((req or {}).get("selected_source_ids") or [])
+    selected_urls = list((req or {}).get("selected_urls") or [])
+    depth = (req or {}).get("depth", "normal")
+    if not query or (not source_ids and not selected_urls):
+        raise HTTPException(400, "query and selected_source_ids (or selected_urls) required")
+    session_id = _uuid.uuid4().hex[:12]
+    try:
+        from core.auto_research_agent import get_auto_researcher
+        agent = get_auto_researcher()
+    except Exception as exc:
+        raise HTTPException(500, f"researcher unavailable: {exc}")
+    background.add_task(_run_research_session_v2, agent, query, selected_urls, depth, session_id)
+    return JSONResponse({"session_id": session_id, "status": "started",
+                         "query": query, "depth": depth, "sources": len(selected_urls)})
+
+
+async def _run_research_session_v2(agent, query: str, urls: list, depth: str, session_id: str) -> None:
+    """Background runner for Research v2 — emits WS events via the existing broadcaster."""
+    try:
+        await _ws_broadcast("task:research_started",
+                            {"session_id": session_id, "query": query, "depth": depth, "sources": len(urls)})
+    except Exception:
+        pass
+    try:
+        result = await agent.research_selected(query, urls, depth=depth, task_id=session_id)
+        try:
+            await _ws_broadcast("task:research_completed",
+                                {"session_id": session_id, "query": query, **(result or {})})
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning("research session %s failed: %s", session_id, exc)
+        try:
+            await _ws_broadcast("task:research_failed", {"session_id": session_id, "error": str(exc)})
+        except Exception:
+            pass
+
+
+@app.get("/api/research/screenshot/{hash_name}")
+async def research_screenshot(hash_name: str):
+    """Serve persisted research screenshots from state/research_screenshots/."""
+    from fastapi.responses import FileResponse
+    import re as _re
+    if not _re.fullmatch(r"[A-Za-z0-9_-]{8,64}\.png", hash_name):
+        raise HTTPException(status_code=400, detail="invalid filename")
+    repo_root = Path(__file__).resolve().parents[3]
+    path = repo_root / "state" / "research_screenshots" / hash_name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(str(path), media_type="image/png")
+
+
+# --- Vault (Obsidian-compatible markdown store) -----------------------------
+try:
+    from memory.vault import Vault as _VaultCls, get_vault as _get_vault_for_tenant
+
+    def _vault() -> _VaultCls:
+        # Tenant-scoped: resolves current tenant via ContextVar set by TenantMiddleware.
+        # Falls back to 'default' tenant outside request context.
+        return _get_vault_for_tenant()
+
+    def _note_to_dict(note) -> dict:
+        return {
+            "id": note.id,
+            "title": note.title,
+            "folder": note.folder,
+            "path": note.path,
+            "frontmatter": note.frontmatter,
+            "body": note.body,
+            "wikilinks": note.wikilinks,
+            "backlinks": note.backlinks,
+            "created": note.created,
+            "updated": note.updated,
+        }
+
+    @app.put("/api/vault/notes/{note_id}")
+    async def vault_update_note(note_id: str, req: dict):
+        body = (req or {}).get("body", "")
+        fm   = (req or {}).get("frontmatter", {}) or {}
+        note = _vault().write_note(note_id, body, fm)
+        _vault().rebuild_indices()
+        return _note_to_dict(note)
+
+    @app.post("/api/vault/notes")
+    async def vault_create_note(req: dict):
+        req   = req or {}
+        title  = req.get("title", "Untitled")
+        folder = req.get("folder", "concepts")
+        body   = req.get("body", "")
+        fm     = req.get("frontmatter", {}) or {}
+        note = _vault().create_note(title, folder=folder, body=body, frontmatter=fm)
+        _vault().rebuild_indices()
+        return _note_to_dict(note)
+
+    @app.delete("/api/vault/notes/{note_id}")
+    async def vault_delete_note(note_id: str):
+        ok = _vault().delete_note(note_id)
+        _vault().rebuild_indices()
+        return {"ok": bool(ok), "id": note_id}
+
+    @app.post("/api/vault/rebuild-indices")
+    async def vault_rebuild_indices():
+        return _vault().rebuild_indices()
+
+except Exception as _vault_err:  # pragma: no cover
+    logging.getLogger(__name__).warning("vault routes not registered: %s", _vault_err)
+
+
+# Wire AgentController broadcaster: POST to Node's localhost broadcast endpoint
+# so events surface on the WebSocket (and dual-write to the message bus).
+try:
+    from core.agent_controller import get_agent_controller as _gac
+    try:
+        from core.bus import get_message_bus as _get_bus
+    except Exception:
+        _get_bus = None
+    import json as _json
+    import urllib.request as _urllib_request
+
+    _NODE_BROADCAST_URL = os.environ.get(
+        "NODE_BROADCAST_URL",
+        f"http://127.0.0.1:{os.environ.get('NODE_BACKEND_PORT', '8787')}/api/tasks/internal/broadcast",
+    )
+
+    def _ws_broadcast(event_type: str, payload: dict) -> None:
+        # 1) durable: publish to in-process bus (for tools like the event stream)
+        try:
+            if _get_bus is not None:
+                _get_bus().publish("notifications", {"event": event_type, "payload": payload})
+        except Exception:
+            pass
+        # 2) realtime: POST to Node so the WS broadcaster delivers to dashboards
+        try:
+            body = _json.dumps({"event": event_type, "payload": payload}).encode("utf-8")
+            req = _urllib_request.Request(
+                _NODE_BROADCAST_URL, data=body,
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            _urllib_request.urlopen(req, timeout=2)  # nosec: localhost-only endpoint
+        except Exception:
+            pass
+
+    _gac().set_broadcast(_ws_broadcast)
+except Exception as _br_err:
+    logger.debug("agent_controller broadcaster wiring deferred: %s", _br_err)
+
+
 # ── Neural Brain initialization ──────────────────────────────────────
 # ── Phase 2: Enterprise Intelligence — mount routes ───────────────────────────
 try:
@@ -26700,10 +27331,279 @@ try:
 except Exception as _p4_err:
     logger.warning("⚠️  Phase 4 routes failed to mount: %s", _p4_err)
 
+
+# ── Startup timings ledger (Phase 2.1) ─────────────────────────────────
+# Recorded entries: {"name", "started", "finished", "ok", "ms"}.
+# Surfaced to the launcher in a later phase — no API endpoint yet.
+_STARTUP_TIMINGS: "list[dict]" = []
+
+
+async def _wave_b_hook(name: str, coro_factory):
+    """Run a Wave B init with a 5 s budget + timings record.
+
+    `coro_factory` is a zero-arg callable returning the coroutine to await.
+    Construct lazily so import errors are caught here, not at gather() time.
+    """
+    import time as _t
+    started = _t.time()
+    entry = {"name": name, "started": started, "finished": None, "ok": False, "ms": None}
+    _STARTUP_TIMINGS.append(entry)
+    try:
+        await asyncio.wait_for(coro_factory(), timeout=5.0)
+        entry["ok"] = True
+    except asyncio.TimeoutError:
+        logger.warning("⚠️  Wave B hook timed out (>5s): %s", name)
+    except Exception as exc:
+        logger.warning("⚠️  Wave B hook failed: %s: %s", name, exc)
+    finally:
+        entry["finished"] = _t.time()
+        entry["ms"] = int((entry["finished"] - started) * 1000)
+
+
+# ─────────────────────────── MemoryAdapter endpoints ───────────────────────
+# Dual-backend vector store (Chroma primary + Qdrant secondary). Lazy import
+# so failure to load the adapter (e.g. deps mid-install) does not crash boot.
+try:
+    from memory.memory_adapter import get_adapter as _get_memory_adapter
+except Exception as _ma_exc:  # pragma: no cover
+    logger.warning("MemoryAdapter import deferred: %s", _ma_exc)
+    _get_memory_adapter = None  # type: ignore[assignment]
+
+
+def _adapter_or_503():
+    if _get_memory_adapter is None:
+        raise HTTPException(status_code=503, detail="memory adapter unavailable")
+    try:
+        return _get_memory_adapter()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"adapter init failed: {exc}")
+
+
+@app.get("/api/memory/adapter/status")
+async def memory_adapter_status():
+    return _adapter_or_503().status()
+
+
+@app.post("/api/memory/adapter/search")
+async def memory_adapter_search(req: dict):
+    query = (req or {}).get("query", "")
+    top_k = int((req or {}).get("top_k", 10))
+    flt = (req or {}).get("filter")
+    if not query:
+        return {"matches": []}
+    matches = _adapter_or_503().search(query, top_k=top_k, filter=flt)
+    return {
+        "matches": [
+            {"id": m.id, "text": m.text, "score": m.score, "metadata": m.metadata}
+            for m in matches
+        ]
+    }
+
+
+@app.post("/api/memory/adapter/add")
+async def memory_adapter_add(req: dict):
+    text = (req or {}).get("text", "")
+    metadata = (req or {}).get("metadata", {}) or {}
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    mid = _adapter_or_503().add(text, metadata=metadata)
+    return {"id": mid}
+
+
+# ── Verification engine + pending review queue ──────────────────────────
+@app.post("/api/memory/verify")
+async def memory_verify(req: dict):
+    from memory.verification import get_engine as _get_ver_engine
+    claim = (req or {}).get('claim', '')
+    sources = (req or {}).get('sources', []) or []
+    context = (req or {}).get('context')
+    if not claim:
+        raise HTTPException(status_code=400, detail="claim required")
+    result = _get_ver_engine().verify(claim, sources=sources, context=context)
+    return result.to_dict()
+
+
+@app.get("/api/memory/pending-review")
+async def pending_review_list(status: str = "pending", topic: Optional[str] = None):
+    from memory.pending_queue import list_all as _q_list, stats as _q_stats
+    flt_status = None if status == 'all' else status
+    return {'entries': _q_list(status=flt_status, topic=topic), 'stats': _q_stats()}
+
+
+@app.get("/api/memory/pending-review/{entry_id}")
+async def pending_review_get(entry_id: str):
+    from memory.pending_queue import get as _q_get
+    entry = _q_get(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="not found")
+    return entry
+
+
+@app.post("/api/memory/pending-review/{entry_id}/approve")
+async def pending_review_approve(entry_id: str):
+    from memory.pending_queue import get as _q_get, update_status as _q_update
+    entry = _q_get(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="not found")
+    try:
+        from memory.memory_adapter import get_adapter as _get_mem_adapter
+        _get_mem_adapter().add(
+            entry['claim'],
+            metadata={
+                'topic': entry.get('topic'),
+                'sources': entry.get('sources', []),
+                'confidence': entry.get('verification', {}).get('confidence', 0.5),
+                'source': 'pending_approved',
+            },
+        )
+    except Exception as e:
+        logger.warning(f"approve: memory persist failed: {e}")
+    _q_update(entry_id, 'approved')
+    return {'ok': True, 'id': entry_id}
+
+
+@app.post("/api/memory/pending-review/{entry_id}/reject")
+async def pending_review_reject(entry_id: str):
+    from memory.pending_queue import update_status as _q_update
+    _q_update(entry_id, 'rejected')
+    return {'ok': True, 'id': entry_id}
+
+
+@app.post("/api/memory/pending-review/{entry_id}/edit")
+async def pending_review_edit(entry_id: str, req: dict):
+    from memory.pending_queue import get as _q_get, update_status as _q_update
+    entry = _q_get(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="not found")
+    new_claim = (req or {}).get('claim', entry['claim'])
+    try:
+        from memory.memory_adapter import get_adapter as _get_mem_adapter
+        _get_mem_adapter().add(
+            new_claim,
+            metadata={
+                'topic': entry.get('topic'),
+                'sources': entry.get('sources', []),
+                'confidence': entry.get('verification', {}).get('confidence', 0.5),
+                'source': 'pending_edited',
+            },
+        )
+    except Exception as e:
+        logger.warning(f"edit: memory persist failed: {e}")
+    _q_update(entry_id, 'edited')
+    return {'ok': True, 'id': entry_id, 'new_claim': new_claim}
+
+
+# ── Topics + Learning ─────────────────────────────────────────────
+@app.get("/api/topics")
+async def topics_list():
+    try:
+        from memory.topic_intelligence import list_topics
+        return {"topics": list_topics()}
+    except Exception as e:
+        logger.warning(f"topics_list failed: {e}")
+        return {"topics": [], "error": str(e)}
+
+
+@app.get("/api/topics/{topic_id}")
+async def topics_get(topic_id: str):
+    from memory.topic_intelligence import get_topic
+    t = get_topic(topic_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="topic not found")
+    return t
+
+
+@app.put("/api/topics/{topic_id}")
+async def topics_update(topic_id: str, req: dict):
+    from memory.topic_intelligence import update_topic
+    t = update_topic(topic_id, **(req or {}))
+    if not t:
+        raise HTTPException(status_code=404, detail="topic not found")
+    return t
+
+
+@app.post("/api/topics/{topic_id}/pin")
+async def topics_pin(topic_id: str, req: dict):
+    from memory.topic_intelligence import pin_topic
+    body = req or {}
+    pinned = bool(body.get('pinned', True))
+    schedule = body.get('schedule', 'every_6h')
+    t = pin_topic(topic_id, pinned=pinned, schedule=schedule)
+    if not t:
+        raise HTTPException(status_code=404, detail="topic not found")
+    return t
+
+
+@app.post("/api/topics/{topic_id}/refresh")
+async def topics_refresh(topic_id: str):
+    from memory.topic_intelligence import get_topic
+    from core.learning_orchestrator import execute_learning
+    t = get_topic(topic_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="topic not found")
+    return await execute_learning(topic=t['label'], scope=t.get('scope', ''), depth='normal')
+
+
+@app.delete("/api/topics/{topic_id}")
+async def topics_delete(topic_id: str):
+    from memory.topic_intelligence import delete_topic
+    if not delete_topic(topic_id):
+        raise HTTPException(status_code=404, detail="topic not found")
+    return {"ok": True, "id": topic_id}
+
+
+@app.post("/api/learning/execute")
+async def learning_execute(req: dict):
+    from core.learning_orchestrator import execute_learning
+    body = req or {}
+    topic = str(body.get('topic', '')).strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic required")
+    return await execute_learning(
+        topic=topic,
+        scope=body.get('scope', ''),
+        depth=body.get('depth', 'normal'),
+        selected_urls=body.get('selected_urls') or None,
+        verification_level=body.get('verification_level', 'normal'),
+        schedule_recurring=bool(body.get('schedule_recurring', False)),
+    )
+
+
+@app.get("/api/learning/sessions")
+async def learning_sessions_list(limit: int = 20):
+    from core.learning_orchestrator import list_sessions
+    return {"sessions": list_sessions(limit=limit)}
+
+
+@app.get("/api/learning/sessions/{session_id}")
+async def learning_session_get(session_id: str):
+    from core.learning_orchestrator import get_session
+    s = get_session(session_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="session not found")
+    return s
+
+
+@app.on_event("startup")
+async def _start_topic_scheduler():
+    try:
+        from core.topic_scheduler import get_scheduler
+        await get_scheduler().start()
+        logger.info("✅ TopicScheduler started")
+    except Exception as e:
+        logger.warning(f"TopicScheduler startup failed: {e}")
+
+
 @app.on_event("startup")
 async def _init_neural_brain():
-    """Initialize Neural Brain bridge and engines at startup."""
+    """Initialize Neural Brain bridge and engines at startup.
+
+    Wave A: blocking, must finish before uvicorn serves traffic.
+    Wave B: fire-and-forget background bootstraps, gathered in one detached task.
+    """
     global _neural_brain_initialized, _memory_initialized, _llm_probe_result
+
+    # ── Wave A — required before /api/health and /api/auth/auto-token ──────
     try:
         from neural_brain.api.node_bridge import get_bridge
         _bridge = get_bridge()
@@ -26712,7 +27612,7 @@ async def _init_neural_brain():
     except Exception as e:
         logger.warning(f"⚠️  Neural Brain bridge failed to initialize: {e}")
 
-    # Memory subsystem probe
+    # Memory subsystem probe (cheap, in-process, gates a flag the health check reads)
     try:
         from runtime.memory.memory_router import MemoryRouter  # type: ignore
         _memory_initialized = True
@@ -26726,8 +27626,24 @@ async def _init_neural_brain():
     if not _memory_initialized:
         _memory_initialized = True  # degrade gracefully — treat as ready
 
+    # ── Wave B — background subsystems, fire-and-forget, never awaited ─────
+    # Defer MetricsCollector start by 5 s so the boot path doesn't compete with
+    # uvicorn for the event loop. Until then, the collector is a no-op and the
+    # bounded SSE queue never fills before a subscriber arrives.
+    async def _start_metrics_delayed():
+        try:
+            await asyncio.sleep(5)
+            from core.observability.metrics_collector import get_metrics_collector
+            get_metrics_collector().start()
+            logger.info("✅ MetricsCollector started (deferred 5 s after boot)")
+        except Exception as exc:
+            logger.warning(f"⚠️  MetricsCollector deferred start failed: {exc}")
+    try:
+        asyncio.create_task(_start_metrics_delayed())
+    except Exception as e:
+        logger.warning(f"⚠️  Could not schedule MetricsCollector: {e}")
+
     # LLM reachability probe (non-blocking, best-effort, 8s timeout)
-    import asyncio as _asyncio
     async def _probe_llm():
         global _llm_probe_result
         try:
@@ -26745,82 +27661,65 @@ async def _init_neural_brain():
                 _llm_probe_result = False
         except Exception:
             _llm_probe_result = False
-    _asyncio.create_task(_probe_llm())
+    asyncio.create_task(_probe_llm())
 
-    # Phase 4 subsystem startup
-    try:
+    # All remaining Wave B inits run as a single detached gather. Each hook
+    # has its own 5 s budget; return_exceptions=True keeps siblings alive.
+    async def _factory_loop_detector():
         from infra.cognitive.coherence.loop_detector import get_loop_detector as _get_ld
-        _asyncio.create_task(_get_ld().start())
-        logger.info("✅ Phase 4 Coherence loop detector started")
-    except Exception as _p4_coh_err:
-        logger.warning("⚠️  Phase 4 Coherence failed: %s", _p4_coh_err)
+        asyncio.create_task(_get_ld().start())
 
-    try:
+    async def _factory_initiative_manager():
         from infra.cognitive.executive.initiative_manager import get_initiative_manager as _get_im
-        _asyncio.create_task(_get_im().start_lifecycle_loop())
-        logger.info("✅ Phase 4 Executive initiative manager started")
-    except Exception as _p4_exec_err:
-        logger.warning("⚠️  Phase 4 Executive failed: %s", _p4_exec_err)
+        asyncio.create_task(_get_im().start_lifecycle_loop())
 
-    try:
+    async def _factory_proactive_engine():
         from infra.cognitive.teammate.proactive_engine import get_proactive_engine as _get_pe
-        _asyncio.create_task(_get_pe().start())
-        logger.info("✅ Phase 4 Teammate proactive engine started")
-    except Exception as _p4_tm_err:
-        logger.warning("⚠️  Phase 4 Teammate failed: %s", _p4_tm_err)
+        asyncio.create_task(_get_pe().start())
 
-    try:
+    async def _factory_deadline_tracker():
         from infra.cognitive.temporal.deadline_tracker import get_deadline_tracker as _get_dt
-        _asyncio.create_task(_get_dt().start())
-        logger.info("✅ Phase 4 Temporal deadline tracker started")
-    except Exception as _p4_tmp_err:
-        logger.warning("⚠️  Phase 4 Temporal failed: %s", _p4_tmp_err)
+        asyncio.create_task(_get_dt().start())
 
-    # Phase 2 subsystem startup
-    try:
+    async def _factory_rag_daemon():
         from infra.rag.sync_daemon import get_sync_daemon as _get_rag_daemon
-        _asyncio.create_task(_get_rag_daemon().start())
-        logger.info("✅ RAG SyncDaemon started")
-    except Exception as _e:
-        logger.warning("⚠️  RAG SyncDaemon failed: %s", _e)
+        asyncio.create_task(_get_rag_daemon().start())
 
-    try:
+    async def _factory_planning_scheduler():
         from infra.planning.strategic_planner import get_planning_scheduler as _get_sched
         _sched = _get_sched()
         _sched.register_tenant(os.environ.get("DEFAULT_TENANT_ID", "system"))
-        _asyncio.create_task(_sched.start())
-        logger.info("✅ PlanningScheduler started")
-    except Exception as _e:
-        logger.warning("⚠️  PlanningScheduler failed: %s", _e)
+        asyncio.create_task(_sched.start())
 
-    try:
+    async def _factory_otel():
         from infra.telemetry.otel import _init_providers as _otel_init
         _otel_init()
-        logger.info("✅ OTel providers initialized")
-    except Exception as _e:
-        logger.warning("⚠️  OTel init failed: %s", _e)
 
-    # Phase 3 subsystem startup
-    try:
+    async def _factory_rpa_and_healing():
         from infra.rpa.session_manager import get_session_manager as _get_sm
-        _asyncio.create_task(_get_sm().start_cleanup_loop())
+        asyncio.create_task(_get_sm().start_cleanup_loop())
         from infra.healing.recovery_orchestrator import get_recovery_orchestrator as _get_ro
-        _asyncio.create_task(_get_ro().start())
-        logger.info("✅ Phase 3 RPA SessionManager + SelfHealing started")
-    except Exception as _p3_start_err:
-        logger.warning("⚠️  Phase 3 startup partial failure: %s", _p3_start_err)
+        asyncio.create_task(_get_ro().start())
 
-    # Phase 4 subsystem startup
-    try:
-        from infra.cognitive.temporal.deadline_tracker import get_deadline_tracker as _get_dt
-        _asyncio.create_task(_get_dt().start())
-        from infra.cognitive.teammate.proactive_engine import get_proactive_engine as _get_pe
-        _asyncio.create_task(_get_pe().start())
+    async def _factory_adaptive_throttler():
         from infra.cognitive.resilience.adaptive_throttler import get_adaptive_throttler as _get_at
-        _asyncio.create_task(_get_at().start())
-        logger.info("✅ Phase 4 temporal + teammate + resilience background tasks started")
-    except Exception as _p4_start_err:
-        logger.warning("⚠️  Phase 4 startup partial failure: %s", _p4_start_err)
+        asyncio.create_task(_get_at().start())
+
+    async def _wave_b_gather():
+        await asyncio.gather(
+            _wave_b_hook("phase4.loop_detector", _factory_loop_detector),
+            _wave_b_hook("phase4.initiative_manager", _factory_initiative_manager),
+            _wave_b_hook("phase4.proactive_engine", _factory_proactive_engine),
+            _wave_b_hook("phase4.deadline_tracker", _factory_deadline_tracker),
+            _wave_b_hook("phase2.rag_sync_daemon", _factory_rag_daemon),
+            _wave_b_hook("phase2.planning_scheduler", _factory_planning_scheduler),
+            _wave_b_hook("phase2.otel", _factory_otel),
+            _wave_b_hook("phase3.rpa_and_healing", _factory_rpa_and_healing),
+            _wave_b_hook("phase4.adaptive_throttler", _factory_adaptive_throttler),
+            return_exceptions=True,
+        )
+
+    asyncio.create_task(_wave_b_gather())
 
 
 if __name__ == "__main__":
