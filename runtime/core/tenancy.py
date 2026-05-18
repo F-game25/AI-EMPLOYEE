@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 import logging
+import os
 from typing import Optional
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -31,8 +32,13 @@ class TenantContext:
     def __post_init__(self):
         if not self.tenant_id:
             raise ValueError("tenant_id is required")
-        if not isinstance(self.tenant_id, str) or len(self.tenant_id) < 8:
-            raise ValueError("tenant_id must be non-empty string (8+ chars)")
+        # Relaxed from 8→3 chars (2026-05-18): the 8-char rule blocked the legitimate
+        # 'default' local-mode tenant. Privacy/isolation does NOT depend on tenant_id
+        # length — it depends on namespace separation (Chroma collection, vault root,
+        # pending_queue path). Length validation is here only to prevent empty/single
+        # char accidents; 3+ is sufficient.
+        if not isinstance(self.tenant_id, str) or len(self.tenant_id) < 3:
+            raise ValueError("tenant_id must be non-empty string (3+ chars)")
 
 
 class TenantManager:
@@ -56,11 +62,23 @@ class TenantManager:
         logger.info(f"Created tenant: {tenant_id} for {org_name} ({user_email})")
         return tenant_id
 
+    def ensure_tenant(self, tenant_id: str, org_name: str = "Auto", user_email: str = "") -> Path:
+        """Idempotent: create tenant dirs if missing. Used by local-mode boot to materialize
+        the 'default' tenant on first request without going through register flow."""
+        tenant_path = self.tenants_dir / tenant_id
+        if not tenant_path.exists():
+            tenant_path.mkdir(parents=True, exist_ok=True)
+            (tenant_path / "state").mkdir(exist_ok=True)
+            (tenant_path / "config").mkdir(exist_ok=True)
+            logger.info(f"Auto-provisioned tenant: {tenant_id} ({org_name})")
+        return tenant_path / "state"
+
     def get_tenant_state_dir(self, tenant_id: str) -> Path:
-        """Get the state directory for a tenant."""
+        """Get the state directory for a tenant. Auto-provisions if missing (local mode)."""
         path = self.tenants_dir / tenant_id / "state"
         if not path.exists():
-            raise ValueError(f"Tenant {tenant_id} not found")
+            # Auto-provision rather than raise — supports local-mode bootstrap
+            return self.ensure_tenant(tenant_id)
         return path
 
     def get_tenant_config_dir(self, tenant_id: str) -> Path:
@@ -121,7 +139,11 @@ async def get_current_tenant_from_jwt(request) -> TenantContext:
     token = auth_header[7:]  # Remove "Bearer " prefix
 
     try:
-        payload = jwt.decode(token, options={"verify_signature": False})  # Signature verified elsewhere
+        secret = os.getenv("JWT_SECRET_KEY") or os.getenv("JWT_SECRET")
+        if not secret:
+            raise HTTPException(status_code=500, detail="JWT secret is not configured")
+
+        payload = jwt.decode(token, secret, algorithms=["HS256"])
         tenant_id = payload.get("tenant_id")
         org_name = payload.get("org_name", "")
         user_email = payload.get("email", "")
@@ -130,7 +152,13 @@ async def get_current_tenant_from_jwt(request) -> TenantContext:
             raise HTTPException(status_code=401, detail="Token missing tenant_id")
 
         return TenantContext(tenant_id=tenant_id, org_name=org_name, user_email=user_email)
-    except jwt.DecodeError as e:
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
 

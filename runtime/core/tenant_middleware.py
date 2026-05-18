@@ -23,6 +23,8 @@ class TenantMiddleware(BaseHTTPMiddleware):
         # Routes that don't require tenant context (auth, health, etc.)
         self.exempt_routes = {
             "/health",
+            "/health/detail",
+            "/events",
             "/security/status",
             "/auth/register",
             "/auth/login",
@@ -33,6 +35,11 @@ class TenantMiddleware(BaseHTTPMiddleware):
             "/docs",
             "/redoc",
         }
+        # NOTE: previous `exempt_prefixes` removed (2026-05-18 security audit CRITICAL).
+        # Tenant context MUST be set for vault/memory/learning/topics — removing the bypass
+        # restores per-tenant data isolation. Node forwards Authorization with valid JWT
+        # so tenant_id is extracted normally.
+        self.exempt_prefixes: tuple[str, ...] = ()
 
     async def dispatch(self, request: Request, call_next):
         """Extract tenant from JWT, set context, call handler, cleanup."""
@@ -40,6 +47,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
         # Skip tenant extraction for exempt routes
         if path in self.exempt_routes or path.startswith("/openapi"):
+            response = await call_next(request)
+            return response
+        if any(path.startswith(p) for p in self.exempt_prefixes):
             response = await call_next(request)
             return response
 
