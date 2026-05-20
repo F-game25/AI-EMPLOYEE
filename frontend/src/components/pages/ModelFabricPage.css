@@ -105,6 +105,15 @@
 
 .mf-preview { max-width: 220px; max-height: 160px; border-radius: 8px; border: 1px solid var(--nx-border); margin: 8px 0; display: block; }
 
+/* ── lifecycle (VRAM) + quant panels ── */
+.mf-vram { margin: 4px 0 12px; }
+.mf-vram-bar { height: 10px; border-radius: 6px; background: var(--nx-bg-deep, #04050a); border: 1px solid var(--nx-border-faint); overflow: hidden; }
+.mf-vram-fill { height: 100%; background: linear-gradient(90deg, var(--nx-success, #22c55e), var(--nx-warning, #f59e0b)); transition: width .6s ease; }
+.mf-vram-label { font-size: 11px; color: var(--nx-text-muted); display: block; margin-top: 4px; }
+.mf-q-size { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--nx-text-muted); }
+.mf-q-size input { width: 80px; margin-bottom: 0; }
+.mf-quants { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
 @media (max-width: 768px) {
   .mf-page { padding: 16px 14px 50px; }
   .mf-grid { grid-template-columns: 1fr; }

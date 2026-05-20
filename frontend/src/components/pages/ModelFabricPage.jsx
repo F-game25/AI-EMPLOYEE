@@ -146,11 +146,127 @@ export default function ModelFabricPage() {
         })}
       </section>
 
+      <LifecyclePanel />
+      <QuantPanel />
       <AutoRoutePanel />
       <RagPanel />
       <VisionPanel available={byArch.VLM?.available} />
       <ActionPanel available={byArch.LAM?.available} />
     </div>
+  )
+}
+
+/* ── Model lifecycle: VRAM + loaded models + unload controls ── */
+function LifecyclePanel() {
+  const [lc, setLc] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(async () => {
+    try { setLc(await api.get('/api/model-fabric/lifecycle/status')) } catch { /* offline */ }
+  }, [])
+  useEffect(() => { load(); const i = setInterval(load, 8000); return () => clearInterval(i) }, [load])
+  const unload = async (id) => {
+    setBusy(true)
+    try { await api.post(`/api/model-fabric/models/${encodeURIComponent(id)}/unload`, {}) } catch { /* noop */ }
+    finally { setBusy(false); load() }
+  }
+  const unloadIdle = async () => {
+    setBusy(true)
+    try { await api.post('/api/model-fabric/models/unload-idle', {}) } catch { /* noop */ }
+    finally { setBusy(false); load() }
+  }
+  const free = lc?.free_vram_mb, total = lc?.total_vram_mb
+  const usedPct = free != null && total ? Math.round(((total - free) / total) * 100) : null
+  return (
+    <section className="mf-panel">
+      <h2>Model Lifecycle <span className="mf-tag">VRAM</span></h2>
+      <p className="mf-panel-sub">Heavy models load on demand; idle ones evict to free GPU. Only one heavy load at a time.</p>
+      {total != null && (
+        <div className="mf-vram">
+          <div className="mf-vram-bar"><div className="mf-vram-fill" style={{ width: `${usedPct}%` }} /></div>
+          <span className="mf-vram-label">{total - free} / {total} MB used · {free} MB free</span>
+        </div>
+      )}
+      <div className="mf-row">
+        <span className="mf-chip">{lc?.models_loaded ?? 0} loaded / {lc?.models_registered ?? 0} known</span>
+        {lc?.heavy_load_busy && <span className="mf-chip">heavy load in progress…</span>}
+        <button className="mf-btn mf-btn--sm" onClick={unloadIdle} disabled={busy}>Unload idle</button>
+        <button className="mf-btn mf-btn--sm" onClick={load} disabled={busy}>↻</button>
+      </div>
+      <ul className="mf-hits">
+        {(lc?.models || []).length === 0 && <li className="mf-empty">No models resident — all load on demand.</li>}
+        {(lc?.models || []).map((m) => (
+          <li key={m.model_id}>
+            <div className="mf-row" style={{ margin: 0, justifyContent: 'space-between' }}>
+              <div className="mf-hit-text">
+                <StatusDot available={m.loaded} /> {m.model_id}
+                <span className="mf-hit-meta"> {m.arch} · ~{m.est_vram_mb}MB{m.quant ? ` · ${m.quant}` : ''}{m.idle_s != null ? ` · idle ${Math.round(m.idle_s)}s` : ''}</span>
+              </div>
+              {m.loaded && <button className="mf-btn mf-btn--sm" onClick={() => unload(m.model_id)} disabled={busy}>Unload</button>}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/* ── Quantisation: active quant + selector ── */
+function QuantPanel() {
+  const [status, setStatus] = useState(null)
+  const [avail, setAvail] = useState([])
+  const [paramsB, setParamsB] = useState(7)
+  const [devOverride, setDevOverride] = useState(false)
+  const [sel, setSel] = useState(null)
+  const load = useCallback(async () => {
+    try {
+      const [s, a] = await Promise.all([
+        api.get('/api/model-fabric/quantization/status'),
+        api.get('/api/model-fabric/quantization/available'),
+      ])
+      setStatus(s); setAvail(a.quants || [])
+    } catch { /* offline */ }
+  }, [])
+  useEffect(() => { load(); const i = setInterval(load, 10000); return () => clearInterval(i) }, [load])
+  const select = async () => {
+    try { setSel(await api.post('/api/model-fabric/quantization/select', { params_b: Number(paramsB), dev_override: devOverride })) }
+    catch (e) { setSel({ status: 'error', reason: e.message }) }
+  }
+  return (
+    <section className="mf-panel">
+      <h2>Quantisation <span className="mf-tag">GPU-fit</span></h2>
+      <p className="mf-panel-sub">{status?.policy || 'Every local load fits a quant tier to free VRAM. FP16/FP32 blocked unless dev-override.'}</p>
+      {status && (
+        <div className="mf-row">
+          <span className="mf-chip">free: <b>{status.free_vram_mb} MB</b></span>
+          <span className="mf-chip">7B → <b>{status.recommended_7b?.quant}</b> ({status.recommended_7b?.est_vram_mb}MB)</span>
+        </div>
+      )}
+      <div className="mf-row">
+        <label className="mf-q-size">Model size (B):
+          <input type="number" min="0.5" max="180" step="0.5" value={paramsB} onChange={e => setParamsB(e.target.value)} />
+        </label>
+        <label className={`mf-toggle ${devOverride ? 'mf-toggle--hot' : ''}`}>
+          <input type="checkbox" checked={devOverride} onChange={e => setDevOverride(e.target.checked)} />
+          {devOverride ? '⚠ FP16 override' : 'Quant only'}
+        </label>
+        <button className="mf-btn" onClick={select}>Select quant</button>
+      </div>
+      {sel && (
+        <div className="mf-panel-out">
+          <span className="mf-chip">quant: <b>{sel.quant}</b></span>
+          <span className="mf-chip">~{sel.est_vram_mb}MB</span>
+          <span className="mf-chip">{sel.quality} / {sel.speed}</span>
+          <span className={`mf-chip ${sel.fits ? '' : 'mf-toggle--hot'}`}>{sel.fits ? 'fits locally' : 'too big'}</span>
+          {sel.recommend_remote && <span className="mf-chip mf-toggle--hot">→ remote compute</span>}
+          <pre>{sel.reason}</pre>
+        </div>
+      )}
+      <div className="mf-quants">
+        {avail.map(q => (
+          <span key={q.quant} className="mf-chip" title={`${q.quality} quality, ${q.speed}`}>{q.quant}</span>
+        ))}
+      </div>
+    </section>
   )
 }
 
