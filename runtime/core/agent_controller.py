@@ -21,8 +21,30 @@ from core.research_agent import ResearchAgent
 from core.executor import Executor
 from core.planner import Planner
 from core.validator import Validator
-from security.policy import SecurityPolicy, get_security_policy
 from skills.catalog import SkillCatalog, get_skill_catalog
+
+
+def _load_security_policy():
+    """Import the runtime security *package* policy, resilient to a flat
+    ``security.py`` shadowing ``sys.modules['security']`` on the server path.
+
+    `runtime/security/policy.py` is dependency-clean (stdlib only), so loading it
+    directly by file path is safe when the normal import resolves to the wrong module.
+    """
+    try:
+        from security.policy import SecurityPolicy, get_security_policy  # type: ignore
+        return SecurityPolicy, get_security_policy
+    except (ImportError, ModuleNotFoundError):
+        import importlib.util
+        from pathlib import Path
+        policy_path = Path(__file__).resolve().parents[1] / "security" / "policy.py"
+        spec = importlib.util.spec_from_file_location("_runtime_security_policy", policy_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod.SecurityPolicy, mod.get_security_policy
+
+
+SecurityPolicy, get_security_policy = _load_security_policy()
 
 
 class AgentController:
@@ -382,15 +404,43 @@ class AgentController:
         return summary
 
     def _emit_action(self, action: str, payload: dict) -> dict:
+        """Dispatch a skill via the ActionBus with a REAL LLM executor.
+
+        Previously this emitted an unregistered ``skill:<name>`` action with no
+        executor → the bus returned ``unknown_action`` but the skill still reported
+        success (a fake-success no-op). We now supply an executor that runs the goal
+        through the local LLM, so the action genuinely executes and honest status
+        propagates (executor raising → bus returns error → task fails).
+        """
         from actions.action_bus import get_action_bus
 
-        action_type = f"skill:{payload.get('skill', 'unknown')}"
-        bus_payload = {"task_input": payload.get("input", {}), "action": action}
+        skill = payload.get("skill", "unknown")
+        action_type = f"skill:{skill}"
+        task_input = payload.get("input", {}) or {}
+        goal = str(task_input.get("goal") or task_input.get("task") or "").strip()
+        context = task_input.get("context")
+
+        def _llm_executor(_p: dict) -> dict:
+            from engine.api import generate
+            role = skill.replace("-", " ").replace("_", " ")
+            system = (
+                f"You are the '{role}' capability inside an AI operations system. "
+                "Complete the user's goal concretely and concisely. If the goal asks "
+                "for code or a file, output the full content."
+            )
+            text = generate(prompt=goal or str(task_input), system=system,
+                            context=context if isinstance(context, str) else None)
+            text = (text or "").strip()
+            if not text:
+                raise RuntimeError(f"skill '{skill}' produced no output")
+            return {"skill": skill, "goal": goal, "output": text}
+
         return get_action_bus().emit(
             action_type=action_type,
-            payload=bus_payload,
+            payload={"task_input": task_input, "action": action},
             actor="agent_controller",
             reason="executor dispatch",
+            executor=_llm_executor,
         )
 
 

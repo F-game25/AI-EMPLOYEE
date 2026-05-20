@@ -20688,7 +20688,47 @@ def run_task_with_agent_controller(payload: dict, _auth: None = Depends(require_
         summary = get_agent_controller().run_goal(goal)
     except Exception as exc:
         logger.exception("AgentController task run failed")
-        raise HTTPException(500, f"AgentController failed: {exc}") from exc
+        error_message = str(exc) or exc.__class__.__name__
+        return JSONResponse({
+            "ok": False,
+            "source": "agent_controller",
+            "task": goal,
+            "status": "failed",
+            "degraded": True,
+            "error": f"AgentController failed: {error_message}",
+            "errors": [{
+                "stage": "agent_controller",
+                "message": error_message,
+                "type": exc.__class__.__name__,
+            }],
+            "proof": [{
+                "type": "agent_controller_error",
+                "label": "AgentController failed before producing task output",
+                "status": "failed",
+                "details": error_message,
+            }],
+            "tasks": [],
+        })
+
+    if not isinstance(summary, dict):
+        return JSONResponse({
+            "ok": False,
+            "source": "agent_controller",
+            "task": goal,
+            "status": "failed",
+            "degraded": True,
+            "error": "AgentController returned an invalid result contract",
+            "errors": [{
+                "stage": "agent_controller",
+                "message": f"Expected dict, got {type(summary).__name__}",
+            }],
+            "proof": [{
+                "type": "agent_controller_error",
+                "label": "Invalid AgentController result contract",
+                "status": "failed",
+            }],
+            "tasks": [],
+        })
 
     proof: list[dict] = [{
         "type": "agent_controller",

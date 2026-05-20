@@ -59,7 +59,17 @@ class AgentDispatchSkill(SkillBase):
     ) -> dict[str, Any]:
         payload = {"skill": self.name, "input": input_data}
         action_result = action_runner("skill_dispatch", payload)
-        return {"status": "success", "action_result": action_result}
+        # Honest status: only "executed"/"success" count as success. unknown_action
+        # or error must surface as a real failure — never a fake success.
+        bus_status = (action_result or {}).get("status")
+        ok = bus_status in ("executed", "success")
+        result_obj = (action_result or {}).get("result") or {}
+        return {
+            "status": "success" if ok else "failed",
+            "action_result": action_result,
+            "output": result_obj.get("output") if ok else None,
+            "error": "" if ok else ((action_result or {}).get("error") or f"action not executed (status={bus_status})"),
+        }
 
 
 class SkillCatalog:
