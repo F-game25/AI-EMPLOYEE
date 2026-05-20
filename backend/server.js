@@ -2239,8 +2239,9 @@ async function proxyModelFabric(path, { method = 'GET', body, timeout = 120000 }
 
 const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline — Python backend not running.' };
 
-// GET endpoints: /models, /health
-['models', 'health'].forEach((seg) => {
+// GET endpoints (fast; never trigger a model load)
+['models', 'health', 'status', 'lifecycle/status', 'quantization/status',
+ 'quantization/available'].forEach((seg) => {
   app.get(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
     try {
       const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { timeout: 15000 });
@@ -2249,16 +2250,25 @@ const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline �
   });
 });
 
-// POST endpoints: route, llm, slm, vision/analyze, vision/segment, generate/visual,
-// actions/execute, rag/query, rag/ingest
+// POST endpoints
 ['route', 'llm', 'slm', 'vision/analyze', 'vision/segment', 'generate/visual',
- 'actions/execute', 'rag/query', 'rag/ingest'].forEach((seg) => {
+ 'actions/execute', 'rag/query', 'rag/ingest', 'quantization/select',
+ 'models/unload-idle'].forEach((seg) => {
   app.post(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
     try {
       const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { method: 'POST', body: req.body });
       return res.status(ok ? 200 : 502).json(data);
     } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
   });
+});
+
+// Per-model unload (model id may contain slashes/colons, e.g. "qwen2.5-coder:14b")
+app.post(/^\/api\/model-fabric\/models\/(.+)\/unload$/, requireAuth, async (req, res) => {
+  try {
+    const id = encodeURIComponent(req.params[0]);
+    const { ok, data } = await proxyModelFabric(`/api/model-fabric/models/${id}/unload`, { method: 'POST', body: req.body });
+    return res.status(ok ? 200 : 502).json(data);
+  } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
 });
 
 // ── Agent fleet controls ──────────────────────────────────────────────────────

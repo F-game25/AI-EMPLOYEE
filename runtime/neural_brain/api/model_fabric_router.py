@@ -17,6 +17,11 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/model-fabric", tags=["model-fabric"])
 
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
 # ── Cached hardware-aware resolution (re-resolved every 60s) ──────────────────
 _resolved_cache: dict | None = None
 _resolved_at: float = 0.0
@@ -40,8 +45,46 @@ def _arch_model(arch: str) -> dict:
     return (_resolved().get("resolved") or {}).get(arch, {})
 
 
+def _ollama_unloader(model: str):
+    """Return a callable that drops an Ollama model from VRAM (keep_alive=0)."""
+    def _unload():
+        try:
+            import ollama
+            ollama.generate(model=model, prompt=" ", keep_alive=0, options={"num_predict": 1})
+        except Exception:  # noqa: BLE001
+            pass
+    return _unload
+
+
+def _register_unloader(arch: str, entry: dict):
+    """Register a real unloader with the lifecycle manager for this arch's model."""
+    from neural_brain.models.lifecycle_manager import get_lifecycle_manager
+    mgr = get_lifecycle_manager()
+    model = entry.get("model")
+    if not model:
+        return mgr, None
+    unloader = None
+    if arch == "LCM":
+        from neural_brain.models import lcm_backend
+        unloader = lcm_backend.unload
+    elif arch == "SAM":
+        from neural_brain.models import sam_backend
+        unloader = sam_backend.unload
+    elif entry.get("provider") == "ollama":
+        unloader = _ollama_unloader(model)
+    mgr.register(model, arch, entry.get("provider", "ollama"), unloader=unloader)
+    return mgr, model
+
+
 def _route(arch: str, request: dict) -> dict:
-    """Route through the existing router, injecting the resolved model + provider."""
+    """Route through the existing router with VRAM-aware admission control.
+
+    Heavy archs pass through the lifecycle manager: it serializes heavy loads,
+    evicts idle heavy models to free VRAM, and — if even a full GPU can't hold the
+    model — returns a structured 'needs remote compute' plan instead of OOM-crashing.
+    """
+    import time as _t
+    from neural_brain.models.lifecycle_manager import HEAVY_ARCHS, get_lifecycle_manager
     from neural_brain.models.model_architecture_router import ModelArchitectureRouter
     entry = _arch_model(arch)
     if not entry.get("available", True):
@@ -52,10 +95,30 @@ def _route(arch: str, request: dict) -> dict:
         req["model"] = entry["model"]
     if entry.get("provider") and "provider" not in req:
         req["provider"] = entry["provider"]
-    result = ModelArchitectureRouter.route(arch, req)
-    result.setdefault("arch", arch)
-    result.setdefault("model", entry.get("model"))
-    return result
+
+    mgr, model = _register_unloader(arch, entry)
+    heavy = arch in HEAVY_ARCHS
+    plan = None
+    if heavy:
+        plan = mgr.acquire_heavy(arch)
+        if not plan.get("fits", True) and plan.get("recommend_remote"):
+            mgr.release_heavy()
+            return {"status": "needs_remote", "arch": arch, "model": model,
+                    "available": True, "vram_plan": plan,
+                    "reason": "model exceeds local VRAM — provision remote compute (Compute Fabric)"}
+    try:
+        t0 = _t.time()
+        result = ModelArchitectureRouter.route(arch, req)
+        if model and isinstance(result, dict) and result.get("status") in ("success", "ok"):
+            mgr.mark_loaded(model, load_ms=(_t.time() - t0) * 1000)
+        result.setdefault("arch", arch)
+        result.setdefault("model", entry.get("model"))
+        if plan and plan.get("evicted"):
+            result["vram_evicted"] = plan["evicted"]
+        return result
+    finally:
+        if heavy:
+            mgr.release_heavy()
 
 
 # ── MoE intent classifier (keyword-first; cheap, no model needed) ─────────────
@@ -151,6 +214,30 @@ def health():
             "total": len(subsystems), "subsystems": subsystems}
 
 
+@router.get("/status")
+def status():
+    """Fast module-status summary (Phase 4 shape). Never triggers a model load."""
+    t0 = time.time()
+    from neural_brain.models.lifecycle_manager import get_lifecycle_manager, _free_vram_mb
+    from neural_brain.models.model_architecture_router import ModelArchitectureRouter
+    r = _resolved()
+    available = sum(1 for a in ModelArchitectureRouter.ARCHS
+                    if (r.get("resolved") or {}).get(a, {}).get("available"))
+    lc = get_lifecycle_manager().status()
+    loaded = lc["models_loaded"]
+    ready = available > 0
+    module_status = "online" if ready and loaded else ("degraded" if ready else "offline")
+    reason = None if loaded else "models load on demand (none resident yet)"
+    return {
+        "status": module_status, "module": "model_fabric", "ready": ready,
+        "models_loaded": loaded, "models_available": available, "models_total": len(ModelArchitectureRouter.ARCHS),
+        "free_vram_mb": _free_vram_mb(), "tier": r.get("tier"),
+        "active_quant": get_lifecycle_manager().select_quant(7.0).get("quant"),
+        "reason": reason, "response_ms": round((time.time() - t0) * 1000, 1),
+        "timestamp": _now_iso(),
+    }
+
+
 @router.post("/route")
 def route(req: RouteReq):
     """MoE auto-route: classify intent → architecture → dispatch with resolved model."""
@@ -223,6 +310,56 @@ def rag_query(req: RagQueryReq):
     except Exception as e:  # noqa: BLE001
         logger.warning("rag_query failed: %s", e)
         return {"status": "error", "error": str(e), "results": []}
+
+
+# ── Lifecycle ──────────────────────────────────────────────────────────────────
+@router.get("/lifecycle/status")
+def lifecycle_status():
+    """Loaded/registered models, VRAM, idle timers — never triggers a load."""
+    from neural_brain.models.lifecycle_manager import get_lifecycle_manager
+    return {"status": "ok", **get_lifecycle_manager().status()}
+
+
+@router.post("/models/{model_id:path}/unload")
+def model_unload(model_id: str):
+    from neural_brain.models.lifecycle_manager import get_lifecycle_manager
+    ok = get_lifecycle_manager().unload(model_id)
+    return {"status": "ok" if ok else "noop", "model_id": model_id, "unloaded": ok}
+
+
+@router.post("/models/unload-idle")
+def models_unload_idle():
+    from neural_brain.models.lifecycle_manager import get_lifecycle_manager
+    return {"status": "ok", "unloaded": get_lifecycle_manager().unload_idle()}
+
+
+# ── Quantisation ───────────────────────────────────────────────────────────────
+class QuantSelectReq(BaseModel):
+    params_b: float = Field(7.0, description="Model size in billions of params")
+    dev_override: bool = Field(False, description="Allow FP16/FP32 (blocked by default)")
+
+
+@router.get("/quantization/status")
+def quantization_status():
+    """Active GPU budget + the quant the selector would pick for a 7B model now."""
+    from neural_brain.models.lifecycle_manager import get_lifecycle_manager, _free_vram_mb
+    mgr = get_lifecycle_manager()
+    return {"status": "ok", "free_vram_mb": _free_vram_mb(),
+            "recommended_7b": mgr.select_quant(7.0),
+            "policy": "FP16/FP32 local loads blocked unless dev_override; quant fit to free VRAM"}
+
+
+@router.get("/quantization/available")
+def quantization_available():
+    from neural_brain.models.lifecycle_manager import _QUANT_LADDER
+    return {"status": "ok", "quants": [
+        {"quant": n, "bpw": bpw, "quality": q, "speed": s} for n, bpw, q, s in _QUANT_LADDER]}
+
+
+@router.post("/quantization/select")
+def quantization_select(req: QuantSelectReq):
+    from neural_brain.models.lifecycle_manager import get_lifecycle_manager
+    return {"status": "ok", **get_lifecycle_manager().select_quant(req.params_b, dev_override=req.dev_override)}
 
 
 @router.post("/rag/ingest")

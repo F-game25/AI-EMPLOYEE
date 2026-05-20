@@ -53,6 +53,29 @@ def _load_pipe():
     return _PIPE, _PIPE_ERR
 
 
+def unload() -> bool:
+    """Free the diffusion pipeline from GPU/RAM. Called by the lifecycle manager."""
+    global _PIPE, _PIPE_ERR
+    if _PIPE is None:
+        return False
+    try:
+        del _PIPE
+    except Exception:  # noqa: BLE001
+        pass
+    _PIPE, _PIPE_ERR = None, None
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
+def is_loaded() -> bool:
+    return _PIPE is not None
+
+
 def _remote_generate(backend_url: str, request: dict) -> dict:
     import httpx
     payload = {

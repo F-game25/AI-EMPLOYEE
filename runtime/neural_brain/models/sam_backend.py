@@ -69,6 +69,29 @@ def _load_sam():
         return None, None, _SAM_ERR
 
 
+def unload() -> bool:
+    """Free the SAM model from GPU/RAM. Called by the lifecycle manager."""
+    global _SAM, _SAM_ERR
+    if _SAM is None:
+        return False
+    try:
+        del _SAM
+    except Exception:  # noqa: BLE001
+        pass
+    _SAM, _SAM_ERR = None, None
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
+def is_loaded() -> bool:
+    return _SAM is not None
+
+
 def _decode_image(image_data):
     import cv2
     import numpy as np
