@@ -76,6 +76,13 @@ class BlacklightEngine:
         self._threat_count = 0
         self._last_escalation_ts: float = 0.0   # when last escalation happened
         self._lockdown_entered_ts: float = 0.0   # when LOCKDOWN was entered (for staged exit)
+        # ── Security Sentinel (always-on local AI defender) ───────────────────
+        self._sentinel_enabled = os.getenv("BL_SENTINEL_ENABLED", "true").lower() == "true"
+        self._sentinel_interval_s = int(os.getenv("BL_SENTINEL_INTERVAL_S", "30"))
+        self._last_sentinel_ts: float = 0.0
+        self._sentinel_state = "idle"      # idle | analyzing | online | degraded | off
+        self._sentinel_last_verdict: dict | None = None
+        self._sentinel_runs = 0
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -216,10 +223,126 @@ class BlacklightEngine:
             # Cap at sum of individual scores (avoid inflating)
             aggregate = min(100, int(sum(te.score for te in events[-10:])))
 
+        # Security Sentinel: local-AI reasoning over the event window (rate-limited).
+        # Runs even in offline mode (local Ollama only). Can raise the score.
+        sentinel_bump = self._maybe_run_sentinel(events)
+        aggregate = min(100, aggregate + sentinel_bump)
+
         self._current_score = aggregate
         self._update_active_threats(events)
         self._apply_mode(aggregate)
         self._emit_status()
+
+    # ── Security Sentinel (always-on local AI defender) ───────────────────────
+    def _maybe_run_sentinel(self, events: list[ThreatEvent]) -> int:
+        """Analyze the recent threat window with a local SLM. Returns a score bump.
+
+        Local-only (Ollama) so it works fully offline. Rate-limited; only runs when
+        there are threat signals. Degrades to rule-only (bump 0) if no local model.
+        """
+        if not self._sentinel_enabled:
+            self._sentinel_state = "off"
+            return 0
+        now = time.time()
+        if not events or (now - self._last_sentinel_ts) < self._sentinel_interval_s:
+            return 0
+        self._last_sentinel_ts = now
+        self._sentinel_state = "analyzing"
+        try:
+            summary = self._summarize_events(events)
+            verdict = self._sentinel_llm(summary)
+            self._sentinel_runs += 1
+            self._sentinel_last_verdict = verdict
+            self._sentinel_state = "online"
+            risk = int(verdict.get("risk", 0) or 0)
+            if risk >= 40:
+                from neural_brain.utils.event_bus import publish
+                publish("blacklight:ai_alert", source="blacklight_sentinel", payload={
+                    "risk": risk, "category": verdict.get("category"),
+                    "reason": verdict.get("reason"),
+                    "recommended_action": verdict.get("recommended_action"),
+                })
+                logger.warning("BLACKLIGHT SENTINEL: risk=%d category=%s — %s",
+                               risk, verdict.get("category"), str(verdict.get("reason"))[:120])
+            # DETECT → DEFEND: at high risk the sentinel takes graduated defensive action.
+            self._sentinel_defend(risk, verdict)
+            # Contribute up to ~30 points so the AI can escalate but not solely drive lockdown.
+            return min(30, risk // 3)
+        except Exception as e:  # noqa: BLE001
+            self._sentinel_state = "degraded"
+            logger.debug("Blacklight sentinel degraded (rule-only): %s", e)
+            return 0
+
+    def _sentinel_defend(self, risk: int, verdict: dict) -> None:
+        """Graduated, audited defensive response driven by the sentinel's verdict.
+
+        Uses only the engine's existing defensive capabilities (no new destructive
+        powers). Gated by BL_SENTINEL_AUTODEFEND (default on). Actions escalate with
+        risk; each is published as blacklight:ai_defense and audited. Lethal escalation
+        (system shutdown) is intentionally left to the threshold-based _apply_mode path.
+        """
+        import os as _os
+        if _os.getenv("BL_SENTINEL_AUTODEFEND", "true").lower() != "true":
+            return
+        category = str(verdict.get("category", "")).lower()
+        actions: list[str] = []
+        try:
+            # ≥85 or credential/brute categories → rotate keys (invalidates forged tokens).
+            if risk >= 85 or any(k in category for k in ("brute", "credential", "token", "auth", "key")):
+                try:
+                    self.force_key_rotation()
+                    actions.append("key_rotation")
+                except Exception:  # noqa: BLE001
+                    pass
+            # ≥75 or session/hijack categories → invalidate all sessions.
+            if risk >= 75 or any(k in category for k in ("session", "hijack", "takeover")):
+                try:
+                    self.invalidate_all_sessions(reason="sentinel_autodefend")
+                    actions.append("invalidate_sessions")
+                except Exception:  # noqa: BLE001
+                    pass
+            if actions:
+                from neural_brain.utils.event_bus import publish
+                publish("blacklight:ai_defense", source="blacklight_sentinel", payload={
+                    "risk": risk, "category": verdict.get("category"),
+                    "actions": actions, "reason": verdict.get("reason"),
+                })
+                logger.warning("BLACKLIGHT SENTINEL DEFEND: risk=%d actions=%s", risk, actions)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("sentinel defend error: %s", e)
+
+    @staticmethod
+    def _summarize_events(events: list[ThreatEvent]) -> str:
+        from collections import Counter
+        by_type = Counter(te.event_type for te in events)
+        by_source = Counter(te.source for te in events)
+        top = sorted(events, key=lambda e: e.score, reverse=True)[:8]
+        lines = [f"window_event_count={len(events)}",
+                 "by_type=" + ", ".join(f"{k}:{v}" for k, v in by_type.most_common(8)),
+                 "by_source=" + ", ".join(f"{k}:{v}" for k, v in by_source.most_common(6)),
+                 "top_events=" + "; ".join(f"{te.event_type}(score={te.score},src={te.source})" for te in top)]
+        return "\n".join(lines)
+
+    def _sentinel_llm(self, summary: str) -> dict:
+        """Ask the local SLM to judge breach risk. Local Ollama only — offline-safe."""
+        import json as _json
+        import re as _re
+        from engine.api import generate
+        system = (
+            "You are a local security sentinel defending an AI operating system. "
+            "Given a summary of recent system/auth/security events, judge the likelihood "
+            "of an active security breach or attack. Respond ONLY with compact JSON: "
+            '{"risk": 0-100, "category": "<short>", "reason": "<short>", '
+            '"recommended_action": "<short>"}.'
+        )
+        text = generate(prompt=f"Recent security event window:\n{summary}", system=system)
+        text = (text or "").strip()
+        m = _re.search(r"\{.*\}", text, _re.DOTALL)
+        if not m:
+            raise ValueError("sentinel produced no JSON verdict")
+        verdict = _json.loads(m.group(0))
+        verdict["risk"] = max(0, min(100, int(verdict.get("risk", 0) or 0)))
+        return verdict
 
     def _update_active_threats(self, events: list[ThreatEvent]) -> None:
         self._active_threats = [
@@ -379,6 +502,13 @@ class BlacklightEngine:
             "event_count": self._event_count,
             "threat_event_count": self._threat_count,
             "cooldown_remaining_s": round(cooldown_remaining, 1),
+            "sentinel": {
+                "enabled": self._sentinel_enabled,
+                "state": self._sentinel_state,
+                "runs": self._sentinel_runs,
+                "interval_s": self._sentinel_interval_s,
+                "last_verdict": self._sentinel_last_verdict,
+            },
             **ctrl.get_state(),
         }
 
@@ -390,6 +520,8 @@ class BlacklightEngine:
                 "threat_score": self._current_score,
                 "mode": get_system_control().get_mode(),
                 "active_threats": self._active_threats[:5],
+                "sentinel_state": self._sentinel_state,
+                "sentinel_last_verdict": self._sentinel_last_verdict,
             })
         except Exception:
             pass

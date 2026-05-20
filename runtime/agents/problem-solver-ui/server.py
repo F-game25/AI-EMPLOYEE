@@ -28324,6 +28324,13 @@ async def _init_neural_brain():
         from infra.cognitive.resilience.adaptive_throttler import get_adaptive_throttler as _get_at
         asyncio.create_task(_get_at().start())
 
+    async def _factory_blacklight_sentinel():
+        # Always-on defensive security engine + local-AI sentinel. get_blacklight()
+        # starts the background threat-monitor loop (incl. the offline-capable SLM
+        # sentinel). Defensive only — distinct from the gated BLACKLIGHT recon agent.
+        from neural_brain.security.blacklight_engine import get_blacklight
+        get_blacklight()
+
     async def _wave_b_gather():
         await asyncio.gather(
             _wave_b_hook("phase4.loop_detector", _factory_loop_detector),
@@ -28335,6 +28342,7 @@ async def _init_neural_brain():
             _wave_b_hook("phase2.otel", _factory_otel),
             _wave_b_hook("phase3.rpa_and_healing", _factory_rpa_and_healing),
             _wave_b_hook("phase4.adaptive_throttler", _factory_adaptive_throttler),
+            _wave_b_hook("security.blacklight_sentinel", _factory_blacklight_sentinel),
             return_exceptions=True,
         )
 

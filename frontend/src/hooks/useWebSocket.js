@@ -604,8 +604,26 @@ function dispatchSecurityEvent(event, data) {
         active_threats: data.active_threats ?? [],
         agents_paused: data.agents_paused ?? false,
         forge_disabled: data.forge_disabled ?? false,
+        sentinel_state: data.sentinel_state ?? undefined,
+        sentinel_last_verdict: data.sentinel_last_verdict ?? undefined,
         updated_at: Date.now(),
       })
+      break
+    case 'blacklight:ai_alert':
+      sys.addHeartbeatLog({
+        text: `[SENTINEL] AI detected risk ${data.risk} (${data.category || '?'}) — ${data.reason || ''}`,
+        level: (data.risk ?? 0) >= 70 ? 'error' : 'warning',
+        ts: Date.now(),
+      })
+      if ((data.risk ?? 0) >= 70) sys.triggerCriticalAlert?.()
+      break
+    case 'blacklight:ai_defense':
+      sys.addHeartbeatLog({
+        text: `[SENTINEL] 🛡 AI defended: ${(data.actions || []).join(', ')} (risk ${data.risk}, ${data.category || '?'})`,
+        level: 'error',
+        ts: Date.now(),
+      })
+      sys.triggerCriticalAlert?.()
       break
     case 'blacklight:mode_change':
       sec.setSecurityStatus({
