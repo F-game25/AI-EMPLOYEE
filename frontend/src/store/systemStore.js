@@ -118,8 +118,13 @@ export const useSystemStore = create((set, get) => ({
     schedulePersist(get)
   },
 
-  // Navigation
-  activeSection: 'dashboard',
+  // Navigation — initialize from the URL so deep links / refresh restore the page
+  activeSection: (() => {
+    try {
+      const seg = (window.location.pathname || '').replace(/^\/+/, '').split('/')[0]
+      return seg || 'dashboard'
+    } catch { return 'dashboard' }
+  })(),
   setActiveSection: (s) => set({ activeSection: s }),
 
   // Sidebar

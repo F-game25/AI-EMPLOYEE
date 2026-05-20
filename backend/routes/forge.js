@@ -472,6 +472,25 @@ async function executeAction(action, project) {
 
 const PYTHON_BACKEND_PORT_FORGE = process.env.PYTHON_BACKEND_PORT || 18790
 
+// Shared system prompt for both the non-streaming and SSE message handlers.
+// The filename-labelling rules are load-bearing: extractCodeActions falls back to
+// generated_N.txt when the model omits a path, so the model MUST label every block.
+function buildForgeSystemPrompt(project, treeSnippet, historySnippet) {
+  return (
+    `You are AscendForge, a supervised AI coding assistant.\n` +
+    `Project: ${project?.name || 'unknown'} (${project?.package_type || 'generic'})\n` +
+    (project ? `Root: ${safeProjectRoot(project)}\n` : '') +
+    `Files (first 50):\n${treeSnippet}\n\n` +
+    `Recent session:\n${historySnippet}\n\n` +
+    `When you propose file content, you MUST start each code block's info string with the\n` +
+    `relative file path, e.g.:\n` +
+    '```python src/app.py\n<code>\n```\n' +
+    `If you cannot determine a path, put the intended filename as the FIRST line of the code\n` +
+    `as a comment (# path/to/file.py). Never omit the filename. One file per code block.\n` +
+    `Keep explanations brief. Proposed writes require owner approval before execution.`
+  )
+}
+
 function extractCodeActions(text, project) {
   const actions = []
   // Group 1: lang, group 2: optional path hint on the fence line, group 3: code body
@@ -564,9 +583,10 @@ async function callPythonChat(message, timeoutMs = 30000) {
   const py = await _httpJson(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}/api/chat`, { message }, timeoutMs)
   if (_replyText(py)) return { ok: true, ...py }
 
-  // Fallback → direct Ollama
+  // Fallback → direct Ollama. Forge codegen prefers a coding-specialized model.
   const host = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '')
-  const model = process.env.OLLAMA_MODEL || 'llama3.2:latest'
+  const model = process.env.FORGE_OLLAMA_MODEL || process.env.OLLAMA_CODE_MODEL ||
+    'qwen2.5-coder:14b'
   const og = await _httpJson(`${host}/api/generate`, { model, prompt: message, stream: false }, timeoutMs)
   if (og && og.response) return { ok: true, response: og.response, provider: 'ollama' }
   return { ok: false, error: py.error || og.error || 'no_reply' }
@@ -804,14 +824,7 @@ module.exports = function createForgeRouter(requireAuth) {
     const recentHistory = (session.history || []).slice(-4).filter(m => m.role !== 'assistant' || !m.plan)
     const historySnippet = recentHistory.map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
 
-    const systemPrompt =
-      `You are AscendForge, a supervised AI coding assistant.\n` +
-      `Project: ${project.name} (${project.package_type || 'generic'})\n` +
-      `Root: ${safeProjectRoot(project)}\n` +
-      `Files (first 50):\n${treeSnippet}\n\n` +
-      `Recent session:\n${historySnippet}\n\n` +
-      `Respond with code blocks using \`\`\`lang\\n...\\n\`\`\` syntax for any proposed file content. ` +
-      `Keep explanations brief. Proposed writes require owner approval before execution.`
+    const systemPrompt = buildForgeSystemPrompt(project, treeSnippet, historySnippet)
 
     const aiMessage = `${systemPrompt}\n\nUser: ${content}`
 
@@ -885,12 +898,7 @@ module.exports = function createForgeRouter(requireAuth) {
     const treeSnippet = flatTree.slice(0, 50).join('\n')
     const historySnippet = (session.history || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
 
-    const systemPrompt =
-      `You are AscendForge, a supervised AI coding assistant.\n` +
-      `Project: ${project?.name || 'unknown'} (${project?.package_type || 'generic'})\n` +
-      `Files (first 50):\n${treeSnippet}\n\nRecent session:\n${historySnippet}\n\n` +
-      `Respond with code blocks using \`\`\`lang\\n...\\n\`\`\` syntax for any proposed file content. ` +
-      `Keep explanations brief. Proposed writes require owner approval before execution.`
+    const systemPrompt = buildForgeSystemPrompt(project, treeSnippet, historySnippet)
 
     try {
       const aiResult = await callPythonChat(`${systemPrompt}\n\nUser: ${content}`)

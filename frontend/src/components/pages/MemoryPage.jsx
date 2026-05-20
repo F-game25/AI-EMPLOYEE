@@ -135,12 +135,18 @@ function MemoryHealth() {
     wsEvent: 'memory:write',
     pollMs: 10000,
   })
+  // CONVERSATIONS tile derives from the live /conversations feed — the health
+  // endpoint's total_conversations reads a stale conversations_index.json.
+  const { data: convos } = useLiveData({
+    endpoint: `${API}/conversations`,
+    transform: (d) => (typeof d.total === 'number' ? d.total : (d.conversations || []).length),
+  })
   const h = data || {}
   return (
     <div className="mem-health">
       {[
         ['Stored Facts', h.total_facts ?? 0],
-        ['Conversations', h.total_conversations ?? 0],
+        ['Conversations', convos ?? h.total_conversations ?? 0],
         ['Semantic Items', h.semantic_items ?? 0],
         ['Source', h.source || 'local_state'],
       ].map(([label, val]) => (
