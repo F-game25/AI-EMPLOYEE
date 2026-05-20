@@ -30,6 +30,7 @@ const IntelligencePage  = lazy(() => import('./pages/IntelligencePage'))
 const SystemHealthPage  = lazy(() => import('./pages/SystemHealthPage'))
 const IntegrationsPage  = lazy(() => import('./pages/IntegrationsPage'))
 const ModelsPage        = lazy(() => import('./pages/ModelsPage'))
+const ModelFabricPage   = lazy(() => import('./pages/ModelFabricPage'))
 const AgentsPage        = lazy(() => import('./pages/AgentsPage'))
 const MoneyModePage     = lazy(() => import('./pages/MoneyModePage'))
 const SecurityPanel     = lazy(() => import('./pages/SecurityPanel'))
@@ -82,6 +83,7 @@ const PAGES = {
   'audit':          SecurityPanel,
   // SYSTEM
   'models':         ModelsPage,
+  'model-fabric':   ModelFabricPage,
   'runtime':        SystemHealthPage,
 }
 

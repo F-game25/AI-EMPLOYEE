@@ -22,6 +22,10 @@ security.local.yml
 config.local.yml
 data/
 models/
+# but the neural-brain model-routing *source* lives under a models/ dir — keep it tracked
+!runtime/neural_brain/models/
+!runtime/neural_brain/models/**
+runtime/neural_brain/models/**/__pycache__/
 venv/
 .venv/
 

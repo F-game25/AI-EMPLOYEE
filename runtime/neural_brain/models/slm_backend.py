@@ -14,7 +14,7 @@ def route_slm(request: dict) -> dict:
             return {"status": "error", "error": "Missing prompt"}
 
         # Try phi3:mini first, fallback to qwen2.5:1.5b
-        model = "phi3:mini"
+        model = request.get("model") or "phi3:mini"
         try:
             response = ollama.generate(
                 model=model,

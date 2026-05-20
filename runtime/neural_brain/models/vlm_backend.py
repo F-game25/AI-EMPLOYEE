@@ -36,7 +36,7 @@ def route_vlm(request: dict) -> dict:
             else:
                 return {"status": "error", "error": f"Invalid image format: {type(img)}"}
 
-        model = "llava:7b"
+        model = request.get("model") or "llava:7b"
         response = ollama.generate(
             model=model,
             prompt=prompt,

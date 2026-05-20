@@ -2221,6 +2221,46 @@ app.get('/api/neural-brain/forge/evolution/status', async (req, res) => {
   res.json(data);
 });
 
+// ── Model Fabric proxy (Python /api/model-fabric/*) ─────────────────────────────
+// Generic GET/POST passthrough with the internal service token. Honest offline
+// fallback (no fake success) so the UI can show "Python backend offline".
+async function proxyModelFabric(path, { method = 'GET', body, timeout = 120000 } = {}) {
+  const opts = {
+    method,
+    headers: { Authorization: `Bearer ${internalServiceToken()}`, 'Content-Type': 'application/json' },
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await Promise.race([
+    fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}${path}`, opts),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeout)),
+  ]);
+  return { ok: r?.ok, status: r?.status, data: await r.json() };
+}
+
+const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline — Python backend not running.' };
+
+// GET endpoints: /models, /health
+['models', 'health'].forEach((seg) => {
+  app.get(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
+    try {
+      const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { timeout: 15000 });
+      return res.status(ok ? 200 : 502).json(data);
+    } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
+  });
+});
+
+// POST endpoints: route, llm, slm, vision/analyze, vision/segment, generate/visual,
+// actions/execute, rag/query, rag/ingest
+['route', 'llm', 'slm', 'vision/analyze', 'vision/segment', 'generate/visual',
+ 'actions/execute', 'rag/query', 'rag/ingest'].forEach((seg) => {
+  app.post(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
+    try {
+      const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { method: 'POST', body: req.body });
+      return res.status(ok ? 200 : 502).json(data);
+    } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
+  });
+});
+
 // ── Agent fleet controls ──────────────────────────────────────────────────────
 app.post('/api/agents/start-all', requireAuth, (req, res) => {
   res.json({ ok: true, action: 'start-all' });
@@ -3441,6 +3481,7 @@ app.post('/api/tasks/run', requireAuth, async (req, res) => {
     try {
       const pyResult = await requestPythonJSON('/api/tasks/run', 'POST', {
         task: message,
+        goal: message,
         user_id: userId,
         workflow_run: run.run_id,
         memory_context: compactMemoryTraceForModel(memoryTrace),

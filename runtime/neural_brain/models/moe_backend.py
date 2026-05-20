@@ -13,8 +13,8 @@ def route_moe(request: dict) -> dict:
         if not prompt:
             return {"status": "error", "error": "Missing prompt"}
 
-        # Try local Ollama MoE
-        model = "mixtral:8x7b-instruct-q4_K_M"
+        # Try local Ollama MoE (resolver-injected model preferred — hardware-aware)
+        model = request.get("model") or "mixtral:8x7b-instruct-q4_K_M"
         try:
             response = ollama.generate(
                 model=model,

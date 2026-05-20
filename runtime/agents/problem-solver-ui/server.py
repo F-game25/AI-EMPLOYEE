@@ -2417,9 +2417,11 @@ except Exception as _feat_err:
 # ── Neural Brain API (LangGraph + Mem0 + Neo4j cognitive stack) ────
 try:
     from neural_brain.api import router as _neural_brain_router, forge_compat_router as _forge_compat_router
+    from neural_brain.api import model_fabric_router as _model_fabric_router
     app.include_router(_neural_brain_router)
     app.include_router(_forge_compat_router)
-    logger.info("✅ Neural Brain API loaded")
+    app.include_router(_model_fabric_router)
+    logger.info("✅ Neural Brain API + Model Fabric loaded")
 except Exception as _nb_err:
     logger.warning("⚠️  Neural Brain API failed to load: %s", _nb_err)
 
