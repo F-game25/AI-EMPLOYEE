@@ -35,7 +35,9 @@ _ARCH_PREFS: dict[str, list[str]] = {
     # Mixture-of-experts style model (rare locally) — fall back to a strong dense model
     "MoE":  ["mixtral", "qwen2.5-moe", "qwen3.5", "qwen2.5-coder:14b", "llama3.1"],
     # Vision-language
-    "VLM":  ["llava", "qwen2.5-vl", "bakllava", "moondream"],
+    # moondream first: reliable on ollama 0.21.x / 8GB; llava's vision runner
+    # segfaults on some ollama builds, so it's a lower-priority fallback.
+    "VLM":  ["moondream", "qwen2.5-vl", "bakllava", "llava"],
     # Action / tool-calling model — needs solid reasoning, prefer coder/instruct
     "LAM":  ["qwen2.5-coder:14b", "qwen2.5:7b", "llama3.1", "llama3.2"],
 }
@@ -141,15 +143,28 @@ def resolve_models() -> dict:
         "reason": "ollama-embed" if embed else "local sentence-transformers fallback",
     }
 
-    # LCM (visual generation) + SAM (segmentation): require non-Ollama backends.
-    resolved["LCM"] = {
-        "model": None, "provider": None, "available": False,
-        "reason": "no local diffusion backend (ComfyUI/Diffusers) configured",
-    }
-    resolved["SAM"] = {
-        "model": None, "provider": None, "available": False,
-        "reason": "no Segment-Anything backend configured",
-    }
+    # LCM (visual generation) + SAM (segmentation): local diffusers / segment-anything.
+    # Available when the backing library is importable (weights auto-download on first use).
+    import importlib.util as _ilu
+    _has = lambda *m: all(_ilu.find_spec(x) is not None for x in m)  # noqa: E731
+    if _has("diffusers", "torch"):
+        resolved["LCM"] = {
+            "model": os.getenv("LCM_MODEL_ID", "SimianLuo/LCM_Dreamshaper_v7"),
+            "provider": "diffusers-local", "available": True,
+            "reason": "local diffusers (GPU)" if hw.get("gpu") else "local diffusers (CPU — slow)",
+        }
+    else:
+        resolved["LCM"] = {"model": None, "provider": None, "available": False,
+                           "reason": "diffusers not installed (pip install diffusers)"}
+    if _has("segment_anything", "torch", "cv2"):
+        resolved["SAM"] = {
+            "model": os.getenv("SAM_MODEL_TYPE", "vit_b"),
+            "provider": "segment-anything-local", "available": True,
+            "reason": "local segment-anything (weights auto-download)",
+        }
+    else:
+        resolved["SAM"] = {"model": None, "provider": None, "available": False,
+                           "reason": "segment-anything not installed (pip install segment-anything)"}
 
     return {"tier": hw["tier"], "hardware": hw, "installed": installed, "resolved": resolved}
 
