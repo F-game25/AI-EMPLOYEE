@@ -1708,7 +1708,7 @@ app.post('/api/auth/token', (req, res) => {
   if (body.secret !== JWT_SECRET) {
     return res.status(401).json({ ok: false, error: 'Invalid secret' });
   }
-  const token = jwt.sign({ type: 'access', role: 'admin', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const token = jwt.sign({ sub: 'admin', type: 'access', role: 'admin', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
   res.json({ ok: true, token, expires_in: JWT_EXPIRES_IN });
 });
 
@@ -1719,9 +1719,24 @@ app.get('/api/auth/auto-token', (req, res) => {
   const rawIp = req.socket?.remoteAddress || '';
   const isLocal = rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1';
   if (!isLocal) return res.status(403).json({ ok: false, error: 'Only available from localhost' });
-  const token = jwt.sign({ type: 'access', role: 'operator', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' }, JWT_SECRET, { expiresIn: '8h' });
+  const token = jwt.sign({ sub: 'operator', type: 'access', role: 'operator', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' }, JWT_SECRET, { expiresIn: '8h' });
   res.json({ ok: true, token });
 });
+
+function pythonServiceAuthorization(req) {
+  const payload = req.jwtPayload || {};
+  const sub = payload.sub || payload.user_id || 'operator';
+  const token = jwt.sign({
+    sub,
+    type: 'access',
+    role: payload.role || 'operator',
+    iss: 'ai-employee-node',
+    tenant_id: payload.tenant_id || req.tenant?.id || 'default',
+    org_name: payload.org_name || 'Local',
+    service: 'node-gateway',
+  }, JWT_SECRET, { expiresIn: '10m' });
+  return `Bearer ${token}`;
+}
 
 // GET /api/identity/public — public identity info (no auth required)
 // Returns instance name and color palette for onboarding/branding
@@ -2027,6 +2042,17 @@ async function checkNeuralGraphReady() {
 
 app.get('/api/readiness', async (req, res) => {
   const degradedReasons = [];
+  // Self-heal: the boot poll for Python is one-shot. If it's marked not-ready,
+  // re-probe live so readiness recovers when Python comes up after Node.
+  if (!_readiness.pythonReady) {
+    try {
+      const hr = await Promise.race([
+        fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/health`),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 1200)),
+      ]);
+      if (hr?.ok) { _readiness.pythonReady = true; if (_readiness.phase === 'BOOTING') _readiness.phase = 'READY'; }
+    } catch (_) {}
+  }
   const graphProbe = await checkNeuralGraphReady();
   const neuralBrainReady = _readiness.pythonReady === true;
   const graphReady = graphProbe.ok === true;
@@ -2091,16 +2117,43 @@ app.get('/api/capabilities/status', requireAuth, (_req, res) => {
 });
 
 // ── Neural Brain data endpoints (proxy to Python if up, fallback to stubs) ───
+// Internal service token so Node→Python proxy calls pass the Python auth gate.
+// Signed with the shared JWT_SECRET; short-lived and minted on demand (cached 5 min).
+let _internalToken = null;
+let _internalTokenExp = 0;
+function internalServiceToken() {
+  const now = Date.now();
+  if (_internalToken && now < _internalTokenExp) return _internalToken;
+  _internalToken = jwt.sign(
+    { type: 'access', role: 'service', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local', svc: 'node-proxy' },
+    JWT_SECRET,
+    { expiresIn: '10m' },
+  );
+  _internalTokenExp = now + 5 * 60 * 1000; // refresh well before expiry
+  return _internalToken;
+}
+
 async function proxyNeuralBrain(path, fallback) {
   try {
     const r = await Promise.race([
-      fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}${path}`),
+      fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}${path}`, {
+        headers: { Authorization: `Bearer ${internalServiceToken()}` },
+      }),
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 1500)),
     ]);
     if (r?.ok) return r.json();
   } catch (_) {}
   return fallback;
 }
+
+// Rich native-graph proxy (89+ nodes) — the snapshot endpoint can be empty, so expose
+// the live graph directly. Authenticated via the internal service token in proxyNeuralBrain.
+app.get('/api/neural-brain/graph', async (req, res) => {
+  const depth = Number(req.query.depth) || 2;
+  const limit = Number(req.query.limit) || 200;
+  const data = await proxyNeuralBrain(`/api/neural-brain/graph?depth=${depth}&limit=${limit}`, { nodes: [], links: [] });
+  res.json(normalizeDashboardGraph(data));
+});
 
 app.get('/api/neural-brain/memory/status', async (req, res) => {
   const data = await proxyNeuralBrain('/api/neural-brain/memory/status', {
@@ -3261,7 +3314,7 @@ app.post('/api/automation/control', requireAuth, (req, res) => {
 app.post('/api/money/content-pipeline', requireAuth, async (req, res) => {
   try {
     const result = await requestPythonJSON('/api/money/content-pipeline', 'POST', req.body || {}, {
-      headers: req.headers.authorization ? { Authorization: req.headers.authorization } : {},
+      headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 30000,
     });
     if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
@@ -3275,7 +3328,7 @@ app.post('/api/money/content-pipeline', requireAuth, async (req, res) => {
 app.post('/api/money/lead-pipeline', requireAuth, async (req, res) => {
   try {
     const result = await requestPythonJSON('/api/money/lead-pipeline', 'POST', req.body || {}, {
-      headers: req.headers.authorization ? { Authorization: req.headers.authorization } : {},
+      headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 30000,
     });
     if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
@@ -3289,7 +3342,7 @@ app.post('/api/money/lead-pipeline', requireAuth, async (req, res) => {
 app.post('/api/money/opportunity-pipeline', requireAuth, async (req, res) => {
   try {
     const result = await requestPythonJSON('/api/money/opportunity-pipeline', 'POST', req.body || {}, {
-      headers: req.headers.authorization ? { Authorization: req.headers.authorization } : {},
+      headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 30000,
     });
     if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
@@ -3303,7 +3356,7 @@ app.post('/api/money/opportunity-pipeline', requireAuth, async (req, res) => {
 app.post('/api/money/affiliate-draft', requireAuth, async (req, res) => {
   try {
     const result = await requestPythonJSON('/api/money/affiliate-draft', 'POST', req.body || {}, {
-      headers: req.headers.authorization ? { Authorization: req.headers.authorization } : {},
+      headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 30000,
     });
     if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
@@ -3334,7 +3387,7 @@ app.post('/api/tasks/run', requireAuth, async (req, res) => {
         message: body.task,
         userId: body.user_id || (req.jwtPayload?.sub ? `user:${req.jwtPayload.sub}` : 'user:default'),
         tenantId: req.tenant?.id || req.jwtPayload?.tenant_id || 'default',
-        authHeader: req.headers.authorization || '',
+        authHeader: pythonServiceAuthorization(req),
         labels: ['http'],
         executionTimeoutMs: 3000,
       });
@@ -3392,7 +3445,7 @@ app.post('/api/tasks/run', requireAuth, async (req, res) => {
         workflow_run: run.run_id,
         memory_context: compactMemoryTraceForModel(memoryTrace),
       }, {
-        headers: req.headers.authorization ? { Authorization: req.headers.authorization } : {},
+        headers: { Authorization: pythonServiceAuthorization(req) },
         timeoutMs: 30000,
       });
 
@@ -3522,7 +3575,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
         modelRoute,
         userId: chatUserId,
         tenantId: req.tenant?.id || req.jwtPayload?.tenant_id || 'default',
-        authHeader: req.headers.authorization || '',
+        authHeader: pythonServiceAuthorization(req),
         labels: ['http'],
         executionTimeoutMs: 3000,
       });

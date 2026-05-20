@@ -590,17 +590,15 @@ export default function NeuralNetworkPage() {
     }
     if (nodes?.length) { setHydrated(true); return () => { cancelled = true } }
     Promise.all([
+      fetch('/api/neural-brain/graph?depth=2&limit=300').then(r => r.ok ? r.json() : null).catch(() => null),
       fetch('/api/brain/graph').then(r => r.ok ? r.json() : null).catch(() => null),
       fetch('/api/neural-brain/graph/snapshot').then(r => r.ok ? r.json() : null).catch(() => null),
-    ]).then(([brainGraph, snapshot]) => {
+    ]).then((payloads) => {
       if (cancelled) return
-      const primary = normalizeGraphPayload(brainGraph || {})
-      const fallback = normalizeGraphPayload(snapshot || {})
-      if (primary.nodes.length) {
-        setGraph(primary)
-      } else if (fallback.nodes.length) {
-        setGraph(fallback)
-      }
+      // Pick the richest available source (native memory graph → in-memory brain → snapshot)
+      const candidates = payloads.map(p => normalizeGraphPayload(p || {}))
+      const best = candidates.reduce((a, b) => (b.nodes.length > a.nodes.length ? b : a), { nodes: [], links: [] })
+      if (best.nodes.length) setGraph(best)
       setHydrated(true)
     })
     return () => { cancelled = true }
