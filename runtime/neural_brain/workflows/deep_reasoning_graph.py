@@ -1,8 +1,8 @@
 """LangGraph StateGraph for multi-step reasoning."""
 from langgraph.graph import StateGraph, END
 
-from runtime.neural_brain.core.brain_state import BrainState
-from runtime.neural_brain.workflows.nodes import (
+from neural_brain.core.brain_state import BrainState
+from neural_brain.workflows.nodes import (
     classify_node,
     retrieve_node,
     plan_node,
@@ -57,4 +57,20 @@ def build_reasoning_graph():
     # Set entry point
     graph.set_entry_point("classify")
 
-    return graph.compile()
+    # Wire checkpointer — Neo4j for persistence, MemorySaver as fallback
+    checkpointer = None
+    try:
+        from neural_brain.graph.neo4jsaver_wrapper import get_checkpointer
+        from neural_brain.config import get_settings
+        checkpointer = get_checkpointer(get_settings())
+    except Exception:
+        pass
+
+    if checkpointer is None:
+        try:
+            from langgraph.checkpoint.memory import MemorySaver
+            checkpointer = MemorySaver()
+        except Exception:
+            pass
+
+    return graph.compile(checkpointer=checkpointer)

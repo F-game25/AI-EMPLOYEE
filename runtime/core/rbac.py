@@ -1,123 +1,149 @@
-"""Role-based access control system."""
-from enum import Enum
-from typing import Optional, Set
-from dataclasses import dataclass
-from datetime import datetime
+"""Role-Based Access Control — policy engine for FastAPI routes.
 
-from core.tenancy import get_current_tenant
-from core.database import get_database
+Permission string format: '<resource>:<action>' or '<resource>:*' (wildcard).
+
+Wildcard resolution order:
+  1. Role has '*'              → grants everything.
+  2. Exact string match        → grants.
+  3. Role has '<res>:*'        → grants any '<res>:<action>'.
+  4. Permission is '<res>:*'   → granted if role has any '<res>:<x>'.
+
+Usage in server.py::
+
+    from core.rbac import require_permission
+
+    @app.post("/api/ascend/mode")
+    def ascend_set_mode(payload: dict,
+                        _auth: None = Depends(require_auth),
+                        _rbac=require_permission("admin:*", require_auth)):
+        ...
+
+Alternatively use the pre-wired factory after registering require_auth::
+
+    from core.rbac import make_permission_dep
+    require_admin = make_permission_dep("admin:*", require_auth)
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable
+
+from fastapi import Depends, HTTPException, Request, status
+
+# ── Role → permission grants ──────────────────────────────────────────────────
+
+ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "admin": {"*"},
+    "operator": {
+        "tasks:*",
+        "agents:*",
+        "research:read",
+        "vault:read",
+        "settings:write",
+    },
+    "analyst": {
+        "tasks:read",
+        "research:*",
+        "telemetry:read",
+        "vault:read",
+    },
+    "viewer": {
+        "tasks:read",
+        "agents:read",
+        "telemetry:read",
+    },
+    "support": {
+        "tasks:read",
+        "agents:read",
+        "vault:read",
+    },
+}
+
+# ── Core permission check ─────────────────────────────────────────────────────
 
 
-class Role(str, Enum):
-    """User roles in the system."""
-    ADMIN = "admin"
-    MEMBER = "member"
-    VIEWER = "viewer"
+def has_permission(role: str, permission: str) -> bool:
+    """Return True if *role* is granted *permission*.
+
+    Args:
+        role: one of admin | operator | analyst | viewer | support
+        permission: e.g. "tasks:read", "vault:write", "admin:*"
+
+    Returns:
+        bool — True if the role's grant set covers the requested permission.
+    """
+    grants: set[str] = ROLE_PERMISSIONS.get(role, set())
+
+    if "*" in grants:          # super-wildcard (admin)
+        return True
+    if permission in grants:   # exact match
+        return True
+
+    resource = permission.split(":", 1)[0]
+
+    if f"{resource}:*" in grants:   # resource-level wildcard in grants
+        return True
+
+    # Requested permission is itself a wildcard — allow if role has *any* grant
+    # on that resource (e.g. operator requesting "tasks:*" when they have "tasks:*")
+    if permission.endswith(":*"):
+        return any(g == "*" or g.startswith(f"{resource}:") for g in grants)
+
+    return False
 
 
-@dataclass
-class RolePermission:
-    """Defines what actions a role can perform."""
-    role: Role
-    can_execute_agents: bool
-    can_manage_users: bool
-    can_manage_billing: bool
-    can_delete_data: bool
-    can_view_audit_logs: bool
-
-    @staticmethod
-    def get_permissions(role: Role) -> "RolePermission":
-        """Get permission set for a role."""
-        permissions = {
-            Role.ADMIN: RolePermission(
-                role=Role.ADMIN,
-                can_execute_agents=True,
-                can_manage_users=True,
-                can_manage_billing=True,
-                can_delete_data=True,
-                can_view_audit_logs=True,
-            ),
-            Role.MEMBER: RolePermission(
-                role=Role.MEMBER,
-                can_execute_agents=True,
-                can_manage_users=False,
-                can_manage_billing=False,
-                can_delete_data=False,
-                can_view_audit_logs=False,
-            ),
-            Role.VIEWER: RolePermission(
-                role=Role.VIEWER,
-                can_execute_agents=False,
-                can_manage_users=False,
-                can_manage_billing=False,
-                can_delete_data=False,
-                can_view_audit_logs=False,
-            ),
-        }
-        return permissions[role]
-
-    def require(self, permission: str) -> bool:
-        """Check if role has a specific permission."""
-        perm_attr = f"can_{permission}"
-        return getattr(self, perm_attr, False)
+# ── FastAPI dependency factory ────────────────────────────────────────────────
 
 
-class RBACManager:
-    """Manage user roles and permissions."""
+def require_permission(permission: str, auth_dep: Callable | None = None) -> Any:
+    """Build a FastAPI ``Depends`` that enforces *permission*.
 
-    def __init__(self):
-        self.db = get_database()
+    Must be called with the *auth_dep* callable (e.g. ``require_auth`` from
+    server.py) so it can chain authentication before the permission check.
 
-    def assign_role(self, user_id: str, role: Role, tenant_id: str) -> bool:
-        """Assign a role to a user in a tenant."""
-        try:
-            self.db.execute(
-                """
-                INSERT INTO user_roles (user_id, tenant_id, role, assigned_at)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (user_id, tenant_id) DO UPDATE
-                SET role = %s, assigned_at = %s
-                """,
-                (user_id, tenant_id, role.value, datetime.utcnow(), role.value, datetime.utcnow()),
-                tenant_id=tenant_id,
+    Args:
+        permission: permission string, e.g. "admin:*", "research:*"
+        auth_dep: the ``require_auth`` async function from server.py.
+                  If None, authentication is skipped (not recommended for
+                  production; only useful when REQUIRE_AUTH=0).
+
+    Returns:
+        A ``Depends(...)`` instance suitable as a FastAPI route parameter default.
+
+    Example::
+
+        @app.post("/api/settings")
+        def save_settings(body: _SettingsUpdateRequest,
+                          _rbac=require_permission("settings:write", require_auth)):
+            ...
+    """
+    if auth_dep is None:
+        # Fallback: no auth dep wired — just check role from request state.
+        async def _check_no_auth(request: Request) -> None:
+            role: str = getattr(request.state, "role", "viewer")
+            if not has_permission(role, permission):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Role '{role}' lacks permission '{permission}'",
+                )
+
+        return Depends(_check_no_auth)
+
+    # Normal path: chain off auth_dep so authn always runs first.
+    async def _check(
+        request: Request,
+        token_data: Any = Depends(auth_dep),
+    ) -> Any:
+        # token_data is None when REQUIRE_AUTH=0 (pass-through mode).
+        role: str = "viewer"
+        if isinstance(token_data, dict):
+            role = token_data.get("role", "viewer")
+
+        if not has_permission(role, permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{role}' lacks permission '{permission}'",
             )
-            return True
-        except Exception as e:
-            print(f"Failed to assign role: {e}")
-            return False
+        return token_data
 
-    def get_user_role(self, user_id: str, tenant_id: str) -> Optional[Role]:
-        """Get user's role in a tenant."""
-        try:
-            result = self.db.execute(
-                "SELECT role FROM user_roles WHERE user_id = %s AND tenant_id = %s",
-                (user_id, tenant_id),
-                tenant_id=tenant_id,
-            )
-            if result:
-                return Role(result[0].get("role"))
-            return Role.VIEWER  # default to viewer
-        except Exception:
-            return Role.VIEWER
-
-    def has_permission(self, user_id: str, tenant_id: str, permission: str) -> bool:
-        """Check if user has a specific permission."""
-        role = self.get_user_role(user_id, tenant_id)
-        perms = RolePermission.get_permissions(role)
-        return perms.require(permission)
-
-    def list_user_roles(self, tenant_id: str) -> list[dict]:
-        """List all user roles in a tenant."""
-        try:
-            return self.db.execute(
-                "SELECT user_id, role, assigned_at FROM user_roles WHERE tenant_id = %s ORDER BY assigned_at DESC",
-                (),
-                tenant_id=tenant_id,
-            )
-        except Exception:
-            return []
-
-
-def get_rbac_manager() -> RBACManager:
-    """Get global RBAC manager instance."""
-    return RBACManager()
+    return Depends(_check)

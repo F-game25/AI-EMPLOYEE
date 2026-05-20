@@ -109,6 +109,27 @@ router.post('/upload', requireTenant(), upload.array('files', 100), async (req, 
       }
     }
 
+    // Trigger async ingestion for each uploaded file (non-blocking)
+    for (const f of uploadedFiles) {
+      const filePath = path.join(uploadDir, f.fileName);
+      const tenantId = f.tenantId || 'default';
+      setImmediate(async () => {
+        try {
+          const { execFile } = require('child_process');
+          execFile(process.env.PYTHON_BIN || 'python3', [
+            path.join(__dirname, '../../runtime/core/document_ingestion_pipeline.py'),
+            '--file', filePath,
+            '--tenant', tenantId
+          ], { timeout: 120000 }, (err, stdout, stderr) => {
+            if (err) console.error('[ingestion] failed:', err.message);
+            else console.log('[ingestion] done:', stdout.trim());
+          });
+        } catch (e) {
+          console.error('[ingestion] spawn error:', e.message);
+        }
+      });
+    }
+
     res.status(200).json({
       ok: true,
       files: uploadedFiles,
@@ -314,6 +335,69 @@ router.delete('/files/:fileId', requireTenant(), async (req, res) => {
       error: 'Delete failed',
       details: error.message
     });
+  }
+});
+
+/**
+ * POST /api/workspace/analyze
+ * Re-trigger ingestion pipeline for an already-uploaded file
+ */
+router.post('/analyze', requireTenant(), async (req, res) => {
+  try {
+    const tenantId = req.tenant.tenantId;
+    const { fileId } = req.body || {};
+    if (!fileId) return res.status(400).json({ ok: false, error: 'fileId required' });
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(fileId)) return res.status(400).json({ ok: false, error: 'Invalid fileId format' });
+
+    const uploadDir = getUploadDir(tenantId);
+    const metadata = await loadMetadata(uploadDir, fileId);
+    if (!metadata) return res.status(404).json({ ok: false, error: 'File not found' });
+
+    const filePath = path.join(uploadDir, metadata.fileName);
+    try { await fs.access(filePath); } catch {
+      return res.status(404).json({ ok: false, error: 'File data not found on disk' });
+    }
+
+    // Spawn ingestion non-blocking
+    const { execFile } = require('child_process');
+    execFile(process.env.PYTHON_BIN || 'python3', [
+      path.join(__dirname, '../../runtime/core/document_ingestion_pipeline.py'),
+      '--file', filePath,
+      '--tenant', tenantId
+    ], { timeout: 120000 }, (err, stdout) => {
+      if (err) console.error('[ingestion] re-analyze failed:', err.message);
+      else console.log('[ingestion] re-analyze done:', stdout.trim());
+    });
+
+    res.status(202).json({ ok: true, message: 'Ingestion queued', fileId, file: metadata.originalName });
+  } catch (error) {
+    console.error('[WORKSPACE] Analyze error:', error);
+    res.status(500).json({ ok: false, error: 'Analyze failed', details: error.message });
+  }
+});
+
+/**
+ * GET /api/workspace/ingestion-log
+ * Return the last 50 ingestion log entries
+ */
+router.get('/ingestion-log', requireTenant(), async (req, res) => {
+  try {
+    const logPath = path.join(__dirname, '../../state/ingestion_log.jsonl');
+    let entries = [];
+    try {
+      const raw = await fs.readFile(logPath, 'utf8');
+      entries = raw.trim().split('\n').filter(Boolean).slice(-50).map(line => {
+        try { return JSON.parse(line); } catch { return null; }
+      }).filter(Boolean);
+    } catch {
+      // File doesn't exist yet — return empty list
+    }
+    res.status(200).json({ ok: true, entries, count: entries.length });
+  } catch (error) {
+    console.error('[WORKSPACE] Ingestion log error:', error);
+    res.status(500).json({ ok: false, error: 'Failed to read ingestion log', details: error.message });
   }
 });
 

@@ -129,6 +129,16 @@ class ResearchAgent:
         for item in payload.get("actionable_playbooks", [])[:3]:
             get_memory_index().add_memory(f"{topic} playbook: {item}", importance=0.85)
         get_learning_engine().add_conversation_message(role="system", message=f"learned topic: {topic}")
+
+        # Delegate to AutoResearchAgent for live web fetch + 3-layer persistence
+        try:
+            import asyncio as _asyncio
+            from core.auto_research_agent import get_auto_researcher
+            researcher = get_auto_researcher()
+            web_result = _asyncio.run(researcher.research(gaps=[topic], goal=f"learn topic: {topic}", hop=0))
+            payload["live_research"] = web_result
+        except Exception:
+            pass
         return payload
 
 

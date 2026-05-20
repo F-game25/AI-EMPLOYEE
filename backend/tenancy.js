@@ -9,7 +9,10 @@ const jwt = require('jsonwebtoken');
 
 // Request-scoped tenant store (using async local storage would be better for production)
 // For now, we attach tenant directly to request object
-let jwtSecret = process.env.JWT_SECRET_KEY || 'default-secret';
+const jwtSecret = process.env.JWT_SECRET_KEY;
+if (!jwtSecret) {
+  throw new Error('[tenancy] JWT_SECRET_KEY env var is required — refusing to start with default secret');
+}
 
 /**
  * Middleware to extract tenant from JWT and attach to request
@@ -20,6 +23,7 @@ function tenantMiddleware(secret = jwtSecret) {
     '/health',
     '/health/full',
     '/api/health',
+    '/api/runtime/identity',
     '/api/auth/token',
     '/auth/register',
     '/auth/login',
@@ -32,7 +36,15 @@ function tenantMiddleware(secret = jwtSecret) {
     '/api/identity/finalize',
     '/api/bootstrap/status',
     '/api/bootstrap/start',
-    '/api/settings',
+    '/api/auth/auto-token',
+    '/api/neural-brain/memory/status',
+    '/api/neural-brain/memory/list',
+    '/api/neural-brain/graph/status',
+    '/api/neural-brain/graph/snapshot',
+    '/api/neural-brain/threads',
+    '/api/neural-brain/forge/evolution/status',
+    '/api/readiness',
+    '/api/readiness/deep',
   ]);
 
   // Static asset extensions (frontend bundle) — never require auth
@@ -65,12 +77,7 @@ function tenantMiddleware(secret = jwtSecret) {
     const token = authHeader.slice(7); // Remove "Bearer " prefix
 
     try {
-      // Decode JWT without signature verification (signature verified elsewhere)
-      const payload = jwt.decode(token);
-
-      if (!payload) {
-        return res.status(401).json({ detail: 'Invalid token' });
-      }
+      const payload = jwt.verify(token, secret);
 
       const tenantId = payload.tenant_id;
       const orgName = payload.org_name || '';
@@ -82,14 +89,18 @@ function tenantMiddleware(secret = jwtSecret) {
 
       // Attach tenant context to request
       req.tenant = {
+        id: tenantId,
         tenantId,
+        tenant_id: tenantId,
         orgName,
+        org_name: orgName,
         email,
       };
+      req.tenantId = tenantId;
 
       return next();
     } catch (err) {
-      return res.status(401).json({ detail: `Invalid token: ${err.message}` });
+      return res.status(401).json({ detail: 'Invalid or expired token' });
     }
   };
 }

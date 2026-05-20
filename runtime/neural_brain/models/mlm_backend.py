@@ -19,7 +19,7 @@ def route_mlm(request: dict) -> dict:
 def _embed(request: dict) -> dict:
     """Generate embeddings for texts."""
     try:
-        from runtime.neural_brain.memory.embedding_provider import EmbeddingProvider
+        from neural_brain.memory.embedding_provider import EmbeddingProvider
 
         texts = request.get("texts", [])
         if not texts:

@@ -2,6 +2,7 @@
 import os
 import subprocess
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -148,17 +149,94 @@ class BackupManager:
                     logger.warning(f"Failed to delete {backup_file}: {e}")
 
     def list_backups(self) -> list[dict]:
-        """List all available backups."""
+        """List local backup files with size, age, and creation time."""
+        now = datetime.utcnow()
         backups = []
-        for backup_file in sorted(self.backup_dir.glob("ai_employee_*.dump"), reverse=True):
-            stat = backup_file.stat()
+        for f in sorted(self.backup_dir.glob("ai_employee_*"), reverse=True):
+            if f.suffix not in (".dump", ".sql"):
+                continue
+            stat = f.stat()
+            created_at = datetime.utcfromtimestamp(stat.st_mtime)
             backups.append({
-                "file": backup_file.name,
-                "path": str(backup_file),
-                "size_mb": stat.st_size / (1024 * 1024),
-                "created": datetime.utcfromtimestamp(stat.st_mtime).isoformat()
+                "file": f.name,
+                "path": str(f),
+                "size_mb": round(stat.st_size / (1024 * 1024), 3),
+                "age_days": (now - created_at).days,
+                "created_at": created_at.isoformat(),
             })
         return backups
+
+    # ── Cloud upload methods ──────────────────────────────────────────────────
+
+    def upload_to_s3(self, backup_file: str) -> bool:
+        """Upload backup to S3. Returns False gracefully if boto3 absent or bucket unset."""
+        bucket = os.environ.get("S3_BACKUP_BUCKET", "")
+        if not bucket:
+            logger.warning("S3_BACKUP_BUCKET not set — skipping S3 upload")
+            return False
+        try:
+            import boto3  # type: ignore
+        except ImportError:
+            logger.warning("boto3 not installed — skipping S3 upload")
+            return False
+        try:
+            path = Path(backup_file)
+            key = f"backups/{path.name}"
+            s3 = boto3.client("s3")
+            s3.upload_file(str(path), bucket, key)
+            logger.info(f"Uploaded to s3://{bucket}/{key}")
+            return True
+        except Exception as e:
+            logger.error(f"S3 upload failed: {e}")
+            return False
+
+    def upload_to_backblaze(self, backup_file: str) -> bool:
+        """Upload backup to Backblaze B2. Returns False gracefully if b2sdk absent or creds unset."""
+        key_id = os.environ.get("B2_APPLICATION_KEY_ID", "")
+        app_key = os.environ.get("B2_APPLICATION_KEY", "")
+        bucket_name = os.environ.get("B2_BUCKET_NAME", "")
+        if not all([key_id, app_key, bucket_name]):
+            logger.warning("B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY / B2_BUCKET_NAME not fully set — skipping B2 upload")
+            return False
+        try:
+            from b2sdk.v2 import InMemoryAccountInfo, B2Api  # type: ignore
+        except ImportError:
+            logger.warning("b2sdk not installed — skipping Backblaze upload")
+            return False
+        try:
+            info = InMemoryAccountInfo()
+            api = B2Api(info)
+            api.authorize_account("production", key_id, app_key)
+            bucket = api.get_bucket_by_name(bucket_name)
+            path = Path(backup_file)
+            bucket.upload_local_file(
+                local_file=str(path),
+                file_name=f"backups/{path.name}",
+            )
+            logger.info(f"Uploaded to b2://{bucket_name}/backups/{path.name}")
+            return True
+        except Exception as e:
+            logger.error(f"Backblaze upload failed: {e}")
+            return False
+
+    def full_backup_cycle(self, upload: bool = True) -> dict:
+        """Run create_backup + optional cloud uploads. Returns result summary dict."""
+        start = time.monotonic()
+        backup_file = self.create_backup()
+        if not backup_file:
+            return {"file": "", "size_mb": 0.0, "s3_ok": False, "b2_ok": False, "duration_s": round(time.monotonic() - start, 2)}
+
+        size_mb = round(Path(backup_file).stat().st_size / (1024 * 1024), 3)
+        s3_ok = self.upload_to_s3(backup_file) if upload else False
+        b2_ok = self.upload_to_backblaze(backup_file) if upload else False
+
+        return {
+            "file": backup_file,
+            "size_mb": size_mb,
+            "s3_ok": s3_ok,
+            "b2_ok": b2_ok,
+            "duration_s": round(time.monotonic() - start, 2),
+        }
 
 
 def get_backup_manager() -> BackupManager:

@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aeternus-nexus.fullname" . }}-python
+  labels:
+    app.kubernetes.io/component: python-backend
+    {{- include "aeternus-nexus.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.python.enabled }}
+  replicas: {{ .Values.replicaCount.python }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: python-backend
+      {{- include "aeternus-nexus.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: python-backend
+        {{- include "aeternus-nexus.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "aeternus-nexus.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: python-backend
+          image: "{{ .Values.image.repository }}-python:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: {{ .Values.containerSecurityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.containerSecurityContext.readOnlyRootFilesystem }}
+            capabilities:
+              drop: {{ toJson .Values.containerSecurityContext.capabilities.drop }}
+          ports:
+            - containerPort: {{ .Values.service.python.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "aeternus-nexus.fullname" . }}-config
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.anthropicKeyName }}
+                  key: api-key
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.resources.python | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.service.python.port }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.service.python.port }}
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 3

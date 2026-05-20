@@ -57,6 +57,11 @@ from memory.vector_store import VectorStore, get_vector_store
 from memory.short_term_cache import ShortTermCache, get_short_term_cache
 from memory.strategy_store import StrategyStore, get_strategy_store
 
+try:
+    from neural_brain.graph.native_graph_store import NativeGraphStore
+except Exception:  # pragma: no cover - import path can differ in legacy tools
+    NativeGraphStore = None  # type: ignore[assignment]
+
 logger = logging.getLogger("memory_router")
 
 _LOCK = threading.RLock()
@@ -96,10 +101,12 @@ class MemoryRouter:
         self._vs = vector_store or get_vector_store()
         self._cache = cache or get_short_term_cache()
         self._ss = strategy_store or get_strategy_store()
+        self._graph = NativeGraphStore() if NativeGraphStore is not None else None
         self._stats: dict[str, int] = {
             "cache_writes": 0,
             "vector_writes": 0,
             "strategy_writes": 0,
+            "graph_writes": 0,
             "cache_reads": 0,
             "vector_reads": 0,
         }
@@ -156,6 +163,20 @@ class MemoryRouter:
                 self._vs.store(key, text, metadata=metadata, importance=importance)
                 self._stats["vector_writes"] += 1
                 vector_stored = True
+                if self._graph is not None:
+                    try:
+                        self._graph.upsert_node(
+                            key,
+                            metadata.get("title") or key,
+                            type=mt,
+                            group="memory",
+                            source=source or "python_memory_router",
+                            confidence=float(importance),
+                            metadata={**metadata, "content": text},
+                        )
+                        self._stats["graph_writes"] += 1
+                    except Exception as e:
+                        logger.debug("native graph memory write skipped: %s", e)
 
         return {
             "cache_key": key,
@@ -310,6 +331,20 @@ class MemoryRouter:
                     importance=0.6,
                 )
                 self._stats["vector_writes"] += 1
+                if self._graph is not None:
+                    try:
+                        self._graph.upsert_node(
+                            ep_key,
+                            action,
+                            type="episodic",
+                            group="memory",
+                            source="python_memory_router",
+                            confidence=0.6,
+                            metadata={"content": summary, "action": action, "goal_type": goal_type},
+                        )
+                        self._stats["graph_writes"] += 1
+                    except Exception as e:
+                        logger.debug("native graph outcome write skipped: %s", e)
                 promoted = True
 
         return {
@@ -344,6 +379,11 @@ class MemoryRouter:
                     "episodic": self._vs.count(memory_type="episodic"),
                     "semantic": self._vs.count(memory_type="semantic"),
                     "procedural": self._vs.count(memory_type="procedural"),
+                },
+                "graph": self._graph.stats() if self._graph is not None else {
+                    "available": False,
+                    "backend": "native_sqlite_graph",
+                    "error": "native graph store unavailable",
                 },
                 "ts": _ts(),
             }

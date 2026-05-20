@@ -1,0 +1,56 @@
+{
+  "name": "nexus-mobile",
+  "version": "1.0.0",
+  "description": "NEXUS OS — Mobile client for AI-EMPLOYEE system",
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "build:android": "eas build --platform android",
+    "build:ios": "eas build --platform ios",
+    "build:preview": "eas build --profile preview --platform all",
+    "lint": "eslint . --ext .js,.jsx",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "expo": "~51.0.0",
+    "expo-status-bar": "~1.12.1",
+    "expo-secure-store": "~13.0.2",
+    "expo-constants": "~16.0.2",
+    "expo-local-authentication": "~14.0.1",
+    "expo-notifications": "~0.28.14",
+    "expo-device": "~6.0.2",
+    "expo-application": "~5.9.1",
+    "expo-clipboard": "~6.0.3",
+    "expo-haptics": "~13.0.1",
+    "expo-linear-gradient": "~13.0.2",
+    "react": "18.2.0",
+    "react-native": "0.74.5",
+    "@react-navigation/native": "^6.1.17",
+    "@react-navigation/native-stack": "^6.9.17",
+    "@react-navigation/bottom-tabs": "^6.5.20",
+    "@react-navigation/stack": "^6.3.29",
+    "react-native-screens": "~3.31.1",
+    "react-native-safe-area-context": "4.10.5",
+    "react-native-gesture-handler": "~2.16.1",
+    "react-native-reanimated": "~3.10.1",
+    "react-native-svg": "15.2.0",
+    "zustand": "^4.5.4",
+    "jose": "^5.6.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@types/react": "~18.2.79",
+    "typescript": "^5.3.3",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "jest-expo": "~51.0.4"
+  },
+  "private": true,
+  "jest": {
+    "preset": "jest-expo"
+  }
+}

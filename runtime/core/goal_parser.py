@@ -84,6 +84,10 @@ def parse_goal(user_input: str) -> dict[str, Any]:
     Returns the structured plan dict. If LLM is unavailable, falls back to
     keyword-based template matching.
     """
+    non_goal = _classify_non_goal(user_input)
+    if non_goal:
+        return non_goal
+
     from core.tool_llm_caller import call_llm_for_tool
 
     prompt = (
@@ -95,6 +99,8 @@ def parse_goal(user_input: str) -> dict[str, Any]:
     if raw:
         plan = _extract_json(raw)
         if plan and _is_valid_plan(plan):
+            if plan.get("is_goal") and _looks_like_plain_question(user_input):
+                return _conversation_plan("question")
             logger.info("goal_parser: LLM plan parsed (is_goal=%s, steps=%d)",
                        plan.get("is_goal"), len(plan.get("task_plan", [])))
             return plan
@@ -127,24 +133,107 @@ _GOAL_KEYWORDS: dict[str, list[str]] = {
     "website_builder": ["build a website", "build me a website", "create a website", "make a website", "generate a website", "build a landing page", "create a landing page"],
     "content_creation": ["write", "create a post", "draft", "linkedin post", "twitter post", "blog post", "create content", "generate content", "article", "caption", "copy for"],
     "email_campaign": ["email campaign", "cold email", "send emails", "outreach email", "write an email", "draft an email"],
-    "research": ["research", "learn about", "find out", "investigate", "analyze", "analyse", "what is", "summarize", "summarise"],
+    "research": ["research", "learn about", "find out", "investigate", "analyze", "analyse", "summarize", "summarise"],
     "lead_generation": ["find leads", "find contacts", "find companies", "find emails", "get leads", "prospect", "lead list", "lead generation"],
 }
 
-_QUESTION_KEYWORDS = ["hello", "hi", "hey", "what can you", "how are you", "help me understand", "status", "who are you", "how does", "can you explain"]
+_QUESTION_KEYWORDS = [
+    "hello", "hi", "hey", "what can you", "how are you", "help me understand",
+    "status", "who are you", "how does", "can you explain", "tell me about",
+    "what is", "what are", "who is", "who are", "when is", "where is",
+]
+
+_ACTION_VERBS = [
+    "build", "create", "make", "generate", "write", "draft", "save", "send",
+    "find", "research", "investigate", "analyze", "analyse", "summarize",
+    "summarise", "scan", "run", "execute", "install", "deploy", "update",
+    "fix", "refactor", "test", "email", "post", "publish",
+]
+
+_QUESTION_START_RE = re.compile(
+    r"^\s*(what|who|when|where|why|how|can|could|would|should|is|are|do|does|did|tell me|explain)\b",
+    re.IGNORECASE,
+)
+
+_TIME_PATTERNS = [
+    re.compile(r"\bwhat\s+time\s+is\s+it\b", re.IGNORECASE),
+    re.compile(r"\bcurrent\s+time\b", re.IGNORECASE),
+    re.compile(r"^\s*time\s*\??\s*$", re.IGNORECASE),
+]
+
+_DATE_PATTERNS = [
+    re.compile(r"\bwhat\s+(date|day)\s+is\s+it\b", re.IGNORECASE),
+    re.compile(r"\bcurrent\s+(date|day)\b", re.IGNORECASE),
+    re.compile(r"^\s*(date|today)\s*\??\s*$", re.IGNORECASE),
+]
+
+
+def _conversation_plan(response_type: str = "conversation") -> dict[str, Any]:
+    return {
+        "is_goal": False,
+        "goal_type": "conversation",
+        "response_type": response_type,
+        "structured_goal": {},
+        "task_plan": [],
+    }
+
+
+def _has_action_intent(text: str) -> bool:
+    lower = text.lower()
+    if any(kw in lower for keywords in _GOAL_KEYWORDS.values() for kw in keywords):
+        return True
+    return any(re.search(rf"\b{re.escape(verb)}\b", lower) for verb in _ACTION_VERBS)
+
+
+def _looks_like_plain_question(text: str) -> bool:
+    lower = text.strip().lower()
+    if not lower:
+        return False
+    if any(pattern.search(lower) for pattern in _TIME_PATTERNS + _DATE_PATTERNS):
+        return True
+    if _QUESTION_START_RE.search(lower) and not _has_action_intent(lower):
+        return True
+    if lower.endswith("?") and not _has_action_intent(lower):
+        return True
+    return False
+
+
+def _classify_non_goal(user_input: str) -> dict[str, Any] | None:
+    lower = (user_input or "").strip().lower()
+    if not lower:
+        return _conversation_plan("empty")
+    if any(pattern.search(lower) for pattern in _TIME_PATTERNS):
+        return _conversation_plan("time")
+    if any(pattern.search(lower) for pattern in _DATE_PATTERNS):
+        return _conversation_plan("date")
+    if lower in {"hello", "hi", "hey", "yo"}:
+        return _conversation_plan("greeting")
+    if lower in {"status", "system status", "are you online"}:
+        return _conversation_plan("status")
+    if _looks_like_plain_question(lower):
+        return _conversation_plan("question")
+    if any(kw in lower for kw in _QUESTION_KEYWORDS) and not _has_action_intent(lower):
+        return _conversation_plan("question")
+    return None
 
 
 def _keyword_fallback(user_input: str) -> dict[str, Any]:
     lower = user_input.lower()
 
-    if any(kw in lower for kw in _QUESTION_KEYWORDS):
-        return {"is_goal": False, "goal_type": "conversation", "structured_goal": {}, "task_plan": []}
+    non_goal = _classify_non_goal(user_input)
+    if non_goal:
+        return non_goal
 
-    goal_type = "content_creation"  # default for action verbs
+    goal_type = ""
     for gtype, keywords in _GOAL_KEYWORDS.items():
         if any(kw in lower for kw in keywords):
             goal_type = gtype
             break
+    if not goal_type:
+        if _has_action_intent(user_input):
+            goal_type = "research"
+        else:
+            return _conversation_plan("conversation")
 
     template = _GOAL_TASK_TEMPLATES.get(goal_type, _GOAL_TASK_TEMPLATES["research"])
     # Fill in template placeholders

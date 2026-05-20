@@ -26,6 +26,9 @@ class TaskNode:
     passed: bool = False
     started_at: str = ""
     finished_at: str = ""
+    needs_research: bool = False
+    research_findings: dict[str, Any] = field(default_factory=dict)
+    context_score: float = 0.0
 
     def to_contract(self) -> dict[str, Any]:
         return {
@@ -39,6 +42,9 @@ class TaskNode:
             "error": self.error,
             "score": self.score,
             "passed": self.passed,
+            "needs_research": self.needs_research,
+            "context_score": self.context_score,
+            "research_findings": self.research_findings,
         }
 
 

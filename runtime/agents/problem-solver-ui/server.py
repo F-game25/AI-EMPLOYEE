@@ -312,6 +312,15 @@ _REPO_BIN_FILE = _REPO_RUNTIME_DIR / "bin" / "ai-employee"
 if str(_REPO_RUNTIME_DIR) not in sys.path:
     sys.path.insert(0, str(_REPO_RUNTIME_DIR))
 
+# ── PII log sanitization — imported early so all subsequent logging is clean ──
+try:
+    from core.log_sanitizer import install_global_filter, SanitizedLoggingMiddleware as _SanitizedLoggingMiddleware
+    install_global_filter()
+    _LOG_SANITIZER_AVAILABLE = True
+except Exception as _ls_err:  # graceful degradation if starlette absent at this point
+    _LOG_SANITIZER_AVAILABLE = False
+    _SanitizedLoggingMiddleware = None  # type: ignore[assignment]
+
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_DIR = AI_HOME / "state"
 CONFIG_DIR = AI_HOME / "config"
@@ -343,7 +352,7 @@ _REPO_SKILLS_FILE = Path(__file__).parent.parent.parent / "config" / "skills_lib
 # Source agent_capabilities.json path (bundled in repo config directory)
 _REPO_CAPS_FILE = Path(__file__).parent.parent.parent / "config" / "agent_capabilities.json"
 
-PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
+PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "18790"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
 MAX_CHAT_MESSAGE_LENGTH = 10000
 CHATLOG_MAX_ENTRIES = 1000
@@ -1691,7 +1700,24 @@ try:
 except ImportError:
     _AI_ROUTER_AVAILABLE = False
 
-app = FastAPI(title="AI Employee Dashboard")
+app = FastAPI(
+    title="AI Employee API",
+    description="Autonomous AI workforce platform API",
+    version="1.0.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+    openapi_tags=[
+        {"name": "auth", "description": "Authentication & token management"},
+        {"name": "tasks", "description": "Task execution & orchestration"},
+        {"name": "agents", "description": "Agent management"},
+        {"name": "research", "description": "Autonomous research"},
+        {"name": "vault", "description": "Knowledge vault"},
+        {"name": "billing", "description": "Usage & billing"},
+        {"name": "monitoring", "description": "Observability & metrics"},
+        {"name": "admin", "description": "Admin operations (admin role required)"},
+    ],
+)
 
 # ── Multi-tenancy initialization ──────────────────────────────────────────────
 from core.tenancy import init_tenant_manager
@@ -2266,6 +2292,27 @@ async def require_auth(
             )
 
 
+
+# ── RBAC permission dependency (wired here after require_auth is defined) ──
+try:
+    from core.rbac import require_permission as _require_permission  # noqa: E402
+
+    def require_permission(permission: str):  # type: ignore[misc]
+        """Return the inner check callable for use as Depends(require_permission(...))."""
+        dep = _require_permission(permission, require_auth)
+        # dep is Depends(_check); unwrap to the raw callable so callers can
+        # wrap it themselves with Depends() without double-wrapping.
+        return dep.dependency
+except Exception as _rbac_import_err:  # graceful degradation
+    import logging as _rbac_log
+    _rbac_log.getLogger(__name__).warning("core.rbac unavailable: %s", _rbac_import_err)
+
+    def require_permission(permission: str):  # type: ignore[misc]  # noqa: F811
+        """Fallback: pass-through callable for Depends(require_permission(...))."""
+        async def _noop() -> None:
+            return None
+        return _noop
+
 # ── Rate limiter ─────────────────────────────────────────────────
 if _SLOWAPI_AVAILABLE:
     _rate_limit = (
@@ -2289,6 +2336,54 @@ def _auth_rate_limit(f):
     if _SLOWAPI_AVAILABLE and limiter is not None:
         return limiter.limit("5/minute")(f)
     return f
+
+
+def _make_tier_limiter(solo_rpm: int = 60, team_rpm: int = 300, enterprise_rpm: int = 3000):
+    """Return a FastAPI Depends that enforces per-tier rate limits drawn from the JWT role.
+
+    Role mapping:
+      viewer   → solo_rpm
+      operator → team_rpm
+      admin    → enterprise_rpm  (also covers service tokens)
+
+    Falls back to solo_rpm when the role is unknown or slowapi is unavailable.
+    Endpoints must accept ``request: Request`` for slowapi to extract the key.
+    """
+    def _decorator(f):
+        if not (_SLOWAPI_AVAILABLE and limiter is not None):
+            return f
+
+        import functools
+
+        @functools.wraps(f)
+        async def _wrapper(request: Request, *args, **kwargs):
+            # Extract role from JWT; Authorization header already validated by require_auth
+            role = "viewer"
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                try:
+                    import jwt as _jwt
+                    token = auth_header.split(" ", 1)[1]
+                    payload = _jwt.decode(token, options={"verify_signature": False})
+                    role = payload.get("role", "viewer")
+                except Exception:
+                    pass
+            rpm = {
+                "admin": enterprise_rpm,
+                "operator": team_rpm,
+            }.get(role, solo_rpm)
+            limit_str = f"{rpm}/minute"
+            # Dynamically apply the limit for this request
+            limited = limiter.limit(limit_str)(f)
+            return await limited(request, *args, **kwargs)
+
+        return _wrapper
+
+    return _decorator
+
+
+# Pre-built tier limiter used on high-cost endpoints
+_tier_rate_limit = _make_tier_limiter(solo_rpm=60, team_rpm=300, enterprise_rpm=3000)
 
 # ── CORS ─────────────────────────────────────────────────────────
 _cors_origins = (
@@ -2345,6 +2440,11 @@ try:
 except Exception as _rg_err:
     logger.warning("⚠️  RequestGuard middleware failed: %s", _rg_err)
 
+# ── PII sanitization middleware (outermost — added last due to LIFO ordering) ──
+if _LOG_SANITIZER_AVAILABLE and _SanitizedLoggingMiddleware is not None:
+    app.add_middleware(_SanitizedLoggingMiddleware)
+    logger.info("PII log sanitization middleware active")
+
 # ── Telemetry auto-capture + Key rotation ───────────────────────────
 try:
     from neural_brain.core.telemetry import get_telemetry as _get_tel
@@ -2371,6 +2471,14 @@ try:
                 _get_priv().get_mode().value)
 except Exception as _priv_err:
     logger.warning("⚠️  Privacy/Telemetry/Updates failed: %s", _priv_err)
+
+# ── Privacy-safe operational telemetry middleware ────────────────
+try:
+    from core.telemetry import PrivacyTelemetryMiddleware as _PrivTelMW
+    app.add_middleware(_PrivTelMW)
+    logger.info("✅ PrivacyTelemetryMiddleware active")
+except Exception as _ptm_err:
+    logger.warning("⚠️  PrivacyTelemetryMiddleware failed: %s", _ptm_err)
 
 # ── Security headers middleware ──────────────────────────────────
 @app.middleware("http")
@@ -17595,7 +17703,7 @@ def security_status():
 
 
 @app.post("/auth/register", response_model=_TokenResponse,
-          status_code=status.HTTP_201_CREATED)
+          status_code=status.HTTP_201_CREATED, tags=["auth"])
 @_auth_rate_limit
 def auth_register(request: Request, user_data: _UserCreate):
     """
@@ -17674,7 +17782,7 @@ class _LoginRequest(BaseModel):
     password: str = Field(..., min_length=1)
 
 
-@app.post("/auth/login", response_model=_TokenResponse)
+@app.post("/auth/login", response_model=_TokenResponse, tags=["auth"])
 @_auth_rate_limit
 def auth_login(request: Request, login_data: _LoginRequest):
     """
@@ -17780,7 +17888,7 @@ class _RefreshRequest(BaseModel):
     refresh_token: str = Field(..., min_length=32)
 
 
-@app.post("/auth/refresh", response_model=_TokenResponse)
+@app.post("/auth/refresh", response_model=_TokenResponse, tags=["auth"])
 @_auth_rate_limit
 def auth_refresh(request: Request, body: _RefreshRequest):
     cfg = _security_config
@@ -17849,7 +17957,7 @@ class _LogoutRequest(BaseModel):
     refresh_token: Optional[str] = None
 
 
-@app.post("/auth/logout")
+@app.post("/auth/logout", tags=["auth"])
 def auth_logout(
     request: Request,
     body: Optional[_LogoutRequest] = None,
@@ -17875,6 +17983,189 @@ def auth_logout(
         "timestamp": _now_utc().isoformat(),
     }))
     return JSONResponse({"ok": True})
+
+
+@app.get("/auth/oidc/providers")
+def oidc_providers():
+    """Return the list of registered OIDC provider names (no secrets)."""
+    try:
+        from core.oidc import _oidc_registry
+        return {"providers": [p.name for p in _oidc_registry._providers]}
+    except Exception:
+        return {"providers": []}
+
+
+# ── Break-glass emergency access endpoints ────────────────────────────────────
+
+try:
+    from core.break_glass import get_break_glass_store as _get_bg_store  # noqa: E402
+    _BG_AVAILABLE = True
+except Exception as _bg_import_err:
+    import logging as _bg_log
+    _bg_log.getLogger(__name__).warning("core.break_glass unavailable: %s", _bg_import_err)
+    _BG_AVAILABLE = False
+
+
+@app.post("/api/break-glass/request")
+async def bg_request(
+    body: dict,
+    _rbac=Depends(require_permission("admin:*")),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """Admin requests time-boxed break-glass access to a target tenant."""
+    from core.audit import get_audit_db as _get_audit_db  # noqa: E402
+    target_tenant_id = (body.get("target_tenant_id") or "").strip()
+    reason = (body.get("reason") or "").strip()
+    if not target_tenant_id or not reason:
+        raise HTTPException(status_code=400, detail="target_tenant_id and reason are required")
+
+    admin_id = "unknown"
+    if credentials and credentials.credentials:
+        _pl = _decode_any_token(credentials.credentials)
+        if isinstance(_pl, dict):
+            admin_id = _pl.get("sub", "unknown")
+
+    if not _BG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Break-glass module unavailable")
+
+    store = _get_bg_store()
+    req = store.create_request(admin_id=admin_id, target_tenant_id=target_tenant_id, reason=reason)
+
+    _get_audit_db().append(
+        tenant_id=target_tenant_id,
+        actor=admin_id,
+        action="break_glass:request",
+        resource=f"tenant:{target_tenant_id}",
+        outcome="pending",
+        meta={"request_id": req.request_id, "reason": reason},
+    )
+    return JSONResponse({"request_id": req.request_id, "status": req.status, "expires_at": req.expires_at})
+
+
+@app.post("/api/break-glass/{request_id}/approve")
+async def bg_approve(
+    request_id: str,
+    _rbac=Depends(require_permission("admin:*")),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """Approve a pending break-glass request and issue a short-lived access token."""
+    from core.audit import get_audit_db as _get_audit_db  # noqa: E402
+    admin_id = "unknown"
+    if credentials and credentials.credentials:
+        _pl = _decode_any_token(credentials.credentials)
+        if isinstance(_pl, dict):
+            admin_id = _pl.get("sub", "unknown")
+
+    if not _BG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Break-glass module unavailable")
+
+    store = _get_bg_store()
+    try:
+        token = store.approve(request_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Break-glass request not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    req = store._requests[request_id]
+    _get_audit_db().append(
+        tenant_id=req.target_tenant_id,
+        actor=admin_id,
+        action="break_glass:approve",
+        resource=f"tenant:{req.target_tenant_id}",
+        outcome="approved",
+        meta={"request_id": request_id, "original_admin": req.admin_id, "expires_at": req.expires_at},
+    )
+
+    await _ws_broadcast("security:break_glass_approved", {
+        "request_id": request_id,
+        "admin_id": req.admin_id,
+        "target_tenant_id": req.target_tenant_id,
+        "expires_at": req.expires_at,
+        "approved_by": admin_id,
+    })
+
+    return JSONResponse({"request_id": request_id, "token": token, "expires_at": req.expires_at})
+
+
+@app.post("/api/break-glass/{request_id}/deny")
+async def bg_deny(
+    request_id: str,
+    _rbac=Depends(require_permission("admin:*")),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """Deny a pending break-glass request."""
+    from core.audit import get_audit_db as _get_audit_db  # noqa: E402
+    admin_id = "unknown"
+    if credentials and credentials.credentials:
+        _pl = _decode_any_token(credentials.credentials)
+        if isinstance(_pl, dict):
+            admin_id = _pl.get("sub", "unknown")
+
+    if not _BG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Break-glass module unavailable")
+
+    store = _get_bg_store()
+    try:
+        store.deny(request_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Break-glass request not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    req = store._requests[request_id]
+    _get_audit_db().append(
+        tenant_id=req.target_tenant_id,
+        actor=admin_id,
+        action="break_glass:deny",
+        resource=f"tenant:{req.target_tenant_id}",
+        outcome="denied",
+        meta={"request_id": request_id, "original_admin": req.admin_id},
+    )
+
+    return JSONResponse({"request_id": request_id, "status": "denied"})
+
+
+@app.get("/api/break-glass/active")
+async def bg_list_active(
+    _rbac=Depends(require_permission("admin:*")),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """List all currently active (approved, non-expired) break-glass sessions."""
+    from core.audit import get_audit_db as _get_audit_db  # noqa: E402
+    admin_id = "unknown"
+    if credentials and credentials.credentials:
+        _pl = _decode_any_token(credentials.credentials)
+        if isinstance(_pl, dict):
+            admin_id = _pl.get("sub", "unknown")
+
+    if not _BG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Break-glass module unavailable")
+
+    store = _get_bg_store()
+    active = store.get_active()
+
+    _get_audit_db().append(
+        tenant_id="system",
+        actor=admin_id,
+        action="break_glass:list_active",
+        resource="break_glass:sessions",
+        outcome="ok",
+        meta={"count": len(active)},
+    )
+
+    return JSONResponse({"sessions": [r.to_dict() for r in active]})
+
+
+@app.post("/api/admin/backup")
+async def trigger_backup(_rbac=Depends(require_permission("admin:*"))):
+    """Trigger a local PostgreSQL backup cycle (no cloud upload — use cron for that)."""
+    from core.backup import BackupManager
+    result = BackupManager().full_backup_cycle(upload=False)
+    if not result.get("file"):
+        raise HTTPException(status_code=500, detail="Backup failed — check DATABASE_URL and pg_dump availability")
+    return result
+
 
 # ── End security endpoints ─────────────────────────────────────────────────────
 
@@ -18726,7 +19017,7 @@ async def websocket_stream(websocket: WebSocket):
             _WS_CLIENTS.discard(websocket)
 
 
-@app.get("/api/chat")
+@app.get("/api/chat", tags=["tasks"])
 def get_chat():
     messages = _read_last_n_lines(CHATLOG, 100)
     return JSONResponse({"messages": messages})
@@ -18737,7 +19028,8 @@ def get_chat_alias():
     return get_chat()
 
 
-@app.post("/api/chat")
+@app.post("/api/chat", tags=["tasks"])
+@_tier_rate_limit
 async def post_chat(payload: dict, request: Request):
     raw_message = (payload or {}).get("message", "").strip()
     model_route = ((payload or {}).get("model_route") or "").strip().lower()
@@ -18911,7 +19203,19 @@ async def post_chat(payload: dict, request: Request):
         except Exception:
             pass
 
-    _resp_payload: dict = {"ok": True, "response": response}
+    _resp_payload: dict = {
+        "ok": True,
+        "response": response,
+        "degraded": "[DEGRADED_PIPELINE]" in response or response.startswith("[pipeline_fallback]"),
+        "proof": [
+            {
+                "type": "chat_log",
+                "label": "Conversation exchange appended to chat log",
+                "status": "recorded",
+                "path": str(CHATLOG),
+            }
+        ],
+    }
     if _explain_dict is not None:
         _resp_payload["explanation"] = {
             "explain_id": _explain_dict.get("explain_id"),
@@ -18925,6 +19229,12 @@ async def post_chat(payload: dict, request: Request):
     # ── Finish trace and embed trace_id in response ───────────────────────────
     if _trace_id:
         _resp_payload["trace_id"] = _trace_id
+        _resp_payload["proof"].append({
+            "type": "trace",
+            "label": f"Distributed trace {_trace_id}",
+            "trace_id": _trace_id,
+            "status": "recorded",
+        })
         if _dt is not None:
             try:
                 _dt.finish_trace(_trace_id)
@@ -20351,7 +20661,8 @@ def submit_task(payload: dict):
     return JSONResponse({"ok": True, "task_id": task_id, "message": f"Task submitted: {description[:60]}", "agents": agents, "mode": mode})
 
 
-@app.post("/api/tasks/run")
+@app.post("/api/tasks/run", tags=["tasks"])
+@_tier_rate_limit
 def run_task_with_agent_controller(payload: dict, _auth: None = Depends(require_auth)):
     """Run a goal through the core AgentController contract.
 
@@ -20377,10 +20688,37 @@ def run_task_with_agent_controller(payload: dict, _auth: None = Depends(require_
         logger.exception("AgentController task run failed")
         raise HTTPException(500, f"AgentController failed: {exc}") from exc
 
+    proof: list[dict] = [{
+        "type": "agent_controller",
+        "label": "Planner -> Executor -> Validator completed",
+        "status": "completed",
+        "run_id": summary.get("run_id"),
+    }]
+    for task in (summary.get("tasks", []) if isinstance(summary.get("tasks"), list) else []):
+        if not isinstance(task, dict):
+            continue
+        output = task.get("output") if isinstance(task.get("output"), dict) else {}
+        if output.get("path"):
+            proof.append({
+                "type": "file",
+                "label": output.get("filename") or Path(str(output["path"])).name,
+                "path": output["path"],
+                "status": task.get("status"),
+                "task_id": task.get("task_id"),
+            })
+        if task.get("error"):
+            proof.append({
+                "type": "task_error",
+                "label": task.get("error"),
+                "status": "failed",
+                "task_id": task.get("task_id"),
+            })
+
     return JSONResponse({
         "ok": True,
         "source": "agent_controller",
         "task": goal,
+        "proof": proof,
         **summary,
     })
 
@@ -20883,7 +21221,7 @@ def _recalc_summary(events: list) -> dict:
     return s
 
 
-@app.get("/api/metrics")
+@app.get("/api/metrics", tags=["monitoring"])
 def get_metrics(period: str = "all"):
     data = _load_metrics()
     events = data.get("events", [])
@@ -21202,7 +21540,7 @@ def _vector_store_memory(key: str, text: str, metadata: dict | None = None, impo
         from memory.vector_store import get_vector_store  # type: ignore
     except Exception:
         try:
-            from runtime.memory.vector_store import get_vector_store  # type: ignore
+            from memory.vector_store import get_vector_store  # type: ignore
         except Exception:
             return
     try:
@@ -21259,7 +21597,7 @@ def search_memory(q: str = Query(..., min_length=1, max_length=500), top_k: int 
         from memory.vector_store import get_vector_store  # type: ignore
     except Exception:
         try:
-            from runtime.memory.vector_store import get_vector_store  # type: ignore
+            from memory.vector_store import get_vector_store  # type: ignore
         except Exception:
             get_vector_store = None  # type: ignore
     if get_vector_store is not None:  # type: ignore[name-defined]
@@ -21623,54 +21961,21 @@ def update_integration(integration_id: str, payload: dict, _auth: None = Depends
 def _validate_webhook_url(url: str) -> str | None:
     """Validate a user-supplied webhook URL to prevent SSRF attacks.
 
-    Returns an error message string if the URL is rejected, or None if it is safe.
-    Allows only http:// and https:// schemes and rejects private / loopback / link-local
-    / cloud-metadata IP ranges.
+    Delegates to the shared url_guard module (single source of truth).
+    Returns an error string if rejected, or None if safe.
     """
-    import ipaddress
-    import socket
-    import urllib.parse as _up
-
-    parsed = _up.urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return "Webhook URL must use http:// or https://"
-
-    hostname = parsed.hostname or ""
-    if not hostname:
-        return "Webhook URL has no valid hostname"
-
-    # Resolve hostname to IP and check for private/reserved ranges
     try:
-        addr_info = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        return "Webhook hostname could not be resolved"
-
-    _BLOCKED_NETWORKS = [
-        ipaddress.ip_network("127.0.0.0/8"),       # loopback
-        ipaddress.ip_network("::1/128"),             # IPv6 loopback
-        ipaddress.ip_network("10.0.0.0/8"),          # private
-        ipaddress.ip_network("172.16.0.0/12"),       # private
-        ipaddress.ip_network("192.168.0.0/16"),      # private
-        ipaddress.ip_network("169.254.0.0/16"),      # link-local / cloud metadata
-        ipaddress.ip_network("fc00::/7"),            # IPv6 unique local
-        ipaddress.ip_network("fe80::/10"),           # IPv6 link-local
-        ipaddress.ip_network("0.0.0.0/8"),           # this-network
-    ]
-
-    for _family, _socktype, _proto, _canonname, sockaddr in addr_info:
-        ip_str = sockaddr[0]
-        try:
-            ip = ipaddress.ip_address(ip_str)
-        except ValueError:
-            return f"Could not parse resolved IP address: {ip_str}"
-        for net in _BLOCKED_NETWORKS:
-            if ip in net:
-                return (
-                    "Webhook URL resolves to a private/reserved address and is not allowed. "
-                    "Use a publicly reachable URL."
-                )
-
-    return None  # URL is safe
+        from core.url_guard import validate_url  # type: ignore
+        return validate_url(url)
+    except ImportError:
+        # Inline fallback if url_guard is somehow unavailable
+        import urllib.parse as _up
+        parsed = _up.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return "Webhook URL must use http:// or https://"
+        if not parsed.hostname:
+            return "Webhook URL has no valid hostname"
+        return None
 
 
 @app.post("/api/integrations/{integration_id}/test")
@@ -21864,7 +22169,7 @@ class _SettingsUpdateRequest(BaseModel):
 
 
 @app.post("/api/settings")
-def save_settings(body: _SettingsUpdateRequest):
+def save_settings(body: _SettingsUpdateRequest, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("settings:write"))):
     # Skip masked values — user didn't change them
     clean = {k: v for k, v in body.updates.items() if v != _MASK and k.strip()}
     if not clean:
@@ -22641,7 +22946,7 @@ def ascend_status():
 
 
 @app.post("/api/ascend/mode")
-def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth)):
+def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Set ASCEND_FORGE operating mode (GENERAL / MONEY / AUTO)."""
     mode = (payload.get("mode") or "").strip().upper()
     if not mode:
@@ -22659,7 +22964,7 @@ def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth)):
 
 
 @app.post("/api/ascend/scan")
-def ascend_scan(_auth: None = Depends(require_auth)):
+def ascend_scan(_auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Trigger a system scan and return queued patches."""
     try:
         af = _load_ascend_module()
@@ -22682,7 +22987,7 @@ def ascend_patches():
 
 
 @app.post("/api/ascend/patches/{patch_id}/approve")
-def ascend_approve(patch_id: str, _auth: None = Depends(require_auth)):
+def ascend_approve(patch_id: str, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Approve a pending patch."""
     try:
         af = _load_ascend_module()
@@ -22697,7 +23002,7 @@ def ascend_approve(patch_id: str, _auth: None = Depends(require_auth)):
 
 
 @app.post("/api/ascend/patches/{patch_id}/reject")
-def ascend_reject(patch_id: str, _auth: None = Depends(require_auth)):
+def ascend_reject(patch_id: str, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Reject a pending patch."""
     try:
         af = _load_ascend_module()
@@ -22712,7 +23017,7 @@ def ascend_reject(patch_id: str, _auth: None = Depends(require_auth)):
 
 
 @app.post("/api/ascend/patches/{patch_id}/rollback")
-def ascend_rollback(patch_id: str, _auth: None = Depends(require_auth)):
+def ascend_rollback(patch_id: str, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Roll back an approved patch."""
     try:
         af = _load_ascend_module()
@@ -22738,7 +23043,7 @@ def ascend_changelog(limit: int = 50):
 
 
 @app.post("/api/ascend/auto-approve")
-def ascend_auto_approve(payload: dict, _auth: None = Depends(require_auth)):
+def ascend_auto_approve(payload: dict, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Toggle auto-approve for LOW risk patches."""
     enabled = bool(payload.get("enabled", False))
     try:
@@ -26492,9 +26797,18 @@ async def restore_backup(backup_name: str, _auth: None = Depends(require_auth)):
 
 # ── Payment & Stripe Integration ──────────────────────────────────────────────
 
-@app.post("/api/billing/customer/create")
+def _stripe_check() -> JSONResponse | None:
+    """Return a 503 JSONResponse if STRIPE_API_KEY is not configured, else None."""
+    if not os.environ.get("STRIPE_API_KEY"):
+        return JSONResponse({"ok": False, "error": "Stripe not configured (STRIPE_API_KEY missing)"}, status_code=503)
+    return None
+
+
+@app.post("/api/billing/customer/create", tags=["billing"])
 async def create_stripe_customer(payload: dict, _auth: None = Depends(require_auth)):
     """Create a Stripe customer for a tenant."""
+    if err := _stripe_check():
+        return err
     try:
         from core.stripe_integration import get_stripe_manager
         from core.tenancy import get_current_tenant
@@ -26507,15 +26821,16 @@ async def create_stripe_customer(payload: dict, _auth: None = Depends(require_au
         )
         if customer_id:
             return JSONResponse({"customer_id": customer_id, "status": "created"})
-        else:
-            return JSONResponse({"error": "Failed to create customer"}, status_code=500)
+        return JSONResponse({"ok": False, "error": "Failed to create customer"}, status_code=500)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.post("/api/billing/payment-intent/create")
+@app.post("/api/billing/payment-intent/create", tags=["billing"])
 async def create_payment_intent(payload: dict, _auth: None = Depends(require_auth)):
     """Create a Stripe payment intent."""
+    if err := _stripe_check():
+        return err
     try:
         from core.stripe_integration import get_stripe_manager
         stripe_mgr = get_stripe_manager()
@@ -26527,15 +26842,16 @@ async def create_payment_intent(payload: dict, _auth: None = Depends(require_aut
         )
         if result:
             return JSONResponse(result)
-        else:
-            return JSONResponse({"error": "Failed to create payment intent"}, status_code=500)
+        return JSONResponse({"ok": False, "error": "Failed to create payment intent"}, status_code=500)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.post("/api/billing/subscription/create")
+@app.post("/api/billing/subscription/create", tags=["billing"])
 async def create_subscription(payload: dict, _auth: None = Depends(require_auth)):
     """Create a Stripe subscription."""
+    if err := _stripe_check():
+        return err
     try:
         from core.stripe_integration import get_stripe_manager
         stripe_mgr = get_stripe_manager()
@@ -26546,37 +26862,206 @@ async def create_subscription(payload: dict, _auth: None = Depends(require_auth)
         )
         if result:
             return JSONResponse(result)
-        else:
-            return JSONResponse({"error": "Failed to create subscription"}, status_code=500)
+        return JSONResponse({"ok": False, "error": "Failed to create subscription"}, status_code=500)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.get("/api/billing/subscription/{subscription_id}")
+@app.get("/api/billing/subscription/{subscription_id}", tags=["billing"])
 async def get_subscription(subscription_id: str, _auth: None = Depends(require_auth)):
     """Get subscription status."""
+    if err := _stripe_check():
+        return err
     try:
         from core.stripe_integration import get_stripe_manager
         stripe_mgr = get_stripe_manager()
         result = stripe_mgr.get_subscription_status(subscription_id)
         if result:
             return JSONResponse(result)
-        else:
-            return JSONResponse({"error": "Subscription not found"}, status_code=404)
+        return JSONResponse({"ok": False, "error": "Subscription not found"}, status_code=404)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.post("/api/billing/subscription/{subscription_id}/cancel")
+@app.post("/api/billing/subscription/{subscription_id}/cancel", tags=["billing"])
 async def cancel_subscription(subscription_id: str, payload: dict = {}, _auth: None = Depends(require_auth)):
     """Cancel a subscription."""
+    if err := _stripe_check():
+        return err
     try:
         from core.stripe_integration import get_stripe_manager
         stripe_mgr = get_stripe_manager()
         success = stripe_mgr.cancel_subscription(subscription_id, at_period_end=payload.get("at_period_end", False))
         return JSONResponse({"status": "cancelled" if success else "failed"})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ── Stripe webhook — validates Stripe-Signature, no JWT auth ──────────────────
+
+@app.post("/api/billing/stripe/webhook", tags=["billing"])
+async def stripe_webhook(request: Request):
+    """Stripe webhook handler — validates signature and processes events."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+        if not webhook_secret:
+            return JSONResponse({"ok": False, "error": "STRIPE_WEBHOOK_SECRET not configured"}, status_code=503)
+        payload_bytes = await request.body()
+        sig_header = request.headers.get("stripe-signature", "")
+        try:
+            event = _stripe.Webhook.construct_event(payload_bytes, sig_header, webhook_secret)
+        except _stripe.error.SignatureVerificationError:
+            return JSONResponse({"ok": False, "error": "Invalid Stripe signature"}, status_code=400)
+        event_type = event.get("type", "")
+        logger.info("stripe_webhook: received event type=%s id=%s", event_type, event.get("id"))
+        # Dispatch known event types
+        if event_type == "invoice.payment_succeeded":
+            invoice = event["data"]["object"]
+            logger.info("stripe_webhook: payment succeeded customer=%s amount=%s", invoice.get("customer"), invoice.get("amount_paid"))
+        elif event_type == "customer.subscription.deleted":
+            sub = event["data"]["object"]
+            logger.info("stripe_webhook: subscription cancelled id=%s", sub.get("id"))
+        elif event_type == "customer.subscription.updated":
+            sub = event["data"]["object"]
+            logger.info("stripe_webhook: subscription updated id=%s status=%s", sub.get("id"), sub.get("status"))
+        return JSONResponse({"ok": True, "type": event_type})
+    except Exception as e:
+        logger.error("stripe_webhook error: %s", e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/stripe/customer", tags=["billing"])
+async def stripe_create_or_get_customer(body: dict, auth=Depends(require_auth)):
+    """Create or retrieve a Stripe customer linked to this tenant."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        from core.tenancy import get_current_tenant
+        tenant = get_current_tenant()
+        tenant_id = tenant.tenant_id if tenant else (auth.get("tenant_id", "default") if isinstance(auth, dict) else "default")
+        email = body.get("email", "")
+        name = body.get("name", "")
+        # Check if customer already exists for this tenant
+        existing = _stripe.Customer.search(query=f'metadata["tenant_id"]:"{tenant_id}"', limit=1)
+        if existing.data:
+            cust = existing.data[0]
+            return JSONResponse({"ok": True, "customer_id": cust.id, "status": "existing"})
+        from core.stripe_integration import get_stripe_manager
+        mgr = get_stripe_manager()
+        customer_id = mgr.create_customer(tenant_id=tenant_id, email=email, name=name)
+        if not customer_id:
+            return JSONResponse({"ok": False, "error": "Failed to create Stripe customer"}, status_code=500)
+        return JSONResponse({"ok": True, "customer_id": customer_id, "status": "created"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/billing/stripe/subscription", tags=["billing"])
+async def stripe_get_subscription(auth=Depends(require_auth)):
+    """Get active subscription for the current tenant's Stripe customer."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        from core.tenancy import get_current_tenant
+        tenant = get_current_tenant()
+        tenant_id = tenant.tenant_id if tenant else (auth.get("tenant_id", "default") if isinstance(auth, dict) else "default")
+        customers = _stripe.Customer.search(query=f'metadata["tenant_id"]:"{tenant_id}"', limit=1)
+        if not customers.data:
+            return JSONResponse({"ok": False, "error": "No Stripe customer found for this tenant"}, status_code=404)
+        customer_id = customers.data[0].id
+        subs = _stripe.Subscription.list(customer=customer_id, status="active", limit=1)
+        if not subs.data:
+            return JSONResponse({"ok": True, "subscription": None, "status": "no_active_subscription"})
+        from core.stripe_integration import get_stripe_manager
+        result = get_stripe_manager().get_subscription_status(subs.data[0].id)
+        return JSONResponse({"ok": True, "subscription": result})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/stripe/checkout", tags=["billing"])
+async def stripe_create_checkout(body: dict, auth=Depends(require_auth)):
+    """Create a Stripe Checkout session (hosted page redirect). body: {price_id, success_url, cancel_url}."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        price_id = body.get("price_id", "")
+        success_url = body.get("success_url", "")
+        cancel_url = body.get("cancel_url", "")
+        if not price_id or not success_url or not cancel_url:
+            return JSONResponse({"ok": False, "error": "price_id, success_url, cancel_url are required"}, status_code=400)
+        from core.tenancy import get_current_tenant
+        tenant = get_current_tenant()
+        tenant_id = tenant.tenant_id if tenant else (auth.get("tenant_id", "default") if isinstance(auth, dict) else "default")
+        session_kwargs: dict = {
+            "mode": "subscription",
+            "payment_method_types": ["card"],
+            "line_items": [{"price": price_id, "quantity": 1}],
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            "metadata": {"tenant_id": tenant_id},
+        }
+        # Attach existing customer if available
+        try:
+            customers = _stripe.Customer.search(query=f'metadata["tenant_id"]:"{tenant_id}"', limit=1)
+            if customers.data:
+                session_kwargs["customer"] = customers.data[0].id
+        except Exception:
+            pass
+        session = _stripe.checkout.Session.create(**session_kwargs)
+        return JSONResponse({"ok": True, "session_id": session.id, "url": session.url})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/stripe/sync-usage", tags=["billing", "admin"])
+async def stripe_sync_usage(_rbac=Depends(require_permission("admin:*"))):
+    """Sync cost ledger usage data to Stripe metered billing items."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        from core.cost_ledger import get_cost_ledger
+        ledger = get_cost_ledger()
+        # Collect all tenant IDs from the ledger
+        with ledger._lock:
+            raw_keys = list(ledger._ledger.keys())
+        tenant_ids = {k.split(":")[0] for k in raw_keys if ":" in k}
+        synced = []
+        errors = []
+        for tenant_id in tenant_ids:
+            try:
+                customers = _stripe.Customer.search(query=f'metadata["tenant_id"]:"{tenant_id}"', limit=1)
+                if not customers.data:
+                    continue
+                customer_id = customers.data[0].id
+                subs = _stripe.Subscription.list(customer=customer_id, status="active", limit=1)
+                if not subs.data:
+                    continue
+                sub = subs.data[0]
+                # Find metered subscription items
+                for item in sub["items"]["data"]:
+                    price = item.get("price", {})
+                    if price.get("recurring", {}).get("usage_type") == "metered":
+                        daily_usd = ledger.get_daily_spend(tenant_id)
+                        quantity = max(1, int(daily_usd * 100))  # cents as usage units
+                        _stripe.SubscriptionItem.create_usage_record(
+                            item["id"],
+                            quantity=quantity,
+                            action="set",
+                        )
+                        synced.append({"tenant_id": tenant_id, "customer_id": customer_id, "usage_units": quantity})
+            except Exception as ex:
+                errors.append({"tenant_id": tenant_id, "error": str(ex)})
+        return JSONResponse({"ok": True, "synced": synced, "errors": errors})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 # ── RBAC Routes ───────────────────────────────────────────────────────────────
@@ -26650,7 +27135,7 @@ async def list_user_roles(_auth: None = Depends(require_auth)):
 
 # ── Billing Metrics Routes (Phase 4) ──────────────────────────────────────────
 
-@app.get("/api/billing/metrics")
+@app.get("/api/billing/metrics", tags=["billing"])
 async def get_billing_metrics(_auth: None = Depends(require_auth)):
     """Get billing metrics for current tenant."""
     try:
@@ -26667,7 +27152,7 @@ async def get_billing_metrics(_auth: None = Depends(require_auth)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/api/billing/all-metrics")
+@app.get("/api/billing/all-metrics", tags=["billing", "admin"])
 async def get_all_billing_metrics(_auth: None = Depends(require_auth)):
     """Get billing metrics for all tenants (admin only)."""
     try:
@@ -26781,6 +27266,35 @@ async def get_audit_logs(_auth: None = Depends(require_auth)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/api/audit/model-decisions", tags=["admin"])
+async def model_decision_audit_admin(
+    limit: int = 100,
+    _rbac=Depends(require_permission("admin:*")),
+):
+    """Admin: recent model decision fingerprints — no prompt/response content stored."""
+    try:
+        from core.model_decision_audit import get_model_audit
+        audit = get_model_audit()
+        n = min(limit, 500)
+        return JSONResponse({
+            "decisions": audit.get_recent(limit=n),
+            "stats": audit.get_stats(window_hours=24),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/audit/chain-verify", tags=["admin"])
+async def audit_chain_verify(_rbac=Depends(require_permission("admin:*"))):
+    """Admin: verify hash-chain integrity of the audit log — detects tampering or row removal."""
+    try:
+        from core.audit import get_audit_db
+        ok, msg = get_audit_db().verify_chain()
+        return JSONResponse({"valid": ok, "message": msg})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ── Observability Status Routes (Phase 4) ────────────────────────────────────
 
 @app.get("/api/observability/sentry")
@@ -26809,6 +27323,30 @@ async def get_embeddings_status(_auth: None = Depends(require_auth)):
             "mode": manager.get_mode(),
             "available": manager.embeddings_available,
             "dimension": 384,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/monitoring/drift")
+async def drift_report(_auth: None = Depends(require_auth)):
+    """Model drift and bias monitoring report — compares current 24h vs 7-day baseline."""
+    try:
+        from core.drift_monitor import DriftMonitor
+        return JSONResponse(DriftMonitor().get_report())
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/monitoring/decisions")
+async def decision_audit(_auth: None = Depends(require_auth)):
+    """Recent model decision audit records — compliance traceability (no content stored)."""
+    try:
+        from core.model_decision_audit import get_model_audit
+        audit = get_model_audit()
+        return JSONResponse({
+            "records": audit.get_recent(limit=100),
+            "stats": audit.get_stats(window_hours=24),
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -27042,6 +27580,8 @@ async def web_search_endpoint(body: _SearchRequest):
                 if not top_urls and body.query.startswith("http"):
                     top_urls = [{"url": body.query, "title": "", "snippet": "", "source": "SCREENSHOT",
                                  "provider": "cloak", "screenshot_b64": None, "page_text": None, "relevance": 80}]
+                from core.url_guard import validate_url as _gu  # type: ignore
+                top_urls = [r for r in top_urls if not _gu(r["url"])]
                 fetch_tasks = [fetch_url(r["url"]) for r in top_urls]
                 fetched = await asyncio.gather(*fetch_tasks, return_exceptions=True)
                 for result_item, page_data in zip(top_urls, fetched):
@@ -27156,8 +27696,9 @@ async def research_discover(req: dict):
         raise HTTPException(500, f"discover failed: {exc}")
 
 
-@app.post("/api/research/execute")
-async def research_execute(req: dict, background: BackgroundTasks):
+@app.post("/api/research/execute", tags=["research"])
+@_tier_rate_limit
+async def research_execute(req: dict, background: BackgroundTasks, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("research:*"))):
     """Research v2 phase 2: run full research pipeline on user-selected URLs."""
     import uuid as _uuid
     query = (req or {}).get("query", "").strip()
@@ -27166,6 +27707,17 @@ async def research_execute(req: dict, background: BackgroundTasks):
     depth = (req or {}).get("depth", "normal")
     if not query or (not source_ids and not selected_urls):
         raise HTTPException(400, "query and selected_source_ids (or selected_urls) required")
+    if selected_urls:
+        from core.url_guard import validate_url as _gu  # type: ignore
+        _orig_count = len(selected_urls)
+        selected_urls = [u for u in selected_urls if not _gu(u)]
+        if len(selected_urls) < _orig_count:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "SSRF guard blocked %d URL(s) in /api/research/execute",
+                _orig_count - len(selected_urls))
+        if not selected_urls and not source_ids:
+            raise HTTPException(400, "All provided URLs were blocked by SSRF policy")
     session_id = _uuid.uuid4().hex[:12]
     try:
         from core.auto_research_agent import get_auto_researcher
@@ -27237,7 +27789,7 @@ try:
         }
 
     @app.put("/api/vault/notes/{note_id}")
-    async def vault_update_note(note_id: str, req: dict):
+    async def vault_update_note(note_id: str, req: dict, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("vault:write"))):
         body = (req or {}).get("body", "")
         fm   = (req or {}).get("frontmatter", {}) or {}
         note = _vault().write_note(note_id, body, fm)
@@ -27245,7 +27797,7 @@ try:
         return _note_to_dict(note)
 
     @app.post("/api/vault/notes")
-    async def vault_create_note(req: dict):
+    async def vault_create_note(req: dict, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("vault:write"))):
         req   = req or {}
         title  = req.get("title", "Untitled")
         folder = req.get("folder", "concepts")
@@ -27256,7 +27808,7 @@ try:
         return _note_to_dict(note)
 
     @app.delete("/api/vault/notes/{note_id}")
-    async def vault_delete_note(note_id: str):
+    async def vault_delete_note(note_id: str, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("vault:write"))):
         ok = _vault().delete_note(note_id)
         _vault().rebuild_indices()
         return {"ok": bool(ok), "id": note_id}
@@ -27584,6 +28136,31 @@ async def learning_session_get(session_id: str):
     return s
 
 
+@app.get("/api/telemetry/summary")
+async def telemetry_summary(window: int = 60, _auth=Depends(require_auth)):
+    from core.telemetry import get_collector
+    return get_collector().get_summary(window_minutes=window)
+
+
+@app.get("/api/billing/summary", tags=["billing"])
+async def billing_summary(auth=Depends(require_auth)):
+    from core.cost_ledger import get_cost_ledger
+    tenant_id = auth.get("tenant_id", "default") if isinstance(auth, dict) else "default"
+    return get_cost_ledger().get_summary(tenant_id)
+
+
+@app.post("/api/billing/budget", tags=["billing", "admin"])
+async def set_budget_endpoint(body: dict, _rbac=Depends(require_permission("admin:*"))):
+    from core.cost_ledger import get_cost_ledger
+    from dataclasses import asdict as _asdict
+    tenant_id = body.get("tenant_id", "default")
+    return _asdict(get_cost_ledger().set_budget(
+        tenant_id,
+        float(body.get("daily_usd", 10.0)),
+        float(body.get("monthly_usd", 200.0)),
+    ))
+
+
 @app.on_event("startup")
 async def _start_topic_scheduler():
     try:
@@ -27614,7 +28191,7 @@ async def _init_neural_brain():
 
     # Memory subsystem probe (cheap, in-process, gates a flag the health check reads)
     try:
-        from runtime.memory.memory_router import MemoryRouter  # type: ignore
+        from memory.memory_router import MemoryRouter  # type: ignore
         _memory_initialized = True
     except Exception:
         try:

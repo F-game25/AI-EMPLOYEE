@@ -7,8 +7,8 @@ logger = logging.getLogger(__name__)
 def route_llm(request: dict) -> dict:
     """Route to LLM via orchestrator.LLMClient + model_routing."""
     try:
-        from runtime.core.orchestrator import get_llm_client
-        from runtime.core.model_routing import select_model_route
+        from core.orchestrator import get_llm_client
+        from core.model_routing import select_model_route
 
         prompt = request.get("prompt", "")
         if not prompt:

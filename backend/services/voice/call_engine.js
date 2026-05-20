@@ -12,11 +12,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const EventEmitter = require('events');
 const ttsEngine = require('./tts_engine');
 const { pipeline: sharedPipeline } = require('./stream_pipeline');
 
-const LOG_DIR = path.resolve(__dirname, '../../../state/call_logs');
+const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'), 'state'));
+const LOG_DIR = path.join(STATE_DIR, 'call_logs');
 const MAX_CALL_DURATION_MS = 10 * 60 * 1000; // 10 minutes default
 
 // ── Session registry ──────────────────────────────────────────────────────────

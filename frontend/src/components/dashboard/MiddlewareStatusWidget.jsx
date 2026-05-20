@@ -1,24 +1,28 @@
 import { useEffect, useState } from 'react'
-import { API_URL } from '../../config/api'
+import { useSystemStore } from '../../store/systemStore'
 
 const ROLE_LABELS = { llm: 'LLM', lam: 'LAM', vlm: 'VLM', sam: 'SAM', lcm: 'LCM' }
 const ROLE_COLOR  = { llm: '#20D6C7', lam: '#E5C76B', vlm: '#A78BFA', sam: '#34D399', lcm: '#F472B6' }
 
 export default function MiddlewareStatusWidget() {
   const [status, setStatus] = useState(null)
-  const [err, setErr]       = useState(null)
+  const [err, setErr] = useState(null)
+  const ws = useSystemStore(s => s.ws)
 
   useEffect(() => {
-    let alive = true
-    const load = () => fetch(`${API_URL}/api/middleware/status`)
-      .then(r => r.json())
-      .then(d => { if (alive) { setStatus(d); setErr(null) } })
-      .catch(e => { if (alive) setErr(e.message) })
-
-    load()
-    const t = setInterval(load, 8000)
-    return () => { alive = false; clearInterval(t) }
-  }, [])
+    if (!ws) return
+    const onMessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data)
+        if (msg.event === 'system:middleware' && msg.data) {
+          setStatus(msg.data)
+          setErr(null)
+        }
+      } catch {}
+    }
+    ws.addEventListener('message', onMessage)
+    return () => ws.removeEventListener('message', onMessage)
+  }, [ws])
 
   const card = {
     background: 'rgba(12,14,24,0.7)',

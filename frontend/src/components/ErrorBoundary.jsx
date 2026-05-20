@@ -1,5 +1,7 @@
 import { Component } from 'react'
 
+const RELOAD_FLAG_KEY = 'nx:reload-once-on-chunk-error'
+
 export default class ErrorBoundary extends Component {
   constructor(props) {
     super(props)
@@ -12,15 +14,38 @@ export default class ErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     console.error('[ErrorBoundary]', error, info.componentStack)
+    try {
+      window.ai?.notifyUiFailed?.({
+        message: `${this.props.label || 'Application'} failed to render: ${error?.message || 'Unknown error'}`,
+        severity: this.props.severity || 'fatal',
+        stack: error?.stack,
+        componentStack: info?.componentStack,
+      })
+    } catch {
+      // Recovery still renders locally if Electron IPC is unavailable.
+    }
+    // Stale-chunk auto-recovery: if a lazy import 404s, reload exactly once.
+    // sessionStorage ensures we don't loop on a real error.
+    const msg = error?.message || ''
+    const isChunkError = /Failed to fetch dynamically imported module|Loading chunk|Loading CSS chunk|Importing a module script failed/i.test(msg)
+    if (isChunkError && !sessionStorage.getItem(RELOAD_FLAG_KEY)) {
+      sessionStorage.setItem(RELOAD_FLAG_KEY, '1')
+      window.location.reload()
+    }
   }
 
   render() {
-    if (!this.state.hasError) return this.props.children
+    if (!this.state.hasError) {
+      // Successful render — clear the reload-once flag so future stale chunks can recover too.
+      if (sessionStorage.getItem(RELOAD_FLAG_KEY)) sessionStorage.removeItem(RELOAD_FLAG_KEY)
+      return this.props.children
+    }
 
     const label = this.props.label || 'component'
     const msg = this.state.error?.message || 'Unknown error'
     // Stale chunk after rebuild — hard reload fetches fresh index.html + new hashes
     const isChunkError = /Failed to fetch dynamically imported module|Loading chunk|Loading CSS chunk/i.test(msg)
+    const canReturnToLauncher = typeof window !== 'undefined' && window.ai?.returnToLauncher
 
     return (
       <div style={{
@@ -53,6 +78,40 @@ export default class ErrorBoundary extends Component {
         >
           {isChunkError ? 'Reload App' : 'Retry'}
         </button>
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            marginLeft: 8,
+            padding: '6px 16px',
+            background: 'transparent',
+            border: '1px solid rgba(32,214,199,0.32)',
+            borderRadius: 6,
+            color: '#20D6C7',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 12,
+          }}
+        >
+          Reload
+        </button>
+        {canReturnToLauncher && (
+          <button
+            onClick={() => window.ai.returnToLauncher()}
+            style={{
+              marginLeft: 8,
+              padding: '6px 16px',
+              background: 'transparent',
+              border: '1px solid rgba(229,199,107,0.32)',
+              borderRadius: 6,
+              color: 'var(--gold, #E5C76B)',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 12,
+            }}
+          >
+            Return to Launcher
+          </button>
+        )}
       </div>
     )
   }

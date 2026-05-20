@@ -170,6 +170,7 @@ class HITLGate:
         submitted_by: str = "system",
         timeout_s: int = _DEFAULT_TIMEOUT_S,
         blocking: bool = False,
+        research_findings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Submit a HITL request and optionally block until decided.
 
@@ -187,10 +188,13 @@ class HITLGate:
         -------
         dict with keys: ``approved`` (bool), ``status``, ``request_id``.
         """
+        merged_payload = dict(payload or {})
+        if research_findings:
+            merged_payload["_research_findings"] = research_findings
         req = HITLRequest(
             agent=agent,
             action=action,
-            payload=payload or {},
+            payload=merged_payload,
             submitted_by=submitted_by,
             timeout_s=timeout_s,
         )

@@ -18,6 +18,7 @@ Commands (via chatlog / WhatsApp / Dashboard):
   eng devops <task>                — CI/CD, Docker, K8s, infrastructure
   eng database <task>              — schema design and query optimization
   eng security <task>              — security review and threat modeling
+  eng rust <task>                  — Rust systems programming (ownership, async, unsafe, crates)
   eng architecture <system>        — system architecture design
   eng refactor <description>       — refactoring guidance
   eng debug <problem>              — debugging and troubleshooting help
@@ -200,6 +201,22 @@ SYSTEM_ARCHITECTURE = (
     "Consider: scalability, reliability, maintainability, team capabilities, and time-to-market."
 )
 
+SYSTEM_RUST = (
+    "You are a senior Rust engineer with deep expertise in systems programming, "
+    "ownership/borrowing/lifetimes, async Rust (tokio/async-std), and zero-cost abstractions. "
+    "\n\nRust-specific guidelines:\n"
+    "- Ownership: explain borrows, moves, and clones precisely. Never suggest .clone() without justification.\n"
+    "- Error handling: prefer Result<T,E> with ? operator. Use thiserror for library errors, anyhow for applications.\n"
+    "- Lifetimes: annotate explicitly when the compiler can't infer. Prefer 'static sparingly.\n"
+    "- Async: use tokio::spawn for concurrency, tokio::select! for racing futures. Avoid blocking in async context.\n"
+    "- Performance: prefer stack allocation. Use Cow<str> for flexible string ownership. Profile before optimizing.\n"
+    "- Unsafe: only in well-bounded modules with documented safety invariants. Document every unsafe block.\n"
+    "- Idioms: newtype pattern for type safety, builder pattern for complex configs, typestate for compile-time state machines.\n"
+    "- Dependencies: suggest well-maintained crates (serde, tokio, reqwest, rayon, clap, tracing).\n"
+    "- WASM: if targeting wasm32, use wasm-bindgen, avoid std::thread, use web_sys for DOM.\n"
+    "\nAlways provide runnable code with proper Cargo.toml dependencies listed."
+)
+
 
 # ── Command Handlers ──────────────────────────────────────────────────────────
 
@@ -359,6 +376,25 @@ def cmd_architecture(system: str) -> str:
     )
 
 
+def cmd_rust(task: str) -> str:
+    return ai_query(
+        f"Rust engineering task: {task}\n\n"
+        "## Implementation\n"
+        "Provide complete, compilable Rust code with:\n"
+        "- Cargo.toml with all required dependencies and versions\n"
+        "- Correct ownership, borrowing, and lifetime annotations\n"
+        "- Idiomatic error handling (Result<T,E> with ? operator)\n"
+        "- Async runtime setup if needed (tokio::main or async-std)\n\n"
+        "## Safety & Correctness\n"
+        "- Document any unsafe blocks with explicit safety invariants\n"
+        "- Handle all Result/Option paths — no unwrap() without justification\n"
+        "- Identify potential panics and eliminate them\n\n"
+        "## Key Decisions\n"
+        "Explain ownership model choices, trait bounds, and crate selections",
+        SYSTEM_RUST,
+    )
+
+
 def cmd_refactor(description: str) -> str:
     return ai_query(
         f"Refactoring guidance for: {description}\n\n"
@@ -414,6 +450,7 @@ COMMANDS = {
     "eng database": (cmd_database, 1),
     "eng security": (cmd_security, 1),
     "eng architecture": (cmd_architecture, 1),
+    "eng rust": (cmd_rust, 1),
     "eng refactor": (cmd_refactor, 1),
     "eng debug": (cmd_debug, 1),
     "eng status": (lambda: cmd_status(), 0),

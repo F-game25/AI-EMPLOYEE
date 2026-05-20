@@ -1162,3 +1162,27 @@ body {
   letter-spacing: 0.08em;
   font-size: 10px;
 }
+
+/* ════════════════════════════════════════════════════════════════
+   Mobile layout — global overrides (≤ 768px)
+   ════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  /* Prevent horizontal overflow */
+  body { overflow-x: hidden; }
+
+  /* Root flex container: sidebar hidden off-screen (handled by Sidebar.css),
+     main content fills full width */
+  .fixed.inset-0.flex {
+    overflow: hidden;
+  }
+
+  /* Safe-area padding for iPhone notch / home bar */
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Scrollable page content areas get extra bottom space for mobile nav */
+  main > div[style] {
+    padding-bottom: 8px !important;
+  }
+}

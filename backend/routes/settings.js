@@ -6,8 +6,9 @@ const validator = require('../validators/settings-validator')
 
 const router = express.Router()
 
-// Encryption key (should be from env in production)
-const ENCRYPTION_KEY = process.env.SETTINGS_ENCRYPTION_KEY || 'dev-key-please-set-in-env'
+// Encryption key — must be 32 bytes for AES-256
+const RAW_KEY = process.env.SETTINGS_ENCRYPTION_KEY || 'dev-key-please-set-in-env-32bytess'
+const ENCRYPTION_KEY = crypto.createHash('sha256').update(RAW_KEY).digest() // always 32 bytes
 
 // Settings file path (per tenant)
 function getSettingsPath(tenantId) {
@@ -15,20 +16,24 @@ function getSettingsPath(tenantId) {
   return path.join(homeDir, '.ai-employee', 'tenants', tenantId, 'settings.json')
 }
 
-// Simple encryption for API keys
+// AES-256-CBC with random IV — format: iv_hex:encrypted_hex
 function encryptKey(key) {
   if (!key) return ''
-  const cipher = crypto.createCipher('aes-256-cbc', ENCRYPTION_KEY)
+  const iv = crypto.randomBytes(16)
+  const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv)
   let encrypted = cipher.update(key, 'utf8', 'hex')
   encrypted += cipher.final('hex')
-  return encrypted
+  return `${iv.toString('hex')}:${encrypted}`
 }
 
 function decryptKey(encrypted) {
   if (!encrypted) return ''
   try {
-    const decipher = crypto.createDecipher('aes-256-cbc', ENCRYPTION_KEY)
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8')
+    const [ivHex, data] = encrypted.split(':')
+    if (!ivHex || !data) return ''
+    const iv = Buffer.from(ivHex, 'hex')
+    const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv)
+    let decrypted = decipher.update(data, 'hex', 'utf8')
     decrypted += decipher.final('utf8')
     return decrypted
   } catch {

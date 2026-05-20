@@ -13,6 +13,7 @@ from typing import Any
 import threading
 
 from core.bus import get_message_bus
+from core.cost_ledger import BudgetEnforcementError, get_cost_ledger
 from core.model_routing import classify_request_tier, select_model_route
 from core.phase_reporter import PhaseReporter
 from core.wavefield_provider import (
@@ -39,21 +40,58 @@ INTENT_CATEGORIES = (
 )
 logger = logging.getLogger("task_orchestrator_core")
 
+_OLLAMA_REACHABLE: bool | None = None
+
+
+def _ollama_reachable() -> bool:
+    """1s HTTP check to the Ollama tags endpoint. Result cached for the process."""
+    global _OLLAMA_REACHABLE
+    if _OLLAMA_REACHABLE is not None:
+        return _OLLAMA_REACHABLE
+    host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{host}/api/tags", timeout=1) as resp:
+            _OLLAMA_REACHABLE = resp.status == 200
+    except Exception:  # noqa: BLE001
+        _OLLAMA_REACHABLE = False
+    return _OLLAMA_REACHABLE
+
+
+def _resolve_backend() -> str:
+    """Resolve the LLM backend, auto-falling back to Ollama (local-first) when
+    the configured cloud provider has no API key but Ollama is available."""
+    backend = os.environ.get("LLM_BACKEND", "anthropic").strip().lower()
+    if backend == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+        if os.environ.get("OLLAMA_HOST") or _ollama_reachable():
+            logger.warning("ANTHROPIC_API_KEY not set — falling back to local Ollama backend")
+            backend = "ollama"
+    elif backend == "openai" and not os.environ.get("OPENAI_API_KEY", "").strip():
+        if os.environ.get("OLLAMA_HOST") or _ollama_reachable():
+            logger.warning("OPENAI_API_KEY not set — falling back to local Ollama backend")
+            backend = "ollama"
+    return backend
+
 
 class LLMClient:
     def __init__(self, state_dir: Path | None = None) -> None:
-        self.backend = os.environ.get("LLM_BACKEND", "anthropic").strip().lower()
+        self.backend = _resolve_backend()
         self.state_dir = state_dir or Path(os.environ.get("AI_EMPLOYEE_STATE_DIR", "state"))
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.state_dir / "llm_calls.jsonl"
 
-    def complete(self, *, prompt: str, system: str = "You are a helpful AI assistant.") -> dict[str, Any]:
+    def complete(self, *, prompt: str, system: str = "You are a helpful AI assistant.", tenant_id: str = "default") -> dict[str, Any]:
         attempts = 3
         delay_s = 1.0
         last_error = ""
         req_tier = classify_request_tier(prompt=prompt, context=system)
         route = select_model_route(prompt=prompt, context=system, requested_route=None, default_route="auto")
         record_wavefield_event("route_selected")
+
+        # Budget enforcement — hard cap check before any LLM spend
+        _ledger = get_cost_ledger()
+        _allowed, _reason = _ledger.check_budget(tenant_id)
+        if not _allowed:
+            raise BudgetEnforcementError(f"Budget cap exceeded: {_reason}")
 
         # Shadow mode: fire wavefield in background, continue with primary
         if route.shadow_wavefield:
@@ -112,6 +150,32 @@ class LLMClient:
                         "ok": True,
                     }
                 )
+                # Record actual spend in cost ledger (split tokens if available)
+                _model_name = response.get("model", self.backend)
+                _in_tok = response.get("input_tokens", response.get("tokens_used", 0))
+                _out_tok = response.get("output_tokens", 0)
+                try:
+                    _ledger.record(tenant_id, _model_name, _in_tok, _out_tok)
+                except Exception as _le:
+                    logger.warning("cost_ledger.record failed (non-fatal): %s", _le)
+                try:
+                    from core.model_decision_audit import get_model_audit
+                    _cost = response.get("cost_usd", 0.0)
+                    _elapsed_ms = int((time.time() - started) * 1000)
+                    get_model_audit().record(
+                        tenant_id=tenant_id,
+                        model=_model_name,
+                        prompt=prompt,
+                        response=response.get("output", ""),
+                        input_tokens=_in_tok,
+                        output_tokens=_out_tok,
+                        cost_usd=_cost,
+                        latency_ms=_elapsed_ms,
+                        decision_type="chat",
+                        outcome="success",
+                    )
+                except Exception:
+                    pass
                 return response
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
@@ -138,7 +202,13 @@ class LLMClient:
         key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         if not key:
             raise RuntimeError("ANTHROPIC_API_KEY is not set")
-        model = "claude-sonnet-4-20250514"
+        # Read model from llm_router (model-routing.json) at call time so UI changes take effect
+        try:
+            from core.llm_router import get_router as _get_lr
+            _route = _get_lr().get_route()
+            model = _route[1] if _route[0] == "anthropic" else "claude-sonnet-4-6"
+        except Exception:
+            model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
         payload = {
             "model": model,
             "max_tokens": 1024,
@@ -166,9 +236,14 @@ class LLMClient:
             if block.get("type") == "text":
                 text += block.get("text", "")
         usage = body.get("usage", {})
+        in_tok = int(usage.get("input_tokens", 0))
+        out_tok = int(usage.get("output_tokens", 0))
         return {
             "output": text.strip(),
-            "tokens_used": int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0)),
+            "tokens_used": in_tok + out_tok,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "model": model,
         }
 
     def _call_openrouter(self, *, prompt: str, system: str, model: str = "deepseek/deepseek-coder-v2") -> dict[str, Any]:
@@ -200,15 +275,19 @@ class LLMClient:
             raise RuntimeError(f"OpenRouter HTTP {exc.code}: {body}") from exc
         text = body.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         usage = body.get("usage", {})
+        in_tok = int(usage.get("prompt_tokens", 0))
+        out_tok = int(usage.get("completion_tokens", 0))
         return {
             "output": text,
-            "tokens_used": int(usage.get("prompt_tokens", 0)) + int(usage.get("completion_tokens", 0)),
+            "tokens_used": in_tok + out_tok,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
             "model": model,
         }
 
     def _call_ollama(self, *, prompt: str, system: str) -> dict[str, Any]:
         host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-        model = os.environ.get("OLLAMA_MODEL", "llama3.2")
+        model = os.environ.get("OLLAMA_MODEL", "llama3.2:latest")
         payload = {"model": model, "prompt": prompt, "system": system, "stream": False}
         req = urllib.request.Request(
             f"{host}/api/generate",
@@ -223,8 +302,15 @@ class LLMClient:
             body = exc.read().decode("utf-8", errors="ignore")
             raise RuntimeError(f"Ollama HTTP {exc.code}: {body}") from exc
         text = body.get("response", "").strip()
-        tokens = int(body.get("eval_count", 0)) + int(body.get("prompt_eval_count", 0))
-        return {"output": text, "tokens_used": tokens}
+        in_tok = int(body.get("prompt_eval_count", 0))
+        out_tok = int(body.get("eval_count", 0))
+        return {
+            "output": text,
+            "tokens_used": in_tok + out_tok,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "model": "ollama",
+        }
 
     def _log_call(self, event: dict[str, Any]) -> None:
         # Rotate at 50 MB to prevent unbounded disk growth

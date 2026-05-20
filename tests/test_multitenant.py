@@ -1,13 +1,24 @@
 """Multi-tenancy tests — verify tenant isolation and data segregation."""
 import json
 import pytest
+import asyncio
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 # Add runtime to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "runtime"))
 
-from core.tenancy import TenantManager, TenantContext, get_tenant_manager, init_tenant_manager
+import jwt
+from fastapi import HTTPException
+
+from core.tenancy import (
+    TenantManager,
+    TenantContext,
+    get_current_tenant_from_jwt,
+    get_tenant_manager,
+    init_tenant_manager,
+)
 from core.file_lock import read_json_safe, write_json_safe
 
 
@@ -80,6 +91,38 @@ class TestTenantContext:
         manager.clear_current_tenant()
 
         assert manager.get_current_tenant() is None
+
+    def test_extract_tenant_from_signed_jwt(self, monkeypatch):
+        """Tenant extraction should require and accept a valid JWT signature."""
+        secret = "test-secret-key-long-enough-for-hs256"
+        monkeypatch.setenv("JWT_SECRET_KEY", secret)
+        token = jwt.encode(
+            {"tenant_id": "tenant-123", "org_name": "Org", "email": "user@example.com"},
+            secret,
+            algorithm="HS256",
+        )
+        request = SimpleNamespace(headers={"Authorization": f"Bearer {token}"})
+
+        context = asyncio.run(get_current_tenant_from_jwt(request))
+
+        assert context.tenant_id == "tenant-123"
+        assert context.org_name == "Org"
+        assert context.user_email == "user@example.com"
+
+    def test_extract_tenant_rejects_forged_jwt(self, monkeypatch):
+        """Tenant extraction must reject tokens signed with the wrong secret."""
+        monkeypatch.setenv("JWT_SECRET_KEY", "real-secret-key-long-enough-for-hs256")
+        token = jwt.encode(
+            {"tenant_id": "tenant-123", "org_name": "Org", "email": "user@example.com"},
+            "wrong-secret-key-long-enough-for-hs256",
+            algorithm="HS256",
+        )
+        request = SimpleNamespace(headers={"Authorization": f"Bearer {token}"})
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(get_current_tenant_from_jwt(request))
+
+        assert exc.value.status_code == 401
 
 
 class TestTenantDataIsolation:

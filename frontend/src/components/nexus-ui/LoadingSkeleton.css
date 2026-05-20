@@ -1,0 +1,90 @@
+@keyframes nx-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.nx-skel { width: 100%; }
+
+.nx-skel__bar {
+  height: 14px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #1a1f2e 25%, #22283a 50%, #1a1f2e 75%);
+  background-size: 800px 100%;
+  animation: nx-shimmer 1.4s ease-in-out infinite;
+  margin-bottom: 8px;
+}
+
+.nx-skel__dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(90deg, #1a1f2e 25%, #22283a 50%, #1a1f2e 75%);
+  background-size: 800px 100%;
+  animation: nx-shimmer 1.4s ease-in-out infinite;
+}
+
+.nx-skel--rows { display: flex; flex-direction: column; gap: 10px; }
+.nx-skel__row  { display: flex; align-items: center; gap: 10px; }
+
+.nx-skel--card {
+  padding: 16px;
+  border: 1px solid #1e2435;
+  border-radius: 8px;
+  background: #0d1117;
+}
+.nx-skel__card-header {
+  height: 32px; border-radius: 4px; width: 40%;
+  background: linear-gradient(90deg, #1a1f2e 25%, #22283a 50%, #1a1f2e 75%);
+  background-size: 800px 100%;
+  animation: nx-shimmer 1.4s ease-in-out infinite;
+  margin-bottom: 16px;
+}
+
+.nx-skel--grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 3), 1fr);
+  gap: 12px;
+}
+.nx-skel__cell {
+  height: 80px; border-radius: 6px;
+  background: linear-gradient(90deg, #1a1f2e 25%, #22283a 50%, #1a1f2e 75%);
+  background-size: 800px 100%;
+  animation: nx-shimmer 1.4s ease-in-out infinite;
+}
+
+/* card-grid: agent tile placeholders */
+.nx-skel--card-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 3), 1fr);
+  gap: 12px;
+}
+.nx-skel__card-tile {
+  padding: 14px 12px;
+  border: 1px solid #1e2435;
+  border-radius: 8px;
+  background: #0d1117;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+.nx-skel__card-tile-avatar {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: linear-gradient(90deg, #1a1f2e 25%, #22283a 50%, #1a1f2e 75%);
+  background-size: 800px 100%;
+  animation: nx-shimmer 1.4s ease-in-out infinite;
+  margin-bottom: 10px;
+}
+.nx-skel__card-tile-bar {
+  width: 100%; height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg, #1a1f2e 25%, #22283a 50%, #1a1f2e 75%);
+  background-size: 800px 100%;
+  animation: nx-shimmer 1.4s ease-in-out infinite;
+  margin-top: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-skel__bar, .nx-skel__dot, .nx-skel__card-header, .nx-skel__cell,
+  .nx-skel__card-tile-avatar, .nx-skel__card-tile-bar {
+    animation: none;
+    background: #1a1f2e;
+  }
+}

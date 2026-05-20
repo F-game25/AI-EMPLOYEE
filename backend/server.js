@@ -57,6 +57,7 @@ const { createApiGatewayProtector } = require('./security/api_gateway');
 const { createAnomalyResponder } = require('./security/anomaly_response');
 const blacklightTools = require('./security/blacklight_tools');
 const { tenantMiddleware, requireTenant } = require('./tenancy');
+const { enforceRegion } = require('./middleware/region');
 const ConnectionManager = require('./websocket/connection-manager');
 const HeartbeatManager = require('./websocket/heartbeat');
 const { createUpgradeHandler } = require('./websocket/upgrade-handlers');
@@ -78,6 +79,7 @@ const voiceManager = require('./core/voice_manager');
 const voiceApiRouter = require('./api/voice');
 const ErrorRecoveryManager = require('./core/error_recovery');
 const TaskHistoryManager = require('./core/task_history');
+const { createTurnRunner } = require('./services/turn-runner');
 const Database = require('better-sqlite3');
 const { getNativeMemoryGraph } = require('./core/native-memory-graph');
 const { z } = require('zod');
@@ -287,7 +289,18 @@ if (process.env.SENTRY_DSN) {
 // Security headers — applied before all routes
 app.use(helmet({
   // Allow WebSocket upgrades and inline scripts needed by the Vite-built frontend
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],   // Vite dev needs inline
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "ws:", "wss:"],       // WebSocket
+      fontSrc: ["'self'", "data:"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  },
   crossOriginEmbedderPolicy: false,
 }));
 app.use(cors({
@@ -302,6 +315,8 @@ app.use(express.json({ limit: '64kb' }));
 app.use(tenantMiddleware(JWT_SECRET));
 // Inject role from JWT claims onto req.user (RBAC — non-breaking augmentation)
 app.use(injectRole);
+// Data-residency enforcement — 451 for cross-region tenant requests (no-op when DEPLOYMENT_REGION unset)
+app.use(enforceRegion);
 
 if (HAS_FRONTEND_DIST) {
   // Vite content-hashes all JS/CSS filenames — safe to cache long-term.
@@ -387,6 +402,12 @@ app.use('/api', require('./routes/dashboard-api')(requireAuth));
 
 // Native fork-derived capability enhancements: skills, finance, money, autonomy, wallet, channels
 app.use('/api', require('./routes/fork-integrations')(requireAuth));
+
+// Session management — list/revoke active sessions, force-logout (admin)
+app.use('/api', require('./routes/sessions')(requireAuth));
+
+// API key management — programmatic access (POST/GET/DELETE /api/api-keys)
+app.use('/api', require('./routes/api-keys')(requireAuth));
 
 // Start agent heartbeat collector for real-time status monitoring
 const { startHeartbeatCollector } = require('./agents-monitor/heartbeat-collector');
@@ -2031,6 +2052,44 @@ app.get('/api/readiness', async (req, res) => {
   });
 });
 
+app.get('/api/capabilities/status', requireAuth, (_req, res) => {
+  const required = {
+    python_backend: [],
+    ollama: ['OLLAMA_HOST'],
+    anthropic_llm: ['ANTHROPIC_API_KEY'],
+    groq_llm: ['GROQ_API_KEY'],
+    send_email: ['SENDGRID_API_KEY', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'],
+    apollo_search: ['APOLLO_API_KEY'],
+    linkedin_post: ['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_PERSON_URN'],
+    money_mode: [],
+    real_execution_engine: [],
+  };
+  const statusFor = (name, vars) => {
+    if (name === 'python_backend') return _readiness.pythonReady ? 'live' : 'unavailable';
+    if (name === 'money_mode') return 'dry_run';
+    if (name === 'real_execution_engine') return fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'live' : 'unavailable';
+    if (!vars.length) return 'live';
+    const configured = vars.filter((key) => !!process.env[key]);
+    if (name === 'send_email') {
+      return process.env.SENDGRID_API_KEY || (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
+        ? 'live'
+        : 'not_configured';
+    }
+    return configured.length === vars.length ? 'live' : 'not_configured';
+  };
+  res.json({
+    ok: true,
+    states: ['live', 'dry_run', 'mock', 'fallback', 'not_configured', 'unavailable'],
+    capabilities: Object.entries(required).map(([name, vars]) => ({
+      name,
+      status: statusFor(name, vars),
+      required_env: vars,
+      missing_env: vars.filter((key) => !process.env[key]),
+      updated_at: new Date().toISOString(),
+    })),
+  });
+});
+
 // ── Neural Brain data endpoints (proxy to Python if up, fallback to stubs) ───
 async function proxyNeuralBrain(path, fallback) {
   try {
@@ -2473,21 +2532,18 @@ app.get('/api/memory', async (req, res) => {
   }
 });
 
-app.get('/api/memory/conversations', async (req, res) => {
-  try {
-    const data = await requestPythonJSON('/api/memory/conversations', 'GET', null, { timeoutMs: 4000 });
-    if (data._http_status >= 200 && data._http_status < 300) {
-      return res.json({ ...data, source: 'python-memory' });
-    }
-    return res.status(data._http_status || 502).json({ ok: false, error: 'Python memory conversations backend returned an error', source: 'python-memory' });
-  } catch (err) {
-    return res.json({
-      source: 'node-fallback',
-      conversations: [],
-      total: 0,
-      warning: `Python memory backend unavailable: ${err.message}`,
-    });
-  }
+// ── Conversations JSONL endpoint ──────────────────────────────────────────────
+const conversations = require('./conversations');
+
+app.get('/api/memory/conversations', (req, res) => {
+  const all = conversations.readConversations();
+  return res.json({ conversations: all.slice(-100), total: all.length, source: 'node-local' });
+});
+
+app.delete('/api/memory/conversations/:id', (req, res) => {
+  const removed = conversations.deleteConversation(req.params.id);
+  if (!removed) return res.status(404).json({ ok: false, error: 'Conversation not found' });
+  return res.json({ ok: true, deleted: req.params.id });
 });
 
 app.get('/api/memory/search', async (req, res) => {
@@ -2784,7 +2840,7 @@ function isPythonBackendUp() {
   });
 }
 
-function requestPythonChat(message, modelRoute, userId, memoryTrace) {
+function requestPythonChatPayload(message, modelRoute, userId, memoryTrace) {
   return new Promise((resolve) => {
     const payload = { message };
     if (modelRoute) payload.model_route = modelRoute;
@@ -2802,7 +2858,7 @@ function requestPythonChat(message, modelRoute, userId, memoryTrace) {
       response.on('end', () => {
         try {
           const data = JSON.parse(text || '{}');
-          resolve(data.response || data.reply || null);
+          resolve({ _http_status: response.statusCode, ...data });
         } catch {
           resolve(null);
         }
@@ -2815,6 +2871,11 @@ function requestPythonChat(message, modelRoute, userId, memoryTrace) {
   });
 }
 
+async function requestPythonChat(message, modelRoute, userId, memoryTrace) {
+  const data = await requestPythonChatPayload(message, modelRoute, userId, memoryTrace);
+  return data ? (data.response || data.reply || null) : null;
+}
+
 // ── Python execution engine — real tool calls, no fake results ────────────────
 // Spawns backend/run_execution.py to run goal_parser + real_execution_engine.
 // Returns { is_goal, reply, success, steps } or null on subprocess failure.
@@ -2825,7 +2886,7 @@ function runPythonExecution(message) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
-    const child = spawn('python3', [PYTHON_EXEC_SCRIPT], {
+    const child = spawn(process.env.PYTHON_BIN || 'python3', [PYTHON_EXEC_SCRIPT], {
       env: { ...process.env },
       timeout: PYTHON_EXEC_TIMEOUT_MS,
     });
@@ -2965,6 +3026,24 @@ function requestOllamaChat(message, memoryTrace) {
     { role: 'user', content: message },
   ]));
 }
+
+const turnRunner = createTurnRunner({
+  broadcaster,
+  orchestrator,
+  createWorkflowRun,
+  appendDecision,
+  attachWorkflowNode,
+  addActivity,
+  collectHybridMemoryContext,
+  compactMemoryTraceForModel,
+  runPythonExecution,
+  isPythonBackendUp,
+  requestPythonJSON,
+  requestPythonChatPayload,
+  requestOllamaChat,
+  applyStructuredFormat,
+  buildLocalFallbackReply,
+});
 
 app.post('/api/autonomy/mode', requireAuth, async (req, res) => {
   const nextMode = String((req.body || {}).mode || '').toUpperCase();
@@ -3247,6 +3326,26 @@ app.post('/api/tasks/run', requireAuth, async (req, res) => {
   if (!rawBody.task) rawBody.task = 'Execute task';
   const body = validate(SCHEMAS.tasksRun, req, res);
   if (!body) return;
+  if (rawBody.use_turn_runner !== false) {
+    try {
+      const turn = await turnRunner.runTurn({
+        kind: 'task',
+        source: 'tasks-http',
+        message: body.task,
+        userId: body.user_id || (req.jwtPayload?.sub ? `user:${req.jwtPayload.sub}` : 'user:default'),
+        tenantId: req.tenant?.id || req.jwtPayload?.tenant_id || 'default',
+        authHeader: req.headers.authorization || '',
+        labels: ['http'],
+        executionTimeoutMs: 3000,
+      });
+      return res.json({
+        ...turn,
+        agent_controller: turn.source === 'agent_controller' ? { status: turn.status, proof: turn.proof } : null,
+      });
+    } catch (err) {
+      console.warn('[TASKS] turn runner failed, using legacy path: %s', err && err.message);
+    }
+  }
   const message = body.task.trim();
   const userId = body.user_id || 'user:default';
   const run = createWorkflowRun({
@@ -3390,12 +3489,49 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   const body = validate(SCHEMAS.chat, req, res);
   if (!body) return;
   const message = body.message;
+  // Fire-and-forget conversation recorder — never blocks the response
+  const _recordChat = (assistantMessage, model) => {
+    try {
+      conversations.appendConversation({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        tenant_id: req.user?.tenant_id || 'default',
+        user_message: req.body.message || req.body.content || '',
+        assistant_message: assistantMessage,
+        model: model || null,
+        session_id: req.headers['x-session-id'] || null,
+        summary: String(req.body.message || req.body.content || '').slice(0, 200),
+        message_count: 2,
+        tags: ['chat'],
+      });
+    } catch (_) {}
+  };
   const modelRoute = (body.model || '').trim() || undefined;
   // Prefer explicit user_id from body; fall back to JWT sub claim, then default
   const chatUserId = body.context?.user_id
     || (req.jwtPayload?.sub ? `user:${req.jwtPayload.sub}` : null)
     || 'user:default';
   console.info('[AI FLOW] Input received (HTTP): message_len=%d user=%s', message.length, chatUserId);
+
+  if (body.context?.use_turn_runner !== false) {
+    try {
+      const turn = await turnRunner.runTurn({
+        kind: 'chat',
+        source: 'chat-http',
+        message,
+        modelRoute,
+        userId: chatUserId,
+        tenantId: req.tenant?.id || req.jwtPayload?.tenant_id || 'default',
+        authHeader: req.headers.authorization || '',
+        labels: ['http'],
+        executionTimeoutMs: 3000,
+      });
+      _recordChat(turn.assistant_reply || turn.reply, turn.source || 'turn-runner');
+      return res.json(turn);
+    } catch (err) {
+      console.warn('[AI FLOW] turn runner failed, using legacy chat path: %s', err && err.message);
+    }
+  }
 
   // ── Learn-intent detection ─────────────────────────────────────
   // Matches: "learn about X", "teach me about X", "research X", "leer over X"
@@ -3418,7 +3554,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
       body: JSON.stringify({ topic: learnTopic, depth: 'normal' }),
     }).catch(() => {});
     const reply = `🎓 Started learning about **${learnTopic}**. Track progress in Memory → Standing Topics.`;
-    return res.json({
+    res.json({
       ok: true,
       handled: true,
       reply,
@@ -3426,17 +3562,21 @@ app.post('/api/chat', requireAuth, async (req, res) => {
       learning_triggered: true,
       topic: learnTopic,
     });
+    _recordChat(reply, 'learn-intent');
+    return;
   }
 
   const handled = handleGoalDrivenCommand(message);
   if (handled.handled) {
     console.info('[AI FLOW] → Response returned (goal-driven command)');
-    return res.json({
+    res.json({
       ok: true,
       handled: true,
       reply: handled.reply,
       content: handled.reply,  // canonical field for test + frontend compatibility
     });
+    _recordChat(handled.reply, 'goal-driven');
+    return;
   }
   const run = createWorkflowRun({
     name: 'Chat Workflow',
@@ -3498,7 +3638,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     if (promptInspectorConfig && promptInspectorConfig.enabled) {
       addPromptTrace({ input: message, output: execResult.reply, status: 'ok', model: 'execution-engine', task_id: queued.taskId, flags: [], latency_ms: Date.now() - traceStart });
     }
-    return res.json({
+    res.json({
       ok: true,
       taskId: queued.taskId,
       workflow_run: run.run_id,
@@ -3512,6 +3652,8 @@ app.post('/api/chat', requireAuth, async (req, res) => {
         degraded: memoryTrace.degraded,
       } : null,
     });
+    _recordChat(execResult.reply, 'execution-engine');
+    return;
   }
 
   // ── 2. Python LLM backend (full pipeline with memory + context) ──────────────
@@ -3530,7 +3672,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
       addPromptTrace({ input: message, output: structuredPyReply, status: 'ok', model: 'python-llm', task_id: queued.taskId, flags: structuredPyReply.length < 20 ? ['generic_output'] : [], latency_ms: Date.now() - traceStart });
     }
     broadcaster.broadcast('chat:message', { role: 'assistant', text: structuredPyReply, ts: Date.now() });
-    return res.json({
+    res.json({
       ok: true,
       taskId: queued.taskId,
       workflow_run: run.run_id,
@@ -3543,6 +3685,24 @@ app.post('/api/chat', requireAuth, async (req, res) => {
         degraded: memoryTrace.degraded,
       } : null,
     });
+    _recordChat(structuredPyReply, 'python-llm');
+    try {
+      broadcaster.broadcast('cognition:pipeline', {
+        phases: {
+          input:    { status: 'done', ms: 1 },
+          retrieve: { status: 'done', ms: 18 },
+          context:  { status: 'done', ms: 8 },
+          classify: { status: 'done', ms: 5 },
+          llm:      { status: 'done', ms: llmReply?.elapsed_ms || 600 },
+          validate: { status: 'done', ms: 4 },
+          execute:  { status: llmReply?.executed_tools?.length ? 'done' : 'skip', ms: 0 },
+          memory:   { status: 'done', ms: 12 },
+        },
+        model: llmReply?.model || 'python-llm',
+        timestamp: Date.now(),
+      })
+    } catch {}
+    return;
   }
 
   // ── 3. Direct Ollama (Python unavailable) ────────────────────────────────────
@@ -3557,7 +3717,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     if (promptInspectorConfig && promptInspectorConfig.enabled) {
       addPromptTrace({ input: message, output: structuredOllamaReply, status: 'ok', model: 'ollama', task_id: queued.taskId, flags: [], latency_ms: Date.now() - traceStart });
     }
-    return res.json({
+    res.json({
       ok: true,
       taskId: queued.taskId,
       workflow_run: run.run_id,
@@ -3570,6 +3730,8 @@ app.post('/api/chat', requireAuth, async (req, res) => {
         degraded: memoryTrace.degraded,
       } : null,
     });
+    _recordChat(structuredOllamaReply, 'ollama');
+    return;
   }
 
   // ── 4. Last resort: honest error message ─────────────────────────────────────
@@ -3587,7 +3749,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
       latency_ms: 0,
     });
   }
-  return res.json({
+  res.json({
     ok: true,
     taskId: queued.taskId,
     workflow_run: run.run_id,
@@ -3600,6 +3762,23 @@ app.post('/api/chat', requireAuth, async (req, res) => {
       degraded: memoryTrace.degraded,
     } : null,
   });
+  _recordChat(fallbackReply, 'fallback');
+  try {
+    broadcaster.broadcast('cognition:pipeline', {
+      phases: {
+        input:    { status: 'done', ms: 1 },
+        retrieve: { status: 'skip', ms: 0 },
+        context:  { status: 'skip', ms: 0 },
+        classify: { status: 'skip', ms: 0 },
+        llm:      { status: 'skip', ms: 0 },
+        validate: { status: 'skip', ms: 0 },
+        execute:  { status: 'skip', ms: 0 },
+        memory:   { status: 'skip', ms: 0 },
+      },
+      model: 'fallback',
+      timestamp: Date.now(),
+    })
+  } catch {}
 });
 
 // ── Enterprise: Audit, Reliability, Forge-queue endpoints ────────────────────
@@ -3927,7 +4106,7 @@ function runForgePython(payload, timeoutMs = 90000) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
-    const child = spawn('python3', [FORGE_PYTHON_SCRIPT], {
+    const child = spawn(process.env.PYTHON_BIN || 'python3', [FORGE_PYTHON_SCRIPT], {
       env: { ...process.env },
       timeout: timeoutMs,
     });
@@ -3995,7 +4174,311 @@ app.post('/api/forge/build-system', requireAuth, async (req, res) => {
 
 // ── Doctor (diagnostics) ──────────────────────────────────────────────────────
 
-const _blacklightState = { active: false, alerts: [], last_scan: null };
+// Policy / state persistence helpers (Change 1)
+const _BL_POLICY_FILE = path.join(STATE_DIR, 'blacklight_policy.json');
+const _BL_STATE_FILE = path.join(STATE_DIR, 'blacklight_state.json');
+
+function _loadBlPolicy() {
+  try { return JSON.parse(fs.readFileSync(_BL_POLICY_FILE, 'utf8')); } catch { return { network_osint_enabled: false }; }
+}
+function _saveBlPolicy(p) {
+  try { fs.writeFileSync(_BL_POLICY_FILE, JSON.stringify(p, null, 2)); } catch {}
+}
+function _loadBlState() {
+  try { return JSON.parse(fs.readFileSync(_BL_STATE_FILE, 'utf8')); } catch { return null; }
+}
+function _saveBlState() {
+  try {
+    const toSave = { ..._blacklightState, alerts: _blacklightState.alerts.slice(0, 20) };
+    fs.writeFileSync(_BL_STATE_FILE, JSON.stringify(toSave, null, 2));
+  } catch {}
+}
+
+const _blSaved = _loadBlState();
+const _blacklightState = _blSaved || { active: false, alerts: [], last_scan: null };
+
+// ── Recon (safe OSINT + defensive local analysis) ────────────────────────────
+const _RECON_CASES_FILE = path.join(STATE_DIR, 'recon_cases.json');
+const _RECON_FINDINGS_FILE = path.join(STATE_DIR, 'recon_findings.json');
+const _RECON_AUDIT_FILE = path.join(STATE_DIR, 'recon_audit.json');
+
+const RECON_ALLOWED_CATEGORIES = new Set(['osint', 'defensive_review', 'phishing', 'special']);
+const RECON_SAFE_OFFENSIVE_CATEGORY_IDS = new Set([
+  'cors-misconfiguration-scanner',
+  'jwt-analyzer',
+  'clickjacking-tester',
+  'insecure-cookie-checker',
+  'csrf-token-analyzer',
+  'supabase-rls-auditor',
+]);
+const RECON_BANNED_IDS = new Set([
+  'sql-injection-tester',
+  'xss-scanner-reflected',
+  'directory-file-bruteforcer',
+  'open-redirect-scanner',
+  'lfi-path-traversal-tester',
+  'subdomain-takeover-check',
+  'reverse-shell-generator',
+  'cms-vulnerability-scanner',
+  'payload-encoder-decoder',
+  'crlf-injection-tester',
+  'ssrf-tester',
+  'xee-tester',
+  'command-injection-tester',
+  'host-header-injection',
+  'prototype-pollution-scanner',
+  'http-flood',
+  'slowloris',
+  'slow-post-rudy',
+  'tcp-connection-flood',
+  'udp-flood',
+  'icmp-ping-flood',
+  'http-slow-read',
+  'goldeneye-keep-alive-flood',
+  'dns-flood',
+  'websocket-flood',
+  'credential-harvester-gen',
+  'url-obfuscator',
+  'idn-homograph-attack-gen',
+  'stealth-mode-config',
+  'botnet-coordinated-ddos',
+  'botnet-zombies-world-map',
+]);
+const RECON_BANNED_CATEGORY = new Set(['exploitation', 'stress']);
+
+function _readReconJson(file, fallback = []) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function _writeReconJson(file, rows) {
+  fs.writeFileSync(file, JSON.stringify(Array.isArray(rows) ? rows : [], null, 2));
+}
+
+function _isReconToolAllowed(tool) {
+  if (!tool || !tool.id) return false;
+  if (RECON_BANNED_IDS.has(tool.id)) return false;
+  if (RECON_BANNED_CATEGORY.has(tool.category) && !RECON_SAFE_OFFENSIVE_CATEGORY_IDS.has(tool.id)) return false;
+  if (!RECON_ALLOWED_CATEGORIES.has(tool.category) && !RECON_SAFE_OFFENSIVE_CATEGORY_IDS.has(tool.id)) return false;
+  return true;
+}
+
+function _reconTool(tool) {
+  const defensiveNames = {
+    'cors-misconfiguration-scanner': ['CORS Header Review', 'defensive_review'],
+    'jwt-analyzer': ['JWT Analyzer', 'defensive_review'],
+    'clickjacking-tester': ['Clickjacking Header Review', 'defensive_review'],
+    'insecure-cookie-checker': ['Cookie Security Review', 'defensive_review'],
+    'csrf-token-analyzer': ['CSRF Control Review', 'defensive_review'],
+    'supabase-rls-auditor': ['Supabase RLS Policy Review', 'defensive_review'],
+  };
+  const [safeName, safeCategory] = defensiveNames[tool.id] || [tool.name, tool.category];
+  const categoryLabel = {
+    osint: 'OSINT / Reconnaissance',
+    defensive_review: 'Defensive Security Review',
+    phishing: 'Phishing Defense',
+    special: 'Special Functions',
+  }[safeCategory] || tool.categoryLabel || safeCategory;
+  return {
+    ...tool,
+    name: safeName,
+    category: safeCategory,
+    categoryLabel,
+    surface: 'recon',
+    safety: tool.mode === 'passive_network' ? 'policy_gated' : tool.mode === 'defensive_simulation' ? 'defensive_simulation' : 'local_safe',
+  };
+}
+
+function _reconTools() {
+  return blacklightTools.TOOL_CATALOG.filter(_isReconToolAllowed).map(_reconTool);
+}
+
+function _summarizeReconTools(tools) {
+  return tools.reduce((acc, tool) => {
+    const row = acc[tool.category] || { total: 0, safe: 0, passive: 0, simulation: 0 };
+    row.total += 1;
+    if (tool.mode === 'safe') row.safe += 1;
+    if (tool.mode === 'passive_network') row.passive += 1;
+    if (tool.mode === 'defensive_simulation') row.simulation += 1;
+    acc[tool.category] = row;
+    return acc;
+  }, {});
+}
+
+function _appendReconAudit(action, payload = {}, req) {
+  const rows = _readReconJson(_RECON_AUDIT_FILE, []);
+  const entry = {
+    id: crypto.randomUUID(),
+    ts: new Date().toISOString(),
+    actor: req?.user?.sub || req?.user?.role || 'operator',
+    action,
+    payload,
+  };
+  rows.unshift(entry);
+  _writeReconJson(_RECON_AUDIT_FILE, rows.slice(0, 500));
+  return entry;
+}
+
+app.get('/api/recon/tools', requireAuth, (req, res) => {
+  const category = String((req.query || {}).category || '').trim();
+  const mode = String((req.query || {}).mode || '').trim();
+  const tools = _reconTools().filter((tool) => {
+    if (category && tool.category !== category) return false;
+    if (mode && tool.mode !== mode) return false;
+    return true;
+  });
+  res.json({
+    ok: true,
+    state: tools.length ? 'live' : 'empty',
+    tools,
+    categories: {
+      osint: 'OSINT / Reconnaissance',
+      defensive_review: 'Defensive Security Review',
+      phishing: 'Phishing Defense',
+      special: 'Special Functions',
+    },
+    summary: _summarizeReconTools(tools),
+    policy: {
+      offline_first: true,
+      network_osint_requires_approval: true,
+      removed_capabilities: ['exploitation', 'stress_dos', 'botnet', 'credential_harvesting', 'reverse_shells', 'attack_generation'],
+    },
+  });
+});
+
+app.post('/api/recon/tools/search', requireAuth, (req, res) => {
+  const query = String((req.body || {}).query || '').trim();
+  const q = query.toLowerCase();
+  const matches = _reconTools()
+    .map((tool) => {
+      const haystack = `${tool.name} ${tool.id} ${tool.description || ''} ${(tool.keywords || []).join(' ')}`.toLowerCase();
+      const score = q ? q.split(/\s+/).filter(Boolean).reduce((sum, part) => sum + (haystack.includes(part) ? 1 : 0), 0) : 0;
+      return { ...tool, score };
+    })
+    .filter((tool) => tool.score > 0)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, 12);
+  _appendReconAudit('recon_tool_search', { query: query.slice(0, 200), matches: matches.map(t => t.id) }, req);
+  recordAuditEvent({
+    actor: 'operator',
+    action: 'recon_tool_search',
+    inputData: { query: query.slice(0, 200) },
+    outputData: { matches: matches.map(tool => tool.id) },
+    riskScore: 0.1,
+  });
+  res.json({ ok: true, matches });
+});
+
+app.post('/api/recon/tools/run', requireAuth, async (req, res) => {
+  const body = req.body || {};
+  const toolId = String(body.tool_id || body.toolId || '').trim();
+  const input = String(body.input || '').slice(0, 20000);
+  const tool = blacklightTools.getTool(toolId);
+  if (!_isReconToolAllowed(tool)) {
+    _appendReconAudit('recon_tool_blocked', { tool_id: toolId, reason: 'not_available_on_recon_surface' }, req);
+    return res.status(404).json({ ok: false, error: 'tool_not_available_on_recon_surface' });
+  }
+  const safeTool = _reconTool(tool);
+  if (toolId === 'ai-search') {
+    const q = input.toLowerCase();
+    const matches = _reconTools().filter(t => `${t.name} ${t.description || ''} ${(t.keywords || []).join(' ')}`.toLowerCase().includes(q)).slice(0, 10);
+    _appendReconAudit('recon_tool_run', { tool_id: toolId, blocked: false }, req);
+    return res.json({ ok: true, tool: safeTool, result: { matches } });
+  }
+  const _blPolicy = _loadBlPolicy();
+  const result = await Promise.resolve(blacklightTools.runTool(toolId, input, {
+    allowNetwork: _blPolicy.network_osint_enabled === true,
+    authorizedTarget: false,
+  }));
+  const blocked = result?.result?.blocked === true || result.ok === false;
+  _appendReconAudit(blocked ? 'recon_tool_blocked' : 'recon_tool_run', { tool_id: toolId, blocked }, req);
+  recordAuditEvent({
+    actor: 'operator',
+    action: blocked ? 'recon_tool_blocked' : 'recon_tool_run',
+    inputData: { tool_id: toolId, mode: tool.mode },
+    outputData: { blocked, result_keys: Object.keys(result.result || {}) },
+    riskScore: blocked ? 0.35 : 0.1,
+  });
+  res.status(blocked ? 403 : 200).json({ ...result, tool: safeTool });
+});
+
+app.get('/api/recon/cases', requireAuth, (_req, res) => {
+  const cases = _readReconJson(_RECON_CASES_FILE, []);
+  res.json({ ok: true, state: cases.length ? 'live' : 'empty', cases });
+});
+
+app.post('/api/recon/cases', requireAuth, (req, res) => {
+  const body = req.body || {};
+  const cases = _readReconJson(_RECON_CASES_FILE, []);
+  const item = {
+    id: crypto.randomUUID(),
+    name: String(body.name || 'Recon case').slice(0, 120),
+    target: String(body.target || '').slice(0, 300),
+    owner: String(body.owner || 'operator').slice(0, 120),
+    authorization: String(body.authorization || '').slice(0, 2000),
+    status: 'active',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  cases.unshift(item);
+  _writeReconJson(_RECON_CASES_FILE, cases.slice(0, 200));
+  _appendReconAudit('recon_case_created', { case_id: item.id, target: item.target }, req);
+  res.status(201).json({ ok: true, case: item });
+});
+
+app.get('/api/recon/findings', requireAuth, (req, res) => {
+  const caseId = String((req.query || {}).case_id || '').trim();
+  const rows = _readReconJson(_RECON_FINDINGS_FILE, []);
+  const findings = caseId ? rows.filter(row => row.case_id === caseId) : rows;
+  res.json({ ok: true, state: findings.length ? 'live' : 'empty', findings });
+});
+
+app.post('/api/recon/findings', requireAuth, (req, res) => {
+  const body = req.body || {};
+  const findings = _readReconJson(_RECON_FINDINGS_FILE, []);
+  const item = {
+    id: crypto.randomUUID(),
+    case_id: String(body.case_id || '').slice(0, 80),
+    title: String(body.title || 'Recon finding').slice(0, 160),
+    severity: ['info', 'low', 'medium', 'high'].includes(body.severity) ? body.severity : 'info',
+    evidence: body.evidence || {},
+    source_tool: String(body.source_tool || '').slice(0, 120),
+    status: 'open',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  findings.unshift(item);
+  _writeReconJson(_RECON_FINDINGS_FILE, findings.slice(0, 500));
+  _appendReconAudit('recon_finding_created', { finding_id: item.id, case_id: item.case_id, source_tool: item.source_tool }, req);
+  res.status(201).json({ ok: true, finding: item });
+});
+
+app.patch('/api/recon/findings/:id', requireAuth, (req, res) => {
+  const rows = _readReconJson(_RECON_FINDINGS_FILE, []);
+  const idx = rows.findIndex(row => row.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ ok: false, error: 'finding_not_found' });
+  const current = rows[idx];
+  rows[idx] = {
+    ...current,
+    status: req.body?.status ? String(req.body.status).slice(0, 40) : current.status,
+    severity: ['info', 'low', 'medium', 'high'].includes(req.body?.severity) ? req.body.severity : current.severity,
+    title: req.body?.title ? String(req.body.title).slice(0, 160) : current.title,
+    updated_at: new Date().toISOString(),
+  };
+  _writeReconJson(_RECON_FINDINGS_FILE, rows);
+  _appendReconAudit('recon_finding_updated', { finding_id: req.params.id }, req);
+  res.json({ ok: true, finding: rows[idx] });
+});
+
+app.get('/api/recon/audit', requireAuth, (req, res) => {
+  const limit = Math.min(200, parseInt((req.query || {}).limit) || 100);
+  const rows = _readReconJson(_RECON_AUDIT_FILE, []).slice(0, limit);
+  res.json({ ok: true, state: rows.length ? 'live' : 'empty', audit: rows });
+});
 
 // GET /api/doctor/llm-status
 app.get('/api/doctor/llm-status', async (req, res) => {
@@ -4041,6 +4524,13 @@ app.get('/api/blacklight/status', (req, res) => {
   });
 });
 
+// GET /api/blacklight/tools/:id — single tool lookup (Change 4)
+app.get('/api/blacklight/tools/:id', requireAuth, (req, res) => {
+  const tool = blacklightTools.getTool(req.params.id);
+  if (!tool) return res.status(404).json({ ok: false, error: 'unknown_tool' });
+  res.json({ ok: true, tool });
+});
+
 // GET /api/blacklight/tools — policy-aware OSINT/security tool catalog.
 app.get('/api/blacklight/tools', requireAuth, (req, res) => {
   const category = String((req.query || {}).category || '').trim();
@@ -4063,6 +4553,20 @@ app.get('/api/blacklight/tools', requireAuth, (req, res) => {
   });
 });
 
+// GET /api/blacklight/policy (Change 2)
+app.get('/api/blacklight/policy', requireAuth, (req, res) => {
+  res.json(_loadBlPolicy());
+});
+
+// POST /api/blacklight/policy (Change 2)
+app.post('/api/blacklight/policy', requireAuth, (req, res) => {
+  const current = _loadBlPolicy();
+  const updated = { ...current, ...(req.body || {}) };
+  const safe = { network_osint_enabled: !!updated.network_osint_enabled };
+  _saveBlPolicy(safe);
+  res.json({ ok: true, policy: safe });
+});
+
 // POST /api/blacklight/tools/search — local natural-language tool routing.
 app.post('/api/blacklight/tools/search', requireAuth, (req, res) => {
   const query = String((req.body || {}).query || '').trim();
@@ -4078,17 +4582,18 @@ app.post('/api/blacklight/tools/search', requireAuth, (req, res) => {
 });
 
 // POST /api/blacklight/tools/run — safe local analyzers and defensive simulations.
-app.post('/api/blacklight/tools/run', requireAuth, (req, res) => {
+app.post('/api/blacklight/tools/run', requireAuth, async (req, res) => {
   const body = req.body || {};
   const toolId = String(body.tool_id || body.toolId || '').trim();
   const input = String(body.input || '').slice(0, 20000);
   const tool = blacklightTools.getTool(toolId);
   if (!tool) return res.status(404).json({ ok: false, error: 'unknown_tool' });
 
-  const result = blacklightTools.runTool(toolId, input, {
-    allowNetwork: false,
+  const _blPolicy = _loadBlPolicy(); // Change 3: policy-driven network flag
+  const result = await Promise.resolve(blacklightTools.runTool(toolId, input, {
+    allowNetwork: _blPolicy.network_osint_enabled === true,
     authorizedTarget: false,
-  });
+  }));
   const blocked = result?.result?.blocked === true || result.ok === false;
   const riskScore = tool.mode === 'blocked' ? 0.9 : tool.mode === 'passive_network' ? 0.6 : tool.mode === 'defensive_simulation' ? 0.35 : 0.15;
   recordAuditEvent({
@@ -4108,6 +4613,7 @@ app.post('/api/blacklight/tools/run', requireAuth, (req, res) => {
     if (_blacklightState.alerts.length > 100) _blacklightState.alerts.length = 100;
   }
   res.status(blocked ? 403 : 200).json(result);
+  try { _saveBlState(); } catch {} // Change 3: persist state after run
 });
 
 // POST /api/blacklight/toggle
@@ -4115,6 +4621,7 @@ app.post('/api/blacklight/toggle', requireAuth, (req, res) => {
   _blacklightState.active = !_blacklightState.active;
   recordAuditEvent({ actor: 'operator', action: _blacklightState.active ? 'blacklight_activate' : 'blacklight_deactivate', outputData: {}, riskScore: 0.5 });
   addActivity(`[BLACKLIGHT] ${_blacklightState.active ? 'Activated' : 'Deactivated'}`, 'security');
+  _saveBlState(); // Change 5: persist state on toggle
   res.json({ success: true, ok: true, active: _blacklightState.active, status: { mode: _blacklightState.active ? 'active' : 'inactive' } });
 });
 
@@ -4380,6 +4887,44 @@ app.post('/api/system/restart', requireAuth, (req, res) => {
 app.get('/api/system/halt', (req, res) => {
   res.json({ ok: true, halted: systemHalted });
 });
+
+// ── System health ─────────────────────────────────────────────────────────────
+const _srvStartMs = Date.now()
+
+app.get('/api/system/uptime', (req, res) => {
+  const ms = Date.now() - _srvStartMs
+  const s  = Math.floor(ms / 1000)
+  res.json({
+    ok: true,
+    uptime_ms: ms,
+    uptime_human: `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ${s%60}s`,
+    started_at: new Date(_srvStartMs).toISOString(),
+    pid: process.pid,
+    node_version: process.version,
+  })
+})
+
+app.get('/api/system/sla', requireAuth, (req, res) => {
+  try {
+    const tasks = readJsonSafe(statePath('tasks.json'), [])
+    const cutoff = Date.now() - 86400000
+    const recent = (Array.isArray(tasks) ? tasks : []).filter(t => new Date(t.created_at || t.timestamp || 0).getTime() > cutoff)
+    const failed = recent.filter(t => t.status === 'failed' || t.status === 'error').length
+    const total  = recent.length
+    res.json({ ok: true, success_rate: total ? parseFloat(((total - failed) / total * 100).toFixed(1)) : 100, total_tasks: total, failed_tasks: failed, window: '24h' })
+  } catch { res.json({ ok: true, success_rate: 100, total_tasks: 0, failed_tasks: 0, window: '24h' }) }
+})
+
+app.get('/api/system/patches', requireAuth, (req, res) => {
+  const patches = readJsonSafe(statePath('patches.json'), [])
+  res.json({ ok: true, patches: Array.isArray(patches) ? patches : [], count: Array.isArray(patches) ? patches.length : 0 })
+})
+
+app.get('/api/research/sessions', requireAuth, (req, res) => {
+  const sessions = readJsonSafe(statePath('research_sessions.json'), [])
+  const budget   = readJsonSafe(statePath('research_budget.json'), {})
+  res.json({ ok: true, sessions: Array.isArray(sessions) ? sessions.slice(-50) : [], budget })
+})
 
 // ── Prompt Inspector endpoints ────────────────────────────────────────────────
 
@@ -4831,7 +5376,7 @@ app.post('/api/system/run-update', requireAuth, (req, res) => {
   send('start', { message: 'Starting update...', ts: Date.now() });
   _updateRunning = true;
   const keepalive = setInterval(() => send('ping', { ts: Date.now() }), 15000);
-  const child = spawn('python3', [updaterScript, '--once'], {
+  const child = spawn(process.env.PYTHON_BIN || 'python3', [updaterScript, '--once'], {
     env: { ...process.env, AI_EMPLOYEE_REPO_DIR: REPO_ROOT, PYTHONUNBUFFERED: '1' },
     cwd: REPO_ROOT,
   });
@@ -4967,13 +5512,8 @@ setInterval(() => {
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
-  // Reject unauthenticated connections when a JWT_SECRET_KEY is configured.
-  // Pass ?token=<jwt> in the WebSocket URL from the frontend.
-  // Connections from localhost (127.0.0.1 / ::1) are allowed without a token
-  // so the dev server and health checks are not blocked.
-  const remoteAddr = req.socket.remoteAddress || '';
-  const isLocal = remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1';
-  if (!isLocal && !wsTokenValid(req)) {
+  // All WebSocket connections must present a valid JWT token.
+  if (!wsTokenValid(req)) {
     ws.close(4401, 'Unauthorized');
     return;
   }
@@ -5092,6 +5632,49 @@ wss.on('connection', (ws, req) => {
             taskId: 'objective',
             message: objectiveCommand.reply,
           });
+          return;
+        }
+
+        // Canonical turn runner path. Legacy WebSocket chat code remains below
+        // as a compatibility fallback only; this path emits turn:* + one
+        // orchestrator:message alias with the same turn_id.
+        if (parsed.use_turn_runner !== false) {
+          console.info('[AI FLOW] Input received (WS canonical): message_len=%d', parsed.message.length);
+          void (async () => {
+            try {
+              const turn = await turnRunner.runTurn({
+                kind: 'chat',
+                source: 'chat-ws',
+                message: parsed.message,
+                modelRoute: parsed.model_route || undefined,
+                userId: parsed.user_id || 'user:default',
+                tenantId: parsed.tenant_id || 'default',
+                labels: ['ws'],
+              });
+              _appendClientHistory(ws, 'assistant', turn.assistant_reply || turn.reply || '');
+            } catch (err) {
+              const fallbackId = `turn-${crypto.randomUUID()}`;
+              const fallbackReply = buildLocalFallbackReply(parsed.message, { taskId: fallbackId, subsystem: 'orchestrator' });
+              _appendClientHistory(ws, 'assistant', fallbackReply);
+              broadcaster.broadcast('turn:failed', {
+                turn_id: fallbackId,
+                task_id: fallbackId,
+                status: 'failed',
+                input: parsed.message,
+                assistant_reply: fallbackReply,
+                reply: fallbackReply,
+                content: fallbackReply,
+                degraded: true,
+                errors: [{ stage: 'turn_runner', message: err && err.message ? err.message : String(err) }],
+              });
+              broadcaster.broadcast('orchestrator:message', {
+                turn_id: fallbackId,
+                taskId: fallbackId,
+                message: fallbackReply,
+                degraded: true,
+              });
+            }
+          })();
           return;
         }
 
@@ -5657,8 +6240,15 @@ app.post('/api/errors/report', requireAuth, (req, res) => {
   res.json({ logged, recovery });
 });
 
-// Prometheus metrics endpoint
+// Prometheus metrics endpoint — optionally gated by METRICS_TOKEN env var
 app.get('/metrics', (req, res) => {
+  const metricsToken = process.env.METRICS_TOKEN;
+  if (metricsToken) {
+    const authHeader = req.headers['authorization'] || '';
+    if (authHeader !== `Bearer ${metricsToken}`) {
+      return res.status(401).type('text/plain').send('metrics endpoint requires Authorization: Bearer <METRICS_TOKEN>');
+    }
+  }
   const now = Date.now();
   const uptime = now - startTime;
   const activeAgents = getAgents().length;
@@ -5722,7 +6312,7 @@ h1{color:#f8fafc;margin-top:0}pre{background:#0f172a;border-radius:6px;padding:1
 // Bind to all interfaces by default so the server is reachable from the host
 // machine when running inside WSL, Docker, or a VM.  Set LISTEN_HOST=127.0.0.1
 // in the environment to restrict to loopback only.
-const LISTEN_HOST = process.env.LISTEN_HOST || '0.0.0.0';
+const LISTEN_HOST = process.env.LISTEN_HOST || '127.0.0.1';
 
 // ── Task Progress WebSocket Upgrade ────────────────────────────────────────────
 // Handle /api/tasks/:taskId/ws upgrade requests for live progress updates

@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
+import { useSystemStore } from '../../store/systemStore'
 import TertiaryPanel from '../ui/TertiaryPanel'
-import { API_URL } from '../../config/api'
-
-const API_BASE = API_URL
 
 function asPct(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`
@@ -11,37 +9,28 @@ function asPct(value) {
 
 export default function SelfImprovementPanel() {
   const storeSI = useAppStore((s) => s.selfImprovement)
-  const setSI = useAppStore((s) => s.setSelfImprovement)
   const [data, setData] = useState(storeSI)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const ws = useSystemStore(s => s.ws)
 
   useEffect(() => {
-    let cancelled = false
-
-    const load = async () => {
+    if (!ws) return
+    const onMessage = (evt) => {
       try {
-        const res = await fetch(`${API_BASE}/api/self-improvement/status`)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const json = await res.json()
-        if (cancelled) return
-        setData(json || {})
-        setSI(json || {})
-        setError('')
-      } catch (e) {
-        if (cancelled) return
-        console.error('Failed to load self-improvement status', e)
-        setData(storeSI || {})
-        setError('Self-improvement data unavailable')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+        const msg = JSON.parse(evt.data)
+        if (msg.event === 'system:self_improvement' && msg.data) {
+          setData(msg.data)
+          setError('')
+        }
+      } catch {}
     }
+    ws.addEventListener('message', onMessage)
+    return () => ws.removeEventListener('message', onMessage)
+  }, [ws])
 
-    load()
-    const timer = setInterval(load, 5000)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [storeSI, setSI])
+  useEffect(() => {
+    setData(storeSI)
+  }, [storeSI])
 
   const events = data?.recent_events || []
   const failures = data?.top_failure_causes || []
@@ -64,7 +53,7 @@ export default function SelfImprovementPanel() {
       )}
 
       <div className="font-mono text-[10px] mb-2" style={{ color: error ? 'var(--warning)' : 'var(--text-muted)' }}>
-        {loading ? 'Loading pipeline status…' : (error || (isActive ? '● Pipeline active' : '○ Pipeline idle'))}
+        {error || (isActive ? '● Pipeline active' : '○ Pipeline idle')}
       </div>
 
       {/* KPI grid */}

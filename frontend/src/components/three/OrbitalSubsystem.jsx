@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -20,11 +20,17 @@ export const OrbitalSubsystem = ({ nodeId, onExit }) => {
     setExitButtonVisible(false);
   };
 
+  const onCreated = useCallback(({ gl }) => {
+    gl.domElement.addEventListener('webglcontextlost', e => e.preventDefault())
+    gl.domElement.addEventListener('webglcontextrestored', () => gl.forceContextRestore?.())
+  }, [])
+
   return (
     <div className="orbital-subsystem-container">
       <Canvas
         camera={{ position: [0, 0, 3.5], fov: 50 }}
         style={{ width: '100%', height: '100%' }}
+        onCreated={onCreated}
       >
         <ambientLight intensity={0.3} color="#1a1a2e" />
         <pointLight position={[5, 5, 5]} intensity={0.8} color="#e5c76b" />

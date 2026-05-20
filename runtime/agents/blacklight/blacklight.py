@@ -238,6 +238,10 @@ def skill_hunt_leads(niche: str, location: str = "") -> dict:
         return {"skill": "hunt_leads", "found": len(leads),
                 "qualified": len(leads), "leads": leads}
 
+    # Preferred path for OSINT lookups: use the Node.js tool catalog instead of
+    # direct Python scraping — e.g. run_tool("osint-dns", niche) or
+    # run_tool("osint-whois", niche).  The catalog call handles auth, rate
+    # limiting, and result normalisation centrally.
     return {"skill": "hunt_leads", "found": 0, "qualified": 0, "leads": []}
 
 
@@ -278,6 +282,59 @@ def skill_store_lead(lead: dict) -> dict:
         return {"skill": "store_lead", "stored": True, "lead": lead.get("name", "")}
     return {"skill": "store_lead", "stored": False,
             "lead": lead.get("name", ""), "reason": "duplicate"}
+
+
+# ── HTTP tool-catalog bridge ──────────────────────────────────────────────────
+
+def _get_jwt() -> str | None:
+    """Read JWT from state file or env."""
+    jwt_env = os.getenv("BLACKLIGHT_JWT") or os.getenv("API_JWT_TOKEN")
+    if jwt_env:
+        return jwt_env
+    try:
+        state_path = Path(os.getenv("AI_HOME", str(Path.home() / ".ai-employee"))) / "state" / "blacklight.state.json"
+        if state_path.exists():
+            data = json.loads(state_path.read_text())
+            return data.get("jwt_token")
+    except Exception:
+        pass
+    return None
+
+
+def run_tool(tool_id: str, input_data: str, *, timeout: int = 30) -> dict:
+    """Execute a Blacklight tool via the Node.js HTTP endpoint."""
+    import requests
+    node_url = os.getenv("NODE_BACKEND_URL", "http://127.0.0.1:8787")
+    jwt = _get_jwt()
+    try:
+        r = requests.post(
+            f"{node_url}/api/blacklight/tools/run",
+            json={"tool_id": tool_id, "input": input_data},
+            headers={"Authorization": f"Bearer {jwt}"} if jwt else {},
+            timeout=timeout,
+        )
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e), "tool_id": tool_id}
+
+
+def list_tools(category: str = "osint") -> list[dict]:
+    """List available Blacklight tools via HTTP endpoint."""
+    import requests
+    node_url = os.getenv("NODE_BACKEND_URL", "http://127.0.0.1:8787")
+    jwt = _get_jwt()
+    try:
+        r = requests.get(
+            f"{node_url}/api/blacklight/tools",
+            params={"category": category},
+            headers={"Authorization": f"Bearer {jwt}"} if jwt else {},
+            timeout=10,
+        )
+        data = r.json()
+        return data.get("tools", [])
+    except Exception as e:
+        logger.warning("list_tools failed: %s", e)
+        return []
 
 
 # ── Opportunity Engine ────────────────────────────────────────────────────────
@@ -389,9 +446,21 @@ def execute_plan(plan: dict) -> dict:
     store_result    = skill_store_lead(lead)
     outreach_result = skill_generate_outreach(lead, offer)
 
+    # ── Node.js tool-catalog dispatch ─────────────────────────────────────────
+    # If the planner attached a tool_id (e.g. "osint-dns", "osint-whois") use
+    # the HTTP catalog endpoint as the preferred execution path; fall back to the
+    # Python skills above when the endpoint is unavailable.
+    tool_result: dict = {}
+    if plan.get("tool_id"):
+        tool_result = run_tool(plan["tool_id"], plan.get("input", lead.get("website", "")))
+        if not tool_result.get("ok"):
+            logger.warning("run_tool(%s) failed: %s", plan["tool_id"], tool_result.get("error"))
+
     _log("action", f"Executed plan for {lead.get('name', 'Unknown')}", {
         "stored":  store_result.get("stored"),
         "preview": (outreach_result.get("message") or "")[:80],
+        "tool_id": plan.get("tool_id"),
+        "tool_ok": tool_result.get("ok") if tool_result else None,
     })
 
     # ── AUDIT: record every execution for traceability ──────────────────────
@@ -400,14 +469,17 @@ def execute_plan(plan: dict) -> dict:
         "lead_name": lead.get("name", "Unknown"),
         "stored": store_result.get("stored", False),
         "outreach_preview": (outreach_result.get("message") or "")[:120],
+        "tool_id": plan.get("tool_id"),
+        "tool_ok": tool_result.get("ok") if tool_result else None,
     })
 
     return {
         "plan_id":          plan["id"],
         "lead":             lead.get("name", "Unknown"),
-        "steps_completed":  2,
+        "steps_completed":  2 + (1 if tool_result.get("ok") else 0),
         "stored":           store_result.get("stored", False),
         "outreach_message": outreach_result.get("message", ""),
+        "tool_result":      tool_result or None,
     }
 
 
@@ -612,6 +684,15 @@ def _run_loop(goal: str) -> None:
             for plan in plans:
                 if _stop_event.is_set():
                     break
+                # If the plan carries a tool_id, dispatch via the Node.js tool
+                # catalog (preferred path for OSINT/lookup operations) before
+                # falling through to the Python skill layer inside execute_plan.
+                if plan.get("tool_id"):
+                    tool_res = run_tool(plan["tool_id"], plan.get("input", ""))
+                    if tool_res.get("ok"):
+                        _log("info", f"tool {plan['tool_id']} ok", tool_res)
+                    # execute_plan will also call run_tool and merge the result;
+                    # this early call allows pre-flight enrichment if needed.
                 result = execute_plan(plan)
                 executions.append(result)
 

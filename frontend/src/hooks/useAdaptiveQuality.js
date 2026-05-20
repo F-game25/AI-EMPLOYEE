@@ -7,6 +7,7 @@ import { useEffect, useState, useRef } from 'react';
 
 export function useAdaptiveQuality() {
   const [quality, setQuality] = useState('normal');
+  const qualityRef = useRef('normal');
   const fpsRef = useRef(60);
   const frameCountRef = useRef(0);
   const lastTimeRef = useRef(performance.now());
@@ -26,33 +27,18 @@ export function useAdaptiveQuality() {
 
         // Adaptive quality based on FPS
         if (fps > 55) {
-          if (quality !== 'normal') {
-            setQuality('normal');
-            consecutiveFrameChecks = 0;
-          }
+          if (qualityRef.current !== 'normal') { qualityRef.current = 'normal'; setQuality('normal'); consecutiveFrameChecks = 0; }
         } else if (fps > 45) {
-          if (quality !== 'normal') {
+          if (qualityRef.current !== 'normal') {
             consecutiveFrameChecks++;
-            if (consecutiveFrameChecks > 2) {
-              setQuality('normal');
-              consecutiveFrameChecks = 0;
-            }
+            if (consecutiveFrameChecks > 2) { qualityRef.current = 'normal'; setQuality('normal'); consecutiveFrameChecks = 0; }
           }
         } else if (fps > 30) {
-          if (quality !== 'reduced') {
-            setQuality('reduced');
-            consecutiveFrameChecks = 0;
-          }
+          if (qualityRef.current !== 'reduced') { qualityRef.current = 'reduced'; setQuality('reduced'); consecutiveFrameChecks = 0; }
         } else if (fps > 20) {
-          if (quality !== 'low') {
-            setQuality('low');
-            consecutiveFrameChecks = 0;
-          }
+          if (qualityRef.current !== 'low') { qualityRef.current = 'low'; setQuality('low'); consecutiveFrameChecks = 0; }
         } else {
-          if (quality !== 'fallback') {
-            setQuality('fallback');
-            consecutiveFrameChecks = 0;
-          }
+          if (qualityRef.current !== 'fallback') { qualityRef.current = 'fallback'; setQuality('fallback'); consecutiveFrameChecks = 0; }
         }
 
         frameCountRef.current = 0;
@@ -69,7 +55,7 @@ export function useAdaptiveQuality() {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [quality]);
+  }, []);
 
   const qualitySettings = {
     normal: {

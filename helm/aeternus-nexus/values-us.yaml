@@ -1,0 +1,30 @@
+# US region deployment overrides — apply with: helm upgrade ... -f values.yaml -f values-us.yaml
+
+deployment:
+  region: us
+
+env:
+  DEPLOYMENT_REGION: "us"
+  REGION_EU_ENDPOINT: "https://eu.api.aeternus.ai"
+  REGION_US_ENDPOINT: "https://us.api.aeternus.ai"
+  LISTEN_HOST: "0.0.0.0"
+
+ingress:
+  enabled: true
+  host: "us.nexus.example.com"
+  annotations:
+    nginx.ingress.kubernetes.io/server-snippet: |
+      add_header X-Data-Region "US" always;
+      add_header X-Frame-Options "DENY" always;
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+replicaCount: 2
+
+resources:
+  node:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"

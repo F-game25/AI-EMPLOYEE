@@ -1,8 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useAppStore } from '../../store/appStore'
-import { API_URL } from '../../config/api'
-
-const BASE = API_URL
 
 function MetricCard({ label, value }) {
   return (
@@ -15,39 +12,14 @@ function MetricCard({ label, value }) {
 
 export default function ObservabilityDashboard() {
   const observability = useAppStore((s) => s.observability)
-  const setObservability = useAppStore((s) => s.setObservability)
   const activityFeed = useAppStore((s) => s.activityFeed)
   const agents = useAppStore((s) => s.agents)
   const workflowState = useAppStore((s) => s.workflowState)
 
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    const load = async () => {
-      setLoading(true)
-      try {
-        const res = await fetch(`${BASE}/api/observability/snapshot`, { signal: controller.signal })
-        const data = await res.json()
-        setObservability(data)
-      } catch {
-        // WebSocket snapshot continues updating store.
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-    const interval = setInterval(load, 3000)
-    return () => {
-      clearInterval(interval)
-      controller.abort()
-    }
-  }, [setObservability])
-
-  const metrics = observability?.metrics || {}
-  const health = observability?.system_health || {}
-  const autoFixLog = observability?.auto_fix_log || []
-  const events = observability?.events || []
+  const metrics = useMemo(() => observability?.metrics || {}, [observability?.metrics])
+  const health = useMemo(() => observability?.system_health || {}, [observability?.system_health])
+  const autoFixLog = useMemo(() => observability?.auto_fix_log || [], [observability?.auto_fix_log])
+  const events = useMemo(() => observability?.events || [], [observability?.events])
 
   const queueViz = useMemo(() => ({
     pending: observability?.queue_visualizer?.pending ?? workflowState?.runs?.filter((run) => run.status === 'pending').length ?? 0,
@@ -58,7 +30,7 @@ export default function ObservabilityDashboard() {
     <div className="ds-card" style={{ padding: 'var(--space-4)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
         <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>Observability Dashboard</div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{loading ? 'Refreshing…' : (observability?.updated_at || 'Live')}</div>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Live</div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>

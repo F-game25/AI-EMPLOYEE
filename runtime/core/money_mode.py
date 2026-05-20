@@ -193,9 +193,31 @@ class MoneyMode:
         opportunity: str,
         budget: float = 0.0,
         dry_run: bool = False,
+        research_first: bool = True,
     ) -> dict:
-        """Outreach → response tracking → conversion pipeline."""
+        """Outreach → response tracking → conversion pipeline.
+
+        When ``research_first`` (default True), runs an autonomous research
+        pass on the opportunity before queuing outreach so messaging is
+        grounded in fresh, source-cited context.
+        """
         job_id = str(uuid.uuid4())[:8]
+        research_summary: dict = {}
+        if research_first and not dry_run:
+            try:
+                import asyncio as _asyncio
+                from core.auto_research_agent import get_auto_researcher
+                from core.context_evaluator import get_context_evaluator
+                ev = get_context_evaluator().evaluate(opportunity)
+                if not ev.get("sufficient"):
+                    research_summary = _asyncio.run(
+                        get_auto_researcher().research(
+                            gaps=ev.get("gaps") or [opportunity],
+                            goal=opportunity, hop=0, task_id=job_id,
+                        )
+                    )
+            except Exception:
+                research_summary = {}
         # The step-level outreach action is queued through the ActionBus; the
         # pipeline itself completes synchronously regardless.
         outreach_step_status = "dry_run" if dry_run else "queued"
@@ -264,6 +286,7 @@ class MoneyMode:
             "steps": steps,
             "estimated_roi": estimated_roi,
             "status": status,
+            "research_findings": research_summary,
         }
 
     def affiliate_content_draft(

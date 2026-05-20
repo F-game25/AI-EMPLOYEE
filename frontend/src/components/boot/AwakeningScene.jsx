@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Sparkles, Text, Float } from '@react-three/drei';
 import * as THREE from 'three';
@@ -261,6 +261,11 @@ export const AwakeningScene = () => {
     return () => window.removeEventListener('boot-complete', handleBootComplete);
   }, []);
 
+  const onCreated = useCallback(({ gl }) => {
+    gl.domElement.addEventListener('webglcontextlost', e => e.preventDefault())
+    gl.domElement.addEventListener('webglcontextrestored', () => gl.forceContextRestore?.())
+  }, [])
+
   if (bootComplete) {
     return <div className="awakening-fade-out" />;
   }
@@ -270,6 +275,7 @@ export const AwakeningScene = () => {
       <Canvas
         camera={{ position: [0, 0, 3.5], fov: 50 }}
         style={{ width: '100vw', height: '100vh' }}
+        onCreated={onCreated}
       >
         <ambientLight intensity={0.3} color="#1a1a2e" />
         <pointLight position={[5, 5, 5]} intensity={0.8} color="#e5c76b" />

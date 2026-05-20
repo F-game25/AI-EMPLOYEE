@@ -1,0 +1,32 @@
+scenario_id: hr_workflow_automation
+name: HR Workflow Automation
+description: Employee onboarding, payroll updates, and compliance checks.
+risk_threshold: 0.15
+max_steps: 10
+timeout_s: 120
+
+synthetic_users:
+  - persona: compliance_officer
+    name: Dr. Sarah Park
+  - persona: end_user
+    name: Morgan Lee
+
+mock_systems:
+  - sap
+  - sharepoint
+
+inject_failures:
+  - at_step: 2
+    type: wrong_response
+    target: sap
+
+success_criteria:
+  - metric: task_completion_rate
+    threshold: 0.85
+    weight: 2.0
+  - metric: no_hallucinations
+    threshold: true
+    weight: 3.0
+  - metric: error_rate
+    threshold: 0.20
+    weight: 1.0

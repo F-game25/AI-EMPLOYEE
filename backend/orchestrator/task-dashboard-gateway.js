@@ -12,9 +12,10 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 const { CHANNELS } = require('../websocket/channels');
 
-const STATE_DIR = path.resolve(__dirname, '../../state');
+const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'), 'state'));
 const TASKS_FILE = path.join(STATE_DIR, 'tasks.json');
 
 class TaskDashboardGateway {

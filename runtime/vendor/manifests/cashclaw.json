@@ -1,0 +1,14 @@
+{
+  "id": "cashclaw",
+  "source_url": "https://github.com/moltlaunch/cashclaw",
+  "fork_url": "https://github.com/F-game25/cashclaw.",
+  "upstream_commit": "fb5974ec0f3840ecdd973d20cd74a0735f62289c",
+  "license": "MIT",
+  "checksum_sha256": "3a53271549d2a129861f47ed84a6ed3e4d66e511be6d18e19122e09b3e21b704",
+  "local_namespace": "aeternus_money_mode",
+  "risk_class": "high",
+  "runtime_code_imported": false,
+  "imported_paths": ["runtime/config/fork_integration_manifest.json#money_mode"],
+  "approval_policy": "external_marketplaces_wallets_and_delivery_disabled_by_default",
+  "patch_notes": "Reused task lifecycle, quote, approval, delivery, feedback, and memory concepts as internal Money Mode contracts only."
+}

@@ -1,0 +1,754 @@
+{
+  "version": "2026.05.17",
+  "state": "live",
+  "integration_mode": "enhancement_layer",
+  "policy": {
+    "critical_features_builtin": true,
+    "external_marketplaces_enabled": false,
+    "external_delivery_enabled": false,
+    "wallets_enabled": false,
+    "owner_controlled_wallet_supported": true,
+    "self_modification_requires_approval": true,
+    "network_adapters_disabled_by_default": true
+  },
+  "sources": [
+    {
+      "id": "agent-skills",
+      "fork_url": "https://github.com/F-game25/agent-skills.",
+      "upstream_url": "https://github.com/addyosmani/agent-skills",
+      "commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+      "license": "MIT",
+      "checksum_sha256": "827ba3476da7961caadf565d5765747836de788c76eb5b77659048a6cfa25105",
+      "local_namespace": "aeternus_agent_skills",
+      "runtime_code_imported": false,
+      "state": "live"
+    },
+    {
+      "id": "financial-services",
+      "fork_url": "https://github.com/F-game25/financial-services.",
+      "upstream_url": "https://github.com/anthropics/financial-services",
+      "commit": "853f755a61f7bbb045c681327f46b354419030a1",
+      "license": "Apache-2.0",
+      "checksum_sha256": "fcea2e9a3b88c39b249e9a79f91641fbcaaa605f35633ec7e74158dde6181891",
+      "local_namespace": "aeternus_financial_services",
+      "runtime_code_imported": false,
+      "state": "live"
+    },
+    {
+      "id": "cashclaw",
+      "fork_url": "https://github.com/F-game25/cashclaw.",
+      "upstream_url": "https://github.com/moltlaunch/cashclaw",
+      "commit": "fb5974ec0f3840ecdd973d20cd74a0735f62289c",
+      "license": "MIT",
+      "checksum_sha256": "3a53271549d2a129861f47ed84a6ed3e4d66e511be6d18e19122e09b3e21b704",
+      "local_namespace": "aeternus_money_mode",
+      "runtime_code_imported": false,
+      "state": "live"
+    },
+    {
+      "id": "automaton",
+      "fork_url": "https://github.com/F-game25/automaton.",
+      "upstream_url": "https://github.com/Conway-Research/automaton",
+      "commit": "22096f78f20bef63660e24a433f290769af6290f",
+      "license": "MIT",
+      "checksum_sha256": "66ce0da46c51b3ceef0aaca5ca1c6f90ad75b004b20759928586574168211ea2",
+      "local_namespace": "aeternus_autonomy_policy",
+      "runtime_code_imported": false,
+      "state": "live"
+    },
+    {
+      "id": "openclaw",
+      "fork_url": "https://github.com/F-game25/openclaw-2.0",
+      "upstream_url": "https://github.com/openclaw/openclaw",
+      "commit": "c8d9733e41bdd59d5e1e454d75e31abb655fc430",
+      "license": "MIT",
+      "checksum_sha256": "5c67ac39ab9f29f2bf8239fae1f205d96ec7b0be745ed60c4d4defe659cb6386",
+      "local_namespace": "aeternus_channels",
+      "runtime_code_imported": false,
+      "state": "disabled"
+    }
+  ],
+  "engineering_skills": [
+    {
+      "id": "spec-driven-development",
+      "name": "Spec Driven Development",
+      "category": "planning",
+      "trigger_keywords": [
+        "spec",
+        "requirements",
+        "contract"
+      ],
+      "verification_gates": [
+        "acceptance criteria",
+        "interface contract",
+        "risk review"
+      ],
+      "canonical_skill_id": "agent_skill_spec_driven_development"
+    },
+    {
+      "id": "planning-and-task-breakdown",
+      "name": "Planning And Task Breakdown",
+      "category": "planning",
+      "trigger_keywords": [
+        "plan",
+        "roadmap",
+        "breakdown"
+      ],
+      "verification_gates": [
+        "task graph",
+        "dependencies",
+        "milestones"
+      ],
+      "canonical_skill_id": "agent_skill_planning_and_task_breakdown"
+    },
+    {
+      "id": "incremental-implementation",
+      "name": "Incremental Implementation",
+      "category": "build",
+      "trigger_keywords": [
+        "build",
+        "implement",
+        "ship"
+      ],
+      "verification_gates": [
+        "small patch",
+        "focused test",
+        "rollback path"
+      ],
+      "canonical_skill_id": "agent_skill_incremental_implementation"
+    },
+    {
+      "id": "test-driven-development",
+      "name": "Test Driven Development",
+      "category": "quality",
+      "trigger_keywords": [
+        "test",
+        "regression",
+        "coverage"
+      ],
+      "verification_gates": [
+        "failing test first",
+        "passing test",
+        "edge case"
+      ],
+      "canonical_skill_id": "agent_skill_test_driven_development"
+    },
+    {
+      "id": "code-review-and-quality",
+      "name": "Code Review And Quality",
+      "category": "quality",
+      "trigger_keywords": [
+        "review",
+        "quality",
+        "bug"
+      ],
+      "verification_gates": [
+        "severity ranked findings",
+        "line references",
+        "residual risk"
+      ],
+      "canonical_skill_id": "agent_skill_code_review_and_quality"
+    },
+    {
+      "id": "code-simplification",
+      "name": "Code Simplification",
+      "category": "maintenance",
+      "trigger_keywords": [
+        "simplify",
+        "technical debt",
+        "cleanup"
+      ],
+      "verification_gates": [
+        "behavior preserved",
+        "duplication reduced",
+        "tests pass"
+      ],
+      "canonical_skill_id": "agent_skill_code_simplification"
+    },
+    {
+      "id": "shipping-and-launch",
+      "name": "Shipping And Launch",
+      "category": "release",
+      "trigger_keywords": [
+        "ship",
+        "release",
+        "package"
+      ],
+      "verification_gates": [
+        "release checklist",
+        "smoke test",
+        "rollback plan"
+      ],
+      "canonical_skill_id": "agent_skill_shipping_and_launch"
+    },
+    {
+      "id": "security-and-hardening",
+      "name": "Security And Hardening",
+      "category": "security",
+      "trigger_keywords": [
+        "security",
+        "hardening",
+        "vulnerability"
+      ],
+      "verification_gates": [
+        "threat model",
+        "approval gates",
+        "audit log"
+      ],
+      "canonical_skill_id": "agent_skill_security_and_hardening"
+    },
+    {
+      "id": "frontend-ui-engineering",
+      "name": "Frontend UI Engineering",
+      "category": "frontend",
+      "trigger_keywords": [
+        "ui",
+        "dashboard",
+        "react"
+      ],
+      "verification_gates": [
+        "responsive layout",
+        "real data states",
+        "build"
+      ],
+      "canonical_skill_id": "agent_skill_frontend_ui_engineering"
+    },
+    {
+      "id": "api-and-interface-design",
+      "name": "API And Interface Design",
+      "category": "backend",
+      "trigger_keywords": [
+        "api",
+        "contract",
+        "endpoint"
+      ],
+      "verification_gates": [
+        "schema",
+        "status semantics",
+        "auth policy"
+      ],
+      "canonical_skill_id": "agent_skill_api_and_interface_design"
+    },
+    {
+      "id": "performance-optimization",
+      "name": "Performance Optimization",
+      "category": "performance",
+      "trigger_keywords": [
+        "performance",
+        "latency",
+        "memory"
+      ],
+      "verification_gates": [
+        "baseline",
+        "measurement",
+        "no regression"
+      ],
+      "canonical_skill_id": "agent_skill_performance_optimization"
+    },
+    {
+      "id": "debugging-and-error-recovery",
+      "name": "Debugging And Error Recovery",
+      "category": "reliability",
+      "trigger_keywords": [
+        "debug",
+        "crash",
+        "error"
+      ],
+      "verification_gates": [
+        "reproduction",
+        "root cause",
+        "recovery path"
+      ],
+      "canonical_skill_id": "agent_skill_debugging_and_error_recovery"
+    },
+    {
+      "id": "documentation-and-adrs",
+      "name": "Documentation And ADRs",
+      "category": "docs",
+      "trigger_keywords": [
+        "docs",
+        "adr",
+        "architecture"
+      ],
+      "verification_gates": [
+        "current behavior",
+        "decision record",
+        "operator notes"
+      ],
+      "canonical_skill_id": "agent_skill_documentation_and_adrs"
+    },
+    {
+      "id": "deprecation-and-migration",
+      "name": "Deprecation And Migration",
+      "category": "maintenance",
+      "trigger_keywords": [
+        "migration",
+        "deprecate",
+        "upgrade"
+      ],
+      "verification_gates": [
+        "compatibility",
+        "data migration",
+        "fallback"
+      ],
+      "canonical_skill_id": "agent_skill_deprecation_and_migration"
+    },
+    {
+      "id": "context-engineering",
+      "name": "Context Engineering",
+      "category": "agents",
+      "trigger_keywords": [
+        "context",
+        "memory",
+        "prompt"
+      ],
+      "verification_gates": [
+        "source limits",
+        "memory retrieval",
+        "token budget"
+      ],
+      "canonical_skill_id": "agent_skill_context_engineering"
+    },
+    {
+      "id": "source-driven-development",
+      "name": "Source Driven Development",
+      "category": "research",
+      "trigger_keywords": [
+        "source",
+        "evidence",
+        "research"
+      ],
+      "verification_gates": [
+        "primary sources",
+        "traceability",
+        "citation map"
+      ],
+      "canonical_skill_id": "agent_skill_source_driven_development"
+    },
+    {
+      "id": "ci-cd-and-automation",
+      "name": "CI CD And Automation",
+      "category": "automation",
+      "trigger_keywords": [
+        "ci",
+        "automation",
+        "pipeline"
+      ],
+      "verification_gates": [
+        "repeatable command",
+        "failure signal",
+        "artifact"
+      ],
+      "canonical_skill_id": "agent_skill_ci_cd_and_automation"
+    },
+    {
+      "id": "browser-testing-with-devtools",
+      "name": "Browser Testing With Devtools",
+      "category": "testing",
+      "trigger_keywords": [
+        "browser",
+        "playwright",
+        "screenshot"
+      ],
+      "verification_gates": [
+        "desktop viewport",
+        "mobile viewport",
+        "console clean"
+      ],
+      "canonical_skill_id": "agent_skill_browser_testing_with_devtools"
+    },
+    {
+      "id": "git-workflow-and-versioning",
+      "name": "Git Workflow And Versioning",
+      "category": "release",
+      "trigger_keywords": [
+        "git",
+        "branch",
+        "commit"
+      ],
+      "verification_gates": [
+        "diff review",
+        "no unrelated revert",
+        "changelog"
+      ],
+      "canonical_skill_id": "agent_skill_git_workflow_and_versioning"
+    },
+    {
+      "id": "idea-refine",
+      "name": "Idea Refine",
+      "category": "planning",
+      "trigger_keywords": [
+        "idea",
+        "refine",
+        "scope"
+      ],
+      "verification_gates": [
+        "goal",
+        "constraints",
+        "first milestone"
+      ],
+      "canonical_skill_id": "agent_skill_idea_refine"
+    },
+    {
+      "id": "interview-me",
+      "name": "Interview Me",
+      "category": "requirements",
+      "trigger_keywords": [
+        "questions",
+        "clarify",
+        "interview"
+      ],
+      "verification_gates": [
+        "unknowns",
+        "decisions",
+        "assumptions"
+      ],
+      "canonical_skill_id": "agent_skill_interview_me"
+    },
+    {
+      "id": "doubt-driven-development",
+      "name": "Doubt Driven Development",
+      "category": "quality",
+      "trigger_keywords": [
+        "assumption",
+        "risk",
+        "doubt"
+      ],
+      "verification_gates": [
+        "weak assumptions",
+        "test probe",
+        "decision"
+      ],
+      "canonical_skill_id": "agent_skill_doubt_driven_development"
+    },
+    {
+      "id": "using-agent-skills",
+      "name": "Using Agent Skills",
+      "category": "agents",
+      "trigger_keywords": [
+        "skill",
+        "agent skill",
+        "workflow skill"
+      ],
+      "verification_gates": [
+        "skill chosen",
+        "execution fit",
+        "verification"
+      ],
+      "canonical_skill_id": "agent_skill_using_agent_skills"
+    }
+  ],
+  "finance_workflows": [
+    {
+      "id": "pitch-agent",
+      "name": "Pitch Agent",
+      "agent": "finance-pitch-agent",
+      "domain": "investment-banking",
+      "approval_required": true,
+      "outputs": [
+        "draft deck outline",
+        "source checklist"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_pitch_agent"
+    },
+    {
+      "id": "meeting-prep",
+      "name": "Meeting Prep Agent",
+      "agent": "finance-meeting-prep",
+      "domain": "relationship-management",
+      "approval_required": true,
+      "outputs": [
+        "briefing memo",
+        "questions"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_meeting_prep"
+    },
+    {
+      "id": "market-researcher",
+      "name": "Market Researcher",
+      "agent": "finance-market-researcher",
+      "domain": "markets",
+      "approval_required": true,
+      "outputs": [
+        "research summary",
+        "source map"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_market_researcher"
+    },
+    {
+      "id": "earnings-reviewer",
+      "name": "Earnings Reviewer",
+      "agent": "finance-earnings-reviewer",
+      "domain": "equity-research",
+      "approval_required": true,
+      "outputs": [
+        "earnings notes",
+        "variance flags"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_earnings_reviewer"
+    },
+    {
+      "id": "model-builder",
+      "name": "Model Builder",
+      "agent": "finance-model-builder",
+      "domain": "financial-modeling",
+      "approval_required": true,
+      "outputs": [
+        "model plan",
+        "assumption table"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_model_builder"
+    },
+    {
+      "id": "valuation-reviewer",
+      "name": "Valuation Reviewer",
+      "agent": "finance-valuation-reviewer",
+      "domain": "valuation",
+      "approval_required": true,
+      "outputs": [
+        "valuation review",
+        "sensitivity flags"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_valuation_reviewer"
+    },
+    {
+      "id": "gl-reconciler",
+      "name": "GL Reconciler",
+      "agent": "finance-gl-reconciler",
+      "domain": "accounting",
+      "approval_required": true,
+      "outputs": [
+        "reconciliation draft",
+        "exception list"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_gl_reconciler"
+    },
+    {
+      "id": "month-end-closer",
+      "name": "Month End Closer",
+      "agent": "finance-month-end-closer",
+      "domain": "accounting",
+      "approval_required": true,
+      "outputs": [
+        "close checklist",
+        "variance notes"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_month_end_closer"
+    },
+    {
+      "id": "statement-auditor",
+      "name": "Statement Auditor",
+      "agent": "finance-statement-auditor",
+      "domain": "audit",
+      "approval_required": true,
+      "outputs": [
+        "audit observations",
+        "evidence requests"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_statement_auditor"
+    },
+    {
+      "id": "kyc-screener",
+      "name": "KYC Screener",
+      "agent": "finance-kyc-screener",
+      "domain": "compliance",
+      "approval_required": true,
+      "outputs": [
+        "screening draft",
+        "review flags"
+      ],
+      "state": "live",
+      "canonical_skill_id": "finance_workflow_kyc_screener"
+    }
+  ],
+  "money_mode": {
+    "state": "live",
+    "task_lifecycle": [
+      "discover",
+      "evaluate_fit",
+      "price_quote",
+      "plan_work",
+      "execute_draft",
+      "human_approval",
+      "deliver",
+      "record_feedback",
+      "improve_memory"
+    ],
+    "approval_gates": [
+      "accept_paid_task",
+      "publish_content",
+      "deliver_client_work",
+      "spend_money",
+      "use_wallet",
+      "modify_external_account"
+    ],
+    "default_task_sources": [
+      {
+        "id": "internal-opportunities",
+        "name": "Internal Opportunities",
+        "state": "live"
+      }
+    ],
+    "pricing_policy": {
+      "currency": "USD",
+      "minimum_quote": 25,
+      "approval_required": true,
+      "basis": [
+        "complexity",
+        "estimated_hours",
+        "risk",
+        "revision_count",
+        "external_delivery"
+      ]
+    }
+  },
+  "autonomy_policy": {
+    "state": "live",
+    "risk_levels": {
+      "safe": {
+        "decision": "allow",
+        "requires_approval": false
+      },
+      "caution": {
+        "decision": "allow_logged",
+        "requires_approval": false
+      },
+      "dangerous": {
+        "decision": "requires_approval",
+        "requires_approval": true
+      },
+      "forbidden": {
+        "decision": "block",
+        "requires_approval": true
+      }
+    },
+    "forbidden_capabilities": [
+      "autonomous_wallet",
+      "self_replication",
+      "domain_purchase",
+      "uncontrolled_self_modification",
+      "coordinated_ddos",
+      "credential_harvesting"
+    ],
+    "dangerous_capabilities": [
+      "file_write",
+      "shell_command",
+      "external_message",
+      "delivery",
+      "tool_install",
+      "agent_creation",
+      "infrastructure_change",
+      "owner_wallet_create",
+      "wallet_withdrawal",
+      "external_compute_purchase"
+    ]
+  },
+  "wallet_vault": {
+    "state": "disabled",
+    "mode": "owner_controlled_local_vault",
+    "autonomous_spending": false,
+    "encryption": "aes-256-gcm-with-scrypt",
+    "approval_gates": [
+      "create_wallet",
+      "import_wallet",
+      "claim_funds",
+      "withdraw_funds",
+      "buy_external_compute"
+    ],
+    "purchase_policy": {
+      "external_compute_enabled": false,
+      "per_purchase_owner_approval": true,
+      "daily_limit_usd": 0,
+      "allowed_providers": []
+    }
+  },
+  "channels": {
+    "state": "disabled",
+    "local_dashboard": {
+      "state": "live",
+      "requires_pairing": false
+    },
+    "external_adapters": [
+      {
+        "id": "telegram",
+        "state": "disabled"
+      },
+      {
+        "id": "discord",
+        "state": "disabled"
+      },
+      {
+        "id": "slack",
+        "state": "disabled"
+      }
+    ]
+  },
+  "canonical_skill_ids": [
+    "agent_skill_api_and_interface_design",
+    "agent_skill_browser_testing_with_devtools",
+    "agent_skill_ci_cd_and_automation",
+    "agent_skill_code_review_and_quality",
+    "agent_skill_code_simplification",
+    "agent_skill_context_engineering",
+    "agent_skill_debugging_and_error_recovery",
+    "agent_skill_deprecation_and_migration",
+    "agent_skill_documentation_and_adrs",
+    "agent_skill_doubt_driven_development",
+    "agent_skill_frontend_ui_engineering",
+    "agent_skill_git_workflow_and_versioning",
+    "agent_skill_idea_refine",
+    "agent_skill_incremental_implementation",
+    "agent_skill_interview_me",
+    "agent_skill_performance_optimization",
+    "agent_skill_planning_and_task_breakdown",
+    "agent_skill_security_and_hardening",
+    "agent_skill_shipping_and_launch",
+    "agent_skill_source_driven_development",
+    "agent_skill_spec_driven_development",
+    "agent_skill_test_driven_development",
+    "agent_skill_using_agent_skills",
+    "autonomy_approval_gate",
+    "autonomy_heartbeat_monitoring",
+    "autonomy_loop_detection",
+    "autonomy_policy_evaluation",
+    "autonomy_self_modification_audit",
+    "autonomy_tool_risk_classification",
+    "channel_allowlist_routing",
+    "channel_local_pairing",
+    "channel_session_routing",
+    "finance_workflow_earnings_reviewer",
+    "finance_workflow_gl_reconciler",
+    "finance_workflow_kyc_screener",
+    "finance_workflow_market_researcher",
+    "finance_workflow_meeting_prep",
+    "finance_workflow_model_builder",
+    "finance_workflow_month_end_closer",
+    "finance_workflow_pitch_agent",
+    "finance_workflow_statement_auditor",
+    "finance_workflow_valuation_reviewer",
+    "money_delivery_approval",
+    "money_earnings_lifecycle",
+    "money_feedback_ingestion",
+    "money_quote_drafting",
+    "money_task_discovery",
+    "money_task_evaluation",
+    "wallet_claim_request",
+    "wallet_compute_quote",
+    "wallet_owner_vault_setup",
+    "wallet_spend_approval"
+  ],
+  "global_skills_library": {
+    "path": "runtime/config/skills_library.json",
+    "imported_skill_count": 52,
+    "updated_at": "2026-05-17"
+  }
+}

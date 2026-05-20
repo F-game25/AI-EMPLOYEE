@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 def route_lam(request: dict) -> dict:
     """Route to LAM (invoke skills/tools from runtime/skills/catalog)."""
     try:
-        from runtime.skills.catalog import get_skill
+        from skills.catalog import get_skill
 
         skill_name = request.get("skill", "")
         args = request.get("args", {})

@@ -1,152 +1,231 @@
-import { useState, useCallback } from 'react'
-import { Panel, KPITile, HexButton, StatusPill, HexFrame } from '../nexus-ui'
-import { API_URL } from '../../config/api'
+import { useEffect, useState } from 'react'
+import Panel from '../nexus-ui/Panel'
+import KPITile from '../nexus-ui/KPITile'
+import StatusPill from '../nexus-ui/StatusPill'
+import { SectionLabel } from '../nexus-ui/SectionLabel'
+import { EmptyState, ErrorState } from '../nexus-ui'
 import './MoneyModePage.css'
 
-const BASE = API_URL
+const fmt$ = (v) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(Number(v) || 0)
 
-const PIPELINES = [
-  {
-    id: 'content',
-    label: 'Content Pipeline',
-    icon: '✍',
-    desc: 'Generate, publish, and distribute content across channels.',
-    endpoint: '/api/money/content-pipeline',
-    tone: 'cool',
-  },
-  {
-    id: 'lead',
-    label: 'Lead Pipeline',
-    icon: '◎',
-    desc: 'Identify, qualify, and enrich B2B leads via Apollo + scraping.',
-    endpoint: '/api/money/lead-pipeline',
-    tone: 'gold',
-  },
-  {
-    id: 'opportunity',
-    label: 'Opportunity Pipeline',
-    icon: '$',
-    desc: 'Run outreach sequences and convert opportunities to revenue.',
-    endpoint: '/api/money/opportunity-pipeline',
-    tone: 'success',
-  },
-]
+const fmtNum = (v) => new Intl.NumberFormat('en-US').format(Number(v) || 0)
 
-function PipelineCard({ pipeline, onRun, running, lastRun }) {
-  const isRunning = running === pipeline.id
+async function fetchJson(path) {
+  const res = await fetch(path, { credentials: 'include' })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`)
+  return data
+}
+
+function useEconomyData() {
+  const [state, setState] = useState({ loading: true, error: null, data: null })
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      try {
+        const [summary, ledger, costs, pipelines, opportunities, wallet, moneyTasks] = await Promise.all([
+          fetchJson('/api/economy/summary').catch((e) => ({ state: 'degraded', error: e.message })),
+          fetchJson('/api/economy/ledger').catch(() => ({ items: [] })),
+          fetchJson('/api/economy/costs').catch(() => ({ items: [] })),
+          fetchJson('/api/economy/pipelines').catch(() => ({ pipelines: [] })),
+          fetchJson('/api/economy/opportunities').catch(() => ({ opportunities: [] })),
+          fetchJson('/api/economy/wallet').catch(() => ({ wallet: { configured: false, state: 'degraded' } })),
+          fetchJson('/api/money/tasks').catch(() => ({ tasks: [], policy: null })),
+        ])
+        if (alive) setState({ loading: false, error: summary.error || null, data: { summary, ledger, costs, pipelines, opportunities, wallet, moneyTasks } })
+      } catch (err) {
+        if (alive) setState({ loading: false, error: err.message, data: null })
+      }
+    }
+    load()
+    const id = setInterval(load, 15000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+  return state
+}
+
+function SimpleTable({ rows, columns, emptyTitle }) {
+  if (!rows.length) return <EmptyState icon="[]" title={emptyTitle} sub="No persisted records exist yet." />
   return (
-    <div className={`mm-card mm-card--${pipeline.tone}`}>
-      <div className="mm-card__head">
-        <HexFrame size="md" tone={pipeline.tone} glow={isRunning} pulse={isRunning}>
-          <span className="mm-card__icon">{pipeline.icon}</span>
-        </HexFrame>
-        <div className="mm-card__title">
-          <div className="mm-card__name">{pipeline.label}</div>
-          <div className="mm-card__desc">{pipeline.desc}</div>
-        </div>
-        {lastRun && (
-          <StatusPill tone={pipeline.tone} label={`$${lastRun.estimated_roi} ROI`} />
-        )}
+    <table className="ecc-token-table">
+      <thead>
+        <tr>{columns.map((col) => <th key={col.key} className="ecc-token-table__th">{col.label}</th>)}</tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={row.id || index} className="ecc-token-table__row">
+            {columns.map((col) => <td key={col.key} className="ecc-token-table__op">{col.render ? col.render(row) : row[col.key] || '-'}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function PipelineCard({ pipeline }) {
+  return (
+    <div className="ecc-pipeline-card">
+      <div className="ecc-pipeline-card__head">
+        <span className="ecc-pipeline-card__name">{pipeline.name || pipeline.id}</span>
+        <StatusPill label={(pipeline.status || 'idle').toUpperCase()} tone={pipeline.status === 'active' ? 'success' : 'idle'} size="sm" />
       </div>
-      {lastRun && (
-        <div className="mm-card__last">
-          <span>LAST · {new Date(lastRun.executed_at).toLocaleTimeString()}</span>
-          <span className="mm-card__last-status">● {lastRun.status}</span>
+      <div className="ecc-pipeline-card__metrics">
+        <div className="ecc-pipeline-card__metric">
+          <span className="ecc-pipeline-card__metric-label">Runs</span>
+          <span className="ecc-pipeline-card__metric-val">{fmtNum(pipeline.runs || 0)}</span>
         </div>
-      )}
-      <HexButton
-        variant="primary"
-        size="sm"
-        icon={isRunning ? null : '▶'}
-        loading={isRunning}
-        onClick={() => onRun(pipeline)}
-      >
-        {isRunning ? 'RUNNING…' : 'RUN PIPELINE'}
-      </HexButton>
+        <div className="ecc-pipeline-card__metric">
+          <span className="ecc-pipeline-card__metric-label">Value</span>
+          <span className="ecc-pipeline-card__metric-val">{fmt$(pipeline.value || 0)}</span>
+        </div>
+        <div className="ecc-pipeline-card__metric">
+          <span className="ecc-pipeline-card__metric-label">Last Run</span>
+          <span className="ecc-pipeline-card__metric-val ecc-pipeline-card__metric-val--muted">{pipeline.last_run_at ? new Date(pipeline.last_run_at).toLocaleString() : 'never'}</span>
+        </div>
+      </div>
     </div>
   )
 }
 
-export default function MoneyModePage() {
-  const [running, setRunning]   = useState(null)
-  const [history, setHistory]   = useState([])
-  const [totals, setTotals]     = useState({ roi: 0, runs: 0 })
-  const [lastRuns, setLastRuns] = useState({})
-  const [error, setError]       = useState(null)
+function WalletPanel({ wallet }) {
+  const w = wallet?.wallet || wallet || {}
+  return (
+    <Panel
+      title="OWNER WALLET VAULT"
+      icon="$"
+      tone="gold"
+      size="compact"
+      actions={<StatusPill label={w.configured ? 'CONFIGURED' : 'OWNER SETUP'} tone={w.configured ? 'success' : 'warn'} size="sm" />}
+    >
+      <div className="ecc-wallet-vault">
+        <div className="ecc-wallet-vault__balance">{fmt$(w.balance?.available || w.available || 0)}</div>
+        <div className="ecc-wallet-vault__meta">
+          <span>{w.address || 'Encrypted local owner vault is not configured.'}</span>
+          <span>Claim, spend, wallet and external compute actions require owner approval.</span>
+          <span>Autonomous spending is blocked.</span>
+        </div>
+      </div>
+    </Panel>
+  )
+}
 
-  const runPipeline = useCallback(async (pipeline) => {
-    setRunning(pipeline.id)
-    setError(null)
-    try {
-      const token = localStorage.getItem('auth_token') || ''
-      const r = await fetch(`${BASE}${pipeline.endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      })
-      const data = await r.json()
-      setHistory(h => [{ ...data, pipeline: pipeline.id, label: pipeline.label, tone: pipeline.tone, ts: Date.now() }, ...h].slice(0, 50))
-      setLastRuns(lr => ({ ...lr, [pipeline.id]: { ...data, executed_at: new Date().toISOString() } }))
-      setTotals(t => ({ roi: t.roi + (data.estimated_roi || 0), runs: t.runs + 1 }))
-    } catch (e) {
-      setError(`${pipeline.label} failed: ${e.message}`)
-    } finally {
-      setRunning(null)
-    }
-  }, [])
+export default function MoneyModePage() {
+  const { loading, error, data } = useEconomyData()
+  const summary = data?.summary || {}
+  const ledger = data?.ledger?.items || data?.ledger?.ledger || []
+  const costs = data?.costs?.items || data?.costs?.costs || []
+  const pipelines = data?.pipelines?.pipelines || []
+  const opportunities = data?.opportunities?.opportunities || []
+  const tasks = data?.moneyTasks?.tasks || []
+  const policy = data?.moneyTasks?.policy || {}
+
+  const revenue = summary.revenue || summary.total_revenue || 0
+  const cost = summary.cost || summary.total_cost || 0
+  const profit = summary.profit ?? (revenue - cost)
+  const tokenCost = summary.token_cost || costs.reduce((acc, item) => acc + (Number(item.cost) || 0), 0)
+  const roi = cost > 0 ? (profit / cost) * 100 : 0
 
   return (
-    <div className="mm-grid">
-      <div className="mm-kpis">
-        <KPITile icon="$" iconTone="success" label="Total ROI" value={`$${totals.roi.toFixed(2)}`} sub="THIS SESSION" accent />
-        <KPITile icon="◎" iconTone="cool"    label="Runs"      value={totals.runs} sub="PIPELINES TRIGGERED" />
-        <KPITile icon="✦" iconTone="gold"    label="Available" value={PIPELINES.length} sub="PIPELINES" />
-      </div>
-
-      {error && (
-        <div className="mm-error">
-          <span className="mm-error__dot" />
-          <span>{error}</span>
+    <div className="ecc-page" role="main" aria-label="Economy Command Center">
+      <header className="ecc-titlebar">
+        <div className="ecc-titlebar__left">
+          <span className="ecc-titlebar__icon" aria-hidden="true">$</span>
+          <h1 className="ecc-titlebar__title">ECONOMY COMMAND CENTER</h1>
+          <div className="ecc-titlebar__divider" aria-hidden="true" />
+          <span className="ecc-titlebar__sub">Real ledger, wallet, task value and approval gates</span>
         </div>
-      )}
-
-      <Panel
-        icon="⌬"
-        title="Money Pipelines"
-        actions={<StatusPill tone="gold" label={`${PIPELINES.length} ACTIVE`} dot={false} size="sm" />}
-      >
-        <div className="mm-list">
-          {PIPELINES.map(p => (
-            <PipelineCard
-              key={p.id}
-              pipeline={p}
-              onRun={runPipeline}
-              running={running}
-              lastRun={lastRuns[p.id]}
-            />
-          ))}
+        <div className="ecc-titlebar__right">
+          <StatusPill label={(summary.state || (error ? 'degraded' : 'live')).toUpperCase()} tone={error ? 'alert' : 'gold'} dot={!error} />
+          <span className="ecc-titlebar__ts">{new Date().toLocaleTimeString()}</span>
         </div>
-      </Panel>
+      </header>
 
-      <Panel
-        icon="◷"
-        title="Run History"
-        actions={<StatusPill tone="idle" label={`${history.length} RUNS`} dot={false} size="sm" />}
-      >
-        {history.length === 0 ? (
-          <div className="mm-empty">No pipelines run yet this session.</div>
-        ) : (
-          <div className="mm-history">
-            {history.map((r, i) => (
-              <div key={i} className={`mm-history__row mm-history__row--${r.tone}`}>
-                <span className="mm-history__dot" />
-                <span className="mm-history__label">{r.label}</span>
-                <span className="mm-history__roi">${r.estimated_roi} ROI</span>
-                <span className="mm-history__time">{new Date(r.ts).toLocaleTimeString()}</span>
+      {loading && <EmptyState icon="..." title="Loading economy state" />}
+      {error && <ErrorState title="Economy degraded" message={error} />}
+
+      <section className="ecc-kpi-strip" aria-label="Key performance indicators">
+        <KPITile label="TRACKED VALUE" value={<span className="ecc-tabular">{fmt$(revenue)}</span>} icon="$" iconTone="gold" accent hover sub="persisted ledger" />
+        <KPITile label="COST" value={<span className="ecc-tabular">{fmt$(cost)}</span>} icon="-" iconTone="warn" hover sub="tracked spend" />
+        <KPITile label="PROFIT" value={<span className="ecc-tabular">{fmt$(profit)}</span>} icon="+" iconTone={profit >= 0 ? 'success' : 'warn'} hover sub="value minus cost" />
+        <KPITile label="ROI" value={<span className="ecc-tabular">{roi.toFixed(1)}%</span>} icon="%" iconTone={roi >= 0 ? 'success' : 'warn'} hover sub="real data only" />
+        <KPITile label="TOKEN COST" value={<span className="ecc-tabular">{fmt$(tokenCost)}</span>} icon="T" iconTone="warn" hover sub="from call logs" />
+      </section>
+
+      <div className="ecc-enhance-grid">
+        <Panel title="MONEY MODE TASK INBOX" icon="[]" tone="gold" size="compact" actions={<StatusPill label={tasks.length ? `${tasks.length} TASKS` : 'EMPTY'} tone={tasks.length ? 'success' : 'idle'} size="sm" />}>
+          <div className="ecc-native-list">
+            {tasks.slice(0, 5).map((task) => (
+              <div key={task.id} className="ecc-native-row">
+                <div>
+                  <span className="ecc-native-row__title">{task.title || task.id}</span>
+                  <span className="ecc-native-row__sub">{task.source || 'internal'} - {task.estimated_hours || 0}h - {task.risk || 'standard'}</span>
+                </div>
+                <StatusPill label={(task.state || 'draft').toUpperCase()} tone={task.risk === 'dangerous' ? 'warn' : 'idle'} size="sm" />
               </div>
             ))}
+            {!tasks.length && <span className="ecc-native-empty">No task sources are active. Discovery is disabled until configured by the owner.</span>}
           </div>
-        )}
+        </Panel>
+        <WalletPanel wallet={data?.wallet} />
+        <Panel title="APPROVAL GATES" icon="!" tone="gold" size="compact" actions={<StatusPill label={policy.state?.toUpperCase?.() || 'POLICY'} tone="success" size="sm" />}>
+          <div className="ecc-approval-gates">
+            {(policy.approval_gates || ['accept_paid_task', 'deliver_client_work', 'claim_funds', 'spend_money', 'buy_external_compute']).map((gate) => (
+              <span key={gate} className="ecc-approval-gate">{gate.replace(/_/g, ' ')}</span>
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="ecc-mid-row">
+        <Panel title="PIPELINES" icon="[]" tone="gold" size="compact" className="ecc-pipeline-panel">
+          <div className="ecc-pipeline-list">
+            {pipelines.map((pipeline) => <PipelineCard key={pipeline.id || pipeline.name} pipeline={pipeline} />)}
+            {!pipelines.length && <EmptyState icon="[]" title="No active pipelines" sub="Content, data and outreach pipelines will appear after first real run." />}
+          </div>
+        </Panel>
+        <Panel title="OPPORTUNITIES" icon="+" tone="gold" size="compact" className="ecc-chart-panel">
+          <SimpleTable
+            rows={opportunities}
+            emptyTitle="No opportunities"
+            columns={[
+              { key: 'title', label: 'Opportunity' },
+              { key: 'source', label: 'Source' },
+              { key: 'estimated_value', label: 'Value', render: (r) => fmt$(r.estimated_value || r.value) },
+              { key: 'state', label: 'State' },
+            ]}
+          />
+        </Panel>
+      </div>
+
+      <Panel title="TOKEN/API COSTS" icon="T" tone="gold" size="compact" className="ecc-token-panel">
+        <SimpleTable
+          rows={costs}
+          emptyTitle="No cost history"
+          columns={[
+            { key: 'operation', label: 'Operation' },
+            { key: 'tokens', label: 'Tokens', render: (r) => fmtNum(r.tokens) },
+            { key: 'cost', label: 'Cost', render: (r) => fmt$(r.cost) },
+            { key: 'provider', label: 'Provider' },
+          ]}
+        />
       </Panel>
+
+      <section aria-label="Ledger">
+        <SectionLabel icon="$" tone="gold" rule>LEDGER</SectionLabel>
+        <Panel title="REAL ECONOMY LEDGER" icon="$" tone="gold" size="compact">
+          <SimpleTable
+            rows={ledger}
+            emptyTitle="No ledger records"
+            columns={[
+              { key: 'type', label: 'Type' },
+              { key: 'amount', label: 'Amount', render: (r) => fmt$(r.amount || r.value) },
+              { key: 'status', label: 'Status' },
+              { key: 'created_at', label: 'Created', render: (r) => r.created_at ? new Date(r.created_at).toLocaleString() : '-' },
+            ]}
+          />
+        </Panel>
+      </section>
     </div>
   )
 }

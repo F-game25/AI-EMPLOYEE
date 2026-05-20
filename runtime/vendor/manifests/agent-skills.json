@@ -1,0 +1,14 @@
+{
+  "id": "agent-skills",
+  "source_url": "https://github.com/addyosmani/agent-skills",
+  "fork_url": "https://github.com/F-game25/agent-skills.",
+  "upstream_commit": "f17c6e88c904dc747381c374312c2d58e10647ae",
+  "license": "MIT",
+  "checksum_sha256": "827ba3476da7961caadf565d5765747836de788c76eb5b77659048a6cfa25105",
+  "local_namespace": "aeternus_agent_skills",
+  "risk_class": "low",
+  "runtime_code_imported": false,
+  "imported_paths": ["runtime/config/fork_integration_manifest.json#engineering_skills"],
+  "approval_policy": "metadata_and_workflow_templates_only",
+  "patch_notes": "Converted engineering skill concepts into native AETERNUS skill metadata and recommendation gates."
+}

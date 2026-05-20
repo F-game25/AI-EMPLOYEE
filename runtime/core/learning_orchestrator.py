@@ -162,6 +162,9 @@ async def execute_learning(
 
 async def _run_session(session_id: str, topic: str, topic_id: str, cfg: Dict,
                        selected_urls: Optional[List[str]], verification_level: str):
+    if selected_urls:
+        from core.url_guard import validate_url as _gu  # type: ignore
+        selected_urls = [u for u in selected_urls if not _gu(u)]
     new_memories = 0
     sources_used = 0
     confidences: List[float] = []

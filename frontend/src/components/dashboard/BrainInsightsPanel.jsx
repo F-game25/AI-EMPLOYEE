@@ -9,40 +9,58 @@ function asPercent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`
 }
 
+function Sparkline({ values, color = '#D4AF37', width = 120, height = 32 }) {
+  if (!values?.length) return null
+  const min = Math.min(...values), max = Math.max(...values)
+  const range = max - min || 1
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * width
+    const y = height - ((v - min) / range) * height
+    return `${x},${y}`
+  }).join(' ')
+  return (
+    <svg width={width} height={height} style={{ display: 'block' }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export default function BrainInsightsPanel() {
   const storeInsights = useAppStore((s) => s.brainInsights)
   const [insights, setInsights] = useState(storeInsights)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [history, setHistory] = useState([])
+
+  // WS broadcast (every 5s) populates brainInsights in store — sync local state from store
+  useEffect(() => {
+    if (storeInsights && Object.keys(storeInsights).length > 0) {
+      setInsights(storeInsights)
+      setLoading(false)
+      setError('')
+    }
+  }, [storeInsights])
 
   useEffect(() => {
-    let cancelled = false
+    if (storeInsights?.performance_metrics?.avg_confidence != null)
+      setHistory(h => [...h.slice(-19), storeInsights.performance_metrics.avg_confidence])
+  }, [storeInsights])
 
-    const loadInsights = async () => {
+  // One-time initial fetch if store is empty
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/brain/insights`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
-        if (cancelled) return
-        setInsights(data || {})
-        setError('')
+        if (!cancelled) { setInsights(data || {}); setLoading(false) }
       } catch (e) {
-        if (cancelled) return
-        console.error('Failed to load brain insights', e)
-        setInsights(storeInsights || {})
-        setError('Brain insights unavailable')
-      } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) { setInsights(storeInsights || {}); setError('Brain insights unavailable'); setLoading(false) }
       }
-    }
-
-    loadInsights()
-    const timer = setInterval(loadInsights, 3000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [storeInsights])
+    })()
+    return () => { cancelled = true }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const metrics = insights?.performance_metrics || {}
   const strategies = insights?.learned_strategies || []
@@ -63,6 +81,7 @@ export default function BrainInsightsPanel() {
         <TertiaryPanel className="p-2 font-mono text-[10px]">
           <div style={{ color: 'var(--text-muted)' }}>AVG CONFIDENCE</div>
           <div style={{ color: 'var(--gold)' }}>{asPercent(metrics.avg_confidence)}</div>
+          <Sparkline values={history} />
         </TertiaryPanel>
       </div>
 

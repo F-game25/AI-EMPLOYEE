@@ -73,6 +73,7 @@
     0 calc(100% - var(--nx-chamfer-sm)),
     0 var(--nx-chamfer-sm)
   );
+  position: relative;
 }
 .nx-sidebar__brand-mark span {
   font-family: var(--nx-font-mono);
@@ -81,6 +82,25 @@
   color: #1a130c;
   letter-spacing: 0.06em;
   line-height: 1;
+}
+
+/* Cognitive state indicator — pulsing dot */
+.nx-sidebar__cognitive-indicator {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.2);
+  transition: box-shadow 0.3s ease;
+}
+.nx-sidebar__cognitive-indicator[style*="active"] {
+  animation: nx-cognitive-pulse 1.5s ease-in-out infinite;
+}
+@keyframes nx-cognitive-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .nx-sidebar__brand-text { min-width: 0; }
@@ -119,9 +139,45 @@
 .nx-sidebar__scroll::-webkit-scrollbar-track { background: transparent; }
 
 .nx-sidebar__group {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 .nx-sidebar__group:last-child { margin-bottom: 6px; }
+
+/* Group toggle button (header) */
+.nx-sidebar__group-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 14px;
+  width: 100%;
+  color: var(--nx-text-dim);
+  transition: color var(--nx-dur) var(--nx-ease), background var(--nx-dur) var(--nx-ease);
+  position: relative;
+  margin-bottom: 8px;
+}
+.nx-sidebar__group-toggle:hover {
+  color: var(--nx-text);
+  background: rgba(229,199,107,0.05);
+}
+.nx-sidebar__group-toggle::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 12px;
+  bottom: -4px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--nx-border-strong), transparent);
+  opacity: 0.3;
+}
+
+.nx-sidebar__group-icon {
+  font-size: 11px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
 
 .nx-sidebar__group-label {
   font-family: var(--nx-font-display);
@@ -129,20 +185,21 @@
   font-weight: 600;
   letter-spacing: var(--nx-tracking-cap);
   text-transform: uppercase;
-  color: var(--nx-text-dim);
-  padding: 6px 12px 6px 14px;
-  margin-bottom: 2px;
-  position: relative;
+  flex: 1;
+  min-width: 0;
 }
-.nx-sidebar__group-label::after {
-  content: '';
-  position: absolute;
-  left: 14px;
-  right: 12px;
-  bottom: 2px;
-  height: 1px;
-  background: linear-gradient(90deg, var(--nx-border-strong), transparent);
-  opacity: 0.5;
+
+.nx-sidebar--collapsed .nx-sidebar__group-toggle {
+  justify-content: center;
+  padding: 6px;
+}
+
+/* Group items container */
+.nx-sidebar__group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 4px;
 }
 
 /* ── Footer ───────────────────────────────────────────────────────── */
@@ -192,3 +249,136 @@
   color: var(--nx-text);
   border-color: var(--nx-border-strong);
 }
+
+/* ── Brand enhancements ── */
+.nx-sidebar__brand-year {
+  font-family: var(--nx-font-mono);
+  font-size: 8px;
+  color: rgba(255, 184, 0, 0.35);
+  letter-spacing: 0.12em;
+  margin-top: 1px;
+}
+
+/* ── System Status Widget ── */
+.nx-sidebar__sys-status {
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 184, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex-shrink: 0;
+  background: rgba(255, 184, 0, 0.02);
+}
+
+.nx-sidebar__sys-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  font-weight: 700;
+  color: rgba(255, 184, 0, 0.5);
+  letter-spacing: 0.12em;
+  margin-bottom: 2px;
+}
+
+/* ── Ring gauge ───────────────────────────────────────────────────────── */
+.nx-sidebar__gauge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+.nx-sidebar__gauge-num {
+  display: flex;
+  flex-direction: column;
+}
+.nx-sidebar__gauge-pct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+.nx-sidebar__gauge-lbl {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.16em;
+  margin-top: 4px;
+}
+
+/* ── Mobile drawer ────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .nx-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 4px 0 32px rgba(0, 0, 0, 0.6);
+  }
+
+  .nx-sidebar--mobile-open {
+    transform: translateX(0);
+  }
+}
+
+.nx-sidebar-overlay {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .nx-sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+  }
+}
+
+/* ── Mini metrics (CPU/GPU/RAM/VRAM/DISK row) ─────────────────────────── */
+.nx-sidebar__sys-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+.nx-sidebar__mm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 2px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+.nx-sidebar__mm-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #00FF88;
+  box-shadow: 0 0 3px rgba(0,255,136,0.5);
+}
+.nx-sidebar__mm--warn .nx-sidebar__mm-dot { background: #FFD93D; box-shadow: 0 0 3px rgba(255,217,61,0.5); }
+.nx-sidebar__mm--crit .nx-sidebar__mm-dot { background: #FF4444; box-shadow: 0 0 4px rgba(255,68,68,0.6); animation: nx-mm-flash 0.7s step-end infinite; }
+@keyframes nx-mm-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.nx-sidebar__mm-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.05em;
+}
+.nx-sidebar__mm-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+.nx-sidebar__mm--warn .nx-sidebar__mm-val { color: #FFD93D; }
+.nx-sidebar__mm--crit .nx-sidebar__mm-val { color: #FF6B6B; }

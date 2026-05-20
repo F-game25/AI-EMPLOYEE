@@ -1,10 +1,13 @@
 """Skill catalog with class-based stateless skill modules."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import threading
 from typing import Any, Callable
 
 from skills.base import SkillBase
+from skills.context_research import ContextResearchSkill
 
 # Capability tags per skill name
 _SKILL_TAGS: dict[str, list[str]] = {
@@ -15,6 +18,7 @@ _SKILL_TAGS: dict[str, list[str]] = {
     "email-marketing": ["marketing", "email", "campaigns"],
     "ceo-briefing": ["analytics", "reporting", "business_intelligence"],
     "problem-solver": ["general", "fallback"],
+    "context-research": ["research", "learning", "context"],
 }
 
 
@@ -74,7 +78,7 @@ class SkillCatalog:
             ("ceo-briefing", "Creates analytical business briefing outputs."),
             ("problem-solver", "General-purpose fallback execution skill."),
         ]
-        return {
+        skills: dict[str, SkillBase] = {
             skill_name: AgentDispatchSkill(
                 skill_name=skill_name,
                 description=desc,
@@ -82,6 +86,43 @@ class SkillCatalog:
             )
             for skill_name, desc in configured
         }
+        # First-class skill: context research (executable directly, no dispatch indirection)
+        skills["context-research"] = ContextResearchSkill()
+        skills.update(self._load_configured_skills(existing=set(skills)))
+        return skills
+
+    def _load_configured_skills(self, *, existing: set[str]) -> dict[str, SkillBase]:
+        config_path = Path(__file__).resolve().parents[1] / "config" / "skills_library.json"
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+        entries = raw if isinstance(raw, list) else raw.get("skills", [])
+        if not isinstance(entries, list):
+            return {}
+
+        loaded: dict[str, SkillBase] = {}
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            skill_id = str(item.get("id") or item.get("skill_id") or "").strip()
+            if not skill_id or skill_id in existing:
+                continue
+            tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+            category = str(item.get("category") or "").strip().lower().replace(" ", "_")
+            capability_tags = [str(tag) for tag in tags if str(tag).strip()]
+            if category:
+                capability_tags.append(category)
+            if not capability_tags:
+                capability_tags = ["configured"]
+            loaded[skill_id] = AgentDispatchSkill(
+                skill_name=skill_id,
+                description=str(item.get("description") or item.get("name") or "Configured skill."),
+                version=str(item.get("version") or "1.0"),
+                capability_tags=capability_tags,
+            )
+        return loaded
 
     def get(self, name: str) -> SkillBase | None:
         return self._skills.get(name)
@@ -91,6 +132,9 @@ class SkillCatalog:
 
     def all(self) -> dict[str, SkillBase]:
         return dict(self._skills)
+
+    def list_skills(self) -> list[str]:
+        return sorted(self._skills)
 
 
 _instance: SkillCatalog | None = None

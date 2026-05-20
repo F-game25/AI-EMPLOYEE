@@ -83,6 +83,20 @@
   gap: 10px;
   justify-content: flex-end;
   min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+/* Progressive disclosure: hide non-essential stats as space tightens */
+@media (max-width: 1600px) {
+  .nx-topbar__right > .nx-topbar__stat:nth-of-type(3) { display: none; } /* hide UPTIME */
+}
+@media (max-width: 1400px) {
+  .nx-topbar__right > .nx-topbar__stat:nth-of-type(2) { display: none; } /* hide RAM */
+}
+@media (max-width: 1280px) {
+  .nx-topbar__right > .nx-topbar__divider:nth-of-type(1) { display: none; }
+  .nx-topbar__right > .nx-topbar__stat:nth-of-type(1) { display: none; } /* hide CPU */
 }
 
 .nx-topbar__divider {
@@ -92,6 +106,8 @@
   flex-shrink: 0;
   margin: 0 2px;
 }
+
+.nx-topbar__mini-eye { flex-shrink: 0; margin: 0 4px; }
 
 /* ── Inline stat ──────────────────────────────────────────────────── */
 .nx-topbar__stat {
@@ -125,6 +141,59 @@
 .nx-topbar__stat--alert  .nx-topbar__stat-value { color: var(--nx-danger); }
 .nx-topbar__stat--gold   .nx-topbar__stat-value { color: var(--nx-gold); }
 
+.nx-topbar__stat-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.nx-topbar__stat-delta {
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.nx-topbar__stat-delta--up   { color: #00FFB4; }
+.nx-topbar__stat-delta--down { color: #FF6B6B; }
+.nx-topbar__stat-delta--flat { color: rgba(255,255,255,0.4); }
+
+/* ── Threat enum block ────────────────────────────────────────────── */
+.nx-topbar__threat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.nx-topbar__threat-label {
+  font-family: var(--nx-font-display);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: var(--nx-tracking-cap);
+  text-transform: uppercase;
+  color: var(--nx-text-dim);
+}
+.nx-topbar__threat-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.nx-topbar__threat-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.nx-topbar__threat-value {
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.nx-topbar__threat--success .nx-topbar__threat-value { color: #00FFB4; }
+.nx-topbar__threat--warn    .nx-topbar__threat-value { color: #FFD93D; }
+.nx-topbar__threat--alert   .nx-topbar__threat-value { color: #FF6B6B; }
+.nx-topbar__threat--alert   .nx-topbar__threat-dot   { animation: nx-threat-flash 0.8s ease-in-out infinite; }
+@keyframes nx-threat-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
 /* ── Update banner ────────────────────────────────────────────────── */
 .nx-topbar__update {
   background: var(--nx-gold-grad);
@@ -153,6 +222,9 @@
   letter-spacing: 0.04em;
 }
 .nx-topbar__update button:hover { background: rgba(0,0,0,0.10); }
+.nx-topbar__update--available { background: rgba(0,255,136,0.15); color: #00ff88; border-bottom: 1px solid rgba(0,255,136,0.3); }
+.nx-topbar__update--available button { border-color: rgba(0,255,136,0.4); color: #00ff88; }
+.nx-topbar__update--available button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* ── Offline banner ───────────────────────────────────────────────── */
 .nx-topbar__offline {
@@ -188,7 +260,70 @@
   text-transform: uppercase;
 }
 
+/* ── Health sparkline ─────────────────────────────────────────────── */
+.nx-topbar__health {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.nx-topbar__health-label {
+  font-family: var(--nx-font-mono);
+  font-size: 8px;
+  color: var(--nx-text-dim);
+  letter-spacing: 0.08em;
+}
+
+.nx-topbar__sparkline {
+  display: block;
+  overflow: visible;
+}
+
+.nx-topbar__health-val {
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nx-gold);
+  min-width: 28px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── User avatar ──────────────────────────────────────────────────── */
+.nx-topbar__user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.nx-topbar__avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 184, 0, 0.15);
+  border: 1px solid rgba(255, 184, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: #FFB800;
+}
+
+.nx-topbar__username {
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  color: var(--nx-text-dim);
+  letter-spacing: 0.06em;
+}
+
 /* ── Responsive: collapse the center on narrow screens ────────────── */
+@media (max-width: 1400px) {
+  .nx-topbar__health, .nx-topbar__user { display: none; }
+}
 @media (max-width: 1100px) {
   .nx-topbar { grid-template-columns: auto auto 1fr; }
   .nx-topbar__center > :first-child { display: none; } /* hide command pill, keep clock */
@@ -197,4 +332,70 @@
   .nx-topbar__center { display: none; }
   .nx-topbar { grid-template-columns: auto 1fr; }
   .nx-topbar__stat--ram, .nx-topbar__stat--uptime { display: none; }
+}
+
+/* ── Hamburger — visible only on mobile ──────────────────────────── */
+.nx-topbar__hamburger {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .nx-topbar {
+    grid-template-columns: 44px auto 1fr;
+    gap: 8px;
+    padding: 0 12px;
+    height: 52px;
+  }
+
+  .nx-topbar__hamburger {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 5px;
+    width: 44px;
+    height: 44px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .nx-topbar__hamburger span {
+    display: block;
+    width: 20px;
+    height: 1.5px;
+    background: var(--nx-text-dim, rgba(255,255,255,0.5));
+    border-radius: 1px;
+    transition: background 0.15s;
+  }
+
+  .nx-topbar__hamburger:active span {
+    background: var(--nx-gold, #D4AF37);
+  }
+
+  /* Hide dense right-side stats on mobile — keep only online + mode pills */
+  .nx-topbar__divider,
+  .nx-topbar__stat,
+  .nx-topbar__threat,
+  .nx-topbar__health,
+  .nx-topbar__mini-eye,
+  .nx-topbar__user { display: none; }
+
+  .nx-topbar__center { display: none; }
+
+  /* Left breadcrumb takes remaining space */
+  .nx-topbar__left {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Right: show only essential status pills */
+  .nx-topbar__right {
+    justify-content: flex-end;
+    gap: 6px;
+  }
 }

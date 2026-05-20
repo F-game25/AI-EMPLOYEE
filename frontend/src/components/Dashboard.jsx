@@ -1,65 +1,108 @@
-import { useCallback, useEffect, lazy, Suspense } from 'react'
+import { useCallback, useEffect, lazy, Suspense, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../store/appStore'
-import { useBrainStore } from '../store/brainStore'
 import Sidebar from './layout/Sidebar'
+import MobileNav from './layout/MobileNav'
 import ContextPanel from './layout/ContextPanel'
+import CommandDock from './dock/CommandDock'
+import ChatPanel from './core/ChatPanel'
 
-const DashboardPage       = lazy(() => import('./pages/NexusOSDashboard'))
-const AscendForgePage     = lazy(() => import('./pages/AscendForgePage'))
-const ControlCenterPage   = lazy(() => import('./pages/ControlCenterPage'))
-const DoctorPage          = lazy(() => import('./pages/DoctorPage'))
-const FairnessPage        = lazy(() => import('./pages/FairnessPage'))
-const HermesPage          = lazy(() => import('./pages/HermesPage'))
-const LearningLadderPage  = lazy(() => import('./pages/LearningLadderPage'))
-const PromptInspectorPage = lazy(() => import('./pages/PromptInspectorPage'))
-const TrainingPage        = lazy(() => import('./pages/TrainingPage'))
-const WorkspacePage       = lazy(() => import('./pages/WorkspacePage'))
-const AIControlPage       = lazy(() => import('./pages/AIControlPage'))
-const NeuralBrainPage     = lazy(() => import('./pages/NeuralBrainPage'))
-const OperationsPage      = lazy(() => import('./pages/OperationsPage'))
-const AgentsPage          = lazy(() => import('./pages/AgentsPageNEW'))
-const SystemPage          = lazy(() => import('./pages/SystemPage'))
-const VoicePage           = lazy(() => import('./pages/VoicePage'))
-const BlacklightPage      = lazy(() => import('./pages/BlacklightPage'))
-const MoneyModePage       = lazy(() => import('./pages/MoneyModePage'))
-const EvolutionPage       = lazy(() => import('./pages/EvolutionPage'))
-const HistoryPage         = lazy(() => import('./pages/HistoryPage'))
-const SettingsPage        = lazy(() => import('./pages/SettingsPage'))
-const ExecutionPage  = lazy(() => import('./pages/ExecutionPage'))
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const handler = e => setMatches(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [query])
+  return matches
+}
+
+const DashboardPage     = lazy(() => import('./pages/NexusOSDashboard'))
+const AscendForgePage   = lazy(() => import('./pages/AscendForgePage'))
+const WorkflowsPage     = lazy(() => import('./pages/WorkflowsPage'))
+const WorkspacePage     = lazy(() => import('./pages/WorkspacePage'))
+const OperationsPage    = lazy(() => import('./pages/OperationsPage'))
+const SettingsPage      = lazy(() => import('./pages/SettingsPage'))
+const NeuralNetworkPage = lazy(() => import('./pages/NeuralNetworkPage'))
+const IntelligencePage  = lazy(() => import('./pages/IntelligencePage'))
+const SystemHealthPage  = lazy(() => import('./pages/SystemHealthPage'))
+const IntegrationsPage  = lazy(() => import('./pages/IntegrationsPage'))
+const ModelsPage        = lazy(() => import('./pages/ModelsPage'))
+const AgentsPage        = lazy(() => import('./pages/AgentsPage'))
+const MoneyModePage     = lazy(() => import('./pages/MoneyModePage'))
+const SecurityPanel     = lazy(() => import('./pages/SecurityPanel'))
+const MemoryPage        = lazy(() => import('./pages/MemoryPage'))
+const KnowledgePage     = lazy(() => import('./pages/KnowledgePage'))
+const ResearchPage      = lazy(() => import('./pages/ResearchPage'))
+const CognitionPage     = lazy(() => import('./pages/CognitionPage'))
+const ReconPage         = lazy(() => import('./pages/ReconPage'))
 import { API_URL } from '../config/api'
 import TopBar from './dashboard/TopBar'
+import BottomDrawer from './dock/BottomDrawer'
 import ErrorBoundary from './ErrorBoundary'
+import CommandPalette from './ui/CommandPalette'
+import VoiceModal from './ui/VoiceModal'
 
 const BASE = API_URL
 
 const PAGES = {
-  'dashboard': DashboardPage,
-  'execution': ExecutionPage,
-  'ai-control': AIControlPage,
-  'neural-brain': NeuralBrainPage,
-  'operations': OperationsPage,
-  'agents': AgentsPage,
-  'control-center': ControlCenterPage,
-  'ascend-forge': AscendForgePage,
-  'doctor': DoctorPage,
-  'blacklight': BlacklightPage,
-  'fairness': FairnessPage,
-  'hermes': HermesPage,
-  'learning-ladder': LearningLadderPage,
-  'system': SystemPage,
-  'voice': VoicePage,
-  'prompt-inspector': PromptInspectorPage,
-  'money-mode':       MoneyModePage,
-  'workspace':        WorkspacePage,
-  'evolution':        EvolutionPage,
-  'training':         TrainingPage,
-  'history':          HistoryPage,
-  'settings':         SettingsPage,
+  // Legacy aliases
+  'dashboard':      DashboardPage,
+  'neural-network': NeuralNetworkPage,
+  'intelligence':   IntelligencePage,
+  'operations':     OperationsPage,
+  'ascend-forge':   AscendForgePage,
+  'system':         SystemHealthPage,
+  'workspace':      WorkspacePage,
+  'integrations':   IntegrationsPage,
+  'settings':       SettingsPage,
+  // CORE
+  'nexus':          DashboardPage,
+  'cognition':      CognitionPage,
+  'agents':         AgentsPage,
+  'memory':         MemoryPage,
+  'economy':        MoneyModePage,
+  // OPERATIONS
+  'tasks':          OperationsPage,
+  'workflows':      WorkflowsPage,
+  'infrastructure': SystemHealthPage,
+  'deployments':    SystemHealthPage,
+  // INTELLIGENCE
+  'neural-graph':   NeuralNetworkPage,
+  'knowledge':      KnowledgePage,
+  'trends':         IntelligencePage,
+  'research':       ResearchPage,
+  'recon':          ReconPage,
+  // SECURITY — panel switches internally on activeSection
+  'policies':       SecurityPanel,
+  'security':       SecurityPanel,
+  'blacklight':     SecurityPanel,
+  'audit':          SecurityPanel,
+  // SYSTEM
+  'models':         ModelsPage,
+  'runtime':        SystemHealthPage,
+}
+
+function DashboardMountedSignal({ section }) {
+  useEffect(() => {
+    try {
+      window.ai?.notifyUiMounted?.({
+        phase: 'dashboard-rendered',
+        section,
+        message: `Dashboard rendered: ${section}`,
+      })
+    } catch {
+      // Electron IPC is best-effort; browser mode has no launcher.
+    }
+  }, [section])
+  return null
 }
 
 export default function Dashboard() {
+  const [chatPanelOpen, setChatPanelOpen] = useState(false)
+  const isMobile = useMediaQuery('(max-width: 768px)')
   const activeSection = useAppStore(s => s.activeSection)
   const setActiveSection = useAppStore(s => s.setActiveSection)
   const navigate = useNavigate()
@@ -77,26 +120,21 @@ export default function Dashboard() {
     if (location.pathname !== target) navigate(target, { replace: false })
   }, [activeSection]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const wsConnected = useAppStore(s => s.wsConnected)
   const setProductMetrics = useAppStore(s => s.setProductMetrics)
   const setAutomationStatus = useAppStore(s => s.setAutomationStatus)
   const setBrainInsights = useAppStore(s => s.setBrainInsights)
-  const setBrainStatus = useAppStore(s => s.setBrainStatus)
-  const setBrainActivity = useAppStore(s => s.setBrainActivity)
   const setWorkflowSnapshot = useAppStore(s => s.setWorkflowSnapshot)
-  const setGraph = useBrainStore(s => s.setGraph)
 
-  // Background data fetching — shared across all sections
+  // Initial hydration fetch — runs once on mount; WS broadcast handles all subsequent updates
   const refreshDashboard = useCallback(async () => {
     try {
       const [modeRes, dashRes] = await Promise.all([
         fetch(`${BASE}/api/mode`),
         fetch(`${BASE}/api/product/dashboard`),
       ])
-      const modeData = await modeRes.json()
       const dashData = await dashRes.json()
-      // modeData is fetched for dashboard sync but mode state is primarily
-      // driven by WebSocket events stored in the Zustand store.
-      if (modeData?.mode) { /* tracked via WebSocket */ }
+      await modeRes.json()
       setProductMetrics(dashData || {})
       if (dashData?.learning?.brain) setBrainInsights(dashData.learning.brain)
       if (Array.isArray(dashData?.workflow_runs)) {
@@ -111,43 +149,41 @@ export default function Dashboard() {
     }
   }, [setAutomationStatus, setProductMetrics, setBrainInsights, setWorkflowSnapshot])
 
-  const refreshBrainRuntime = useCallback(async () => {
-    try {
-      const [statusRes, insightsRes, activityRes, graphRes] = await Promise.all([
-        fetch(`${BASE}/api/brain/status`),
-        fetch(`${BASE}/api/brain/insights`),
-        fetch(`${BASE}/api/brain/activity?limit=20`),
-        fetch(`${BASE}/api/brain/graph`),
-      ])
-      const [statusData, insightsData, activityData, graphData] = await Promise.all([
-        statusRes.json(),
-        insightsRes.json(),
-        activityRes.json(),
-        graphRes.ok ? graphRes.json() : null,
-      ])
-      if (statusData) setBrainStatus(statusData)
-      if (insightsData) setBrainInsights(insightsData)
-      if (activityData) setBrainActivity(activityData)
-      if (graphData) setGraph(graphData)
-    } catch (e) {
-      console.error('Failed to refresh brain runtime', e)
-      // Keep current state; WebSocket updates continue in real time.
-    }
-  }, [setBrainActivity, setBrainInsights, setBrainStatus, setGraph])
-
+  // Initial hydration only; fallback REST poll only when WS is disconnected
   useEffect(() => {
     refreshDashboard()
+    if (wsConnected) return
     const i = setInterval(refreshDashboard, 8000)
     return () => clearInterval(i)
-  }, [refreshDashboard])
+  }, [refreshDashboard, wsConnected])
+  // Brain runtime data is now entirely WS-driven (broadcast every 5s from server)
 
+  // Keyboard shortcuts for chat panel (Alt+T / Meta+T)
+  // Note: Ctrl/Cmd+K is owned by CommandPalette
   useEffect(() => {
-    refreshBrainRuntime()
-    const i = setInterval(refreshBrainRuntime, 3000)
-    return () => clearInterval(i)
-  }, [refreshBrainRuntime])
+    const handleKeyDown = (e) => {
+      if ((e.altKey || e.metaKey) && e.key === 't') {
+        e.preventDefault()
+        setChatPanelOpen(v => !v)
+      }
+      if (e.key === 'Escape' && chatPanelOpen) {
+        setChatPanelOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [chatPanelOpen])
+
+  // Listen for the topbar/search-pill → open chat command
+  useEffect(() => {
+    const openChat = () => setChatPanelOpen(true)
+    window.addEventListener('nx:chat:open', openChat)
+    return () => window.removeEventListener('nx:chat:open', openChat)
+  }, [])
 
   const PageComponent = PAGES[activeSection] || DashboardPage
+  const isFullscreen = activeSection === 'dashboard' || activeSection === 'nexus'
+  const showCommandDock = true
 
   return (
     <motion.div
@@ -164,6 +200,8 @@ export default function Dashboard() {
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
+        paddingBottom: isMobile ? 60 : (showCommandDock ? 116 : 0),
+        marginLeft: isMobile ? 0 : undefined,
       }}>
         <TopBar />
         <div style={{
@@ -171,17 +209,18 @@ export default function Dashboard() {
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          padding: activeSection === 'dashboard' ? 0 : 'var(--space-2) var(--space-3)',
-          overflowY: activeSection === 'dashboard' ? 'hidden' : 'auto',
+          padding: isFullscreen ? 0 : 'var(--space-2) var(--space-3)',
+          overflowY: isFullscreen ? 'hidden' : 'auto',
         }}>
-          <ErrorBoundary key={activeSection} label={activeSection}>
+          <ErrorBoundary key={activeSection} label={activeSection} severity="page">
             <Suspense fallback={
               <div style={{ padding: 32, color: 'var(--text-dim, #888)', fontFamily: 'var(--nx-font-mono, monospace)', fontSize: 13 }}>
                 Loading…
               </div>
             }>
-              <div style={activeSection === 'dashboard' ? { flex:1, height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' } : {}}>
+              <div style={isFullscreen ? { flex:1, height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' } : {}}>
                 <PageComponent />
+                <DashboardMountedSignal section={activeSection} />
               </div>
             </Suspense>
           </ErrorBoundary>
@@ -190,6 +229,16 @@ export default function Dashboard() {
 
       {/* Optional context panel */}
       <ContextPanel />
+
+      {/* Bottom Drawer + Command Bar — desktop only */}
+      {!isMobile && <BottomDrawer />}
+      {!isMobile && <CommandDock onToggleChat={setChatPanelOpen} chatOpen={chatPanelOpen} />}
+      <ChatPanel isOpen={chatPanelOpen} onClose={() => setChatPanelOpen(false)} />
+      <CommandPalette />
+      <VoiceModal />
+
+      {/* Mobile bottom navigation */}
+      {isMobile && <MobileNav />}
     </motion.div>
   )
 }

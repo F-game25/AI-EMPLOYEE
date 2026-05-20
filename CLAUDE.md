@@ -171,6 +171,41 @@ python3 scripts/migrate_to_multitenant.py
 - 10 comprehensive multi-tenancy tests in `tests/test_multitenant.py` (all passing)
 - Tests cover: tenant creation, context management, data isolation, migration scenarios
 
+### Autonomous Research Loop
+
+The system learns online when a task lacks context. Before executing any goal,
+`AgentController.run_goal()` scores context sufficiency via `ContextSufficiencyEvaluator`
+(`runtime/core/context_evaluator.py`). If the score is below 0.6 the user is asked
+"Task — enough context? Yes / No" via a WebSocket `task:context_check` event that
+renders `ContextCheckModal.jsx`. On "No" (or when `AUTO_RESEARCH_MODE=auto`),
+`AutoResearchAgent` (`runtime/core/auto_research_agent.py`) runs adaptive-depth
+research (3→6→10 sources per hop, up to 3 hops): `search_web` → stealth
+`CloakBrowser.fetch_url` → LLM summarize → 3-layer persist
+(vector store + Neo4j brain graph + `state/knowledge_store.json`).
+
+**Env vars:**
+- `AUTO_RESEARCH_MODE` — `ask` (default) / `auto` / `off`
+- `RESEARCH_MAX_HOPS` — default 3
+- `RESEARCH_MAX_PAGES_PER_DAY` — daily budget, default 200
+- `CONTEXT_CHECK_TIMEOUT_S` — default 60 (modal auto-resolves to "continue")
+- `KNOWLEDGE_ACQUISITION_INTERVAL_S` — passive idle-research cadence, default 3600
+- `BRAVE_API_KEY` / `BING_API_KEY` — optional additional search providers
+
+**Integration surfaces:**
+- `runtime/skills/context_research.py` — `ContextResearchSkill` callable by the planner
+- `runtime/tools/web_research_tool.py`, `context_score_tool.py` — atomic tools
+- Pipeline phase 2.5 `rate_context_sufficiency` in `unified_pipeline.py`
+- `runtime/core/money_mode.py` outreach pipeline takes `research_first=True`
+- `runtime/core/hitl_gate.py` `require_approval` accepts `research_findings` for the approval card
+- `EvolutionController` schedules passive knowledge acquisition on idle cycles
+- Per-source trust via `runtime/core/source_trust.py` + `runtime/config/source_trust.json`
+
+**Frontend surfaces:**
+- `ContextCheckModal.jsx` — mounted globally in `App.jsx`
+- `ResearchActivityPanel.jsx` — live + historical sessions, on the Research page
+- WS events: `task:context_check`, `task:research_started`, `task:research_completed`,
+  `task:research_budget_exhausted` — dispatched in `useWebSocket.js`
+
 ### Observability
 
 - **Prometheus Metrics** (`/metrics` endpoint, port 8787): Exposes `ai_employee_*` metrics in text format

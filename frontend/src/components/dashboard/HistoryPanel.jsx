@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useEventFeedStore } from '../../store/eventFeedStore'
 import { Panel, HexButton, StatusPill, SectionLabel, KPITile } from '../nexus-ui'
 import './HistoryPanel.css'
 
@@ -12,55 +13,21 @@ const STATUS_PILL_TONES = {
 }
 
 export default function HistoryPanel() {
-  const [events, setEvents] = useState([])
-  const [stats, setStats] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const events = useEventFeedStore(s => s.events)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [activeTab, setActiveTab] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
 
-  // Fetch history with polling
-  useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const params = new URLSearchParams()
-        if (activeTab !== 'all') params.append('status', activeTab)
-        if (searchTerm) params.append('search', searchTerm)
-
-        const res = await fetch(`/api/history?${params}`)
-        if (res.ok) {
-          const data = await res.json()
-          setEvents(data.events || data.tasks || [])
-        }
-      } catch (e) {
-        console.error('Failed to fetch history:', e)
-      }
-      setLoading(false)
+  const stats = useMemo(() => {
+    const total = events.length
+    const done = events.filter(e => e.kind === 'complete' || e.status === 'done').length
+    const failed = events.filter(e => e.kind === 'error' || e.status === 'failed').length
+    return {
+      total_tasks: total,
+      success_rate: total > 0 ? (done / total) * 100 : 0,
+      failed_count: failed,
     }
-
-    const fetchStats = async () => {
-      try {
-        const res = await fetch('/api/history/stats')
-        if (res.ok) {
-          const data = await res.json()
-          setStats(data)
-        }
-      } catch (e) {
-        console.error('Failed to fetch stats:', e)
-      }
-    }
-
-    fetchHistory()
-    fetchStats()
-
-    // Poll every 2 seconds
-    const interval = setInterval(() => {
-      fetchHistory()
-      fetchStats()
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [activeTab, searchTerm])
+  }, [events])
 
   const handleEventSelect = useCallback((event) => {
     setSelectedEvent(selectedEvent?.task_id === event.task_id ? null : event)
@@ -87,21 +54,22 @@ export default function HistoryPanel() {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
   }
 
-  const getEventStatus = (event) => event.status || 'queued'
+  const getEventStatus = useCallback((event) => event.status || 'queued', [])
 
-  // Filter events based on active tab and search
-  const filteredEvents = events
-    .filter((e) => activeTab === 'all' || getEventStatus(e) === activeTab)
-    .filter((e) => {
-      if (!searchTerm) return true
-      const term = searchTerm.toLowerCase()
-      return (
-        (e.input || '').toLowerCase().includes(term) ||
-        (e.agent_sequence?.some((a) => a.toLowerCase().includes(term))) ||
-        (e.task_id || '').toLowerCase().includes(term)
-      )
-    })
-    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+  const filteredEvents = useMemo(() => {
+    const term = searchTerm.toLowerCase()
+    return events
+      .filter((e) => activeTab === 'all' || getEventStatus(e) === activeTab)
+      .filter((e) => {
+        if (!searchTerm) return true
+        return (
+          (e.input || '').toLowerCase().includes(term) ||
+          (e.agent_sequence?.some((a) => a.toLowerCase().includes(term))) ||
+          (e.task_id || '').toLowerCase().includes(term)
+        )
+      })
+      .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+  }, [events, activeTab, searchTerm, getEventStatus])
 
   return (
     <div className="hp-container">
@@ -165,9 +133,7 @@ export default function HistoryPanel() {
         <div className="hp-content">
           {/* Event list */}
           <div className="hp-list">
-            {loading ? (
-              <div className="hp-empty">Loading history...</div>
-            ) : filteredEvents.length === 0 ? (
+            {filteredEvents.length === 0 ? (
               <div className="hp-empty">No events yet</div>
             ) : (
               <AnimatePresence initial={false}>

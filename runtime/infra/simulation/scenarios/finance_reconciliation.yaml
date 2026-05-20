@@ -1,0 +1,30 @@
+scenario_id: finance_reconciliation
+name: Finance Reconciliation
+description: Automated invoice matching, GL reconciliation, and audit trail generation.
+risk_threshold: 0.10
+max_steps: 8
+timeout_s: 90
+
+synthetic_users:
+  - persona: compliance_officer
+    name: Dr. Sarah Park
+
+mock_systems:
+  - sap
+  - jira
+
+inject_failures:
+  - at_step: 4
+    type: slow
+    target: sap
+
+success_criteria:
+  - metric: task_completion_rate
+    threshold: 0.95
+    weight: 3.0
+  - metric: no_hallucinations
+    threshold: true
+    weight: 4.0
+  - metric: max_latency_ms
+    threshold: 8000
+    weight: 1.0

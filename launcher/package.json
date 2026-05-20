@@ -1,10 +1,25 @@
 {
   "name": "ai-employee-launcher",
   "version": "1.0.0",
+  "description": "AETERNUS NEXUS launcher — Electron front door for the AI Operating System.",
   "main": "main.js",
+  "author": "AI Employee Project",
+  "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --linux AppImage deb"
+    "verify": "node scripts/verify.js",
+    "icons": "python3 scripts/generate-icons.py",
+    "prepare:bundle": "npm --prefix ../frontend run build",
+    "build": "npm run prepare:bundle && npm run icons && electron-builder",
+    "build:linux": "npm run prepare:bundle && npm run icons && electron-builder --linux AppImage deb",
+    "build:mac": "npm run prepare:bundle && npm run icons && electron-builder --mac dmg zip --x64 --arm64",
+    "build:win": "npm run prepare:bundle && npm run icons && electron-builder --win nsis portable --x64",
+    "build:all": "npm run prepare:bundle && npm run icons && electron-builder -mwl",
+    "package:dir": "npm run prepare:bundle && npm run icons && electron-builder --dir",
+    "package:dir:offline": "npm run prepare:bundle && npm run icons && electron-builder --dir -c.electronDist=node_modules/electron/dist"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
   },
   "devDependencies": {
     "electron": "^27.3.11",
@@ -12,24 +27,117 @@
   },
   "build": {
     "appId": "com.ai-employee.launcher",
-    "productName": "AI Employee",
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "icon": "assets/icon.png",
-      "category": "Utility"
+    "productName": "AETERNUS NEXUS",
+    "copyright": "© AI Employee Project",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
     },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "assets/icon.*",
+      "package.json"
+    ],
     "extraResources": [
       {
         "from": "../",
         "to": "repo",
         "filter": [
           "start.sh",
-          "stop.sh"
+          "stop.sh",
+          "package.json",
+          "scripts/verify_core_dependencies.py",
+          "scripts/verify_vendor_intake.py",
+          "scripts/bootstrap_python_core.py",
+          "scripts/build_python_core_bundle.py",
+          "scripts/verify_enterprise_linux_package.py",
+          "SECURITY_BUNDLING.md",
+          "docs/ENTERPRISE_BUNDLING_SECURITY_PLAN.md",
+          "backend/**/*",
+          "runtime/**/*",
+          "frontend/dist/**/*",
+          "!**/node_modules/.cache/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!state/**",
+          "!frontend/node_modules/**",
+          "!**/.git/**"
         ]
       }
-    ]
+    ],
+    "afterPack": "scripts/after-pack.js",
+    "publish": {
+      "provider": "github",
+      "owner": "F-game25",
+      "repo": "AI-EMPLOYEE",
+      "releaseType": "release"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Utility",
+      "desktop": {
+        "Name": "AETERNUS NEXUS",
+        "Comment": "AI Operating System for autonomous business operations",
+        "Categories": "Utility;Development;"
+      }
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "AETERNUS NEXUS ${version}",
+      "writeUpdateInfo": true
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "AETERNUS NEXUS",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    }
   }
 }

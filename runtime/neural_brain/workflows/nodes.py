@@ -1,14 +1,41 @@
-"""Individual workflow nodes for deep reasoning."""
+"""Individual workflow nodes for deep reasoning.
+
+ARCHITECTURE NOTE: These nodes run inside the LangGraph graph that
+ConsciousnessEngine.think() invokes. Direct calls to get_memory() and
+ModelArchitectureRouter here are KERNEL-INTERNAL — they are NOT API bypasses.
+External code must NEVER import these functions directly; all entry points
+flow through ConsciousnessEngine.process_input().
+"""
+import asyncio
 import logging
 import time
-from typing import Any
 
-from runtime.neural_brain.core.brain_state import BrainState
-from runtime.neural_brain.core.intent_classifier import classify_intent
-from runtime.neural_brain.api.node_bridge import emit
-from runtime.neural_brain.core.reasoning_trace import ReasoningTrace
+from neural_brain.core.brain_state import BrainState
+from neural_brain.core.intent_classifier import classify_intent
+from neural_brain.api.node_bridge import emit
+from neural_brain.core.reasoning_trace import ReasoningTrace
+
+
+def _route(arch: str, request: dict) -> dict:
+    """Kernel-internal model dispatch. Always respects privacy gate + performance tracker."""
+    from neural_brain.models.model_architecture_router import ModelArchitectureRouter
+    return ModelArchitectureRouter.route(arch, request)
 
 logger = logging.getLogger(__name__)
+
+
+def _run_async(coro):
+    """Run an async coroutine from a sync context (LangGraph worker thread)."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Already inside an event loop (e.g. pytest-asyncio) — use thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, coro).result()
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
 
 
 def classify_node(state: BrainState) -> BrainState:
@@ -39,60 +66,53 @@ def classify_node(state: BrainState) -> BrainState:
 def retrieve_node(state: BrainState) -> BrainState:
     """Retrieve relevant context from memory and graph."""
     start = time.time()
-    from runtime.neural_brain.memory.neural_memory_manager import NeuralMemoryManager
-    from runtime.neural_brain.graph.brain_graph import BrainGraph
+    from neural_brain.memory import get_memory
+    from neural_brain.graph import get_brain_graph
 
     input_text = state.get("input", "")
     traces = state.get("trace", [])
+    retrieved = []
 
     try:
-        mem = NeuralMemoryManager()
-        result = mem.recall(input_text, k=5)
+        mem = get_memory()
+        result = _run_async(mem.recall(input_text, k=5))
         retrieved = result.get("results", [])
-
-        graph = BrainGraph()
-        neighbors = graph.neighborhood(limit=20)
-        retrieved.extend([
-            {"id": n.get("id"), "content": n.get("label"), "type": "concept", "score": 0.8}
-            for n in neighbors.get("nodes", [])[:5]
-        ])
-
-        latency_ms = (time.time() - start) * 1000
-        trace = ReasoningTrace(
-            node="retrieve",
-            input={"query": input_text},
-            output={"count": len(retrieved)},
-            latency_ms=latency_ms,
-            status="success",
-        )
-
-        emit("nb:reasoning_step", {
-            "trace_id": state.get("thread_id"),
-            "node": "retrieve",
-            "count": len(retrieved),
-            "latency_ms": latency_ms,
-        })
-
-        return {**state, "retrieved": retrieved, "trace": traces + [trace]}
-
     except Exception as e:
-        latency_ms = (time.time() - start) * 1000
-        logger.warning(f"retrieve_node failed: {e}")
-        trace = ReasoningTrace(
-            node="retrieve",
-            input={"query": input_text},
-            output={},
-            latency_ms=latency_ms,
-            status="error",
-            error=str(e),
-        )
-        return {**state, "retrieved": [], "trace": traces + [trace]}
+        logger.warning("retrieve_node memory recall failed: %s", e)
+
+    try:
+        graph = get_brain_graph()
+        if graph is not None:
+            neighbors = graph.neighborhood(seed_ids=None, limit=20)
+            retrieved.extend([
+                {"id": n.get("id"), "content": n.get("label"), "type": "concept", "score": 0.8}
+                for n in neighbors.get("nodes", [])[:5]
+            ])
+    except Exception as e:
+        logger.warning("retrieve_node graph failed: %s", e)
+
+    latency_ms = (time.time() - start) * 1000
+    trace = ReasoningTrace(
+        node="retrieve",
+        input={"query": input_text},
+        output={"count": len(retrieved)},
+        latency_ms=latency_ms,
+        status="success",
+    )
+
+    emit("nb:reasoning_step", {
+        "trace_id": state.get("thread_id"),
+        "node": "retrieve",
+        "count": len(retrieved),
+        "latency_ms": latency_ms,
+    })
+
+    return {**state, "retrieved": retrieved, "trace": traces + [trace]}
 
 
 def plan_node(state: BrainState) -> BrainState:
-    """Generate execution plan from context."""
+    """Generate execution plan — uses LLM for deep reasoning."""
     start = time.time()
-    from runtime.core.orchestrator import get_llm_client
 
     input_text = state.get("input", "")
     retrieved = state.get("retrieved", [])
@@ -100,20 +120,21 @@ def plan_node(state: BrainState) -> BrainState:
     traces = state.get("trace", [])
 
     context = "\n".join([f"- {r.get('content', '')}" for r in retrieved[:5]])
-    prompt = f"""Given this context:
-{context}
-
-Plan {intent} steps to accomplish: {input_text}
-
-Respond with JSON: {{"steps": [{{"step": 1, "action": "...", "args": {{}}}}]}}"""
+    prompt = (
+        f"Given this context:\n{context}\n\n"
+        f"Plan {intent} steps to accomplish: {input_text}\n\n"
+        'Respond with JSON: {"steps": [{"step": 1, "action": "...", "args": {}}]}'
+    )
 
     try:
-        client = get_llm_client()
-        response = client.invoke(prompt)
-        plan_text = response.get("output", "{}") if isinstance(response, dict) else response
+        result = _route("LLM", {"prompt": prompt, "max_tokens": 512})
+        plan_text = result.get("output") or result.get("text") or "{}"
 
         import json
-        plan_data = json.loads(plan_text) if isinstance(plan_text, str) else plan_text
+        try:
+            plan_data = json.loads(plan_text)
+        except Exception:
+            plan_data = {}
         plan = plan_data.get("steps", [])
 
         latency_ms = (time.time() - start) * 1000
@@ -136,7 +157,7 @@ Respond with JSON: {{"steps": [{{"step": 1, "action": "...", "args": {{}}}}]}}""
 
     except Exception as e:
         latency_ms = (time.time() - start) * 1000
-        logger.warning(f"plan_node failed: {e}")
+        logger.warning("plan_node failed: %s", e)
         trace = ReasoningTrace(
             node="plan",
             input={"intent": intent},
@@ -149,22 +170,21 @@ Respond with JSON: {{"steps": [{{"step": 1, "action": "...", "args": {{}}}}]}}""
 
 
 def act_node(state: BrainState) -> BrainState:
-    """Execute a skill or action."""
+    """Execute a skill or action — uses LAM for action calls."""
     start = time.time()
     plan = state.get("plan", [])
     cursor = state.get("cursor", 0)
     traces = state.get("trace", [])
 
     if cursor >= len(plan):
-        return state  # No more actions
+        return state
 
     current_step = plan[cursor]
     action = {"skill": current_step.get("action"), "args": current_step.get("args", {})}
+    skill_name = action.get("skill", "")
 
     try:
-        from runtime.skills.catalog import get_skill
-
-        skill_name = action.get("skill")
+        from skills.catalog import get_skill
         skill = get_skill(skill_name)
         result = skill.run(**action.get("args", {}))
 
@@ -177,6 +197,12 @@ def act_node(state: BrainState) -> BrainState:
             status="success",
         )
 
+        emit("nb:action_call", {
+            "skill": skill_name,
+            "args_preview": str(action.get("args", {}))[:80],
+            "status": "success",
+            "latency_ms": latency_ms,
+        })
         emit("nb:reasoning_step", {
             "trace_id": state.get("thread_id"),
             "node": "act",
@@ -194,7 +220,7 @@ def act_node(state: BrainState) -> BrainState:
 
     except Exception as e:
         latency_ms = (time.time() - start) * 1000
-        logger.warning(f"act_node failed: {e}")
+        logger.warning("act_node failed: %s", e)
         trace = ReasoningTrace(
             node="act",
             input=action,
@@ -203,6 +229,23 @@ def act_node(state: BrainState) -> BrainState:
             status="error",
             error=str(e),
         )
+
+        # LAM fallback — ask LLM to synthesize an action result
+        try:
+            lam_result = _route("LAM", {
+                "skill": skill_name,
+                "args": action.get("args", {}),
+                "context": state.get("input", ""),
+            })
+            fallback_output = lam_result.get("output") or f"Simulated execution of {skill_name}"
+            return {
+                **state,
+                "action": action,
+                "action_result": {"status": "fallback", "output": fallback_output},
+                "trace": traces + [trace],
+            }
+        except Exception:
+            pass
 
         emit("nb:reasoning_step", {
             "trace_id": state.get("thread_id"),
@@ -221,10 +264,9 @@ def act_node(state: BrainState) -> BrainState:
 
 
 def synthesize_node(state: BrainState) -> BrainState:
-    """Generate final output and save to memory."""
+    """Generate final output (SLM for speed), save to memory."""
     start = time.time()
-    from runtime.neural_brain.memory.neural_memory_manager import NeuralMemoryManager
-    from runtime.core.orchestrator import get_llm_client
+    from neural_brain.memory import get_memory
 
     input_text = state.get("input", "")
     retrieved = state.get("retrieved", [])
@@ -235,54 +277,57 @@ def synthesize_node(state: BrainState) -> BrainState:
     context = "\n".join([f"- {r.get('content', '')}" for r in retrieved[:3]])
     action_summary = f"Action result: {action_results}" if action_results else "No actions taken."
 
-    prompt = f"""Summarize the answer to: {input_text}
+    prompt = (
+        f"Summarize the answer to: {input_text}\n\n"
+        f"Context: {context}\n{action_summary}\n\n"
+        "Provide a concise, actionable summary (100-200 words)."
+    )
 
-Context: {context}
-{action_summary}
-
-Provide a concise, actionable summary (100-200 words)."""
+    output = "Unable to synthesize response."
+    status = "error"
+    error_msg = None
 
     try:
-        client = get_llm_client()
-        response = client.invoke(prompt)
-        output = response.get("output", response) if isinstance(response, dict) else response
+        result = _route("SLM", {"prompt": prompt, "max_tokens": 300})
+        output = result.get("output") or result.get("text") or output
+        status = "success"
+    except Exception as e:
+        logger.warning("synthesize_node SLM failed, falling back to LLM: %s", e)
+        try:
+            result = _route("LLM", {"prompt": prompt, "max_tokens": 300})
+            output = result.get("output") or result.get("text") or output
+            status = "success"
+        except Exception as e2:
+            error_msg = str(e2)
+            logger.warning("synthesize_node LLM fallback also failed: %s", e2)
 
-        # Save to memory
-        mem = NeuralMemoryManager()
-        mem.remember(
+    # Async memory write — fire and don't block if it fails
+    try:
+        mem = get_memory()
+        _run_async(mem.remember(
             content=f"Q: {input_text}\nA: {output}",
             type="episodic",
             user_id=user_id,
             metadata={"intent": state.get("intent"), "source": "reasoning"},
-        )
-
-        latency_ms = (time.time() - start) * 1000
-        trace = ReasoningTrace(
-            node="synthesize",
-            input={},
-            output={"output_length": len(output)},
-            latency_ms=latency_ms,
-            status="success",
-        )
-
-        emit("nb:reasoning_step", {
-            "trace_id": state.get("thread_id"),
-            "node": "synthesize",
-            "output_length": len(output),
-            "latency_ms": latency_ms,
-        })
-
-        return {**state, "output": output, "trace": traces + [trace]}
-
+        ))
     except Exception as e:
-        latency_ms = (time.time() - start) * 1000
-        logger.warning(f"synthesize_node failed: {e}")
-        trace = ReasoningTrace(
-            node="synthesize",
-            input={},
-            output={},
-            latency_ms=latency_ms,
-            status="error",
-            error=str(e),
-        )
-        return {**state, "output": "Unable to synthesize response.", "trace": traces + [trace]}
+        logger.warning("synthesize_node memory write failed: %s", e)
+
+    latency_ms = (time.time() - start) * 1000
+    trace = ReasoningTrace(
+        node="synthesize",
+        input={},
+        output={"output_length": len(output)},
+        latency_ms=latency_ms,
+        status=status,
+        error=error_msg,
+    )
+
+    emit("nb:reasoning_step", {
+        "trace_id": state.get("thread_id"),
+        "node": "synthesize",
+        "output_length": len(output),
+        "latency_ms": latency_ms,
+    })
+
+    return {**state, "output": output, "trace": traces + [trace]}

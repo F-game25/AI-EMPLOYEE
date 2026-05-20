@@ -2,7 +2,7 @@
     "_meta": {
         "version": "2.1",
         "description": "Capabilities map for all AI agents \u2014 used by task-orchestrator for intelligent routing",
-        "total_agents": 89,
+        "total_agents": 90,
         "updated_at": "2026-04-28",
         "model_routing": {
             "sales": {
@@ -47,6 +47,46 @@
                 "task decomposition",
                 "agent selection",
                 "result aggregation"
+            ],
+            "parallel_capable": true
+        },
+        "task-orchestrator": {
+            "description": "Task Orchestrator \u2014 durable planner and multi-agent coordinator for enterprise upgrade missions, task decomposition, agent dispatch, budget checks, progress tracking, and result synthesis",
+            "category": "coordination",
+            "skills": [
+                "task_decomposition",
+                "agent_dispatch",
+                "workflow_planning",
+                "progress_tracking",
+                "result_synthesis",
+                "model_budget_planning",
+                "memory_writeback"
+            ],
+            "commands": [
+                "task",
+                "orchestrate",
+                "assign",
+                "agents",
+                "task list",
+                "task status"
+            ],
+            "specialties": [
+                "durable task plans",
+                "multi-agent coordination",
+                "cost-aware model routing",
+                "memory writeback",
+                "enterprise mission tracking"
+            ],
+            "workflows": [
+                "task_decomposition",
+                "agent_dispatch",
+                "result_synthesis",
+                "peer_review"
+            ],
+            "hooks": [
+                "before_dispatch:budget_check",
+                "after_subtask:memory_write",
+                "on_failure:retry_or_escalate"
             ],
             "parallel_capable": true
         },
@@ -1088,14 +1128,19 @@
             "parallel_capable": false
         },
         "ascend-forge": {
-            "description": "ASCEND FORGE \u2014 top-layer self-improver: GENERAL/MONEY/AUTO modes, BLACKLIGHT override, prompt scanner, patch/approval/rollback/changelog system, failsafe",
+            "description": "ASCEND FORGE \u2014 system overseer, vibecoding engineer, security specialist, patch/approval/rollback owner, and enterprise upgrade mission coordinator",
             "category": "orchestrator",
             "skills": [
                 "self_improvement",
                 "patch_management",
                 "prompt_scanning",
                 "rollback_management",
-                "changelog_generation"
+                "changelog_generation",
+                "system_architecture",
+                "secure_local_builds",
+                "agent_skill_generation",
+                "workflow_generation",
+                "token_budget_planning"
             ],
             "commands": [
                 "ascend run",
@@ -1106,21 +1151,43 @@
             ],
             "specialties": [
                 "autonomous self-improvement",
+                "enterprise desktop packaging",
+                "offline-first local runtime builds",
+                "multi-agent workflow design",
+                "security review",
                 "GENERAL/MONEY/AUTO modes",
                 "BLACKLIGHT override",
                 "patch approval workflow",
                 "safe rollback"
             ],
+            "workflows": [
+                "project_scaffold",
+                "code_change_plan",
+                "sandboxed_patch",
+                "security_review",
+                "agent_skill_generation",
+                "workflow_generation",
+                "rollback_preparation"
+            ],
+            "hooks": [
+                "before_patch:create_snapshot",
+                "before_external_write:require_approval",
+                "after_patch:run_tests",
+                "after_failure:create_diagnostics",
+                "security_scan:on_submit"
+            ],
             "parallel_capable": false
         },
         "blacklight": {
-            "description": "BLACKLIGHT Autonomous Intelligence \u2014 darknet & blockchain monitoring, autonomous goal\u2192execute loop running 24/7",
+            "description": "BLACKLIGHT Security Operations \u2014 defensive OSINT, security posture analysis, policy-gated recon, audit logging, and high-risk tool blocking for enterprise safety",
             "category": "intelligence",
             "skills": [
-                "autonomous_goal_execution",
-                "opportunity_identification",
-                "strategic_planning",
-                "self_improvement",
+                "defensive_osint",
+                "security_posture_analysis",
+                "tool_policy_gating",
+                "threat_intelligence",
+                "audit_logging",
+                "approval_workflows",
                 "multi_agent_coordination"
             ],
             "commands": [
@@ -1128,12 +1195,29 @@
                 "bl start",
                 "bl stop",
                 "bl status",
-                "bl logs"
+                "bl logs",
+                "bl tools",
+                "bl search"
             ],
             "specialties": [
-                "darknet monitoring",
-                "blockchain analysis",
-                "autonomous intelligence"
+                "defensive OSINT catalog",
+                "safe local analyzers",
+                "network recon approval gates",
+                "blocked exploit and DDoS controls",
+                "security audit trails"
+            ],
+            "workflows": [
+                "tool_discovery",
+                "safe_local_analysis",
+                "network_approval_gate",
+                "blocked_capability_audit",
+                "defensive_remediation_plan"
+            ],
+            "hooks": [
+                "before_tool_run:policy_check",
+                "after_tool_run:audit_event",
+                "on_blocked_tool:create_security_alert",
+                "before_network_osint:require_approval"
             ],
             "parallel_capable": true
         },

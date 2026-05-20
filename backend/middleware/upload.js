@@ -10,7 +10,10 @@ const { v4: uuidv4 } = require('uuid');
 const ALLOWED_EXTENSIONS = new Set([
   '.py', '.js', '.ts', '.jsx', '.tsx',
   '.md', '.txt', '.json', '.sh',
-  '.css', '.html'
+  '.css', '.html',
+  '.rs', '.toml',
+  '.pdf', '.docx', '.xlsx', '.csv',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp'
 ]);
 
 // Maximum file size: 50MB

@@ -1,0 +1,318 @@
+.recon-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
+  color: var(--nx-text, #f5f0df);
+}
+
+.recon-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border: 1px solid rgba(229, 199, 107, 0.24);
+  background:
+    linear-gradient(135deg, rgba(229, 199, 107, 0.1), rgba(13, 19, 25, 0.72)),
+    rgba(5, 8, 12, 0.92);
+  box-shadow: inset 0 0 40px rgba(229, 199, 107, 0.05);
+}
+
+.recon-kicker {
+  color: var(--nx-gold, #e5c76b);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.recon-header h1 {
+  margin: 4px 0;
+  font-size: 28px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.recon-header p {
+  margin: 0;
+  color: var(--nx-text-dim, rgba(245, 240, 223, 0.64));
+}
+
+.recon-header__pills,
+.recon-actions,
+.recon-cats,
+.recon-search,
+.recon-finding-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.recon-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.92fr) minmax(360px, 1.08fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.recon-grid--bottom {
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+}
+
+.recon-panel {
+  min-width: 0;
+}
+
+.recon-safe-banner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.08);
+  color: rgba(245, 240, 223, 0.82);
+  font-size: 13px;
+}
+
+.recon-safe-banner__mark {
+  color: #22c55e;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.recon-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.recon-full {
+  display: block;
+  margin-top: 12px;
+}
+
+.recon-form-grid label,
+.recon-full {
+  color: var(--nx-text-dim, rgba(245, 240, 223, 0.58));
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.recon-page input,
+.recon-page select,
+.recon-page textarea {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 11px;
+  border: 1px solid rgba(229, 199, 107, 0.18);
+  border-radius: 6px;
+  background: rgba(3, 6, 10, 0.72);
+  color: var(--nx-text, #f5f0df);
+  font: inherit;
+  outline: none;
+}
+
+.recon-page textarea {
+  resize: vertical;
+}
+
+.recon-page input:focus,
+.recon-page select:focus,
+.recon-page textarea:focus {
+  border-color: rgba(229, 199, 107, 0.5);
+  box-shadow: 0 0 0 2px rgba(229, 199, 107, 0.08);
+}
+
+.recon-btn,
+.recon-cat {
+  border: 1px solid rgba(229, 199, 107, 0.28);
+  border-radius: 6px;
+  background: rgba(229, 199, 107, 0.08);
+  color: var(--nx-text, #f5f0df);
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.recon-btn:hover,
+.recon-cat:hover,
+.recon-cat--active {
+  border-color: rgba(229, 199, 107, 0.58);
+  background: rgba(229, 199, 107, 0.16);
+}
+
+.recon-btn--primary {
+  background: linear-gradient(135deg, rgba(229, 199, 107, 0.92), rgba(163, 108, 36, 0.86));
+  color: #080a0d;
+}
+
+.recon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.recon-search {
+  margin-bottom: 12px;
+}
+
+.recon-search input {
+  flex: 1 1 260px;
+  margin-top: 0;
+}
+
+.recon-tools {
+  display: grid;
+  gap: 10px;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 4px;
+  margin-top: 12px;
+}
+
+.recon-tool {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(229, 199, 107, 0.14);
+  border-radius: 8px;
+  background: rgba(5, 9, 14, 0.76);
+  color: inherit;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.recon-tool--active,
+.recon-tool:hover {
+  border-color: rgba(229, 199, 107, 0.52);
+  background: rgba(229, 199, 107, 0.08);
+}
+
+.recon-tool__head,
+.recon-finding__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.recon-tool__name {
+  color: var(--nx-gold, #e5c76b);
+  font-weight: 800;
+}
+
+.recon-tool__meta,
+.recon-finding__meta,
+.recon-runner__meta {
+  margin-top: 6px;
+  color: var(--nx-text-dim, rgba(245, 240, 223, 0.58));
+  font-size: 12px;
+}
+
+.recon-tool__desc,
+.recon-runner__desc {
+  margin: 8px 0 0;
+  color: rgba(245, 240, 223, 0.72);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.recon-runner__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.recon-policy-note {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+  color: rgba(245, 240, 223, 0.74);
+  font-size: 13px;
+}
+
+.recon-result {
+  margin-top: 14px;
+  border: 1px solid rgba(229, 199, 107, 0.16);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  padding: 12px;
+}
+
+.recon-result--error {
+  border-color: rgba(239, 68, 68, 0.42);
+}
+
+.recon-result pre,
+.recon-audit code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(245, 240, 223, 0.82);
+}
+
+.recon-list,
+.recon-audit {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.recon-finding,
+.recon-audit__row {
+  border: 1px solid rgba(229, 199, 107, 0.14);
+  border-radius: 8px;
+  background: rgba(4, 8, 12, 0.68);
+  padding: 11px;
+}
+
+.recon-finding--high {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.recon-finding--medium {
+  border-color: rgba(245, 158, 11, 0.34);
+}
+
+.recon-audit__row {
+  display: grid;
+  grid-template-columns: 78px 170px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.recon-audit__row span {
+  color: var(--nx-text-dim, rgba(245, 240, 223, 0.58));
+}
+
+.recon-audit__row strong {
+  color: var(--nx-gold, #e5c76b);
+}
+
+@media (max-width: 980px) {
+  .recon-header,
+  .recon-grid,
+  .recon-grid--bottom {
+    grid-template-columns: 1fr;
+  }
+
+  .recon-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .recon-form-grid,
+  .recon-audit__row {
+    grid-template-columns: 1fr;
+  }
+}

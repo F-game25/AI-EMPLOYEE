@@ -1,8 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { useSystemStore, selectBackendHealth } from '../../store/systemStore'
+import { useSecurityStore } from '../../store/securityStore'
+import { useEconomyStore } from '../../store/economyStore'
+import { useCognitiveStore } from '../../store/cognitiveStore'
 import { useUpdateCheck } from '../../hooks/useUpdateCheck'
 import { CommandPill, ClockModule, StatusPill, HexButton } from '../nexus-ui'
+import MiniEye from '../core/MiniEye'
 import './TopBar.css'
 
 const PAGE_LABELS = {
@@ -16,6 +21,7 @@ const PAGE_LABELS = {
   'voice':           'Voice',
   'prompt-inspector':'Prompt Inspector',
   'blacklight':      'Blacklight',
+  'recon':           'Recon',
   'fairness':        'Fairness',
   'doctor':          'Doctor',
   'control-center':  'Control Center',
@@ -41,7 +47,7 @@ const MODE_TONE = {
   COST:        'success',
 }
 
-function OfflineBanner() {
+function OfflineBanner({ reason }) {
   const heartbeatLogs = useAppStore(s => s.heartbeatLogs)
   const [countdown, setCountdown] = useState(null)
 
@@ -58,6 +64,12 @@ function OfflineBanner() {
     return () => clearInterval(id)
   }, [heartbeatLogs])
 
+  // Show reconnect countdown only when the issue is the WS itself.
+  const showCountdown = reason === 'WebSocket reconnecting'
+  const suffix = showCountdown
+    ? (countdown != null && countdown > 0 ? ` — RECONNECTING IN ${countdown}s` : ' — RECONNECTING…')
+    : ''
+
   return (
     <motion.div
       initial={{ height: 0, opacity: 0 }}
@@ -68,32 +80,76 @@ function OfflineBanner() {
     >
       <span className="nx-topbar__offline-dot" />
       <span className="nx-topbar__offline-text">
-        BACKEND DISCONNECTED
-        {countdown != null && countdown > 0 ? ` — RECONNECTING IN ${countdown}s` : ' — RECONNECTING…'}
+        BACKEND ISSUE — {reason || 'UNKNOWN'}{suffix}
       </span>
     </motion.div>
   )
 }
 
-function TopStat({ label, value, tone = 'default' }) {
+function TopStat({ label, value, tone = 'default', delta = null }) {
+  const deltaTone = delta == null ? null : delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'
   return (
     <div className={`nx-topbar__stat nx-topbar__stat--${tone}`}>
       <span className="nx-topbar__stat-label">{label}</span>
-      <span className="nx-topbar__stat-value">{value}</span>
+      <div className="nx-topbar__stat-line">
+        <span className="nx-topbar__stat-value">{value}</span>
+        {delta != null && (
+          <span className={`nx-topbar__stat-delta nx-topbar__stat-delta--${deltaTone}`}>
+            {delta > 0 ? '+' : ''}{delta.toFixed(1)}%
+          </span>
+        )}
+      </div>
     </div>
   )
+}
+
+// Threat enum → label / tone
+function threatToEnum(score) {
+  if (score >= 75) return { label: 'CRITICAL', tone: 'alert', color: '#FF4444' }
+  if (score >= 50) return { label: 'HIGH',     tone: 'alert', color: '#FF8C42' }
+  if (score >= 25) return { label: 'ELEVATED', tone: 'warn',  color: '#FFD93D' }
+  return { label: 'OK', tone: 'success', color: '#00FFB4' }
 }
 
 export default function TopBar() {
   const wsConnected   = useAppStore(s => s.wsConnected)
   const systemStatus  = useAppStore(s => s.systemStatus)
+  const systemHealth  = useAppStore(s => s.systemHealth) || {}
   const nnStatus      = useAppStore(s => s.nnStatus)
   const activeSection = useAppStore(s => s.activeSection)
-  const { updateReady } = useUpdateCheck()
+  const { updateReady, updateComplete, applying, applyUpdate } = useUpdateCheck()
+  const toggleMobileSidebar = useSystemStore(s => s.toggleMobileSidebar)
 
-  const wasConnectedRef = useRef(false)
-  if (wsConnected) wasConnectedRef.current = true
-  const showOffline = !wsConnected && wasConnectedRef.current
+  const threatScore  = useSecurityStore(s => s.securityStatus?.threat_score) ?? 0
+  const revenueToday = useEconomyStore(s => s.revenue?.today) ?? 0
+  const revenueYday  = useEconomyStore(s => s.revenue?.yesterday) ?? 0
+  const modelCalls   = useCognitiveStore(s => s.modelCalls) || []
+
+  // Tokens/sec EMA over last 30 samples (modelCalls is event-stream length proxy)
+  const tokEmaRef = useRef(0)
+  useEffect(() => {
+    const alpha = 0.15
+    tokEmaRef.current = alpha * modelCalls.length + (1 - alpha) * tokEmaRef.current
+  }, [modelCalls.length])
+  const tokensPerSec = Math.round(tokEmaRef.current)
+  const formatTokens = (v) => v >= 1_000_000 ? `${(v/1_000_000).toFixed(2)}M` : v >= 1_000 ? `${(v/1_000).toFixed(1)}K` : String(v)
+
+  // Revenue delta
+  const revDelta = revenueYday > 0 ? ((revenueToday - revenueYday) / revenueYday) * 100 : null
+
+  // Threat enum
+  const threat = threatToEnum(threatScore)
+
+  // New banner state — reads structured backend health, not raw wsConnected.
+  // Banner hides on first paint until we've seen a healthy state at least once,
+  // matching the prior wasConnectedRef behaviour.
+  const backendHealthy = useSystemStore(s => selectBackendHealth(s).healthy)
+  const backendReason = useSystemStore(s => selectBackendHealth(s).reason)
+  const wasHealthyRef = useRef(false)
+  useEffect(() => {
+    if (backendHealthy) wasHealthyRef.current = true
+  }, [backendHealthy])
+  const showOffline = !backendHealthy && wasHealthyRef.current
 
   const cpu  = systemStatus?.cpu ?? systemStatus?.cpu_usage ?? 0
   const ram  = systemStatus?.memory ?? systemStatus?.ram ?? 0
@@ -105,25 +161,60 @@ export default function TopBar() {
   const cpuTone = cpu > 80 ? 'alert' : cpu > 60 ? 'warn' : 'cool'
   const ramTone = ram > 80 ? 'alert' : 'default'
 
+  // Rolling sparkline for health
+  const sparkRef = useRef(new Array(8).fill(0))
+  useEffect(() => {
+    sparkRef.current = [...sparkRef.current.slice(1), cpu]
+  }, [cpu])
+  const sparkPoints = sparkRef.current.map((v, i) => {
+    const x = (i / 7) * 52 + 2
+    const y = 14 - (v / 100) * 11
+    return `${x},${y}`
+  }).join(' ')
+
+  const formatRevenue = (v) => {
+    if (v >= 1000) return `$${(v/1000).toFixed(1)}K`
+    return `$${Math.round(v)}`
+  }
+
   const openCommandPalette = () => {
-    // Hook for future palette overlay; for now, focus a no-op event.
-    window.dispatchEvent(new CustomEvent('nx:command-palette:open'))
+    // Opens the chat panel — the command/search surface for the system.
+    // Listened to in Dashboard.jsx.
+    window.dispatchEvent(new CustomEvent('nx:chat:open'))
   }
 
   return (
     <>
-      {updateReady && (
-        <div className="nx-topbar__update">
+      {updateComplete && (
+        <div className="nx-topbar__update nx-topbar__update--complete">
           <span>UPDATE APPLIED — NEW VERSION AVAILABLE</span>
           <button onClick={() => window.location.reload()}>RELOAD NOW →</button>
         </div>
       )}
+      {updateReady && !updateComplete && (
+        <div className="nx-topbar__update nx-topbar__update--available">
+          <span>UPDATE AVAILABLE</span>
+          <button onClick={applyUpdate} disabled={applying}>
+            {applying ? 'UPDATING…' : 'UPDATE NOW →'}
+          </button>
+        </div>
+      )}
 
       <AnimatePresence>
-        {showOffline && <OfflineBanner key="offline" />}
+        {showOffline && <OfflineBanner key="offline" reason={backendReason} />}
       </AnimatePresence>
 
       <header className="nx-topbar">
+        {/* Hamburger — mobile only */}
+        <button
+          type="button"
+          className="nx-topbar__hamburger"
+          onClick={toggleMobileSidebar}
+          aria-label="Open navigation"
+        >
+          <span /><span /><span />
+        </button>
+
         {/* Left: breadcrumb */}
         <div className="nx-topbar__left">
           <span className="nx-topbar__crumb-root">Aeternus Nexus</span>
@@ -164,11 +255,47 @@ export default function TopBar() {
 
           <span className="nx-topbar__divider" />
 
-          <TopStat label="BRAIN" value={`${brainPct}%`} tone="gold" />
+          <div
+            className={`nx-topbar__threat nx-topbar__threat--${threat.tone}`}
+            title={`Threat score: ${Math.round(threatScore)}`}
+          >
+            <span className="nx-topbar__threat-label">THREAT LEVEL</span>
+            <div className="nx-topbar__threat-line">
+              <span className="nx-topbar__threat-dot" style={{ background: threat.color, boxShadow: `0 0 6px ${threat.color}` }} />
+              <span className="nx-topbar__threat-value">{threat.label}</span>
+            </div>
+          </div>
+          <TopStat
+            label="REVENUE/DAY"
+            value={formatRevenue(revenueToday)}
+            tone="gold"
+            delta={revDelta}
+          />
+          <TopStat label="TOKENS/SEC" value={formatTokens(tokensPerSec)} />
 
-          <HexButton size="sm" variant="outline" tone="gold" icon="◈">
-            Console
-          </HexButton>
+          <span className="nx-topbar__divider" />
+
+          {/* Health sparkline */}
+          <div className="nx-topbar__health">
+            <span className="nx-topbar__health-label">HEALTH</span>
+            <svg width="56" height="16" viewBox="0 0 56 16" className="nx-topbar__sparkline">
+              <polyline points={sparkPoints} fill="none" stroke="rgba(255,184,0,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="nx-topbar__health-val">{brainPct}%</span>
+          </div>
+
+          <span className="nx-topbar__divider" />
+
+          {/* Route-aware mini-eye */}
+          <MiniEye size={22} className="nx-topbar__mini-eye" />
+
+          <span className="nx-topbar__divider" />
+
+          {/* User avatar */}
+          <div className="nx-topbar__user">
+            <div className="nx-topbar__avatar">AN</div>
+            <span className="nx-topbar__username">ALEX</span>
+          </div>
         </div>
       </header>
     </>

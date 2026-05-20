@@ -1,0 +1,35 @@
+{{- if .Values.autoscaling.python.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "aeternus-nexus.fullname" . }}-python
+  labels:
+    {{- include "aeternus-nexus.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "aeternus-nexus.fullname" . }}-python
+  minReplicas: {{ .Values.autoscaling.python.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.python.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.python.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 600
+{{- end }}

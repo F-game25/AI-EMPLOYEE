@@ -13,8 +13,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const AGENTS_STATE_DIR = path.resolve(__dirname, '../../state/agents');
+const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'), 'state'));
+const AGENTS_STATE_DIR = path.join(STATE_DIR, 'agents');
 const HEARTBEAT_INTERVAL_MS = 5000; // 5s polling
 const IDLE_THRESHOLD_MS = 30000; // 30s = idle
 const DEAD_THRESHOLD_MS = 60000; // 60s = dead

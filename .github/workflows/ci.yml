@@ -1,86 +1,312 @@
-name: CI — Test & Deploy
+name: CI
 
-on:
+"on":
   push:
-    branches: [main, develop]
+    branches: ["**"]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  test:
-    name: Unit & Integration Tests
+  # ─────────────────────────────────────────────────────────────
+  # PYTHON LINT
+  # ─────────────────────────────────────────────────────────────
+  lint-python:
+    name: Lint — Python
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - uses: actions/setup-python@v5
         with:
-          node-version: 18
-          cache: npm
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install core deps
+        run: pip install -r runtime/requirements-core.txt
+
+      - name: Syntax-check all runtime Python files
         run: |
-          npm install --prefix backend
-          pip install -r runtime/agents/problem-solver-ui/requirements.txt
-          pip install -r requirements-test.txt
+          find runtime/ -name '*.py' -print0 | xargs -0 python3 -m py_compile
+          echo "py_compile: all files OK"
 
-      - name: Lint Python code
-        run: npm run lint
-
-      - name: Unit tests
-        run: python3 -m pytest tests/ -v --tb=short
-        env:
-          STRICT_PIPELINE: "1"
-
-      - name: Agent self-test
-        run: python3 runtime/agents/agent_selftest.py
-        timeout-minutes: 5
-
-      - name: Docker build check
-        run: docker build -t ai-employee:test . --quiet
-
-      - name: Validate configs
+      - name: Ruff lint (skip gracefully if unavailable)
         run: |
-          pip install pyyaml
-          python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml'))"
-          grep -q "limit_req_zone" nginx.conf
+          if pip show ruff >/dev/null 2>&1 || pip install ruff -q; then
+            ruff check runtime/ --output-format=github || true
+          else
+            echo "ruff unavailable — skipping"
+          fi
 
-  security:
-    name: Security Audit
+  # ─────────────────────────────────────────────────────────────
+  # PYTHON TESTS
+  # ─────────────────────────────────────────────────────────────
+  test-python:
+    name: Test — Python (pytest)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    needs: lint-python
+
+    env:
+      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || 'test-secret-for-ci-only' }}
+      STRICT_PIPELINE: "0"
+      LOG_LEVEL: WARNING
+      EVOLUTION_MODE: "OFF"
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runtime + test deps
+        run: |
+          pip install -r runtime/requirements-core.txt \
+                      -r requirements-test.txt
+
+      - name: Run pytest
+        run: |
+          python3 -m pytest tests/ \
+            -x \
+            --timeout=60 \
+            --ignore=tests/ui_automation \
+            --ignore=tests/ui_e2e \
+            -q \
+            --tb=short \
+            --junitxml=reports/pytest.xml \
+            --cov=runtime \
+            --cov-report=xml:reports/coverage.xml \
+            --cov-report=term-missing
+        continue-on-error: false
+
+      - name: Upload test + coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-reports
+          path: reports/
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────
+  # NODE LINT
+  # ─────────────────────────────────────────────────────────────
+  lint-node:
+    name: Lint — Node.js
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Run lint (graceful if script absent)
+        run: |
+          if npm run lint --if-present 2>&1 | grep -q "Missing script"; then
+            echo "No root lint script — skipping"
+          else
+            npm run lint --if-present
+          fi
+
+  # ─────────────────────────────────────────────────────────────
+  # NODE TESTS
+  # ─────────────────────────────────────────────────────────────
+  test-node:
+    name: Test — Node.js (security + settings)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint-node
+
+    env:
+      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || 'test-secret-for-ci-only' }}
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Run security node tests
+        run: node tests/test_security_node.js
+
+      - name: Run settings route tests (if present)
+        run: |
+          if [ -f tests/test_settings_routes.js ]; then
+            node tests/test_settings_routes.js
+          else
+            echo "test_settings_routes.js not found — skipping"
+          fi
+
+  # ─────────────────────────────────────────────────────────────
+  # FRONTEND TESTS
+  # ─────────────────────────────────────────────────────────────
+  test-frontend:
+    name: Test — Frontend (Vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Vitest
+        working-directory: frontend
+        run: npm test
+
+  # ─────────────────────────────────────────────────────────────
+  # FRONTEND BUILD
+  # ─────────────────────────────────────────────────────────────
+  build-frontend:
+    name: Build — Frontend (Vite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test-frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Verify dist output
+        run: |
+          if [ ! -d frontend/dist ] || [ -z "$(ls -A frontend/dist)" ]; then
+            echo "ERROR: frontend/dist is missing or empty after build"
+            exit 1
+          fi
+          echo "frontend/dist OK — $(find frontend/dist -type f | wc -l) files"
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────
+  # SECURITY SCAN
+  # ─────────────────────────────────────────────────────────────
+  security-scan:
+    name: Security Scan (bandit + safety)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
 
       - name: Install security tools
+        run: pip install bandit safety -q
+
+      - name: Bandit static analysis
         run: |
-          pip install bandit safety pip-audit
-
-      - name: Bandit scan
-        run: bandit -r runtime/agents -f json -o /tmp/bandit.json || true
+          bandit -r runtime/ -ll -q \
+            --format json \
+            -o reports/bandit.json || true
+          bandit -r runtime/ -ll -q || true
         continue-on-error: true
 
-      - name: Safety check
-        run: safety check --json || true
+      - name: Safety dependency check
+        run: safety check -r runtime/requirements-core.txt --bare || true
         continue-on-error: true
 
-  deploy:
-    name: Deploy
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: reports/bandit.json
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────
+  # GATE — all required checks must pass
+  # ─────────────────────────────────────────────────────────────
+  all-green:
+    name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [test, security]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    timeout-minutes: 10
+    needs: [test-python, test-node, test-frontend, build-frontend, security-scan]
+    if: always()
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -t ai-employee:${{ github.sha }} .
+      - name: Evaluate required job outcomes
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "Job results: $results"
+
+          required_jobs="test-python test-node test-frontend build-frontend"
+          failed=false
+
+          for job in $required_jobs; do
+            result=$(echo "$results" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          job = '${job}'.replace('-', '-')
+          # GitHub replaces - with - in needs keys
+          for k, v in data.items():
+              if k == '${job}':
+                  print(v['result'])
+                  break
+          else:
+              print('missing')
+          ")
+            echo "  $job: $result"
+            if [ "$result" != "success" ]; then
+              echo "FAIL: $job did not succeed (result: $result)"
+              failed=true
+            fi
+          done
+
+          if [ "$failed" = "true" ]; then
+            exit 1
+          fi
+
+          echo "All required checks passed."

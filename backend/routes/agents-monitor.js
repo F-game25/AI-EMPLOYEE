@@ -16,9 +16,12 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { AgentStateRegistry } = require('../agents-monitor/agent-state');
+const { getAscendForgeEngine } = require('../ascendforge/engine');
 
-const AGENTS_STATE_DIR = path.resolve(__dirname, '../../state/agents');
+const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'), 'state'));
+const AGENTS_STATE_DIR = path.join(STATE_DIR, 'agents');
 
 /**
  * Simple requireAuth middleware (can be injected from server.js)
@@ -160,6 +163,42 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
   const router = express.Router();
   const requireAuth = requireAuthMiddleware || defaultRequireAuth;
   const registry = agentStateRegistry || new AgentStateRegistry();
+
+  /**
+   * GET /api/agents/:agentId/capabilities
+   * Return native AscendForge-created agent contract details.
+   */
+  router.get('/:agentId/capabilities', requireAuth, (req, res) => {
+    try {
+      const blueprint = getAscendForgeEngine().getBlueprint(req.params.agentId);
+      if (!blueprint) {
+        return res.status(404).json({ ok: false, error: 'agent capability contract not found' });
+      }
+      res.json({ ok: true, state: 'live', agent_id: req.params.agentId, capabilities: blueprint });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message || 'failed to load agent capabilities' });
+    }
+  });
+
+  /**
+   * GET /api/agents/:agentId/skills
+   * Return resolved global skill records for an AscendForge-created agent.
+   */
+  router.get('/:agentId/skills', requireAuth, (req, res) => {
+    try {
+      const engine = getAscendForgeEngine();
+      const blueprint = engine.getBlueprint(req.params.agentId);
+      if (!blueprint) {
+        return res.status(404).json({ ok: false, error: 'agent skill contract not found' });
+      }
+      const skills = (blueprint.selected_skill_ids || [])
+        .map(skillId => engine.getSkill(skillId))
+        .filter(Boolean);
+      res.json({ ok: true, state: 'live', agent_id: req.params.agentId, skills });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message || 'failed to load agent skills' });
+    }
+  });
 
   /**
    * GET /api/agents/monitor/status

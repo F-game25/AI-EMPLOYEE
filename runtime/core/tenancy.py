@@ -49,17 +49,43 @@ class TenantManager:
         self.tenants_dir = self.ai_home / "tenants"
         self.tenants_dir.mkdir(parents=True, exist_ok=True)
 
-    def create_tenant(self, org_name: str, user_email: str) -> str:
-        """Create new tenant, return tenant_id."""
+    def create_tenant(self, org_name: str, user_email: str, region: Optional[str] = None) -> str:
+        """Create new tenant, return tenant_id.
+
+        Args:
+            org_name: Human-readable organisation name.
+            user_email: Owner's email address.
+            region: Data-residency region code ("eu" | "us").  If omitted, the
+                    value of the DEPLOYMENT_REGION env var is used; falls back
+                    to "us" when neither is provided.
+        """
+        import json as _json
+        from core.region import get_registry as _get_registry
+
         tenant_id = str(uuid.uuid4())[:8]  # Short UUID for readability
         tenant_path = self.tenants_dir / tenant_id
         tenant_path.mkdir(exist_ok=True)
 
-        # Create tenant state directory
+        # Create tenant sub-directories
         (tenant_path / "state").mkdir(exist_ok=True)
         (tenant_path / "config").mkdir(exist_ok=True)
 
-        logger.info(f"Created tenant: {tenant_id} for {org_name} ({user_email})")
+        # Resolve region: explicit arg > DEPLOYMENT_REGION env var > default "us"
+        resolved_region = region or os.getenv("DEPLOYMENT_REGION", "us")
+
+        # Persist tenant metadata (org, email, region)
+        meta = {
+            "tenant_id": tenant_id,
+            "org_name": org_name,
+            "user_email": user_email,
+            "region": resolved_region,
+        }
+        (tenant_path / "config" / "tenant.json").write_text(_json.dumps(meta, indent=2))
+
+        # Register in the region registry
+        _get_registry().assign_region(tenant_id, resolved_region)
+
+        logger.info(f"Created tenant: {tenant_id} for {org_name} ({user_email}) region={resolved_region}")
         return tenant_id
 
     def ensure_tenant(self, tenant_id: str, org_name: str = "Auto", user_email: str = "") -> Path:

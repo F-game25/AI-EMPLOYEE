@@ -51,6 +51,14 @@ from core.phase_reporter import PhaseReporter
 
 logger = logging.getLogger("unified_pipeline")
 
+# ── Native graph store initialisation (once at import time) ──────────────────
+try:
+    from neural_brain.graph.native_graph_store import NativeGraphStore as _NativeGraphStore  # noqa: PLC0415
+    _NativeGraphStore()  # triggers _ensure_schema() → creates DB + tables if absent
+    logger.debug("native_memory_graph.db initialised")
+except Exception as _e:  # pragma: no cover
+    logger.debug("NativeGraphStore init skipped (non-fatal): %s", _e)
+
 # ── Runtime mode ──────────────────────────────────────────────────────────────
 
 # When True: no fallback, no silent swallowing — phases raise on failure.
@@ -234,6 +242,26 @@ def retrieve_relevant_nodes(input_text: str) -> dict[str, Any]:
     except Exception as exc:
         logger.debug("MemoryIndex retrieval failed (non-fatal): %s", exc)
 
+    # MemoryRouter: additional hybrid memory retrieval (5-lane)
+    try:
+        from memory.memory_router import get_memory_router  # noqa: PLC0415
+        router = get_memory_router()
+        router_results = router.retrieve(input_text, top_k=5)
+        if router_results:
+            extra_concepts = [
+                r.get("text", "")
+                for r in router_results
+                if r.get("text", "").strip()
+            ]
+            # Merge without duplicates
+            seen_concepts = set(concepts)
+            for c in extra_concepts:
+                if c not in seen_concepts:
+                    concepts.append(c)
+                    seen_concepts.add(c)
+    except Exception as exc:
+        logger.debug("MemoryRouter retrieval failed (non-fatal): %s", exc)
+
     return {
         "nodes": nodes,
         "concepts": concepts,
@@ -266,6 +294,56 @@ def build_context(input_text: str, graph_data: dict[str, Any]) -> str:
         parts.append("Past Decisions & Memory:\n" + "\n".join(f"- {s}" for s in snippets))
 
     return "\n\n".join(parts)
+
+
+# ── Phase 2.5 — Context sufficiency + optional research ─────────────────────
+
+
+def rate_context_sufficiency(input_text: str, graph_data: dict[str, Any]) -> dict[str, Any]:
+    """Score how well existing memory covers ``input_text``.
+
+    Returns ``{score, sufficient, gaps, memory_hits, graph_hits}``. If
+    ``AUTO_RESEARCH_MODE=auto`` and ``sufficient`` is False, kicks off a single
+    inline research hop and re-evaluates. Caller decides whether to loop.
+    """
+    import os
+    try:
+        from core.context_evaluator import get_context_evaluator  # noqa: PLC0415
+        evaluator = get_context_evaluator()
+        result = evaluator.evaluate(input_text)
+    except Exception as exc:
+        logger.debug("rate_context_sufficiency unavailable (non-fatal): %s", exc)
+        return {"score": 1.0, "sufficient": True, "gaps": [], "memory_hits": 0, "graph_hits": 0, "researched": False}
+
+    if result.get("sufficient"):
+        result["researched"] = False
+        return result
+
+    mode = (os.getenv("AUTO_RESEARCH_MODE") or "ask").lower()
+    if mode != "auto":
+        result["researched"] = False
+        return result
+
+    # Inline single-hop research (auto mode only — the "ask" path runs via AgentController)
+    try:
+        import asyncio  # noqa: PLC0415
+        from core.auto_research_agent import get_auto_researcher  # noqa: PLC0415
+        researcher = get_auto_researcher()
+        asyncio.run(researcher.research(gaps=result.get("gaps", []), goal=input_text, hop=0))
+        # Re-evaluate after research
+        try:
+            re_eval = evaluator.evaluate(input_text)
+            re_eval["researched"] = True
+            return re_eval
+        except Exception:
+            result["researched"] = True
+            return result
+    except Exception as exc:
+        if os.getenv("STRICT_PIPELINE") == "1":
+            raise
+        logger.debug("inline research failed (non-fatal): %s", exc)
+        result["researched"] = False
+        return result
 
 
 # ── Phase 3 — Neural decision layer ──────────────────────────────────────────
@@ -912,6 +990,29 @@ def process_user_input(
         lambda: "",
     )
 
+    # ── Phase 2.5: Context sufficiency + optional auto-research ─────────────
+    context_check = _phase(
+        25,
+        "rate_context_sufficiency",
+        "2.5 (rate context sufficiency)",
+        lambda: rate_context_sufficiency(input_text, run.graph_data),
+        lambda: {"score": 1.0, "sufficient": True, "gaps": [], "researched": False},
+        critical=False,
+    )
+    run.trace["context_check"] = {
+        "score": context_check.get("score", 1.0),
+        "sufficient": context_check.get("sufficient", True),
+        "gaps": context_check.get("gaps", []),
+        "researched": context_check.get("researched", False),
+    }
+    # If research happened inline, re-retrieve to pick up new memory
+    if context_check.get("researched"):
+        try:
+            run.graph_data = retrieve_relevant_nodes(input_text) or run.graph_data
+            run.context = build_context(input_text, run.graph_data)
+        except Exception as exc:
+            logger.debug("post-research re-retrieval failed (non-fatal): %s", exc)
+
     # ── Phase 3: Intent classification + agent selection ─────────────────────
     decision = _phase(
         3,
@@ -1022,6 +1123,37 @@ def process_user_input(
             run.agent_results,
             prev_intent=_prev_intent,
         ),
+        lambda: None,
+        critical=False,
+    )
+
+    # ── Phase 8b: MemoryRouter write-back (non-blocking, non-critical) ──────────
+    def _memory_writeback() -> None:
+        from memory.memory_router import get_memory_router  # noqa: PLC0415
+        import datetime  # noqa: PLC0415
+        router = get_memory_router()
+        goal = input_text
+        response_text = run.final_response
+        if goal and response_text:
+            router.store(
+                key=f"ep:{abs(hash(goal)) % 1_000_000}:{int(time.time())}",
+                text=f"Goal: {goal}\nResult: {response_text[:500]}",
+                memory_type="episodic",
+                source="unified_pipeline",
+                importance=0.6,
+                extra={
+                    "timestamp": datetime.datetime.utcnow().isoformat(),
+                    "goal": goal[:200],
+                    "intent": run.intent,
+                    "success": not run.degraded,
+                },
+            )
+
+    _phase(
+        8,
+        "memory_writeback",
+        "8b (memory write-back)",
+        _memory_writeback,
         lambda: None,
         critical=False,
     )

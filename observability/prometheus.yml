@@ -1,0 +1,49 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    system: ai-employee
+    environment: local
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers: []  # wire up Alertmanager here when ready
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: prometheus
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          service: prometheus
+
+  # Node.js backend — exposes /metrics in Prometheus text format
+  - job_name: ai-employee-node
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8787"]
+        labels:
+          service: node-backend
+          runtime: nodejs
+
+  # Python FastAPI backend — served by opentelemetry-sdk or custom /metrics
+  - job_name: ai-employee-python
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:18790"]
+        labels:
+          service: python-backend
+          runtime: python
+
+  # OTel Collector Prometheus exporter (traces/metrics forwarded by the collector)
+  - job_name: otel-collector
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["otel-collector:8889"]
+        labels:
+          service: otel-collector

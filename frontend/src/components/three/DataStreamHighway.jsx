@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Line, MeshLine, useCursor } from '@react-three/drei';
+import { Line, useCursor } from '@react-three/drei';
 import * as THREE from 'three';
 
 export const DataStreamHighway = ({ metrics = {} }) => {

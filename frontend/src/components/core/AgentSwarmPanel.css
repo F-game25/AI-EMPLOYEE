@@ -1,0 +1,132 @@
+/* ══════════════════════════════════════════════
+   AGENT SWARM PANEL
+   ══════════════════════════════════════════════ */
+
+.swarm-panel {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.swarm-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.swarm-panel__title {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 184, 0, 0.7);
+  letter-spacing: 0.1em;
+}
+
+.swarm-panel__count {
+  font-size: 9px;
+  color: #00FF88;
+  font-weight: 600;
+  background: rgba(0, 255, 136, 0.1);
+  border: 1px solid rgba(0, 255, 136, 0.25);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+
+.swarm-panel__empty {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.2);
+  text-align: center;
+  padding: 12px 0;
+}
+
+.swarm-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+/* ── Agent card ── */
+.swarm-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 5px 5px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: default;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.swarm-card--active {
+  border-color: rgba(0, 255, 136, 0.25);
+  background: rgba(0, 255, 136, 0.04);
+}
+
+.swarm-card--busy {
+  border-color: rgba(255, 184, 0, 0.25);
+  background: rgba(255, 184, 0, 0.04);
+}
+
+.swarm-card__top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.swarm-card__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  flex-shrink: 0;
+}
+
+.swarm-card__dot--active {
+  background: #00FF88;
+  box-shadow: 0 0 4px rgba(0, 255, 136, 0.6);
+  animation: dot-pulse 2s ease-in-out infinite;
+}
+
+.swarm-card__dot--busy {
+  background: #FFB800;
+  box-shadow: 0 0 4px rgba(255, 184, 0, 0.5);
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.swarm-card__name {
+  font-size: 8px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swarm-card__role {
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swarm-card__metric {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 184, 0, 0.6);
+}
+
+.swarm-card--more {
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.2);
+  border-style: dashed;
+}
