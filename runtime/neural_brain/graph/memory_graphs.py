@@ -38,7 +38,10 @@ def _label(text: str, n: int = 42) -> str:
 
 
 def _state_dir() -> Path:
-    return Path(os.environ.get("STATE_DIR") or Path(__file__).resolve().parents[3] / "state")
+    # Canonical: STATE_DIR → AI_EMPLOYEE_HOME/AI_HOME → ~/.ai-employee, then /state.
+    # Matches start.sh and the other modules so every subsystem reads one state dir.
+    home = Path(os.environ.get("AI_EMPLOYEE_HOME") or os.environ.get("AI_HOME") or Path.home() / ".ai-employee")
+    return Path(os.environ.get("STATE_DIR") or home / "state").resolve()
 
 
 def _shortterm(limit: int) -> dict:
