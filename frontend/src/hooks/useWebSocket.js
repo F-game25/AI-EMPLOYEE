@@ -618,12 +618,23 @@ function dispatchSecurityEvent(event, data) {
       if ((data.risk ?? 0) >= 70) sys.triggerCriticalAlert?.()
       break
     case 'blacklight:ai_defense':
+    case 'blacklight:guard_block': {
+      const acts = (data.actions || []).map(a => (typeof a === 'string' ? a : `${a.action}→${a.target}`)).join(', ')
       sys.addHeartbeatLog({
-        text: `[SENTINEL] 🛡 AI defended: ${(data.actions || []).join(', ')} (risk ${data.risk}, ${data.category || '?'})`,
+        text: `[GUARD] 🛡 Blocked threat: ${acts} (${data.event_type || data.category || 'attack'})`,
         level: 'error',
         ts: Date.now(),
       })
       sys.triggerCriticalAlert?.()
+      break
+    }
+    case 'security:notification':
+      sys.addHeartbeatLog({
+        text: `[GUARD] ${data.title || 'Security action'} — ${data.detail || ''}`,
+        level: data.level === 'critical' ? 'error' : data.level === 'warning' ? 'warning' : 'info',
+        ts: Date.now(),
+      })
+      sec.pushNotification?.({ title: data.title, detail: data.detail, level: data.level, ts: Date.now() })
       break
     case 'blacklight:mode_change':
       sec.setSecurityStatus({

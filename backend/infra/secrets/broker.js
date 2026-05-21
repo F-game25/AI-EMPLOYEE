@@ -260,6 +260,21 @@ class SecretsBroker {
     const { tenant_id = 'system', agent_id = null, scope = 'system' } = opts;
     const secretPath = _buildPath(tenant_id, scope, key, agent_id);
 
+    // Security guard: deny ALL secret/API-key/wallet access while the sentinel has
+    // locked sensitive stores (responding to a detected attack). Fail closed.
+    try {
+      const { isSensitiveLocked } = require('../../security/sentinel_guard');
+      if (isSensitiveLocked()) {
+        _audit('get', secretPath, tenant_id, agent_id, false, 'sensitive_lock_active');
+        const err = new Error('sensitive stores locked by security guard');
+        err.code = 'SENSITIVE_LOCKED';
+        throw err;
+      }
+    } catch (e) {
+      if (e && e.code === 'SENSITIVE_LOCKED') throw e;
+      // guard helper unavailable — do not block normal operation
+    }
+
     _audit('get', secretPath, tenant_id, agent_id, true);
 
     // Try backends in priority order

@@ -279,6 +279,11 @@ const app = express();
 // Trust reverse-proxy headers (X-Forwarded-For, X-Forwarded-Proto) for accurate IP
 app.set('trust proxy', 1);
 
+// Security guard: reject requests from IPs the sentinel has blocked (keep attackers out).
+// Runs first so a blocked attacker never reaches auth, routes, or the secrets vault.
+const { ipBlockMiddleware: _sentinelIpBlock } = require('./security/sentinel_guard');
+app.use(_sentinelIpBlock);
+
 // Sentry error tracking middleware (if initialized)
 if (process.env.SENTRY_DSN) {
   const Sentry = require('@sentry/node');
@@ -353,6 +358,94 @@ app.get('/api/artifacts', (_req, res) => {
     .filter(f => fs.statSync(path.join(ARTIFACTS_DIR, f)).isFile())
     .map(f => ({ name: f, url: `/api/artifacts/${f}`, size: fs.statSync(path.join(ARTIFACTS_DIR, f)).size }));
   res.json(files);
+});
+
+function readJsonLinesRecent(filePath, limit = 100) {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean);
+    return lines.slice(-limit).map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean).reverse();
+  } catch {
+    return [];
+  }
+}
+
+app.get('/api/proof/center', requireAuth, (_req, res) => {
+  const turns = readJsonLinesRecent(statePath('turns.jsonl'), 100);
+  const artifactFiles = (() => {
+    try {
+      if (!fs.existsSync(ARTIFACTS_DIR)) return [];
+      return fs.readdirSync(ARTIFACTS_DIR)
+        .filter((name) => fs.statSync(path.join(ARTIFACTS_DIR, name)).isFile())
+        .map((name) => {
+          const stat = fs.statSync(path.join(ARTIFACTS_DIR, name));
+          return {
+            id: `artifact:${name}`,
+            name,
+            type: 'file',
+            path: path.join(ARTIFACTS_DIR, name),
+            url: `/api/artifacts/${encodeURIComponent(name)}`,
+            source: 'artifact_storage',
+            status: 'available',
+            size: stat.size,
+            created_at: stat.mtime.toISOString(),
+          };
+        })
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    } catch {
+      return [];
+    }
+  })();
+
+  const proofItems = [];
+  for (const turn of turns) {
+    for (const item of [...(turn.proof || []), ...(turn.artifacts || [])]) {
+      if (!item || typeof item !== 'object') continue;
+      const name = item.name || item.label || item.type || 'proof item';
+      proofItems.push({
+        id: item.id || `${turn.turn_id || turn.task_id || 'turn'}:${proofItems.length + 1}`,
+        task_id: item.task_id || turn.task_id || turn.taskId || null,
+        turn_id: turn.turn_id || null,
+        name,
+        type: item.type || item.artifact_type || 'trace',
+        path: item.path || null,
+        url: item.url || null,
+        source: item.source || turn.source || turn.compatibility_route || 'turn',
+        status: item.status || turn.status || 'unknown',
+        degraded: turn.degraded === true || item.status === 'fallback' || item.status === 'degraded',
+        created_at: item.created_at || turn.created_at || turn.timestamp || null,
+      });
+    }
+  }
+
+  const counts = [...proofItems, ...artifactFiles].reduce((acc, item) => {
+    const status = item.degraded ? 'degraded' : (item.status || 'unknown');
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+
+  res.json({
+    ok: true,
+    source: 'node_proof_center',
+    generated_at: new Date().toISOString(),
+    counts,
+    turns: turns.map((turn) => ({
+      turn_id: turn.turn_id || null,
+      task_id: turn.task_id || turn.taskId || null,
+      contract_version: turn.contract_version || null,
+      status: turn.status || 'unknown',
+      source: turn.source || turn.compatibility_route || 'unknown',
+      degraded: turn.degraded === true,
+      proof_count: Array.isArray(turn.proof) ? turn.proof.length : 0,
+      artifact_count: Array.isArray(turn.artifacts) ? turn.artifacts.length : 0,
+      created_at: turn.created_at || turn.timestamp || null,
+      errors: Array.isArray(turn.errors) ? turn.errors : [],
+    })),
+    proof_items: proofItems,
+    artifacts: artifactFiles,
+  });
 });
 
 app.use('/gateway', gateway);
@@ -2078,41 +2171,312 @@ app.get('/api/readiness', async (req, res) => {
   });
 });
 
-app.get('/api/capabilities/status', requireAuth, (_req, res) => {
-  const required = {
-    python_backend: [],
-    ollama: ['OLLAMA_HOST'],
-    anthropic_llm: ['ANTHROPIC_API_KEY'],
-    groq_llm: ['GROQ_API_KEY'],
-    send_email: ['SENDGRID_API_KEY', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'],
-    apollo_search: ['APOLLO_API_KEY'],
-    linkedin_post: ['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_PERSON_URN'],
-    money_mode: [],
-    real_execution_engine: [],
+async function probeHttp(url, timeoutMs = 900) {
+  try {
+    const response = await Promise.race([
+      fetch(url),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+    ]);
+    return { ok: !!response?.ok, status: response?.status || 0 };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+function capabilityRecord({
+  id,
+  label,
+  status,
+  category,
+  required_env = [],
+  missing_env = [],
+  setup_action = 'none',
+  details = '',
+  docs_hint = '',
+  source = 'node',
+  proof = null,
+}) {
+  const checkedAt = new Date().toISOString();
+  return {
+    id,
+    name: id, // compatibility for older dashboard widgets
+    label,
+    status,
+    category,
+    required_env,
+    missing_env,
+    last_checked_at: checkedAt,
+    updated_at: checkedAt,
+    setup_action,
+    details,
+    docs_hint,
+    source,
+    proof,
   };
-  const statusFor = (name, vars) => {
-    if (name === 'python_backend') return _readiness.pythonReady ? 'live' : 'unavailable';
-    if (name === 'money_mode') return 'dry_run';
-    if (name === 'real_execution_engine') return fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'live' : 'unavailable';
-    if (!vars.length) return 'live';
-    const configured = vars.filter((key) => !!process.env[key]);
-    if (name === 'send_email') {
-      return process.env.SENDGRID_API_KEY || (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
-        ? 'live'
-        : 'not_configured';
+}
+
+function missingEnv(keys) {
+  return keys.filter((key) => !process.env[key]);
+}
+
+function statusFromEnv(keys, { any = false } = {}) {
+  if (!keys.length) return { status: 'live', missing: [] };
+  const missing = missingEnv(keys);
+  if (any) {
+    return { status: missing.length < keys.length ? 'live' : 'not_configured', missing };
+  }
+  return { status: missing.length === 0 ? 'live' : 'not_configured', missing };
+}
+
+app.get('/api/capabilities/status', requireAuth, async (_req, res) => {
+  const checkedAt = new Date().toISOString();
+  const pythonProbe = _readiness.pythonReady
+    ? { ok: true, status: 200 }
+    : await probeHttp(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/health`);
+  if (pythonProbe.ok) {
+    _readiness.pythonReady = true;
+    if (_readiness.phase === 'BOOTING') _readiness.phase = 'READY';
+  }
+
+  const ollamaHost = process.env.OLLAMA_HOST || process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
+  const ollamaProbe = await probeHttp(`${String(ollamaHost).replace(/\/$/, '')}/api/tags`);
+  const llmProviders = [
+    ['anthropic_llm', 'Anthropic LLM', ['ANTHROPIC_API_KEY']],
+    ['openai_llm', 'OpenAI LLM', ['OPENAI_API_KEY']],
+    ['openrouter_llm', 'OpenRouter LLM', ['OPENROUTER_API_KEY']],
+    ['groq_llm', 'Groq LLM', ['GROQ_API_KEY']],
+  ];
+  const providerRecords = llmProviders.map(([id, label, requiredEnv]) => {
+    const env = statusFromEnv(requiredEnv);
+    return capabilityRecord({
+      id,
+      label,
+      status: env.status,
+      category: 'llm',
+      required_env: requiredEnv,
+      missing_env: env.missing,
+      setup_action: env.status === 'live' ? 'test' : 'configure_env',
+      details: env.status === 'live' ? `${label} key is present.` : `${label} requires ${env.missing.join(', ')}.`,
+      docs_hint: 'Configure provider keys in ~/.ai-employee/.env or Settings.',
+    });
+  });
+  const activeProviderCount = providerRecords.filter((record) => record.status === 'live').length + (ollamaProbe.ok ? 1 : 0);
+
+  const emailRequired = ['SENDGRID_API_KEY', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'];
+  const emailConfigured = !!process.env.SENDGRID_API_KEY
+    || (!!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS);
+  const emailMissing = emailConfigured
+    ? []
+    : emailRequired.filter((key) => !process.env[key]);
+  const apolloEnv = statusFromEnv(['APOLLO_API_KEY']);
+  const linkedinEnv = statusFromEnv(['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_PERSON_URN']);
+  const stateWritable = (() => {
+    try {
+      fs.accessSync(STATE_DIR, fs.constants.R_OK | fs.constants.W_OK);
+      return true;
+    } catch {
+      return false;
     }
-    return configured.length === vars.length ? 'live' : 'not_configured';
-  };
+  })();
+  const artifactsWritable = (() => {
+    try {
+      fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
+      fs.accessSync(ARTIFACTS_DIR, fs.constants.R_OK | fs.constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  const capabilities = [
+    capabilityRecord({
+      id: 'node_backend',
+      label: 'Node Backend',
+      status: 'live',
+      category: 'runtime',
+      setup_action: 'view_logs',
+      details: `Gateway is running on port ${PORT}.`,
+      docs_hint: 'Node owns auth, WebSocket, dashboard APIs, and Python proxying.',
+      proof: { started_at: SERVER_START_TIMESTAMP, port: PORT },
+    }),
+    capabilityRecord({
+      id: 'python_backend',
+      label: 'Python Backend',
+      status: pythonProbe.ok ? 'live' : 'unavailable',
+      category: 'runtime',
+      setup_action: pythonProbe.ok ? 'test' : 'start_service',
+      details: pythonProbe.ok
+        ? `Python health responded on port ${PYTHON_BACKEND_PORT}.`
+        : `Python did not respond on port ${PYTHON_BACKEND_PORT}.`,
+      docs_hint: 'Start the Python AI backend before marking task execution fully live.',
+      proof: { port: PYTHON_BACKEND_PORT, probe: pythonProbe },
+    }),
+    capabilityRecord({
+      id: 'frontend_build',
+      label: 'Frontend Build',
+      status: HAS_FRONTEND_DIST ? 'live' : 'not_configured',
+      category: 'runtime',
+      setup_action: HAS_FRONTEND_DIST ? 'none' : 'run_build',
+      details: HAS_FRONTEND_DIST ? 'Built frontend assets are available.' : 'frontend/dist/index.html is missing.',
+      docs_hint: 'Run npm --prefix frontend run build to produce production assets.',
+    }),
+    capabilityRecord({
+      id: 'websocket_event_bus',
+      label: 'WebSocket Event Bus',
+      status: 'live',
+      category: 'runtime',
+      setup_action: 'test',
+      details: 'Node WebSocket upgrade handler is mounted; clients still need a valid token.',
+      docs_hint: 'Use the dashboard connection pill and event feed to confirm live client traffic.',
+    }),
+    capabilityRecord({
+      id: 'auth_session',
+      label: 'Auth / Session',
+      status: JWT_SECRET ? 'live' : 'not_configured',
+      category: 'security',
+      required_env: ['JWT_SECRET_KEY'],
+      missing_env: JWT_SECRET ? [] : ['JWT_SECRET_KEY'],
+      setup_action: JWT_SECRET ? 'test' : 'configure_env',
+      details: JWT_SECRET ? 'JWT signing secret is configured.' : 'JWT_SECRET_KEY is required before startup.',
+      docs_hint: 'Local admin tokens are available from /api/auth/auto-token.',
+    }),
+    capabilityRecord({
+      id: 'ollama_local_model',
+      label: 'Ollama / Local Model',
+      status: ollamaProbe.ok ? 'live' : 'not_configured',
+      category: 'llm',
+      required_env: ['OLLAMA_HOST'],
+      missing_env: process.env.OLLAMA_HOST || process.env.OLLAMA_URL ? [] : ['OLLAMA_HOST'],
+      setup_action: ollamaProbe.ok ? 'test' : 'start_service',
+      details: ollamaProbe.ok ? `Ollama responded at ${ollamaHost}.` : `No Ollama response from ${ollamaHost}.`,
+      docs_hint: 'Start Ollama and pull the configured local model to enable local fallback.',
+      proof: { host: ollamaHost, probe: ollamaProbe },
+    }),
+    capabilityRecord({
+      id: 'llm_provider_routing',
+      label: 'LLM Provider Routing',
+      status: activeProviderCount > 0 ? 'live' : 'not_configured',
+      category: 'llm',
+      setup_action: activeProviderCount > 0 ? 'test' : 'configure_env',
+      details: activeProviderCount > 0
+        ? `${activeProviderCount} provider path(s) appear usable.`
+        : 'No remote provider key or local Ollama service is currently usable.',
+      docs_hint: 'Configure at least one model provider before expecting high-quality LLM responses.',
+    }),
+    ...providerRecords,
+    capabilityRecord({
+      id: 'tool_registry',
+      label: 'Tool / Skill Registry',
+      status: fs.existsSync(path.join(REPO_ROOT, 'runtime', 'config', 'skills_library.json')) ? 'live' : 'unavailable',
+      category: 'execution',
+      setup_action: 'test',
+      details: 'Skill registry file is present for planner/executor lookup.',
+      docs_hint: 'Tools still report their own configured/unconfigured state per provider.',
+    }),
+    capabilityRecord({
+      id: 'real_execution_engine',
+      label: 'Real Execution Engine',
+      status: fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'live' : 'unavailable',
+      category: 'execution',
+      setup_action: fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'test' : 'view_logs',
+      details: fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'backend/run_execution.py exists.' : 'backend/run_execution.py is missing.',
+      docs_hint: 'Execution proof must include artifacts, traces, provider IDs, or explicit dry-run output.',
+    }),
+    capabilityRecord({
+      id: 'money_mode',
+      label: 'Money Mode',
+      status: 'dry_run',
+      category: 'money',
+      setup_action: 'run_doctor',
+      details: 'Money Mode is available as an approval-gated dry-run layer until external accounts are configured.',
+      docs_hint: 'Publishing, outreach, payments, paid-task acceptance, and account changes require approval.',
+    }),
+    capabilityRecord({
+      id: 'email_outreach',
+      label: 'Email / Outreach',
+      status: emailConfigured ? 'live' : 'not_configured',
+      category: 'integration',
+      required_env: emailRequired,
+      missing_env: emailMissing,
+      setup_action: emailConfigured ? 'test' : 'configure_env',
+      details: emailConfigured ? 'At least one email provider path is configured.' : 'Email requires SendGrid or a complete SMTP env set.',
+      docs_hint: 'Outbound email remains approval-gated even when configured.',
+    }),
+    capabilityRecord({
+      id: 'apollo_search',
+      label: 'Apollo Lead Search',
+      status: apolloEnv.status,
+      category: 'integration',
+      required_env: ['APOLLO_API_KEY'],
+      missing_env: apolloEnv.missing,
+      setup_action: apolloEnv.status === 'live' ? 'test' : 'configure_env',
+      details: apolloEnv.status === 'live' ? 'Apollo API key is present.' : 'Lead discovery needs APOLLO_API_KEY for live provider calls.',
+      docs_hint: 'Unconfigured lead discovery must be labeled mock/fallback/dry-run.',
+    }),
+    capabilityRecord({
+      id: 'linkedin_post',
+      label: 'LinkedIn Posting',
+      status: linkedinEnv.status,
+      category: 'integration',
+      required_env: ['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_PERSON_URN'],
+      missing_env: linkedinEnv.missing,
+      setup_action: linkedinEnv.status === 'live' ? 'test' : 'configure_env',
+      details: linkedinEnv.status === 'live' ? 'LinkedIn posting credentials are present.' : 'LinkedIn posting needs access token and person URN.',
+      docs_hint: 'Posting is never automatic; it requires an approval decision.',
+    }),
+    capabilityRecord({
+      id: 'artifact_storage',
+      label: 'Proof / Artifact Storage',
+      status: artifactsWritable ? 'live' : 'unavailable',
+      category: 'execution',
+      setup_action: artifactsWritable ? 'none' : 'view_logs',
+      details: artifactsWritable ? `Artifact directory is writable: ${ARTIFACTS_DIR}` : `Artifact directory is not writable: ${ARTIFACTS_DIR}`,
+      docs_hint: 'Generated outputs should link to stored artifacts or explain why none was produced.',
+    }),
+    capabilityRecord({
+      id: 'memory_store',
+      label: 'Memory / Vector Store',
+      status: stateWritable ? 'live' : 'unavailable',
+      category: 'memory',
+      setup_action: stateWritable ? 'test' : 'view_logs',
+      details: stateWritable ? `State directory is readable and writable: ${STATE_DIR}` : `State directory is not writable: ${STATE_DIR}`,
+      docs_hint: 'Memory health is degraded when vector/knowledge stores are unavailable or fallback-only.',
+    }),
+    capabilityRecord({
+      id: 'startup_warnings',
+      label: 'Startup / Runtime Warnings',
+      status: _readiness.subsystemsReady ? 'live' : (_readiness.pythonReady ? 'fallback' : 'unavailable'),
+      category: 'runtime',
+      setup_action: 'view_logs',
+      details: _readiness.subsystemsReady
+        ? 'Startup readiness reports all known subsystems ready.'
+        : 'Startup readiness still has degraded subsystem signals.',
+      docs_hint: 'Review /api/readiness and logs when this is fallback or unavailable.',
+    }),
+  ];
+
+  const counts = capabilities.reduce((acc, capability) => {
+    acc[capability.status] = (acc[capability.status] || 0) + 1;
+    return acc;
+  }, {});
+  const notLive = capabilities.filter((capability) => capability.status !== 'live');
+  const recommended = notLive.find((capability) => capability.status === 'unavailable')
+    || notLive.find((capability) => capability.status === 'not_configured')
+    || notLive.find((capability) => capability.status === 'fallback')
+    || null;
+
   res.json({
     ok: true,
-    states: ['live', 'dry_run', 'mock', 'fallback', 'not_configured', 'unavailable'],
-    capabilities: Object.entries(required).map(([name, vars]) => ({
-      name,
-      status: statusFor(name, vars),
-      required_env: vars,
-      missing_env: vars.filter((key) => !process.env[key]),
-      updated_at: new Date().toISOString(),
-    })),
+    checked_at: checkedAt,
+    states: ['live', 'dry_run', 'mock', 'fallback', 'not_configured', 'unavailable', 'error'],
+    counts,
+    next_recommended_action: recommended ? {
+      capability_id: recommended.id,
+      label: recommended.label,
+      setup_action: recommended.setup_action,
+      details: recommended.details,
+    } : null,
+    capabilities,
   });
 });
 
