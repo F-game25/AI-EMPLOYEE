@@ -3,22 +3,8 @@ import { Panel, SectionLabel } from '../nexus-ui'
 import { useLiveData } from '../../hooks/useLiveData'
 import { useAgentStore } from '../../store/agentStore'
 import { toastSuccess, toastError } from '../nexus-ui/Toaster'
+import api from '../../api/client'
 import './IntelligencePage.css'
-
-/* ── Stub data ──────────────────────────────────────────────────────────────── */
-const STUB_LLM_CALLS = [
-  { id: 'lc1', model: 'claude-sonnet-4-6', agent: 'web-research-agent', ms: 1240, tokens: 2180, cost_usd: 0.0031, status: 'ok', ts: Date.now() - 4000 },
-  { id: 'lc2', model: 'claude-haiku-4-5', agent: 'email-writer', ms: 320, tokens: 890, cost_usd: 0.0004, status: 'ok', ts: Date.now() - 9000 },
-  { id: 'lc3', model: 'claude-sonnet-4-6', agent: 'data-analyst', ms: 5800, tokens: 8420, cost_usd: 0.012, status: 'slow', ts: Date.now() - 15000 },
-  { id: 'lc4', model: 'ollama/llama3', agent: 'support-triage', ms: 680, tokens: 1100, cost_usd: 0.0, status: 'ok', ts: Date.now() - 22000 },
-  { id: 'lc5', model: 'claude-opus-4-7', agent: 'competitive-analyst', ms: 3200, tokens: 5600, cost_usd: 0.028, status: 'ok', ts: Date.now() - 40000 },
-]
-
-const STUB_INSIGHTS = [
-  { id: 'ins1', category: 'sales', title: '3 warm leads went cold — recommend re-engage', detail: 'Leads from outreach campaign 2 days ago showed high intent but no response. 72% re-engage rate with follow-up within 48h.', action: 'Trigger re-engagement workflow', actionType: 'workflow', severity: 'medium' },
-  { id: 'ins2', category: 'content', title: 'Content velocity dropped 40% this week', detail: 'Content pipeline ran 3 jobs vs 5 last week. Likely cause: delayed research phase. Consider parallelizing.', action: 'View pipeline details', actionType: 'view', severity: 'low' },
-  { id: 'ins3', category: 'operations', title: 'High task failure rate on lead-hunter-elite', detail: '4 of 11 runs failed in last 24h (36%). Above 10% threshold. Root cause: rate limiting on LinkedIn scraper.', action: 'Investigate agent logs', actionType: 'inspect', severity: 'high' },
-]
 
 /* ── Tab 1: Agent Fleet Summary ─────────────────────────────────────────────── */
 function FleetTab() {
@@ -79,7 +65,7 @@ function BrainInspectorTab() {
     transform: d => d?.calls || d,
   })
   const [selected, setSelected] = useState(null)
-  const list = calls || STUB_LLM_CALLS
+  const list = Array.isArray(calls) ? calls : []
 
   // Per-agent cost breakdown
   const agentCosts = {}
@@ -144,7 +130,7 @@ function BrainInspectorTab() {
 
 /* ── Tab 3: AI Strategic Insights ───────────────────────────────────────────── */
 function InsightsTab() {
-  const [insights, setInsights] = useState(STUB_INSIGHTS)
+  const [insights, setInsights] = useState([])
   const [dismissed, setDismissed] = useState([])
   const [askText, setAskText] = useState('')
   const [asking, setAsking] = useState(false)
@@ -163,11 +149,7 @@ function InsightsTab() {
 
   async function handleAction(insight) {
     try {
-      await fetch('/api/intelligence/trigger-action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ insight_id: insight.id, action: insight.actionType }),
-      })
+      await api.post('/api/intelligence/trigger-action', { insight_id: insight.id, action: insight.actionType })
       toastSuccess(`Action triggered: ${insight.action}`)
       setDismissed(d => [...d, insight.id])
     } catch { toastError('Failed to trigger action') }
@@ -178,12 +160,7 @@ function InsightsTab() {
     if (!askText.trim()) return
     setAsking(true)
     try {
-      const r = await fetch('/api/intelligence/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: askText }),
-      })
-      const j = await r.json()
+      const j = await api.post('/api/intelligence/ask', { question: askText })
       setAnswer(j.insight || j.answer || 'No insight available from current data.')
     } catch {
       setAnswer('Unable to fetch insight — backend may be offline.')

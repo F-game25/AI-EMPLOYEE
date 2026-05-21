@@ -2,7 +2,52 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { useSystemStore } from '../../store/systemStore'
 import { useLiveData } from '../../hooks/useLiveData'
+import api from '../../api/client'
 import './SystemHealthPage.css'
+
+// Doctor diagnostics — restored from the removed DoctorPage. Backend live at
+// /api/doctor/{status,run}. Renders real shape {grade, overall_score, scores,
+// issues:[{area,severity,issue,suggestion}], strengths, data_source}.
+const _sevClass = (s) => (s === 'error' ? 'error' : s === 'warning' ? 'warn' : 'info')
+function DoctorPanel() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [running, setRunning] = useState(false)
+  const load = useCallback(async () => {
+    try { setData(await api.get('/api/doctor/status')) } catch { setData(null) } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load() }, [load])
+  const run = async () => { setRunning(true); try { await api.post('/api/doctor/run', {}) } catch { /* */ } finally { setRunning(false); load() } }
+  const grade = data?.grade ?? '—'
+  const score = data?.overall_score ?? 0
+  const issues = data?.issues || []
+  const strengths = data?.strengths || []
+  const simulated = data?.data_source === 'simulated'
+  return (
+    <div className="infra-doctor">
+      <div className="infra-doctor__head">
+        <span className="infra-doctor__title">SYSTEM DOCTOR</span>
+        <span className="infra-doctor__summary">Grade {grade} · {score}/100 · {issues.length} issues</span>
+        {simulated && <span className="infra-doctor__badge" title="No live health-check data yet — values are simulated">SIMULATED</span>}
+        <button className="infra-doctor__run" onClick={run} disabled={running} aria-label="Run diagnostics">{running ? 'Running…' : '↻ Run checks'}</button>
+      </div>
+      {loading ? <div className="infra-doctor__empty">Loading diagnostics…</div>
+        : !data ? <div className="infra-doctor__empty">Diagnostics unavailable.</div>
+        : <ul className="infra-doctor__list">
+            {strengths.map((s, i) => (
+              <li key={`s${i}`} className="infra-doctor__row infra-doctor__row--ok">
+                <span className="infra-doctor__dot" />{typeof s === 'string' ? s : (s.area || s.issue || 'OK')}
+              </li>))}
+            {issues.map((it, i) => (
+              <li key={`i${i}`} className={`infra-doctor__row infra-doctor__row--${_sevClass(it.severity)}`}>
+                <span className="infra-doctor__dot" />
+                <span><strong>{it.area || 'Issue'}:</strong> {it.issue}{it.suggestion ? ` — ${it.suggestion}` : ''}</span>
+              </li>))}
+            {strengths.length === 0 && issues.length === 0 && <li className="infra-doctor__empty">No diagnostics reported.</li>}
+          </ul>}
+    </div>
+  )
+}
 
 // ── Ring Gauge ──────────────────────────────────────────────────────
 const R = 32
@@ -620,6 +665,9 @@ export default function SystemHealthPage() {
         <SLAUptimePanel />
         <PatchHistoryPanel />
       </div>
+
+      {/* System Doctor diagnostics */}
+      <DoctorPanel />
 
       {/* Live log stream */}
       <LogStreamPanel />

@@ -704,3 +704,22 @@
 .infra-log-level { font-weight: 700; font-size: 8px; letter-spacing: 0.08em; }
 .infra-log-comp { color: var(--nx-cyan, #22d3ee); opacity: 0.8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .infra-log-msg  { color: var(--nx-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── System Doctor diagnostics ── */
+.infra-doctor { border: 1px solid var(--nx-border, rgba(229,199,107,0.14)); border-radius: 12px; padding: 14px 16px; margin-top: 16px; background: var(--nx-surface, #0b0d18); }
+.infra-doctor__head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.infra-doctor__title { font-size: 12px; font-weight: 600; letter-spacing: .06em; color: var(--nx-text-muted); }
+.infra-doctor__summary { font-size: 12px; color: var(--nx-text-muted); }
+.infra-doctor__run { margin-left: auto; font-size: 12px; padding: 4px 12px; border-radius: 7px; cursor: pointer; border: 1px solid var(--nx-border-strong, rgba(229,199,107,0.28)); background: var(--nx-gold-grad-soft); color: var(--nx-gold-bright, #ffd97a); }
+.infra-doctor__run:disabled { opacity: .5; }
+.infra-doctor__empty { font-size: 12px; color: var(--nx-text-muted); font-style: italic; padding: 6px 0; }
+.infra-doctor__list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
+.infra-doctor__row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 8px; border-radius: 6px; background: var(--nx-bg-deep, #04050a); }
+.infra-doctor__dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.infra-doctor__row--ok .infra-doctor__dot { background: var(--nx-success, #22c55e); }
+.infra-doctor__row--warn .infra-doctor__dot { background: var(--nx-warning, #f59e0b); }
+.infra-doctor__row--error .infra-doctor__dot { background: var(--nx-danger, #ef4444); }
+.infra-doctor__row--info .infra-doctor__dot { background: var(--nx-info, #38bdf8); }
+.infra-doctor__row { align-items: flex-start; }
+.infra-doctor__dot { margin-top: 4px; }
+.infra-doctor__badge { font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 2px 7px; border-radius: 5px; color: var(--nx-warning, #f59e0b); border: 1px solid var(--nx-warning, #f59e0b); background: rgba(245,158,11,0.1); }

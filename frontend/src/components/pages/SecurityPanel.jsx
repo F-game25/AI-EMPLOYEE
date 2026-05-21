@@ -319,6 +319,42 @@ function HITLCard({ item, onApprove, onReject }) {
   )
 }
 
+// Fairness & bias monitor — restored from the removed FairnessPage. Backend live
+// at /api/fairness/report. Real shape: {agents_monitored, total_actions,
+// high_risk_actions, risk_rate, by_actor:{}, demographic_parity, disparate_impact}.
+function FairnessPanel() {
+  const [rep, setRep] = useState(null)
+  useEffect(() => {
+    api.get('/api/fairness/report').then(setRep).catch(() => setRep(false))
+  }, [])
+  if (rep === null) return null
+  if (rep === false) return <Panel title="Fairness & Bias"><div className="sec-fair-empty">Fairness report unavailable.</div></Panel>
+  const actors = Object.entries(rep.by_actor || {}).sort((a, b) => b[1] - a[1])
+  const maxCount = actors.reduce((m, [, n]) => Math.max(m, n), 0) || 1
+  const riskPct = Math.round((parseFloat(rep.risk_rate) || 0) * 100)
+  return (
+    <Panel title="Fairness & Bias" right={<span className={`sec-badge-count ${riskPct > 20 ? 'low' : ''}`}>{riskPct}% risk</span>}>
+      <div className="sec-fair-stats">
+        <div className="sec-fair-stat"><span>{rep.agents_monitored ?? 0}</span><label>Agents monitored</label></div>
+        <div className="sec-fair-stat"><span>{rep.total_actions ?? 0}</span><label>Actions audited</label></div>
+        <div className="sec-fair-stat"><span>{rep.high_risk_actions ?? 0}</span><label>High-risk</label></div>
+      </div>
+      {actors.length > 0 && (
+        <div className="sec-fair-list">
+          {actors.map(([name, count]) => (
+            <div key={name} className="sec-fair-row">
+              <span className="sec-fair-name">{name}</span>
+              <div className="sec-fair-bar"><div style={{ width: `${(count / maxCount) * 100}%` }} className="mid" /></div>
+              <span className="sec-fair-score">{count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="sec-fair-note">Demographic parity: {rep.demographic_parity || 'N/A'}</div>
+    </Panel>
+  )
+}
+
 function AuditTab() {
   const { data: auditData, refresh } = useLiveData({
     endpoint: '/api/security/audit',
@@ -343,6 +379,7 @@ function AuditTab() {
 
   return (
     <div className="sec-tab-content">
+      <FairnessPanel />
       {hitl.length > 0 && (
         <Panel title="HITL Approval Queue" right={<span className="sec-badge-count">{hitl.length}</span>}>
           {hitl.map(h => (

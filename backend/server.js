@@ -3319,6 +3319,8 @@ function requestPythonJSON(pathname, method = 'GET', payload = null, options = {
     }
     const body = payload ? JSON.stringify(payload) : null;
     const headers = {
+      // Authenticate Node→Python proxy calls; RequestGuard rejects non-public routes without it.
+      Authorization: `Bearer ${internalServiceToken()}`,
       ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
       ...(options.headers || {}),
     };
@@ -3793,9 +3795,10 @@ app.post('/api/autonomy/emergency-stop', requireAuth, (req, res) => {
 app.get('/api/evolution/status', async (req, res) => {
   try {
     const data = await requestPythonJSON('/api/evolution/status', 'GET');
+    if (data._http_status && data._http_status >= 400) throw new Error(`py_${data._http_status}`);
     res.json(data);
   } catch {
-    res.json({ mode: 'OFF', running: false });
+    res.json({ mode: 'OFF', running: false, available: false });
   }
 });
 

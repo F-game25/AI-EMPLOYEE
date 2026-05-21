@@ -483,6 +483,45 @@ function AppearanceTab() {
 /* ── Tab 5: ADVANCED ───────────────────────────────────────────────────── */
 
 
+// Self-evolution control — restored from the removed EvolutionPage. Backend live at
+// /api/evolution/{status,mode}. AUTO requires explicit confirm (autonomous code deploy).
+const EVO_MODES = [
+  { id: 'OFF',  label: 'Off',  desc: 'No self-modification. System is frozen.' },
+  { id: 'SAFE', label: 'Safe', desc: 'Proposes patches — requires human approval before applying.' },
+  { id: 'AUTO', label: 'Auto', desc: 'Autonomously generates, validates, and deploys safe patches.' },
+]
+function EvolutionModePanel() {
+  const [status, setStatus] = useState(null)
+  const [mode, setMode] = useState(null)
+  const load = () => api.get('/api/evolution/status').then(d => { setStatus(d); setMode(d.mode || 'OFF') }).catch(() => setMode('OFF'))
+  useEffect(() => { load() }, [])
+  const choose = async (m) => {
+    if (m === mode) return
+    if (m === 'AUTO' && !window.confirm('Enable AUTO evolution? The system will autonomously generate and deploy code patches without human approval.')) return
+    setMode(m)
+    try { const d = await api.post('/api/evolution/mode', { mode: m }); setMode(d.mode || m); load() } catch { /* */ }
+  }
+  return (
+    <div className="nx-section">
+      <div className="nx-section-label">SELF-EVOLUTION</div>
+      <div className="nx-evo-stats">
+        <span>Loop: <b>{status?.running ? 'RUNNING' : 'IDLE'}</b></span>
+        <span>Patches applied: <b>{status?.patches_applied ?? 0}</b></span>
+        {status?.patches_proposed != null && <span>Proposed: <b>{status.patches_proposed}</b></span>}
+      </div>
+      <div className="nx-render-opts" role="radiogroup" aria-label="Evolution mode">
+        {EVO_MODES.map(m => (
+          <button key={m.id} type="button" role="radio" aria-checked={mode === m.id}
+            className={`nx-render-opt ${mode === m.id ? 'nx-render-opt--active' : ''}`} onClick={() => choose(m.id)}>
+            <span className="nx-render-opt__title">{m.label}{mode === m.id && ' ✓'}</span>
+            <span className="nx-render-opt__desc">{m.desc}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function AdvancedTab() {
   const [cfg, setCfg] = useState({ strict_pipeline: false, hitl_gate: true, data_retention: 30 })
   const [showRawJson, setShowRawJson] = useState(false)
@@ -507,7 +546,7 @@ function AdvancedTab() {
 
   const downloadLogs = async () => {
     try {
-      const resp = await fetch('/api/logs', { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } })
+      const resp = await fetch('/api/logs', { headers: { Authorization: `Bearer ${sessionStorage.getItem('ai_jwt') || ''}` } })
       const blob = await resp.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a'); a.href = url; a.download = 'python-backend.log'; a.click()
@@ -536,6 +575,9 @@ function AdvancedTab() {
   return (
     <div className="nx-tab-content">
       {pending && <SafetyConfirmModal action={pending} onConfirm={executeAction} onCancel={() => setPending(null)} />}
+
+      <EvolutionModePanel />
+      <div className="nx-divider" />
 
       {/* Pipeline controls */}
       <div className="nx-section">

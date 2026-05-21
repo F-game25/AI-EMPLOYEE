@@ -18,13 +18,6 @@ const TABS = ['PROVIDERS', 'PERFORMANCE', 'ROUTING RULES', 'PROMPTS']
 // Derive a flat MODEL_OPTIONS list from registry data, or fall back to static list
 
 
-const STUB_LLM_CALLS = [
-  { model: 'claude-sonnet-4-6', calls: 842, p50: 420,  p95: 890,  tps: 38.2, cost: 0.0032, errors: 2 },
-  { model: 'claude-opus-4-7',   calls: 213, p50: 1140, p95: 2100, tps: 22.1, cost: 0.0180, errors: 0 },
-  { model: 'claude-haiku-4-5',  calls: 1540,p50: 180,  p95: 390,  tps: 68.4, cost: 0.0008, errors: 7 },
-  { model: 'gpt-4o',            calls: 91,  p50: 640,  p95: 1320, tps: 29.5, cost: 0.0060, errors: 1 },
-  { model: 'llama3.2',          calls: 310, p50: 890,  p95: 1800, tps: 18.0, cost: 0.0000, errors: 4 },
-]
 
 
 function makeSparkline(seed, len = 20) {

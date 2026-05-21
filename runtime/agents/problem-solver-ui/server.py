@@ -18432,6 +18432,38 @@ def get_doctor():
     return JSONResponse({"output": out, "rc": rc})
 
 
+# ── Self-evolution control ────────────────────────────────────────────────────
+
+@app.get("/api/evolution/status")
+def get_evolution_status():
+    try:
+        from core.self_evolution import get_evolution_controller
+        return JSONResponse(get_evolution_controller().status())
+    except Exception as exc:
+        logger.warning("evolution: status failed: %s", exc)
+        return JSONResponse({"running": False, "mode": "OFF", "available": False, "error": str(exc)})
+
+
+class EvolutionModeRequest(BaseModel):
+    mode: str  # OFF | SAFE | AUTO
+
+
+@app.post("/api/evolution/mode")
+def post_evolution_mode(req: EvolutionModeRequest):
+    try:
+        from core.self_evolution import get_evolution_controller
+        ctrl = get_evolution_controller()
+        mode = ctrl.set_mode(req.mode)
+        # AUTO/SAFE run the loop; OFF stops it.
+        ctrl.stop() if mode == "OFF" else ctrl.start()
+        return JSONResponse({"mode": mode, "status": ctrl.status()})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.warning("evolution: set mode failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ── Doctor structured diagnostics ─────────────────────────────────────────────
 
 def _load_doctor_actions() -> dict:
