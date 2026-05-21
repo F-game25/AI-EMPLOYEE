@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Panel, HexButton, SectionLabel } from '../nexus-ui'
 import FileUploadZone from '../workspace/FileUploadZone'
 import { API_URL } from '../../config/api'
+import api from '../../api/client'
 import './WorkspacePage.css'
 
 const BASE = API_URL
@@ -48,8 +49,7 @@ function IngestionLogPanel() {
     setLoading(true)
     setError(null)
     try {
-      const r = await fetch(`${BASE}/api/workspace/ingestion-log`)
-      const d = await r.json()
+      const d = await api.get('/api/workspace/ingestion-log')
       setEntries((d.entries || []).slice(-20).reverse())
     } catch (e) {
       setError('Could not load ingestion log.')
@@ -160,8 +160,7 @@ export default function WorkspacePage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await fetch(`${BASE}/api/workspace/files`)
-      const d = await r.json()
+      const d = await api.get('/api/workspace/files')
       setFiles((d.files || []).map(normalizeFile))
     } catch {
       setFiles([])
@@ -198,11 +197,9 @@ export default function WorkspacePage() {
     if (!window.confirm('Delete this file? This action cannot be undone.')) return
     setDeleting(fileId)
     try {
-      const r = await fetch(`${BASE}/api/workspace/files/${fileId}`, { method: 'DELETE' })
-      if (r.ok) {
-        setFiles(prev => prev.filter(f => (f.fileId || f.id || f.path) !== fileId))
-        if ((selected?.fileId || selected?.id || selected?.path) === fileId) setSelected(null)
-      }
+      await api.delete(`/api/workspace/files/${fileId}`)
+      setFiles(prev => prev.filter(f => (f.fileId || f.id || f.path) !== fileId))
+      if ((selected?.fileId || selected?.id || selected?.path) === fileId) setSelected(null)
     } catch (e) {
       console.error('Delete failed:', e)
     } finally {
@@ -214,12 +211,7 @@ export default function WorkspacePage() {
     e.stopPropagation()
     setAnalyzeState(prev => ({ ...prev, [fileId]: 'pending' }))
     try {
-      const r = await fetch(`${BASE}/api/workspace/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId })
-      })
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      await api.post('/api/workspace/analyze', { fileId })
       setAnalyzeState(prev => ({ ...prev, [fileId]: 'ok' }))
       setTimeout(() => setAnalyzeState(prev => ({ ...prev, [fileId]: 'idle' })), 3000)
     } catch {

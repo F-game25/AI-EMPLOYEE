@@ -83,8 +83,7 @@ function BlockedIPRow({ item, onUnblock }) {
   async function handleUnblock() {
     setBusy(true)
     try {
-      const r = await fetch(`${API}/blocked-ips/${encodeURIComponent(item.ip)}`, { method: 'DELETE' })
-      if (!r.ok) throw new Error('Failed')
+      await api.delete(`${API}/blocked-ips/${encodeURIComponent(item.ip)}`)
       toastSuccess(`Unblocked ${item.ip}`)
       onUnblock(item.ip)
     } catch {
@@ -172,7 +171,7 @@ function ThreatTab() {
 
   async function toggleStrict() {
     try {
-      await fetch(`${API}/strict-mode`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !strict }) })
+      await api.post(`${API}/strict-mode`, { enabled: !strict })
       setStrict(s => !s)
       toastSuccess(`Strict mode ${!strict ? 'enabled' : 'disabled'}`)
     } catch { toastError('Failed to toggle strict mode') }
@@ -181,7 +180,7 @@ function ThreatTab() {
   async function rotateJWT() {
     setRotating(true)
     try {
-      await fetch(`${API}/rotate-jwt`, { method: 'POST' })
+      await api.post(`${API}/rotate-jwt`)
       toastSuccess('JWT secret rotated — all sessions invalidated')
     } catch { toastError('JWT rotation failed') } finally { setRotating(false) }
   }
@@ -297,7 +296,7 @@ function HITLCard({ item, onApprove, onReject }) {
   const act = async (action) => {
     setBusy(true)
     try {
-      await fetch(`${API}/hitl/${item.id}/${action}`, { method: 'POST' })
+      await api.post(`${API}/hitl/${item.id}/${action}`)
       action === 'approve' ? onApprove(item.id) : onReject(item.id)
       toastSuccess(`Request ${action}d`)
     } catch { toastError(`Failed to ${action}`) } finally { setBusy(false) }
@@ -406,17 +405,11 @@ function modeClass(mode) {
 }
 
 async function runBlacklightTool(toolId, input) {
-  const token = sessionStorage.getItem('ai_jwt')
-  const res = await fetch('/api/blacklight/tools/run', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ tool_id: toolId, input }),
-  })
-  const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))
-  return data
+  try {
+    return await api.post('/api/blacklight/tools/run', { tool_id: toolId, input })
+  } catch (e) {
+    return { ok: false, error: e.message || 'request failed' }
+  }
 }
 
 function ToolCard({ tool, selected, onSelect, networkPolicy }) {
@@ -452,8 +445,8 @@ function BlacklightToolsTab() {
   const [policyLoading, setPolicyLoading] = React.useState(false)
 
   React.useEffect(() => {
-    fetch('/api/blacklight/policy', { headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } })
-      .then(r => r.json())
+    // Was reading localStorage('token') (wrong key) → always 401. api client uses ai_jwt.
+    api.get('/api/blacklight/policy')
       .then(d => setNetworkPolicy(!!d.network_osint_enabled))
       .catch(() => {})
   }, [])
@@ -461,14 +454,9 @@ function BlacklightToolsTab() {
   async function toggleNetworkPolicy() {
     setPolicyLoading(true)
     try {
-      const res = await fetch('/api/blacklight/policy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
-        body: JSON.stringify({ network_osint_enabled: !networkPolicy })
-      })
-      const d = await res.json()
+      const d = await api.post('/api/blacklight/policy', { network_osint_enabled: !networkPolicy })
       if (d.ok) setNetworkPolicy(d.policy.network_osint_enabled)
-    } finally {
+    } catch { /* leave unchanged */ } finally {
       setPolicyLoading(false)
     }
   }

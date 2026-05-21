@@ -3,6 +3,7 @@ import { useAgentStore } from '../../store/agentStore'
 import { useAppStore } from '../../store/appStore'
 import { KPITile, StatusPill } from '../nexus-ui'
 import LoadingSkeleton from '../nexus-ui/LoadingSkeleton'
+import api from '../../api/client'
 import './AgentsPage.css'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -161,13 +162,12 @@ function DetailDrawer({ agent, onClose, contract }) {
     setBusy(action)
     try {
       if (action === 'grade') {
-        const r = await fetch(`/api/agents/${agent.id}/grade`)
-        const d = r.ok ? await r.json() : null
+        const d = await api.get(`/api/agents/${agent.id}/grade`)
         if (d) setGrade(d.grade ?? d.score ?? '—')
       } else if (action === 'reinforce') {
-        await fetch(`/api/agents/${agent.id}/reinforce`, { method: 'POST' })
+        await api.post(`/api/agents/${agent.id}/reinforce`)
       } else if (action === 'ladder') {
-        await fetch(`/api/agents/${agent.id}/ladder/advance`, { method: 'POST' })
+        await api.post(`/api/agents/${agent.id}/ladder/advance`)
       }
     } catch {/* swallow — UI doesn't block on agent endpoints */}
     finally { setBusy(null) }
@@ -311,12 +311,10 @@ export const AgentsPage = () => {
   const [forgeAgents,   setForgeAgents]   = useState([])
 
   useEffect(() => {
-    fetch('/api/system/manifest', { headers: authHeaders() })
-      .then(r => r.ok ? r.json() : null)
+    api.get('/api/system/manifest')
       .then(data => data && setManifest(data))
       .catch(() => {})
-    fetch('/api/forge/agents/blueprints', { headers: authHeaders() })
-      .then(r => r.ok ? r.json() : null)
+    api.get('/api/forge/agents/blueprints')
       .then(data => {
         const list = Array.isArray(data?.blueprints) ? data.blueprints : []
         setForgeAgents(list.filter(item => item.registration_status === 'registered').map((item, index) => normalizeAgent({
@@ -342,8 +340,7 @@ export const AgentsPage = () => {
     const source = storeAgents.length > 0 ? storeAgents : (appAgents || [])
     if (source.length > 0) { setAgents(mergeAgents(forgeAgents, source)); setLoading(false); return }
 
-    fetch('/api/agents', { headers: authHeaders() })
-      .then(r => r.ok ? r.json() : null)
+    api.get('/api/agents')
       .then(data => {
         const list = Array.isArray(data?.agents) ? data.agents : []
         setAgents(mergeAgents(forgeAgents, list))
