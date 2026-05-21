@@ -9,7 +9,7 @@ const ROUTES = [
   'tasks', 'workflows', 'infrastructure', 'deployments',
   'neural-graph', 'knowledge', 'trends', 'research', 'recon',
   'policies', 'permissions', 'sandboxes', 'audit', 'security', 'approvals', 'proof',
-  'setup', 'integrations', 'models', 'runtime', 'api-catalog', 'user-views', 'settings',
+  'setup', 'integrations', 'models', 'runtime', 'api-catalog', 'user-views', 'perspectives', 'settings',
   'workspace', 'operations', 'intelligence', 'ascend-forge', 'system',
 ]
 

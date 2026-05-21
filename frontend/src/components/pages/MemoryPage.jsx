@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Panel, SectionLabel, StatusPill, EmptyState, ErrorState } from '../nexus-ui'
 import LoadingSkeleton from '../nexus-ui/LoadingSkeleton'
 import { useLiveData } from '../../hooks/useLiveData'
+import { useAppStore } from '../../store/appStore'
 import { toastSuccess, toastError, toastWarn } from '../nexus-ui/Toaster'
 import StandingTopicsPanel from '../knowledge/StandingTopicsPanel'
 import PendingReviewQueue from '../memory/PendingReviewQueue'
@@ -42,6 +43,7 @@ function layoutNodes(nodes) {
 }
 
 function MemoryGraph() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const rawNodes = useBrainStore(s => s.nodes)
   const rawLinks = useBrainStore(s => s.links)
   const [selected, setSelected] = useState(null)
@@ -56,7 +58,13 @@ function MemoryGraph() {
   const selNode = selected ? nodes.find(n => n.id === selected) : null
 
   if (!nodes.length) return (
-    <EmptyState icon="◈" title="No graph data yet" sub="Brain activates when tasks run" />
+    <EmptyState
+      icon="◈"
+      title="No graph data yet"
+      sub="Brain graph data appears after tasks, memory writes, or project context ingestion."
+      action="Run Task"
+      onAction={() => setActiveSection('tasks')}
+    />
   )
 
   return (
@@ -253,6 +261,7 @@ function PersonalFacts() {
 }
 
 function ConversationHistory() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const { data, loading, error, refresh } = useLiveData({
     endpoint: `${API}/conversations`,
     transform: (d) => d.conversations || [],
@@ -288,7 +297,15 @@ function ConversationHistory() {
       <Panel title="Conversation History">
         {loading && <LoadingSkeleton variant="list" rows={4} />}
         {error && <ErrorState title="Conversation memory degraded" message={error} />}
-        {!loading && !error && !filtered.length && <EmptyState icon="◷" title="No conversations found" sub="Completed sessions will appear here once the main AI records them." />}
+        {!loading && !error && !filtered.length && (
+          <EmptyState
+            icon="◷"
+            title="No conversations found"
+            sub="Completed sessions will appear here once the main AI records them."
+            action="Open Chat"
+            onAction={() => setActiveSection('nexus')}
+          />
+        )}
         <div className="mem-convos">
           {filtered.map((conversation) => (
             <div key={conversation.id || conversation.title} className="mem-convo">
@@ -317,6 +334,7 @@ function ConversationHistory() {
 }
 
 function SemanticStore() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [status, setStatus] = useState(null)
@@ -374,7 +392,15 @@ function SemanticStore() {
           <button type="button" className="mem-btn" onClick={requestReindex}>Request Reindex</button>
         </form>
         {status?.state === 'degraded' && <ErrorState title="Semantic search degraded" message={status.error} />}
-        {status?.state === 'empty' && <EmptyState icon="⬡" title="No semantic matches" sub="Try another query or ingest project/context memory first." />}
+        {status?.state === 'empty' && (
+          <EmptyState
+            icon="⬡"
+            title="No semantic matches"
+            sub="Try another query or check memory/vector-store setup before relying on semantic recall."
+            action="Open Setup"
+            onAction={() => setActiveSection('setup')}
+          />
+        )}
         <div className="mem-convos">
           {results.map((item) => (
             <div key={item.id || item.title} className="mem-convo">

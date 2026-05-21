@@ -29,12 +29,13 @@ function Sparkline({ data = [], color = 'var(--nx-gold)', height = 36 }) {
     const canvas = ref.current
     if (!canvas || !data.length) return
     const ctx = canvas.getContext('2d')
+    if (!ctx) return
     const w = canvas.width, h = canvas.height
     const max = Math.max(...data, 1)
     ctx.clearRect(0, 0, w, h)
     ctx.beginPath()
     data.forEach((v, i) => {
-      const x = (i / (data.length - 1)) * w
+      const x = data.length > 1 ? (i / (data.length - 1)) * w : w / 2
       const y = h - (v / max) * (h - 4)
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
     })

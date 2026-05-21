@@ -72,12 +72,39 @@
 }
 
 .ux-role-card,
-.ux-guidance {
+.ux-guidance,
+.ux-perspective-detail {
   background: var(--nx-surface, #0d0d18);
   border: 1px solid var(--nx-border, #242434);
   border-left: 3px solid rgba(229,199,107,0.28);
   border-radius: 8px;
   padding: 16px;
+}
+
+.ux-perspective-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ux-perspective-tabs button {
+  background: transparent;
+  border: 1px solid var(--nx-border, #242434);
+  border-radius: 6px;
+  color: var(--nx-text-muted, #8a8a96);
+  cursor: pointer;
+  font-family: var(--nx-font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 8px 10px;
+  text-transform: uppercase;
+}
+
+.ux-perspective-tabs button:hover,
+.ux-perspective-tabs button.is-active {
+  background: rgba(229,199,107,0.08);
+  border-color: rgba(229,199,107,0.28);
+  color: var(--nx-gold, #e5c76b);
 }
 
 .ux-role-card--live { border-left-color: var(--nx-success, #22c55e); }
@@ -87,6 +114,10 @@
 .ux-role-card--not_configured,
 .ux-role-card--unavailable,
 .ux-role-card--error { border-left-color: var(--nx-danger, #ef4444); }
+
+.ux-role-card--active {
+  box-shadow: 0 0 0 1px rgba(229,199,107,0.2) inset;
+}
 
 .ux-role-head {
   align-items: flex-start;
@@ -102,11 +133,44 @@
 }
 
 .ux-role-card p,
-.ux-guidance p {
+.ux-guidance p,
+.ux-perspective-detail p {
   color: var(--nx-text-muted, #8a8a96);
   font-size: 11px;
   line-height: 1.55;
   margin: 6px 0 0;
+}
+
+.ux-readiness {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: auto auto 1fr;
+  margin-top: 14px;
+}
+
+.ux-readiness span {
+  color: var(--nx-text-dim, #666672);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.ux-readiness b {
+  color: var(--nx-gold, #e5c76b);
+  font-size: 11px;
+}
+
+.ux-readiness__bar {
+  background: rgba(255,255,255,0.06);
+  border-radius: 999px;
+  height: 5px;
+  overflow: hidden;
+}
+
+.ux-readiness__bar i {
+  background: linear-gradient(90deg, rgba(229,199,107,0.4), var(--nx-gold, #e5c76b));
+  display: block;
+  height: 100%;
 }
 
 .ux-status,
@@ -197,6 +261,132 @@
   justify-content: space-between;
 }
 
+.ux-perspective-detail--live { border-left-color: var(--nx-success, #22c55e); }
+.ux-perspective-detail--dry_run,
+.ux-perspective-detail--fallback,
+.ux-perspective-detail--mock { border-left-color: var(--nx-gold, #e5c76b); }
+.ux-perspective-detail--not_configured,
+.ux-perspective-detail--unavailable,
+.ux-perspective-detail--error { border-left-color: var(--nx-danger, #ef4444); }
+
+.ux-perspective-detail__head {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.ux-perspective-detail__head h2 {
+  font-size: 20px;
+  letter-spacing: 0.06em;
+  margin: 4px 0 0;
+  text-transform: uppercase;
+}
+
+.ux-perspective-score {
+  border: 1px solid rgba(229,199,107,0.18);
+  border-radius: 8px;
+  min-width: 110px;
+  padding: 10px;
+  text-align: right;
+}
+
+.ux-perspective-score b {
+  color: var(--nx-gold, #e5c76b);
+  display: block;
+  font-size: 22px;
+}
+
+.ux-perspective-score span {
+  color: var(--nx-text-muted, #8a8a96);
+  display: block;
+  font-size: 9px;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+.ux-detail-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.ux-detail-panel {
+  background: rgba(0,0,0,0.2);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.ux-detail-panel h3 {
+  color: var(--nx-gold, #e5c76b);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.ux-detail-panel ul {
+  color: var(--nx-text-muted, #8a8a96);
+  font-size: 10px;
+  line-height: 1.5;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.ux-workflow-row {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 6px;
+  color: var(--nx-text, #e4e4f0);
+  cursor: pointer;
+  display: block;
+  font-family: var(--nx-font-mono, monospace);
+  margin-bottom: 8px;
+  padding: 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.ux-workflow-row:hover {
+  border-color: rgba(229,199,107,0.28);
+}
+
+.ux-workflow-row span,
+.ux-workflow-row small,
+.ux-blocker-row span,
+.ux-blocker-row small {
+  display: block;
+}
+
+.ux-workflow-row span {
+  color: var(--nx-gold, #e5c76b);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.ux-workflow-row small,
+.ux-blocker-row small,
+.ux-muted {
+  color: var(--nx-text-muted, #8a8a96);
+  font-size: 10px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.ux-blocker-row {
+  border-bottom: 1px solid rgba(255,255,255,0.045);
+  padding: 0 0 8px;
+  margin-bottom: 8px;
+}
+
+.ux-blocker-row span {
+  color: var(--nx-text, #e4e4f0);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
 .ux-error {
   background: rgba(239,68,68,0.06);
   border: 1px solid rgba(239,68,68,0.2);
@@ -208,13 +398,19 @@
 
 @media (max-width: 920px) {
   .ux-header,
-  .ux-guidance {
+  .ux-guidance,
+  .ux-perspective-detail__head {
     align-items: stretch;
     flex-direction: column;
   }
 
   .ux-summary,
-  .ux-grid {
+  .ux-grid,
+  .ux-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ux-perspective-score {
+    text-align: left;
   }
 }

@@ -173,6 +173,57 @@
   letter-spacing: var(--nx-tracking-cap);
 }
 
+.swarm-empty--guided {
+  align-items: center;
+  background: rgba(229,199,107,0.035);
+  border: 1px solid rgba(229,199,107,0.16);
+  border-radius: var(--nx-r-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--nx-s-8);
+}
+
+.swarm-empty__title {
+  color: var(--nx-gold);
+  font-size: 12px;
+}
+
+.swarm-empty__detail {
+  color: var(--nx-text-muted);
+  font-size: 11px;
+  letter-spacing: 0;
+  line-height: 1.45;
+  max-width: 520px;
+  text-transform: none;
+}
+
+.swarm-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.swarm-empty__actions button {
+  background: transparent;
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-r-sm);
+  color: var(--nx-text-muted);
+  cursor: pointer;
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  letter-spacing: var(--nx-tracking-cap);
+  padding: 7px 10px;
+  text-transform: uppercase;
+}
+
+.swarm-empty__actions button:hover {
+  border-color: var(--nx-border-strong);
+  color: var(--nx-gold);
+}
+
 /* ── Agent tile ─────────────────────────────────────────────────────── */
 .swarm-tile {
   position: relative;

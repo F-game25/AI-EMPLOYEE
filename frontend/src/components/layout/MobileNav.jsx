@@ -59,7 +59,7 @@ const MORE_NAV = [
   { id: 'proof',          label: 'Proof Center' },
   { id: 'setup',          label: 'Setup Center' },
   { id: 'api-catalog',    label: 'API Catalog' },
-  { id: 'user-views',     label: 'User Views' },
+  { id: 'user-views',     label: 'Perspectives' },
   { id: 'settings',       label: 'Settings' },
 ]
 

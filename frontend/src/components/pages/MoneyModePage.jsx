@@ -4,6 +4,7 @@ import KPITile from '../nexus-ui/KPITile'
 import StatusPill from '../nexus-ui/StatusPill'
 import { SectionLabel } from '../nexus-ui/SectionLabel'
 import { EmptyState, ErrorState } from '../nexus-ui'
+import { useAppStore } from '../../store/appStore'
 import api from '../../api/client'
 import TaskComposer, { MONEY_PRESETS } from '../core/TaskComposer'
 import './MoneyModePage.css'
@@ -110,6 +111,7 @@ function WalletPanel({ wallet }) {
 }
 
 export default function MoneyModePage() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const { loading, error, data } = useEconomyData()
   const summary = data?.summary || {}
   const ledger = data?.ledger?.items || data?.ledger?.ledger || []
@@ -124,6 +126,7 @@ export default function MoneyModePage() {
   const profit = summary.profit ?? (revenue - cost)
   const tokenCost = summary.token_cost || costs.reduce((acc, item) => acc + (Number(item.cost) || 0), 0)
   const roi = cost > 0 ? (profit / cost) * 100 : 0
+  const needsFirstRunSetup = !loading && !tasks.length && !pipelines.length && !opportunities.length && !ledger.length
 
   return (
     <div className="ecc-page" role="main" aria-label="Economy Command Center">
@@ -142,6 +145,28 @@ export default function MoneyModePage() {
 
       {loading && <EmptyState icon="..." title="Loading economy state" />}
       {error && <ErrorState title="Economy degraded" message={error} />}
+      {needsFirstRunSetup && (
+        <Panel
+          title="MONEY MODE SETUP REQUIRED"
+          icon="!"
+          tone="gold"
+          size="compact"
+          actions={<StatusPill label="NO LIVE SOURCES" tone="warn" size="sm" />}
+        >
+          <div className="ecc-guided-setup">
+            <div>
+              <strong>Money Mode has no active task sources, pipelines, opportunities, or ledger proof yet.</strong>
+              <span>Configure providers first, then run a safe draft task. Publishing, outreach, wallet use, spending, and paid-task acceptance stay approval-gated.</span>
+            </div>
+            <div className="ecc-guided-setup__actions" aria-label="Money Mode setup actions">
+              <button className="ecc-action-btn ecc-action-btn--primary" onClick={() => setActiveSection('setup')}>Open Setup</button>
+              <button className="ecc-action-btn" onClick={() => setActiveSection('integrations')}>Check Integrations</button>
+              <button className="ecc-action-btn" onClick={() => setActiveSection('approvals')}>Approval Inbox</button>
+              <button className="ecc-action-btn" onClick={() => setActiveSection('proof')}>Proof Center</button>
+            </div>
+          </div>
+        </Panel>
+      )}
 
       <section className="ecc-kpi-strip" aria-label="Key performance indicators">
         <KPITile label="TRACKED VALUE" value={<span className="ecc-tabular">{fmt$(revenue)}</span>} icon="$" iconTone="gold" accent hover sub="persisted ledger" />
@@ -170,7 +195,12 @@ export default function MoneyModePage() {
                 <StatusPill label={(task.state || 'draft').toUpperCase()} tone={task.risk === 'dangerous' ? 'warn' : 'idle'} size="sm" />
               </div>
             ))}
-            {!tasks.length && <span className="ecc-native-empty">No task sources are active. Discovery is disabled until configured by the owner.</span>}
+            {!tasks.length && (
+              <div className="ecc-native-empty ecc-native-empty--guided">
+                <span>No task sources are active. Discovery is disabled until configured by the owner.</span>
+                <button className="ecc-action-btn ecc-action-btn--sm" onClick={() => setActiveSection('integrations')}>Configure Sources</button>
+              </div>
+            )}
           </div>
         </Panel>
         <WalletPanel wallet={data?.wallet} />

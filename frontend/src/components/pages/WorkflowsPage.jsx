@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Panel, SectionLabel, StatusPill, EmptyState, ErrorState } from '../nexus-ui'
 import useLiveData from '../../hooks/useLiveData'
+import { useAppStore } from '../../store/appStore'
 import { toastSuccess, toastError, toastWarn } from '../nexus-ui/Toaster'
 import './WorkflowsPage.css'
 
@@ -25,10 +26,30 @@ async function request(path, options = {}) {
   return data
 }
 
-function WorkflowCanvas({ workflows, runs, onSelect }) {
+function WorkflowEmpty({ title, sub, primary, onPrimary, secondary, onSecondary }) {
+  return (
+    <div className="wf-guided-empty">
+      <EmptyState icon="[]" title={title} sub={sub} action={primary} onAction={onPrimary} />
+      {secondary && onSecondary && (
+        <button className="wf-btn" type="button" onClick={onSecondary}>{secondary}</button>
+      )}
+    </div>
+  )
+}
+
+function WorkflowCanvas({ workflows, runs, onSelect, onCreate, onSetup }) {
   const items = runs.length ? runs : workflows
   if (!items.length) {
-    return <EmptyState icon="[]" title="No workflow executions" sub="Instantiate a template or create a workflow draft to populate the live canvas." />
+    return (
+      <WorkflowEmpty
+        title="No workflow executions"
+        sub="Create a workflow draft or run setup if workflow templates and skills are not available."
+        primary="Create Workflow"
+        onPrimary={onCreate}
+        secondary="Open Setup"
+        onSecondary={onSetup}
+      />
+    )
   }
   return (
     <div className="wf-canvas-wrap">
@@ -98,9 +119,18 @@ function WorkflowDetail({ item, onRun }) {
   )
 }
 
-function TemplatesPanel({ templates, onUse }) {
+function TemplatesPanel({ templates, onUse, onCreate }) {
   const [expanded, setExpanded] = useState(null)
-  if (!templates.length) return <EmptyState icon="[]" title="No workflow templates" sub="Template registry is empty." />
+  if (!templates.length) {
+    return (
+      <WorkflowEmpty
+        title="No workflow templates"
+        sub="Template registry is empty. Create a supervised workflow draft while setup checks provider availability."
+        primary="Open Builder"
+        onPrimary={onCreate}
+      />
+    )
+  }
   return (
     <div className="wf-templates__grid">
       {templates.map((tpl) => (
@@ -136,8 +166,17 @@ function TemplatesPanel({ templates, onUse }) {
   )
 }
 
-function SkillPacksPanel({ packs }) {
-  if (!packs.length) return <EmptyState icon="[]" title="No skill packs loaded" sub="The global skills library did not return any packs." />
+function SkillPacksPanel({ packs, onSetup }) {
+  if (!packs.length) {
+    return (
+      <WorkflowEmpty
+        title="No skill packs loaded"
+        sub="The global skills library did not return any packs. Check capability status before running skill-dependent workflows."
+        primary="Open Setup"
+        onPrimary={onSetup}
+      />
+    )
+  }
   return (
     <div className="wf-skillpacks">
       {packs.map((pack) => (
@@ -158,8 +197,17 @@ function SkillPacksPanel({ packs }) {
   )
 }
 
-function FinancePanel({ workflows }) {
-  if (!workflows.length) return <EmptyState icon="[]" title="No finance workflows" sub="Finance templates are unavailable or disabled." />
+function FinancePanel({ workflows, onEconomy }) {
+  if (!workflows.length) {
+    return (
+      <WorkflowEmpty
+        title="No finance workflows"
+        sub="Finance templates are unavailable or disabled. Use Money Mode for approval-gated revenue work."
+        primary="Open Money Mode"
+        onPrimary={onEconomy}
+      />
+    )
+  }
   async function runFinance(id) {
     try {
       await request(`/api/finance/workflows/${encodeURIComponent(id)}/run`, {
@@ -288,6 +336,7 @@ function BuilderPanel({ skills, onCreated }) {
 }
 
 export default function WorkflowsPage() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const [activeTab, setActiveTab] = useState('canvas')
   const [selected, setSelected] = useState(null)
   const [templates, setTemplates] = useState([])
@@ -364,13 +413,19 @@ export default function WorkflowsPage() {
         {error && <ErrorState title="Workflow registry degraded" message={error} />}
         {!loading && !error && activeTab === 'canvas' && (
           <>
-            <WorkflowCanvas workflows={workflows} runs={runs} onSelect={setSelected} />
+            <WorkflowCanvas
+              workflows={workflows}
+              runs={runs}
+              onSelect={setSelected}
+              onCreate={() => setActiveTab('builder')}
+              onSetup={() => setActiveSection('setup')}
+            />
             <WorkflowDetail item={selected} onRun={runWorkflow} />
           </>
         )}
-        {activeTab === 'templates' && <div className="wf-templates"><TemplatesPanel templates={templates} onUse={useTemplate} /></div>}
-        {activeTab === 'skills' && <div className="wf-templates"><SkillPacksPanel packs={packs} /></div>}
-        {activeTab === 'finance' && <div className="wf-templates"><FinancePanel workflows={finance} /></div>}
+        {activeTab === 'templates' && <div className="wf-templates"><TemplatesPanel templates={templates} onUse={useTemplate} onCreate={() => setActiveTab('builder')} /></div>}
+        {activeTab === 'skills' && <div className="wf-templates"><SkillPacksPanel packs={packs} onSetup={() => setActiveSection('setup')} /></div>}
+        {activeTab === 'finance' && <div className="wf-templates"><FinancePanel workflows={finance} onEconomy={() => setActiveSection('economy')} /></div>}
         {activeTab === 'business' && <BusinessPanel templates={businessTemplates} />}
         {activeTab === 'builder' && <div className="wf-templates"><BuilderPanel skills={flatSkills} onCreated={refresh} /></div>}
       </div>

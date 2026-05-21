@@ -105,6 +105,7 @@ const PAGES = {
   'api-catalog':    ApiCatalogPage,
   'user-views':     UserExperienceCenter,
   'roles':          UserExperienceCenter,
+  'perspectives':   UserExperienceCenter,
 }
 
 function DashboardMountedSignal({ section }) {

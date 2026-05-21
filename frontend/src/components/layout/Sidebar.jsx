@@ -217,7 +217,7 @@ const NAV_GROUPS = [
       },
       {
         id: 'user-views',
-        label: 'User Views',
+        label: 'Perspectives',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="5" r="2"/><circle cx="11" cy="5" r="2"/><path d="M2 14c.4-2.4 2-4 4-4s3.6 1.6 4 4"/><path d="M8.5 10.5c.7-.4 1.5-.5 2.5-.5 1.8 0 3.2 1.4 3.5 4"/></svg>,
       },
       {

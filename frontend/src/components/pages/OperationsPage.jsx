@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Panel, SectionLabel, StatusPill, EmptyState, ErrorState } from '../nexus-ui'
 import { useLiveData } from '../../hooks/useLiveData'
+import { useAppStore } from '../../store/appStore'
 import { toastSuccess, toastError, toastWarn } from '../nexus-ui/Toaster'
 import './OperationsPage.css'
 
@@ -87,9 +88,28 @@ function TaskCard({ task, onInspect, onRefresh }) {
   )
 }
 
-function Board({ tasks, onInspect, onRefresh }) {
+function GuidedTaskEmpty({ onCreate, onSetup, onProof }) {
+  return (
+    <div className="ops-guided-empty">
+      <EmptyState
+        icon="⬡"
+        title="No live tasks"
+        sub="Run a safe task to verify the canonical execution path, or check setup if the gateway is not ready."
+        action="Create Task"
+        onAction={onCreate}
+      />
+      <div className="ops-guided-empty__actions" aria-label="Task setup actions">
+        <button className="ops-btn ops-btn--primary" onClick={onCreate}>Create Task</button>
+        <button className="ops-btn" onClick={onSetup}>Run Setup Check</button>
+        <button className="ops-btn" onClick={onProof}>View Proof Center</button>
+      </div>
+    </div>
+  )
+}
+
+function Board({ tasks, onInspect, onRefresh, onCreate, onSetup, onProof }) {
   if (!tasks.length) {
-    return <EmptyState icon="⬡" title="No live tasks" sub="Create a task or run a workflow to populate mission control." />
+    return <GuidedTaskEmpty onCreate={onCreate} onSetup={onSetup} onProof={onProof} />
   }
   return (
     <div className="ops-kanban">
@@ -114,8 +134,18 @@ function Board({ tasks, onInspect, onRefresh }) {
   )
 }
 
-function TaskTable({ tasks, onInspect }) {
-  if (!tasks.length) return <EmptyState icon="◈" title="No task rows" sub="The task gateway has no records yet." />
+function TaskTable({ tasks, onInspect, onCreate }) {
+  if (!tasks.length) {
+    return (
+      <EmptyState
+        icon="◈"
+        title="No task rows"
+        sub="The task gateway has no records yet. Run a first task to create visible trace and proof output."
+        action="Create Task"
+        onAction={onCreate}
+      />
+    )
+  }
   return (
     <Panel title="Task List">
       <div className="ops-sched-head">
@@ -293,6 +323,7 @@ function InspectModal({ task, onClose }) {
 }
 
 export default function OperationsPage() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const [tab, setTab] = useState('board')
   const [inspecting, setInspecting] = useState(null)
   const [showForm, setShowForm] = useState(false)
@@ -329,6 +360,11 @@ export default function OperationsPage() {
       setSubmitting(false)
     }
   }
+  function openCreateTask() {
+    setTab('create')
+    setShowForm(false)
+  }
+
   const completed = tasks.filter((task) => task.status === 'completed').length
   const queued = tasks.filter((task) => ['incoming', 'planning', 'pending'].includes(task.status)).length
   const failed = tasks.filter((task) => task.status === 'failed').length
@@ -401,11 +437,20 @@ export default function OperationsPage() {
 
       {loading && <EmptyState icon="…" title="Loading task gateway" />}
       {error && <ErrorState title="Task gateway degraded" message={error} />}
-      {!loading && !error && tab === 'board' && <Board tasks={tasks} onInspect={setInspecting} onRefresh={refresh} />}
-      {!loading && !error && tab === 'list' && <TaskTable tasks={tasks} onInspect={setInspecting} />}
+      {!loading && !error && tab === 'board' && (
+        <Board
+          tasks={tasks}
+          onInspect={setInspecting}
+          onRefresh={refresh}
+          onCreate={openCreateTask}
+          onSetup={() => setActiveSection('setup')}
+          onProof={() => setActiveSection('proof')}
+        />
+      )}
+      {!loading && !error && tab === 'list' && <TaskTable tasks={tasks} onInspect={setInspecting} onCreate={openCreateTask} />}
       {tab === 'create' && <CreateTask onCreated={refresh} />}
       {tab === 'scheduler' && <Scheduler />}
-      {!loading && !error && tab === 'history' && <TaskTable tasks={history} onInspect={setInspecting} />}
+      {!loading && !error && tab === 'history' && <TaskTable tasks={history} onInspect={setInspecting} onCreate={openCreateTask} />}
 
       <InspectModal task={inspecting} onClose={() => setInspecting(null)} />
     </div>

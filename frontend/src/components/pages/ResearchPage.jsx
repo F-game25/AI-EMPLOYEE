@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useCognitiveStore } from '../../store/cognitiveStore'
+import { useAppStore } from '../../store/appStore'
 import { Panel, SectionLabel } from '../nexus-ui'
 import ResearchActivityPanel from '../dashboard/ResearchActivityPanel'
 import './ResearchPage.css'
@@ -195,6 +196,21 @@ function RPSourceSelection({ candidates, selected, setSelected, filterType, setF
   )
 }
 
+function ResearchGuidance({ title, detail, primary, onPrimary, secondary, onSecondary }) {
+  return (
+    <div className="rp-guidance" role="status">
+      <div>
+        <b>{title}</b>
+        <span>{detail}</span>
+      </div>
+      <div className="rp-guidance__actions">
+        {primary && <button className="rp-primary-btn rp-primary-btn--compact" onClick={onPrimary}>{primary}</button>}
+        {secondary && <button className="rp-secondary-btn" onClick={onSecondary}>{secondary}</button>}
+      </div>
+    </div>
+  )
+}
+
 // ── Phase 3: Execute + Live Log + Results ────────────────────────────────────
 function RPExecutePanel({ depth, setDepth, selectedCount, totalCount, onExecute, phase, sessionId, progressLog, results }) {
   return (
@@ -258,6 +274,7 @@ function RPExecutePanel({ depth, setDepth, selectedCount, totalCount, onExecute,
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function ResearchPage() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const [phase, setPhase]             = useState('query')      // 'query' | 'select' | 'executing' | 'done'
   const [query, setQuery]             = useState('')
   const [candidates, setCandidates]   = useState([])
@@ -268,22 +285,27 @@ export default function ResearchPage() {
   const [executing, setExecuting]     = useState(false)
   const [results, setResults]         = useState(null)
   const [progressLog, setProgressLog] = useState([])
+  const [error, setError]             = useState('')
 
   const onDiscover = async () => {
     if (!query.trim()) return
     setExecuting(true)
+    setError('')
     try {
-      const r = await fetch('/api/research/discover', {
+      const res = await fetch('/api/research/discover', {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ query, max_sources: 12 }),
-      }).then(r => r.json())
+      })
+      const r = await res.json()
+      if (!res.ok || r.error) throw new Error(r.error || r.message || 'Research discovery failed')
       const sources = r.sources || []
       setCandidates(sources)
       setSelected(new Set(sources.map(s => s.id)))   // default: all selected
       setPhase('select')
     } catch (e) {
       console.error('discover failed', e)
+      setError(e.message || 'Research discovery failed')
     } finally {
       setExecuting(false)
     }
@@ -294,8 +316,9 @@ export default function ResearchPage() {
     const selectedSources = candidates.filter(s => selected.has(s.id))
     setExecuting(true)
     setProgressLog([])
+    setError('')
     try {
-      const r = await fetch('/api/research/execute', {
+      const res = await fetch('/api/research/execute', {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
@@ -304,11 +327,14 @@ export default function ResearchPage() {
           selected_urls: selectedSources.map(s => s.url),
           depth,
         }),
-      }).then(r => r.json())
+      })
+      const r = await res.json()
+      if (!res.ok || r.error) throw new Error(r.error || r.message || 'Research execution failed')
       setSessionId(r.session_id)
       setPhase('executing')
     } catch (e) {
       console.error('execute failed', e)
+      setError(e.message || 'Research execution failed')
       setExecuting(false)
     }
   }
@@ -322,6 +348,7 @@ export default function ResearchPage() {
     setResults(null)
     setProgressLog([])
     setExecuting(false)
+    setError('')
   }
 
   // WS listener for task:research_* events
@@ -354,12 +381,32 @@ export default function ResearchPage() {
         locked={phase !== 'query'}
         suggested={SUGGESTED}
       />
+      {error && (
+        <ResearchGuidance
+          title="Research is blocked or degraded"
+          detail={error}
+          primary="Open Setup"
+          onPrimary={() => setActiveSection('setup')}
+          secondary="Check Proof"
+          onSecondary={() => setActiveSection('proof')}
+        />
+      )}
       {(phase === 'select' || phase === 'executing' || phase === 'done') && (
         <RPSourceSelection
           candidates={candidates}
           selected={selected} setSelected={setSelected}
           filterType={filterType} setFilterType={setFilterType}
           locked={phase !== 'select'}
+        />
+      )}
+      {phase === 'select' && candidates.length === 0 && !error && (
+        <ResearchGuidance
+          title="No sources were discovered"
+          detail="Try a broader query or check integrations/model setup before relying on research output."
+          primary="Open Setup"
+          onPrimary={() => setActiveSection('setup')}
+          secondary="New Research"
+          onSecondary={onReset}
         />
       )}
       {(phase === 'select' || phase === 'executing' || phase === 'done') && (

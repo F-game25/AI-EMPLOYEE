@@ -296,11 +296,31 @@ function DetailDrawer({ agent, onClose, contract }) {
   )
 }
 
+function AgentsEmpty({ filtered, onSpawn, onTasks, onSetup, onShowAll }) {
+  return (
+    <div className="swarm-empty swarm-empty--guided">
+      <div className="swarm-empty__title">{filtered ? 'NO AGENTS MATCH THIS FILTER' : 'NO AGENTS AVAILABLE'}</div>
+      <div className="swarm-empty__detail">
+        {filtered
+          ? 'Clear the filter or check setup if expected agents are missing.'
+          : 'Spawn an agent or run setup to verify the agent registry and Python backend.'}
+      </div>
+      <div className="swarm-empty__actions">
+        {filtered && <button type="button" onClick={onShowAll}>Show All</button>}
+        <button type="button" onClick={onSpawn}>Spawn Agent</button>
+        <button type="button" onClick={onTasks}>Run Task</button>
+        <button type="button" onClick={onSetup}>Open Setup</button>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export const AgentsPage = () => {
   const storeAgents = useAgentStore(s => s.agents)
   const appAgents   = useAppStore(s => s.agents)
+  const setActiveSection = useAppStore(s => s.setActiveSection)
 
   const [agents,        setAgents]        = useState([])
   const [loading,       setLoading]       = useState(true)
@@ -429,7 +449,13 @@ export const AgentsPage = () => {
             />
           ))}
           {!loading && visible.length === 0 && (
-            <div className="swarm-empty">NO AGENTS MATCH THIS FILTER</div>
+            <AgentsEmpty
+              filtered={agents.length > 0}
+              onSpawn={handleSpawn}
+              onTasks={() => setActiveSection('tasks')}
+              onSetup={() => setActiveSection('setup')}
+              onShowAll={() => handleTabChange('ALL')}
+            />
           )}
         </div>
 

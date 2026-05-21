@@ -304,6 +304,66 @@
   font-style: italic;
 }
 
+.wsp-guided-empty {
+  align-items: center;
+  border: 1px solid rgba(229,199,107,0.16);
+  border-radius: 8px;
+  background: rgba(229,199,107,0.035);
+  color: var(--nx-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  min-height: 150px;
+  padding: 16px;
+  text-align: center;
+}
+
+.wsp-preview-area > .wsp-guided-empty {
+  height: 100%;
+  min-height: 320px;
+}
+
+.wsp-guided-empty__title {
+  color: var(--nx-gold);
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wsp-guided-empty__detail {
+  font-size: 11px;
+  line-height: 1.5;
+  max-width: 520px;
+}
+
+.wsp-guided-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.wsp-guided-empty__btn {
+  background: transparent;
+  border: 1px solid var(--nx-border);
+  border-radius: 6px;
+  color: var(--nx-text-muted);
+  cursor: pointer;
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 6px 8px;
+  text-transform: uppercase;
+}
+
+.wsp-guided-empty__btn:hover {
+  border-color: var(--nx-border-strong);
+  color: var(--nx-gold);
+}
+
 /* ── Re-analyze Button ──────────────────────────────────────────────── */
 .wsp-file-analyze-btn {
   opacity: 0;

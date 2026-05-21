@@ -327,6 +327,18 @@
   font-size: 11px;
 }
 
+.wf-guided-empty {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: center;
+  min-height: 240px;
+  padding: 18px;
+  width: 100%;
+}
+
 .wf-skillpacks,
 .wf-finance-grid {
   display: grid;

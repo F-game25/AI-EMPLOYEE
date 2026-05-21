@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Panel, HexButton, SectionLabel } from '../nexus-ui'
 import FileUploadZone from '../workspace/FileUploadZone'
+import { useAppStore } from '../../store/appStore'
 import { API_URL } from '../../config/api'
 import api from '../../api/client'
 import './WorkspacePage.css'
@@ -136,8 +137,25 @@ function HtmlPreview({ url, name }) {
   )
 }
 
+function WorkspaceEmpty({ title, detail, actions = [] }) {
+  return (
+    <div className="wsp-guided-empty">
+      <div className="wsp-guided-empty__title">{title}</div>
+      <div className="wsp-guided-empty__detail">{detail}</div>
+      {!!actions.length && (
+        <div className="wsp-guided-empty__actions">
+          {actions.map(action => (
+            <button key={action.label} className="wsp-guided-empty__btn" onClick={action.onClick}>{action.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Re-analyze button states: { [fileId]: 'idle'|'pending'|'ok'|'error' }
 export default function WorkspacePage() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
@@ -238,7 +256,15 @@ export default function WorkspacePage() {
             {loading ? (
               <div className="wsp-empty">Loading…</div>
             ) : filtered.length === 0 ? (
-              <div className="wsp-empty">No files found.</div>
+              <WorkspaceEmpty
+                title={files.length ? 'No files match this filter' : 'No workspace files yet'}
+                detail={files.length ? 'Clear the filter or refresh the workspace index.' : 'Upload files here or run a task that produces artifacts, then use Proof Center to verify output.'}
+                actions={[
+                  ...(files.length ? [{ label: 'Clear Filter', onClick: () => setFilter('') }] : []),
+                  { label: 'Run Task', onClick: () => setActiveSection('tasks') },
+                  { label: 'Proof Center', onClick: () => setActiveSection('proof') },
+                ]}
+              />
             ) : (
               filtered.map(f => {
                 const fid = f.fileId || f.id || f.path
@@ -277,7 +303,14 @@ export default function WorkspacePage() {
 
       <div className="wsp-preview-area">
         {!selected ? (
-          <div className="wsp-empty-state">Select a file to preview</div>
+          <WorkspaceEmpty
+            title="Select a file to preview"
+            detail="Workspace previews generated files, uploads, and task artifacts. Use task execution or Proof Center when you need a verified output trail."
+            actions={[
+              { label: 'Run Task', onClick: () => setActiveSection('tasks') },
+              { label: 'Proof Center', onClick: () => setActiveSection('proof') },
+            ]}
+          />
         ) : (
           <Panel title={selected.path} tone="gold">
             <div className="wsp-preview-meta">

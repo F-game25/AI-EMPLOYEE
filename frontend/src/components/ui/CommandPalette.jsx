@@ -12,7 +12,11 @@ const PAGES = [
   { id: 'economy',       label: 'Economy',           icon: '◇' },
   { id: 'tasks',         label: 'Tasks',             icon: '▣' },
   { id: 'workflows',     label: 'Workflows',         icon: '▷' },
+  { id: 'workspace',     label: 'Workspace',         icon: '⊞' },
   { id: 'infrastructure',label: 'Infrastructure',    icon: '▤' },
+  { id: 'setup',         label: 'Setup Center',      icon: '⚙' },
+  { id: 'approvals',     label: 'Approval Inbox',    icon: '✓' },
+  { id: 'proof',         label: 'Proof Center',      icon: '▥' },
   { id: 'neural-graph',  label: 'Neural Graph',      icon: '◈' },
   { id: 'knowledge',     label: 'Knowledge',         icon: '▩' },
   { id: 'trends',        label: 'Trends',            icon: '△' },
@@ -23,16 +27,28 @@ const PAGES = [
   { id: 'sandboxes',     label: 'Sandboxes',         icon: '▨' },
   { id: 'audit',         label: 'Audit',             icon: '▥' },
   { id: 'models',        label: 'Models',            icon: '◑' },
+  { id: 'model-fabric',  label: 'Model Fabric',      icon: '▦' },
   { id: 'runtime',       label: 'Runtime',           icon: '▶' },
   { id: 'integrations',  label: 'Integrations',      icon: '◫' },
+  { id: 'api-catalog',   label: 'API Catalog',       icon: '▤' },
+  { id: 'user-views',    label: 'Perspectives',      icon: '◌' },
   { id: 'settings',      label: 'Settings',          icon: '◎' },
 ]
 
 const ACTIONS = [
-  { id: 'action:new-task',      label: 'New Task',       icon: '+', event: 'nx:task:new' },
-  { id: 'action:spawn-agent',   label: 'Spawn Agent',    icon: '◉', event: 'nx:agent:spawn' },
-  { id: 'action:stop',          label: 'Emergency Stop', icon: '■', event: 'nx:system:stop' },
-  { id: 'action:scan',          label: 'System Scan',    icon: '◈', event: 'nx:system:scan' },
+  { id: 'action:chat',          label: 'Ask AI Teammate',        icon: '↵', event: 'nx:chat:open', page: 'nexus', badge: 'CHAT' },
+  { id: 'action:new-task',      label: 'Run New Task',           icon: '+', event: 'nx:task:new', page: 'tasks', badge: 'TASK' },
+  { id: 'action:setup-check',   label: 'Run Setup Check',        icon: '✓', page: 'setup', badge: 'ADMIN' },
+  { id: 'action:review-proof',  label: 'Review Latest Proof',    icon: '▥', page: 'proof', badge: 'PROOF' },
+  { id: 'action:approvals',     label: 'Open Approval Queue',    icon: '!', page: 'approvals', badge: 'SAFETY' },
+  { id: 'action:user-views',    label: 'Choose Perspective',     icon: '◌', page: 'user-views', badge: 'ROLES' },
+  { id: 'action:models',        label: 'Test Model Providers',   icon: '◑', page: 'models', badge: 'LLM' },
+  { id: 'action:integrations',  label: 'Check Integrations',     icon: '◫', page: 'integrations', badge: 'SETUP' },
+  { id: 'action:api-catalog',   label: 'Inspect API Catalog',    icon: '▤', page: 'api-catalog', badge: 'ADMIN' },
+  { id: 'action:system-health', label: 'Open System Health',     icon: '▨', page: 'system', badge: 'OPS' },
+  { id: 'action:spawn-agent',   label: 'Spawn Agent',            icon: '◉', event: 'nx:agent:spawn', page: 'agents', badge: 'AGENT' },
+  { id: 'action:stop',          label: 'Emergency Stop',         icon: '■', event: 'nx:system:stop', page: 'settings', badge: 'SAFETY' },
+  { id: 'action:scan',          label: 'System Scan',            icon: '◈', event: 'nx:system:scan', page: 'security', badge: 'SECURITY' },
 ]
 
 const GROUPS = [
@@ -104,7 +120,8 @@ export default function CommandPalette() {
     if (item.kind === 'page') {
       setActiveSection(item.id)
     } else {
-      window.dispatchEvent(new CustomEvent(item.event))
+      if (item.page) setActiveSection(item.page)
+      if (item.event) window.dispatchEvent(new CustomEvent(item.event))
     }
     closePalette()
   }, [setActiveSection, closePalette])
@@ -145,7 +162,7 @@ export default function CommandPalette() {
           <span className="cp-item__icon">{item.icon}</span>
           <span className="cp-item__label">{item.label}</span>
           {g.kind === 'action' && (
-            <span className="cp-item__badge">ACTION</span>
+            <span className="cp-item__badge">{item.badge || 'ACTION'}</span>
           )}
         </button>
       )
