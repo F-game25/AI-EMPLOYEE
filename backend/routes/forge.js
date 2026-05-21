@@ -1067,6 +1067,102 @@ module.exports = function createForgeRouter(requireAuth) {
     res.json({ ok: true, all_passed: allPassed, results, rolled_back: rolledBack })
   })
 
+  // Shared verification runner (used by the agentic loop).
+  async function runVerifyCommands(project, cmds) {
+    const { exec } = require('child_process')
+    const root = safeProjectRoot(project)
+    const results = []
+    for (const cmd of cmds) {
+      if (!isVerifyAllowed(cmd)) { results.push({ command: cmd, pass: false, skipped: true, output: 'not in verify allowlist' }); continue }
+      // eslint-disable-next-line no-await-in-loop
+      const r = await new Promise(resolve => {
+        exec(cmd, { cwd: root, timeout: 180000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env } },
+          (err, stdout, stderr) => resolve({ command: cmd, pass: !err, code: err?.code ?? 0, output: String(stdout + stderr).slice(-1500) }))
+      })
+      results.push(r)
+    }
+    return { all_passed: results.length > 0 && results.every(r => r.pass), results }
+  }
+
+  // ── WS4 Phase 3: autonomous agentic loop ──────────────────────────────────────
+  // One goal → plan → generate → apply → verify → feed errors back → fix → re-verify,
+  // bounded and owner-gated. Captures original file contents and auto-rolls-back the
+  // whole run if it can't reach green. Reuses the indexer context + verify allowlist.
+  router.post('/agentic-run', requireAuth, async (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_agentic_run')) return
+    const project = findProject(req.body?.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    if (!project.write_access) return res.status(403).json({ ok: false, error: 'project is not writable' })
+    const goal = String(req.body?.goal || '').trim()
+    if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
+    const maxIters = Math.min(5, Math.max(1, Number(req.body?.max_iterations) || 3))
+    const verifyCmds = (Array.isArray(req.body?.commands) && req.body.commands.length)
+      ? req.body.commands : (project.verification_commands || defaultVerificationCommands(project))
+    const autoRollback = req.body?.auto_rollback !== false
+
+    const root = safeProjectRoot(project)
+    const originals = new Map()   // path → original content (or null if new)
+    const captureOriginal = (rel) => {
+      if (originals.has(rel)) return
+      try { const t = resolveInsideProject(project, rel); originals.set(rel, fs.existsSync(t) ? fs.readFileSync(t, 'utf8') : null) }
+      catch { /* path escapes — skip */ }
+    }
+
+    const transcript = []
+    let success = false
+    let lastErrors = ''
+    appendAudit('forge_agentic_start', { project_id: project.id, goal: goal.slice(0, 120), max_iters: maxIters })
+
+    for (let iter = 1; iter <= maxIters; iter++) {
+      const codeContext = await retrieveForgeContext(project, goal)
+      const flatTree = []
+      const flatten = (nodes) => { for (const n of nodes) { flatTree.push(n.path); if (n.children) flatten(n.children) } }
+      flatten(buildTree(root))
+      const sys = buildForgeSystemPrompt(project, flatTree.slice(0, 50).join('\n'), '') + codeContext
+      const fixNote = lastErrors
+        ? `\n\nThe previous attempt FAILED verification with:\n${lastErrors.slice(0, 1500)}\nFix the cause. Re-output the COMPLETE corrected file(s).`
+        : ''
+      const prompt = `${sys}\n\nGoal: ${goal}${fixNote}\n\nOutput the full file(s) needed, each in a code block labelled with its path.`
+
+      let aiText = ''
+      try { const r = await callPythonChat(prompt, 90000); aiText = r?.response || r?.reply || '' } catch { /* */ }
+      const actions = aiText ? extractCodeActions(aiText, project).slice(0, 8) : []
+
+      const written = []
+      for (const a of actions) {
+        captureOriginal(normalizeRelPath(a.file_path))
+        // eslint-disable-next-line no-await-in-loop
+        const w = await executeAction(a, project)
+        written.push({ path: a.file_path, ok: w.ok !== false, error: w.error || null })
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      const verify = written.some(w => w.ok) ? await runVerifyCommands(project, verifyCmds) : { all_passed: false, results: [{ output: 'no files written' }] }
+      lastErrors = verify.all_passed ? '' : verify.results.filter(r => !r.pass).map(r => `${r.command || 'apply'}: ${r.output || r.error}`).join('\n')
+      transcript.push({ iteration: iter, files_written: written, verify })
+      appendAudit('forge_agentic_iter', { project_id: project.id, iter, files: written.length, passed: verify.all_passed })
+
+      if (verify.all_passed) { success = true; break }
+    }
+
+    // Auto-rollback the whole run if we never reached green.
+    let rolledBack = false
+    if (!success && autoRollback && originals.size) {
+      for (const [rel, content] of originals.entries()) {
+        try {
+          const t = resolveInsideProject(project, rel)
+          if (content === null) { if (fs.existsSync(t)) fs.unlinkSync(t) }
+          else fs.writeFileSync(t, content, 'utf8')
+        } catch { /* best effort */ }
+      }
+      rolledBack = true
+      appendAudit('forge_agentic_rollback', { project_id: project.id, files: originals.size })
+    }
+    appendAudit('forge_agentic_done', { project_id: project.id, success, iterations: transcript.length, rolled_back: rolledBack })
+    res.json({ ok: true, success, iterations: transcript.length, transcript, rolled_back: rolledBack,
+      summary: success ? `Goal achieved in ${transcript.length} iteration(s).` : `Did not reach green in ${transcript.length} iteration(s); ${rolledBack ? 'changes rolled back.' : 'changes left in place.'}` })
+  })
+
   router.post('/rollback', requireAuth, async (req, res) => {
     if (!requireOwnerApproval(req, res, 'forge_rollback')) return
     const snapshotId = String(req.body?.snapshot_id || '').trim()

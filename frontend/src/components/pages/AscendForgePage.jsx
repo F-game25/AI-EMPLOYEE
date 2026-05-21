@@ -959,6 +959,60 @@ function UnderstandPane({ project }) {
   )
 }
 
+/* ─── Auto-build pane: WS4 Phase 3 autonomous agentic loop ─── */
+function AgenticPane({ project }) {
+  const [goal, setGoal] = useState('')
+  const [maxIters, setMaxIters] = useState(3)
+  const [running, setRunning] = useState(false)
+  const [run, setRun] = useState(null)
+
+  if (!project) return <div className="af-chat__no-project">Select a writable project to auto-build.</div>
+  if (!project.write_access) return <div className="af-understand__hint">This project is read-only — auto-build needs write access (import with write access or create a project).</div>
+
+  const start = async () => {
+    if (!goal.trim()) return
+    setRunning(true); setRun(null)
+    try {
+      const d = await JPOST_JSON('/api/forge/agentic-run', { project_id: project.id, goal, max_iterations: maxIters, ownerApproved: true, auto_rollback: true })
+      setRun(d)
+      d.success ? toastSuccess(d.summary) : toastError(d.summary)
+    } catch (e) { toastError(e.message) } finally { setRunning(false) }
+  }
+
+  return (
+    <div className="af-understand">
+      <SectionLabel>AUTONOMOUS BUILD</SectionLabel>
+      <div className="af-understand__hint">One goal → generate → apply → verify → fix, looping until green. Auto-rolls-back if it can’t pass. Owner-approved & bounded.</div>
+      <textarea className="af-agentic__goal" rows={3} value={goal} onChange={e => setGoal(e.target.value)} placeholder="e.g. Add a /health route that returns {status:'ok'} and make sure the build passes" />
+      <div className="af-agentic__controls">
+        <label>Max iterations
+          <select value={maxIters} onChange={e => setMaxIters(Number(e.target.value))}>
+            {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+        <button className="af-index-btn" onClick={start} disabled={running}>{running ? 'Building…' : '▶ Auto-build'}</button>
+      </div>
+
+      {run && (
+        <div className="af-agentic__result">
+          <div className={`af-agentic__status ${run.success ? 'ok' : 'fail'}`}>
+            {run.success ? '✓ ' : '✗ '}{run.summary}
+          </div>
+          {(run.transcript || []).map(t => (
+            <div key={t.iteration} className="af-agentic__iter">
+              <div className="af-agentic__itertitle">Iteration {t.iteration} — {t.verify?.all_passed ? 'PASS' : 'FAIL'}</div>
+              <div className="af-agentic__files">{(t.files_written || []).map((f, i) => <span key={i} className={f.ok ? 'ok' : 'fail'}>{f.path}</span>)}</div>
+              {(t.verify?.results || []).filter(r => !r.pass).map((r, i) => (
+                <pre key={i} className="af-agentic__err">{r.command}: {(r.output || '').slice(-400)}</pre>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ─── Main page ────────────────────────────────────────────────────── */
 
 export default function AscendForgePage() {
@@ -1156,6 +1210,7 @@ export default function AscendForgePage() {
             <button className={`af-tab ${tab === 'chat' ? 'af-tab--active' : ''}`} onClick={() => setTab('chat')}>Chat</button>
             <button className={`af-tab ${tab === 'tree' ? 'af-tab--active' : ''}`} onClick={() => setTab('tree')}>Files</button>
             <button className={`af-tab ${tab === 'understand' ? 'af-tab--active' : ''}`} onClick={() => setTab('understand')}>Understand</button>
+            <button className={`af-tab ${tab === 'autobuild' ? 'af-tab--active' : ''}`} onClick={() => setTab('autobuild')}>Auto-build</button>
             <button className={`af-tab ${tab === 'projects' ? 'af-tab--active' : ''}`} onClick={() => setTab('projects')}>Projects</button>
           </div>
 
@@ -1178,6 +1233,7 @@ export default function AscendForgePage() {
             />
           )}
           {tab === 'understand' && <UnderstandPane project={project} />}
+          {tab === 'autobuild' && <AgenticPane project={project} />}
           {tab === 'projects' && (
             <ProjectPicker
               project={project}
