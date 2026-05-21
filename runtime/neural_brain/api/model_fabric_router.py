@@ -362,6 +362,96 @@ def quantization_select(req: QuantSelectReq):
     return {"status": "ok", **get_lifecycle_manager().select_quant(req.params_b, dev_override=req.dev_override)}
 
 
+# ── Owner-gated auto-pull of the optimal quant ──────────────────────────────────
+# LOCAL ONLY. Single-flight: one `ollama pull` at a time, in a background thread,
+# never auto-invoked from inference — only via these explicit endpoints.
+import threading as _threading
+
+_pull_lock = _threading.Lock()
+_pull_state: dict = {"running": False, "model": None, "quant": None,
+                     "tag": None, "started_at": None, "finished_at": None,
+                     "ok": None, "output": None, "error": None}
+
+
+class QuantPullReq(BaseModel):
+    model: str = Field(..., description="Model name or family (e.g. qwen2.5:7b)")
+    quant: str | None = Field(None, description="GGUF quant suffix; omitted → optimal for this host")
+
+
+class ReloadQuantReq(BaseModel):
+    quant: str = Field(..., description="GGUF quant suffix to reload the model with")
+
+
+def _resolve_quant_tag(model: str, quant: str | None) -> tuple[str, str]:
+    """Return (full_tag, quant) — derive optimal quant + a `model:quant` tag."""
+    if not quant:
+        try:
+            from neural_brain.models.model_resolver import detect_hardware_tier, optimal_quant_tag
+            hw = detect_hardware_tier()
+            quant = optimal_quant_tag(model, hw.get("vram_gb", hw.get("tier")))
+        except Exception:  # noqa: BLE001
+            quant = "q4_K_M"
+    tag = model if "-" + quant.lower() in model.lower() else f"{model}-{quant}"
+    return tag, quant
+
+
+def _run_pull(tag: str):
+    """Background worker — runs `ollama pull <tag>` and records the real result."""
+    import subprocess
+    try:
+        proc = subprocess.run(["ollama", "pull", tag], capture_output=True,
+                              text=True, timeout=3600)
+        _pull_state["ok"] = proc.returncode == 0
+        _pull_state["output"] = (proc.stdout or "")[-2000:]
+        _pull_state["error"] = None if proc.returncode == 0 else (proc.stderr or "")[-2000:]
+    except Exception as e:  # noqa: BLE001
+        _pull_state["ok"] = False
+        _pull_state["error"] = str(e)
+    finally:
+        _pull_state["running"] = False
+        _pull_state["finished_at"] = _now_iso()
+        if _pull_lock.locked():
+            try:
+                _pull_lock.release()
+            except RuntimeError:
+                pass
+
+
+def _start_pull(model: str, quant: str | None) -> dict:
+    """Single-flight pull starter. Returns busy/started status immediately."""
+    if not _pull_lock.acquire(blocking=False):
+        return {"status": "busy", "model": _pull_state.get("model"),
+                "quant": _pull_state.get("quant"), "reason": "another pull is in progress"}
+    tag, quant = _resolve_quant_tag(model, quant)
+    _pull_state.update({"running": True, "model": model, "quant": quant, "tag": tag,
+                        "started_at": _now_iso(), "finished_at": None,
+                        "ok": None, "output": None, "error": None})
+    _threading.Thread(target=_run_pull, args=(tag,), daemon=True).start()
+    return {"status": "started", "model": model, "quant": quant, "tag": tag}
+
+
+@router.post("/quantization/pull")
+def quantization_pull(req: QuantPullReq):
+    """Owner-gated: pull the optimal (or specified) quant of a model. Local only."""
+    return _start_pull(req.model, req.quant)
+
+
+@router.get("/quantization/pull/status")
+def quantization_pull_status():
+    return {"status": "ok", **_pull_state}
+
+
+@router.post("/models/{model_id:path}/reload-with-quant")
+def model_reload_with_quant(model_id: str, req: ReloadQuantReq):
+    """Unload the model from VRAM, then pull the requested quant variant."""
+    from neural_brain.models.lifecycle_manager import get_lifecycle_manager
+    unloaded = get_lifecycle_manager().unload(model_id)
+    base = model_id.split("-" + req.quant.lower())[0] if req.quant else model_id
+    result = _start_pull(base, req.quant)
+    result["unloaded"] = unloaded
+    return result
+
+
 @router.post("/rag/ingest")
 def rag_ingest(req: RagIngestReq):
     """Ingest text or a file into memory for later retrieval."""

@@ -210,13 +210,16 @@ function LifecyclePanel() {
   )
 }
 
-/* ── Quantisation: active quant + selector ── */
+/* ── Quantisation: active quant + selector + owner-gated optimal-quant pull ── */
 function QuantPanel() {
   const [status, setStatus] = useState(null)
   const [avail, setAvail] = useState([])
   const [paramsB, setParamsB] = useState(7)
   const [devOverride, setDevOverride] = useState(false)
   const [sel, setSel] = useState(null)
+  const [pullModel, setPullModel] = useState('')
+  const [pull, setPull] = useState(null)
+  const pollRef = useRef(null)
   const load = useCallback(async () => {
     try {
       const [s, a] = await Promise.all([
@@ -226,10 +229,35 @@ function QuantPanel() {
       setStatus(s); setAvail(a.quants || [])
     } catch { /* offline */ }
   }, [])
+  // Default the pull target to the resolved LLM model (best-effort).
+  useEffect(() => {
+    api.get('/api/model-fabric/models')
+      .then(r => { const m = r?.resolved?.LLM?.model; if (m) setPullModel(p => p || m) })
+      .catch(() => {})
+  }, [])
   useEffect(() => { load(); const i = setInterval(load, 10000); return () => clearInterval(i) }, [load])
+  useEffect(() => () => clearInterval(pollRef.current), [])
   const select = async () => {
     try { setSel(await api.post('/api/model-fabric/quantization/select', { params_b: Number(paramsB), dev_override: devOverride })) }
     catch (e) { setSel({ status: 'error', reason: e.message }) }
+  }
+  const pollPull = useCallback(() => {
+    clearInterval(pollRef.current)
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await api.get('/api/model-fabric/quantization/pull/status')
+        setPull(s)
+        if (!s.running) clearInterval(pollRef.current)
+      } catch { clearInterval(pollRef.current) }
+    }, 2000)
+  }, [])
+  const doPull = async () => {
+    if (!pullModel.trim()) return
+    try {
+      const r = await api.post('/api/model-fabric/quantization/pull', { model: pullModel.trim() })
+      setPull(r)
+      if (r.status === 'started') pollPull()
+    } catch (e) { setPull({ status: 'error', error: e.message }) }
   }
   return (
     <section className="mf-panel">
@@ -265,6 +293,27 @@ function QuantPanel() {
         {avail.map(q => (
           <span key={q.quant} className="mf-chip" title={`${q.quality} quality, ${q.speed}`}>{q.quant}</span>
         ))}
+      </div>
+      {/* Owner-gated: pull the optimal quant for this host. Local only, single-flight. */}
+      <div className="mf-pull">
+        <div className="mf-row">
+          <input value={pullModel} onChange={e => setPullModel(e.target.value)} placeholder="model (e.g. qwen2.5:7b)" />
+          <button className="mf-btn" onClick={doPull} disabled={pull?.running}>
+            {pull?.running ? 'Pulling…' : 'Pull optimal quant'}
+          </button>
+        </div>
+        {pull && (
+          <div className="mf-panel-out">
+            <span className={`mf-chip ${pull.running ? 'mf-pull--run' : pull.ok === false ? 'mf-toggle--hot' : ''}`}>
+              {pull.running ? 'running' : pull.status === 'busy' ? 'busy' : pull.ok === false ? 'failed' : pull.ok ? 'done' : pull.status}
+            </span>
+            {pull.tag && <span className="mf-chip">{pull.tag}</span>}
+            {pull.quant && <span className="mf-chip">quant: <b>{pull.quant}</b></span>}
+            {(pull.error || pull.reason || pull.output) && (
+              <pre>{pull.error || pull.reason || pull.output}</pre>
+            )}
+          </div>
+        )}
       </div>
     </section>
   )

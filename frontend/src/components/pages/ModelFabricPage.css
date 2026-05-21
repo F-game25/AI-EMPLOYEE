@@ -113,6 +113,10 @@
 .mf-q-size { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--nx-text-muted); }
 .mf-q-size input { width: 80px; margin-bottom: 0; }
 .mf-quants { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.mf-pull { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--nx-border-faint); }
+.mf-pull .mf-row { margin-bottom: 0; }
+.mf-pull--run { border-color: var(--nx-warning, #f59e0b); color: var(--nx-warning, #f59e0b); animation: mf-pulse 1.2s ease-in-out infinite; }
+@keyframes mf-pulse { 50% { opacity: .5; } }
 
 @media (max-width: 768px) {
   .mf-page { padding: 16px 14px 50px; }

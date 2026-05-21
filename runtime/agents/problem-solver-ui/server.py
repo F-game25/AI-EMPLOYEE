@@ -18159,6 +18159,61 @@ async def bg_list_active(
     return JSONResponse({"sessions": [r.to_dict() for r in active]})
 
 
+# ── Cross-runtime security event receiver ──────────────────────────────────
+# Node-originated security telemetry (vault/secrets access, auth, etc.) is
+# forwarded here so the in-process BlacklightEngine sentinel can score and
+# respond. Localhost OR a valid service/internal JWT is required. Never raises
+# on bad input — returns 400. Event values are NOT inspected/persisted here.
+_SECURITY_EVENT_PREFIXES = ("vault:", "security:", "auth:")
+
+
+@app.post("/api/internal/security-event")
+async def receive_security_event(
+    request: Request,
+    body: dict,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """Receive a cross-runtime security event and republish on the Python bus."""
+    # (a) Accept only from localhost OR a valid token (service/internal/user).
+    authed = _is_localhost(request)
+    if not authed and credentials and credentials.credentials:
+        authed = _decode_any_token(credentials.credentials) is not None
+    if not authed:
+        raise HTTPException(status_code=401, detail="localhost or valid token required")
+
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "body must be an object"}, status_code=400)
+
+    event_type = body.get("event_type")
+    if not isinstance(event_type, str) or not event_type.startswith(_SECURITY_EVENT_PREFIXES):
+        return JSONResponse(
+            {"ok": False, "error": "event_type must start with vault:/security:/auth:"},
+            status_code=400,
+        )
+
+    source = body.get("source")
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+
+    try:
+        from neural_brain.utils.event_bus import publish as _publish_security_event
+        _publish_security_event(
+            event_type,
+            source=source if isinstance(source, str) and source else "node",
+            payload=payload,
+        )
+    except Exception as _e:  # never raise — telemetry must not break callers
+        _audit_logger.warning(json.dumps({
+            "event": "security_event_publish_failed",
+            "event_type": event_type,
+            "timestamp": _now_utc().isoformat(),
+        }))
+        return JSONResponse({"ok": False, "error": "publish failed"}, status_code=400)
+
+    return JSONResponse({"ok": True})
+
+
 @app.post("/api/admin/backup")
 async def trigger_backup(_rbac=Depends(require_permission("admin:*"))):
     """Trigger a local PostgreSQL backup cycle (no cloud upload — use cron for that)."""

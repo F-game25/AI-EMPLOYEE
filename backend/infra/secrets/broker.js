@@ -31,6 +31,31 @@ const fs = require('fs');
 const path = require('path');
 
 const LOG = '[SecretsBroker]';
+
+// Best-effort security telemetry → Python sentinel (BlacklightEngine).
+// Never throws; never carries secret values.
+let _forwardSecurityEvent = () => {};
+try {
+  ({ forwardSecurityEvent: _forwardSecurityEvent } = require('../../security/security_event_forwarder'));
+} catch { /* forwarder unavailable — telemetry silently disabled */ }
+
+// In-memory burst detector: >20 reads / 10s per tenant|agent → suspicious.
+const _BURST_WINDOW_MS = 10_000;
+const _BURST_THRESHOLD = 20;
+const _readWindows = new Map();  // 'tenant|agent' → number[] (timestamps)
+
+function _recordReadAndCheckBurst(tenant_id, agent_id) {
+  const k = `${tenant_id}|${agent_id || ''}`;
+  const now = Date.now();
+  const hits = (_readWindows.get(k) || []).filter(t => now - t < _BURST_WINDOW_MS);
+  hits.push(now);
+  _readWindows.set(k, hits);
+  return hits.length > _BURST_THRESHOLD;
+}
+
+function _emit(eventType, payload) {
+  try { _forwardSecurityEvent(eventType, payload); } catch { /* never break secrets access */ }
+}
 const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || process.env.HOME || '/tmp', '.ai-employee', 'state'));
 const AUDIT_LOG_PATH = path.join(STATE_DIR, 'secrets-audit.jsonl');
 
@@ -266,6 +291,7 @@ class SecretsBroker {
       const { isSensitiveLocked } = require('../../security/sentinel_guard');
       if (isSensitiveLocked()) {
         _audit('get', secretPath, tenant_id, agent_id, false, 'sensitive_lock_active');
+        _emit('vault:access_denied', { key_path: secretPath, tenant_id, agent_id, reason: 'sensitive_lock_active' });
         const err = new Error('sensitive stores locked by security guard');
         err.code = 'SENSITIVE_LOCKED';
         throw err;
@@ -286,8 +312,11 @@ class SecretsBroker {
           const lease = this._leases.get(secretPath);
           if (lease && Date.now() > lease.expires_at) {
             _audit('get', secretPath, tenant_id, agent_id, false, 'lease_expired');
+            _emit('vault:access_denied', { key_path: secretPath, tenant_id, agent_id, reason: 'lease_expired' });
             return null;
           }
+          const suspicious = _recordReadAndCheckBurst(tenant_id, agent_id);
+          _emit('vault:access', { key_path: secretPath, tenant_id, agent_id, scope, suspicious });
           return result.value ?? (typeof result === 'string' ? result : null);
         }
       } catch (e) {

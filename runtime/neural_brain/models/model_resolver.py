@@ -60,6 +60,49 @@ def _ollama_tags(timeout: float = 2.0) -> list[str]:
         return []
 
 
+def _ollama_models(timeout: float = 2.0) -> list[dict]:
+    """Installed model objects (name + details.quantization_level), or []."""
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_HOST}/api/tags", timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return [m for m in data.get("models", []) if m.get("name")]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ollama models unavailable: %s", exc)
+        return []
+
+
+def _params_b_from_name(name: str) -> float:
+    """Best-effort parameter count (billions) parsed from a model tag, default 7."""
+    import re
+    m = re.search(r"(\d+(?:\.\d+)?)\s*b", (name or "").lower())
+    return float(m.group(1)) if m else 7.0
+
+
+# GGUF quant ladder (largest→smallest) — same philosophy as lifecycle_manager.select_quant.
+# bytes ≈ params * bpw / 8; pick the largest quant whose weights fit ~75% of VRAM.
+_QUANT_TAGS = [("q8_0", 8.5), ("q6_K", 6.6), ("q5_K_M", 5.7),
+               ("q4_K_M", 4.8), ("q3_K_M", 3.9), ("q2_K", 3.0)]
+
+
+def optimal_quant_tag(model_family_or_name: str, tier_or_vram) -> str:
+    """Best GGUF quant suffix for a model on this host. Never raises.
+
+    tier_or_vram: a numeric VRAM-GB value, or a tier string (cpu|low|mid|high).
+    """
+    params_b = _params_b_from_name(model_family_or_name)
+    if isinstance(tier_or_vram, (int, float)):
+        vram_gb = float(tier_or_vram)
+    else:
+        vram_gb = {"high": 16.0, "mid": 8.0, "low": 4.0, "cpu": 0.0}.get(str(tier_or_vram), 8.0)
+    if vram_gb <= 0:  # CPU host — favour a balanced quant for RAM/speed
+        return "q4_K_M"
+    budget_mb = vram_gb * 1024 * 0.75
+    for name, bpw in _QUANT_TAGS:
+        if (params_b * 1e9 * bpw / 8 / 1e6) <= budget_mb:
+            return name
+    return _QUANT_TAGS[-1][0]
+
+
 def detect_hardware_tier() -> dict:
     """Return {tier, gpu, vram_gb, ram_gb, cpu_cores}. tier ∈ cpu|low|mid|high."""
     info = {"tier": "cpu", "gpu": None, "vram_gb": 0, "ram_gb": 0, "cpu_cores": os.cpu_count() or 1}
@@ -121,16 +164,22 @@ def resolve_models() -> dict:
     installed = _ollama_tags()
     allow_heavy = hw["tier"] in ("mid", "high") or hw["ram_gb"] >= 24
     resolved: dict[str, dict] = {}
+    # Real installed quant per tag (best-effort; None if Ollama didn't report it).
+    _quant_by_tag = {m.get("name"): (m.get("details") or {}).get("quantization_level")
+                     for m in _ollama_models()}
 
     for arch, prefs in _ARCH_PREFS.items():
         model = _match(prefs, installed, allow_heavy)
         if model is None and not allow_heavy:
             # Heavy filter left nothing — retry allowing heavy as a last resort
             model = _match(prefs, installed, allow_heavy=True)
+        active_quant = _quant_by_tag.get(model) if model else None
         resolved[arch] = {
             "model": model,
             "provider": "ollama" if model else None,
             "available": bool(model),
+            "active_quant": active_quant,
+            "optimal_quant": optimal_quant_tag(model, hw.get("vram_gb", hw["tier"])) if model else None,
             "reason": "installed+tier-fit" if model else "no matching model installed",
         }
 

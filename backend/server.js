@@ -2605,7 +2605,7 @@ const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline â
 
 // GET endpoints (fast; never trigger a model load)
 ['models', 'health', 'status', 'lifecycle/status', 'quantization/status',
- 'quantization/available'].forEach((seg) => {
+ 'quantization/available', 'quantization/pull/status'].forEach((seg) => {
   app.get(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
     try {
       const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { timeout: 15000 });
@@ -2617,7 +2617,7 @@ const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline â
 // POST endpoints
 ['route', 'llm', 'slm', 'vision/analyze', 'vision/segment', 'generate/visual',
  'actions/execute', 'rag/query', 'rag/ingest', 'quantization/select',
- 'models/unload-idle'].forEach((seg) => {
+ 'quantization/pull', 'models/unload-idle'].forEach((seg) => {
   app.post(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
     try {
       const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { method: 'POST', body: req.body });
@@ -2631,6 +2631,15 @@ app.post(/^\/api\/model-fabric\/models\/(.+)\/unload$/, requireAuth, async (req,
   try {
     const id = encodeURIComponent(req.params[0]);
     const { ok, data } = await proxyModelFabric(`/api/model-fabric/models/${id}/unload`, { method: 'POST', body: req.body });
+    return res.status(ok ? 200 : 502).json(data);
+  } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
+});
+
+// Per-model reload with a specific quant (unload + pull the quant variant)
+app.post(/^\/api\/model-fabric\/models\/(.+)\/reload-with-quant$/, requireAuth, async (req, res) => {
+  try {
+    const id = encodeURIComponent(req.params[0]);
+    const { ok, data } = await proxyModelFabric(`/api/model-fabric/models/${id}/reload-with-quant`, { method: 'POST', body: req.body });
     return res.status(ok ? 200 : 502).json(data);
   } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
 });

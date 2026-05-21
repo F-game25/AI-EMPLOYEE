@@ -86,6 +86,59 @@ def _ollama_post(endpoint: str, payload: dict, timeout: int) -> dict:
         raise RuntimeError(f"Ollama not reachable at {OLLAMA_HOST}: {exc}") from exc
 
 
+# ── Lifecycle/quant gate (WS8b) ──────────────────────────────────────────────
+# Per-model real GGUF quant, cached so we hit /api/show once per model.
+_quant_cache: dict[str, str | None] = {}
+
+
+def _ollama_quant(model: str) -> str | None:
+    """Real GGUF quant of an installed model via /api/show (cached per-model)."""
+    if model in _quant_cache:
+        return _quant_cache[model]
+    quant = None
+    try:
+        info = _ollama_post("/api/show", {"name": model}, 10)
+        quant = (info.get("details") or {}).get("quantization_level")
+    except Exception:  # noqa: BLE001
+        quant = None
+    _quant_cache[model] = quant
+    return quant
+
+
+def _ollama_unloader(model: str):
+    """Callable that drops *model* from VRAM (keep_alive=0 forces an unload)."""
+    def _unload():
+        try:
+            _ollama_post("/api/generate", {"model": model, "prompt": " ",
+                                           "keep_alive": 0, "stream": False}, 15)
+        except Exception:  # noqa: BLE001
+            pass
+    return _unload
+
+
+def _enforce_lifecycle(model: str):
+    """Register model + evict-to-fit if not already resident. Returns (mgr, was_loaded).
+
+    Robust by design: any failure returns (None, False) and the caller proceeds —
+    inference must never break because the lifecycle manager is unavailable. Does NOT
+    take the global heavy lock on the hot path; only ensure_room when not resident.
+    """
+    try:
+        from neural_brain.models.lifecycle_manager import get_lifecycle_manager
+        mgr = get_lifecycle_manager()
+        e = mgr.register(model, "LLM", "ollama", unloader=_ollama_unloader(model))
+        if not e.loaded:
+            if not os.environ.get("MODEL_FABRIC_DEV_OVERRIDE"):
+                q = _ollama_quant(model)
+                if q and ("f16" in q.lower() or "f32" in q.lower() or q.upper() in ("FP16", "FP32")):
+                    logger.warning("llm model %s is full-precision (%s) — not quantised", model, q)
+            mgr.ensure_room("LLM")
+        return mgr, e.loaded
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("lifecycle gate skipped: %s", exc)
+        return None, False
+
+
 def generate(
     prompt: str,
     system: str = "You are a helpful AI assistant.",
@@ -132,13 +185,22 @@ def generate(
         except Exception as exc:  # noqa: BLE001
             logger.warning("ai_router failed (%s) — falling back to direct Ollama", exc)
 
+    mgr, _ = _enforce_lifecycle(chosen_model)
     payload = {
         "model": chosen_model,
         "prompt": full_prompt,
         "system": system,
         "stream": False,
     }
+    import time as _t
+    t0 = _t.time()
     response = _ollama_post("/api/generate", payload, timeout)
+    if mgr is not None:
+        try:
+            mgr.mark_loaded(chosen_model, load_ms=(_t.time() - t0) * 1000,
+                            quant=_ollama_quant(chosen_model))
+        except Exception:  # noqa: BLE001
+            pass
     return response.get("response", "")
 
 
