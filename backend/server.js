@@ -482,6 +482,7 @@ app.use('/api/agents', agentsMonitorRouter);
 
 // AscendForge — agentic vibecoder
 app.use('/api/forge', require('./routes/forge')(requireAuth));
+app.use('/api/compute', require('./routes/compute')(requireAuth));
 
 // Workflows — template library + CRUD
 app.use('/api/workflows', require('./routes/workflows')(requireAuth));
