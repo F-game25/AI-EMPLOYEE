@@ -132,27 +132,6 @@ function GatewayRow({ evt }) {
   )
 }
 
-/* ── STUB data ──────────────────────────────────────────────────────────────── */
-const STUB_THREATS = {
-  score: 23,
-  sparkline: [10,18,12,25,20,23,15,28,22,23],
-  intrusions: [
-    { ip: '45.155.205.12', path: '/api/auth/login', reason: 'Brute force (23 attempts)', score: 72 },
-    { ip: '91.108.4.200', path: '/api/tasks/run', reason: 'Payload anomaly', score: 55 },
-  ],
-  blockedIPs: [
-    { ip: '45.155.205.12', reason: 'Brute force', since: Date.now() - 120000 },
-    { ip: '77.222.81.10', reason: 'Honeypot trigger', since: Date.now() - 800000 },
-  ],
-  gatewayEvents: [
-    { timestamp: Date.now() - 5000, type: 'RATE_LIMIT', path: '/api/chat', detail: '60 req/min exceeded' },
-    { timestamp: Date.now() - 12000, type: 'MISSING_KEY', path: '/api/forge/files/write', detail: 'No Authorization header' },
-  ],
-  anomalies: [
-    { id: 'a1', severity: 'high', title: 'Unusual login pattern', details: '14 failed logins from 3 distinct IPs in 60 s', detected_at: Date.now() - 45000 },
-  ],
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════════
    TAB 1 — Live Threat Console
 ═══════════════════════════════════════════════════════════════════════════════ */
@@ -162,7 +141,7 @@ function ThreatTab() {
     wsEvent: 'security:event',
     pollMs: 10000,
   })
-  const t = threats || STUB_THREATS
+  const t = threats || {}
   const [blocked, setBlocked] = useState(t.blockedIPs || [])
   const [acked, setAcked] = useState([])
   const [strict, setStrict] = useState(false)
@@ -262,17 +241,6 @@ function ThreatTab() {
 /* ═══════════════════════════════════════════════════════════════════════════════
    TAB 2 — Audit & Compliance
 ═══════════════════════════════════════════════════════════════════════════════ */
-const STUB_AUDIT = [
-  { id: 'au1', actor: 'admin@nexus', action: 'agent:run', resource: '/api/tasks/run', result: 'ok', timestamp: Date.now() - 30000 },
-  { id: 'au2', actor: 'system', action: 'security:block-ip', resource: '45.155.205.12', result: 'ok', timestamp: Date.now() - 120000 },
-  { id: 'au3', actor: 'user-abc', action: 'auth:login', resource: '/auth/login', result: 'fail', timestamp: Date.now() - 240000 },
-]
-
-const STUB_HITL = [
-  { id: 'h1', agent: 'lead-hunter-elite', action: 'Send outreach to 120 leads', risk: 'medium', payload: { goal: 'Outreach Q2', targets: 120 }, created_at: Date.now() - 45000 },
-  { id: 'h2', agent: 'data-analyst', action: 'Export 8 400 customer records', risk: 'high', payload: { format: 'csv', records: 8400 }, created_at: Date.now() - 180000 },
-]
-
 const COMPLIANCE = [
   { name: 'GDPR',    status: 'met',     note: 'Data retention policy active' },
   { name: 'SOC2',    status: 'partial', note: 'Audit logging active; pen test pending' },
@@ -302,15 +270,16 @@ function HITLCard({ item, onApprove, onReject }) {
       toastSuccess(`Request ${action}d`)
     } catch { toastError(`Failed to ${action}`) } finally { setBusy(false) }
   }
+  const risk = item.risk || 'medium'
   return (
-    <div className={`sec-hitl-card sec-hitl-card--${item.risk}`}>
+    <div className={`sec-hitl-card sec-hitl-card--${risk}`}>
       <div className="sec-hitl-head">
-        <span className="sec-hitl-agent">{item.agent}</span>
-        <span className={`sec-hitl-risk sec-hitl-risk--${item.risk}`}>{item.risk.toUpperCase()}</span>
-        <span className="sec-hitl-time">{new Date(item.created_at).toLocaleTimeString()}</span>
+        <span className="sec-hitl-agent">{item.agent || item.actor || 'agent'}</span>
+        <span className={`sec-hitl-risk sec-hitl-risk--${risk}`}>{risk.toUpperCase()}</span>
+        <span className="sec-hitl-time">{item.created_at ? new Date(item.created_at).toLocaleTimeString() : ''}</span>
       </div>
       <div className="sec-hitl-action">{item.action}</div>
-      <pre className="sec-hitl-payload">{JSON.stringify(item.payload, null, 2)}</pre>
+      {item.payload && <pre className="sec-hitl-payload">{JSON.stringify(item.payload, null, 2)}</pre>}
       <div className="sec-hitl-btns">
         <button className="sec-btn sec-btn--primary" onClick={() => act('approve')} disabled={busy}>Approve</button>
         <button className="sec-btn sec-btn--danger"  onClick={() => act('reject')}  disabled={busy}>Reject</button>
@@ -361,9 +330,16 @@ function AuditTab() {
     wsEvent: 'security:audit',
     transform: d => d?.entries || d,
   })
-  const [hitl, setHitl] = useState(STUB_HITL)
+  const { data: hitlData } = useLiveData({
+    endpoint: '/api/security/hitl',
+    wsEvent: 'security:hitl',
+    pollMs: 15000,
+    transform: d => d?.queue || d,
+  })
+  const [resolved, setResolved] = useState([])
   const [filter, setFilter] = useState('')
-  const entries = auditData || STUB_AUDIT
+  const entries = Array.isArray(auditData) ? auditData : []
+  const hitl = (Array.isArray(hitlData) ? hitlData : []).filter(h => !resolved.includes(h.id))
   const filtered = entries.filter(r =>
     !filter || [r.actor, r.action, r.resource].some(v => v?.includes(filter))
   )
@@ -384,8 +360,8 @@ function AuditTab() {
         <Panel title="HITL Approval Queue" right={<span className="sec-badge-count">{hitl.length}</span>}>
           {hitl.map(h => (
             <HITLCard key={h.id} item={h}
-              onApprove={id => setHitl(x => x.filter(y => y.id !== id))}
-              onReject={id => setHitl(x => x.filter(y => y.id !== id))} />
+              onApprove={id => setResolved(x => [...x, id])}
+              onReject={id => setResolved(x => [...x, id])} />
           ))}
         </Panel>
       )}

@@ -1,16 +1,8 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import api from '../../../api/client'
-import { STUB_AGENTS } from './shared'
-
-const STUB_VERSIONS = (agentId) => [
-  { ts: '2026-05-17 14:32', preview: 'You are a ' + agentId + ' specialist. Your job is...' },
-  { ts: '2026-05-16 09:15', preview: 'Previous version of the ' + agentId + ' system prompt...' },
-  { ts: '2026-05-14 18:44', preview: 'Earlier iteration focused on output structure...' },
-  { ts: '2026-05-10 11:00', preview: 'Initial prompt — broad, general instructions...' },
-  { ts: '2026-05-07 08:22', preview: 'Draft zero — placeholder before calibration...' },
-]
 
 function PromptsTab() {
+  const [agents, setAgents]               = useState([])
   const [selectedAgent, setSelectedAgent] = useState(null)
   const [promptText, setPromptText]       = useState('')
   const [originalText, setOriginalText]   = useState('')
@@ -18,6 +10,12 @@ function PromptsTab() {
   const [saving, setSaving]               = useState(false)
   const [saved, setSaved]                 = useState(false)
   const textareaRef                       = useRef(null)
+
+  useEffect(() => {
+    api.get('/api/agents/list')
+      .then(d => setAgents((d?.agents || d || []).map(a => ({ id: a.id || a.name, name: a.name || a.id, prompt: a.prompt || a.description || '' }))))
+      .catch(() => setAgents([]))
+  }, [])
 
   const selectAgent = useCallback(async (agent) => {
     setSelectedAgent(agent)
@@ -27,11 +25,11 @@ function PromptsTab() {
       const text = d?.prompt ?? agent.prompt
       setPromptText(text)
       setOriginalText(text)
-      setVersions(d?.versions ?? STUB_VERSIONS(agent.id))
+      setVersions(Array.isArray(d?.versions) ? d.versions : [])
     } catch {
       setPromptText(agent.prompt)
       setOriginalText(agent.prompt)
-      setVersions(STUB_VERSIONS(agent.id))
+      setVersions([])
     }
   }, [])
 
@@ -68,7 +66,8 @@ function PromptsTab() {
       <div className="mp-prompts-layout">
         {/* Left: agent list */}
         <div className="mp-agent-list">
-          {STUB_AGENTS.map(agent => (
+          {agents.length === 0 && <div className="mp-prompt-no-selection">No agents loaded.</div>}
+          {agents.map(agent => (
             <div
               key={agent.id}
               className={`mp-agent-item ${selectedAgent?.id === agent.id ? 'mp-agent-item--active' : ''}`}
@@ -78,7 +77,7 @@ function PromptsTab() {
               onKeyDown={e => e.key === 'Enter' && selectAgent(agent)}
             >
               <div className="mp-agent-item-name">{agent.name}</div>
-              <div className="mp-agent-item-preview">{agent.prompt.slice(0, 80)}</div>
+              {agent.prompt && <div className="mp-agent-item-preview">{agent.prompt.slice(0, 80)}</div>}
             </div>
           ))}
         </div>

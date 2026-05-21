@@ -449,26 +449,12 @@ function WebhookRow({ hook }) {
 /* ── WebhooksTab ──────────────────────────────────────────────────────────── */
 function WebhooksTab() {
   const [hooks, setHooks] = useState([])
-  const [source, setSource] = useState('loading')
 
   useEffect(() => {
-    api.get('/api/hooks/list')
-      .then(d => {
-        setHooks(d.hooks || [])
-        setSource((d.hooks || []).length ? 'backend' : 'fallback')
-      })
-      .catch(() => setSource('fallback'))
+    api.get('/api/hooks/list').then(d => setHooks(d.hooks || [])).catch(() => setHooks([]))
   }, [])
 
-  const STUB_HOOKS = [
-    { name: 'lead-created',    url: '/api/hooks/lead-created',    events: ['lead:created'],    active: true },
-    { name: 'task-completed',  url: '/api/hooks/task-completed',  events: ['task:done'],       active: true },
-    { name: 'revenue-event',   url: '/api/hooks/revenue-event',   events: ['revenue:event'],   active: true },
-    { name: 'agent-error',     url: '/api/hooks/agent-error',     events: ['agent:error'],     active: false },
-  ]
-
-  const displayHooks = hooks.length ? hooks : STUB_HOOKS
-  const usingFallback = source === 'fallback' || hooks.length === 0
+  const displayHooks = hooks
 
   return (
     <div className="integ-tab-body">
@@ -476,11 +462,6 @@ function WebhooksTab() {
       <div className="integ-info-banner">
         Rate limit and API token settings have moved to <strong>Settings → Security</strong>
       </div>
-      {usingFallback && (
-        <div className="integ-warning-banner">
-          Webhook rows are fallback catalog entries because live hook status was not returned by the backend.
-        </div>
-      )}
 
       {/* Inbound webhooks */}
       <div className="integ-section">
@@ -488,7 +469,9 @@ function WebhooksTab() {
         <div className="integ-wh-head">
           <span>Name</span><span>URL</span><span>Events</span><span>Secret</span><span>Status</span>
         </div>
-        {displayHooks.map(h => <WebhookRow key={h.name} hook={{ ...h, source: usingFallback ? 'fallback' : 'backend' }} />)}
+        {displayHooks.length === 0
+          ? <div className="integ-empty">No webhook endpoints registered.</div>
+          : displayHooks.map(h => <WebhookRow key={h.name} hook={{ ...h, source: 'backend' }} />)}
       </div>
 
       {/* Test sandbox */}

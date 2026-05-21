@@ -357,6 +357,13 @@
   scrollbar-width: thin; scrollbar-color: rgba(229,199,107,0.12) transparent;
 }
 
+.integ-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--nx-text-muted, #9a927e);
+}
 .integ-error-banner,
 .integ-warning-banner,
 .integ-loading {

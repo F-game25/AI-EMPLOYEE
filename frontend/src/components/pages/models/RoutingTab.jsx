@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import api from '../../../api/client'
-import { buildModelOptions, STUB_ROUTING } from './shared'
+import { buildModelOptions } from './shared'
 
 function RoutingRow({ rule, onChange, onSave, registryData }) {
   const [saving, setSaving] = useState(false)
@@ -281,9 +281,9 @@ function TaskRoutingSection({ registryData }) {
 }
 
 function RoutingTab() {
-  const [agentRules, setAgentRules] = useState(STUB_ROUTING)
+  const [agentRules, setAgentRules] = useState([])
   const [registryData, setRegistryData] = useState(null)
-  const [rulesSource, setRulesSource] = useState('compatibility_defaults')
+  const [rulesSource, setRulesSource] = useState('empty')
 
   useEffect(() => {
     api.get('/api/models/registry')
@@ -329,7 +329,7 @@ function RoutingTab() {
 
       <div className="mp-routing-header">
         <div className="mp-section-label" style={{ margin: 0 }}>AGENT MODEL ROUTING</div>
-        {rulesSource !== 'backend' && <span className="mp-source-label mp-source-label--warn">COMPATIBILITY DEFAULTS</span>}
+        {rulesSource === 'backend' && <span className="mp-source-label">SAVED</span>}
         <button className="mp-add-btn" onClick={addRule}>+ ADD RULE</button>
       </div>
       <div style={{ overflowX: 'auto' }}>
@@ -345,6 +345,9 @@ function RoutingTab() {
             </tr>
           </thead>
           <tbody>
+            {agentRules.length === 0 && (
+              <tr><td colSpan={6} className="mp-routing-empty">No routing rules yet — click “+ Add Rule” to create one.</td></tr>
+            )}
             {agentRules.map(rule => (
               <RoutingRow
                 key={rule.id}

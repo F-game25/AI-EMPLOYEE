@@ -644,6 +644,13 @@ select.mp-model-select option { background: #111120; }
   box-shadow: 0 0 0 2px rgba(229,199,107,0.1);
 }
 
+.mp-routing-empty {
+  text-align: center;
+  padding: 18px;
+  color: var(--nx-text-dim, #555570);
+  font-size: 12px;
+  font-style: italic;
+}
 .mp-prompt-no-selection {
   display: flex;
   align-items: center;
