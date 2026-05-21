@@ -124,6 +124,11 @@ const NAV_GROUPS = [
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="3" cy="3" r="1"/><circle cx="13" cy="3" r="1"/><circle cx="3" cy="13" r="1"/><circle cx="13" cy="13" r="1"/><circle cx="8" cy="8" r="1"/><path d="M4 4l4 4M12 4l-4 4M4 12l4-4M12 12l-4-4"/></svg>,
       },
       {
+        id: 'graphs',
+        label: 'Memory Graphs',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="4" cy="4" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M5.3 4.6l5.4.6M5.2 5.4l.9 5.4M7.4 12h3.2M11.6 6.4l.3 4"/></svg>,
+      },
+      {
         id: 'knowledge',
         label: 'Knowledge',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z"/><path d="M5 6h6M5 9h6M5 12h3"/></svg>,

@@ -2563,6 +2563,18 @@ app.get('/api/neural-brain/threads', async (req, res) => {
   res.json(data);
 });
 
+// ── Four living memory graphs (WS3): shortterm|longterm|relations|unified ──────
+const _MEMORY_GRAPH_VIEWS = new Set(['shortterm', 'longterm', 'relations', 'unified']);
+app.get('/api/memory/graph/:view', async (req, res) => {
+  const { view } = req.params;
+  if (!_MEMORY_GRAPH_VIEWS.has(view)) return res.status(400).json({ error: 'unknown view', nodes: [], links: [] });
+  const limit = Number(req.query.limit) || 300;
+  // Forward Python payload as-is — it already carries decay/status/val fields the
+  // living-graph renderer needs, which normalizeDashboardGraph would strip.
+  const data = await proxyNeuralBrain(`/api/neural-brain/graph/views/${view}?limit=${limit}`, { nodes: [], links: [], stats: {}, view });
+  res.json(data);
+});
+
 app.post('/api/neural-brain/think', async (req, res) => {
   try {
     const r = await Promise.race([

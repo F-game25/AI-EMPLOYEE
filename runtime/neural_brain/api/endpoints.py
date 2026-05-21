@@ -98,6 +98,16 @@ async def get_graph(depth: int = Query(2, ge=1, le=5), limit: int = Query(200, g
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/graph/views/{view}")
+async def get_graph_view(view: str, limit: int = Query(300, ge=10, le=1000)):
+    """One of the four living memory graphs: shortterm|longterm|relations|unified."""
+    try:
+        from neural_brain.graph.memory_graphs import build_view
+        return build_view(view, limit=limit)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/threads")
 async def list_threads(limit: int = Query(20, ge=1, le=200)):
     """List recent reasoning threads from trace JSONL files."""

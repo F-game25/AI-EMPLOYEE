@@ -26,6 +26,7 @@ const WorkspacePage     = lazy(() => import('./pages/WorkspacePage'))
 const OperationsPage    = lazy(() => import('./pages/OperationsPage'))
 const SettingsPage      = lazy(() => import('./pages/SettingsPage'))
 const NeuralNetworkPage = lazy(() => import('./pages/NeuralNetworkPage'))
+const GraphsPage        = lazy(() => import('./pages/GraphsPage'))
 const IntelligencePage  = lazy(() => import('./pages/IntelligencePage'))
 const SystemHealthPage  = lazy(() => import('./pages/SystemHealthPage'))
 const SystemSetupCenter = lazy(() => import('./pages/SystemSetupCenter'))
@@ -79,6 +80,8 @@ const PAGES = {
   'deployments':    SystemHealthPage,
   // INTELLIGENCE
   'neural-graph':   NeuralNetworkPage,
+  'graphs':         GraphsPage,
+  'memory-graphs':  GraphsPage,
   'knowledge':      KnowledgePage,
   'trends':         IntelligencePage,
   'research':       ResearchPage,
