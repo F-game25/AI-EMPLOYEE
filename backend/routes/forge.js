@@ -550,13 +550,13 @@ function extractCodeActions(text, project) {
   return actions
 }
 
-function _httpJson(url, payload, timeoutMs) {
+function _httpJson(url, payload, timeoutMs, extraHeaders = {}) {
   return new Promise(resolve => {
     const http = require('http')
     const body = JSON.stringify(payload)
     const req = http.request(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...extraHeaders },
       timeout: timeoutMs,
     }, response => {
       let text = ''
@@ -571,6 +571,42 @@ function _httpJson(url, payload, timeoutMs) {
     req.write(body)
     req.end()
   })
+}
+
+// Short-lived service token so Node→Python code-index calls pass the zero-trust
+// RequestGuard. Signed with the shared JWT secret; cached ~5 min.
+let _ciToken = null
+let _ciTokenExp = 0
+function _codeIndexToken() {
+  const now = Date.now()
+  if (_ciToken && now < _ciTokenExp) return _ciToken
+  const secret = process.env.JWT_SECRET_KEY || process.env.JWT_SECRET
+  if (!secret) return null
+  try {
+    const jwt = require('jsonwebtoken')
+    _ciToken = jwt.sign({ type: 'access', role: 'service', iss: 'ai-employee', tenant_id: 'default', svc: 'forge-index' },
+      secret, { algorithm: 'HS256', expiresIn: '10m', subject: 'svc:forge' })
+    _ciTokenExp = now + 5 * 60 * 1000
+    return _ciToken
+  } catch { return null }
+}
+
+// Code-index calls go to the venv FastAPI backend (vector store lives there, not
+// in run_forge.py's bare python3). Best-effort: returns {ok:false} if backend down.
+function callCodeIndex(suffix, payload, timeoutMs = 120000) {
+  const token = _codeIndexToken()
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+  return _httpJson(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}/api/code-index/${suffix}`, payload, timeoutMs, headers)
+}
+
+// Retrieve the most relevant code snippets for a goal, formatted for the prompt.
+async function retrieveForgeContext(project, query) {
+  try {
+    const r = await callCodeIndex('context', { project_id: project.id, query, k: 6 }, 20000)
+    if (!r?.ok || !Array.isArray(r.results) || !r.results.length) return ''
+    const blocks = r.results.map(h => `--- ${h.path}${h.symbol ? ` :: ${h.symbol}` : ''} ---\n${(h.snippet || '').slice(0, 900)}`).join('\n\n')
+    return `\nRelevant existing code (retrieved from the indexed project — read before editing):\n${blocks}\n`
+  } catch { return '' }
 }
 
 function _replyText(d) {
@@ -824,7 +860,8 @@ module.exports = function createForgeRouter(requireAuth) {
     const recentHistory = (session.history || []).slice(-4).filter(m => m.role !== 'assistant' || !m.plan)
     const historySnippet = recentHistory.map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
 
-    const systemPrompt = buildForgeSystemPrompt(project, treeSnippet, historySnippet)
+    const codeContext = await retrieveForgeContext(project, content)
+    const systemPrompt = buildForgeSystemPrompt(project, treeSnippet, historySnippet) + codeContext
 
     const aiMessage = `${systemPrompt}\n\nUser: ${content}`
 
@@ -898,7 +935,8 @@ module.exports = function createForgeRouter(requireAuth) {
     const treeSnippet = flatTree.slice(0, 50).join('\n')
     const historySnippet = (session.history || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
 
-    const systemPrompt = buildForgeSystemPrompt(project, treeSnippet, historySnippet)
+    const codeContext = project ? await retrieveForgeContext(project, content) : ''
+    const systemPrompt = buildForgeSystemPrompt(project, treeSnippet, historySnippet) + codeContext
 
     try {
       const aiResult = await callPythonChat(`${systemPrompt}\n\nUser: ${content}`)
@@ -1004,6 +1042,37 @@ module.exports = function createForgeRouter(requireAuth) {
   router.get('/queue', requireAuth, (_req, res) => {
     const pending = loadActions().filter(action => ['proposed', 'approved'].includes(action.status))
     res.json({ ok: true, state: 'live', items: pending, total: pending.length })
+  })
+
+  // ── Code understanding (WS4): index a project + retrieve architecture/context ──
+  router.post('/index', requireAuth, async (req, res) => {
+    const project = findProject(req.body?.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const r = await callCodeIndex('index', { root: safeProjectRoot(project), project_id: project.id, max_files: Number(req.body?.max_files) || 400 }, 180000)
+    if (!r?.ok) return res.status(502).json({ ok: false, error: r?.error || 'indexing failed (is the Python backend up?)' })
+    appendAudit('forge_project_indexed', { project_id: project.id, files: r.files, chunks: r.chunks })
+    res.json(r)
+  })
+
+  router.post('/context', requireAuth, async (req, res) => {
+    const project = findProject(req.body?.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const query = String(req.body?.query || '').trim()
+    if (!query) return res.status(400).json({ ok: false, error: 'query required' })
+    const r = await callCodeIndex('context', { project_id: project.id, query, k: Number(req.body?.k) || 6 }, 20000)
+    res.json(r?.ok ? r : { ok: false, error: r?.error || 'context unavailable', results: [] })
+  })
+
+  router.get('/summary/:projectId', requireAuth, (req, res) => {
+    const project = findProject(req.params.projectId)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const http = require('http')
+    const token = _codeIndexToken()
+    const r = http.get(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}/api/code-index/summary/${project.id}`, { timeout: 8000, headers: token ? { Authorization: `Bearer ${token}` } : {} }, resp => {
+      let t = ''; resp.on('data', c => { t += c }); resp.on('end', () => { try { res.json(JSON.parse(t || '{}')) } catch { res.json({ ok: false, error: 'parse_error' }) } })
+    })
+    r.on('error', () => res.json({ ok: false, error: 'python backend offline' }))
+    r.on('timeout', () => { r.destroy(); res.json({ ok: false, error: 'timeout' }) })
   })
 
   router.get('/status', requireAuth, (_req, res) => {

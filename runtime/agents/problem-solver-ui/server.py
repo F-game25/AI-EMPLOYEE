@@ -2418,10 +2418,12 @@ except Exception as _feat_err:
 try:
     from neural_brain.api import router as _neural_brain_router, forge_compat_router as _forge_compat_router
     from neural_brain.api import model_fabric_router as _model_fabric_router
+    from neural_brain.api.code_index_router import router as _code_index_router
     app.include_router(_neural_brain_router)
     app.include_router(_forge_compat_router)
     app.include_router(_model_fabric_router)
-    logger.info("✅ Neural Brain API + Model Fabric loaded")
+    app.include_router(_code_index_router)
+    logger.info("✅ Neural Brain API + Model Fabric + Code Index loaded")
 except Exception as _nb_err:
     logger.warning("⚠️  Neural Brain API failed to load: %s", _nb_err)
 
