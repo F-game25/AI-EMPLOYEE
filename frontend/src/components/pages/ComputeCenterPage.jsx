@@ -73,7 +73,7 @@ export default function ComputeCenterPage() {
         </div>
         <div className="cc-head-stats">
           <span className={`cc-chip ${live ? 'cc-chip--live' : 'cc-chip--safe'}`}>{live ? '● LIVE provisioning ON' : '● Dry-run (live OFF)'}</span>
-          <button className="cc-btn" onClick={refresh}>↻</button>
+          <button className="cc-btn" onClick={refresh} aria-label="Refresh compute status">↻</button>
         </div>
       </header>
 
@@ -109,7 +109,7 @@ export default function ComputeCenterPage() {
           </div>
         )}
         {offers?.offers?.length > 0 && (
-          <table className="cc-offers">
+          <table className="cc-offers" aria-label="Available GPU offers">
             <thead><tr><th>Provider</th><th>GPU</th><th>$/hr</th><th>Source</th><th></th></tr></thead>
             <tbody>
               {offers.offers.map((o, i) => (
@@ -155,7 +155,7 @@ export default function ComputeCenterPage() {
       <section className="cc-section">
         <h2>Jobs</h2>
         {jobs.length === 0 ? <div className="cc-note">No compute jobs yet.</div> : (
-          <table className="cc-jobs">
+          <table className="cc-jobs" aria-label="Compute jobs">
             <thead><tr><th>Name</th><th>Provider</th><th>GPU</th><th>Status</th><th>Mode</th><th></th></tr></thead>
             <tbody>
               {jobs.map(j => (
@@ -225,7 +225,10 @@ function JobPersistence({ jobId }) {
         <button className="cc-btn cc-btn--sm" onClick={forceSync}>Force sync</button>
         <button className="cc-btn cc-btn--sm" onClick={recover}>Recover</button>
         <button className="cc-btn cc-btn--sm" onClick={() => teardown(false)}>Safe teardown</button>
-        <button className="cc-btn cc-btn--sm cc-btn--stop" onClick={() => teardown(true)}>Force teardown</button>
+        <button className="cc-btn cc-btn--sm cc-btn--stop"
+          onClick={() => { if (window.confirm('Force teardown ignores the sync-verified gate and may release the remote before all work is confirmed in the local archive. Continue?')) teardown(true) }}>
+          Force teardown
+        </button>
       </div>
       {arts.length > 0 && (
         <div className="cc-persist-files">

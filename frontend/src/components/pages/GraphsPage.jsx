@@ -64,15 +64,17 @@ export default function GraphsPage() {
               LT {stats.sources.longterm} · ST {stats.sources.shortterm} · REL {stats.sources.relations}
             </span>
           )}
-          <button className={`mg-live ${live.current ? 'mg-live--on' : ''}`} onClick={() => { live.current = !live.current; setView(v => v) }}>
+          <button className={`mg-live ${live.current ? 'mg-live--on' : ''}`} onClick={() => { live.current = !live.current; setView(v => v) }}
+            aria-pressed={live.current} aria-label={live.current ? 'Live updates on — click to pause' : 'Live updates paused — click to resume'}>
             ● Live
           </button>
         </div>
       </header>
 
-      <nav className="mg-tabs">
+      <nav className="mg-tabs" role="tablist" aria-label="Memory graph views">
         {VIEWS.map(v => (
-          <button key={v.id} className={`mg-tab ${view === v.id ? 'mg-tab--active' : ''}`} onClick={() => setView(v.id)}>
+          <button key={v.id} role="tab" aria-selected={view === v.id} aria-label={`${v.label} graph`}
+            className={`mg-tab ${view === v.id ? 'mg-tab--active' : ''}`} onClick={() => setView(v.id)}>
             {v.label}
           </button>
         ))}

@@ -93,7 +93,7 @@ export default function ModelFabricPage() {
               <span className="mf-chip">{health.online}/{health.total} online</span>
             </>
           )}
-          <button className="mf-btn" onClick={refresh}>↻ Refresh</button>
+          <button className="mf-btn" onClick={refresh} aria-label="Refresh subsystem health">↻ Refresh</button>
         </div>
       </header>
 
@@ -101,13 +101,13 @@ export default function ModelFabricPage() {
       {err && <div className="mf-note mf-note--err">⚠ {err}</div>}
 
       {/* ── Subsystem cards ── */}
-      <section className="mf-grid">
+      <section className="mf-grid" role="list" aria-label="Model subsystems">
         {ARCH_ORDER.map(arch => {
           const meta = ARCH_META[arch]
           const s = byArch[arch] || {}
           const r = results[arch]
           return (
-            <div key={arch} className={`mf-card ${s.available ? '' : 'mf-card--off'}`}>
+            <div key={arch} role="listitem" className={`mf-card ${s.available ? '' : 'mf-card--off'}`}>
               <div className="mf-card-top">
                 <StatusDot available={s.available} />
                 <span className="mf-card-title">{meta.label}</span>
@@ -126,6 +126,7 @@ export default function ModelFabricPage() {
                   className="mf-btn mf-btn--sm"
                   disabled={!meta.test || !s.available || busy[arch]}
                   onClick={() => testArch(arch)}
+                  aria-label={`Test ${meta.label} subsystem`}
                 >
                   {busy[arch] ? 'Testing…' : meta.test ? 'Test' : 'No test'}
                 </button>

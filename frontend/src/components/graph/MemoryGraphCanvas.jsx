@@ -141,8 +141,9 @@ export default function MemoryGraphCanvas({ data, emptyHint = 'No nodes yet.' })
   const empty = !(data?.nodes?.length)
   return (
     <div className="mg-canvas-wrap">
-      <canvas ref={canvasRef} className="mg-canvas" />
-      {empty && <div className="mg-empty-overlay">{emptyHint}</div>}
+      <canvas ref={canvasRef} className="mg-canvas" role="img"
+        aria-label={empty ? 'Empty memory graph' : `Memory graph with ${data.nodes.length} nodes and ${data.links?.length || 0} links`} />
+      {empty && <div className="mg-empty-overlay" role="status">{emptyHint}</div>}
     </div>
   )
 }
