@@ -38,21 +38,27 @@ try {
   log.info(`chromium log → ${chromiumLog}`)
 } catch (e) { log.warn('failed to wire chromium logging:', e.message) }
 
-// ── WebGL stability ──────────────────────────────────────────────────────────
+// ── WebGL stability (in-app controllable) ────────────────────────────────────
 // The dashboard/neural pages render a heavy three.js scene. On Linux+Electron the
-// GPU WebGL context was being LOST ("THREE.WebGLRenderer: Context Lost"), which
-// crashed every page that mounts 3D. Try hardware first (ignore the GPU blocklist,
-// keep contexts alive), and ALWAYS allow a software (SwiftShader) WebGL fallback so
-// a context can never be permanently lost. Override with AI_EMPLOYEE_FORCE_SOFTGL=1.
+// GPU WebGL context was being LOST ("THREE.WebGLRenderer: Context Lost"), crashing
+// every 3D page. The mode is set from INSIDE the app (Settings → Display), persisted
+// to ~/.ai-employee/config/render-prefs.json, and read here before app.ready:
+//   auto     — hardware first, SwiftShader software fallback always allowed (default)
+//   hardware — trust the GPU (no forced software), fallback still permitted
+//   software — force SwiftShader software rendering (most stable, slower)
 try {
+  const { getRenderMode } = require('./src/render-prefs')
+  const mode = getRenderMode()
   app.commandLine.appendSwitch('ignore-gpu-blocklist')
   app.commandLine.appendSwitch('enable-gpu-rasterization')
   app.commandLine.appendSwitch('disable-gpu-process-crash-limit')
   app.commandLine.appendSwitch('enable-unsafe-swiftshader')   // software WebGL fallback
-  if (process.env.AI_EMPLOYEE_FORCE_SOFTGL === '1') {
+  if (mode === 'software') {
     app.commandLine.appendSwitch('use-gl', 'angle')
     app.commandLine.appendSwitch('use-angle', 'swiftshader')
-    log.info('WebGL: forcing SwiftShader software rendering')
+    log.info('WebGL: SwiftShader software rendering (mode=software)')
+  } else {
+    log.info(`WebGL: mode=${mode}`)
   }
 } catch (e) { log.warn('failed to set WebGL flags:', e.message) }
 
@@ -846,6 +852,18 @@ ipcMain.handle('restart-verbose', async (event) => {
 ipcMain.handle('get-launch-status', async () => launchStatus)
 ipcMain.handle('get-diagnostics', async () => buildDiagnostics())
 ipcMain.handle('get-policy', async () => loadPolicy())
+
+// Rendering mode (WebGL) — controllable from Settings; takes effect on next restart.
+ipcMain.handle('get-render-mode', async () => {
+  const { getRenderMode, VALID } = require('./src/render-prefs')
+  return { mode: getRenderMode(), options: VALID }
+})
+ipcMain.handle('set-render-mode', async (_e, mode) => {
+  const { setRenderMode } = require('./src/render-prefs')
+  const r = setRenderMode(mode)
+  log.info(`render mode set → ${mode} (ok=${r.ok})`)
+  return r  // caller restarts to apply
+})
 ipcMain.handle('get-phases', async () => tracker.snapshot())
 
 ipcMain.handle('open-logs-folder', async () => {

@@ -367,6 +367,54 @@ const THEMES = [
   { id: 'matrix-green',  label: 'MATRIX GREEN', colors: ['#22c55e', '#030903', '#0a160a'] },
 ]
 
+// Rendering (GPU) mode — controllable in-app instead of a terminal env var.
+// Only shown inside the Electron launcher (window.ai present). Applies on restart.
+const RENDER_LABELS = { auto: 'Auto (recommended)', hardware: 'Hardware (GPU)', software: 'Software (most stable)' }
+const RENDER_DESC = {
+  auto: 'Use the GPU; fall back to software if the WebGL context is lost.',
+  hardware: 'Force GPU rendering — fastest, but unstable on some Linux drivers.',
+  software: 'SwiftShader software rendering — slower, but never loses the WebGL context. Use this if pages flicker or go blank.',
+}
+function RenderingSection() {
+  const [mode, setMode] = useState(null)
+  const [options, setOptions] = useState(['auto', 'hardware', 'software'])
+  const [dirty, setDirty] = useState(false)
+  useEffect(() => {
+    if (!window.ai?.getRenderMode) { setMode('unavailable'); return }
+    window.ai.getRenderMode()
+      .then(r => { setMode(r.mode || 'auto'); if (Array.isArray(r.options)) setOptions(r.options) })
+      .catch(() => setMode('unavailable'))
+  }, [])
+  if (mode === 'unavailable' || mode === null) return null   // browser mode — no launcher
+  const choose = async (m) => {
+    setMode(m)
+    try { await window.ai.setRenderMode(m); setDirty(true) } catch { /* */ }
+  }
+  return (
+    <>
+      <div className="nx-divider" />
+      <div className="nx-section">
+        <div className="nx-section-label">RENDERING (GPU)</div>
+        <div className="nx-render-opts" role="radiogroup" aria-label="Rendering mode">
+          {options.map(o => (
+            <button key={o} type="button" role="radio" aria-checked={mode === o}
+              className={`nx-render-opt ${mode === o ? 'nx-render-opt--active' : ''}`} onClick={() => choose(o)}>
+              <span className="nx-render-opt__title">{RENDER_LABELS[o] || o}{mode === o && ' ✓'}</span>
+              <span className="nx-render-opt__desc">{RENDER_DESC[o] || ''}</span>
+            </button>
+          ))}
+        </div>
+        {dirty && (
+          <div className="nx-render-restart">
+            <span>Saved — restart the app to apply.</span>
+            <button className="nx-save-btn" onClick={() => window.ai?.restartSystem?.()}>Restart now</button>
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
 function AppearanceTab() {
   const [cfg, setCfg] = useState({ theme: 'nexus-dark', sidebar_collapsed: false, reduced_motion: false, font_size: 13 })
   const set = (k, v) => setCfg(p => ({ ...p, [k]: v }))
@@ -426,6 +474,8 @@ function AppearanceTab() {
 
         <NxSaveBtn label="APPLY APPEARANCE" saving={saving} saved={saved} onClick={save} />
       </div>
+
+      <RenderingSection />
     </div>
   )
 }

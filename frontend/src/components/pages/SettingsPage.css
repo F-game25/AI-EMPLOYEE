@@ -1316,3 +1316,21 @@ select.nx-input option { background: var(--nx-surface-3); color: var(--nx-text);
   .nx-notif-header-row span:last-child,
   .nx-notif-row         span:last-child { display: none; }
 }
+
+/* ── Rendering (GPU) mode selector ── */
+.nx-render-opts { display: flex; flex-direction: column; gap: 8px; }
+.nx-render-opt {
+  text-align: left; display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 14px; border-radius: 8px; cursor: pointer;
+  background: var(--nx-bg-deep, #04050a); color: var(--nx-text, #ecead8);
+  border: 1px solid var(--nx-border, rgba(229,199,107,0.14)); transition: border-color .15s, background .15s;
+}
+.nx-render-opt:hover { border-color: var(--nx-border-strong, rgba(229,199,107,0.28)); }
+.nx-render-opt--active { border-color: var(--nx-gold, #e5c76b); background: var(--nx-gold-grad-soft); }
+.nx-render-opt__title { font-size: 13px; font-weight: 600; }
+.nx-render-opt__desc { font-size: 11px; color: var(--nx-text-muted, #9a927e); }
+.nx-render-restart {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 12px;
+  background: rgba(245,158,11,0.1); border: 1px solid var(--nx-warning, #f59e0b); color: var(--nx-warning, #f59e0b);
+}

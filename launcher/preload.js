@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('ai', {
   getLaunchStatus: () => ipcRenderer.invoke('get-launch-status'),
   getDiagnostics: () => ipcRenderer.invoke('get-diagnostics'),
   getPolicy: () => ipcRenderer.invoke('get-policy'),
+  getRenderMode: () => ipcRenderer.invoke('get-render-mode'),
+  setRenderMode: (mode) => ipcRenderer.invoke('set-render-mode', mode),
   getPhases: () => ipcRenderer.invoke('get-phases'),
   openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
   copyDiagnostics: () => ipcRenderer.invoke('copy-diagnostics'),
