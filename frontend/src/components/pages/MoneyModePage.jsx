@@ -4,6 +4,8 @@ import KPITile from '../nexus-ui/KPITile'
 import StatusPill from '../nexus-ui/StatusPill'
 import { SectionLabel } from '../nexus-ui/SectionLabel'
 import { EmptyState, ErrorState } from '../nexus-ui'
+import api from '../../api/client'
+import TaskComposer, { MONEY_PRESETS } from '../core/TaskComposer'
 import './MoneyModePage.css'
 
 const fmt$ = (v) =>
@@ -12,10 +14,7 @@ const fmt$ = (v) =>
 const fmtNum = (v) => new Intl.NumberFormat('en-US').format(Number(v) || 0)
 
 async function fetchJson(path) {
-  const res = await fetch(path, { credentials: 'include' })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`)
-  return data
+  return api.get(path)
 }
 
 function useEconomyData() {
@@ -153,6 +152,13 @@ export default function MoneyModePage() {
       </section>
 
       <div className="ecc-enhance-grid">
+        <TaskComposer
+          title="START MONEY TASK"
+          subtitle="Draft, evaluate, and prepare work. Risky execution pauses for approval."
+          presets={MONEY_PRESETS}
+          placeholder="Example: find 3 service offers I can sell this week using my existing skills."
+          source="money-mode-composer"
+        />
         <Panel title="MONEY MODE TASK INBOX" icon="[]" tone="gold" size="compact" actions={<StatusPill label={tasks.length ? `${tasks.length} TASKS` : 'EMPTY'} tone={tasks.length ? 'success' : 'idle'} size="sm" />}>
           <div className="ecc-native-list">
             {tasks.slice(0, 5).map((task) => (

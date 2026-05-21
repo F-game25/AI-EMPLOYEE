@@ -28,6 +28,11 @@ const SettingsPage      = lazy(() => import('./pages/SettingsPage'))
 const NeuralNetworkPage = lazy(() => import('./pages/NeuralNetworkPage'))
 const IntelligencePage  = lazy(() => import('./pages/IntelligencePage'))
 const SystemHealthPage  = lazy(() => import('./pages/SystemHealthPage'))
+const SystemSetupCenter = lazy(() => import('./pages/SystemSetupCenter'))
+const ProofCenter       = lazy(() => import('./pages/ProofCenter'))
+const ApprovalInbox     = lazy(() => import('./pages/ApprovalInbox'))
+const ApiCatalogPage    = lazy(() => import('./pages/ApiCatalogPage'))
+const UserExperienceCenter = lazy(() => import('./pages/UserExperienceCenter'))
 const IntegrationsPage  = lazy(() => import('./pages/IntegrationsPage'))
 const ModelsPage        = lazy(() => import('./pages/ModelsPage'))
 const ModelFabricPage   = lazy(() => import('./pages/ModelFabricPage'))
@@ -56,6 +61,8 @@ const PAGES = {
   'operations':     OperationsPage,
   'ascend-forge':   AscendForgePage,
   'system':         SystemHealthPage,
+  'setup':          SystemSetupCenter,
+  'system-setup':   SystemSetupCenter,
   'workspace':      WorkspacePage,
   'integrations':   IntegrationsPage,
   'settings':       SettingsPage,
@@ -81,10 +88,17 @@ const PAGES = {
   'security':       SecurityPanel,
   'blacklight':     SecurityPanel,
   'audit':          SecurityPanel,
+  'proof':          ProofCenter,
+  'proof-center':   ProofCenter,
+  'approvals':      ApprovalInbox,
+  'approval-inbox': ApprovalInbox,
   // SYSTEM
   'models':         ModelsPage,
   'model-fabric':   ModelFabricPage,
   'runtime':        SystemHealthPage,
+  'api-catalog':    ApiCatalogPage,
+  'user-views':     UserExperienceCenter,
+  'roles':          UserExperienceCenter,
 }
 
 function DashboardMountedSignal({ section }) {

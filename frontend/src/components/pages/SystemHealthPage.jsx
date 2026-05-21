@@ -100,20 +100,6 @@ function Sparkline({ label, buf, color, current, unit = '%' }) {
   )
 }
 
-// ── Process Table ───────────────────────────────────────────────────
-const PROCESSES = [
-  { name: 'nexus-node',        type: 'SERVER',  cpu: 2.1,  mem: '512 MB',  status: 'RUNNING' },
-  { name: 'python-backend',    type: 'AI_SVC',  cpu: 8.4,  mem: '1.2 GB',  status: 'RUNNING' },
-  { name: 'agent-coordinator', type: 'AGENT',   cpu: 1.2,  mem: '128 MB',  status: 'RUNNING' },
-  { name: 'agent-researcher',  type: 'AGENT',   cpu: 3.7,  mem: '256 MB',  status: 'RUNNING' },
-  { name: 'agent-optimizer',   type: 'AGENT',   cpu: 0.8,  mem: '96 MB',   status: 'RUNNING' },
-  { name: 'vector-store',      type: 'DB',      cpu: 0.3,  mem: '2.1 GB',  status: 'RUNNING' },
-  { name: 'sqlite-audit',      type: 'DB',      cpu: 0.1,  mem: '24 MB',   status: 'RUNNING' },
-  { name: 'message-bus',       type: 'IPC',     cpu: 0.2,  mem: '64 MB',   status: 'RUNNING' },
-  { name: 'evolution-ctrl',    type: 'AGENT',   cpu: 0.0,  mem: '32 MB',   status: 'IDLE'    },
-  { name: 'llm-cache',         type: 'CACHE',   cpu: 0.1,  mem: '384 MB',  status: 'RUNNING' },
-]
-
 const TYPE_COLOR = {
   SERVER: 'var(--nx-cyan)',
   AI_SVC: 'var(--nx-gold)',
@@ -133,8 +119,18 @@ const COLS = ['name', 'type', 'cpu', 'mem', 'status']
 
 function ProcessTable() {
   const [sort, setSort] = useState({ col: 'name', asc: true })
+  const { data, error } = useLiveData({ endpoint: '/api/system/processes', pollMs: 5000 })
+  const processes = (data?.processes || []).map(row => ({
+    name: row.name || row.service || `pid-${row.pid}`,
+    type: row.service === 'python_backend' ? 'AI_SVC' : row.service === 'node_backend' ? 'SERVER' : row.service === 'ollama' ? 'AI_SVC' : 'IPC',
+    cpu: Number(row.cpu_percent || 0),
+    mem: `${Number(row.memory_percent || 0).toFixed(1)}%`,
+    status: String(row.status || 'unknown').toUpperCase(),
+    pid: row.pid,
+    command: row.command,
+  }))
 
-  const sorted = [...PROCESSES].sort((a, b) => {
+  const sorted = [...processes].sort((a, b) => {
     const va = a[sort.col], vb = b[sort.col]
     const cmp = typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb))
     return sort.asc ? cmp : -cmp
@@ -146,7 +142,8 @@ function ProcessTable() {
 
   return (
     <div className="infra-proctable">
-      <div className="infra-section-label">PROCESS MONITOR</div>
+      <div className="infra-section-label">LIVE PROCESS MONITOR</div>
+      {error && <div className="infra-live-note">Process data unavailable: {error.message || String(error)}</div>}
       <table className="infra-table">
         <thead>
           <tr>
@@ -159,8 +156,8 @@ function ProcessTable() {
         </thead>
         <tbody>
           {sorted.map(p => (
-            <tr key={p.name} className="infra-table__row">
-              <td className="infra-table__name">{p.name}</td>
+            <tr key={`${p.pid || p.name}`} className="infra-table__row" title={p.command || ''}>
+              <td className="infra-table__name">{p.name}{p.pid ? ` #${p.pid}` : ''}</td>
               <td>
                 <span className="infra-type-pill" style={{ color: TYPE_COLOR[p.type], borderColor: TYPE_COLOR[p.type] }}>
                   {p.type}
@@ -175,6 +172,11 @@ function ProcessTable() {
               </td>
             </tr>
           ))}
+          {!sorted.length && (
+            <tr className="infra-table__row">
+              <td colSpan={COLS.length} className="infra-table__empty">Live process data unavailable.</td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -223,16 +225,7 @@ function SystemInfoPanel({ systemStatus }) {
 }
 
 // ── Container Grid ───────────────────────────────────────────────────
-const CONTAINERS = [
-  { name: 'nexus-node',      port: '8787',  net: 'HTTP/WS', status: 'HEALTHY', uptime: '99.9%' },
-  { name: 'python-backend',  port: '18790', net: 'HTTP',    status: 'HEALTHY', uptime: '99.7%' },
-  { name: 'vector-store',    port: '—',     net: 'LOCAL',   status: 'HEALTHY', uptime: '100%'  },
-  { name: 'message-bus',     port: '—',     net: 'IPC',     status: 'HEALTHY', uptime: '100%'  },
-  { name: 'evolution-ctrl',  port: '—',     net: 'LOCAL',   status: 'IDLE',    uptime: '—'     },
-  { name: 'sqlite-audit',    port: '—',     net: 'LOCAL',   status: 'HEALTHY', uptime: '100%'  },
-]
-
-const CONT_DOT = { HEALTHY: 'var(--nx-success)', IDLE: 'var(--nx-amber)', ERROR: 'var(--nx-danger)' }
+const CONT_DOT = { live: 'var(--nx-success)', degraded: 'var(--nx-amber)', unavailable: 'var(--nx-danger)', not_configured: 'var(--nx-amber)' }
 
 // ── System Diagnostics (from old DoctorPage) ─────────────────────────
 const DIAG_CHECKS = [
@@ -356,26 +349,61 @@ function EmergencyPanel() {
 }
 
 function ContainerGrid() {
+  const { data } = useLiveData({ endpoint: '/api/system/services', pollMs: 5000 })
+  const services = data?.services || []
   return (
     <div className="infra-containers">
-      <div className="infra-section-label">SERVICE STATUS</div>
+      <div className="infra-section-label">LIVE SERVICE STATUS</div>
       <div className="infra-containers__grid">
-        {CONTAINERS.map(c => (
+        {services.map(c => (
           <div key={c.name} className="infra-card">
             <span className="infra-card__dot" style={{ background: CONT_DOT[c.status] ?? 'var(--nx-text-muted)', boxShadow: `0 0 6px ${CONT_DOT[c.status] ?? 'transparent'}` }} />
             <div className="infra-card__name">{c.name}</div>
             <div className="infra-card__meta">
-              {c.port !== '—' && <span className="infra-card__port">:{c.port}</span>}
-              <span className="infra-card__net">{c.net}</span>
+              {c.port && <span className="infra-card__port">:{c.port}</span>}
+              <span className="infra-card__net">{c.restart_available ? 'RESTARTABLE' : 'OBSERVED'}</span>
             </div>
             <div className="infra-card__row">
               <span className="infra-card__status" style={{ color: CONT_DOT[c.status] }}>
-                {c.status}
+                {String(c.status || 'unknown').toUpperCase()}
               </span>
-              <span className="infra-card__uptime">{c.uptime}</span>
+              <span className="infra-card__uptime">{typeof c.uptime === 'number' ? fmtUptime(c.uptime) : '—'}</span>
             </div>
+            {c.last_error && <div className="infra-card__warn">{c.last_error}</div>}
           </div>
         ))}
+        {!services.length && <div className="infra-live-note">Live service data unavailable.</div>}
+      </div>
+    </div>
+  )
+}
+
+function LiveStorageWarningsPanel() {
+  const { data: storageData } = useLiveData({ endpoint: '/api/system/storage', pollMs: 15000 })
+  const { data: warningData } = useLiveData({ endpoint: '/api/system/runtime-warnings', pollMs: 10000 })
+  const storage = storageData?.storage || []
+  const warnings = warningData?.warnings || []
+  return (
+    <div className="infra-live-panel">
+      <div className="infra-live-block">
+        <div className="infra-section-label">LIVE STORAGE</div>
+        {storage.map(item => (
+          <div key={item.id} className="infra-live-row">
+            <span>{item.label}</span>
+            <b>{item.used_percent || item.status}</b>
+          </div>
+        ))}
+        {!storage.length && <div className="infra-live-note">Storage data unavailable.</div>}
+      </div>
+      <div className="infra-live-block">
+        <div className="infra-section-label">RUNTIME WARNINGS</div>
+        {warnings.map(item => (
+          <div key={item.id} className="infra-live-row infra-live-row--warn">
+            <span>{item.id.replace(/_/g, ' ')}</span>
+            <b>{item.status}</b>
+          </div>
+        ))}
+        {!warnings.length && <div className="infra-live-note">No runtime warnings reported.</div>}
       </div>
     </div>
   )
@@ -386,35 +414,32 @@ function SLAUptimePanel() {
   const { data } = useLiveData({ endpoint: '/api/system/uptime', pollMs: 60000 })
   const { data: sla } = useLiveData({ endpoint: '/api/system/sla', pollMs: 60000 })
 
-  const STUB_SERVICES = [
-    { name: 'backend',    uptime_30d: 99.8, uptime_90d: 99.6, incidents_30d: 1, mttr_minutes: 8.2 },
-    { name: 'python-ai',  uptime_30d: 99.4, uptime_90d: 98.9, incidents_30d: 2, mttr_minutes: 14.5 },
-    { name: 'redis',      uptime_30d: 100,  uptime_90d: 99.9, incidents_30d: 0, mttr_minutes: 0 },
-    { name: 'postgres',   uptime_30d: 99.9, uptime_90d: 99.8, incidents_30d: 0, mttr_minutes: 0 },
-  ]
-  const services = data?.services || STUB_SERVICES
-  const currentUptime = sla?.current?.uptime || 99.7
-  const errorRate = sla?.current?.error_rate_pct || 0.3
-  const p95Lat = sla?.current?.p95_latency_ms || 340
+  const services = data?.services || []
+  const currentUptime = sla?.current?.uptime
+  const errorRate = sla?.current?.error_rate_pct
+  const p95Lat = sla?.current?.p95_latency_ms
 
   return (
     <div className="infra-sla-panel">
       <div className="infra-section-label">UPTIME &amp; SLA</div>
+      {!services.length && !sla?.current && (
+        <div className="infra-live-note infra-live-note--warn">Live SLA data unavailable. No sample uptime rows are shown.</div>
+      )}
       <div className="infra-sla-kpis">
         <div className="infra-sla-kpi">
-          <span className="infra-sla-kpi-val" style={{ color: currentUptime >= 99.5 ? 'var(--nx-success)' : 'var(--nx-warning)' }}>
-            {currentUptime.toFixed(2)}%
+          <span className="infra-sla-kpi-val" style={{ color: currentUptime == null || currentUptime >= 99.5 ? 'var(--nx-success)' : 'var(--nx-warning)' }}>
+            {currentUptime == null ? '—' : `${currentUptime.toFixed(2)}%`}
           </span>
           <span className="infra-sla-kpi-label">30-DAY UPTIME</span>
         </div>
         <div className="infra-sla-kpi">
-          <span className="infra-sla-kpi-val" style={{ color: errorRate < 1 ? 'var(--nx-success)' : 'var(--nx-danger)' }}>
-            {errorRate.toFixed(2)}%
+          <span className="infra-sla-kpi-val" style={{ color: errorRate == null || errorRate < 1 ? 'var(--nx-success)' : 'var(--nx-danger)' }}>
+            {errorRate == null ? '—' : `${errorRate.toFixed(2)}%`}
           </span>
           <span className="infra-sla-kpi-label">ERROR RATE</span>
         </div>
         <div className="infra-sla-kpi">
-          <span className="infra-sla-kpi-val">{p95Lat}ms</span>
+          <span className="infra-sla-kpi-val">{p95Lat == null ? '—' : `${p95Lat}ms`}</span>
           <span className="infra-sla-kpi-label">P95 LATENCY</span>
         </div>
       </div>
@@ -424,9 +449,9 @@ function SLAUptimePanel() {
       {services.map(s => (
         <div key={s.name} className="infra-sla-row">
           <span className="infra-sla-name">{s.name}</span>
-          <span className={`infra-sla-val ${s.uptime_30d >= 99.5 ? 'infra-sla-val--ok' : 'infra-sla-val--warn'}`}>{s.uptime_30d.toFixed(2)}%</span>
-          <span className={`infra-sla-val ${s.uptime_90d >= 99.5 ? 'infra-sla-val--ok' : 'infra-sla-val--warn'}`}>{s.uptime_90d.toFixed(2)}%</span>
-          <span className="infra-sla-incidents">{s.incidents_30d}</span>
+          <span className={`infra-sla-val ${s.uptime_30d >= 99.5 ? 'infra-sla-val--ok' : 'infra-sla-val--warn'}`}>{s.uptime_30d == null ? '—' : `${s.uptime_30d.toFixed(2)}%`}</span>
+          <span className={`infra-sla-val ${s.uptime_90d >= 99.5 ? 'infra-sla-val--ok' : 'infra-sla-val--warn'}`}>{s.uptime_90d == null ? '—' : `${s.uptime_90d.toFixed(2)}%`}</span>
+          <span className="infra-sla-incidents">{s.incidents_30d ?? '—'}</span>
           <span className="infra-sla-mttr">{s.mttr_minutes > 0 ? `${s.mttr_minutes}m` : '—'}</span>
         </div>
       ))}
@@ -437,18 +462,14 @@ function SLAUptimePanel() {
 // ── Patch History Panel ─────────────────────────────────────────────────────
 function PatchHistoryPanel() {
   const { data } = useLiveData({ endpoint: '/api/system/patches', pollMs: 30000 })
-
-  const STUB_PATCHES = [
-    { id: 'p001', component: 'email-writer', description: 'Prompt temperature 0.7→0.4', status: 'applied', applied_at: Date.now() - 86400000 * 5, improvement: '+18% CSAT' },
-    { id: 'p002', component: 'data-analyst', description: 'ARR-tier segmentation default', status: 'applied', applied_at: Date.now() - 86400000 * 9, improvement: '+28% accuracy' },
-    { id: 'p003', component: 'lead-hunter',  description: 'Warm-lead priority when depth > 40', status: 'applied', applied_at: Date.now() - 86400000 * 12, improvement: '+14% conv' },
-    { id: 'p004', component: 'orchestrator', description: 'Retry logic for LLM timeouts > 8s', status: 'rolled_back', applied_at: Date.now() - 86400000 * 3, improvement: null },
-  ]
-  const patches = data?.patches?.length ? data.patches : STUB_PATCHES
+  const patches = data?.patches || []
 
   return (
     <div className="infra-patch-panel">
       <div className="infra-section-label">SELF-EVOLUTION PATCH HISTORY</div>
+      {!patches.length && (
+        <div className="infra-live-note infra-live-note--warn">No live patch history is available. Sample patch rows are hidden.</div>
+      )}
       {patches.map(p => (
         <div key={p.id} className={`infra-patch-row infra-patch-row--${p.status}`}>
           <div className="infra-patch-head">
@@ -456,7 +477,7 @@ function PatchHistoryPanel() {
             <span className={`infra-patch-status infra-patch-status--${p.status}`}>
               {p.status === 'applied' ? '✓ APPLIED' : '↩ ROLLED BACK'}
             </span>
-            <span className="infra-patch-date">{new Date(p.applied_at).toLocaleDateString()}</span>
+            <span className="infra-patch-date">{p.applied_at ? new Date(p.applied_at).toLocaleDateString() : '—'}</span>
           </div>
           <div className="infra-patch-desc">{p.description}</div>
           {p.improvement && <div className="infra-patch-improvement">{p.improvement}</div>}
@@ -488,16 +509,7 @@ function LogStreamPanel() {
     return () => window.removeEventListener('ws:event', onWs)
   }, [])
 
-  const STUB_LOGS = [
-    { ts: Date.now() - 500,   level: 'INFO',  component: 'backend',   msg: 'GET /api/agents/list 200 4ms' },
-    { ts: Date.now() - 1200,  level: 'INFO',  component: 'python-ai', msg: 'Pipeline phase: execute → format 91ms' },
-    { ts: Date.now() - 2800,  level: 'WARN',  component: 'python-ai', msg: 'LLM response time 6.2s exceeds threshold' },
-    { ts: Date.now() - 5000,  level: 'INFO',  component: 'agents',    msg: 'lead-hunter-elite: task completed (score 0.87)' },
-    { ts: Date.now() - 7200,  level: 'DEBUG', component: 'memory',    msg: 'Vector store: 3 facts retrieved (84ms)' },
-    { ts: Date.now() - 10000, level: 'INFO',  component: 'evolution', msg: 'Patch p004 rolled back — accuracy regression' },
-    { ts: Date.now() - 14000, level: 'ERROR', component: 'backend',   msg: 'POST /api/forge/sessions 500 timeout' },
-  ]
-  const displayLogs = logs.length ? logs : STUB_LOGS
+  const displayLogs = logs
   const COMPONENTS = ['all', 'backend', 'python-ai', 'agents', 'memory', 'evolution', 'security']
   const LEVEL_COLOR = { INFO: 'var(--nx-text-muted)', WARN: 'var(--nx-warning)', ERROR: 'var(--nx-danger)', DEBUG: 'var(--nx-text-dim)' }
 
@@ -517,6 +529,9 @@ function LogStreamPanel() {
         <button className="infra-log-clear" onClick={() => setLogs([])}>Clear</button>
       </div>
       <div className="infra-log-stream">
+        {!filtered.length && (
+          <div className="infra-live-note infra-live-note--warn">No live log events have arrived yet. Sample log rows are hidden.</div>
+        )}
         {filtered.map((l, i) => (
           <div key={i} className="infra-log-row">
             <span className="infra-log-ts">{new Date(l.ts).toLocaleTimeString()}</span>
@@ -598,6 +613,7 @@ export default function SystemHealthPage() {
 
       {/* Container grid */}
       <ContainerGrid />
+      <LiveStorageWarningsPanel />
 
       {/* SLA + Self-healing */}
       <div className="infra-bottom-row">

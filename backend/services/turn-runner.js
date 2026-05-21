@@ -10,6 +10,7 @@ const STATE_DIR = path.resolve(
     || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'), 'state'),
 );
 const TURN_LOG = path.join(STATE_DIR, 'turns.jsonl');
+const CONTRACT_VERSION = 'turn_result_v1';
 
 function nowIso() {
   return new Date().toISOString();
@@ -119,6 +120,33 @@ function proofFromExecution(result) {
   return proof;
 }
 
+function detectApprovalRequirement(input, kind) {
+  const text = String(input || '').toLowerCase();
+  const isMoneyOrExternal = (
+    kind === 'money'
+    || /\b(money mode|make money|revenue|client|lead|outreach|affiliate|marketplace|wallet|payment|paid task)\b/.test(text)
+  );
+  if (!isMoneyOrExternal) return null;
+
+  const risky = [
+    ['publish', /\b(publish|post|schedule post|go live)\b/],
+    ['outreach', /\b(send|email|dm|message|contact|outreach)\b/],
+    ['payment', /\b(spend|pay|purchase|buy|wallet|payment|transfer|charge)\b/],
+    ['paid_task', /\b(accept paid|accept job|submit client|deliver client|bid)\b/],
+    ['external_account', /\b(change account|connect account|modify account|oauth|api key)\b/],
+  ].filter(([, pattern]) => pattern.test(text)).map(([name]) => name);
+
+  if (!risky.length) return null;
+  return {
+    id: safeId('approval'),
+    status: 'required',
+    risk_level: 'high',
+    required_for: risky,
+    reason: 'This request may publish, send, spend, accept paid work, or modify an external account.',
+    requested_at: nowIso(),
+  };
+}
+
 function formatTeammateReply({ input, rawReply, source, proof, errors, degraded }) {
   const cleanReply = String(rawReply || '').trim();
   const blocked = errors && errors.length > 0;
@@ -191,6 +219,7 @@ function createTurnRunner(deps) {
     deps.addActivity(`[TURN] ${turnId} submitted: ${input}`, 'task');
 
     broadcast('turn:started', {
+      contract_version: CONTRACT_VERSION,
       turn_id: turnId,
       task_id: queued.taskId,
       workflow_run: run.run_id,
@@ -202,6 +231,82 @@ function createTurnRunner(deps) {
       ts: Date.now(),
     });
     broadcast('orchestrator:queued', { ...queued, turn_id: turnId });
+
+    const approvalRequired = detectApprovalRequirement(input, kind);
+    if (approvalRequired) {
+      approvals.push(approvalRequired);
+      actions.push({
+        id: 'approval_gate',
+        action: 'approval_gate',
+        label: 'Human approval required before execution',
+        status: 'waiting_approval',
+        proof: { approval_id: approvalRequired.id, required_for: approvalRequired.required_for },
+      });
+      proof.push({
+        type: 'approval_gate',
+        label: 'Execution paused for human approval',
+        status: 'waiting_approval',
+        approval_id: approvalRequired.id,
+      });
+
+      const assistantReplyForApproval = formatTeammateReply({
+        input,
+        rawReply: 'I paused before taking external or money-related action. Approve the action first, then I can continue with execution.',
+        source: 'approval_gate',
+        proof,
+        errors: [],
+        degraded: false,
+      });
+      const turn = {
+        ok: true,
+        contract_version: CONTRACT_VERSION,
+        compatibility_route: options.source || kind,
+        turn_id: turnId,
+        task_id: queued.taskId,
+        taskId: queued.taskId,
+        workflow_run: run.run_id,
+        user_id: userId,
+        tenant_id: tenantId,
+        input,
+        intent: queued.subsystem || kind,
+        status: 'waiting_approval',
+        assistant_reply: assistantReplyForApproval,
+        reply: assistantReplyForApproval,
+        content: assistantReplyForApproval,
+        response: assistantReplyForApproval,
+        raw_reply: 'Execution paused for approval.',
+        actions,
+        artifacts,
+        attachments: artifacts,
+        proof,
+        approvals,
+        degraded: false,
+        errors,
+        trace_id: null,
+        source: 'approval_gate',
+        memory_router: null,
+        created_at: nowIso(),
+      };
+
+      appendTurnLog(turn);
+      broadcast('approval:required', { turn_id: turnId, task_id: queued.taskId, approval: approvalRequired, turn });
+      broadcast('proof:ready', turn);
+      broadcast('turn:completed', turn);
+      broadcast('orchestrator:message', {
+        turn_id: turnId,
+        taskId: queued.taskId,
+        message: assistantReplyForApproval,
+        proof,
+        artifacts,
+        actions,
+        approvals,
+        degraded: false,
+        source: 'approval_gate',
+        subsystem: queued.subsystem || 'orchestrator',
+        timestamp: nowIso(),
+      });
+      return turn;
+    }
 
     try {
       broadcast('turn:thinking', { turn_id: turnId, task_id: queued.taskId, message: 'Retrieving memory context' });
@@ -242,6 +347,7 @@ function createTurnRunner(deps) {
         try {
           pyPayload = await deps.requestPythonJSON('/api/tasks/run', 'POST', {
             task: input,
+            goal: input,
             user_id: userId,
             workflow_run: run.run_id,
             memory_context: deps.compactMemoryTraceForModel(memoryTrace),
@@ -361,6 +467,8 @@ function createTurnRunner(deps) {
 
     const turn = {
       ok: status !== 'failed',
+      contract_version: CONTRACT_VERSION,
+      compatibility_route: options.source || kind,
       turn_id: turnId,
       task_id: queued.taskId,
       taskId: queued.taskId,

@@ -2672,6 +2672,209 @@ app.get('/api/system/stats', requireAuth, (req, res) => {
   res.json({ ...stats, cpu_percent: stats.cpu_usage ?? stats.cpu ?? 0 });
 });
 
+function execText(command, timeout = 1200) {
+  try {
+    return execSync(command, { encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
+  }
+}
+
+function parsePsRows() {
+  const output = execText('ps -eo pid,comm,pcpu,pmem,etime,args --no-headers', 1200);
+  if (!output.trim()) {
+    return [{
+      pid: process.pid,
+      name: 'node',
+      service: 'node_backend',
+      status: 'running',
+      cpu_percent: 0,
+      memory_percent: 0,
+      uptime: Math.round(process.uptime()),
+      command: 'node backend/server.js',
+      source: 'node_fallback',
+    }];
+  }
+  const interesting = ['node', 'python', 'uvicorn', 'ollama', 'vite'];
+  return output.split('\n').map((line) => {
+    const match = line.trim().match(/^(\d+)\s+(\S+)\s+([\d.]+)\s+([\d.]+)\s+(\S+)\s+(.+)$/);
+    if (!match) return null;
+    const [, pid, comm, cpu, mem, etime, args] = match;
+    const text = `${comm} ${args}`.toLowerCase();
+    if (!interesting.some((term) => text.includes(term)) && !text.includes('ai-employee')) return null;
+    return {
+      pid: Number(pid),
+      name: comm,
+      service: text.includes('python') || text.includes('uvicorn') ? 'python_backend'
+        : text.includes('ollama') ? 'ollama'
+          : text.includes('vite') ? 'frontend_dev'
+            : 'node_backend',
+      status: 'running',
+      cpu_percent: Number(cpu) || 0,
+      memory_percent: Number(mem) || 0,
+      uptime: etime,
+      command: String(args).slice(0, 220),
+      source: 'ps',
+    };
+  }).filter(Boolean).slice(0, 40);
+}
+
+function parseListeningPorts() {
+  const output = execText('ss -ltnp', 1200) || execText('netstat -ltnp', 1200);
+  if (!output.trim()) {
+    return [
+      { port: Number(PORT), protocol: 'tcp', service: 'node_backend', status: 'unknown', source: 'configured' },
+      { port: Number(PYTHON_BACKEND_PORT), protocol: 'tcp', service: 'python_backend', status: _readiness.pythonReady ? 'listening' : 'unknown', source: 'configured' },
+    ];
+  }
+  return output.split('\n').map((line) => {
+    const local = line.match(/(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|\*):(\d+)/);
+    if (!local) return null;
+    const port = Number(local[1]);
+    if (![Number(PORT), Number(PYTHON_BACKEND_PORT), 5173, 11434].includes(port)) return null;
+    return {
+      port,
+      protocol: 'tcp',
+      service: port === Number(PORT) ? 'node_backend'
+        : port === Number(PYTHON_BACKEND_PORT) ? 'python_backend'
+          : port === 11434 ? 'ollama'
+            : 'frontend_dev',
+      status: 'listening',
+      raw: line.trim().slice(0, 220),
+      source: 'socket_table',
+    };
+  }).filter(Boolean);
+}
+
+function storageRows() {
+  const rows = [];
+  const addPath = (id, label, dir) => {
+    let access = 'unavailable';
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.R_OK | fs.constants.W_OK);
+      access = 'read_write';
+    } catch {
+      access = 'unavailable';
+    }
+    rows.push({ id, label, path: dir, status: access, source: 'node_fs' });
+  };
+  addPath('state', 'Runtime State', STATE_DIR);
+  addPath('logs', 'Logs', LOG_DIR);
+  addPath('run', 'PID / Run Files', RUN_DIR);
+  addPath('artifacts', 'Artifacts', ARTIFACTS_DIR);
+  const df = execText(`df -Pk "${STATE_DIR}"`, 1200).split('\n')[1];
+  if (df) {
+    const parts = df.trim().split(/\s+/);
+    rows.push({
+      id: 'disk',
+      label: 'State Disk',
+      path: parts[5],
+      status: 'available',
+      size_kb: Number(parts[1]) || 0,
+      used_kb: Number(parts[2]) || 0,
+      available_kb: Number(parts[3]) || 0,
+      used_percent: parts[4] || null,
+      source: 'df',
+    });
+  }
+  return rows;
+}
+
+function runtimeWarnings() {
+  const warnings = [];
+  if (!HAS_FRONTEND_DIST) warnings.push({ id: 'frontend_dist_missing', status: 'warning', details: 'frontend/dist/index.html is missing.' });
+  if (!_readiness.pythonReady) warnings.push({ id: 'python_backend_not_ready', status: 'warning', details: `Python backend is not live on port ${PYTHON_BACKEND_PORT}.` });
+  if (_readiness.pythonReady && !_readiness.subsystemsReady) warnings.push({ id: 'python_subsystems_degraded', status: 'warning', details: 'Python backend is live but subsystem readiness is degraded.' });
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY && !process.env.OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) {
+    warnings.push({ id: 'llm_provider_missing', status: 'warning', details: 'No remote LLM provider API key is configured.' });
+  }
+  return warnings;
+}
+
+app.get('/api/system/processes', requireAuth, (_req, res) => {
+  res.json({ ok: true, generated_at: new Date().toISOString(), processes: parsePsRows() });
+});
+
+app.get('/api/system/ports', requireAuth, (_req, res) => {
+  res.json({ ok: true, generated_at: new Date().toISOString(), ports: parseListeningPorts() });
+});
+
+app.get('/api/system/storage', requireAuth, (_req, res) => {
+  res.json({ ok: true, generated_at: new Date().toISOString(), storage: storageRows() });
+});
+
+app.get('/api/system/runtime-warnings', requireAuth, (_req, res) => {
+  const warnings = runtimeWarnings();
+  res.json({ ok: true, generated_at: new Date().toISOString(), status: warnings.length ? 'degraded' : 'live', warnings });
+});
+
+app.get('/api/system/services', requireAuth, (_req, res) => {
+  const ports = parseListeningPorts();
+  const portStatus = (port) => ports.some((row) => row.port === Number(port) && row.status === 'listening');
+  const warnings = runtimeWarnings();
+  res.json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    services: [
+      { id: 'node_backend', name: 'Node Backend', status: portStatus(PORT) ? 'live' : 'degraded', port: Number(PORT), uptime: process.uptime(), restart_available: false, log_link: null },
+      { id: 'python_backend', name: 'Python Backend', status: _readiness.pythonReady || portStatus(PYTHON_BACKEND_PORT) ? 'live' : 'unavailable', port: Number(PYTHON_BACKEND_PORT), uptime: null, restart_available: false, log_link: null },
+      { id: 'frontend_build', name: 'Frontend Build', status: HAS_FRONTEND_DIST ? 'live' : 'not_configured', port: null, uptime: null, restart_available: false, log_link: null },
+      { id: 'runtime_warnings', name: 'Runtime Warnings', status: warnings.length ? 'degraded' : 'live', port: null, uptime: null, restart_available: false, last_error: warnings[0]?.details || null },
+    ],
+  });
+});
+
+function collectExpressRoutes() {
+  const routes = [];
+  const stack = app._router?.stack || [];
+  for (const layer of stack) {
+    if (!layer.route) continue;
+    const routePath = layer.route.path;
+    const methods = Object.keys(layer.route.methods || {}).filter((method) => layer.route.methods[method]);
+    const handlers = (layer.route.stack || []).map((item) => item?.handle?.name || '').filter(Boolean);
+    const authRequired = handlers.includes('requireAuth') || routePath.startsWith('/api/');
+    const compatibility = routePath.includes('/chat') || routePath.includes('/tasks/run') ? 'canonical_or_compatibility'
+      : routePath.includes('/legacy') ? 'legacy'
+        : 'active';
+    for (const method of methods) {
+      routes.push({
+        route: routePath,
+        method: method.toUpperCase(),
+        auth_required: authRequired,
+        source: 'node',
+        compatibility,
+        response_contract: routePath.includes('/tasks/run') || routePath.includes('/chat') ? 'turn_result_v1' : 'route_specific',
+        live_status: 'registered',
+        last_smoke_result: null,
+      });
+    }
+  }
+  return routes.sort((a, b) => a.route.localeCompare(b.route) || a.method.localeCompare(b.method));
+}
+
+app.get('/api/admin/api-catalog', requireAuth, (_req, res) => {
+  const nodeRoutes = collectExpressRoutes();
+  const pythonRoutes = [
+    { route: '/api/tasks/run', method: 'POST', auth_required: true, source: 'python', compatibility: 'canonical_agent_controller', response_contract: 'agent_controller_task_result', live_status: _readiness.pythonReady ? 'registered' : 'unavailable', last_smoke_result: null },
+    { route: '/api/chat', method: 'POST', auth_required: true, source: 'python', compatibility: 'canonical_llm_pipeline', response_contract: 'chat_result', live_status: _readiness.pythonReady ? 'registered' : 'unavailable', last_smoke_result: null },
+    { route: '/health', method: 'GET', auth_required: false, source: 'python', compatibility: 'health', response_contract: 'health', live_status: _readiness.pythonReady ? 'registered' : 'unavailable', last_smoke_result: null },
+  ];
+  const routes = [...nodeRoutes, ...pythonRoutes];
+  const counts = routes.reduce((acc, route) => {
+    acc.total = (acc.total || 0) + 1;
+    acc[route.source] = (acc[route.source] || 0) + 1;
+    acc[route.compatibility] = (acc[route.compatibility] || 0) + 1;
+    return acc;
+  }, { total: 0 });
+  res.json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    counts,
+    routes,
+  });
+});
+
 function buildObservabilitySnapshot() {
   const stats = sampleSystemStatus();
   const events = runtimeState.observability.events || [];
@@ -4346,6 +4549,135 @@ function _classifyRisk(action) {
   return 0.10;
 }
 
+const ADMIN_SAFETY_ACTIONS = {
+  'reset-state': {
+    label: 'RESET ALL STATE',
+    endpoint: 'POST /api/admin/reset-state',
+    confirmation: 'RESET ALL STATE',
+    external_effect: 'Would reset runtime state files. This action is staged only from Settings safety center.',
+  },
+  'wipe-memory': {
+    label: 'WIPE MEM0 MEMORY',
+    endpoint: 'DELETE /api/neural-brain/memory/all',
+    confirmation: 'WIPE MEM0 MEMORY',
+    external_effect: 'Would permanently remove memory records. This action is staged only from Settings safety center.',
+  },
+  'factory-reset': {
+    label: 'FACTORY RESET',
+    endpoint: 'POST /api/admin/factory-reset',
+    confirmation: 'FACTORY RESET',
+    external_effect: 'Would reset the full system. This action is staged only from Settings safety center.',
+  },
+  'evolution-rollback': {
+    label: 'EVOLUTION ROLLBACK',
+    endpoint: 'POST /api/evolution/rollback',
+    confirmation: 'EVOLUTION ROLLBACK',
+    external_effect: 'Would roll back applied evolution patches. This action is staged only from Settings safety center.',
+  },
+  'invalidate-sessions': {
+    label: 'INVALIDATE SESSIONS',
+    endpoint: 'POST /api/admin/sessions/invalidate-all',
+    confirmation: 'INVALIDATE SESSIONS',
+    external_effect: 'Would log out active users. This action is staged only from Settings safety center.',
+  },
+  'flush-telemetry': {
+    label: 'FLUSH TELEMETRY',
+    endpoint: 'POST /api/neural-brain/telemetry/flush',
+    confirmation: 'FLUSH TELEMETRY',
+    external_effect: 'Would clear queued telemetry data. This action is staged only from Settings safety center.',
+  },
+};
+
+app.post('/api/admin/safety-action', requireAuth, (req, res) => {
+  const body = req.body || {};
+  const actionId = String(body.action_id || '');
+  const action = ADMIN_SAFETY_ACTIONS[actionId];
+  if (!action) return res.status(400).json({ ok: false, error: 'unknown safety action' });
+
+  const reason = String(body.reason || '').trim();
+  const confirmation = String(body.confirmation || '').trim();
+  if (confirmation !== action.confirmation) {
+    return res.status(400).json({ ok: false, error: `confirmation must equal "${action.confirmation}"` });
+  }
+  if (reason.length < 8) {
+    return res.status(400).json({ ok: false, error: 'reason must be at least 8 characters' });
+  }
+
+  const actor = req.jwtPayload?.email || req.jwtPayload?.sub || req.jwtPayload?.userId || 'admin';
+  const traceId = `safety-${Date.now().toString(36)}`;
+  const event = recordAuditEvent({
+    actor,
+    action: `admin_safety_${actionId}`,
+    inputData: {
+      action_id: actionId,
+      endpoint: action.endpoint,
+      reason,
+      requested_mode: body.execution_mode || 'staged',
+    },
+    outputData: {
+      ok: true,
+      status: 'staged',
+      executed: false,
+      approval_required: true,
+      external_effect: action.external_effect,
+    },
+    riskScore: 0.95,
+    traceId,
+    meta: { source: 'settings_safety_center', dry_run_available: true },
+  });
+
+  res.json({
+    ok: true,
+    status: 'staged',
+    executed: false,
+    approval_required: true,
+    audit_id: event.id,
+    trace_id: traceId,
+    action: {
+      id: actionId,
+      label: action.label,
+      endpoint: action.endpoint,
+      expected_external_effect: action.external_effect,
+    },
+    proof: {
+      type: 'audit_record',
+      id: event.id,
+      source: 'audit_events',
+      created_at: event.ts,
+    },
+  });
+});
+
+app.post('/api/admin/safety-audit', requireAuth, (req, res) => {
+  const body = req.body || {};
+  const label = String(body.label || '').trim();
+  const endpoint = String(body.endpoint || 'internal').trim();
+  const reason = String(body.reason || '').trim();
+  const confirmation = String(body.confirmation || '').trim();
+  if (!label) return res.status(400).json({ ok: false, error: 'label required' });
+  if (confirmation !== label) return res.status(400).json({ ok: false, error: `confirmation must equal "${label}"` });
+  if (reason.length < 8) return res.status(400).json({ ok: false, error: 'reason must be at least 8 characters' });
+
+  const actor = req.jwtPayload?.email || req.jwtPayload?.sub || req.jwtPayload?.userId || 'admin';
+  const traceId = `safety-ui-${Date.now().toString(36)}`;
+  const event = recordAuditEvent({
+    actor,
+    action: `admin_safety_ui_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
+    inputData: { label, endpoint, reason, execution_mode: body.execution_mode || 'ui_confirmed' },
+    outputData: { ok: true, status: 'confirmed', executed: body.executed === true },
+    riskScore: body.risk === 'critical' ? 0.95 : body.risk === 'high' ? 0.85 : 0.55,
+    traceId,
+    meta: { source: 'settings_safety_modal' },
+  });
+  res.json({
+    ok: true,
+    status: 'recorded',
+    audit_id: event.id,
+    trace_id: traceId,
+    proof: { type: 'audit_record', id: event.id, source: 'audit_events', created_at: event.ts },
+  });
+});
+
 // Reliability state
 const reliabilityState = {
   forgeFrozen: false,
@@ -4430,6 +4762,199 @@ function _forgeQueueUpdate(id, patch) {
   const updated = idx !== -1 ? _forgeQueue[idx] : { id, ...patch };
   broadcaster.broadcast('forge:queue_update', { item: updated });
 }
+
+const APPROVAL_DECISIONS_FILE = statePath('approval_decisions.jsonl');
+function appendApprovalDecision(decision) {
+  const entry = {
+    id: `approval-decision-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    decided_at: new Date().toISOString(),
+    ...decision,
+  };
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.appendFileSync(APPROVAL_DECISIONS_FILE, JSON.stringify(entry) + '\n', 'utf8');
+  } catch (_) {
+    // Audit logging still records the decision; file persistence is best effort.
+  }
+  return entry;
+}
+
+function latestApprovalDecisions() {
+  const map = new Map();
+  for (const decision of readJsonlSafe(APPROVAL_DECISIONS_FILE, 1000)) {
+    if (decision?.approval_id) map.set(decision.approval_id, decision);
+  }
+  return map;
+}
+
+function approvalStatus(rawStatus, decision) {
+  if (decision?.decision === 'approved') return 'approved';
+  if (decision?.decision === 'rejected') return 'rejected';
+  if (rawStatus === 'approved' || rawStatus === 'rejected') return rawStatus;
+  return 'pending';
+}
+
+function approvalExternalEffect(requiredFor = []) {
+  const effects = {
+    publish: 'May publish or schedule public content.',
+    outreach: 'May send email, DM, or client outreach.',
+    payment: 'May spend money, use wallets, or trigger payment systems.',
+    paid_task: 'May accept, bid on, submit, or deliver paid client work.',
+    external_account: 'May connect, modify, or use an external account.',
+  };
+  return requiredFor.map((key) => effects[key] || `May perform ${key.replace(/_/g, ' ')}.`).join(' ');
+}
+
+function buildApprovalInboxItems() {
+  const decisions = latestApprovalDecisions();
+  const items = [];
+  const turns = readJsonlSafe(statePath('turns.jsonl'), 250).reverse();
+
+  for (const turn of turns) {
+    const approvals = Array.isArray(turn.approvals) ? turn.approvals : [];
+    for (const approval of approvals) {
+      if (!approval || typeof approval !== 'object') continue;
+      const id = approval.id || `${turn.turn_id || turn.task_id}:approval`;
+      const decision = decisions.get(id);
+      const requiredFor = Array.isArray(approval.required_for) ? approval.required_for : [];
+      items.push({
+        id,
+        source: 'turn_runner',
+        status: approvalStatus(approval.status, decision),
+        requested_action: requiredFor.length ? requiredFor.join(', ') : 'approval required',
+        risk_level: approval.risk_level || 'high',
+        source_task: turn.task_id || turn.taskId || null,
+        turn_id: turn.turn_id || null,
+        expected_external_effect: approvalExternalEffect(requiredFor) || approval.reason || 'External effect requires human review.',
+        dry_run_preview: turn.input || turn.raw_reply || '',
+        proof: Array.isArray(turn.proof) ? turn.proof : [],
+        requested_at: approval.requested_at || turn.created_at || null,
+        requested_by: turn.user_id || 'system',
+        reason: approval.reason || '',
+        decision: decision || null,
+      });
+    }
+  }
+
+  for (const item of _forgeQueue) {
+    const status = String(item.status || 'pending').toLowerCase();
+    if (['approved', 'rejected', 'deployed', 'failed'].includes(status)) continue;
+    const id = `forge:${item.id}`;
+    const decision = decisions.get(id);
+    items.push({
+      id,
+      source: 'forge',
+      status: approvalStatus(status, decision),
+      requested_action: item.goal || item.title || item.name || 'Forge action',
+      risk_level: String(item.risk_level || item.risk || _forgeRiskLabel(_forgeRiskScore(item.goal || item.title || ''))).toLowerCase(),
+      source_task: item.id,
+      turn_id: null,
+      expected_external_effect: 'May stage, modify, deploy, rollback, or otherwise affect generated code/build artifacts.',
+      dry_run_preview: item.summary || item.goal || item.description || '',
+      proof: item.proof ? [item.proof].flat() : [],
+      requested_at: item.created_at || item.createdAt || null,
+      requested_by: item.requested_by || 'forge',
+      reason: item.reason || 'Forge item awaits owner/operator approval.',
+      decision: decision || null,
+    });
+  }
+
+  return items.sort((a, b) => {
+    const score = { pending: 0, approved: 1, rejected: 1 };
+    return (score[a.status] ?? 2) - (score[b.status] ?? 2)
+      || String(b.requested_at || '').localeCompare(String(a.requested_at || ''));
+  });
+}
+
+app.get('/api/approvals/inbox', requireAuth, (_req, res) => {
+  const items = buildApprovalInboxItems();
+  const counts = items.reduce((acc, item) => {
+    acc[item.status] = (acc[item.status] || 0) + 1;
+    acc.total = (acc.total || 0) + 1;
+    return acc;
+  }, { total: 0 });
+  res.json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    counts,
+    items,
+  });
+});
+
+function decideApproval(req, res, decision) {
+  const approvalId = String(req.params.id || '').trim();
+  if (!approvalId) return res.status(400).json({ ok: false, error: 'approval id required' });
+  const actor = req.jwtPayload?.sub || req.jwtPayload?.role || 'operator';
+  const reason = String((req.body || {}).reason || '').slice(0, 500);
+  const inboxItem = buildApprovalInboxItems().find((item) => item.id === approvalId);
+  if (!inboxItem) return res.status(404).json({ ok: false, error: 'approval request not found' });
+  if (inboxItem.status !== 'pending') {
+    return res.status(409).json({ ok: false, error: `approval already ${inboxItem.status}`, item: inboxItem });
+  }
+
+  const entry = appendApprovalDecision({
+    approval_id: approvalId,
+    decision,
+    actor,
+    reason,
+    source: inboxItem.source,
+    source_task: inboxItem.source_task,
+    turn_id: inboxItem.turn_id,
+    requested_action: inboxItem.requested_action,
+  });
+
+  let execution = {
+    executed: false,
+    status: 'decision_recorded',
+    details: 'Decision recorded. Canonical turn approvals do not auto-execute external effects yet.',
+  };
+
+  if (inboxItem.source === 'forge' && approvalId.startsWith('forge:')) {
+    const forgeId = approvalId.slice('forge:'.length);
+    _forgeQueueUpdate(forgeId, {
+      status: decision,
+      decided_at: entry.decided_at,
+      decided_by: actor,
+      decision_reason: reason,
+    });
+    execution = {
+      executed: false,
+      status: `forge_${decision}`,
+      details: 'Forge queue status updated. Deployment/external delivery still requires its own guarded execution path.',
+    };
+  }
+
+  const audit = recordAuditEvent({
+    actor,
+    action: `approval_${decision}`,
+    inputData: { approval_id: approvalId, reason, item: inboxItem },
+    outputData: { decision, execution },
+    riskScore: inboxItem.risk_level === 'high' ? 0.85 : inboxItem.risk_level === 'medium' ? 0.45 : 0.25,
+    traceId: inboxItem.turn_id || inboxItem.source_task || '',
+    meta: { source: inboxItem.source },
+  });
+
+  broadcaster.broadcast('approval:decided', {
+    approval_id: approvalId,
+    decision,
+    actor,
+    reason,
+    execution,
+    decided_at: entry.decided_at,
+  });
+
+  return res.json({
+    ok: true,
+    approval_id: approvalId,
+    decision,
+    entry,
+    audit_id: audit.id,
+    execution,
+  });
+}
+
+app.post('/api/approvals/:id/approve', requireAuth, (req, res) => decideApproval(req, res, 'approved'));
+app.post('/api/approvals/:id/reject', requireAuth, (req, res) => decideApproval(req, res, 'rejected'));
 
 function _forgeRiskScore(goal) {
   const text = (goal || '').toLowerCase();
@@ -5373,23 +5898,56 @@ app.get('/api/system/uptime', (req, res) => {
   const s  = Math.floor(ms / 1000)
   res.json({
     ok: true,
+    status: 'partial',
+    source: 'node_process',
     uptime_ms: ms,
     uptime_human: `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ${s%60}s`,
     started_at: new Date(_srvStartMs).toISOString(),
     pid: process.pid,
     node_version: process.version,
+    services: [{
+      name: 'backend',
+      uptime_30d: null,
+      uptime_90d: null,
+      incidents_30d: null,
+      mttr_minutes: null,
+      status: 'live',
+      uptime_seconds: s,
+      source: 'node_process',
+    }],
+    details: 'Historical uptime percentages require persisted service checks; unavailable fields are null.',
   })
 })
 
 app.get('/api/system/sla', requireAuth, (req, res) => {
   try {
     const tasks = readJsonSafe(statePath('tasks.json'), [])
+    const llmCalls = readJsonlSafe(statePath('llm_calls.jsonl'), 2000)
     const cutoff = Date.now() - 86400000
     const recent = (Array.isArray(tasks) ? tasks : []).filter(t => new Date(t.created_at || t.timestamp || 0).getTime() > cutoff)
     const failed = recent.filter(t => t.status === 'failed' || t.status === 'error').length
     const total  = recent.length
-    res.json({ ok: true, success_rate: total ? parseFloat(((total - failed) / total * 100).toFixed(1)) : 100, total_tasks: total, failed_tasks: failed, window: '24h' })
-  } catch { res.json({ ok: true, success_rate: 100, total_tasks: 0, failed_tasks: 0, window: '24h' }) }
+    const recentCalls = llmCalls.filter(c => new Date(c.timestamp || c.ts || c.created_at || 0).getTime() > cutoff)
+    const latencies = recentCalls.map(c => Number(c.duration_ms || c.latency_ms || 0)).filter(Boolean).sort((a, b) => a - b)
+    const failedCalls = recentCalls.filter(c => c.ok === false || c.status === 'error').length
+    const successRate = total ? parseFloat(((total - failed) / total * 100).toFixed(1)) : null
+    res.json({
+      ok: true,
+      status: total || recentCalls.length ? 'live' : 'unavailable',
+      source: total || recentCalls.length ? 'task_and_llm_call_logs' : 'no_recent_telemetry',
+      success_rate: successRate,
+      total_tasks: total,
+      failed_tasks: failed,
+      window: '24h',
+      targets: { p99_9: 99.9, p99_5: 99.5 },
+      current: {
+        uptime: successRate,
+        p95_latency_ms: latencies.length ? latencies[Math.floor(latencies.length * 0.95)] : null,
+        error_rate_pct: recentCalls.length ? parseFloat((failedCalls / recentCalls.length * 100).toFixed(2)) : null,
+      },
+      totals: { tasks_24h: total, failed_tasks_24h: failed, llm_calls_24h: recentCalls.length, failed_llm_calls_24h: failedCalls },
+    })
+  } catch { res.json({ ok: true, status: 'unavailable', source: 'error', success_rate: null, total_tasks: 0, failed_tasks: 0, window: '24h', current: { uptime: null, p95_latency_ms: null, error_rate_pct: null } }) }
 })
 
 app.get('/api/system/patches', requireAuth, (req, res) => {

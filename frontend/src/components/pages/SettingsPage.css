@@ -125,6 +125,14 @@
   margin-bottom: var(--nx-s-4);
 }
 
+.nx-help-text {
+  max-width: 720px;
+  margin: 0 0 var(--nx-s-4);
+  color: var(--nx-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .nx-section-label--danger { color: var(--nx-danger); }
 
 .nx-divider {
@@ -781,6 +789,28 @@ select.nx-input option { background: var(--nx-surface-3); color: var(--nx-text);
   line-height: 1.5;
 }
 
+.nx-safety-meta {
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.18);
+  border-radius: var(--nx-r-sm);
+  color: var(--nx-text-muted);
+  display: grid;
+  gap: 6px;
+  font-size: 10px;
+  line-height: 1.45;
+  padding: 10px;
+}
+
+.nx-safety-meta strong {
+  color: var(--nx-danger);
+  text-transform: uppercase;
+}
+
+.nx-safety-meta code {
+  color: var(--nx-gold);
+  overflow-wrap: anywhere;
+}
+
 .nx-modal-prompt {
   margin: 0;
   font-size: 11px;
@@ -788,6 +818,21 @@ select.nx-input option { background: var(--nx-surface-3); color: var(--nx-text);
 }
 
 .nx-modal-prompt strong { color: var(--nx-text); }
+
+.nx-safety-reason {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.nx-safety-countdown {
+  border: 1px solid rgba(229,199,107,0.2);
+  border-radius: var(--nx-r-sm);
+  color: var(--nx-gold);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 8px 10px;
+  text-transform: uppercase;
+}
 
 .nx-modal-actions {
   display: flex;

@@ -90,6 +90,8 @@ async function main() {
   });
 
   assert.equal(turn.ok, true);
+  assert.equal(turn.contract_version, 'turn_result_v1');
+  assert.equal(turn.compatibility_route, 'test');
   assert.equal(turn.turn_id.startsWith('turn-'), true);
   assert.equal(turn.task_id, 'task-test');
   assert.equal(turn.workflow_run, 'run-test');
@@ -109,6 +111,23 @@ async function main() {
   assert.equal(decisions.length, 1);
   assert.equal(nodes.length, 1);
   assert.equal(activities.length, 1);
+
+  const approvalTurn = await runner.runTurn({
+    kind: 'task',
+    source: 'money-mode-test',
+    message: 'Money Mode: send outreach emails and accept paid client work',
+    userId: 'user:test',
+    tenantId: 'tenant:test',
+  });
+
+  assert.equal(approvalTurn.contract_version, 'turn_result_v1');
+  assert.equal(approvalTurn.status, 'waiting_approval');
+  assert.equal(approvalTurn.source, 'approval_gate');
+  assert.equal(approvalTurn.approvals.length, 1);
+  assert.ok(approvalTurn.approvals[0].required_for.includes('outreach'));
+  assert.ok(approvalTurn.approvals[0].required_for.includes('paid_task'));
+  assert.ok(approvalTurn.actions.some(action => action.action === 'approval_gate'));
+  assert.ok(events.some(item => item.event === 'approval:required'));
 }
 
 main()

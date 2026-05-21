@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useTaskStore } from '../store/taskStore'
+import { useSystemStore } from '../store/systemStore'
 
 describe('canonical turn contract store behavior', () => {
   beforeEach(() => {
@@ -10,6 +11,16 @@ describe('canonical turn contract store behavior', () => {
       executionSteps: [],
       executionLogs: [],
       workflowState: { active_run: null, runs: [] },
+    })
+    useSystemStore.setState({
+      capabilityStatus: {
+        ok: false,
+        capabilities: [],
+        states: ['live', 'dry_run', 'mock', 'fallback', 'not_configured', 'unavailable'],
+        lastChecked: 0,
+        loading: false,
+        error: null,
+      },
     })
   })
 
@@ -49,5 +60,30 @@ describe('canonical turn contract store behavior', () => {
     const messages = useTaskStore.getState().chatMessages
     expect(messages).toHaveLength(2)
     expect(messages.map(message => message.content)).toEqual(['one', 'two'])
+  })
+
+  it('stores capability registry status for dashboard visibility', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      ok: true,
+      states: ['live', 'dry_run', 'not_configured'],
+      capabilities: [
+        { name: 'python_backend', status: 'live', required_env: [], missing_env: [] },
+        { name: 'anthropic_llm', status: 'not_configured', required_env: ['ANTHROPIC_API_KEY'], missing_env: ['ANTHROPIC_API_KEY'] },
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+
+    try {
+      const capabilities = await useSystemStore.getState().fetchCapabilityStatus()
+      const status = useSystemStore.getState().capabilityStatus
+
+      expect(capabilities).toHaveLength(2)
+      expect(status.ok).toBe(true)
+      expect(status.loading).toBe(false)
+      expect(status.capabilities[0].status).toBe('live')
+      expect(status.capabilities[1].missing_env).toEqual(['ANTHROPIC_API_KEY'])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

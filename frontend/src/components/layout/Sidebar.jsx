@@ -53,7 +53,7 @@ function HealthGauge({ value = 0 }) {
 // OPERATIONS (3): Tasks, Workflows, Infrastructure
 // INTELLIGENCE (4): Neural Graph, Knowledge, Trends, Research
 // SECURITY (2): Security, Audit
-// SYSTEM (3): Integrations, Models, Settings
+// SYSTEM (4): Setup, Integrations, Models, Settings
 // ─────────────────────────────────────────────────────────────────────────
 
 const NAV_GROUPS = [
@@ -164,12 +164,27 @@ const NAV_GROUPS = [
         label: 'Audit',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 14h12V4H2v10z"/><path d="M5 2h6M5 6h2M5 9h6M5 12h2"/></svg>,
       },
+      {
+        id: 'approvals',
+        label: 'Approvals',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.5l5 2v3.5c0 3.4-2.2 5.8-5 7.5-2.8-1.7-5-4.1-5-7.5V3.5l5-2z"/><path d="M5.5 8l1.5 1.5L10.8 6"/></svg>,
+      },
+      {
+        id: 'proof',
+        label: 'Proof',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2.5h10v11H3z"/><path d="M5 5h6M5 8h6M5 11h3"/><path d="M11.5 10.5l1 1 2-2"/></svg>,
+      },
     ],
   },
   {
     group: 'SYSTEM',
     icon: '⚙',
     items: [
+      {
+        id: 'setup',
+        label: 'Setup Center',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.5l5.5 3v6L8 14l-5.5-3.5v-6L8 1.5z"/><path d="M5 8h6M8 5v6"/><path d="M3.5 4.8L8 7.3l4.5-2.5"/></svg>,
+      },
       {
         id: 'integrations',
         label: 'Integrations',
@@ -184,6 +199,16 @@ const NAV_GROUPS = [
         id: 'model-fabric',
         label: 'Model Fabric',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>,
+      },
+      {
+        id: 'api-catalog',
+        label: 'API Catalog',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h10v10H3z"/><path d="M5 6h6M5 9h6M5 12h3"/></svg>,
+      },
+      {
+        id: 'user-views',
+        label: 'User Views',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="5" r="2"/><circle cx="11" cy="5" r="2"/><path d="M2 14c.4-2.4 2-4 4-4s3.6 1.6 4 4"/><path d="M8.5 10.5c.7-.4 1.5-.5 2.5-.5 1.8 0 3.2 1.4 3.5 4"/></svg>,
       },
       {
         id: 'settings',

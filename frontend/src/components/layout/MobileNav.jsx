@@ -55,6 +55,11 @@ const MORE_NAV = [
   { id: 'research',       label: 'Research' },
   { id: 'recon',          label: 'Recon' },
   { id: 'security',       label: 'Security' },
+  { id: 'approvals',      label: 'Approvals' },
+  { id: 'proof',          label: 'Proof Center' },
+  { id: 'setup',          label: 'Setup Center' },
+  { id: 'api-catalog',    label: 'API Catalog' },
+  { id: 'user-views',     label: 'User Views' },
   { id: 'settings',       label: 'Settings' },
 ]
 

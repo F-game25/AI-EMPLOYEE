@@ -8,8 +8,8 @@ const ROUTES = [
   'dashboard', 'nexus', 'cognition', 'agents', 'memory', 'economy',
   'tasks', 'workflows', 'infrastructure', 'deployments',
   'neural-graph', 'knowledge', 'trends', 'research', 'recon',
-  'policies', 'permissions', 'sandboxes', 'audit', 'security',
-  'integrations', 'models', 'runtime', 'settings',
+  'policies', 'permissions', 'sandboxes', 'audit', 'security', 'approvals', 'proof',
+  'setup', 'integrations', 'models', 'runtime', 'api-catalog', 'user-views', 'settings',
   'workspace', 'operations', 'intelligence', 'ascend-forge', 'system',
 ]
 
@@ -18,6 +18,34 @@ function mockFetch() {
     const path = String(url)
     if (path.includes('/api/mode')) return json({ mode: 'BALANCED' })
     if (path.includes('/api/product/dashboard')) return json({ workflow_runs: [], learning: {} })
+    if (path.includes('/api/capabilities/status')) return json({
+      ok: true,
+      states: ['live', 'dry_run', 'mock', 'fallback', 'not_configured', 'unavailable', 'error'],
+      counts: { live: 1, not_configured: 1 },
+      capabilities: [
+        { id: 'node_backend', name: 'node_backend', label: 'Node Backend', status: 'live', category: 'runtime', setup_action: 'test' },
+        { id: 'python_backend', name: 'python_backend', label: 'Python Backend', status: 'not_configured', category: 'runtime', setup_action: 'start_service' },
+      ],
+    })
+    if (path.includes('/api/proof/center')) return json({
+      ok: true,
+      proof_items: [],
+      artifacts: [],
+      turns: [],
+      counts: {},
+    })
+    if (path.includes('/api/approvals/inbox')) return json({
+      ok: true,
+      counts: { pending: 0, approved: 0, rejected: 0, total: 0 },
+      items: [],
+    })
+    if (path.includes('/api/admin/api-catalog')) return json({
+      ok: true,
+      counts: { total: 1, node: 1, python: 0 },
+      routes: [
+        { route: '/api/tasks/run', method: 'POST', auth_required: true, source: 'node', compatibility: 'canonical_or_compatibility', response_contract: 'turn_result_v1', live_status: 'registered' },
+      ],
+    })
     if (path.includes('/api/readiness')) return json({
       nodeReady: true,
       pythonReady: false,

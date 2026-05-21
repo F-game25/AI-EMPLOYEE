@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import api from '../../api/client'
 import { useUpdateCheck } from '../../hooks/useUpdateCheck'
+import { useAppStore } from '../../store/appStore'
 import './SettingsPage.css'
 
 /* ── Constants ─────────────────────────────────────────────────────────── */
@@ -14,12 +15,12 @@ const LLM_MODELS = {
 }
 
 const RED_ZONE_ACTIONS = [
-  { id: 'reset-state',         label: 'RESET ALL STATE',        endpoint: 'POST /api/admin/reset-state',             warning: 'Resets all runtime state files. This cannot be undone.' },
-  { id: 'wipe-memory',         label: 'WIPE MEM0 MEMORY',       endpoint: 'DELETE /api/neural-brain/memory/all',      warning: 'Permanently deletes all stored memories. Cannot be undone.' },
-  { id: 'factory-reset',       label: 'FACTORY RESET',          endpoint: 'POST /api/admin/factory-reset',           warning: 'Complete system factory reset. All data will be lost.' },
-  { id: 'evolution-rollback',  label: 'EVOLUTION ROLLBACK',     endpoint: 'POST /api/evolution/rollback',            warning: 'Rolls back all applied evolution patches.' },
-  { id: 'invalidate-sessions', label: 'INVALIDATE SESSIONS',    endpoint: 'POST /api/admin/sessions/invalidate-all', warning: 'Logs out all active users immediately.' },
-  { id: 'flush-telemetry',     label: 'FLUSH TELEMETRY',        endpoint: 'POST /api/neural-brain/telemetry/flush',  warning: 'Clears all queued telemetry data.' },
+  { id: 'reset-state',         label: 'RESET ALL STATE',        endpoint: 'POST /api/admin/reset-state',             warning: 'Resets all runtime state files. This cannot be undone.', confirmText: 'RESET ALL STATE', risk: 'critical' },
+  { id: 'wipe-memory',         label: 'WIPE MEM0 MEMORY',       endpoint: 'DELETE /api/neural-brain/memory/all',      warning: 'Permanently deletes all stored memories. Cannot be undone.', confirmText: 'WIPE MEM0 MEMORY', risk: 'critical' },
+  { id: 'factory-reset',       label: 'FACTORY RESET',          endpoint: 'POST /api/admin/factory-reset',           warning: 'Complete system factory reset. All data will be lost.', confirmText: 'FACTORY RESET', risk: 'critical' },
+  { id: 'evolution-rollback',  label: 'EVOLUTION ROLLBACK',     endpoint: 'POST /api/evolution/rollback',            warning: 'Rolls back all applied evolution patches.', confirmText: 'EVOLUTION ROLLBACK', risk: 'high' },
+  { id: 'invalidate-sessions', label: 'INVALIDATE SESSIONS',    endpoint: 'POST /api/admin/sessions/invalidate-all', warning: 'Logs out all active users immediately.', confirmText: 'INVALIDATE SESSIONS', risk: 'high' },
+  { id: 'flush-telemetry',     label: 'FLUSH TELEMETRY',        endpoint: 'POST /api/neural-brain/telemetry/flush',  warning: 'Clears all queued telemetry data.', confirmText: 'FLUSH TELEMETRY', risk: 'medium' },
 ]
 
 /* ── Shared primitives ─────────────────────────────────────────────────── */
@@ -89,6 +90,7 @@ function useSave(endpoint, data) {
 /* ── Tab 1: GENERAL ────────────────────────────────────────────────────── */
 
 function GeneralTab() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const [cfg, setCfg] = useState({
     system_name: 'AETERNUS NEXUS',
     operating_mode: 'AUTONOMOUS',
@@ -132,6 +134,17 @@ function GeneralTab() {
           </NxField>
         </div>
         <NxSaveBtn label="SAVE GENERAL SETTINGS" saving={saving} saved={saved} onClick={save} />
+      </div>
+
+      <div className="nx-divider" />
+      <div className="nx-section">
+        <div className="nx-section-label">ADMIN SETUP</div>
+        <p className="nx-help-text">
+          Reopen the technical setup wizard to verify runtime, providers, memory, integrations, approval gates, and the safe smoke test.
+        </p>
+        <button className="nx-save-btn" type="button" onClick={() => setActiveSection('setup')}>
+          OPEN SETUP CENTER
+        </button>
       </div>
 
       <div className="nx-divider" />
@@ -476,20 +489,49 @@ function AppearanceTab() {
 
 /* ── Tab 5: ADVANCED ───────────────────────────────────────────────────── */
 
-function ConfirmModal({ action, onConfirm, onCancel }) {
+function SafetyConfirmModal({ action, onConfirm, onCancel }) {
   const [text, setText] = useState('')
+  const [reason, setReason] = useState('')
+  const [countdown, setCountdown] = useState(action.countdown ?? 5)
+  const confirmText = action.confirmText || action.label || 'CONFIRM'
+  const canConfirm = text === confirmText && reason.trim().length >= 8 && countdown === 0
+
+  useEffect(() => {
+    setCountdown(action.countdown ?? 5)
+    const timer = setInterval(() => {
+      setCountdown(v => Math.max(0, v - 1))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [action])
+
   return (
     <div className="nx-modal-backdrop" role="dialog" aria-modal="true">
       <div className="nx-modal">
         <div className="nx-modal-title">{action.label}</div>
         <div className="nx-modal-body">
           <p className="nx-modal-warning">{action.warning}</p>
-          <p className="nx-modal-prompt">Type <strong>CONFIRM</strong> to proceed:</p>
+          <div className="nx-safety-meta">
+            <span>Risk: <strong>{action.risk || 'high'}</strong></span>
+            <span>Endpoint: <code>{action.endpoint || 'internal'}</code></span>
+            <span>Execution: <strong>{action.executionLabel || 'staged for approval/audit'}</strong></span>
+          </div>
+          <p className="nx-modal-prompt">Type <strong>{confirmText}</strong> to proceed:</p>
           <input className="nx-input nx-input--danger" value={text} onChange={e => setText(e.target.value)} autoFocus />
+          <p className="nx-modal-prompt">Reason for this action:</p>
+          <textarea
+            className="nx-input nx-input--danger nx-safety-reason"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            placeholder="Required for audit trail..."
+            rows={3}
+          />
+          <div className="nx-safety-countdown">
+            {countdown > 0 ? `Available in ${countdown}s` : 'Confirmation window ready'}
+          </div>
         </div>
         <div className="nx-modal-actions">
           <button className="nx-save-btn nx-save-btn--outline" onClick={onCancel}>CANCEL</button>
-          <button className="nx-save-btn nx-save-btn--danger" disabled={text !== 'CONFIRM'} onClick={() => onConfirm(action)}>
+          <button className="nx-save-btn nx-save-btn--danger" disabled={!canConfirm} onClick={() => onConfirm(action, { reason, confirmation: text })}>
             {action.label}
           </button>
         </div>
@@ -532,18 +574,25 @@ function AdvancedTab() {
     setTimeout(() => setDownloadMsg(null), 2500)
   }
 
-  const executeAction = async (action) => {
+  const executeAction = async (action, safety) => {
     setPending(null)
-    const [method, path] = action.endpoint.split(' ')
     try {
-      await (method === 'DELETE' ? api.delete(path) : api.post(path, {}))
-      setResults(p => ({ ...p, [action.id]: '✓ Done' }))
-    } catch { setResults(p => ({ ...p, [action.id]: '✗ Error' })) }
+      const result = await api.post('/api/admin/safety-action', {
+        action_id: action.id,
+        endpoint: action.endpoint,
+        reason: safety.reason,
+        confirmation: safety.confirmation,
+        execution_mode: 'staged',
+      })
+      setResults(p => ({ ...p, [action.id]: `✓ Staged · ${result.audit_id || result.trace_id}` }))
+    } catch (e) {
+      setResults(p => ({ ...p, [action.id]: `✗ ${e.message || 'Error'}` }))
+    }
   }
 
   return (
     <div className="nx-tab-content">
-      {pending && <ConfirmModal action={pending} onConfirm={executeAction} onCancel={() => setPending(null)} />}
+      {pending && <SafetyConfirmModal action={pending} onConfirm={executeAction} onCancel={() => setPending(null)} />}
 
       {/* Pipeline controls */}
       <div className="nx-section">
@@ -606,7 +655,7 @@ function AdvancedTab() {
       <div className="nx-section nx-section--danger">
         <div className="nx-section-label nx-section-label--danger">DANGER ZONE</div>
         <div className="nx-danger-warning">
-          ⚠ These actions are irreversible. Each requires typing CONFIRM to proceed.
+          These actions are staged through the admin safety endpoint first. They require typed confirmation, a reason, a countdown, and an audit record.
         </div>
         <div className="nx-redzone-list">
           {RED_ZONE_ACTIONS.map(a => (
@@ -644,6 +693,7 @@ function ApiTokensSection() {
   const [form, setForm] = useState({ name: '', scopes: [], expiry: '90d' })
   const [creating, setCreating] = useState(false)
   const [newSecret, setNewSecret] = useState(null)
+  const [pendingTokenAction, setPendingTokenAction] = useState(null)
 
   useEffect(() => {
     api.get('/api/security/api-keys').then(d => setTokens(Array.isArray(d?.keys) ? d.keys : [])).catch(() => {})
@@ -667,20 +717,56 @@ function ApiTokensSection() {
   }
 
   const rotate = async id => {
-    if (!window.confirm('Rotate this token? The current key will stop working immediately.')) return
-    await api.post(`/api/security/api-keys/${id}/rotate`, {}).catch(() => {})
+    setPendingTokenAction({
+      id,
+      label: 'ROTATE API TOKEN',
+      warning: 'The current API key will stop working immediately.',
+      confirmText: 'ROTATE API TOKEN',
+      endpoint: `POST /api/security/api-keys/${id}/rotate`,
+      risk: 'medium',
+      run: async () => api.post(`/api/security/api-keys/${id}/rotate`, {}),
+    })
+  }
+
+  const revoke = async id => {
+    setPendingTokenAction({
+      id,
+      label: 'REVOKE API TOKEN',
+      warning: 'This API token will be permanently revoked.',
+      confirmText: 'REVOKE API TOKEN',
+      endpoint: `DELETE /api/security/api-keys/${id}`,
+      risk: 'high',
+      run: async () => api.delete(`/api/security/api-keys/${id}`),
+    })
+  }
+
+  const confirmTokenAction = async (_action, safety) => {
+    const action = pendingTokenAction
+    setPendingTokenAction(null)
+    if (!action) return
+    await action.run().catch(() => {})
+    await api.post('/api/admin/safety-audit', {
+      label: action.label,
+      endpoint: action.endpoint,
+      reason: safety.reason,
+      confirmation: safety.confirmation,
+      risk: action.risk,
+      executed: true,
+      execution_mode: `ui_confirmed:${action.label}`,
+    }).catch(() => {})
     const d = await api.get('/api/security/api-keys').catch(() => null)
     if (d?.keys) setTokens(d.keys)
   }
 
-  const revoke = async id => {
-    if (!window.confirm('Revoke this token permanently?')) return
-    await api.delete(`/api/security/api-keys/${id}`).catch(() => {})
-    setTokens(p => p.filter(t => t.id !== id))
-  }
-
   return (
     <div className="nx-section">
+      {pendingTokenAction && (
+        <SafetyConfirmModal
+          action={pendingTokenAction}
+          onConfirm={confirmTokenAction}
+          onCancel={() => setPendingTokenAction(null)}
+        />
+      )}
       <div className="nx-section-label">API TOKENS</div>
       {newSecret && (
         <div className="nx-sec-secret-reveal">
@@ -744,21 +830,45 @@ function JwtSection() {
   const [cfg, setCfg] = useState({ token_ttl: 60, refresh_ttl: 7 })
   const [rotating, setRotating] = useState(false)
   const [rotated, setRotated] = useState(false)
+  const [pendingJwtRotate, setPendingJwtRotate] = useState(null)
   const set = (k, v) => setCfg(p => ({ ...p, [k]: v }))
   const { saving, saved, save } = useSave('/api/settings/llm', cfg)
 
   const rotateJwt = async () => {
-    if (!window.confirm('This will invalidate ALL active sessions. Users will be logged out. Type CONFIRM to proceed.\n\nThis action cannot be undone.')) return
-    const code = window.prompt('Type CONFIRM to rotate the JWT secret:')
-    if (code !== 'CONFIRM') return
+    setPendingJwtRotate({
+      label: 'ROTATE JWT SECRET',
+      warning: 'This invalidates all active sessions. Users will be logged out.',
+      confirmText: 'ROTATE JWT SECRET',
+      endpoint: 'POST /api/security/rotate-jwt',
+      risk: 'critical',
+    })
+  }
+
+  const confirmJwtRotate = async (_action, safety) => {
+    setPendingJwtRotate(null)
     setRotating(true)
     await api.post('/api/security/rotate-jwt', {}).catch(() => {})
+    await api.post('/api/admin/safety-audit', {
+      label: 'ROTATE JWT SECRET',
+      endpoint: 'POST /api/security/rotate-jwt',
+      reason: safety.reason,
+      confirmation: safety.confirmation,
+      risk: 'critical',
+      executed: true,
+    }).catch(() => {})
     setRotating(false); setRotated(true)
     setTimeout(() => setRotated(false), 3000)
   }
 
   return (
     <div className="nx-section">
+      {pendingJwtRotate && (
+        <SafetyConfirmModal
+          action={pendingJwtRotate}
+          onConfirm={confirmJwtRotate}
+          onCancel={() => setPendingJwtRotate(null)}
+        />
+      )}
       <div className="nx-section-label">JWT SETTINGS</div>
       <div className="nx-form-grid">
         <NxField label="TOKEN TTL (MINUTES)">
@@ -827,6 +937,7 @@ function ActiveSessionsSection() {
   const [revoking, setRevoking] = useState(null)
   const [revokingAll, setRevokingAll] = useState(false)
   const [err, setErr] = useState(null)
+  const [pendingSessionAction, setPendingSessionAction] = useState(null)
 
   const load = () => {
     setErr(null)
@@ -837,24 +948,63 @@ function ActiveSessionsSection() {
   useEffect(() => { load() }, [])
 
   const revokeOne = async sessionId => {
-    setRevoking(sessionId)
-    await api.delete(`/api/sessions/${sessionId}`).catch(() => {})
-    setSessions(p => p.filter(s => s.session_id !== sessionId))
-    setRevoking(null)
+    setPendingSessionAction({
+      label: 'REVOKE SESSION',
+      warning: 'This session will be revoked immediately.',
+      confirmText: 'REVOKE SESSION',
+      endpoint: `DELETE /api/sessions/${sessionId}`,
+      risk: 'medium',
+      sessionId,
+      all: false,
+    })
   }
 
   const revokeAll = async () => {
-    if (!window.confirm('Revoke all other sessions? You will stay logged in on this device.')) return
-    setRevokingAll(true)
-    await api.delete('/api/sessions').catch(() => {})
-    setSessions(p => p.filter(s => s.current))
-    setRevokingAll(false)
+    setPendingSessionAction({
+      label: 'REVOKE ALL OTHER SESSIONS',
+      warning: 'All other sessions will be logged out. This device will stay active.',
+      confirmText: 'REVOKE ALL OTHER SESSIONS',
+      endpoint: 'DELETE /api/sessions',
+      risk: 'high',
+      all: true,
+    })
+  }
+
+  const confirmSessionAction = async (action, safety) => {
+    setPendingSessionAction(null)
+    if (action.all) {
+      setRevokingAll(true)
+      await api.delete('/api/sessions').catch(() => {})
+      setSessions(p => p.filter(s => s.current))
+      setRevokingAll(false)
+    } else {
+      const sessionId = action.sessionId
+      setRevoking(sessionId)
+      await api.delete(`/api/sessions/${sessionId}`).catch(() => {})
+      setSessions(p => p.filter(s => s.session_id !== sessionId))
+      setRevoking(null)
+    }
+    await api.post('/api/admin/safety-audit', {
+      label: action.label,
+      endpoint: action.endpoint,
+      reason: safety.reason,
+      confirmation: safety.confirmation,
+      risk: action.risk,
+      executed: true,
+    }).catch(() => {})
   }
 
   const otherCount = sessions.filter(s => !s.current).length
 
   return (
     <div className="nx-section">
+      {pendingSessionAction && (
+        <SafetyConfirmModal
+          action={pendingSessionAction}
+          onConfirm={confirmSessionAction}
+          onCancel={() => setPendingSessionAction(null)}
+        />
+      )}
       <div className="nx-section-label">ACTIVE SESSIONS</div>
       {err && <div className="nx-badge nx-badge--err" style={{ marginBottom: 8 }}>{err}</div>}
       <div className="nx-sec-table-wrap">
@@ -1232,6 +1382,7 @@ function TeamTab() {
   const [showInvite, setShowInvite] = useState(false)
   const [inviteForm, setInviteForm] = useState({ email: '', role: 'viewer' })
   const [inviting, setInviting] = useState(false)
+  const [pendingUserRemoval, setPendingUserRemoval] = useState(null)
 
   useEffect(() => {
     api.get('/api/users').then(d => setUsers(Array.isArray(d?.users) ? d.users : [])).catch(() => {})
@@ -1272,13 +1423,40 @@ function TeamTab() {
   }
 
   const removeUser = async id => {
-    if (!window.confirm('Remove this user from the system?')) return
-    await api.delete(`/api/users/${id}`).catch(() => {})
-    setUsers(p => p.filter(u => u.id !== id))
+    const user = users.find(u => u.id === id)
+    setPendingUserRemoval({
+      label: 'REMOVE USER',
+      warning: `Remove ${user?.email || id} from the system.`,
+      confirmText: 'REMOVE USER',
+      endpoint: `DELETE /api/users/${id}`,
+      risk: 'high',
+      userId: id,
+    })
+  }
+
+  const confirmRemoveUser = async (action, safety) => {
+    setPendingUserRemoval(null)
+    await api.delete(`/api/users/${action.userId}`).catch(() => {})
+    await api.post('/api/admin/safety-audit', {
+      label: action.label,
+      endpoint: action.endpoint,
+      reason: safety.reason,
+      confirmation: safety.confirmation,
+      risk: action.risk,
+      executed: true,
+    }).catch(() => {})
+    setUsers(p => p.filter(u => u.id !== action.userId))
   }
 
   return (
     <div className="nx-tab-content">
+      {pendingUserRemoval && (
+        <SafetyConfirmModal
+          action={pendingUserRemoval}
+          onConfirm={confirmRemoveUser}
+          onCancel={() => setPendingUserRemoval(null)}
+        />
+      )}
       <div className="nx-section">
         <div className="nx-section-label">USERS</div>
         <div className="nx-sec-table-wrap">

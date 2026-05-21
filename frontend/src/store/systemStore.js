@@ -1,8 +1,9 @@
 import { create } from 'zustand'
+import api from '../api/client'
 
 // ── localStorage hydrate/persist (metric fields only — never chat or event histories) ──
 const SNAPSHOT_KEY = 'nexus:snapshot:system'
-const PERSIST_FIELDS = ['systemStatus', 'systemHealth', 'backendStatus']
+const PERSIST_FIELDS = ['systemStatus', 'systemHealth', 'backendStatus', 'capabilityStatus']
 let _persistTimer = null
 
 function loadSnapshot() {
@@ -48,6 +49,18 @@ const DEFAULT_SYSTEM_STATUS = {
   heartbeat: 0, running_agents: 0, total_agents: 0,
   mode: 'MANUAL', robot_location: 'idle', active_robot: 'none',
   active_subsystem: 'general', thinking_mode: '', money_template: null,
+}
+
+const DEFAULT_CAPABILITY_STATUS = {
+  ok: false,
+  capabilities: [],
+  states: ['live', 'dry_run', 'mock', 'fallback', 'not_configured', 'unavailable', 'error'],
+  counts: {},
+  next_recommended_action: null,
+  checked_at: null,
+  lastChecked: 0,
+  loading: false,
+  error: null,
 }
 
 export const useSystemStore = create((set, get) => ({
@@ -116,6 +129,55 @@ export const useSystemStore = create((set, get) => ({
       },
     }))
     schedulePersist(get)
+  },
+
+  capabilityStatus: { ...DEFAULT_CAPABILITY_STATUS, ...(HYDRATED.capabilityStatus || {}), loading: false, error: null },
+  setCapabilityStatus: (partial) => {
+    set(state => ({
+      capabilityStatus: {
+        ...state.capabilityStatus,
+        ...(partial || {}),
+        lastChecked: partial?.lastChecked || Date.now(),
+      },
+    }))
+    schedulePersist(get)
+  },
+  fetchCapabilityStatus: async () => {
+    set(state => ({
+      capabilityStatus: { ...state.capabilityStatus, loading: true, error: null },
+    }))
+    try {
+      const data = await api.get('/api/capabilities/status')
+      const capabilities = Array.isArray(data?.capabilities) ? data.capabilities : []
+      set(state => ({
+        capabilityStatus: {
+          ...state.capabilityStatus,
+          ok: data?.ok !== false,
+          states: Array.isArray(data?.states) ? data.states : DEFAULT_CAPABILITY_STATUS.states,
+          capabilities,
+          counts: data?.counts || {},
+          next_recommended_action: data?.next_recommended_action || null,
+          checked_at: data?.checked_at || null,
+          loading: false,
+          error: null,
+          lastChecked: Date.now(),
+        },
+      }))
+      schedulePersist(get)
+      return capabilities
+    } catch (error) {
+      set(state => ({
+        capabilityStatus: {
+          ...state.capabilityStatus,
+          ok: false,
+          loading: false,
+          error: error?.message || 'Capability status unavailable',
+          lastChecked: Date.now(),
+        },
+      }))
+      schedulePersist(get)
+      return []
+    }
   },
 
   // Navigation — initialize from the URL so deep links / refresh restore the page

@@ -1,0 +1,220 @@
+.ux-page {
+  color: var(--nx-text, #e4e4f0);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--nx-font-mono, monospace);
+  gap: 16px;
+  min-height: 100%;
+  padding: 20px;
+}
+
+.ux-header {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--nx-border, #242434);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding-bottom: 16px;
+}
+
+.ux-eyebrow {
+  color: var(--nx-gold, #e5c76b);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+
+.ux-header h1,
+.ux-role-card h2,
+.ux-guidance h2 {
+  margin: 0;
+}
+
+.ux-header h1 {
+  font-size: 28px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ux-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(96px, 1fr));
+}
+
+.ux-summary div {
+  background: rgba(229,199,107,0.045);
+  border: 1px solid rgba(229,199,107,0.16);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.ux-summary b {
+  color: var(--nx-gold, #e5c76b);
+  display: block;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ux-summary span {
+  color: var(--nx-text-muted, #8a8a96);
+  display: block;
+  font-size: 9px;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+.ux-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ux-role-card,
+.ux-guidance {
+  background: var(--nx-surface, #0d0d18);
+  border: 1px solid var(--nx-border, #242434);
+  border-left: 3px solid rgba(229,199,107,0.28);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.ux-role-card--live { border-left-color: var(--nx-success, #22c55e); }
+.ux-role-card--dry_run,
+.ux-role-card--fallback,
+.ux-role-card--mock { border-left-color: var(--nx-gold, #e5c76b); }
+.ux-role-card--not_configured,
+.ux-role-card--unavailable,
+.ux-role-card--error { border-left-color: var(--nx-danger, #ef4444); }
+
+.ux-role-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.ux-role-card h2,
+.ux-guidance h2 {
+  color: var(--nx-text, #e4e4f0);
+  font-size: 15px;
+}
+
+.ux-role-card p,
+.ux-guidance p {
+  color: var(--nx-text-muted, #8a8a96);
+  font-size: 11px;
+  line-height: 1.55;
+  margin: 6px 0 0;
+}
+
+.ux-status,
+.ux-status-text {
+  color: var(--nx-text-muted, #8a8a96);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ux-status {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.ux-status--live,
+.ux-status-text--live { color: var(--nx-success, #22c55e); }
+.ux-status--dry_run,
+.ux-status--fallback,
+.ux-status--mock,
+.ux-status-text--dry_run,
+.ux-status-text--fallback,
+.ux-status-text--mock { color: var(--nx-gold, #e5c76b); }
+.ux-status--not_configured,
+.ux-status--unavailable,
+.ux-status--error,
+.ux-status-text--not_configured,
+.ux-status-text--unavailable,
+.ux-status-text--error { color: var(--nx-danger, #ef4444); }
+
+.ux-checks {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.ux-check-row {
+  align-items: center;
+  border-bottom: 1px solid rgba(255,255,255,0.045);
+  color: var(--nx-text-muted, #8a8a96);
+  display: flex;
+  font-size: 10px;
+  justify-content: space-between;
+  padding-bottom: 6px;
+}
+
+.ux-check-row--missing b {
+  color: var(--nx-text-dim, #666672);
+}
+
+.ux-actions,
+.ux-guidance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.ux-actions button,
+.ux-guidance-actions button {
+  background: rgba(229,199,107,0.08);
+  border: 1px solid rgba(229,199,107,0.22);
+  border-radius: 6px;
+  color: var(--nx-gold, #e5c76b);
+  cursor: pointer;
+  font-family: var(--nx-font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 8px 10px;
+  text-transform: uppercase;
+}
+
+.ux-role-foot {
+  color: var(--nx-text-dim, #666672);
+  display: flex;
+  gap: 12px;
+  font-size: 9px;
+  margin-top: 12px;
+  text-transform: uppercase;
+}
+
+.ux-guidance {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.ux-error {
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.2);
+  border-radius: 8px;
+  color: var(--nx-danger, #ef4444);
+  font-size: 11px;
+  padding: 10px 12px;
+}
+
+@media (max-width: 920px) {
+  .ux-header,
+  .ux-guidance {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ux-summary,
+  .ux-grid {
+    grid-template-columns: 1fr;
+  }
+}

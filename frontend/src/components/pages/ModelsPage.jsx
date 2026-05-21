@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import api from '../../api/client'
 import { useLiveData } from '../../hooks/useLiveData'
+import { useSystemStore } from '../../store/systemStore'
 import { Sparkline } from '../nexus-ui'
 import LoadingSkeleton from '../nexus-ui/LoadingSkeleton'
 import './ModelsPage.css'
@@ -78,23 +79,47 @@ function ModelBadge({ model, registryData }) {
 /* ── Tab 1: PROVIDERS ──────────────────────────────────────────────────── */
 
 const PROVIDERS = [
-  { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', keyPrefix: 'sk-ant-' },
-  { id: 'openai',    name: 'OpenAI',    defaultModel: 'gpt-4o',            keyPrefix: 'sk-'     },
-  { id: 'ollama',    name: 'Ollama',    defaultModel: 'llama3.2',          keyPrefix: 'http://'  },
+  { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', keyPrefix: 'sk-ant-', capabilityId: 'anthropic_llm' },
+  { id: 'openai',    name: 'OpenAI',    defaultModel: 'gpt-4o',            keyPrefix: 'sk-',     capabilityId: 'openai_llm' },
+  { id: 'ollama',    name: 'Ollama',    defaultModel: 'llama3.2',          keyPrefix: 'http://', capabilityId: 'ollama_local_model' },
 ]
 
-function ProviderCard({ provider, settings }) {
+function capabilityForProvider(provider, capabilitiesById) {
+  return capabilitiesById[provider.capabilityId] || {
+    id: provider.capabilityId,
+    label: provider.name,
+    status: 'not_configured',
+    missing_env: provider.id === 'ollama' ? ['OLLAMA_HOST'] : [`${provider.id.toUpperCase()}_API_KEY`],
+    details: 'Provider capability has not been reported by the backend yet.',
+    proof: null,
+  }
+}
+
+function providerBadgeStatus(status) {
+  if (status === 'live') return 'connected'
+  if (['dry_run', 'fallback', 'mock'].includes(status)) return 'degraded'
+  if (status === 'error') return 'error'
+  return 'unconfigured'
+}
+
+function ProviderCard({ provider, settings, capability, onRefreshCapabilities }) {
   const [testing, setTesting]     = useState(false)
   const [testResult, setTestResult] = useState(null)
 
-  const configured = settings?.[provider.id + '_configured'] ?? (provider.id === 'ollama')
+  const configured = capability?.status === 'live'
   const model      = settings?.[provider.id + '_model']      ?? provider.defaultModel
-  const status     = configured ? 'connected' : 'unconfigured'
+  const status     = providerBadgeStatus(capability?.status)
 
   const test = async () => {
     setTesting(true); setTestResult(null)
-    await new Promise(r => setTimeout(r, 900 + Math.random() * 600))
-    setTestResult(configured ? { ok: true, msg: 'OK' } : { ok: false, msg: 'Not configured' })
+    const capabilities = await onRefreshCapabilities().catch(() => [])
+    const fresh = capabilities.find(c => c.id === provider.capabilityId) || capability
+    setTestResult({
+      ok: fresh?.status === 'live',
+      msg: fresh?.status === 'live' ? 'Live' : (fresh?.details || 'Not configured'),
+      status: fresh?.status || 'not_configured',
+      checked_at: fresh?.last_checked_at || fresh?.updated_at || new Date().toISOString(),
+    })
     setTesting(false)
   }
 
@@ -103,22 +128,28 @@ function ProviderCard({ provider, settings }) {
       <div className="mp-provider-header">
         <span className="mp-provider-name">{provider.name}</span>
         <span className={`mp-status-badge mp-status-badge--${status}`}>
-          {status === 'connected' ? 'CONNECTED' : status === 'error' ? 'ERROR' : 'NOT CONFIGURED'}
+          {capability?.status === 'live' ? 'LIVE' : (capability?.status || 'NOT CONFIGURED').replaceAll('_', ' ').toUpperCase()}
         </span>
       </div>
       <div className="mp-provider-model">{model}</div>
       <div className="mp-provider-key">
         {configured
           ? `${provider.keyPrefix}${'●'.repeat(16)}`
-          : 'API key not set — configure in Settings > LLM'}
+          : capability?.details || 'API key not set — configure in Settings > LLM'}
       </div>
+      {capability?.missing_env?.length > 0 && (
+        <div className="mp-provider-proof mp-provider-proof--warn">Missing env: {capability.missing_env.join(', ')}</div>
+      )}
+      {capability?.proof && (
+        <div className="mp-provider-proof">Proof: {JSON.stringify(capability.proof).slice(0, 140)}</div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <button className="mp-test-btn" onClick={test} disabled={testing}>
           {testing ? 'TESTING…' : 'TEST CONNECTION'}
         </button>
         {testResult && (
           <span className={`mp-test-result mp-test-result--${testResult.ok ? 'ok' : 'fail'}`}>
-            {testResult.ok ? '✓ ' : '✗ '}{testResult.msg}
+            {testResult.ok ? '✓ ' : '✗ '}{testResult.status}: {testResult.msg}
           </span>
         )}
       </div>
@@ -340,44 +371,60 @@ function OllamaManager() {
 function ProvidersTab() {
   const { data: settings } = useLiveData({ endpoint: '/api/settings', pollMs: 30000 })
   const { data: llmCalls } = useLiveData({ endpoint: '/api/intelligence/llm-calls', pollMs: 15000 })
+  const capabilityStatus = useSystemStore(s => s.capabilityStatus)
+  const fetchCapabilityStatus = useSystemStore(s => s.fetchCapabilityStatus)
   const [registryData, setRegistryData] = useState(null)
 
   useEffect(() => {
     api.get('/api/models/registry')
       .then(d => { if (d?.providers) setRegistryData(d) })
       .catch(() => {}) // fallback: registry stays null, static list used
+    fetchCapabilityStatus().catch(() => {})
   }, [])
 
-  const calls = llmCalls?.total_calls ?? llmCalls?.calls ?? 1055
-  const tokens = llmCalls?.total_tokens ?? llmCalls?.tokens ?? 2_840_000
-  const cost = llmCalls?.total_cost ?? llmCalls?.cost ?? 3.47
+  const capabilitiesById = Object.fromEntries((capabilityStatus?.capabilities || []).map(c => [c.id, c]))
+  const routingCapability = capabilitiesById.llm_provider_routing
+  const calls = llmCalls?.total_calls ?? llmCalls?.calls ?? null
+  const tokens = llmCalls?.total_tokens ?? llmCalls?.tokens ?? null
+  const cost = llmCalls?.total_cost ?? llmCalls?.cost ?? null
 
   return (
     <div>
       <MainBrainPicker registryData={registryData} />
 
+      <div className={`mp-ops-banner mp-ops-banner--${routingCapability?.status || 'not_configured'}`}>
+        <strong>Routing status:</strong> {(routingCapability?.status || 'not_configured').replaceAll('_', ' ')}
+        <span>{routingCapability?.details || 'No model routing capability proof has been reported yet.'}</span>
+      </div>
+
       <div className="mp-kpi-strip">
         <div className="mp-kpi">
           <div className="mp-kpi-label">API CALLS TODAY</div>
-          <div className="mp-kpi-value">{calls.toLocaleString()}</div>
-          <div className="mp-kpi-sub">across all providers</div>
+          <div className="mp-kpi-value">{calls == null ? '—' : calls.toLocaleString()}</div>
+          <div className="mp-kpi-sub">{calls == null ? 'live telemetry unavailable' : 'across all providers'}</div>
         </div>
         <div className="mp-kpi">
           <div className="mp-kpi-label">TOTAL TOKENS USED</div>
-          <div className="mp-kpi-value">{(tokens / 1_000_000).toFixed(2)}M</div>
-          <div className="mp-kpi-sub">input + output</div>
+          <div className="mp-kpi-value">{tokens == null ? '—' : `${(tokens / 1_000_000).toFixed(2)}M`}</div>
+          <div className="mp-kpi-sub">{tokens == null ? 'live telemetry unavailable' : 'input + output'}</div>
         </div>
         <div className="mp-kpi">
           <div className="mp-kpi-label">ESTIMATED COST</div>
-          <div className="mp-kpi-value">${cost.toFixed(2)}</div>
-          <div className="mp-kpi-sub">rolling 24h window</div>
+          <div className="mp-kpi-value">{cost == null ? '—' : `$${cost.toFixed(2)}`}</div>
+          <div className="mp-kpi-sub">{cost == null ? 'live telemetry unavailable' : 'rolling 24h window'}</div>
         </div>
       </div>
 
       <div className="mp-section-label">LLM PROVIDERS</div>
       <div className="mp-provider-grid">
         {PROVIDERS.map(p => (
-          <ProviderCard key={p.id} provider={p} settings={settings} />
+          <ProviderCard
+            key={p.id}
+            provider={p}
+            settings={settings}
+            capability={capabilityForProvider(p, capabilitiesById)}
+            onRefreshCapabilities={fetchCapabilityStatus}
+          />
         ))}
       </div>
 
@@ -405,14 +452,17 @@ function PerformanceTab() {
   const [timeWindow, setTimeWindow] = useState('24h')
   const [metricsRows, setMetricsRows] = useState(null) // null = loading, [] = no data
   const [metricsLoading, setMetricsLoading] = useState(true)
+  const [metricsSource, setMetricsSource] = useState('loading')
 
   useEffect(() => {
     setMetricsLoading(true)
+    setMetricsSource('loading')
     api.get(`/api/models/metrics?window=${timeWindow}`)
       .then(d => {
-        if (Array.isArray(d?.models)) {
+        const rawRows = Array.isArray(d?.metrics) ? d.metrics : Array.isArray(d?.models) ? d.models : null
+        if (rawRows) {
           // API returns array of model metrics
-          setMetricsRows(d.models.map(m => ({
+          setMetricsRows(rawRows.map(m => ({
             model:  m.model,
             calls:  m.calls   ?? 0,
             p50:    m.p50_ms  ?? m.p50  ?? 0,
@@ -421,6 +471,7 @@ function PerformanceTab() {
             cost:   m.cost    ?? 0,
             errors: m.errors  ?? 0,
           })))
+          setMetricsSource('live')
         } else if (d?.models && typeof d.models === 'object') {
           // API returns object keyed by model name
           setMetricsRows(Object.entries(d.models).map(([model, m]) => ({
@@ -432,15 +483,20 @@ function PerformanceTab() {
             cost:   m.cost    ?? 0,
             errors: m.errors  ?? 0,
           })))
+          setMetricsSource('live')
         } else {
-          setMetricsRows(null) // fall back to stub
+          setMetricsRows([])
+          setMetricsSource('unavailable')
         }
       })
-      .catch(() => setMetricsRows(null)) // 404 or error → use stubs
+      .catch(() => {
+        setMetricsRows([])
+        setMetricsSource('unavailable')
+      })
       .finally(() => setMetricsLoading(false))
   }, [timeWindow])
 
-  const rows = metricsRows ?? STUB_LLM_CALLS
+  const rows = metricsRows ?? []
 
   const sorted = [...rows].sort((a, b) => {
     const va = a[sortKey], vb = b[sortKey]
@@ -464,13 +520,18 @@ function PerformanceTab() {
           <option value="7d">7D</option>
         </select>
         {metricsLoading && <LoadingSkeleton variant="list" rows={3} />}
-        {!metricsLoading && metricsRows === null && (
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.05em' }}>SHOWING SAMPLE DATA</span>
+        {!metricsLoading && metricsSource !== 'live' && (
+          <span className="mp-source-label mp-source-label--warn">LIVE METRICS UNAVAILABLE</span>
         )}
       </div>
+      {!metricsLoading && metricsSource !== 'live' && (
+        <div className="mp-ops-banner mp-ops-banner--unavailable">
+          No model performance records were returned by `/api/models/metrics`. The table stays empty instead of showing sample telemetry.
+        </div>
+      )}
       <div className="mp-perf-table-wrap">
         {!metricsLoading && metricsRows?.length === 0 ? (
-          <div className="mp-empty">No data yet for this window</div>
+          <div className="mp-empty">No live model metrics for this window</div>
         ) : (
           <table className="mp-perf-table">
             <thead>
@@ -538,10 +599,9 @@ function RoutingRow({ rule, onChange, onSave, registryData }) {
   const save = async () => {
     setSaving(true)
     try {
-      await api.put('/api/settings/model-routing', rule).catch(() => {})
+      await onSave?.(rule)
     } finally {
       setSaving(false); setSaved(true)
-      onSave?.()
       setTimeout(() => setSaved(false), 2000)
     }
   }
@@ -739,7 +799,10 @@ function TaskRoutingSection({ registryData }) {
     api.get('/api/settings/model-routing')
       .then(d => {
         if (d && typeof d === 'object') {
-          setTaskRouting(prev => ({ ...prev, ...d }))
+          const taskOnly = Object.fromEntries(Object.keys(DEFAULT_TASK_ROUTING)
+            .filter(key => d[key])
+            .map(key => [key, d[key]]))
+          setTaskRouting(prev => ({ ...prev, ...taskOnly }))
           setLoaded(true)
         }
       })
@@ -754,7 +817,8 @@ function TaskRoutingSection({ registryData }) {
   const handleSave = async (taskType) => {
     setSaving(s => ({ ...s, [taskType]: true }))
     try {
-      await api.put('/api/settings/model-routing', { [taskType]: taskRouting[taskType] })
+      const current = await api.get('/api/settings/model-routing').catch(() => ({}))
+      await api.put('/api/settings/model-routing', { ...current, [taskType]: taskRouting[taskType] })
       setSaved(s => ({ ...s, [taskType]: true }))
       setTimeout(() => setSaved(s => ({ ...s, [taskType]: false })), 2000)
     } catch {}
@@ -764,7 +828,8 @@ function TaskRoutingSection({ registryData }) {
   const resetToDefaults = async () => {
     setTaskRouting(DEFAULT_TASK_ROUTING)
     try {
-      await api.put('/api/settings/model-routing', DEFAULT_TASK_ROUTING)
+      const current = await api.get('/api/settings/model-routing').catch(() => ({}))
+      await api.put('/api/settings/model-routing', { ...current, ...DEFAULT_TASK_ROUTING })
     } catch {}
   }
 
@@ -807,10 +872,19 @@ function TaskRoutingSection({ registryData }) {
 function RoutingTab() {
   const [agentRules, setAgentRules] = useState(STUB_ROUTING)
   const [registryData, setRegistryData] = useState(null)
+  const [rulesSource, setRulesSource] = useState('compatibility_defaults')
 
   useEffect(() => {
     api.get('/api/models/registry')
       .then(d => { if (d?.providers) setRegistryData(d) })
+      .catch(() => {})
+    api.get('/api/settings/model-routing')
+      .then(d => {
+        if (Array.isArray(d?.agent_rules)) {
+          setAgentRules(d.agent_rules)
+          setRulesSource('backend')
+        }
+      })
       .catch(() => {})
   }, [])
 
@@ -828,6 +902,14 @@ function RoutingTab() {
 
   const updateRule = (id, updated) => setAgentRules(prev => prev.map(r => r.id === id ? updated : r))
 
+  const saveAgentRule = async (rule) => {
+    const nextRules = agentRules.map(r => r.id === rule.id ? rule : r)
+    setAgentRules(nextRules)
+    const current = await api.get('/api/settings/model-routing').catch(() => ({}))
+    await api.put('/api/settings/model-routing', { ...current, agent_rules: nextRules })
+    setRulesSource('backend')
+  }
+
   return (
     <div>
       <SubsystemsRouting />
@@ -836,6 +918,7 @@ function RoutingTab() {
 
       <div className="mp-routing-header">
         <div className="mp-section-label" style={{ margin: 0 }}>AGENT MODEL ROUTING</div>
+        {rulesSource !== 'backend' && <span className="mp-source-label mp-source-label--warn">COMPATIBILITY DEFAULTS</span>}
         <button className="mp-add-btn" onClick={addRule}>+ ADD RULE</button>
       </div>
       <div style={{ overflowX: 'auto' }}>
@@ -857,7 +940,7 @@ function RoutingTab() {
                 rule={rule}
                 registryData={registryData}
                 onChange={updated => updateRule(rule.id, updated)}
-                onSave={null}
+                onSave={saveAgentRule}
               />
             ))}
           </tbody>

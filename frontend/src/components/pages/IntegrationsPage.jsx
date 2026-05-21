@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { useLiveData } from '../../hooks/useLiveData'
+import api from '../../api/client'
+import { useSystemStore } from '../../store/systemStore'
 import { toastSuccess, toastError } from '../nexus-ui/Toaster'
 import './IntegrationsPage.css'
-
-const API = ''
 
 const INTEGRATIONS = [
   { id: 'google-calendar', name: 'Google Calendar', category: 'productivity', icon: '📅', oauth: true },
@@ -15,11 +14,11 @@ const INTEGRATIONS = [
   { id: 'tiktok',     name: 'TikTok',      category: 'social', icon: '🎵', oauth: true },
   { id: 'youtube',    name: 'YouTube',     category: 'social', icon: '📺', oauth: true },
   { id: 'twitter',    name: 'X / Twitter', category: 'social', icon: '🐦', oauth: true },
-  { id: 'linkedin',   name: 'LinkedIn',    category: 'social', icon: '💼', oauth: true },
+  { id: 'linkedin',   name: 'LinkedIn',    category: 'social', icon: '💼', oauth: true, capabilityId: 'linkedin_post', approvalRequired: true },
   { id: 'discord', name: 'Discord', category: 'comms', icon: '💬', oauth: true },
-  { id: 'gmail',   name: 'Gmail',   category: 'comms', icon: '📧', oauth: true },
+  { id: 'gmail',   name: 'Gmail',   category: 'comms', icon: '📧', oauth: true, capabilityId: 'email_outreach', approvalRequired: true },
   { id: 'slack',   name: 'Slack',   category: 'comms', icon: '💬', apikey: true },
-  { id: 'stripe',   name: 'Stripe',   category: 'data', icon: '💳', apikey: true },
+  { id: 'stripe',   name: 'Stripe',   category: 'data', icon: '💳', apikey: true, approvalRequired: true },
   { id: 'tavily',   name: 'Tavily',   category: 'data', icon: '🔍', apikey: true },
   { id: 'hubspot',  name: 'HubSpot',  category: 'crm',  icon: '🎯', apikey: true },
   { id: 'github',   name: 'GitHub',   category: 'dev',  icon: '🐙', oauth: true },
@@ -41,8 +40,64 @@ const TABS = [
   { id: 'webhooks',   label: 'Webhooks & API Gateway' },
 ]
 
+const STATUS_LABELS = {
+  live: 'Live',
+  dry_run: 'Dry-run',
+  mock: 'Mock',
+  fallback: 'Fallback',
+  not_configured: 'Needs setup',
+  unavailable: 'Unavailable',
+  error: 'Error',
+  connected: 'Connected',
+  pending_confirmation: 'Pending check',
+}
+
+const CONNECTOR_CAPABILITY_FALLBACK = {
+  google: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+  airtable: ['AIRTABLE_API_KEY'],
+  instagram: ['INSTAGRAM_CLIENT_ID', 'INSTAGRAM_CLIENT_SECRET'],
+  tiktok: ['TIKTOK_CLIENT_ID', 'TIKTOK_CLIENT_SECRET'],
+  youtube: ['YOUTUBE_CLIENT_ID', 'YOUTUBE_CLIENT_SECRET'],
+  twitter: ['TWITTER_CLIENT_ID', 'TWITTER_CLIENT_SECRET'],
+  discord: ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET'],
+  slack: ['SLACK_BOT_TOKEN'],
+  stripe: ['STRIPE_SECRET_KEY'],
+  tavily: ['TAVILY_API_KEY'],
+  hubspot: ['HUBSPOT_API_KEY'],
+  github: ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'],
+  linear: ['LINEAR_API_KEY'],
+  notion: ['NOTION_API_KEY'],
+}
+
+function capabilityFallbackFor(integration) {
+  const key = integration.id.split('-')[0]
+  const required = CONNECTOR_CAPABILITY_FALLBACK[integration.id] || CONNECTOR_CAPABILITY_FALLBACK[key] || []
+  return {
+    id: integration.capabilityId || `integration_${integration.id}`,
+    label: integration.name,
+    status: required.length ? 'not_configured' : 'unavailable',
+    category: 'integration',
+    required_env: required,
+    missing_env: required,
+    setup_action: required.length ? 'configure_env' : 'connect_provider',
+    details: required.length
+      ? 'No backend capability check is registered yet; configure the provider before using it.'
+      : 'No backend capability check is registered for this connector yet.',
+    docs_hint: 'Connection status must be confirmed by the backend before this connector is treated as live.',
+  }
+}
+
+function formatStatus(status) {
+  return STATUS_LABELS[status] || (status || 'Unknown').replaceAll('_', ' ')
+}
+
+function statusForCard({ connected, capability }) {
+  if (connected) return 'connected'
+  return capability?.status || 'not_configured'
+}
+
 /* ── ConnectModal ─────────────────────────────────────────────────────────── */
-function ConnectModal({ integration, onClose, onConnected }) {
+function ConnectModal({ integration, onClose, onConnected, capability }) {
   const [apiKey, setApiKey] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [status, setStatus] = useState(null)
@@ -50,45 +105,43 @@ function ConnectModal({ integration, onClose, onConnected }) {
 
   const connectOAuth = async () => {
     setConnecting(true)
-    const r = await fetch(`${API}/api/integrations/${integration.id}/connect`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'oauth' }),
-    }).catch(() => null)
-    const data = r ? await r.json().catch(() => null) : null
+    const data = await api.post(`/api/integrations/${integration.id}/connect`, { type: 'oauth' }).catch(e => ({ ok: false, error: e.message }))
     if (data?.oauth_url) {
       window.open(data.oauth_url, '_blank', 'popup,width=600,height=700')
       pollRef.current = setInterval(async () => {
-        const check = await fetch(`${API}/api/integrations/${integration.id}`).then(r => r.json()).catch(() => null)
+        const check = await api.get(`/api/integrations/${integration.id}`).catch(() => null)
         if (check?.connected) {
           clearInterval(pollRef.current)
-          onConnected(integration.id)
+          onConnected(integration.id, check)
           onClose()
         }
       }, 2000)
     } else if (data?.ok) {
-      onConnected(integration.id)
-      toastSuccess(`${integration.name} connected`)
-      onClose()
+      const check = await api.get(`/api/integrations/${integration.id}`).catch(() => null)
+      onConnected(integration.id, check)
+      if (check?.connected) {
+        toastSuccess(`${integration.name} connected`)
+        onClose()
+      } else {
+        setStatus('Backend accepted the request, but connection is not confirmed yet.')
+        setConnecting(false)
+      }
     } else {
-      setStatus('✗ Failed to initiate connection')
+      setStatus(data?.error || data?.message || 'Failed to initiate connection')
       setConnecting(false)
     }
   }
 
   const connectApiKey = async () => {
     setConnecting(true)
-    const r = await fetch(`${API}/api/integrations/${integration.id}/connect`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'apikey', api_key: apiKey }),
-    }).catch(() => null)
-    if (r?.ok) {
-      onConnected(integration.id)
+    const data = await api.post(`/api/integrations/${integration.id}/connect`, { type: 'apikey', api_key: apiKey }).catch(e => ({ ok: false, error: e.message }))
+    const check = data?.ok ? await api.get(`/api/integrations/${integration.id}`).catch(() => null) : null
+    if (check?.connected) {
+      onConnected(integration.id, check)
       toastSuccess(`${integration.name} connected`)
       onClose()
     } else {
-      setStatus('✗ Connection failed')
+      setStatus(data?.error || 'Connection failed or backend confirmation is missing')
       setConnecting(false)
     }
   }
@@ -104,6 +157,10 @@ function ConnectModal({ integration, onClose, onConnected }) {
           <button className="integ-modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="integ-modal-body">
+          <div className={`integ-modal-capability integ-status--${capability?.status || 'not_configured'}`}>
+            <span>{formatStatus(capability?.status || 'not_configured')}</span>
+            <span>{capability?.details || 'Backend capability status is not registered yet.'}</span>
+          </div>
           {integration.oauth && (
             <>
               <p className="integ-modal-desc">Authorize the system to access your {integration.name} account.</p>
@@ -115,6 +172,9 @@ function ConnectModal({ integration, onClose, onConnected }) {
           {integration.apikey && !integration.oauth && (
             <>
               <p className="integ-modal-desc">Paste your {integration.name} API key below.</p>
+              {capability?.missing_env?.length > 0 && (
+                <div className="integ-modal-env">Missing env: {capability.missing_env.join(', ')}</div>
+              )}
               <input
                 className="integ-key-input"
                 type="password"
@@ -137,30 +197,51 @@ function ConnectModal({ integration, onClose, onConnected }) {
 }
 
 /* ── IntegrationCard ──────────────────────────────────────────────────────── */
-function IntegrationCard({ integration, connected, lastSync, onConnect, onDisconnect }) {
+function IntegrationCard({ integration, state, capability, onConnect, onDisconnect, onRefresh }) {
   const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState(null)
+  const connected = state?.connected === true
+  const lastSync = state?.lastSync
+  const status = statusForCard({ connected, capability })
 
   const testConn = async () => {
     setTesting(true)
     try {
-      const r = await fetch(`${API}/api/integrations/${integration.id}/test`, { method: 'POST' })
-      const d = await r.json()
+      const d = await api.post(`/api/integrations/${integration.id}/test`, {})
+      setTestResult({ ...d, checked_at: new Date().toISOString() })
       d.ok ? toastSuccess(`${integration.name}: OK (${d.latency_ms}ms)`) : toastError(`${integration.name}: ${d.error}`)
-    } catch { toastError('Test failed') }
+      onRefresh?.()
+    } catch (e) {
+      setTestResult({ ok: false, error: e.message, checked_at: new Date().toISOString() })
+      toastError('Test failed')
+    }
     setTesting(false)
   }
 
   return (
-    <div className={`integ-card ${connected ? 'integ-card--connected' : ''}`}>
+    <div className={`integ-card ${connected ? 'integ-card--connected' : ''} integ-card--${status}`}>
       <div className="integ-card-header">
         <span className="integ-card-icon">{integration.icon}</span>
-        <span className={`integ-card-dot ${connected ? 'integ-card-dot--on' : 'integ-card-dot--off'}`} />
+        <span className={`integ-status-pill integ-status--${status}`}>{formatStatus(status)}</span>
       </div>
       <div className="integ-card-name">{integration.name}</div>
       {connected && lastSync
         ? <div className="integ-card-sync">Synced {lastSync}</div>
-        : <div className="integ-card-sync integ-card-sync--dim">Not connected</div>
+        : <div className="integ-card-sync integ-card-sync--dim">{capability?.details || 'Not connected'}</div>
       }
+      {capability?.missing_env?.length > 0 && (
+        <div className="integ-card-env">Missing: {capability.missing_env.join(', ')}</div>
+      )}
+      {integration.approvalRequired && (
+        <div className="integ-card-approval">Approval required before external account changes or sending.</div>
+      )}
+      {testResult && (
+        <div className={`integ-card-proof ${testResult.ok ? 'integ-card-proof--ok' : 'integ-card-proof--err'}`}>
+          Test {testResult.ok ? 'passed' : 'failed'}
+          {testResult.latency_ms ? ` · ${testResult.latency_ms}ms` : ''}
+          {testResult.error ? ` · ${testResult.error}` : ''}
+        </div>
+      )}
       <div className="integ-card-actions">
         {connected ? (
           <>
@@ -181,33 +262,103 @@ function IntegrationCard({ integration, connected, lastSync, onConnect, onDiscon
 
 /* ── ConnectorsTab ────────────────────────────────────────────────────────── */
 function ConnectorsTab() {
-  const { data } = useLiveData({ endpoint: `${API}/api/integrations`, pollMs: 30000, transform: d => d })
+  const capabilityStatus = useSystemStore(s => s.capabilityStatus)
+  const fetchCapabilityStatus = useSystemStore(s => s.fetchCapabilityStatus)
   const [states, setStates] = useState({})
   const [modal, setModal] = useState(null)
   const [activity, setActivity] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [lastError, setLastError] = useState(null)
+
+  const capabilitiesById = Object.fromEntries((capabilityStatus?.capabilities || []).map(c => [c.id, c]))
+  const capabilitiesByIntegration = Object.fromEntries(
+    INTEGRATIONS.map(i => [i.id, i.capabilityId ? capabilitiesById[i.capabilityId] : null]).filter(([, c]) => c)
+  )
+
+  const refreshIntegrations = async () => {
+    setLoading(true)
+    try {
+      const [data, activityRows] = await Promise.all([
+        api.get('/api/integrations'),
+        api.get('/api/integrations/activity').catch(() => []),
+      ])
+      const s = {}
+      ;(Array.isArray(data) ? data : []).forEach(i => {
+        s[i.id] = {
+          connected: i.connected === true,
+          lastSync: i.last_sync ? new Date(i.last_sync).toLocaleTimeString() : null,
+          error: i.error || null,
+          source: 'backend',
+        }
+      })
+      setStates(s)
+      setActivity(Array.isArray(activityRows) ? activityRows : [])
+      setLastError(null)
+    } catch (e) {
+      setLastError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    if (Array.isArray(data)) {
-      const s = {}
-      data.forEach(i => { s[i.id] = { connected: i.connected, lastSync: i.last_sync ? new Date(i.last_sync).toLocaleTimeString() : null } })
-      setStates(s)
-    }
-    fetch(`${API}/api/integrations/activity`).then(r => r.json()).then(setActivity).catch(() => {})
-  }, [data])
+    refreshIntegrations()
+    fetchCapabilityStatus().catch(() => {})
+    const timer = setInterval(() => {
+      refreshIntegrations()
+      fetchCapabilityStatus().catch(() => {})
+    }, 30000)
+    return () => clearInterval(timer)
+  }, [fetchCapabilityStatus])
 
-  const handleConnected = id => setStates(s => ({ ...s, [id]: { connected: true, lastSync: new Date().toLocaleTimeString() } }))
+  const handleConnected = (id, confirmedState) => {
+    if (confirmedState?.connected) {
+      setStates(s => ({
+        ...s,
+        [id]: {
+          connected: true,
+          lastSync: confirmedState.last_sync ? new Date(confirmedState.last_sync).toLocaleTimeString() : new Date().toLocaleTimeString(),
+          source: 'backend',
+        },
+      }))
+    } else {
+      setStates(s => ({
+        ...s,
+        [id]: { ...(s[id] || {}), connected: false, pending: true, source: 'pending_confirmation' },
+      }))
+    }
+    refreshIntegrations()
+    fetchCapabilityStatus().catch(() => {})
+  }
 
   const handleDisconnect = async id => {
-    await fetch(`${API}/api/integrations/${id}`, { method: 'DELETE' }).catch(() => {})
-    setStates(s => ({ ...s, [id]: { connected: false } }))
-    toastSuccess('Disconnected')
+    try {
+      await api.delete(`/api/integrations/${id}`)
+      await refreshIntegrations()
+      toastSuccess('Disconnected')
+    } catch (e) {
+      toastError(e.message || 'Disconnect failed')
+    }
   }
 
   const visibleCats = CATEGORIES.filter(c => c.label !== null)
 
   return (
     <div className="integ-tab-body">
-      {modal && <ConnectModal integration={modal} onClose={() => setModal(null)} onConnected={handleConnected} />}
+      {modal && (
+        <ConnectModal
+          integration={modal}
+          capability={capabilitiesByIntegration[modal.id] || capabilityFallbackFor(modal)}
+          onClose={() => setModal(null)}
+          onConnected={handleConnected}
+        />
+      )}
+
+      <div className="integ-info-banner">
+        Connector cards use backend-confirmed state. Missing environment variables and dry-run/fallback states are shown before any connector is treated as live.
+      </div>
+      {lastError && <div className="integ-error-banner">Integration status unavailable: {lastError}</div>}
+      {loading && <div className="integ-loading">Refreshing integration status...</div>}
 
       <div className="integ-categories">
         {visibleCats.map(cat => {
@@ -221,10 +372,11 @@ function ConnectorsTab() {
                   <IntegrationCard
                     key={integ.id}
                     integration={integ}
-                    connected={states[integ.id]?.connected || false}
-                    lastSync={states[integ.id]?.lastSync}
+                    state={states[integ.id]}
+                    capability={capabilitiesByIntegration[integ.id] || capabilityFallbackFor(integ)}
                     onConnect={i => setModal(i)}
                     onDisconnect={handleDisconnect}
+                    onRefresh={refreshIntegrations}
                   />
                 ))}
               </div>
@@ -263,8 +415,7 @@ function WebhookRow({ hook }) {
   const revealSecret = async () => {
     if (revealed) { setRevealed(false); return }
     try {
-      const r = await fetch(`/api/hooks/${hook.name}/secret`)
-      const d = await r.json()
+      const d = await api.get(`/api/hooks/${hook.name}/secret`)
       setSecret(d.secret)
       setRevealed(true)
     } catch { toastError('Could not fetch secret') }
@@ -289,7 +440,7 @@ function WebhookRow({ hook }) {
         <button className="integ-wh-reveal" onClick={revealSecret}>{revealed ? 'Hide' : 'Reveal'}</button>
       </div>
       <div className={`integ-wh-status ${hook.active ? 'integ-wh-status--on' : 'integ-wh-status--off'}`}>
-        {hook.active ? 'ACTIVE' : 'OFF'}
+        {hook.source === 'fallback' ? 'FALLBACK' : hook.active ? 'ACTIVE' : 'OFF'}
       </div>
     </div>
   )
@@ -298,9 +449,15 @@ function WebhookRow({ hook }) {
 /* ── WebhooksTab ──────────────────────────────────────────────────────────── */
 function WebhooksTab() {
   const [hooks, setHooks] = useState([])
+  const [source, setSource] = useState('loading')
 
   useEffect(() => {
-    fetch('/api/hooks/list').then(r => r.json()).then(d => setHooks(d.hooks || [])).catch(() => {})
+    api.get('/api/hooks/list')
+      .then(d => {
+        setHooks(d.hooks || [])
+        setSource((d.hooks || []).length ? 'backend' : 'fallback')
+      })
+      .catch(() => setSource('fallback'))
   }, [])
 
   const STUB_HOOKS = [
@@ -311,6 +468,7 @@ function WebhooksTab() {
   ]
 
   const displayHooks = hooks.length ? hooks : STUB_HOOKS
+  const usingFallback = source === 'fallback' || hooks.length === 0
 
   return (
     <div className="integ-tab-body">
@@ -318,6 +476,11 @@ function WebhooksTab() {
       <div className="integ-info-banner">
         Rate limit and API token settings have moved to <strong>Settings → Security</strong>
       </div>
+      {usingFallback && (
+        <div className="integ-warning-banner">
+          Webhook rows are fallback catalog entries because live hook status was not returned by the backend.
+        </div>
+      )}
 
       {/* Inbound webhooks */}
       <div className="integ-section">
@@ -325,7 +488,7 @@ function WebhooksTab() {
         <div className="integ-wh-head">
           <span>Name</span><span>URL</span><span>Events</span><span>Secret</span><span>Status</span>
         </div>
-        {displayHooks.map(h => <WebhookRow key={h.name} hook={h} />)}
+        {displayHooks.map(h => <WebhookRow key={h.name} hook={{ ...h, source: usingFallback ? 'fallback' : 'backend' }} />)}
       </div>
 
       {/* Test sandbox */}
@@ -347,13 +510,8 @@ function TestSandbox() {
     setSending(true)
     try {
       const body = JSON.parse(payload)
-      const r = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const d = await r.json().catch(() => ({}))
-      setResult({ status: r.status, body: d })
+      const d = await api.post(endpoint, body)
+      setResult({ status: 200, body: d })
     } catch (e) {
       setResult({ error: e.message })
     }
@@ -387,7 +545,7 @@ function MobilePairingTab() {
 
   const loadStatus = async () => {
     setLoading(true)
-    const data = await fetch('/api/mobile/status').then(r => r.json()).catch(() => null)
+    const data = await api.get('/api/mobile/status').catch(() => null)
     setStatus(data)
     setLoading(false)
   }
@@ -400,11 +558,7 @@ function MobilePairingTab() {
 
   const approve = async requestId => {
     setApproving(requestId)
-    const res = await fetch(`/api/mobile/pair/${requestId}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerApproved: true }),
-    }).then(r => r.json()).catch(() => null)
+    const res = await api.post(`/api/mobile/pair/${requestId}/approve`, { ownerApproved: true }).catch(() => null)
     setApproving(null)
     if (res?.ok) {
       toastSuccess('Mobile device approved')

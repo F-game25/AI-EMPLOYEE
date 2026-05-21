@@ -18,6 +18,7 @@ import CurrentObjectiveNew from '../dashboard/CurrentObjective'
 import CognitiveStreamNew from '../dashboard/CognitiveStream'
 import TaskPipelineNew from '../dashboard/TaskPipeline'
 import SystemTelemetryNew from '../dashboard/SystemTelemetry'
+import TaskComposer from '../core/TaskComposer'
 import './NexusOSDashboard.css'
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
@@ -39,6 +40,18 @@ function money(v) {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
   return `$${Math.round(n)}`
+}
+function capabilityLabel(capability = '') {
+  const raw = typeof capability === 'string' ? capability : (capability.label || capability.id || capability.name || '')
+  return String(raw)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+}
+function capabilityTone(status = '') {
+  if (status === 'live') return 'ok'
+  if (status === 'dry_run' || status === 'mock') return 'warn'
+  if (status === 'fallback') return 'fallback'
+  return 'bad'
 }
 
 // ── Sparkline ──────────────────────────────────────────────────────────────────
@@ -85,6 +98,50 @@ function CornerPanel({ pos, label, icon, accent, metrics = [], sparkData = [], c
         </div>
       )}
     </div>
+  )
+}
+
+function CapabilityMatrix({ status, onRefresh, onOpenSetup }) {
+  const capabilities = Array.isArray(status?.capabilities) ? status.capabilities : []
+  const liveCount = capabilities.filter(c => c.status === 'live').length
+  const setupCount = capabilities.filter(c => c.status === 'not_configured' || c.status === 'unavailable').length
+  const visible = [...capabilities]
+    .sort((a, b) => capabilityTone(a.status).localeCompare(capabilityTone(b.status)))
+    .slice(0, 8)
+  return (
+    <section className="nxd-cap" aria-label="Capability status">
+      <div className="nxd-cap__head">
+        <div>
+          <div className="nxd-cap__kicker">CAPABILITY REGISTRY</div>
+          <div className="nxd-cap__title">{liveCount}/{capabilities.length || 0} LIVE</div>
+        </div>
+        <button className="nxd-cap__refresh" type="button" onClick={onRefresh} disabled={status?.loading}>
+          {status?.loading ? 'CHECKING' : 'CHECK'}
+        </button>
+      </div>
+      {status?.next_recommended_action && (
+        <button className="nxd-cap__next" type="button" onClick={onOpenSetup}>
+          NEXT: {status.next_recommended_action.label}
+        </button>
+      )}
+      {status?.error && <div className="nxd-cap__error">{status.error}</div>}
+      <div className="nxd-cap__summary">
+        <span>SETUP NEEDED <b>{setupCount}</b></span>
+        <span>LAST <b>{status?.lastChecked ? fmt(status.lastChecked, true) : '--:--'}</b></span>
+      </div>
+      <div className="nxd-cap__list">
+        {visible.map(capability => (
+          <div key={capability.id || capability.name} className={`nxd-cap__row nxd-cap__row--${capabilityTone(capability.status)}`}>
+            <span className="nxd-cap__dot" />
+            <span className="nxd-cap__name">{capabilityLabel(capability)}</span>
+            <span className="nxd-cap__status">{String(capability.status || 'unknown').replace(/_/g, ' ')}</span>
+          </div>
+        ))}
+        {!visible.length && (
+          <div className="nxd-cap__empty">Capability status unavailable</div>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -160,6 +217,7 @@ function EventStream({ events = [] }) {
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function NexusOSDashboard() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
   const systemHealth  = useAppStore(s => s.systemHealth) || {}
   const wsConnected   = useAppStore(s => s.wsConnected)
 
@@ -200,6 +258,12 @@ export default function NexusOSDashboard() {
   }, [modelCalls.length])
 
   const systemStatus = useSystemStore(s => s.systemStatus) || {}
+  const capabilityStatus = useSystemStore(s => s.capabilityStatus)
+  const fetchCapabilityStatus = useSystemStore(s => s.fetchCapabilityStatus)
+
+  useEffect(() => {
+    fetchCapabilityStatus?.()
+  }, [fetchCapabilityStatus])
 
   const cpu      = systemHealth.cpu_percent ?? systemStatus.cpu ?? systemStatus.cpu_usage ?? 0
   const ram      = systemHealth.memory_percent ?? systemStatus.memory ?? 0
@@ -385,6 +449,19 @@ export default function NexusOSDashboard() {
       {/* ═══ RIGHT SIDEBAR ════════════════════════════════════════════════════ */}
       <div className="nxd__sidebar">
         <EventStream events={events} />
+        <div className="nxd__div" />
+        <CapabilityMatrix
+          status={capabilityStatus}
+          onRefresh={fetchCapabilityStatus}
+          onOpenSetup={() => setActiveSection('setup')}
+        />
+        <div className="nxd__div" />
+        <TaskComposer
+          title="RUN TASK"
+          subtitle="Start work through the canonical turn runner."
+          source="dashboard-composer"
+          compact
+        />
         <div className="nxd__div" />
         <AgentGridNew />
         <div className="nxd__div" />
