@@ -188,3 +188,13 @@
 
 /* ── Empty ──────────────────────────────────────────────────────────── */
 .cog-empty { font-family: var(--nx-font-mono); font-size: 11px; color: var(--nx-text-dim); padding: 16px 0; text-align: center; }
+
+/* ── Responsive (Batch 4) ── */
+@media (max-width: 768px) {
+  .cog-page { padding: 14px 12px; }
+  .cog-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .cog-header__tabs { flex-wrap: wrap; }
+  /* Call-log is a fixed 5-col table — let it scroll horizontally instead of overflowing. */
+  .cog-call-head, .cog-call-row { min-width: 520px; }
+  .cog-call-list { overflow-x: auto; }
+}

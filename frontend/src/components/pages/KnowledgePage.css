@@ -249,3 +249,12 @@
   letter-spacing: 1px;
 }
 .kp-broken-fix:hover { background: rgba(34,197,94,0.2); }
+
+/* ── Responsive (Batch 4) ── */
+@media (max-width: 900px) {
+  .kp-vault { grid-template-columns: 1fr; }       /* stack master / detail / aside */
+  .kp-toolbar { flex-wrap: wrap; gap: 8px; }
+}
+@media (max-width: 600px) {
+  .kp-broken-row { grid-template-columns: 1fr; gap: 6px; }
+}

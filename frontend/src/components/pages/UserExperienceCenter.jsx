@@ -108,6 +108,7 @@ export default function UserExperienceCenter() {
   const [proof, setProof] = useState(null)
   const [readiness, setReadiness] = useState(null)
   const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -127,6 +128,8 @@ export default function UserExperienceCenter() {
         setReadiness(ready)
       } catch (e) {
         if (!cancelled) setError(e.message || 'Unable to load user views')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     }
     load()
@@ -156,7 +159,8 @@ export default function UserExperienceCenter() {
         </div>
       </header>
 
-      {error && <div className="ux-error">{error}</div>}
+      {error && <div className="ux-error" role="alert">{error}</div>}
+      {loading && !capabilityStatus && <div className="ux-error" role="status" style={{ background: 'transparent', color: 'var(--nx-text-muted)' }}>Loading user views…</div>}
 
       <div className="ux-grid">
         {ROLES.map(role => (
