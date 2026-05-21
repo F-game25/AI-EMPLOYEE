@@ -38,6 +38,24 @@ try {
   log.info(`chromium log → ${chromiumLog}`)
 } catch (e) { log.warn('failed to wire chromium logging:', e.message) }
 
+// ── WebGL stability ──────────────────────────────────────────────────────────
+// The dashboard/neural pages render a heavy three.js scene. On Linux+Electron the
+// GPU WebGL context was being LOST ("THREE.WebGLRenderer: Context Lost"), which
+// crashed every page that mounts 3D. Try hardware first (ignore the GPU blocklist,
+// keep contexts alive), and ALWAYS allow a software (SwiftShader) WebGL fallback so
+// a context can never be permanently lost. Override with AI_EMPLOYEE_FORCE_SOFTGL=1.
+try {
+  app.commandLine.appendSwitch('ignore-gpu-blocklist')
+  app.commandLine.appendSwitch('enable-gpu-rasterization')
+  app.commandLine.appendSwitch('disable-gpu-process-crash-limit')
+  app.commandLine.appendSwitch('enable-unsafe-swiftshader')   // software WebGL fallback
+  if (process.env.AI_EMPLOYEE_FORCE_SOFTGL === '1') {
+    app.commandLine.appendSwitch('use-gl', 'angle')
+    app.commandLine.appendSwitch('use-angle', 'swiftshader')
+    log.info('WebGL: forcing SwiftShader software rendering')
+  }
+} catch (e) { log.warn('failed to set WebGL flags:', e.message) }
+
 const { PATHS } = require('./src/paths')
 const { BackendManager } = require('./src/backend')
 const health = require('./src/health')
@@ -749,9 +767,12 @@ async function startSystem(event, { extraEnv = {}, skipExisting = true } = {}) {
   // Wait for /api/health
   tracker.start('health-ok')
   setStatus({ state: 'starting', phase: 'health-ok', message: 'Probing health endpoints' })
-  const health = await waitForHealth(30000)
-  if (!health.ok) {
-    tracker.fail('health-ok', `/api/health never returned 2xx after ${Math.round(health.elapsedMs / 1000)}s`)
+  // NB: local must NOT be named `health` — that shadows the module-level `health`
+  // (require('./src/health')) across this whole function and TDZ-crashes the earlier
+  // health.configureRuntimeRoute()/getRuntimeRoute() calls. (Fixes restart-verbose.)
+  const healthProbe = await waitForHealth(30000)
+  if (!healthProbe.ok) {
+    tracker.fail('health-ok', `/api/health never returned 2xx after ${Math.round(healthProbe.elapsedMs / 1000)}s`)
     showDiagnostics('Backend started but /api/health is not responding. The system may be in a degraded state.')
     return { success: false }
   }

@@ -4,10 +4,13 @@ const { PATHS } = require('./paths')
 
 const DEFAULT_POLICY = Object.freeze({
   network: {
+    // Data stays local by default (no telemetry/model/dep egress) — but the APP
+    // BINARY auto-updates over the network by default so users get fixes. These
+    // are independent: updating the app ≠ sending user data anywhere.
     offlineByDefault: true,
     allowDependencyInstall: false,
     allowModelDownloads: false,
-    allowAutoUpdate: false,
+    allowAutoUpdate: true,
   },
   security: {
     bindHost: '127.0.0.1',
@@ -43,6 +46,13 @@ function loadPolicy({ allowEnvOverride = process.env.AI_EMPLOYEE_ALLOW_POLICY_EN
       network: {
         offlineByDefault: process.env.AI_EMPLOYEE_OFFLINE !== '0',
       },
+    })
+  }
+
+  // Auto-update opt-out is always honored (disabling network is always safe to allow).
+  if (process.env.AI_EMPLOYEE_ALLOW_AUTO_UPDATE != null) {
+    policy = deepMerge(policy, {
+      network: { allowAutoUpdate: process.env.AI_EMPLOYEE_ALLOW_AUTO_UPDATE === '1' },
     })
   }
 

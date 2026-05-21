@@ -220,9 +220,17 @@ export default function UnifiedBrain({
   activeView = 'FRONT',
   density = 1.0,
 } = {}) {
-  const onCreated = useCallback(({ gl }) => {
-    gl.domElement.addEventListener('webglcontextlost', e => e.preventDefault())
-    gl.domElement.addEventListener('webglcontextrestored', () => gl.forceContextRestore?.())
+  const onCreated = useCallback(({ gl, setFrameloop }) => {
+    const canvas = gl.domElement
+    // On context loss: preventDefault (lets the browser/SwiftShader restore) and
+    // stop the render loop so we don't spam drawArrays against a dead context.
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault()
+      try { setFrameloop?.('never') } catch { /* */ }
+    })
+    canvas.addEventListener('webglcontextrestored', () => {
+      try { setFrameloop?.('always') } catch { /* */ }
+    })
   }, [])
 
   return (
@@ -250,7 +258,7 @@ export default function UnifiedBrain({
       <Canvas
         camera={{ position: VIEW_CAMERA[activeView] || VIEW_CAMERA.FRONT, fov: 55 }}
         dpr={[1, 1.5]}
-        gl={{ antialias: true, alpha: false }}
+        gl={{ antialias: true, alpha: false, powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false }}
         style={{ background: '#000000' }}
         onCreated={onCreated}
       >
