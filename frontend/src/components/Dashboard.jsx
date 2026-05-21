@@ -37,6 +37,7 @@ const UserExperienceCenter = lazy(() => import('./pages/UserExperienceCenter'))
 const IntegrationsPage  = lazy(() => import('./pages/IntegrationsPage'))
 const ModelsPage        = lazy(() => import('./pages/ModelsPage'))
 const ModelFabricPage   = lazy(() => import('./pages/ModelFabricPage'))
+const ComputeCenterPage = lazy(() => import('./pages/ComputeCenterPage'))
 const AgentsPage        = lazy(() => import('./pages/AgentsPage'))
 const MoneyModePage     = lazy(() => import('./pages/MoneyModePage'))
 const SecurityPanel     = lazy(() => import('./pages/SecurityPanel'))
@@ -98,6 +99,8 @@ const PAGES = {
   // SYSTEM
   'models':         ModelsPage,
   'model-fabric':   ModelFabricPage,
+  'compute':        ComputeCenterPage,
+  'compute-center': ComputeCenterPage,
   'runtime':        SystemHealthPage,
   'api-catalog':    ApiCatalogPage,
   'user-views':     UserExperienceCenter,
