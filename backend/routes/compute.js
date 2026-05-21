@@ -5,6 +5,7 @@
 
 const express = require('express');
 const cf = require('../compute_fabric');
+const persist = require('../compute_fabric/persistence');
 
 module.exports = function createComputeRouter(requireAuth) {
   const router = express.Router();
@@ -41,7 +42,24 @@ module.exports = function createComputeRouter(requireAuth) {
   });
 
   router.post('/start-job', requireAuth, (req, res) => {
-    res.json({ ok: true, job: cf.startJob(req.body || {}) });
+    const job = cf.startJob(req.body || {});
+    // WS7: every job gets a local archive + heartbeat from the start.
+    try { persist.initJob(job.id, { name: job.name, provider: job.provider, dry_run: job.dry_run }); } catch { /* */ }
+    res.json({ ok: true, job });
+  });
+
+  // ── WS7: Remote Job Persistence — local is the source of truth ──────────────
+  router.get('/jobs/:id/sync-status', requireAuth, (req, res) => res.json(persist.syncStatus(req.params.id)));
+  router.get('/jobs/:id/manifest', requireAuth, (req, res) => res.json(persist.manifest(req.params.id)));
+  router.get('/jobs/:id/artifacts', requireAuth, (req, res) => res.json(persist.artifacts(req.params.id)));
+  router.post('/jobs/:id/heartbeat', requireAuth, (req, res) => res.json(persist.heartbeat(req.params.id, req.body || {})));
+  router.post('/jobs/:id/checkpoint', requireAuth, (req, res) => res.json(persist.writeCheckpoint(req.params.id, req.body?.name, req.body?.data ?? {})));
+  router.post('/jobs/:id/collect', requireAuth, (req, res) => res.json(persist.collectArtifact(req.params.id, req.body || {})));
+  router.post('/jobs/:id/force-sync', requireAuth, (req, res) => res.json(persist.forceSync(req.params.id, req.body?.from_dir)));
+  router.get('/jobs/:id/recover', requireAuth, (req, res) => res.json(persist.recover(req.params.id)));
+  router.post('/jobs/:id/safe-teardown', requireAuth, (req, res) => {
+    const r = persist.safeTeardown(req.params.id, { force: req.body?.force === true });
+    res.status(r.ok ? 200 : 409).json(r);
   });
 
   router.post('/stop-job', requireAuth, (req, res) => {

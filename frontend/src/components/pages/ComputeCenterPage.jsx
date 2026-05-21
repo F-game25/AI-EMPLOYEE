@@ -57,6 +57,7 @@ export default function ComputeCenterPage() {
     } finally { setBusy(false) }
   }
   const stopJob = async (id) => { await api.post('/api/compute/stop-job', { id }); refresh() }
+  const [openJob, setOpenJob] = useState(null)
 
   const live = local?.live_provisioning
   const dayUsd = spend?.day_usd ?? 0
@@ -158,12 +159,18 @@ export default function ComputeCenterPage() {
             <thead><tr><th>Name</th><th>Provider</th><th>GPU</th><th>Status</th><th>Mode</th><th></th></tr></thead>
             <tbody>
               {jobs.map(j => (
-                <tr key={j.id}>
-                  <td>{j.name}</td><td>{j.provider || '—'}</td><td>{j.gpu || '—'}</td>
-                  <td><span className={`cc-status cc-status--${j.status}`}>{j.status}</span></td>
-                  <td>{j.dry_run ? 'dry-run' : 'live'}</td>
-                  <td>{!['stopped', 'refused'].includes(j.status) && <button className="cc-btn cc-btn--sm cc-btn--stop" onClick={() => stopJob(j.id)}>Stop</button>}</td>
-                </tr>
+                <>
+                  <tr key={j.id}>
+                    <td>{j.name}</td><td>{j.provider || '—'}</td><td>{j.gpu || '—'}</td>
+                    <td><span className={`cc-status cc-status--${j.status}`}>{j.status}</span></td>
+                    <td>{j.dry_run ? 'dry-run' : 'live'}</td>
+                    <td>
+                      <button className="cc-btn cc-btn--sm" onClick={() => setOpenJob(openJob === j.id ? null : j.id)}>{openJob === j.id ? 'Hide' : 'Persistence'}</button>
+                      {!['stopped', 'refused'].includes(j.status) && <button className="cc-btn cc-btn--sm cc-btn--stop" onClick={() => stopJob(j.id)}>Stop</button>}
+                    </td>
+                  </tr>
+                  {openJob === j.id && <tr key={`${j.id}-p`}><td colSpan={6}><JobPersistence jobId={j.id} /></td></tr>}
+                </>
               ))}
             </tbody>
           </table>
@@ -178,6 +185,54 @@ export default function ComputeCenterPage() {
             : audit.slice().reverse().map((e, i) => <div key={i} className="cc-audit-row"><code>{e.event}</code><span>{(e.ts || '').slice(11, 19)}</span></div>)}
         </div>
       </section>
+    </div>
+  )
+}
+
+/* WS7: per-job persistence — local is the source of truth. */
+function JobPersistence({ jobId }) {
+  const [st, setSt] = useState(null)
+  const [arts, setArts] = useState([])
+  const [msg, setMsg] = useState(null)
+  const load = useCallback(async () => {
+    const [s, a] = await Promise.all([
+      api.get(`/api/compute/jobs/${jobId}/sync-status`).catch(() => null),
+      api.get(`/api/compute/jobs/${jobId}/artifacts`).catch(() => ({ files: [] })),
+    ])
+    setSt(s); setArts(a?.files || [])
+  }, [jobId])
+  useEffect(() => { load(); const i = setInterval(load, 8000); return () => clearInterval(i) }, [load])
+
+  const forceSync = async () => { setMsg('Syncing…'); const r = await api.post(`/api/compute/jobs/${jobId}/force-sync`, {}); setMsg(`Verified: ${r.verified}`); load() }
+  const recover = async () => { const r = await api.get(`/api/compute/jobs/${jobId}/recover`); setMsg(`Latest checkpoint: ${r.latest_checkpoint?.name || 'none'}`) }
+  const teardown = async (force = false) => {
+    const r = await api.post(`/api/compute/jobs/${jobId}/safe-teardown`, { force }).catch(e => ({ ok: false, reason: e.message }))
+    setMsg(r.allowed ? `Teardown allowed${r.forced ? ' (forced)' : ''} — local archive retained.` : `Refused: ${r.reason}`)
+    load()
+  }
+
+  if (!st) return <div className="cc-note">Loading persistence…</div>
+  return (
+    <div className="cc-persist">
+      <div className="cc-persist-row">
+        <span className={st.unsynced_warning ? 'cc-warn' : 'cc-ok'}>{st.unsynced_warning ? '⚠ unsynced/stale' : '✓ synced & verified'}</span>
+        <span>{st.file_count} files</span>
+        <span>{st.checkpoints} checkpoints</span>
+        <span>heartbeat {st.last_heartbeat_age_s == null ? '—' : `${st.last_heartbeat_age_s}s ago`}{st.heartbeat_stale ? ' (stale)' : ''}</span>
+        <span>last sync {st.last_sync ? String(st.last_sync).slice(11, 19) : '—'}</span>
+      </div>
+      <div className="cc-persist-actions">
+        <button className="cc-btn cc-btn--sm" onClick={forceSync}>Force sync</button>
+        <button className="cc-btn cc-btn--sm" onClick={recover}>Recover</button>
+        <button className="cc-btn cc-btn--sm" onClick={() => teardown(false)}>Safe teardown</button>
+        <button className="cc-btn cc-btn--sm cc-btn--stop" onClick={() => teardown(true)}>Force teardown</button>
+      </div>
+      {arts.length > 0 && (
+        <div className="cc-persist-files">
+          {arts.map((f, i) => <div key={i}><code>{f.rel}</code> <span>{f.bytes}b · {String(f.sha256).slice(0, 10)}</span></div>)}
+        </div>
+      )}
+      {msg && <div className="cc-note cc-note--dim">{msg}</div>}
     </div>
   )
 }
