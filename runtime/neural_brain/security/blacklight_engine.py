@@ -41,6 +41,18 @@ _SHUTDOWN_THRESHOLD = int(os.getenv("BL_SHUTDOWN_THRESHOLD", "90"))
 _RECOVERY_HYSTERESIS = int(os.getenv("BL_RECOVERY_HYSTERESIS", "10"))  # score must drop this far below threshold to recover
 
 
+def _now_iso_bl() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _looks_like_ip(s: str) -> bool:
+    import re
+    if not s:
+        return False
+    return bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", s) or ":" in s and len(s) <= 45 and any(c in s for c in "0123456789abcdefABCDEF:"))
+
+
 class ThreatEvent:
     __slots__ = ("ts", "score", "event_type", "source", "details")
 
@@ -122,16 +134,24 @@ class BlacklightEngine:
         if score <= 0:
             return
 
+        # Capture attacker identity so the sentinel can block the offender (not the system).
+        ip = payload.get("ip") or (source if _looks_like_ip(source) else None)
+        user = payload.get("user_id") or payload.get("username")
         te = ThreatEvent(
             ts=time.time(),
             score=score,
             event_type=event_type,
             source=source,
-            details={"payload_keys": list(payload.keys())[:5]},
+            details={"payload_keys": list(payload.keys())[:5], "ip": ip, "user": user},
         )
         with self._lock:
             self._threat_events.append(te)
             self._threat_count += 1
+
+        # Reactive guard: high-confidence attacks with an identifiable offender are
+        # blocked IMMEDIATELY and deterministically (no waiting on the AI verdict, no
+        # system shutdown). This keeps attackers out before the score can escalate.
+        self._reactive_guard(event_type, ip, user, score)
 
     def _quick_score(self, event_type: str, source: str, payload: dict) -> int:
         """Zero-latency event scoring."""
@@ -171,7 +191,67 @@ class BlacklightEngine:
             score = max(score, 18)
         if event_type == "security:suspicious_session":
             score = max(score, 20)
+        # ── Wallet / secrets vault (high-value target — defend aggressively) ──
+        if event_type == "vault:access_denied":
+            score = max(score, 35)
+        if event_type == "vault:tamper":
+            score = max(score, 80)        # tampering with the secrets store is critical
+        if event_type == "vault:access":
+            # Bursts of secret reads are the signal; a single authorized read is benign.
+            if payload.get("suspicious") or payload.get("from_blocked_ip"):
+                score = max(score, 45)
+            else:
+                score = max(score, 4)     # low baseline so bursts accumulate
+        if event_type == "vault:exfiltration_suspected":
+            score = max(score, 90)
         return score
+
+    # Event types that, with an identifiable offender, justify an immediate block.
+    _ATTACK_EVENTS = frozenset({
+        "auth:brute_force_detected", "vault:tamper", "vault:exfiltration_suspected",
+        "vault:access_denied", "security:suspicious_session",
+    })
+
+    def _reactive_guard(self, event_type: str, ip: str | None, user: str | None, score: int) -> None:
+        """Deterministic, immediate blocking for clear attacks (no AI, no shutdown).
+
+        Acts as the front-line guard: identifiable offenders behind high-confidence
+        attack events are blocked at once and their events purged, so the threat is
+        neutralized by exclusion before the score can climb toward lockdown/shutdown.
+        """
+        import os as _os
+        if _os.getenv("BL_SENTINEL_AUTODEFEND", "true").lower() != "true":
+            return
+        if event_type not in self._ATTACK_EVENTS and score < 30:
+            return
+        if not ip and not user:
+            return
+        actions: list[dict] = []
+        reason = f"reactive_guard:{event_type}"
+        try:
+            if ip and self._block_ip(ip, reason):
+                actions.append({"action": "block_ip", "target": ip})
+            if user and self._block_user_account(user, reason):
+                actions.append({"action": "block_account", "target": user})
+            if event_type in ("vault:tamper", "vault:exfiltration_suspected"):
+                if self._lock_vault(reason):
+                    actions.append({"action": "lock_vault", "target": "sensitive_stores"})
+            if actions:
+                self._purge_attacker_events({ip} if ip else set(), {user} if user else set())
+                self._notify_user(
+                    title=f"🛡 Security guard blocked {event_type}",
+                    detail=f"Action: {', '.join(a['action'] + '→' + a['target'] for a in actions)}. "
+                           f"Offender kept out; system stays online.",
+                    level="critical" if event_type in ("vault:tamper", "vault:exfiltration_suspected") else "warning",
+                    extra={"event_type": event_type, "actions": actions},
+                )
+                from neural_brain.utils.event_bus import publish
+                publish("blacklight:guard_block", source="blacklight_guard", payload={
+                    "event_type": event_type, "actions": actions, "reason": reason,
+                })
+                logger.warning("BLACKLIGHT GUARD (reactive): %s → blocked %s", event_type, actions)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("reactive_guard error: %s", e)
 
     def _handle_brute_force(self, payload: dict) -> None:
         """Immediate response to detected brute force: lock account + possible key rotation."""
@@ -199,6 +279,13 @@ class BlacklightEngine:
                 logger.debug("Blacklight eval error: %s", e)
             time.sleep(_EVAL_INTERVAL_S)
 
+    @staticmethod
+    def _aggregate_score(events: list[ThreatEvent]) -> int:
+        if not events:
+            return 0
+        # Cap at sum of the most recent individual scores (avoid runaway inflation).
+        return min(100, int(sum(te.score for te in events[-10:])))
+
     def _evaluate(self) -> None:
         now = time.time()
         cutoff = now - _THREAT_WINDOW_S
@@ -208,30 +295,38 @@ class BlacklightEngine:
                 self._threat_events.popleft()
             events = list(self._threat_events)
 
-        if not events:
-            aggregate = 0
-        else:
-            # Weighted sum: recent events count more
-            total_weight = 0.0
-            weighted_score = 0.0
-            for te in events:
-                age = now - te.ts
-                weight = max(0.1, 1.0 - (age / _THREAT_WINDOW_S))
-                weighted_score += te.score * weight
-                total_weight += weight
-            aggregate = int(min(100, weighted_score / max(total_weight, 1) * len(events) / max(len(events), 1)))
-            # Cap at sum of individual scores (avoid inflating)
-            aggregate = min(100, int(sum(te.score for te in events[-10:])))
+        # Security Sentinel: local-AI guard. Detects threats and BLOCKS the attacker
+        # (IP/account) + locks sensitive stores — keeping them out rather than taking
+        # the system down. When it neutralizes an attacker it purges that attacker's
+        # events, so the score reflects the handled state and the system stays up.
+        self._maybe_run_sentinel(events)
 
-        # Security Sentinel: local-AI reasoning over the event window (rate-limited).
-        # Runs even in offline mode (local Ollama only). Can raise the score.
-        sentinel_bump = self._maybe_run_sentinel(events)
-        aggregate = min(100, aggregate + sentinel_bump)
+        with self._lock:
+            events = [te for te in self._threat_events if te.ts >= cutoff]
+        aggregate = self._aggregate_score(events)
 
         self._current_score = aggregate
         self._update_active_threats(events)
+        # Shutdown/lockdown is a LAST RESORT for threats we could not block. A genuine
+        # unblockable flood will keep scoring across cycles and still escalate here.
         self._apply_mode(aggregate)
         self._emit_status()
+
+    def _purge_attacker_events(self, ips: set[str], users: set[str]) -> int:
+        """Remove neutralized attackers' events from the window after blocking them."""
+        if not ips and not users:
+            return 0
+        removed = 0
+        with self._lock:
+            kept = deque()
+            for te in self._threat_events:
+                d = te.details or {}
+                if (d.get("ip") and d["ip"] in ips) or (d.get("user") and d["user"] in users):
+                    removed += 1
+                    continue
+                kept.append(te)
+            self._threat_events = kept
+        return removed
 
     # ── Security Sentinel (always-on local AI defender) ───────────────────────
     def _maybe_run_sentinel(self, events: list[ThreatEvent]) -> int:
@@ -264,52 +359,179 @@ class BlacklightEngine:
                 })
                 logger.warning("BLACKLIGHT SENTINEL: risk=%d category=%s — %s",
                                risk, verdict.get("category"), str(verdict.get("reason"))[:120])
-            # DETECT → DEFEND: at high risk the sentinel takes graduated defensive action.
-            self._sentinel_defend(risk, verdict)
-            # Contribute up to ~30 points so the AI can escalate but not solely drive lockdown.
-            return min(30, risk // 3)
+            # DETECT → DEFEND like a guard: block the ATTACKER, keep them out, notify
+            # the user. The sentinel does NOT inflate the global threat score (return 0),
+            # so it never drives system lockdown/shutdown — that stays a last resort.
+            self._sentinel_defend(risk, verdict, events)
+            return 0
         except Exception as e:  # noqa: BLE001
             self._sentinel_state = "degraded"
             logger.debug("Blacklight sentinel degraded (rule-only): %s", e)
             return 0
 
-    def _sentinel_defend(self, risk: int, verdict: dict) -> None:
-        """Graduated, audited defensive response driven by the sentinel's verdict.
+    @staticmethod
+    def _extract_attackers(events: list[ThreatEvent]) -> tuple[set[str], set[str]]:
+        """Pull attacker IPs + user ids from the recent threat window."""
+        ips: set[str] = set()
+        users: set[str] = set()
+        for te in events:
+            d = te.details or {}
+            if d.get("ip"):
+                ips.add(str(d["ip"]))
+            if d.get("user"):
+                users.add(str(d["user"]))
+        return ips, users
 
-        Uses only the engine's existing defensive capabilities (no new destructive
-        powers). Gated by BL_SENTINEL_AUTODEFEND (default on). Actions escalate with
-        risk; each is published as blacklight:ai_defense and audited. Lethal escalation
-        (system shutdown) is intentionally left to the threshold-based _apply_mode path.
+    def _sentinel_defend(self, risk: int, verdict: dict, events: list[ThreatEvent]) -> None:
+        """Act like a security guard: keep the attacker out, don't take the system down.
+
+        Targeted, audited, reversible-where-possible responses against the OFFENDER
+        (block IP + lock the abused account), escalating with risk. System-wide measures
+        (key rotation for forged-token risk) only at high confidence. Full system
+        lockdown/shutdown is NOT triggered here — it remains a threshold last resort.
+        Every action notifies the user with WHAT was done and WHY.
         """
         import os as _os
         if _os.getenv("BL_SENTINEL_AUTODEFEND", "true").lower() != "true":
             return
+        if risk < 50:
+            return  # below this the sentinel only alerts; no enforcement
         category = str(verdict.get("category", "")).lower()
-        actions: list[str] = []
+        reason = str(verdict.get("reason") or category or "elevated risk")
+        ips, users = self._extract_attackers(events)
+        actions: list[dict] = []
         try:
-            # ≥85 or credential/brute categories → rotate keys (invalidates forged tokens).
-            if risk >= 85 or any(k in category for k in ("brute", "credential", "token", "auth", "key")):
+            for ip in ips:
+                if self._block_ip(ip, reason):
+                    actions.append({"action": "block_ip", "target": ip})
+            for user in users:
+                if self._block_user_account(user, reason):
+                    actions.append({"action": "block_account", "target": user})
+            # Forged-token / credential theft → rotate keys (invalidates stolen tokens).
+            if risk >= 85 and any(k in category for k in ("credential", "token", "key", "session_hijack", "forged")):
                 try:
                     self.force_key_rotation()
-                    actions.append("key_rotation")
+                    actions.append({"action": "key_rotation", "target": "all_tokens"})
                 except Exception:  # noqa: BLE001
                     pass
-            # ≥75 or session/hijack categories → invalidate all sessions.
-            if risk >= 75 or any(k in category for k in ("session", "hijack", "takeover")):
-                try:
-                    self.invalidate_all_sessions(reason="sentinel_autodefend")
-                    actions.append("invalidate_sessions")
-                except Exception:  # noqa: BLE001
-                    pass
+            # Wallet/secrets vault under attack → lock the vault (deny all access) + rotate.
+            vault_threat = any(k in category for k in ("vault", "secret", "wallet", "exfil", "credential")) \
+                or any((te.event_type or "").startswith("vault:") for te in events)
+            if vault_threat and risk >= 60:
+                if self._lock_vault(reason):
+                    actions.append({"action": "lock_vault", "target": "secrets_vault"})
+                if risk >= 80:
+                    try:
+                        self.force_key_rotation()
+                        if not any(a["action"] == "key_rotation" for a in actions):
+                            actions.append({"action": "key_rotation", "target": "all_tokens"})
+                    except Exception:  # noqa: BLE001
+                        pass
             if actions:
+                # Threat neutralized by exclusion → purge the attacker's events so the
+                # system stays up instead of escalating to lockdown/shutdown.
+                blocked_ips = {a["target"] for a in actions if a["action"] == "block_ip"}
+                blocked_users = {a["target"] for a in actions if a["action"] == "block_account"}
+                self._purge_attacker_events(blocked_ips, blocked_users)
+                self._notify_user(
+                    title=f"🛡 Security guard blocked a threat (risk {risk})",
+                    detail=f"Action: {', '.join(a['action'] + '→' + a['target'] for a in actions)}. "
+                           f"Why: {reason}",
+                    level="critical" if risk >= 85 else "warning",
+                    extra={"risk": risk, "category": verdict.get("category"), "actions": actions},
+                )
                 from neural_brain.utils.event_bus import publish
                 publish("blacklight:ai_defense", source="blacklight_sentinel", payload={
                     "risk": risk, "category": verdict.get("category"),
-                    "actions": actions, "reason": verdict.get("reason"),
+                    "actions": actions, "reason": reason,
                 })
-                logger.warning("BLACKLIGHT SENTINEL DEFEND: risk=%d actions=%s", risk, actions)
+                logger.warning("BLACKLIGHT SENTINEL GUARD: risk=%d blocked=%s", risk, actions)
+            else:
+                # Detected but nothing to block (no identifiable offender) — alert only.
+                self._notify_user(
+                    title=f"⚠ Security sentinel detected risk {risk}",
+                    detail=f"{reason}. No identifiable attacker to block; monitoring closely.",
+                    level="warning", extra={"risk": risk, "category": verdict.get("category")},
+                )
         except Exception as e:  # noqa: BLE001
             logger.debug("sentinel defend error: %s", e)
+
+    def _block_ip(self, ip: str, reason: str) -> bool:
+        """Add an IP to the enforced blocklist (state/blocked_ips.json). Idempotent."""
+        if not ip or ip in ("127.0.0.1", "::1", "localhost"):
+            return False
+        try:
+            import json as _json
+            from pathlib import Path
+            repo = Path(os.getenv("AI_EMPLOYEE_REPO_DIR", "."))
+            f = repo / "state" / "blocked_ips.json"
+            f.parent.mkdir(parents=True, exist_ok=True)
+            existing = []
+            if f.exists():
+                try:
+                    existing = _json.loads(f.read_text() or "[]")
+                except Exception:  # noqa: BLE001
+                    existing = []
+            if any((e.get("ip") if isinstance(e, dict) else e) == ip for e in existing):
+                return False
+            existing.append({"ip": ip, "reason": reason, "blocked_at": _now_iso_bl(),
+                             "by": "security_sentinel"})
+            f.write_text(_json.dumps(existing, indent=2))
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.debug("block_ip failed: %s", e)
+            return False
+
+    def _lock_vault(self, reason: str) -> bool:
+        """Lock ALL sensitive stores — secrets, API keys, wallet/money, vaults.
+
+        Writes a protection flag (state/sensitive_lock.json) that the secrets broker,
+        wallet/money layer, and vault honor by denying access until an owner clears it.
+        Publishes vault:lock so live subsystems react immediately. Reversible by the owner.
+        """
+        try:
+            import json as _json
+            from pathlib import Path
+            repo = Path(os.getenv("AI_EMPLOYEE_REPO_DIR", "."))
+            f = repo / "state" / "sensitive_lock.json"
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(_json.dumps({
+                "locked": True,
+                "scope": ["secrets", "api_keys", "wallet", "money", "vault", "sensitive_info"],
+                "reason": reason, "locked_at": _now_iso_bl(), "by": "security_sentinel",
+            }, indent=2))
+            from neural_brain.utils.event_bus import publish
+            publish("vault:lock", source="security_sentinel", payload={
+                "scope": ["secrets", "api_keys", "wallet", "money", "vault", "sensitive_info"],
+                "reason": reason,
+            })
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.debug("lock_vault failed: %s", e)
+            return False
+
+    def _block_user_account(self, user: str, reason: str) -> bool:
+        """Block the abused/attacking account (revokes its sessions + tokens)."""
+        if not user or user in ("anonymous", "system"):
+            return False
+        try:
+            from neural_brain.auth.auth_manager import get_auth_manager
+            get_auth_manager().block_user(user, reason=f"sentinel:{reason}"[:120])
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.debug("block_user failed: %s", e)
+            return False
+
+    def _notify_user(self, *, title: str, detail: str, level: str = "warning", extra: dict | None = None) -> None:
+        """Tell the user WHAT was done and WHY (notifications channel + WS event)."""
+        try:
+            from neural_brain.utils.event_bus import publish
+            publish("security:notification", source="security_sentinel", payload={
+                "title": title, "detail": detail, "level": level, "ts": _now_iso_bl(),
+                **(extra or {}),
+            })
+        except Exception:  # noqa: BLE001
+            pass
 
     @staticmethod
     def _summarize_events(events: list[ThreatEvent]) -> str:
