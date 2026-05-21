@@ -36,6 +36,12 @@ function readJsonl(file, limit = 100) {
   }
 }
 
+function firstExisting(paths) {
+  return paths.find(file => {
+    try { return fs.existsSync(file) } catch { return false }
+  }) || paths[0]
+}
+
 function readTaskRecords() {
   const data = readJSON(path.join(STATE_DIR, 'state/tasks.json'), { tasks: {} })
   const raw = data.tasks || data
@@ -720,15 +726,40 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   // ── SYSTEM / UPTIME ───────────────────────────────────────────────────────
 
   r.get('/system/uptime', requireAuth, (req, res) => {
-    const services = ['backend', 'python-ai', 'redis', 'postgres']
+    const incidents = readJSON(firstExisting([
+      path.join(STATE_DIR, 'state', 'incidents.json'),
+      path.join(STATE_DIR, 'incidents.json'),
+    ]), [])
+    const recentIncidents = Array.isArray(incidents)
+      ? incidents.filter(i => Date.now() - new Date(i.ts || i.created_at || i.started_at || 0).getTime() <= 30 * 86400000)
+      : []
+    const services = [
+      {
+        name: 'backend',
+        uptime_30d: null,
+        uptime_90d: null,
+        incidents_30d: recentIncidents.filter(i => !i.service || i.service === 'backend').length,
+        mttr_minutes: null,
+        status: 'live',
+        uptime_seconds: Math.floor(process.uptime()),
+        source: 'node_process',
+      },
+      {
+        name: 'python-ai',
+        uptime_30d: null,
+        uptime_90d: null,
+        incidents_30d: recentIncidents.filter(i => i.service === 'python-ai' || i.service === 'python_backend').length,
+        mttr_minutes: null,
+        status: 'unavailable',
+        source: 'not_instrumented',
+      },
+    ]
     res.json({
-      services: services.map(s => ({
-        name: s,
-        uptime_30d: parseFloat((99.2 + Math.random() * 0.7).toFixed(2)),
-        uptime_90d: parseFloat((98.9 + Math.random() * 0.9).toFixed(2)),
-        incidents_30d: Math.floor(Math.random() * 3),
-        mttr_minutes: parseFloat((Math.random() * 20 + 5).toFixed(1)),
-      })),
+      ok: true,
+      status: 'partial',
+      source: 'live_process_and_incident_store',
+      details: 'Historical uptime percentages require persisted service checks; unavailable fields are null.',
+      services,
       updated_at: new Date().toISOString(),
     })
   })
@@ -743,9 +774,30 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   })
 
   r.get('/system/sla', requireAuth, (req, res) => {
+    const tasks = readTaskRecords()
+    const cutoff = Date.now() - 86400000
+    const recent = tasks.filter(t => new Date(t.created_at || t.timestamp || t.updated_at || 0).getTime() > cutoff)
+    const failed = recent.filter(t => ['failed', 'error'].includes(String(t.status || '').toLowerCase())).length
+    const total = recent.length
+    const calls = readJsonl(firstExisting([
+      path.join(STATE_DIR, 'state', 'llm_calls.jsonl'),
+      path.join(STATE_DIR, 'llm_calls.jsonl'),
+    ]), 2000)
+    const recentCalls = calls.filter(c => new Date(c.timestamp || c.ts || c.created_at || 0).getTime() > cutoff)
+    const latencies = recentCalls.map(c => Number(c.duration_ms || c.latency_ms || 0)).filter(Boolean).sort((a, b) => a - b)
+    const failedCalls = recentCalls.filter(c => c.ok === false || c.status === 'error').length
     res.json({
+      ok: true,
+      status: total || recentCalls.length ? 'live' : 'unavailable',
+      source: total || recentCalls.length ? 'task_and_llm_call_logs' : 'no_recent_telemetry',
       targets: { p99_9: 99.9, p99_5: 99.5 },
-      current: { uptime: 99.7, p95_latency_ms: 340, error_rate_pct: 0.3 },
+      current: {
+        uptime: total ? parseFloat(((total - failed) / total * 100).toFixed(2)) : null,
+        p95_latency_ms: latencies.length ? latencies[Math.floor(latencies.length * 0.95)] : null,
+        error_rate_pct: recentCalls.length ? parseFloat((failedCalls / recentCalls.length * 100).toFixed(2)) : null,
+      },
+      totals: { tasks_24h: total, failed_tasks_24h: failed, llm_calls_24h: recentCalls.length, failed_llm_calls_24h: failedCalls },
+      details: total || recentCalls.length ? 'SLA derived from recent task and LLM call logs.' : 'No recent task or LLM call telemetry available.',
     })
   })
 
@@ -1397,7 +1449,10 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
       const windowMs = window === '1h' ? 3600000 : window === '7d' ? 604800000 : 86400000
       const since = Date.now() - windowMs
 
-      const logPath = path.join(STATE_DIR, 'state', 'llm_calls.jsonl')
+      const logPath = firstExisting([
+        path.join(STATE_DIR, 'state', 'llm_calls.jsonl'),
+        path.join(STATE_DIR, 'llm_calls.jsonl'),
+      ])
       const lines = fs.existsSync(logPath)
         ? fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean)
         : []
@@ -1408,12 +1463,16 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
 
       const byModel = {}
       for (const c of calls) {
-        const key = `${c.backend}/${c.model || 'default'}`
-        if (!byModel[key]) byModel[key] = { provider: c.backend, model: c.model || 'default', calls: 0, errors: 0, total_ms: 0, latencies: [], tokens: 0 }
+        const provider = c.backend || c.provider || c.route || 'unknown'
+        const model = c.model || c.model_id || 'default'
+        const key = `${provider}/${model}`
+        if (!byModel[key]) byModel[key] = { provider, model, calls: 0, errors: 0, total_ms: 0, latencies: [], tokens: 0, cost: 0 }
         byModel[key].calls++
         if (!c.ok) byModel[key].errors++
-        if (c.duration_ms) { byModel[key].total_ms += c.duration_ms; byModel[key].latencies.push(c.duration_ms) }
-        if (c.tokens_used) byModel[key].tokens += c.tokens_used
+        const duration = Number(c.duration_ms || c.latency_ms || 0)
+        if (duration) { byModel[key].total_ms += duration; byModel[key].latencies.push(duration) }
+        byModel[key].tokens += Number(c.tokens_used || c.tokens || c.total_tokens || 0)
+        byModel[key].cost += Number(c.cost || c.cost_usd || 0)
       }
 
       const metrics = Object.values(byModel).map(m => {
@@ -1428,7 +1487,15 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
         }
       })
 
-      res.json({ metrics, window, total_calls: calls.length })
+      res.json({
+        ok: true,
+        status: calls.length ? 'live' : 'unavailable',
+        source: calls.length ? 'llm_calls_jsonl' : 'no_recent_telemetry',
+        metrics,
+        window,
+        total_calls: calls.length,
+        checked_at: new Date().toISOString(),
+      })
     } catch (e) {
       res.status(500).json({ error: e.message })
     }
