@@ -214,10 +214,11 @@ export default function Dashboard() {
       className="fixed inset-0 flex scanlines"
       style={{ background: 'var(--bg-base)' }}
     >
+      <a href="#main-content" className="skip-link">Skip to content</a>
       <Sidebar />
 
       {/* Main content area */}
-      <main style={{
+      <main id="main-content" style={{
         flex: 1,
         overflow: 'hidden',
         display: 'flex',
