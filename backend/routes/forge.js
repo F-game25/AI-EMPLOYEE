@@ -1025,6 +1025,48 @@ module.exports = function createForgeRouter(requireAuth) {
     res.status(result?.ok === false ? 500 : 200).json({ ok: result?.ok !== false, state: result?.ok === false ? 'degraded' : 'live', ...result })
   })
 
+  // ── Self-update verify loop (WS4): run allowlisted verification, auto-rollback ──
+  // Only build/test/compile commands are permitted — never an arbitrary shell.
+  const VERIFY_ALLOW = [
+    /^npm(\s+--prefix\s+[\w./-]+)?\s+(run\s+(build|verify|lint|typecheck)|test)\b/,
+    /^node\s+-c\s+[\w./-]+$/,
+    /^node\s+--check\s+[\w./-]+$/,
+    /^python3?\s+-m\s+py_compile\b/,
+    /^npx\s+(vitest|tsc|eslint)\b/,
+    /^pytest\b/,
+  ]
+  const isVerifyAllowed = (cmd) => VERIFY_ALLOW.some(re => re.test(String(cmd).trim()))
+
+  router.post('/verify', requireAuth, async (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_verify')) return
+    const project = findProject(req.body?.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const cmds = (Array.isArray(req.body?.commands) && req.body.commands.length)
+      ? req.body.commands
+      : (project.verification_commands || defaultVerificationCommands(project))
+    const root = safeProjectRoot(project)
+    const { exec } = require('child_process')
+    const results = []
+    for (const cmd of cmds) {
+      if (!isVerifyAllowed(cmd)) { results.push({ command: cmd, pass: false, skipped: true, output: 'command not in verify allowlist' }); continue }
+      const r = await new Promise(resolve => {
+        exec(cmd, { cwd: root, timeout: 180000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env } }, (err, stdout, stderr) => {
+          resolve({ command: cmd, pass: !err, code: err?.code ?? 0, output: String(stdout + stderr).slice(-2000) })
+        })
+      })
+      results.push(r)
+    }
+    const allPassed = results.every(r => r.pass)
+    appendAudit('forge_verify', { project_id: project.id, all_passed: allPassed, commands: cmds.length })
+    // Optional auto-rollback on failure when a pre-edit snapshot is supplied
+    let rolledBack = null
+    if (!allPassed && req.body?.rollback_snapshot_id) {
+      rolledBack = await runForgePython({ operation: 'rollback', snapshot_id: String(req.body.rollback_snapshot_id) })
+      appendAudit('forge_verify_autorollback', { project_id: project.id, snapshot_id: req.body.rollback_snapshot_id })
+    }
+    res.json({ ok: true, all_passed: allPassed, results, rolled_back: rolledBack })
+  })
+
   router.post('/rollback', requireAuth, async (req, res) => {
     if (!requireOwnerApproval(req, res, 'forge_rollback')) return
     const snapshotId = String(req.body?.snapshot_id || '').trim()

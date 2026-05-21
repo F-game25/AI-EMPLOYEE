@@ -658,3 +658,27 @@
   }
   .af-pane__section { max-height: none; }
 }
+
+/* ── Understand pane (WS4 code understanding) ── */
+.af-understand { padding: 12px 14px; overflow-y: auto; font-size: 13px; }
+.af-understand__actions { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.af-index-btn { padding: 7px 14px; border-radius: 8px; cursor: pointer; border: 1px solid var(--nx-border-strong, rgba(229,199,107,0.28)); background: var(--nx-gold-grad-soft); color: var(--nx-gold-bright, #ffd97a); font-size: 13px; }
+.af-index-btn:disabled { opacity: .5; cursor: not-allowed; }
+.af-understand__meta { color: var(--nx-text-muted, #9a927e); font-size: 12px; }
+.af-understand__summary { margin-bottom: 16px; }
+.af-understand__row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--nx-border-faint, rgba(255,255,255,0.05)); }
+.af-understand__row span { color: var(--nx-text-muted); }
+.af-understand__row b { color: var(--nx-text, #ecead8); font-weight: 500; text-align: right; }
+.af-understand__modules { list-style: none; padding: 0; margin: 8px 0 0; }
+.af-understand__modules li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; font-size: 12px; }
+.af-understand__modules code { color: var(--nx-gold, #e5c76b); }
+.af-understand__modules span { color: var(--nx-text-muted); }
+.af-understand__hint { color: var(--nx-text-muted); font-style: italic; padding: 8px 0; }
+.af-understand__search { margin-top: 14px; }
+.af-understand__searchrow { display: flex; gap: 8px; margin: 6px 0 10px; }
+.af-understand__searchrow input { flex: 1; background: var(--nx-bg-deep, #04050a); color: var(--nx-text); border: 1px solid var(--nx-border); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.af-understand__searchrow button { padding: 8px 14px; border-radius: 8px; cursor: pointer; border: 1px solid var(--nx-border-strong); background: var(--nx-gold-grad-soft); color: var(--nx-gold-bright); }
+.af-understand__hit { margin-bottom: 8px; border: 1px solid var(--nx-border-faint); border-radius: 8px; overflow: hidden; }
+.af-understand__hitpath { padding: 6px 10px; background: var(--nx-surface, #0b0d18); font-size: 12px; }
+.af-understand__hitpath code { color: var(--nx-gold, #e5c76b); }
+.af-understand__hit pre { margin: 0; padding: 8px 10px; font-size: 11px; line-height: 1.4; white-space: pre-wrap; max-height: 160px; overflow: auto; color: var(--nx-text-muted); background: var(--nx-bg-deep, #04050a); }
