@@ -221,6 +221,7 @@ export default function Dashboard() {
       {/* Main content area */}
       <main id="main-content" style={{
         flex: 1,
+        minWidth: 0,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -230,19 +231,22 @@ export default function Dashboard() {
         <TopBar />
         <div style={{
           flex: 1,
+          minHeight: 0,    // allow this flex child to shrink so the scroll region below works
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
           padding: isFullscreen ? 0 : 'var(--space-2) var(--space-3)',
-          overflowY: isFullscreen ? 'hidden' : 'auto',
         }}>
           <ErrorBoundary key={activeSection} label={activeSection} severity="page">
             <Suspense fallback={
-              <div style={{ padding: 32, color: 'var(--text-dim, #888)', fontFamily: 'var(--nx-font-mono, monospace)', fontSize: 13 }}>
+              <div style={{ flex: 1, minHeight: 0, padding: 32, color: 'var(--text-dim, #888)', fontFamily: 'var(--nx-font-mono, monospace)', fontSize: 13 }}>
                 Loading…
               </div>
             }>
-              <div style={isFullscreen ? { flex:1, height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' } : {}}>
+              {/* Always a flex column with a definite height: full-height pages (Forge,
+                  graphs) fill it; long pages scroll inside it. Scroll lives here, not on
+                  the parent, so height:100% pages don't collapse in non-fullscreen. */}
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: isFullscreen ? 'hidden' : 'auto' }}>
                 <PageComponent />
                 <DashboardMountedSignal section={activeSection} />
               </div>
