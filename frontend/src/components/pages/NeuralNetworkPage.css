@@ -60,6 +60,15 @@
   height: 100% !important;
 }
 
+/* 2D fallback canvas (MemoryGraphCanvas) — rules also live in GraphsPage.css but
+   that sheet isn't loaded on this page, so duplicate the minimum here. */
+.nnp__graph-container .mg-canvas-wrap { position: absolute; inset: 0; }
+.nnp__graph-container .mg-canvas { width: 100%; height: 100%; display: block; }
+.nnp__graph-container .mg-empty-overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--nx-text-muted); font-size: 13px; font-style: italic; pointer-events: none;
+}
+
 /* Bottom gradient — blends 3D into panel edge */
 .nnp__graph-overlay {
   position: absolute;

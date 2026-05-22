@@ -455,10 +455,10 @@ function BlacklightToolsTab() {
   const [result, setResult] = useState(null)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [networkPolicy, setNetworkPolicy] = React.useState(false)
-  const [policyLoading, setPolicyLoading] = React.useState(false)
+  const [networkPolicy, setNetworkPolicy] = useState(false)
+  const [policyLoading, setPolicyLoading] = useState(false)
 
-  React.useEffect(() => {
+  useEffect(() => {
     // Was reading localStorage('token') (wrong key) → always 401. api client uses ai_jwt.
     api.get('/api/blacklight/policy')
       .then(d => setNetworkPolicy(!!d.network_osint_enabled))

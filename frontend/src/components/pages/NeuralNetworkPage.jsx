@@ -4,8 +4,9 @@ import { normalizeGraphPayload, useBrainStore } from '../../store/brainStore'
 import { useAppStore } from '../../store/appStore'
 import { useSystemStore } from '../../store/systemStore'
 import UnifiedBrain from '../three/UnifiedBrain'
+import MemoryGraphCanvas from '../graph/MemoryGraphCanvas'
 import ErrorBoundary from '../ErrorBoundary'
-import { EmptyState, ErrorState } from '../nexus-ui'
+import { EmptyState } from '../nexus-ui'
 import KPITile from '../nexus-ui/KPITile'
 import Panel from '../nexus-ui/Panel'
 import SectionLabel from '../nexus-ui/SectionLabel'
@@ -131,6 +132,24 @@ async function fetchJson(path, options = {}) {
 }
 
 
+// WebGL probe — the Electron launcher webview can lack a usable GL context; when
+// it does we render the dependency-free 2D canvas instead of a blank/error.
+function webglAvailable() {
+  if (typeof document === 'undefined') return false
+  try {
+    const c = document.createElement('canvas')
+    return !!(c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl'))
+  } catch { return false }
+}
+
+// Map brain-store nodes/edges → MemoryGraphCanvas data shape ({id,label,group,val},{source,target,weight}).
+function toCanvasData(nodes, edges) {
+  return {
+    nodes: (nodes || []).map(n => ({ id: n.id, label: n.label, group: n.group, val: 3 + Math.min(6, Number(n.weight) || 1) })),
+    links: (edges || []).map(e => ({ source: e.source, target: e.target, weight: e.strength ?? 0.5 })),
+  }
+}
+
 // ── Mobile guard ─────────────────────────────────────────────────────────────
 
 function useMediaQuery(query) {
@@ -167,6 +186,7 @@ export default function NeuralNetworkPage() {
   const setReadiness = useSystemStore(s => s.setReadiness)
 
   const [hydrated, setHydrated] = useState(false)
+  const [webglOK] = useState(webglAvailable)
   const [isStaleFallback, setIsStaleFallback] = useState(false)
   const [activeView, setActiveView] = useState('TOP')
   const [showKnowledgeNodes,   setShowKnowledgeNodes]   = useState(true)
@@ -385,14 +405,8 @@ export default function NeuralNetworkPage() {
   }
 
   const isMobile = useMediaQuery('(max-width: 768px)')
-
-  if (isMobile) return (
-    <div style={{ padding: 32, textAlign: 'center', color: 'var(--nx-text-dim, #888)', fontFamily: 'var(--nx-font-mono, monospace)' }}>
-      <div style={{ fontSize: 32, marginBottom: 16 }}>◈</div>
-      <div style={{ fontSize: 13, marginBottom: 8 }}>3D NEURAL GRAPH</div>
-      <div style={{ fontSize: 11, opacity: 0.6 }}>Desktop only — WebGL 3D requires a larger screen</div>
-    </div>
-  )
+  // 3D needs WebGL + a roomy viewport; otherwise fall back to the 2D canvas (still real data).
+  const use2D = isMobile || !webglOK
 
   const hasData           = nodes.length > 0
   const nodeCount         = nodes.length
@@ -496,25 +510,24 @@ export default function NeuralNetworkPage() {
           ) : hydrated ? (
             <>
               {hasData ? (
-                <ErrorBoundary
-                  label="neural-graph"
-                  severity="widget"
-                  fallback={
-                    <ErrorState
-                      message="3D renderer failed — WebGL may not be available"
-                      onRetry={() => window.location.reload()}
+                use2D ? (
+                  <MemoryGraphCanvas data={toCanvasData(nodes, edges)} emptyHint="No nodes yet." />
+                ) : (
+                  <ErrorBoundary
+                    label="neural-graph"
+                    severity="widget"
+                    fallback={<MemoryGraphCanvas data={toCanvasData(nodes, edges)} emptyHint="No nodes yet." />}
+                  >
+                    <UnifiedBrain
+                      showKnowledgeNodes={showKnowledgeNodes}
+                      showMemoryLinks={showMemoryLinks}
+                      showAgentConnections={showAgentConnections}
+                      showVaultNetwork={showVaultNetwork}
+                      activeView={activeView}
+                      density={density / 100}
                     />
-                  }
-                >
-                  <UnifiedBrain
-                    showKnowledgeNodes={showKnowledgeNodes}
-                    showMemoryLinks={showMemoryLinks}
-                    showAgentConnections={showAgentConnections}
-                    showVaultNetwork={showVaultNetwork}
-                    activeView={activeView}
-                    density={density / 100}
-                  />
-                </ErrorBoundary>
+                  </ErrorBoundary>
+                )
               ) : (
                 <div className="nnp__empty-state">
                   <IconEmpty />
