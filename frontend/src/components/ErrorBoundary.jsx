@@ -41,6 +41,9 @@ export default class ErrorBoundary extends Component {
       return this.props.children
     }
 
+    // Caller-supplied fallback (e.g. a 2D graph when the 3D renderer throws).
+    if (this.props.fallback !== undefined) return this.props.fallback
+
     const label = this.props.label || 'component'
     const msg = this.state.error?.message || 'Unknown error'
     // Stale chunk after rebuild — hard reload fetches fresh index.html + new hashes

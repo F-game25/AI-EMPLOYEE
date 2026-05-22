@@ -5,6 +5,7 @@ import {
   PerspectiveCamera,
 } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
+import { BlendFunction } from 'postprocessing';
 import * as THREE from 'three';
 import CoreSphere from './CoreSphere';
 import ParticleCloud from './ParticleCloud';
@@ -41,6 +42,7 @@ const Scene = ({ metrics }) => {
       {/* Post-processing */}
       <EffectComposer>
         <Bloom
+          blendFunction={BlendFunction.SCREEN}
           intensity={metrics.load * 1.5}
           luminanceThreshold={0.2}
           luminanceSmoothing={0.9}

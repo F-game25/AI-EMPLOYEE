@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
+import { BlendFunction } from 'postprocessing';
 import * as THREE from 'three';
 import { useOrbitChildNodes } from '../../hooks/useOrbitNodeInteraction';
 
@@ -47,7 +48,7 @@ export const OrbitalSubsystem = ({ nodeId, onExit }) => {
         <SubsystemScene children={children} />
 
         <EffectComposer>
-          <Bloom intensity={0.6} luminanceThreshold={0.2} luminanceSmoothing={0.9} />
+          <Bloom blendFunction={BlendFunction.SCREEN} intensity={0.6} luminanceThreshold={0.2} luminanceSmoothing={0.9} />
         </EffectComposer>
       </Canvas>
 

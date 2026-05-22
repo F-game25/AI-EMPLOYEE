@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback, Suspense } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Environment } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
+import { BlendFunction } from 'postprocessing'
 import CognitiveNetwork from './CognitiveNetwork'
 import MemoryNetwork from './MemoryNetwork'
 import AgentNetwork from './AgentNetwork'
@@ -278,7 +279,7 @@ export default function UnifiedBrain({
             autoRotateSpeed={0.3}
           />
           <EffectComposer>
-            <Bloom luminanceThreshold={0.08} luminanceSmoothing={0.9} intensity={2.2} mipmapBlur />
+            <Bloom blendFunction={BlendFunction.SCREEN} luminanceThreshold={0.08} luminanceSmoothing={0.9} intensity={2.2} mipmapBlur />
           </EffectComposer>
         </Suspense>
       </Canvas>
