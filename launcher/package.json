@@ -7,7 +7,7 @@
     "build": "electron-builder --linux AppImage deb"
   },
   "devDependencies": {
-    "electron": "^27.3.11",
+    "electron": "^39.8.5",
     "electron-builder": "^24.13.0"
   },
   "build": {
