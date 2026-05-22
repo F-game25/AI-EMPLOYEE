@@ -155,14 +155,40 @@ export default function SystemSetupCenter() {
   const capabilityStatus = useSystemStore(s => s.capabilityStatus)
   const fetchCapabilityStatus = useSystemStore(s => s.fetchCapabilityStatus)
   const [activeStep, setActiveStep] = useState('runtime')
-  const [identity, setIdentity] = useState({ systemName: 'Aeternus Nexus', adminName: 'Technical Admin' })
+  const [identity, setIdentity] = useState({ systemName: 'Aeternus Nexus', adminName: 'Technical Admin', voicePreset: 'professional', colorPalette: null })
+  const [palettes, setPalettes] = useState([])
   const [actionResult, setActionResult] = useState(null)
   const [smokeResult, setSmokeResult] = useState(null)
   const [busyAction, setBusyAction] = useState(null)
 
   useEffect(() => {
     fetchCapabilityStatus()
+    // Salvaged from the old Onboarding flow: backend-generated accent palettes.
+    api.get('/api/onboarding/palettes')
+      .then(d => {
+        const list = d?.palettes || []
+        setPalettes(list)
+        if (list[0]) setIdentity(prev => prev.colorPalette ? prev : { ...prev, colorPalette: list[0] })
+      })
+      .catch(() => {})
   }, [fetchCapabilityStatus])
+
+  const saveIdentity = async () => {
+    setBusyAction('identity')
+    try {
+      await api.post('/api/identity/finalize', {
+        user_chosen: identity.adminName || undefined,
+        instance_name: identity.systemName || undefined,
+        voice_preset: identity.voicePreset,
+        color_palette: identity.colorPalette,
+      })
+      setActionResult({ type: 'success', message: 'Identity saved.' })
+    } catch (error) {
+      setActionResult({ type: 'error', message: error?.message || 'Failed to save identity.' })
+    } finally {
+      setBusyAction(null)
+    }
+  }
 
   const capabilities = Array.isArray(capabilityStatus.capabilities) ? capabilityStatus.capabilities : []
   const grouped = useMemo(() => groupCapabilities(capabilities), [capabilities])
@@ -334,6 +360,41 @@ export default function SystemSetupCenter() {
                         <span>Admin owner</span>
                         <input value={identity.adminName} onChange={event => setIdentity({ ...identity, adminName: event.target.value })} />
                       </label>
+                      <div className="setup-field-group">
+                        <span>Voice preset</span>
+                        <div className="setup-chips">
+                          {['professional', 'friendly', 'creative', 'concise'].map(preset => (
+                            <button
+                              key={preset}
+                              type="button"
+                              className={`setup-chip ${identity.voicePreset === preset ? 'setup-chip--active' : ''}`}
+                              onClick={() => setIdentity({ ...identity, voicePreset: preset })}
+                            >
+                              {preset.charAt(0).toUpperCase() + preset.slice(1)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {palettes.length > 0 && (
+                        <div className="setup-field-group">
+                          <span>Accent palette</span>
+                          <div className="setup-palette-grid">
+                            {palettes.map((palette, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                className={`setup-swatch ${identity.colorPalette?.primary === palette.primary ? 'setup-swatch--active' : ''}`}
+                                style={{ background: `linear-gradient(135deg, ${palette.primary}, ${palette.accent})` }}
+                                onClick={() => setIdentity({ ...identity, colorPalette: palette })}
+                                title={`Palette ${idx + 1}`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <button type="button" className="setup-btn" onClick={saveIdentity} disabled={busyAction === 'identity'}>
+                        {busyAction === 'identity' ? 'Saving…' : 'Save identity'}
+                      </button>
                     </div>
                   )}
                   {step.id === 'smoke' && (

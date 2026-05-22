@@ -4,7 +4,15 @@ import { MemoryRouter } from 'react-router-dom'
 import Dashboard from '../components/Dashboard'
 import { useSystemStore } from '../store/systemStore'
 
-const ROUTES = [
+const ROUTE_GROUPS = {
+  core: ['dashboard', 'nexus', 'cognition', 'agents', 'memory', 'economy'],
+  operations: ['tasks', 'workflows', 'infrastructure', 'deployments', 'workspace', 'operations'],
+  intelligence: ['neural-graph', 'knowledge', 'trends', 'research', 'recon', 'intelligence', 'ascend-forge'],
+  security: ['policies', 'permissions', 'sandboxes', 'audit', 'security', 'approvals', 'proof'],
+  system: ['setup', 'integrations', 'models', 'runtime', 'api-catalog', 'user-views', 'perspectives', 'settings', 'system'],
+}
+
+const ALL_ROUTES = [
   'dashboard', 'nexus', 'cognition', 'agents', 'memory', 'economy',
   'tasks', 'workflows', 'infrastructure', 'deployments',
   'neural-graph', 'knowledge', 'trends', 'research', 'recon',
@@ -12,6 +20,14 @@ const ROUTES = [
   'setup', 'integrations', 'models', 'runtime', 'api-catalog', 'user-views', 'perspectives', 'settings',
   'workspace', 'operations', 'intelligence', 'ascend-forge', 'system',
 ]
+
+function selectedRoutes() {
+  const explicit = process.env.DASHBOARD_ROUTES
+  if (explicit) return explicit.split(',').map(route => route.trim()).filter(Boolean)
+  const group = process.env.DASHBOARD_ROUTE_GROUP
+  if (group) return ROUTE_GROUPS[group] || []
+  return ALL_ROUTES
+}
 
 function mockFetch() {
   global.fetch = vi.fn(async url => {
@@ -101,7 +117,13 @@ afterEach(() => {
 })
 
 describe('Dashboard routes', () => {
-  it.each(ROUTES)('mounts /%s without crashing', async route => {
+  const routes = selectedRoutes()
+
+  it('has routes selected for smoke coverage', () => {
+    expect(routes.length).toBeGreaterThan(0)
+  })
+
+  it.each(routes)('mounts /%s without crashing', async route => {
     const { container } = render(
       <MemoryRouter initialEntries={[`/${route}`]}>
         <Dashboard />
