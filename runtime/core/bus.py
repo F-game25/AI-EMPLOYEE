@@ -10,6 +10,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from core.state_paths import canonical_state_dir
+
 logger = logging.getLogger("simple_message_bus")
 
 class SimpleMessageBus:
@@ -18,7 +20,7 @@ class SimpleMessageBus:
     CHANNELS = ("tasks", "results", "notifications", "logs")
 
     def __init__(self, state_dir: Path | None = None, max_lines: int = 10_000) -> None:
-        self._state_dir = state_dir or Path(os.environ.get("AI_EMPLOYEE_STATE_DIR", "state"))
+        self._state_dir = state_dir or canonical_state_dir()
         self._state_dir.mkdir(parents=True, exist_ok=True)
         self._path = self._state_dir / "bus.jsonl"
         self._max_lines = max_lines

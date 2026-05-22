@@ -9,6 +9,7 @@ from typing import Any, Optional
 from core.orchestrator import LLMClient, get_llm_client
 from core.tenancy import get_current_tenant, require_current_tenant
 from core.database import get_database
+from core.state_paths import canonical_state_dir
 
 
 class AgentValidationError(ValueError):
@@ -21,7 +22,7 @@ class BaseAgent:
 
     def __init__(self, llm_client: LLMClient | None = None) -> None:
         self.client = llm_client or get_llm_client()
-        state_dir = Path(os.environ.get("AI_EMPLOYEE_STATE_DIR", "state"))
+        state_dir = canonical_state_dir()
         state_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = state_dir / "agent_calls.jsonl"
 

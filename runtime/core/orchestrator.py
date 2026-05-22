@@ -13,6 +13,7 @@ from typing import Any
 import threading
 
 from core.bus import get_message_bus
+from core.state_paths import canonical_state_dir
 from core.cost_ledger import BudgetEnforcementError, get_cost_ledger
 from core.model_routing import classify_request_tier, select_model_route
 from core.phase_reporter import PhaseReporter
@@ -75,7 +76,7 @@ def _resolve_backend() -> str:
 class LLMClient:
     def __init__(self, state_dir: Path | None = None) -> None:
         self.backend = _resolve_backend()
-        self.state_dir = state_dir or Path(os.environ.get("AI_EMPLOYEE_STATE_DIR", "state"))
+        self.state_dir = state_dir or canonical_state_dir()
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.state_dir / "llm_calls.jsonl"
 

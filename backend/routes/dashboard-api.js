@@ -491,18 +491,24 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   r.get('/cognition/decisions', requireAuth, (req, res) => {
     const explicit = readJSON(path.join(STATE_DIR, 'decision_log.json'), [])
     const llmCalls = readJsonl(path.join(STATE_DIR, 'state/llm_calls.jsonl'), 80)
-      .filter(call => call.model || call.provider || call.agent)
-      .map((call, index) => ({
-        id: call.id || `model_route_${call.ts || index}`,
-        task: call.goal || call.prompt_title || call.intent || 'Model route',
-        winner: call.model || call.provider || 'unknown-model',
-        alternatives: call.alternatives || [],
-        score: call.confidence ?? (call.status === 'error' ? 0.2 : 0.75),
-        reason: call.reason || `Routed to ${call.model || call.provider || 'provider'} by the main AI model router.`,
-        policy_gate: call.policy_gate || 'model_routing',
-        ts: call.ts || call.created_at || null,
-        source: 'llm_calls',
-      }))
+      // Real entry shape: {backend, request_tier, tokens_used, duration_ms, ok, timestamp}.
+      .filter(call => call.model || call.provider || call.agent || call.backend || call.request_tier)
+      .map((call, index) => {
+        const ts = call.ts || call.timestamp || call.created_at || null
+        const winner = call.model || call.provider || call.backend || 'unknown-model'
+        const ok = call.ok !== false && call.status !== 'error'
+        return {
+          id: call.id || `model_route_${ts || index}`,
+          task: call.goal || call.prompt_title || call.intent || (call.request_tier ? `${call.request_tier} request` : 'Model route'),
+          winner,
+          alternatives: call.alternatives || [],
+          score: call.confidence ?? (ok ? 0.75 : 0.2),
+          reason: call.reason || `Routed to ${winner}${call.tokens_used ? ` · ${call.tokens_used} tokens` : ''}${call.duration_ms ? ` · ${call.duration_ms}ms` : ''}.`,
+          policy_gate: call.policy_gate || 'model_routing',
+          ts,
+          source: 'llm_calls',
+        }
+      })
     const decisions = [...explicit, ...llmCalls]
       .sort((a, b) => new Date(b.ts || b.created_at || 0) - new Date(a.ts || a.created_at || 0))
       .slice(0, 50)

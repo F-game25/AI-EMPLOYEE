@@ -17,6 +17,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from core.state_paths import canonical_state_dir
+
 logger = logging.getLogger("codex_engine")
 
 
@@ -147,7 +149,7 @@ class CodexEngine:
             cache_dir: Directory to store analysis cache. Defaults to state/codex_cache/
             state_dir: State directory for logging. Defaults to state/
         """
-        self.state_dir = state_dir or Path(os.environ.get("AI_EMPLOYEE_STATE_DIR", "state"))
+        self.state_dir = state_dir or canonical_state_dir()
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
         self.cache_dir = cache_dir or self.state_dir / "codex_cache"

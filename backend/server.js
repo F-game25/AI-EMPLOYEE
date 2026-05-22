@@ -2241,6 +2241,8 @@ app.get('/api/capabilities/status', requireAuth, async (_req, res) => {
 
   const ollamaHost = process.env.OLLAMA_HOST || process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
   const ollamaProbe = await probeHttp(`${String(ollamaHost).replace(/\/$/, '')}/api/tags`);
+  const fishSpeechHost = process.env.FISH_SPEECH_URL || process.env.FISH_AUDIO_S2_URL || 'http://127.0.0.1:8080';
+  const fishSpeechProbe = await probeHttp(`${String(fishSpeechHost).replace(/\/$/, '')}/v1/health`);
   const llmProviders = [
     ['anthropic_llm', 'Anthropic LLM', ['ANTHROPIC_API_KEY']],
     ['openai_llm', 'OpenAI LLM', ['OPENAI_API_KEY']],
@@ -2352,6 +2354,20 @@ app.get('/api/capabilities/status', requireAuth, async (_req, res) => {
       details: ollamaProbe.ok ? `Ollama responded at ${ollamaHost}.` : `No Ollama response from ${ollamaHost}.`,
       docs_hint: 'Start Ollama and pull the configured local model to enable local fallback.',
       proof: { host: ollamaHost, probe: ollamaProbe },
+    }),
+    capabilityRecord({
+      id: 'fish_speech_s2_local_voice',
+      label: 'Fish Speech S2 Local Voice',
+      status: fishSpeechProbe.ok ? 'live' : 'not_configured',
+      category: 'execution',
+      required_env: ['FISH_SPEECH_URL'],
+      missing_env: process.env.FISH_SPEECH_URL || process.env.FISH_AUDIO_S2_URL ? [] : ['FISH_SPEECH_URL'],
+      setup_action: fishSpeechProbe.ok ? 'test' : 'start_service',
+      details: fishSpeechProbe.ok
+        ? `Fish Speech responded at ${fishSpeechHost}.`
+        : `No Fish Speech response from ${fishSpeechHost}; voice falls back to local OS TTS if available.`,
+      docs_hint: 'Run Fish Speech S2 locally on port 8080 to replace robotic OS speech with a natural system-owned voice.',
+      proof: { host: fishSpeechHost, probe: fishSpeechProbe },
     }),
     capabilityRecord({
       id: 'llm_provider_routing',
@@ -2573,6 +2589,17 @@ app.get('/api/memory/graph/:view', async (req, res) => {
   // Forward Python payload as-is — it already carries decay/status/val fields the
   // living-graph renderer needs, which normalizeDashboardGraph would strip.
   const data = await proxyNeuralBrain(`/api/neural-brain/graph/views/${view}?limit=${limit}`, { nodes: [], links: [], stats: {}, view });
+  // Resilience: if Python is down/empty, serve relations|unified from the Node-side
+  // native graph (same SQLite that backs /api/brain/graph) so Memory Graphs never
+  // goes blank just because the Python backend is offline.
+  if ((!data.nodes || data.nodes.length === 0) && (view === 'relations' || view === 'unified')) {
+    try {
+      const snap = getNativeMemoryGraph({ stateDir: STATE_DIR, repoRoot: REPO_ROOT }).snapshot(limit);
+      if (snap?.nodes?.length) {
+        return res.json({ nodes: snap.nodes, links: snap.links || [], stats: { node_count: snap.nodes.length, link_count: (snap.links || []).length }, view, source: 'native_fallback' });
+      }
+    } catch (_) { /* fall through to honest empty */ }
+  }
   res.json(data);
 });
 
