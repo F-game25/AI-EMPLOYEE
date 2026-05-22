@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/appStore'
+import api from '../../api/client'
 
 const RISK_COLORS = { HIGH: '#EF4444', MEDIUM: '#F59E0B', LOW: '#22C55E' }
 const STATUS_COLORS = { pending: '#E5C76B', approved: '#22C55E', rejected: '#EF4444', running: '#20D6C7', deployed: '#9333EA' }
@@ -33,8 +34,7 @@ function ApprovalQueue() {
 
   // Hydrate queue on mount
   useEffect(() => {
-    fetch('/api/forge/queue')
-      .then(r => r.json())
+    api.get('/api/forge/queue')
       .then(d => setForgeQueue(d.items || []))
       .catch(() => {})
   }, [setForgeQueue])
@@ -43,11 +43,7 @@ function ApprovalQueue() {
     if (!goalInput.trim() || submitting) return
     setSubmitting(true)
     try {
-      await fetch('/api/forge/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goal: goalInput }),
-      })
+      await api.post('/api/forge/submit', { goal: goalInput })
       setGoalInput('')
     } catch (e) {
       console.error('forge submit failed', e)
@@ -58,14 +54,14 @@ function ApprovalQueue() {
 
   const approve = async (id) => {
     try {
-      await fetch(`/api/forge/approve/${id}`, { method: 'POST' })
+      await api.post(`/api/forge/approve/${id}`)
       upsertForgeItem({ id, status: 'approved' })
     } catch (e) { console.error(e) }
   }
 
   const reject = async (id) => {
     try {
-      await fetch(`/api/forge/reject/${id}`, { method: 'POST' })
+      await api.post(`/api/forge/reject/${id}`)
       upsertForgeItem({ id, status: 'rejected' })
     } catch (e) { console.error(e) }
   }
@@ -173,13 +169,7 @@ function BuilderMode() {
     setError(null)
     setResult(null)
     try {
-      const res = await fetch('/api/neural-brain/forge/builder/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ spec, project_name: projectName, target_type: targetType }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      setResult(await res.json())
+      setResult(await api.post('/api/neural-brain/forge/builder/generate', { spec, project_name: projectName, target_type: targetType }))
     } catch (e) {
       setError(e.message)
     } finally {
@@ -190,11 +180,7 @@ function BuilderMode() {
   const submitToForge = async () => {
     if (!result) return
     try {
-      await fetch('/api/forge/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goal: `Deploy generated project: ${projectName}`, files: result.files }),
-      })
+      await api.post('/api/forge/submit', { goal: `Deploy generated project: ${projectName}`, files: result.files })
     } catch (e) { console.error(e) }
   }
 
@@ -252,8 +238,7 @@ function EvolutionStatus() {
   const [status, setStatus] = useState(null)
 
   useEffect(() => {
-    fetch('/api/neural-brain/forge/evolution/status')
-      .then(r => r.json())
+    api.get('/api/neural-brain/forge/evolution/status')
       .then(setStatus)
       .catch(() => {})
   }, [])

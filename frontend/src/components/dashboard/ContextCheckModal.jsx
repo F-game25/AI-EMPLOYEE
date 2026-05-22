@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useCognitiveStore } from '../../store/cognitiveStore'
+import api from '../../api/client'
 import './ContextCheckModal.css'
 
 function scoreTier(score) {
@@ -17,11 +18,7 @@ export default function ContextCheckModal() {
     if (!contextCheck?.taskId || busy) return
     setBusy(true)
     try {
-      await fetch(`/api/tasks/${encodeURIComponent(contextCheck.taskId)}/context-response`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ choice }),
-      })
+      await api.post(`/api/tasks/${encodeURIComponent(contextCheck.taskId)}/context-response`, { choice })
     } catch (e) {
       // best-effort — the AgentController times out to "continue" on no response
       console.warn('[ContextCheckModal] response failed', e)

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import api from '../api/client'
 
 // Singleton state — one poller for each endpoint, shared across all consumers
 const _state = {
@@ -26,11 +27,8 @@ async function fetchHealth() {
 
 async function fetchIntegrations() {
   try {
-    const r = await fetch('/api/integrations', { signal: AbortSignal.timeout(5000) })
-    if (r.ok) {
-      _state.integrations = await r.json()
-      notify()
-    }
+    _state.integrations = await api.get('/api/integrations', { signal: AbortSignal.timeout(5000) })
+    notify()
   } catch (_) {}
 }
 

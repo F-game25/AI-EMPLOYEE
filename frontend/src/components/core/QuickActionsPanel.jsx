@@ -1,4 +1,5 @@
 import { useAppStore } from '../../store/appStore'
+import api from '../../api/client'
 import './QuickActionsPanel.css'
 
 const ACTIONS = [
@@ -16,7 +17,7 @@ export default function QuickActionsPanel() {
   const handleAction = (action) => {
     if (action.danger) {
       if (!window.confirm('Confirm Emergency Stop?')) return
-      fetch('/api/system/stop', { method: 'POST' }).catch(() => {})
+      api.post('/api/system/stop').catch(() => {})
       return
     }
     if (action.section) setActiveSection(action.section)

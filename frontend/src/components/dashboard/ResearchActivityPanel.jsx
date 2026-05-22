@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useCognitiveStore } from '../../store/cognitiveStore'
 import { Panel, StatusPill } from '../nexus-ui'
+import api from '../../api/client'
 import './ResearchActivityPanel.css'
 
 function shortUrl(u) {
@@ -20,8 +21,7 @@ export default function ResearchActivityPanel() {
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/tasks/research/recent?limit=20')
-      .then(r => r.ok ? r.json() : { sessions: [] })
+    api.get('/api/tasks/research/recent?limit=20')
       .then(d => { if (!cancelled) setServerHistory(d.sessions || []) })
       .catch(() => { if (!cancelled) setServerHistory([]) })
     return () => { cancelled = true }

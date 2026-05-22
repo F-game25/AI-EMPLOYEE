@@ -53,6 +53,7 @@ export default function AscendForgePage() {
 
     let accumulated = ''
     try {
+      // streaming: raw fetch intentional (SSE body reader; api client buffers JSON)
       const jwt = sessionStorage.getItem('ai_jwt')
       const resp = await fetch(`/api/forge/sessions/${sessionId}/messages/stream`, {
         method: 'POST',

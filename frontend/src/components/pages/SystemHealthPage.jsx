@@ -345,13 +345,13 @@ function EmergencyPanel() {
 
   const doHalt = useCallback(async () => {
     setHalting(true)
-    try { await fetch('/api/system/halt', { method: 'POST' }) } catch {/* ignore */}
+    try { await api.post('/api/system/halt', {}) } catch {/* ignore */}
     finally { setHalting(false); setHaltConfirm(false) }
   }, [])
 
   const doRestart = useCallback(async () => {
     setRestarting(true)
-    try { await fetch('/api/system/restart', { method: 'POST' }) } catch {/* ignore */}
+    try { await api.post('/api/system/restart', {}) } catch {/* ignore */}
     finally { setRestarting(false) }
   }, [])
 

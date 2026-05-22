@@ -910,6 +910,7 @@ export function sendChatMessage(message) {
   getStore().setTyping(true)
   clearTimeout(_typingTimeout)
   _typingTimeout = setTimeout(() => getStore().setTyping(false), 30000)
+  // streaming: raw fetch intentional (WS-down fallback path, manual auth)
   const token = sessionStorage.getItem('ai_jwt')
   fetch('/api/chat', {
     method: 'POST',

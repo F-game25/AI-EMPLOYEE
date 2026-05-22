@@ -251,6 +251,7 @@ function OllamaManager() {
     if (!pullName.trim()) return
     setPulling(true); setPullStatus({ status: 'starting' })
     try {
+      // streaming: raw fetch intentional (NDJSON pull-progress reader)
       const res = await fetch('/api/ollama/pull', {
         method: 'POST',
         headers: {

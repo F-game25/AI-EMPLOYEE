@@ -120,7 +120,11 @@ function authHeaders(extra = {}) {
 }
 
 async function fetchJson(path, options = {}) {
-  const res = await fetch(path, { credentials: 'include', ...options })
+  // Attach the operator JWT (same contract as api/client.js) so protected memory
+  // routes don't silently 401.
+  const token = sessionStorage.getItem('ai_jwt')
+  const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers }
+  const res = await fetch(path, { credentials: 'include', ...options, headers })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || data.message || `${res.status} ${res.statusText}`)
   return data
@@ -280,9 +284,9 @@ export default function NeuralNetworkPage() {
     }
     if (nodes?.length) { setHydrated(true); return () => { cancelled = true } }
     Promise.all([
-      fetch('/api/neural-brain/graph?depth=2&limit=300').then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('/api/brain/graph').then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('/api/neural-brain/graph/snapshot').then(r => r.ok ? r.json() : null).catch(() => null),
+      api.get('/api/neural-brain/graph?depth=2&limit=300').catch(() => null),
+      api.get('/api/brain/graph').catch(() => null),
+      api.get('/api/neural-brain/graph/snapshot').catch(() => null),
     ]).then((payloads) => {
       if (cancelled) return
       // Pick the richest available source (native memory graph → in-memory brain → snapshot)
