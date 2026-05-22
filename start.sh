@@ -309,6 +309,12 @@ if [[ -n "${PYTHON_BIN:-}" && -f "$_PYTHON_SERVER" ]]; then
     fi
     rm -f "$_PY_PID_FILE"
   fi
+  # Best-effort local Neo4j for the neural-brain graph (no-op if Docker absent;
+  # native SQLite graph is the always-on floor either way).
+  if [[ -f "$REPO_ROOT/scripts/neo4j.sh" ]]; then
+    bash "$REPO_ROOT/scripts/neo4j.sh" 2>&1 | sed 's/^/  /' || true
+  fi
+
   echo "[2.5/3] Starting Python AI backend on port ${_PYTHON_BACKEND_PORT}..."
   # Prefer the venv created by bootstrap.js (PEP 668 systems need this)
   _PY_BIN="$PYTHON_BIN"
@@ -327,6 +333,9 @@ if [[ -n "${PYTHON_BIN:-}" && -f "$_PYTHON_SERVER" ]]; then
       sleep 0.5
       if curl -fsS --max-time 1 "http://127.0.0.1:${_PYTHON_BACKEND_PORT}/health" > /dev/null 2>&1; then
         echo "✅ Python AI backend ready on port ${_PYTHON_BACKEND_PORT}"
+        # Mirror the native graph into Neo4j (idempotent; no-op if Neo4j down).
+        PYTHONPATH="$REPO_ROOT/runtime" "$PYTHON_BIN" -m neural_brain.graph.sync_native_to_neo4j \
+          >> "$APP_LOG_DIR/python-backend.log" 2>&1 || true
         exit 0
       fi
     done
