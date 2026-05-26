@@ -211,6 +211,93 @@ function ResearchGuidance({ title, detail, primary, onPrimary, secondary, onSeco
   )
 }
 
+// ── Research pipeline steps ───────────────────────────────────────────────────
+const PIPELINE_STEPS = [
+  { id: 'discovering', label: 'Discovering' },
+  { id: 'fetching',    label: 'Fetching'    },
+  { id: 'summarizing', label: 'Summarizing' },
+  { id: 'storing',     label: 'Storing'     },
+]
+
+function deriveStep(progressLog) {
+  // Walk the log in reverse to find the latest meaningful event type
+  for (let i = progressLog.length - 1; i >= 0; i--) {
+    const t = progressLog[i].type || ''
+    if (t.includes('completed') || t.includes('stored')) return 'storing'
+    if (t.includes('summar'))    return 'summarizing'
+    if (t.includes('fetch') || t.includes('crawl') || t.includes('page')) return 'fetching'
+    if (t.includes('discover') || t.includes('search') || t.includes('started')) return 'discovering'
+  }
+  return 'discovering'
+}
+
+function RPProgressSteps({ phase, progressLog }) {
+  const current = phase === 'done' ? 'storing' : deriveStep(progressLog)
+  const steps   = PIPELINE_STEPS
+  const curIdx  = steps.findIndex(s => s.id === current)
+
+  return (
+    <div className="rp-steps">
+      {steps.map((s, i) => {
+        const done    = phase === 'done' || i < curIdx
+        const active  = !done && s.id === current
+        return (
+          <div key={s.id} className={`rp-step ${done ? 'rp-step--done' : active ? 'rp-step--active' : ''}`}>
+            <div className="rp-step__icon">
+              {done
+                ? <span className="rp-step__check">✓</span>
+                : active
+                  ? <span className="rp-step__spinner" />
+                  : <span className="rp-step__dot" />
+              }
+            </div>
+            <span className="rp-step__label">{s.label.toUpperCase()}</span>
+            {i < steps.length - 1 && <div className={`rp-step__line ${done ? 'rp-step__line--done' : ''}`} />}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RPResultsPanel({ results }) {
+  const summary  = results?.summary || results?.content || null
+  const sources  = results?.sources || []
+  const wordCount = summary ? summary.split(/\s+/).filter(Boolean).length : null
+
+  return (
+    <div className="rp-results">
+      <SectionLabel>RESULTS</SectionLabel>
+      {(wordCount !== null || sources.length > 0) && (
+        <div className="rp-results-meta">
+          {wordCount !== null && <span className="rp-results-badge rp-results-badge--words">{wordCount} words</span>}
+          {sources.length > 0 && <span className="rp-results-badge rp-results-badge--sources">{sources.length} sources</span>}
+        </div>
+      )}
+      {summary && (
+        <div className="rp-results-summary">{summary}</div>
+      )}
+      {sources.length > 0 && (
+        <div className="rp-results-sources">
+          <div className="rp-results-sources-title">SOURCES</div>
+          {sources.map((s, i) => (
+            <div key={i} className="rp-results-source-row">
+              <span className="rp-results-source-num">{String(i + 1).padStart(2, '0')}</span>
+              {s.url
+                ? <a className="rp-results-source-link" href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a>
+                : <span className="rp-results-source-link">{s.title || s.source || String(s)}</span>
+              }
+            </div>
+          ))}
+        </div>
+      )}
+      {!summary && sources.length === 0 && (
+        <pre className="rp-results-pre">{JSON.stringify(results, null, 2)}</pre>
+      )}
+    </div>
+  )
+}
+
 // ── Phase 3: Execute + Live Log + Results ────────────────────────────────────
 function RPExecutePanel({ depth, setDepth, selectedCount, totalCount, onExecute, phase, sessionId, progressLog, results }) {
   return (
@@ -246,28 +333,25 @@ function RPExecutePanel({ depth, setDepth, selectedCount, totalCount, onExecute,
       </div>
       {(phase === 'executing' || phase === 'done') && (
         <div className="rp-progress">
+          <RPProgressSteps phase={phase} progressLog={progressLog} />
           <SectionLabel>SESSION {sessionId?.slice(0, 8) || '—'} · LIVE LOG</SectionLabel>
           <div className="rp-progress-log">
             {progressLog.length === 0
               ? <div className="rp-log-empty">Waiting for first event…</div>
               : progressLog.map((m, i) => {
                   const variant = (m.type || '').split(':')[1] || 'info'
+                  const detail  = m.message || m.detail || m.url || ''
                   return (
                     <div key={i} className={`rp-log-entry rp-log-entry--${variant}`}>
                       <span className="rp-log-type">{m.type || 'event'}</span>
-                      <span className="rp-log-detail">{JSON.stringify(m).slice(0, 200)}</span>
+                      <span className="rp-log-detail">{detail || JSON.stringify(m).slice(0, 160)}</span>
                     </div>
                   )
                 })}
           </div>
         </div>
       )}
-      {phase === 'done' && results && (
-        <div className="rp-results">
-          <SectionLabel>RESULTS</SectionLabel>
-          <pre className="rp-results-pre">{JSON.stringify(results, null, 2)}</pre>
-        </div>
-      )}
+      {phase === 'done' && results && <RPResultsPanel results={results} />}
     </Panel>
   )
 }

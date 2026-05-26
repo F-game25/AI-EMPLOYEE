@@ -66,7 +66,15 @@ def _agent_with_stubs(memory=None, knowledge=None, graph=None):
     return a, events
 
 
-def test_research_persists_to_memory_and_knowledge():
+def test_research_persists_to_memory_and_knowledge(monkeypatch):
+    # Force auto_save decision so findings bypass the pending_review gate
+    # (pending_review fires when sentence_transformers is not installed)
+    import types
+    stub_result = types.SimpleNamespace(decision="auto_save", confidence=0.9,
+                                        to_dict=lambda: {"decision": "auto_save", "confidence": 0.9})
+    stub_engine = types.SimpleNamespace(verify=lambda **kw: stub_result)
+    monkeypatch.setattr("core.auto_research_agent._VERIFY_AVAILABLE", True)
+    monkeypatch.setattr("core.auto_research_agent._get_verification_engine", lambda: stub_engine)
     mem = _StubMemory(); ks = _StubKnowledge()
     a, events = _agent_with_stubs(memory=mem, knowledge=ks)
     result = asyncio.run(a.research(gaps=["my gap"], goal="my goal", hop=0))

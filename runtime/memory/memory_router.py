@@ -48,14 +48,18 @@ Usage::
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from memory.vector_store import VectorStore, get_vector_store
 from memory.short_term_cache import ShortTermCache, get_short_term_cache
 from memory.strategy_store import StrategyStore, get_strategy_store
+from memory.bm25 import BM25
 
 try:
     from neural_brain.graph.native_graph_store import NativeGraphStore
@@ -402,3 +406,127 @@ def get_memory_router() -> MemoryRouter:
         if _instance is None:
             _instance = MemoryRouter()
     return _instance
+
+
+# ── Hybrid search (BM25 + vector) ─────────────────────────────────────────────
+
+_KS_PATH = Path(os.environ.get("STATE_DIR", Path.home() / ".ai-employee" / "state")) / "knowledge_store.json"
+
+
+def _load_knowledge_entries() -> list[dict]:
+    """Load entries from knowledge_store.json, flattening all topic buckets."""
+    try:
+        raw = json.loads(_KS_PATH.read_text())
+    except Exception:
+        return []
+    entries: list[dict] = []
+    for bucket in raw.get("topics", {}).values():
+        for topic_entry in bucket:
+            for finding in topic_entry.get("findings", []):
+                content = finding.get("summary") or finding.get("content") or ""
+                if content:
+                    entries.append({
+                        "source": finding.get("source") or finding.get("url") or "knowledge_store",
+                        "content": content,
+                        "url": finding.get("url", ""),
+                        "title": finding.get("title", ""),
+                    })
+    for entry in raw.get("entries", []):
+        content = entry.get("content") or entry.get("text") or ""
+        if content:
+            entries.append({
+                "source": entry.get("source", "knowledge_store"),
+                "content": content,
+                "url": entry.get("url", ""),
+                "title": entry.get("title", ""),
+            })
+    return entries
+
+
+def _normalize(scores: list[float]) -> list[float]:
+    lo, hi = min(scores, default=0.0), max(scores, default=0.0)
+    span = hi - lo
+    if span == 0:
+        return [0.0] * len(scores)
+    return [(s - lo) / span for s in scores]
+
+
+def hybrid_search(
+    query: str,
+    top_k: int = 5,
+    alpha: float = 0.5,
+) -> list[dict]:
+    """Hybrid BM25 + vector search over the knowledge store.
+
+    Args:
+        query: Search query.
+        top_k: Number of results.
+        alpha: Weight for vector score (1-alpha = BM25 weight).
+
+    Returns:
+        List of dicts: {source, content, score, bm25_score, vector_score, rank}.
+    """
+    entries = _load_knowledge_entries()
+    if not entries:
+        # Fallback: pure vector search via memory router
+        router = get_memory_router()
+        raw = router.retrieve(query, top_k=top_k)
+        return [
+            {
+                "source": r.get("metadata", {}).get("source") or r.get("_source") or "",
+                "content": r.get("text") or "",
+                "score": r.get("_score", 0.0),
+                "bm25_score": 0.0,
+                "vector_score": r.get("_score", 0.0),
+                "rank": i + 1,
+            }
+            for i, r in enumerate(raw)
+        ]
+
+    corpus = [e["content"] for e in entries]
+    n = len(corpus)
+
+    # BM25 scores
+    bm25 = BM25(corpus)
+    raw_bm25 = bm25.scores(query)
+    norm_bm25 = _normalize(raw_bm25)
+
+    # Vector scores
+    norm_vec = [0.0] * n
+    if alpha > 0.0:
+        try:
+            from core.embeddings import get_embeddings_manager
+            mgr = get_embeddings_manager()
+            q_emb = mgr.embed_text(query)
+            raw_vec: list[float] = []
+            for e in entries:
+                emb = e.get("embedding")
+                if emb:
+                    raw_vec.append(mgr.similarity(q_emb, emb))
+                else:
+                    c_emb = mgr.embed_text(e["content"])
+                    raw_vec.append(mgr.similarity(q_emb, c_emb))
+            norm_vec = _normalize(raw_vec)
+        except Exception:
+            logger.debug("hybrid_search: vector scoring unavailable, using BM25 only")
+            alpha = 0.0
+
+    # Combine
+    combined = [
+        alpha * norm_vec[i] + (1 - alpha) * norm_bm25[i]
+        for i in range(n)
+    ]
+
+    # Rank top_k
+    ranked_idx = sorted(range(n), key=lambda i: combined[i], reverse=True)[:top_k]
+    return [
+        {
+            "source": entries[i]["source"],
+            "content": entries[i]["content"],
+            "score": round(combined[i], 6),
+            "bm25_score": round(norm_bm25[i], 6),
+            "vector_score": round(norm_vec[i], 6),
+            "rank": rank + 1,
+        }
+        for rank, i in enumerate(ranked_idx)
+    ]
