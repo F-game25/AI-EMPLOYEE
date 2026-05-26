@@ -755,8 +755,8 @@ class TestLogSanitizerSanitize:
         return sanitize(text)
 
     def test_jwt_token_redacted(self):
-        # A minimal well-formed JWT (header.payload.sig all base64url)
-        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        # Fake JWT-shaped string — not a real token, used to test the redaction pattern
+        jwt = "eyJGQUtFSEVBREVS.eyJGQUtFUEFZTE9BRCIsInN1YiI6InRlc3QifQ.ZmFrZS1zaWduYXR1cmUtbm90LXJlYWw"
         result = self._sanitize(f"Authorization: {jwt}")
         assert jwt not in result
         assert "[REDACTED-JWT]" in result
@@ -777,7 +777,7 @@ class TestLogSanitizerSanitize:
         assert self._sanitize(text) == text
 
     def test_multiple_patterns_in_one_string(self):
-        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        jwt = "eyJGQUtFSEVBREVS.eyJGQUtFUEFZTE9BRCIsInN1YiI6InRlc3QifQ.ZmFrZS1zaWduYXR1cmUtbm90LXJlYWw"
         text = f"token={jwt} user=bob@test.com"
         result = self._sanitize(text)
         assert jwt not in result
@@ -813,7 +813,7 @@ class TestPIIFilter:
     def test_filter_jwt_in_format_args(self):
         from core.log_sanitizer import PIIFilter
         f = PIIFilter()
-        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        jwt = "eyJGQUtFSEVBREVS.eyJGQUtFUEFZTE9BRCIsInN1YiI6InRlc3QifQ.ZmFrZS1zaWduYXR1cmUtbm90LXJlYWw"
         record = logging.LogRecord(
             name="test", level=logging.INFO, pathname="", lineno=0,
             msg="Token: %s", args=(jwt,), exc_info=None,

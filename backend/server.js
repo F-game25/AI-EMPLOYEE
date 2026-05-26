@@ -346,9 +346,17 @@ function makeRateLimit(max, windowMs = 60_000) {
     next();
   };
 }
-const _rl_blacklight  = makeRateLimit(5);   // 5/min per IP
-const _rl_forge       = makeRateLimit(10);  // 10/min per IP
-const _rl_research    = makeRateLimit(3);   // 3/min per IP
+const _rl_blacklight  = makeRateLimit(5);    // 5/min per IP
+const _rl_forge       = makeRateLimit(10);   // 10/min per IP
+const _rl_research    = makeRateLimit(3);    // 3/min per IP  (legacy — unused, kept for compatibility)
+// ── Per-route rate limiters ───────────────────────────────────────────────────
+const _rl_auth_token  = makeRateLimit(5);    // /api/auth/token — 5/min per IP (brute-force guard)
+const _rl_auto_token  = makeRateLimit(10);   // /api/auth/auto-token — 10/min per IP
+const _rl_upload      = makeRateLimit(20);   // /api/workspace/upload — 20/min per IP
+const _rl_ollama_pull = makeRateLimit(3);    // /api/ollama/pull — 3/min per IP (expensive operation)
+const _rl_chat        = makeRateLimit(30);   // /api/chat — 30/min per IP
+const _rl_tasks_run   = makeRateLimit(30);   // /api/tasks/run — 30/min per IP
+const _rl_api_global  = makeRateLimit(120);  // /api/* catch-all — 120/min per IP
 
 // Simple in-memory response cache with TTL.
 // Returns middleware that serves cached JSON for ttlMs, then refreshes.
@@ -1810,7 +1818,7 @@ let _lastBlacklightStatus = null;
 
 // POST /api/auth/token — exchange the master secret for a 24h JWT
 // Body: { secret: "<JWT_SECRET_KEY from ~/.ai-employee/.env>" }
-app.post('/api/auth/token', (req, res) => {
+app.post('/api/auth/token', _rl_auth_token, (req, res) => {
   const body = validate(SCHEMAS.authToken, req, res);
   if (!body) return;
   if (body.secret !== JWT_SECRET) {
@@ -1823,7 +1831,7 @@ app.post('/api/auth/token', (req, res) => {
 // GET /api/auth/auto-token — issues a short-lived JWT for localhost dashboard access (no secret needed)
 // Only allows requests from loopback. Uses raw socket remoteAddress (unforgeable) — not req.ip
 // which is X-Forwarded-For aware and trivially spoofable via `trust proxy: 1`.
-app.get('/api/auth/auto-token', (req, res) => {
+app.get('/api/auth/auto-token', _rl_auto_token, (req, res) => {
   const rawIp = req.socket?.remoteAddress || '';
   const isLocal = rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1';
   if (!isLocal) return res.status(403).json({ ok: false, error: 'Only available from localhost' });
@@ -3369,9 +3377,12 @@ app.get('/api/ollama/models', requireAuth, async (req, res) => {
   res.json({ models });
 });
 
-app.post('/api/ollama/pull', requireAuth, async (req, res) => {
+app.post('/api/ollama/pull', requireAuth, _rl_ollama_pull, async (req, res) => {
   const name = String((req.body || {}).name || '').trim();
   if (!name) return res.status(400).json({ ok: false, error: 'name required' });
+  if (name.length > 100) return res.status(400).json({ ok: false, error: 'model name too long (max 100 chars)' });
+  // Allowlist: lowercase alphanumeric, colon (tag separator), dot, hyphen, underscore only
+  if (!/^[a-z0-9:._\-]+$/.test(name)) return res.status(400).json({ ok: false, error: 'invalid model name format' });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -3469,7 +3480,7 @@ app.get('/api/knowledge/search', requireAuth, async (req, res) => {
 
 // ── End Phase 4G ──────────────────────────────────────────────────────────────
 
-app.get('/api/system/manifest', (req, res) => {
+app.get('/api/system/manifest', requireAuth, (req, res) => {
   res.json(loadSystemManifest());
 });
 
@@ -4317,7 +4328,7 @@ app.get('/api/money/outreach-log', requireAuth, (req, res) => {
 
 // ── Task execution endpoint ───────────────────────────────────────────────────
 
-app.post('/api/tasks/run', requireAuth, async (req, res) => {
+app.post('/api/tasks/run', requireAuth, _rl_tasks_run, async (req, res) => {
   const rawBody = req.body || {};
   // Normalise: accept both `task` and legacy `message` field before validation
   if (!rawBody.task && rawBody.message) rawBody.task = rawBody.message;
@@ -4485,7 +4496,7 @@ app.post('/api/tasks/run', requireAuth, async (req, res) => {
 });
 
 // Compatibility endpoint used by legacy CLI flows (`ai-employee do/onboard`)
-app.post('/api/chat', requireAuth, async (req, res) => {
+app.post('/api/chat', requireAuth, _rl_chat, async (req, res) => {
   const body = validate(SCHEMAS.chat, req, res);
   if (!body) return;
   const message = body.message;
@@ -6424,7 +6435,7 @@ function resolveWorkspaceFile(relPath) {
 }
 
 // POST /api/workspace/upload — upload file(s) into ~/.ai-employee/workspace/uploads
-app.post('/api/workspace/upload', requireAuth, (req, res) => {
+app.post('/api/workspace/upload', requireAuth, _rl_upload, (req, res) => {
   workspaceUpload.fields([{ name: 'files', maxCount: 100 }, { name: 'file', maxCount: 100 }])(req, res, err => {
     if (err) {
       const tooLarge = err.code === 'LIMIT_FILE_SIZE';
@@ -6618,7 +6629,7 @@ app.get('/api/system/update-status', requireAuth, (req, res) => {
   }
 });
 
-app.get('/api/system/build-hash', (req, res) => {
+app.get('/api/system/build-hash', requireAuth, (req, res) => {
   const versionPath = path.join(os.homedir(), '.ai-employee', 'state', 'version.json');
   try {
     res.json(JSON.parse(fs.readFileSync(versionPath, 'utf8')));
@@ -6781,7 +6792,7 @@ setInterval(() => {
 
 const server = http.createServer(app);
 
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 * 1024 }); // 1 MB cap
 
 // Initialize WebSocket infrastructure for multi-tenant real-time updates
 const connManager = new ConnectionManager();
@@ -7613,6 +7624,13 @@ app.get('/metrics', (req, res) => {
   res.type('text/plain; version=0.0.4').send(metrics + '\n');
 });
 
+// ── Global /api/* catch-all rate limiter ──────────────────────────────────────
+// Runs after all specific-route middlewares. Requests that already consumed a
+// tighter per-route limiter above still count here — that is intentional:
+// the global bucket provides a hard ceiling against endpoint enumeration and
+// slow-rate scatter attacks that individually stay under per-route limits.
+app.use('/api/', _rl_api_global);
+
 app.get('*', (req, res, next) => {
   if (!HAS_FRONTEND_DIST) {
     if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
@@ -7676,7 +7694,14 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   const taskId = match[1];
-  const wssTask = new WebSocketServer({ noServer: true });
+
+  // Auth guard: task progress WS requires a valid JWT (same as main /ws path)
+  if (!wsTokenValid(req)) {
+    socket.destroy();
+    return;
+  }
+
+  const wssTask = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 
   wssTask.handleUpgrade(req, socket, head, (ws) => {
     // Send current task state on connection

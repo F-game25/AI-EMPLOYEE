@@ -20783,6 +20783,8 @@ def run_task_with_agent_controller(payload: dict, _auth: None = Depends(require_
     goal = str(goal).strip()
     if not goal:
         raise HTTPException(400, "task required")
+    if len(goal) > 5000:
+        raise HTTPException(400, "task too long (max 5000 chars)")
 
     try:
         from core.agent_controller import get_agent_controller  # noqa: PLC0415
@@ -27854,12 +27856,18 @@ async def research_recent(limit: int = 20):
 
 
 @app.post("/api/research/discover")
-async def research_discover(req: dict):
+async def research_discover(req: dict, _auth: None = Depends(require_auth)):
     """Research v2 phase 1: discover candidate sources without fetching them."""
     query = (req or {}).get("query", "").strip()
-    max_sources = int((req or {}).get("max_sources", 10))
     if not query:
         raise HTTPException(400, "query required")
+    if len(query) > 500:
+        raise HTTPException(400, "query too long (max 500 chars)")
+    max_sources_raw = (req or {}).get("max_sources", 10)
+    try:
+        max_sources = max(1, min(int(max_sources_raw), 50))
+    except (TypeError, ValueError):
+        max_sources = 10
     try:
         from core.auto_research_agent import get_auto_researcher
         agent = get_auto_researcher()

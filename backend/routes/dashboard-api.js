@@ -36,6 +36,15 @@ function readJsonl(file, limit = 100) {
   }
 }
 
+// Validate a param that will be embedded in a filename. Only allow safe identifier chars.
+// Returns the sanitized string or null if it fails validation.
+function safeFileParam(value, maxLen = 120) {
+  const s = String(value || '').trim();
+  // Allow alphanumeric, hyphen, underscore, dot — reject everything else
+  if (!s || s.length > maxLen || !/^[a-zA-Z0-9_.\-]+$/.test(s)) return null;
+  return s;
+}
+
 function firstExisting(paths) {
   return paths.find(file => {
     try { return fs.existsSync(file) } catch { return false }
@@ -757,13 +766,15 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   })
 
   r.get('/hooks/:name/secret', requireAuth, (req, res) => {
+    const hookName = safeFileParam(req.params.name, 80);
+    if (!hookName) return res.status(400).json({ error: 'invalid hook name' });
     const file    = path.join(STATE_DIR, 'webhook_secrets.json')
     const secrets = readJSON(file, {})
-    if (!secrets[req.params.name]) {
-      secrets[req.params.name] = crypto.randomBytes(32).toString('hex')
+    if (!secrets[hookName]) {
+      secrets[hookName] = crypto.randomBytes(32).toString('hex')
       writeJSON(file, secrets)
     }
-    res.json({ secret: secrets[req.params.name] })
+    res.json({ secret: secrets[hookName] })
   })
 
   // ── SYSTEM / UPTIME ───────────────────────────────────────────────────────
@@ -891,8 +902,10 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   })
 
   r.get('/money/pipelines/:name/runs', requireAuth, (req, res) => {
-    const runs = readJSON(path.join(STATE_DIR, `pipeline_runs_${req.params.name}.json`), [])
-    res.json({ runs, pipeline: req.params.name })
+    const name = safeFileParam(req.params.name);
+    if (!name) return res.status(400).json({ error: 'invalid pipeline name' });
+    const runs = readJSON(path.join(STATE_DIR, `pipeline_runs_${name}.json`), [])
+    res.json({ runs, pipeline: name })
   })
 
   r.post('/money/pipelines/:name/trigger', requireAuth, (req, res) => {
@@ -1019,14 +1032,19 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   // ── AGENT PROMPTS ─────────────────────────────────────────────────────────
 
   r.get('/agents/:id/prompt', requireAuth, (req, res) => {
-    const data = readJSON(path.join(STATE_DIR, 'agent_prompts', `${req.params.id}.json`), { prompt: '', versions: [] })
+    const id = safeFileParam(req.params.id);
+    if (!id) return res.status(400).json({ error: 'invalid agent id' });
+    const data = readJSON(path.join(STATE_DIR, 'agent_prompts', `${id}.json`), { prompt: '', versions: [] })
     res.json({ prompt: data.prompt || '', versions: data.versions || [] })
   })
 
   r.put('/agents/:id/prompt', requireAuth, (req, res) => {
+    const id = safeFileParam(req.params.id);
+    if (!id) return res.status(400).json({ error: 'invalid agent id' });
     const { prompt } = req.body || {}
     if (typeof prompt !== 'string') return res.status(400).json({ error: 'prompt required' })
-    const file = path.join(STATE_DIR, 'agent_prompts', `${req.params.id}.json`)
+    if (prompt.length > 20000) return res.status(400).json({ error: 'prompt too long (max 20000 chars)' })
+    const file = path.join(STATE_DIR, 'agent_prompts', `${id}.json`)
     const data = readJSON(file, { prompt: '', versions: [] })
     const versions = data.versions || []
     if (data.prompt) versions.unshift({ prompt: data.prompt, saved_at: new Date().toISOString() })
@@ -1037,7 +1055,9 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   })
 
   r.get('/agents/:id/prompt/history', requireAuth, (req, res) => {
-    const data = readJSON(path.join(STATE_DIR, 'agent_prompts', `${req.params.id}.json`), { versions: [] })
+    const id = safeFileParam(req.params.id);
+    if (!id) return res.status(400).json({ error: 'invalid agent id' });
+    const data = readJSON(path.join(STATE_DIR, 'agent_prompts', `${id}.json`), { versions: [] })
     res.json({ versions: data.versions || [] })
   })
 

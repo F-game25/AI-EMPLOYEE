@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re as _re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -98,8 +99,16 @@ class BaseAgent:
         tenant_id = self._get_tenant_id()
         return db.insert(table, data, tenant_id=tenant_id)
 
+    @staticmethod
+    def _validate_identifier(name: str) -> str:
+        """Ensure a SQL identifier (table/column name) contains only safe characters."""
+        if not _re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", name):
+            raise ValueError(f"Invalid SQL identifier: {name!r}")
+        return name
+
     def _query_db(self, table: str, where: str = "", params: tuple = ()) -> list[dict[str, Any]]:
         """Query database with automatic tenant_id filter."""
+        self._validate_identifier(table)
         db = self._get_db()
         tenant_id = self._get_tenant_id()
         query = f"SELECT * FROM {table} WHERE {where}" if where else f"SELECT * FROM {table}"

@@ -88,16 +88,19 @@ function makeRateLimit(max, windowMs = 60_000) {
     next()
   }
 }
-const _rl_execute = makeRateLimit(3)
+const _rl_discover = makeRateLimit(10)  // 10/min per IP
+const _rl_execute  = makeRateLimit(10)  // 10/min per IP (execute is heavier but same policy tier)
 
 // ── Router ────────────────────────────────────────────────────────────────────
 module.exports = function createResearchRouter(requireAuth) {
   const router = express.Router()
 
-  router.post('/discover', requireAuth, (req, res) => {
+  router.post('/discover', requireAuth, _rl_discover, (req, res) => {
     const query = (req.body?.query || '').trim()
     if (!query) return res.status(400).json({ error: 'query required' })
-    const limit = parseInt(req.body?.limit || req.body?.max_sources || 10, 10) || 10
+    if (query.length > 500) return res.status(400).json({ error: 'query too long (max 500 chars)' })
+    const limitRaw = parseInt(req.body?.limit || req.body?.max_sources || 10, 10)
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 10
     proxy(
       '/api/research/discover',
       req, res,

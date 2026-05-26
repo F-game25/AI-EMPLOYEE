@@ -10,9 +10,19 @@ from __future__ import annotations
 
 import logging
 import os
+import re as _re
 from typing import Any, Dict, List, Optional, Tuple
 from contextlib import contextmanager
 from urllib.parse import urlparse
+
+_SQL_IDENT_RE = _re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
+
+
+def _check_identifier(name: str) -> str:
+    """Raise ValueError if name is not a safe SQL identifier."""
+    if not _SQL_IDENT_RE.fullmatch(name):
+        raise ValueError(f"Unsafe SQL identifier rejected: {name!r}")
+    return name
 
 try:
     import psycopg
@@ -164,11 +174,15 @@ class DatabaseClient:
         if not self._connected:
             raise RuntimeError("Database not connected")
 
+        _check_identifier(table)
+
         # Auto-inject tenant_id if provided
         if tenant_id and "tenant_id" not in data:
             data = {**data, "tenant_id": tenant_id}
 
         columns = list(data.keys())
+        for col in columns:
+            _check_identifier(col)
         placeholders = ["%s"] * len(columns)
 
         query = f"""
@@ -211,6 +225,9 @@ class DatabaseClient:
         if not self._connected:
             raise RuntimeError("Database not connected")
 
+        _check_identifier(table)
+        for col in data.keys():
+            _check_identifier(col)
         set_clause = ", ".join([f"{k} = %s" for k in data.keys()])
         query = f"UPDATE {table} SET {set_clause} WHERE {where}"
 
@@ -250,6 +267,7 @@ class DatabaseClient:
         if not self._connected:
             raise RuntimeError("Database not connected")
 
+        _check_identifier(table)
         query = f"DELETE FROM {table} WHERE {where}"
 
         if tenant_id:

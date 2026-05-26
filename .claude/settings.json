@@ -3,7 +3,7 @@
     "allow": [
       "Bash(EVOLUTION_MODE=OFF AUTO_RESEARCH_MODE=off nohup bash start.sh)",
       "Bash(EVOLUTION_MODE=OFF nohup bash start.sh)",
-      "Bash(JWT_SECRET_KEY=8bc9b15eace2d4414bcbad47aa468c72ea9c1277475bf6996068fa44bb27a261 node /home/lf/AI-EMPLOYEE/backend/server.js)",
+      "Bash(node /home/lf/AI-EMPLOYEE/backend/server.js)",
       "Bash(NEO4J_PASSWORD=neuralbrain docker compose -f docker-compose.neo4j.yml up -d)",
       "Bash(awk -F\"'\" '{print $2}')",
       "Bash(cat /tmp/agents_in_config.txt | sort > /tmp/agents_in_config_sorted.txt && echo \"Sample of agents in config:\" && head -40 /tmp/agents_in_config_sorted.txt)",

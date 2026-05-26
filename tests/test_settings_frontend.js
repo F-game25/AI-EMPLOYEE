@@ -449,8 +449,8 @@ describe('SettingsPage Component Tests', () => {
       const tab = new MockNotificationsTab({ enableSlackNotifications: true });
       assert.strictEqual(tab.isSlackEnabled(), true);
 
-      tab.updateField('slackWebhookUrl', 'https://hooks.slack.com/services/xxx');
-      assert.strictEqual(tab.getFormData().slackWebhookUrl, 'https://hooks.slack.com/services/xxx');
+      tab.updateField('slackWebhookUrl', 'https://example.com/fake-webhook-for-testing');
+      assert.strictEqual(tab.getFormData().slackWebhookUrl, 'https://example.com/fake-webhook-for-testing');
     });
 
     it('should disable email input when email notifications disabled', () => {

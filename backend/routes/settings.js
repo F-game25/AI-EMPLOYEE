@@ -6,8 +6,16 @@ const validator = require('../validators/settings-validator')
 
 const router = express.Router()
 
-// Encryption key — must be 32 bytes for AES-256
-const RAW_KEY = process.env.SETTINGS_ENCRYPTION_KEY || 'dev-key-please-set-in-env-32bytess'
+// Encryption key — must be set via env var; fallback generates a stable per-process key (dev only)
+const RAW_KEY = process.env.SETTINGS_ENCRYPTION_KEY || (() => {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: SETTINGS_ENCRYPTION_KEY must be set in production');
+    process.exit(1);
+  }
+  // Dev/test: derive a stable but non-secret key so the server can still start
+  const { execSync } = require('child_process');
+  try { return execSync('hostname').toString().trim() + '-dev-only-not-secret'; } catch { return 'dev-only-not-secret'; }
+})();
 const ENCRYPTION_KEY = crypto.createHash('sha256').update(RAW_KEY).digest() // always 32 bytes
 
 // Settings file path (per tenant)

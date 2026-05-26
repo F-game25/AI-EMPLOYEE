@@ -44,7 +44,7 @@ function createUpgradeHandler(connManager, jwtSecret) {
  * Handle WebSocket upgrade for a specific channel
  */
 function handleChannelUpgrade(req, socket, head, channel, connManager, jwtSecret) {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 
   wss.handleUpgrade(req, socket, head, (ws) => {
     // Authenticate connection

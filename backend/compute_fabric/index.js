@@ -29,7 +29,10 @@ const AUDIT_PATH = path.join(CF_DIR, 'audit.jsonl');
 const APPROVALS_PATH = path.join(CF_DIR, 'approvals.json');
 
 const LIVE = process.env.COMPUTE_FABRIC_LIVE === '1';
-const SECRET = process.env.JWT_SECRET_KEY || process.env.JWT_SECRET || 'cf-dev-secret';
+const SECRET = process.env.JWT_SECRET_KEY || process.env.JWT_SECRET || (() => {
+  if (process.env.NODE_ENV === 'production') { console.error('FATAL: JWT_SECRET_KEY not set'); process.exit(1); }
+  return 'cf-dev-only-not-for-production';
+})();
 const DAILY_CAP_USD = Number(process.env.COMPUTE_DAILY_CAP_USD || 0);   // 0 = no spend allowed
 const TOTAL_CAP_USD = Number(process.env.COMPUTE_TOTAL_CAP_USD || 0);
 

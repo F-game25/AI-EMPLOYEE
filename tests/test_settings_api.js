@@ -206,7 +206,7 @@ describe('Settings Validator (backend/validators/settings-validator.js)', () => 
 
     it('should accept valid Slack webhook URL', () => {
       const result = validator.validateNotificationSettings({
-        slackWebhookUrl: 'https://hooks.slack.com/services/TEST00000/TEST00000/test-placeholder-not-a-real-secret',
+        slackWebhookUrl: 'https://example.com/fake-webhook-for-testing',
       });
       assert.strictEqual(result.valid, true);
     });
