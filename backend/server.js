@@ -2529,28 +2529,28 @@ async function proxyNeuralBrain(path, fallback) {
 
 // Rich native-graph proxy (89+ nodes) — the snapshot endpoint can be empty, so expose
 // the live graph directly. Authenticated via the internal service token in proxyNeuralBrain.
-app.get('/api/neural-brain/graph', async (req, res) => {
+app.get('/api/neural-brain/graph', requireAuth, async (req, res) => {
   const depth = Number(req.query.depth) || 2;
   const limit = Number(req.query.limit) || 200;
   const data = await proxyNeuralBrain(`/api/neural-brain/graph?depth=${depth}&limit=${limit}`, { nodes: [], links: [] });
   res.json(normalizeDashboardGraph(data));
 });
 
-app.get('/api/neural-brain/memory/status', async (req, res) => {
+app.get('/api/neural-brain/memory/status', requireAuth, async (req, res) => {
   const data = await proxyNeuralBrain('/api/neural-brain/memory/status', {
     count: 0, last_write_ts: null, recent: [],
   });
   res.json(data);
 });
 
-app.get('/api/neural-brain/memory/list', async (req, res) => {
+app.get('/api/neural-brain/memory/list', requireAuth, async (req, res) => {
   const data = await proxyNeuralBrain('/api/neural-brain/memory/list', {
     items: [], total: 0, page: 1,
   });
   res.json(data);
 });
 
-app.delete('/api/neural-brain/memory/:id', async (req, res) => {
+app.delete('/api/neural-brain/memory/:id', requireAuth, async (req, res) => {
   try {
     const r = await fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/memory/${req.params.id}`, { method: 'DELETE' });
     if (r?.ok) return res.json(await r.json());
@@ -2558,14 +2558,14 @@ app.delete('/api/neural-brain/memory/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/neural-brain/graph/status', async (req, res) => {
+app.get('/api/neural-brain/graph/status', requireAuth, async (req, res) => {
   const data = await proxyNeuralBrain('/api/neural-brain/graph/status', {
     node_count: 0, edge_count: 0, recent_nodes: [],
   });
   res.json(data);
 });
 
-app.get('/api/neural-brain/graph/snapshot', async (req, res) => {
+app.get('/api/neural-brain/graph/snapshot', requireAuth, async (req, res) => {
   let data = await proxyNeuralBrain('/api/neural-brain/graph/snapshot', {
     nodes: [], links: [], stats: {},
   });
@@ -2575,14 +2575,14 @@ app.get('/api/neural-brain/graph/snapshot', async (req, res) => {
   res.json(normalizeDashboardGraph(data));
 });
 
-app.get('/api/neural-brain/threads', async (req, res) => {
+app.get('/api/neural-brain/threads', requireAuth, async (req, res) => {
   const data = await proxyNeuralBrain('/api/neural-brain/threads', { threads: [] });
   res.json(data);
 });
 
 // ── Four living memory graphs (WS3): shortterm|longterm|relations|unified ──────
 const _MEMORY_GRAPH_VIEWS = new Set(['shortterm', 'longterm', 'relations', 'unified']);
-app.get('/api/memory/graph/:view', async (req, res) => {
+app.get('/api/memory/graph/:view', requireAuth, async (req, res) => {
   const { view } = req.params;
   if (!_MEMORY_GRAPH_VIEWS.has(view)) return res.status(400).json({ error: 'unknown view', nodes: [], links: [] });
   const limit = Number(req.query.limit) || 300;
@@ -2603,7 +2603,7 @@ app.get('/api/memory/graph/:view', async (req, res) => {
   res.json(data);
 });
 
-app.post('/api/neural-brain/think', async (req, res) => {
+app.post('/api/neural-brain/think', requireAuth, async (req, res) => {
   try {
     const r = await Promise.race([
       fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/think`, {
@@ -2618,7 +2618,7 @@ app.post('/api/neural-brain/think', async (req, res) => {
   res.json({ response: 'Neural Brain offline — Python backend not running.', status: 'offline' });
 });
 
-app.get('/api/neural-brain/forge/evolution/status', async (req, res) => {
+app.get('/api/neural-brain/forge/evolution/status', requireAuth, async (req, res) => {
   const data = await proxyNeuralBrain('/api/neural-brain/forge/evolution/status', {
     mode: 'SAFE', patches_proposed: 0, patches_applied: 0,
   });
@@ -2963,15 +2963,15 @@ function buildObservabilitySnapshot() {
   };
 }
 
-app.get('/api/observability/snapshot', (req, res) => {
+app.get('/api/observability/snapshot', requireAuth, (req, res) => {
   res.json(buildObservabilitySnapshot());
 });
 
-app.get('/api/observability/events', (req, res) => {
+app.get('/api/observability/events', requireAuth, (req, res) => {
   res.json({ events: (runtimeState.observability.events || []).slice(0, 200) });
 });
 
-app.get('/api/security/aztsa/status', (req, res) => {
+app.get('/api/security/aztsa/status', requireAuth, (req, res) => {
   const requiredSecrets = [
     secretStore.describe('API_GATEWAY_KEY', { aliases: ['AZTSA_GATEWAY_KEY'] }),
     secretStore.describe('JWT_SECRET', { aliases: ['JWT_SECRET_KEY'] }),
@@ -2991,7 +2991,7 @@ app.get('/api/security/aztsa/status', (req, res) => {
   });
 });
 
-app.get('/api/security/honeypot/events', (req, res) => {
+app.get('/api/security/honeypot/events', requireAuth, (req, res) => {
   const limitRaw = Number((req.query || {}).limit || 50);
   const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, limitRaw)) : 50;
   res.json({
@@ -3066,7 +3066,7 @@ app.post('/api/mode', requireAuth, (req, res) => {
   });
 });
 
-app.get('/api/brain/status', (req, res) => {
+app.get('/api/brain/status', requireAuth, (req, res) => {
   const nn = subsystems.getNNStatus();
   const core = brain.status();
   res.json({
@@ -3089,16 +3089,16 @@ app.get('/internal/brain/status', (req, res) => {
   });
 });
 
-app.get('/api/brain/insights', (req, res) => {
+app.get('/api/brain/insights', requireAuth, (req, res) => {
   res.json(brain.insights());
 });
 
-app.get('/api/brain/activity', (req, res) => {
+app.get('/api/brain/activity', requireAuth, (req, res) => {
   const limit = Number(req.query.limit || 20);
   res.json(brain.activity(limit));
 });
 
-app.get('/api/brain/neurons', (req, res) => {
+app.get('/api/brain/neurons', requireAuth, (req, res) => {
   res.json(brain.neurons());
 });
 
@@ -3107,7 +3107,7 @@ app.get('/api/brain/neurons', (req, res) => {
  * Returns { nodes, links, stats } using a normalized schema so the
  * frontend brainStore can consume it directly.
  */
-app.get('/api/brain/graph', async (req, res) => {
+app.get('/api/brain/graph', requireAuth, async (req, res) => {
   const raw = brain.neurons();
   const memoryTree = subsystems.getMemoryTree();
   const nodes = (raw.nodes || []).map((n) => ({
@@ -3216,7 +3216,7 @@ app.get('/api/brain/graph', async (req, res) => {
   }));
 });
 
-app.get('/api/memory/tree', (req, res) => {
+app.get('/api/memory/tree', requireAuth, (req, res) => {
   res.json(subsystems.getMemoryTree());
 });
 
@@ -3231,7 +3231,7 @@ app.post('/api/model/route-plan', (req, res) => {
   res.json(buildModelRoutePlan(body));
 });
 
-app.get('/api/memory', async (req, res) => {
+app.get('/api/memory', requireAuth, async (req, res) => {
   try {
     const data = await requestPythonJSON('/api/memory', 'GET', null, { timeoutMs: 4000 });
     if (data._http_status >= 200 && data._http_status < 300) {
@@ -3254,18 +3254,18 @@ app.get('/api/memory', async (req, res) => {
 // ── Conversations JSONL endpoint ──────────────────────────────────────────────
 const conversations = require('./conversations');
 
-app.get('/api/memory/conversations', (req, res) => {
+app.get('/api/memory/conversations', requireAuth, (req, res) => {
   const all = conversations.readConversations();
   return res.json({ conversations: all.slice(-100), total: all.length, source: 'node-local' });
 });
 
-app.delete('/api/memory/conversations/:id', (req, res) => {
+app.delete('/api/memory/conversations/:id', requireAuth, (req, res) => {
   const removed = conversations.deleteConversation(req.params.id);
   if (!removed) return res.status(404).json({ ok: false, error: 'Conversation not found' });
   return res.json({ ok: true, deleted: req.params.id });
 });
 
-app.get('/api/memory/search', async (req, res) => {
+app.get('/api/memory/search', requireAuth, async (req, res) => {
   const q = String((req.query || {}).q || '').trim();
   if (!q) return res.status(400).json({ ok: false, error: 'q required' });
   const topK = Math.max(1, Math.min(25, Number((req.query || {}).top_k || 8) || 8));
@@ -3282,7 +3282,7 @@ app.get('/api/memory/search', async (req, res) => {
   }
 });
 
-app.post('/api/memory/clients', async (req, res) => {
+app.post('/api/memory/clients', requireAuth, async (req, res) => {
   try {
     const data = await requestPythonJSON('/api/memory/clients', 'POST', req.body || {}, { timeoutMs: 5000 });
     return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
@@ -3291,7 +3291,7 @@ app.post('/api/memory/clients', async (req, res) => {
   }
 });
 
-app.patch('/api/memory/clients/:clientId', async (req, res) => {
+app.patch('/api/memory/clients/:clientId', requireAuth, async (req, res) => {
   try {
     const data = await requestPythonJSON(`/api/memory/clients/${encodeURIComponent(req.params.clientId)}`, 'PATCH', req.body || {}, { timeoutMs: 5000 });
     return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
@@ -3300,7 +3300,7 @@ app.patch('/api/memory/clients/:clientId', async (req, res) => {
   }
 });
 
-app.delete('/api/memory/clients/:clientId', async (req, res) => {
+app.delete('/api/memory/clients/:clientId', requireAuth, async (req, res) => {
   try {
     const data = await requestPythonJSON(`/api/memory/clients/${encodeURIComponent(req.params.clientId)}`, 'DELETE', null, { timeoutMs: 5000 });
     return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
@@ -3309,7 +3309,7 @@ app.delete('/api/memory/clients/:clientId', async (req, res) => {
   }
 });
 
-app.post('/api/memory/interactions', async (req, res) => {
+app.post('/api/memory/interactions', requireAuth, async (req, res) => {
   try {
     const data = await requestPythonJSON('/api/memory/interactions', 'POST', req.body || {}, { timeoutMs: 5000 });
     return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
@@ -3318,21 +3318,21 @@ app.post('/api/memory/interactions', async (req, res) => {
   }
 });
 
-app.get('/api/doctor/status', (req, res) => {
+app.get('/api/doctor/status', requireAuth, (req, res) => {
   res.json(subsystems.getDoctorStatus());
 });
 
-app.get('/api/self-improvement/status', (req, res) => {
+app.get('/api/self-improvement/status', requireAuth, (req, res) => {
   res.json(subsystems.getSelfImprovementStatus());
 });
 
 // ── Autonomy daemon endpoints ─────────────────────────────────────────────────
 
-app.get('/api/autonomy/status', (req, res) => {
+app.get('/api/autonomy/status', requireAuth, (req, res) => {
   res.json(subsystems.getAutonomyStatus());
 });
 
-app.get('/api/autonomy/mode', (req, res) => {
+app.get('/api/autonomy/mode', requireAuth, (req, res) => {
   const auto = subsystems.getAutonomyStatus();
   res.json(auto.mode || { mode: 'OFF', active: false });
 });
@@ -3819,7 +3819,7 @@ app.post('/api/autonomy/emergency-stop', requireAuth, (req, res) => {
   r.end();
 });
 
-app.get('/api/evolution/status', async (req, res) => {
+app.get('/api/evolution/status', requireAuth, async (req, res) => {
   try {
     const data = await requestPythonJSON('/api/evolution/status', 'GET');
     if (data._http_status && data._http_status >= 400) throw new Error(`py_${data._http_status}`);
@@ -3842,7 +3842,7 @@ app.post('/api/evolution/mode', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/product/dashboard', (req, res) => {
+app.get('/api/product/dashboard', requireAuth, (req, res) => {
   res.json(buildDashboardPayload());
 });
 
@@ -3903,14 +3903,14 @@ app.get('/api/economy/wallet', requireAuth, (req, res) => {
   res.json({ ok: true, source: 'wallet_vault', wallet: walletSnapshot(), updated_at: new Date().toISOString() });
 });
 
-app.get('/api/workflows/live', (req, res) => {
+app.get('/api/workflows/live', requireAuth, (req, res) => {
   res.json({
     active_run: runtimeState.selectedWorkflowRun,
     runs: runtimeState.workflowRuns,
   });
 });
 
-app.get('/api/objectives/status', (req, res) => {
+app.get('/api/objectives/status', requireAuth, (req, res) => {
   res.json({
     objectives: runtimeState.objectives,
     systems: runtimeState.objectiveState,
@@ -5015,7 +5015,7 @@ function _forgeRiskLabel(score) {
 }
 
 // GET /api/audit/events
-app.get('/api/audit/events', (req, res) => {
+app.get('/api/audit/events', requireAuth, (req, res) => {
   const limit = Math.min(500, Math.max(1, parseInt((req.query || {}).limit) || 100));
   const actor = (req.query || {}).actor || '';
   const action = (req.query || {}).action || '';
@@ -5028,7 +5028,7 @@ app.get('/api/audit/events', (req, res) => {
 });
 
 // GET /api/audit/stats
-app.get('/api/audit/stats', (req, res) => {
+app.get('/api/audit/stats', requireAuth, (req, res) => {
   const byActor = {};
   const byAction = {};
   const riskDist = { low: 0, medium: 0, high: 0 };
@@ -5053,12 +5053,12 @@ app.post('/api/error-report', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/error-report', (_req, res) => {
+app.get('/api/error-report', requireAuth, (_req, res) => {
   res.json({ errors: _frontendErrors });
 });
 
 // GET /api/reliability/status
-app.get('/api/reliability/status', (req, res) => {
+app.get('/api/reliability/status', requireAuth, (req, res) => {
   res.json({
     stability_score: reliabilityState.stabilityScore,
     forge_frozen: reliabilityState.forgeFrozen,
@@ -5088,7 +5088,7 @@ app.post('/api/reliability/forge/unfreeze', requireAuth, (req, res) => {
 });
 
 // GET /api/forge/queue
-app.get('/api/forge/queue', (req, res) => {
+app.get('/api/forge/queue', requireAuth, (req, res) => {
   const status = (req.query || {}).status || '';
   const items = status ? _forgeQueue.filter((r) => r.status === status) : _forgeQueue;
   res.json({ items, total: _forgeQueue.length });
@@ -5199,7 +5199,7 @@ app.post('/api/forge/rollback', requireAuth, async (req, res) => {
 });
 
 // GET /api/forge/snapshots
-app.get('/api/forge/snapshots', async (req, res) => {
+app.get('/api/forge/snapshots', requireAuth, async (req, res) => {
   const result = await runForgePython({ operation: 'snapshots' });
   if (!result) return res.json({ snapshots: [], summary: {} });
   res.json(result);
@@ -5526,13 +5526,13 @@ app.get('/api/recon/audit', requireAuth, (req, res) => {
 });
 
 // GET /api/doctor/llm-status
-app.get('/api/doctor/llm-status', async (req, res) => {
+app.get('/api/doctor/llm-status', requireAuth, async (req, res) => {
   const result = await runForgePython({ operation: 'llm_status' });
   res.json(result || { ollama: { online: false }, groq: { configured: false } });
 });
 
 // GET /api/doctor/errors
-app.get('/api/doctor/errors', (req, res) => {
+app.get('/api/doctor/errors', requireAuth, (req, res) => {
   const limit = Math.min(100, parseInt((req.query || {}).limit) || 50);
   const errors = (_auditLog || []).filter((e) => e.risk_score >= 0.7 || (e.action || '').includes('fail') || (e.action || '').includes('error')).slice(0, limit);
   res.json({ errors, count: errors.length });
@@ -5559,7 +5559,7 @@ app.post('/api/doctor/run', requireAuth, async (req, res) => {
 // ── Blacklight (security monitoring) ─────────────────────────────────────────
 
 // GET /api/blacklight/status
-app.get('/api/blacklight/status', (req, res) => {
+app.get('/api/blacklight/status', requireAuth, (req, res) => {
   res.json({
     active: _blacklightState.active,
     alerts_count: _blacklightState.alerts.length,
@@ -5687,7 +5687,7 @@ app.post('/api/blacklight/scan', requireAuth, async (req, res) => {
 });
 
 // GET /api/blacklight/alerts
-app.get('/api/blacklight/alerts', (req, res) => {
+app.get('/api/blacklight/alerts', requireAuth, (req, res) => {
   const limit = Math.min(100, parseInt((req.query || {}).limit) || 50);
   res.json({ alerts: _blacklightState.alerts.slice(0, limit), count: _blacklightState.alerts.length });
 });
@@ -5695,7 +5695,7 @@ app.get('/api/blacklight/alerts', (req, res) => {
 // ── Fairness & Governance ─────────────────────────────────────────────────────
 
 // GET /api/fairness/report
-app.get('/api/fairness/report', (req, res) => {
+app.get('/api/fairness/report', requireAuth, (req, res) => {
   const agents = Object.keys(runtimeState.objectiveState || {});
   const total_actions = (_auditLog || []).length;
   const high_risk = (_auditLog || []).filter((e) => e.risk_score >= 0.7).length;
@@ -5715,7 +5715,7 @@ app.get('/api/fairness/report', (req, res) => {
 });
 
 // GET /api/governance/digest
-app.get('/api/governance/digest', async (req, res) => {
+app.get('/api/governance/digest', requireAuth, async (req, res) => {
   const limit = Math.min(50, parseInt((req.query || {}).limit) || 25);
   const events = (_auditLog || []).slice(0, limit);
   const result = await runForgePython({ operation: 'governance_digest', events });
@@ -5725,7 +5725,7 @@ app.get('/api/governance/digest', async (req, res) => {
 // ── Hermes (task routing) ─────────────────────────────────────────────────────
 
 // GET /api/hermes/status
-app.get('/api/hermes/status', (req, res) => {
+app.get('/api/hermes/status', requireAuth, (req, res) => {
   const agents = Object.entries(runtimeState.objectiveState || {}).map(([name, state]) => ({
     name,
     active: state?.active || false,
@@ -5809,7 +5809,7 @@ app.post('/api/learning-ladder/complete', requireAuth, (req, res) => {
 });
 
 // GET /api/learning-ladder/progress?topic=...
-app.get('/api/learning-ladder/progress', (req, res) => {
+app.get('/api/learning-ladder/progress', requireAuth, (req, res) => {
   const topic = String(req.query.topic || '').trim();
   if (!topic) return res.status(400).json({ ok: false, error: 'topic query param is required' });
   try {
@@ -5821,7 +5821,7 @@ app.get('/api/learning-ladder/progress', (req, res) => {
 });
 
 // GET /api/learning-ladder/all
-app.get('/api/learning-ladder/all', (req, res) => {
+app.get('/api/learning-ladder/all', requireAuth, (req, res) => {
   try {
     const topics = learningLadder.getAllTopics();
     const metrics = learningLadder.getMetrics();
@@ -5874,7 +5874,7 @@ app.post('/api/agents/:agent_id/ladder/advance', requireAuth, (req, res) => {
 });
 
 // GET /api/agents/:agent_id/grade
-app.get('/api/agents/:agent_id/grade', (req, res) => {
+app.get('/api/agents/:agent_id/grade', requireAuth, (req, res) => {
   const agentId = String(req.params.agent_id || '').trim();
   if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
   try {
@@ -5886,7 +5886,7 @@ app.get('/api/agents/:agent_id/grade', (req, res) => {
 });
 
 // GET /api/agents/:agent_id/profile
-app.get('/api/agents/:agent_id/profile', (req, res) => {
+app.get('/api/agents/:agent_id/profile', requireAuth, (req, res) => {
   const agentId = String(req.params.agent_id || '').trim();
   if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
   try {
@@ -5898,7 +5898,7 @@ app.get('/api/agents/:agent_id/profile', (req, res) => {
 });
 
 // GET /api/agents/grades
-app.get('/api/agents/grades', (req, res) => {
+app.get('/api/agents/grades', requireAuth, (req, res) => {
   try {
     const profiles = agentLearningProfile.getAllProfiles();
     const metrics = agentLearningProfile.getMetrics();
@@ -5929,7 +5929,7 @@ app.post('/api/system/restart', requireAuth, (req, res) => {
   res.json({ ok: true, halted: false, at: new Date().toISOString() });
 });
 
-app.get('/api/system/halt', (req, res) => {
+app.get('/api/system/halt', requireAuth, (req, res) => {
   res.json({ ok: true, halted: systemHalted });
 });
 
@@ -6037,12 +6037,12 @@ function addPromptTrace(raw) {
 // Inject trace capture into /api/chat pipeline
 const _origChatHandler = null; // hoisted in server.js chat route already — we hook via broadcaster
 
-app.get('/api/prompt-traces', (req, res) => {
+app.get('/api/prompt-traces', requireAuth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 100, 500);
   res.json({ ok: true, traces: promptTraceStore.slice(0, limit), total: promptTraceStore.length });
 });
 
-app.get('/api/prompt-trace/:id', (req, res) => {
+app.get('/api/prompt-trace/:id', requireAuth, (req, res) => {
   const trace = promptTraceStore.find(t => t.id === req.params.id);
   if (!trace) return res.status(404).json({ ok: false, error: 'Trace not found' });
   res.json({ ok: true, trace });
@@ -6053,7 +6053,7 @@ app.delete('/api/prompt-traces', requireAuth, (req, res) => {
   res.json({ ok: true, cleared: true });
 });
 
-app.get('/api/prompt-inspector/config', (req, res) => {
+app.get('/api/prompt-inspector/config', requireAuth, (req, res) => {
   res.json({ ok: true, config: promptInspectorConfig });
 });
 
