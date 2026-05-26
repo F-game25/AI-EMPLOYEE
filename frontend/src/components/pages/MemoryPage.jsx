@@ -426,6 +426,7 @@ function SemanticStore() {
 function MemoryHero() {
   const pendingReviewCount = useLearningStore((s) => s.pendingReviewCount)
   const [hero, setHero] = useState({ totalMemories: '—', pendingReviewN: 0, standingTopicsN: 0, vaultNotes: 0 })
+  const [memStats, setMemStats] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -434,14 +435,17 @@ function MemoryHero() {
       request('/api/memory/pending-review').catch(() => null),
       request('/api/topics').catch(() => null),
       request('/api/vault/notes').catch(() => null),
-    ]).then(([adapterRes, reviewRes, topicsRes, vaultRes]) => {
+      request('/api/memory/stats').catch(() => null),
+    ]).then(([adapterRes, reviewRes, topicsRes, vaultRes, statsRes]) => {
       if (cancelled) return
       const adapter = adapterRes.status === 'fulfilled' ? adapterRes.value : null
       const review  = reviewRes.status === 'fulfilled' ? reviewRes.value : null
       const topics  = topicsRes.status === 'fulfilled' ? topicsRes.value : null
       const vault   = vaultRes.status === 'fulfilled' ? vaultRes.value : null
+      const stats   = statsRes.status === 'fulfilled' ? statsRes.value : null
+      if (stats) setMemStats(stats)
       setHero({
-        totalMemories: adapter?.chroma?.count ?? '—',
+        totalMemories: stats?.total ?? adapter?.chroma?.count ?? '—',
         pendingReviewN: review?.stats?.by_status?.pending ?? (review?.entries?.length ?? 0),
         standingTopicsN: (topics?.topics || []).filter((t) => t.pinned).length,
         vaultNotes: (vault?.notes || vault || []).length || 0,
@@ -457,7 +461,7 @@ function MemoryHero() {
       <div className="mem-hero__tile">
         <div className="mem-hero__label">TOTAL MEMORIES</div>
         <div className="mem-hero__value" style={{ color: '#22d3ee' }}>{hero.totalMemories}</div>
-        <div className="mem-hero__sub">in vector store</div>
+        <div className="mem-hero__sub">{memStats?.vector_indexed != null ? `${memStats.vector_indexed} vector indexed` : 'in vector store'}</div>
       </div>
       <div className="mem-hero__tile">
         <div className="mem-hero__label">PENDING REVIEW</div>
@@ -474,6 +478,19 @@ function MemoryHero() {
         <div className="mem-hero__value" style={{ color: '#e5c76b' }}>{hero.vaultNotes}</div>
         <div className="mem-hero__sub">obsidian-style</div>
       </div>
+      {memStats?.types && Object.keys(memStats.types).length > 0 && (
+        <div className="mem-hero__tile mem-hero__tile--types">
+          <div className="mem-hero__label">BY TYPE</div>
+          <div className="mem-hero__types">
+            {Object.entries(memStats.types).map(([type, count]) => (
+              <div key={type} className="mem-hero__type-row">
+                <span className="mem-hero__type-name">{type}</span>
+                <span className="mem-hero__type-count">{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -163,6 +163,7 @@ export default function KnowledgePage() {
           <button className={`kp-tab ${activeView === 'topics' ? 'is-active' : ''}`} onClick={() => setActiveView('topics')}>STANDING TOPICS</button>
           <button className={`kp-tab ${activeView === 'review' ? 'is-active' : ''}`} onClick={() => setActiveView('review')}>REVIEW QUEUE</button>
           <button className={`kp-tab ${activeView === 'broken' ? 'is-active' : ''}`} onClick={() => setActiveView('broken')}>BROKEN LINKS</button>
+          <button className={`kp-tab ${activeView === 'rag' ? 'is-active' : ''}`} onClick={() => setActiveView('rag')}>RAG SOURCES</button>
         </div>
         <div className="kp-toolbar__right">
           <button className="kp-action" onClick={() => setWizardOpen(true)}>+ LEARN TOPIC</button>
@@ -293,6 +294,8 @@ export default function KnowledgePage() {
         <BrokenLinksView onCreateNote={(title) => { setActiveView('vault'); handleNewNote(title) }} />
       )}
 
+      {activeView === 'rag' && <RagSourcesView />}
+
       <LearnTopicWizard open={wizardOpen} onClose={() => { setWizardOpen(false); setRefreshKey(k => k + 1) }} />
     </div>
   )
@@ -305,6 +308,68 @@ function PendingReviewWrapper() {
   }, [])
   if (!Component) return <LoadingSkeleton variant="list" rows={5} />
   return <Component />
+}
+
+const CHROMA_BADGE = {
+  populated: { label: 'POPULATED', color: '#22c55e' },
+  empty:     { label: 'EMPTY',     color: '#f59e0b' },
+  offline:   { label: 'OFFLINE',   color: '#ef4444' },
+}
+
+function RagSourcesView() {
+  const [sources, setSources] = useState([])
+  const [total, setTotal] = useState(0)
+  const [chromaStatus, setChromaStatus] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.get('/api/rag/sources')
+      .then(d => {
+        setSources(d?.sources || [])
+        setTotal(d?.total ?? (d?.sources?.length ?? 0))
+        setChromaStatus(d?.chroma_status || null)
+      })
+      .catch(() => { setSources([]); setChromaStatus('offline') })
+      .finally(() => setLoading(false))
+  }, [])
+
+  const badge = CHROMA_BADGE[chromaStatus] || null
+
+  if (loading) return <LoadingSkeleton variant="list" rows={5} />
+
+  return (
+    <div className="kp-rag">
+      <div className="kp-rag-header">
+        <span className="kp-rag-title">RAG KNOWLEDGE SOURCES</span>
+        <span className="kp-rag-count">{total} indexed</span>
+        {badge && (
+          <span className="kp-rag-badge" style={{ color: badge.color, border: `1px solid ${badge.color}`, borderRadius: 4, padding: '2px 8px', fontSize: 11 }}>
+            {badge.label}
+          </span>
+        )}
+      </div>
+      {sources.length === 0 && (
+        <div className="kp-empty">
+          <div>No RAG sources indexed yet</div>
+          <div>Sources appear here once documents are ingested into the vector store.</div>
+        </div>
+      )}
+      <div className="kp-rag-list">
+        {sources.map(src => (
+          <div key={src.id} className="kp-rag-row">
+            <div className="kp-rag-row__title">{src.title || src.id}</div>
+            <div className="kp-rag-row__meta">
+              <span>{src.source}</span>
+              {src.tags?.length > 0 && src.tags.map(t => (
+                <span key={t} className="kp-chip" style={{ fontSize: 10, padding: '1px 6px' }}>{t}</span>
+              ))}
+              <span style={{ marginLeft: 'auto', opacity: 0.5, fontSize: 11 }}>{src.created_at?.slice(0, 10) || ''}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function BrokenLinksView({ onCreateNote }) {

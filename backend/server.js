@@ -345,13 +345,13 @@ app.use('/workspace', express.static(WORKSPACE_DIR, { index: false }));
 
 // Serve AI-generated artifacts (summaries, code files) at /api/artifacts/:filename
 const ARTIFACTS_DIR = path.join(__dirname, '..', 'state', 'artifacts');
-app.get('/api/artifacts/:filename', (req, res) => {
+app.get('/api/artifacts/:filename', requireAuth, (req, res) => {
   const fname = path.basename(req.params.filename); // prevent path traversal
   const fpath = path.join(ARTIFACTS_DIR, fname);
   if (!require('fs').existsSync(fpath)) return res.status(404).json({ error: 'Artifact not found' });
   res.download(fpath);
 });
-app.get('/api/artifacts', (_req, res) => {
+app.get('/api/artifacts', requireAuth, (_req, res) => {
   const fs = require('fs');
   if (!fs.existsSync(ARTIFACTS_DIR)) return res.json([]);
   const files = fs.readdirSync(ARTIFACTS_DIR)
@@ -6122,7 +6122,7 @@ app.post('/api/forge/task', requireAuth, (req, res) => {
 });
 
 // GET /api/forge/code-ai/models — list available coding AI models
-app.get('/api/forge/code-ai/models', async (req, res) => {
+app.get('/api/forge/code-ai/models', requireAuth, async (req, res) => {
   const { provider } = req.query || {};
   if (provider === 'ollama') {
     try {
@@ -6272,7 +6272,7 @@ app.post('/api/workspace/upload', requireAuth, (req, res) => {
 });
 
 // GET /api/workspace/files — list files in ~/.ai-employee/workspace/
-app.get('/api/workspace/files', (req, res) => {
+app.get('/api/workspace/files', requireAuth, (req, res) => {
   try {
     const walk = (dir, base) => {
       if (!fs.existsSync(dir)) return [];
@@ -6292,7 +6292,7 @@ app.get('/api/workspace/files', (req, res) => {
 });
 
 // DELETE /api/workspace/files/<relative-path> — delete one workspace file.
-app.delete(/^\/api\/workspace\/files\/(.+)$/, (req, res) => {
+app.delete(/^\/api\/workspace\/files\/(.+)$/, requireAuth, (req, res) => {
   try {
     const target = resolveWorkspaceFile(req.params[0]);
     if (!target) return res.status(400).json({ ok: false, error: 'Invalid file path' });
@@ -6307,7 +6307,7 @@ app.delete(/^\/api\/workspace\/files\/(.+)$/, (req, res) => {
 });
 
 // GET /api/errors  — error audit log (e2e + external callers)
-app.get('/api/errors', (req, res) => {
+app.get('/api/errors', requireAuth, (req, res) => {
   const limit = Math.min(200, parseInt((req.query || {}).limit) || 100);
   const errors = (_auditLog || [])
     .filter((e) => e.risk_score >= 0.6 || String(e.action || '').includes('fail') || String(e.action || '').includes('error'))
@@ -6349,7 +6349,7 @@ app.get('/api/identity', (req, res) => {
 
 // ── Settings Management ───────────────────────────────────────────────────────
 
-app.get('/api/system/settings/coding-ai', (req, res) => {
+app.get('/api/system/settings/coding-ai', requireAuth, (req, res) => {
   try {
     const envPath = path.join(AI_HOME, '.env');
     const settings = { provider: 'anthropic', model: 'claude-sonnet-4-6', has_openrouter_key: false };
@@ -6400,7 +6400,7 @@ app.post('/api/system/settings/coding-ai', requireAuth, (req, res) => {
 
 // ── Agent Catalog ─────────────────────────────────────────────────────────────
 
-app.get('/api/agents/list', (req, res) => {
+app.get('/api/agents/list', requireAuth, (req, res) => {
   try {
     const agents = getAgents().map(a => ({
       id: a.id,
@@ -7257,7 +7257,7 @@ setInterval(() => {
 
 // ── Task Progress API ─────────────────────────────────────────────────────────
 
-app.get('/api/tasks/:taskId', (req, res) => {
+app.get('/api/tasks/:taskId', requireAuth, (req, res) => {
   const { taskId } = req.params;
   const entry = taskStore.get(taskId);
   if (!entry) {
@@ -7300,7 +7300,7 @@ app.post('/api/tasks/:taskId/complete', requireAuth, (req, res) => {
 
 // ── Task History API ──────────────────────────────────────────────────────────
 
-app.get('/api/history', (req, res) => {
+app.get('/api/history', requireAuth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit || 50), 200);
   const filters = {
     status: req.query.status,
@@ -7311,16 +7311,16 @@ app.get('/api/history', (req, res) => {
   res.json({ tasks, total: taskHistory.cache.length });
 });
 
-app.get('/api/history/stats', (req, res) => {
+app.get('/api/history/stats', requireAuth, (req, res) => {
   res.json(taskHistory.getStats());
 });
 
-app.get('/api/history/agent/:agentId', (req, res) => {
+app.get('/api/history/agent/:agentId', requireAuth, (req, res) => {
   const { agentId } = req.params;
   res.json(taskHistory.getAgentStats(agentId));
 });
 
-app.get('/api/history/:taskId', (req, res) => {
+app.get('/api/history/:taskId', requireAuth, (req, res) => {
   const { taskId } = req.params;
   const task = taskHistory.getTask(taskId);
   if (!task) {
@@ -7331,7 +7331,7 @@ app.get('/api/history/:taskId', (req, res) => {
 
 // ── Error Recovery API ────────────────────────────────────────────────────────
 
-app.get('/api/errors/recent', (req, res) => {
+app.get('/api/errors/recent', requireAuth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit || 10), 50);
   res.json({ errors: errorRecovery.getRecentErrors(limit) });
 });

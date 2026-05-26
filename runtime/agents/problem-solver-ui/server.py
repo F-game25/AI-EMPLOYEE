@@ -27774,7 +27774,38 @@ async def system_startup_timings():
     highlighted amber, ``> 5000`` red — a visible budget gate.
     """
     timings = list(_STARTUP_TIMINGS) if "_STARTUP_TIMINGS" in globals() else []
-    return JSONResponse({"timings": timings})
+    vi = sys.version_info
+    return JSONResponse({
+        "timings": timings,
+        "python_version": f"{vi.major}.{vi.minor}.{vi.micro}",
+        "startup_mode": os.environ.get("EVOLUTION_MODE", "unset"),
+        "modules_loaded": len(sys.modules),
+    })
+
+
+@app.get("/api/boot/metrics")
+def get_boot_metrics():
+    """Return boot metrics from state/boot_metrics.json or computed uptime fallback."""
+    boot_file = STATE_DIR / "boot_metrics.json"
+    if boot_file.exists():
+        try:
+            import json as _json
+            data = _json.loads(boot_file.read_text())
+            return JSONResponse({"source": "file", "metrics": data})
+        except Exception:
+            pass
+    uptime_s = time.time() - _startup_time
+    return JSONResponse({
+        "source": "computed",
+        "metrics": {
+            "uptime_s": round(uptime_s, 3),
+            "uptime_ms": int(uptime_s * 1000),
+            "started_at": _startup_time,
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "startup_mode": os.environ.get("EVOLUTION_MODE", "unset"),
+            "modules_loaded": len(sys.modules),
+        },
+    })
 
 
 # ── Autonomous Research API ──────────────────────────────────────────────
@@ -28306,14 +28337,22 @@ async def set_budget_endpoint(body: dict, _rbac=Depends(require_permission("admi
 
 @app.on_event("startup")
 async def _embed_knowledge_store_entries():
-    """Embed knowledge_store.json entries into vector store at startup (idempotent)."""
-    try:
-        from core.knowledge_store import get_knowledge_store
-        n = get_knowledge_store().embed_entries_to_vector_store()
-        if n:
-            logger.info(f"✅ Embedded {n} knowledge store entries into vector store")
-    except Exception as e:
-        logger.warning(f"Knowledge store embedding skipped: {e}")
+    """Embed knowledge_store.json entries into vector store at startup (idempotent).
+
+    Runs in a thread-pool executor so it never blocks the event loop or delays
+    server readiness. Embedding can be slow for large knowledge stores.
+    """
+    def _do_embed():
+        try:
+            from core.knowledge_store import get_knowledge_store
+            n = get_knowledge_store().embed_entries_to_vector_store()
+            if n:
+                logger.info(f"✅ Embedded {n} knowledge store entries into vector store")
+        except Exception as e:
+            logger.warning(f"Knowledge store embedding skipped: {e}")
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _do_embed)
 
 
 @app.on_event("startup")

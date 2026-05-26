@@ -329,8 +329,20 @@ export const AgentsPage = () => {
   const [page,          setPage]          = useState(0)
   const [manifest,      setManifest]      = useState(null)
   const [forgeAgents,   setForgeAgents]   = useState([])
+  const [liveActiveCount, setLiveActiveCount] = useState(null)
+  const [liveTotalCount,  setLiveTotalCount]  = useState(null)
 
   useEffect(() => {
+    api.get('/api/agents/active')
+      .then(d => {
+        if (d && typeof d.count === 'number') setLiveActiveCount(d.count)
+        if (d && typeof d.total === 'number') setLiveTotalCount(d.total)
+        // Merge any live agent data into the agent list
+        if (Array.isArray(d?.agents) && d.agents.length > 0) {
+          setAgents(prev => mergeAgents(prev, d.agents))
+        }
+      })
+      .catch(() => {})
     api.get('/api/system/manifest')
       .then(data => data && setManifest(data))
       .catch(() => {})
@@ -377,9 +389,9 @@ export const AgentsPage = () => {
       agentContracts[String(selectedAgent.name || '').toLowerCase().replace(/\s+/g, '-')]
     : null
 
-  // KPI computations
-  const totalAgents  = agents.length
-  const activeCount  = agents.filter(a => a.status === 'active' || a.status === 'running').length
+  // KPI computations — prefer live endpoint counts when available
+  const totalAgents  = liveTotalCount ?? agents.length
+  const activeCount  = liveActiveCount ?? agents.filter(a => a.status === 'active' || a.status === 'running').length
   const avgHealth    = Math.round(agents.reduce((s, a) => s + (a.health ?? 0), 0) / Math.max(1, agents.length))
   const tasksDone    = agents.reduce((s, a) => s + (a.tasks_completed ?? a.tasksCompleted ?? 0), 0)
 

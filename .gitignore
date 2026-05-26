@@ -26,6 +26,9 @@ models/
 !runtime/neural_brain/models/
 !runtime/neural_brain/models/**
 runtime/neural_brain/models/**/__pycache__/
+# and the frontend pages/models/ sub-directory is source code, not model weights
+!frontend/src/components/pages/models/
+!frontend/src/components/pages/models/**
 venv/
 .venv/
 

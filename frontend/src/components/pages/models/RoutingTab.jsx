@@ -280,10 +280,54 @@ function TaskRoutingSection({ registryData }) {
   )
 }
 
+function LiveRoutingTable({ liveRouting }) {
+  if (!liveRouting) return null
+  const { tasks = {}, _default, source } = liveRouting
+  const entries = Object.entries(tasks)
+  if (entries.length === 0 && !_default) return null
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div className="mp-routing-header">
+        <div className="mp-section-label" style={{ margin: 0 }}>LIVE ROUTING TABLE</div>
+        {source && <span className="mp-source-label">{source.toUpperCase()}</span>}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="mp-routing-table">
+          <thead>
+            <tr>
+              <th>TASK TYPE</th>
+              <th>PROVIDER</th>
+              <th>MODEL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {_default && (
+              <tr key="_default">
+                <td><span className="mp-cell-agent">default</span></td>
+                <td>{_default.provider || '—'}</td>
+                <td>{_default.model || '—'}</td>
+              </tr>
+            )}
+            {entries.map(([taskType, cfg]) => (
+              <tr key={taskType}>
+                <td><span className="mp-cell-agent">{taskType}</span></td>
+                <td>{cfg?.provider || '—'}</td>
+                <td>{cfg?.model || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function RoutingTab() {
   const [agentRules, setAgentRules] = useState([])
   const [registryData, setRegistryData] = useState(null)
   const [rulesSource, setRulesSource] = useState('empty')
+  const [liveRouting, setLiveRouting] = useState(null)
 
   useEffect(() => {
     api.get('/api/models/registry')
@@ -296,6 +340,9 @@ function RoutingTab() {
           setRulesSource('backend')
         }
       })
+      .catch(() => {})
+    api.get('/api/models/routing')
+      .then(d => { if (d && typeof d === 'object') setLiveRouting(d) })
       .catch(() => {})
   }, [])
 
@@ -323,6 +370,7 @@ function RoutingTab() {
 
   return (
     <div>
+      <LiveRoutingTable liveRouting={liveRouting} />
       <SubsystemsRouting />
 
       <TaskRoutingSection registryData={registryData} />

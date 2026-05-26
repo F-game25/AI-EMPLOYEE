@@ -192,6 +192,10 @@ class KnowledgeStore:
             if not text:
                 continue
             try:
+                # overwrite=False → no-op if key already exists; detect by
+                # checking presence before calling store.
+                if vs.retrieve(key) is not None:
+                    continue  # already indexed
                 vs.store(
                     key,
                     text,
