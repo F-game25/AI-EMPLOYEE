@@ -6211,7 +6211,7 @@ function resolveWorkspaceFile(relPath) {
 }
 
 // POST /api/workspace/upload — upload file(s) into ~/.ai-employee/workspace/uploads
-app.post('/api/workspace/upload', (req, res) => {
+app.post('/api/workspace/upload', requireAuth, (req, res) => {
   workspaceUpload.fields([{ name: 'files', maxCount: 100 }, { name: 'file', maxCount: 100 }])(req, res, err => {
     if (err) {
       const tooLarge = err.code === 'LIMIT_FILE_SIZE';
