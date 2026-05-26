@@ -6,12 +6,21 @@ Tests Phase 4 Part 1-3 implementation:
 - Guardrails: spawn limits, trust tiers, escalation
 """
 import asyncio
+import uuid
 import pytest
 import sys
 from pathlib import Path
 
 # Add runtime to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "runtime"))
+
+# Unique suffix per test session — prevents SQLite state pollution across runs
+_RUN_ID = uuid.uuid4().hex[:8]
+
+
+def _tid(n: int) -> str:
+    """Generate a unique tenant ID for this test run."""
+    return f"test-guard-{n}-{_RUN_ID}"
 
 
 class TestCoherence:
@@ -189,8 +198,11 @@ class TestExecutive:
         decision = await plan_next(tenant_id)
         # Decision may be None if LLM fails, but should not crash
         if decision:
-            assert decision["tenant_id"] == tenant_id
-            assert "decision_type" in decision
+            # decision may be a dataclass/namedtuple or dict
+            tid = decision.get("tenant_id") if isinstance(decision, dict) else getattr(decision, "tenant_id", None)
+            dt = decision.get("decision_type") if isinstance(decision, dict) else getattr(decision, "decision_type", None)
+            assert tid == tenant_id
+            assert dt is not None
 
 
 class TestGuardrails:
@@ -201,7 +213,7 @@ class TestGuardrails:
         """Test spawn limit acquisition and release."""
         from infra.cognitive.guardrails import acquire, release
 
-        tenant_id = "test-guard-1"
+        tenant_id = _tid(1)
         agent_id = "test-agent"
 
         # Acquire quota
@@ -216,7 +228,7 @@ class TestGuardrails:
         """Test spawn limit enforcement."""
         from infra.cognitive.guardrails import acquire, reset_agent
 
-        tenant_id = "test-guard-2"
+        tenant_id = _tid(2)
         agent_id = "test-agent"
 
         # Fill up agent quota (max 10)
@@ -237,7 +249,7 @@ class TestGuardrails:
         from infra.cognitive.guardrails import get_tier, set_tier, list_tiers
         from infra.cognitive.guardrails.schema import TrustTier
 
-        tenant_id = "test-guard-3"
+        tenant_id = _tid(3)
         agent_id = "test-agent"
 
         # Default tier is autonomous
@@ -254,7 +266,7 @@ class TestGuardrails:
         from infra.cognitive.guardrails import should_escalate, set_tier
         from infra.cognitive.guardrails.schema import TrustTier
 
-        tenant_id = "test-guard-4"
+        tenant_id = _tid(4)
         agent_id = "test-agent"
 
         # Supervised agent: all actions escalate
@@ -288,7 +300,7 @@ class TestGuardrails:
             get_suppressions,
         )
 
-        tenant_id = "test-guard-5"
+        tenant_id = _tid(5)
         channel = "test-channel"
 
         # Single event: not a storm
@@ -308,7 +320,7 @@ class TestGuardrails:
         from infra.cognitive.guardrails import check_budget, enforce
         from infra.cognitive.executive import record_usage
 
-        tenant_id = "test-guard-6"
+        tenant_id = _tid(6)
 
         # Fresh budget: OK
         assert enforce(tenant_id)
@@ -387,31 +399,28 @@ class TestDatabaseIntegrity:
         """Test that all tables are created correctly."""
         from infra.cognitive.db import cognitive_conn
 
-        with cognitive_conn() as c:
-            # Check objectives table
-            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='objectives'")
-            assert c.fetchone() is not None
-
-            # Check contradictions table
-            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='contradictions'")
-            assert c.fetchone() is not None
-
-            # Check initiatives table
-            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='initiatives'")
-            assert c.fetchone() is not None
-
-            # Check budget_usage table
-            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='budget_usage'")
-            assert c.fetchone() is not None
+        conn = cognitive_conn()
+        try:
+            for table in ("objectives", "contradictions", "initiatives", "budget_usage"):
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+                ).fetchone()
+                assert row is not None, f"Table '{table}' not found in cognitive DB"
+        finally:
+            conn.close()
 
     def test_database_indexes(self):
         """Test that expected indexes exist."""
         from infra.cognitive.db import cognitive_conn
 
-        with cognitive_conn() as c:
-            # Check for tenant-status index
-            c.execute("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE '%idx_obj_tenant%'")
-            assert c.fetchone() is not None
+        conn = cognitive_conn()
+        try:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE '%idx_obj_tenant%'"
+            ).fetchone()
+            assert row is not None, "Expected index idx_obj_tenant* not found"
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

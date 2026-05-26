@@ -25,6 +25,8 @@ class CognitiveInfrastructure:
         self._executive = None
         self._guardrails = None
         self._loop_detector = None
+        self._exec_mgr = None
+        self._workload = None
 
     async def initialize(self) -> None:
         """Initialize all cognitive subsystems.
