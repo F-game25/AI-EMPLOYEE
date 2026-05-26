@@ -7,10 +7,18 @@ Implements three automated and measurable flows:
 """
 from __future__ import annotations
 
+import json
+import logging
+import os
+import re
 import time
+import urllib.request
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _CONTENT_ROI_MULTIPLIER = 0.03
 _LEAD_CONVERSION_MULTIPLIER = 0.08
@@ -515,6 +523,274 @@ class MoneyMode:
             }
         except Exception as exc:
             return {"status": "error", "error": str(exc)}
+
+    # ─────────────────────────── real artifact pipelines ──────────────────────
+
+    @staticmethod
+    def _state_dir() -> Path:
+        base = os.environ.get(
+            "STATE_DIR",
+            os.path.join(os.path.expanduser("~/.ai-employee"), "state"),
+        )
+        return Path(base)
+
+    @staticmethod
+    def _atomic_write(path: Path, data: str) -> None:
+        """Write *data* to *path* atomically via a .tmp sibling."""
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(data, encoding="utf-8")
+        tmp.rename(path)
+
+    @staticmethod
+    def _load_json(path: Path, default: Any) -> Any:
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return default
+
+    def _save_json(self, path: Path, obj: Any) -> None:
+        self._atomic_write(path, json.dumps(obj, indent=2, ensure_ascii=False))
+
+    @staticmethod
+    def _llm_generate(prompt: str, system: str) -> str | None:
+        """Call engine.api.generate; return None if unavailable."""
+        try:
+            from engine.api import generate
+            return generate(prompt=prompt, system=system, timeout=60)
+        except Exception as exc:
+            logger.warning("money_mode: LLM unavailable — %s", exc)
+            return None
+
+    # ── Pipeline 1: content_publish_track ─────────────────────────────────────
+
+    def content_publish_track(
+        self,
+        topic: str,
+        platform: str = "blog",
+        content_type: str = "article",
+    ) -> dict:
+        """Generate content, save artifact, and track in content_log.json.
+
+        LLM is called to produce the body. Falls back to a template when
+        the LLM is unavailable so the caller always gets a usable artifact.
+        """
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        entry_id = str(uuid.uuid4())[:8]
+        safe_topic = re.sub(r"[^\w\-]", "_", topic[:30])
+        state = self._state_dir()
+        content_dir = state / "content"
+        content_dir.mkdir(parents=True, exist_ok=True)
+
+        file_path = content_dir / f"{ts}_{safe_topic}.md"
+        log_path = state / "content_log.json"
+
+        # ── Generate via LLM ──────────────────────────────────────────────────
+        system_prompt = (
+            f"You are a professional {content_type} writer for {platform}. "
+            "Produce well-structured, engaging content. Use markdown."
+        )
+        user_prompt = (
+            f"Write a detailed {content_type} about: {topic}\n\n"
+            f"Target platform: {platform}\n"
+            "Include: introduction, key points, actionable takeaways, conclusion."
+        )
+        generated = self._llm_generate(user_prompt, system_prompt)
+        if generated:
+            body = generated
+            status = "draft"
+        else:
+            # Placeholder template when LLM is offline
+            body = (
+                f"# {topic}\n\n"
+                f"**Platform:** {platform} | **Type:** {content_type}\n\n"
+                "## Introduction\n\n[Replace with real introduction]\n\n"
+                "## Key Points\n\n- Point 1\n- Point 2\n- Point 3\n\n"
+                "## Conclusion\n\n[Replace with real conclusion]\n"
+            )
+            status = "template"
+
+        word_count = len(body.split())
+        self._atomic_write(file_path, body)
+
+        # ── Update log ────────────────────────────────────────────────────────
+        log: list[dict] = self._load_json(log_path, [])
+        log_entry = {
+            "id": entry_id,
+            "topic": topic,
+            "platform": platform,
+            "content_type": content_type,
+            "word_count": word_count,
+            "status": status,
+            "created_at": ts,
+            "file_path": str(file_path),
+        }
+        log.append(log_entry)
+        self._save_json(log_path, log)
+
+        logger.info("content_publish_track: saved %s (%d words, %s)", file_path, word_count, status)
+        return {
+            "ok": True,
+            "artifact": str(file_path),
+            "word_count": word_count,
+            "status": status,
+            "log_entry": log_entry,
+        }
+
+    # ── Pipeline 2: data_scrape_filter_store ──────────────────────────────────
+
+    def data_scrape_filter_store(
+        self,
+        url: str,
+        topic: str = "",
+    ) -> dict:
+        """Fetch URL, extract text, deduplicate, and store in knowledge_store.json.
+
+        Respects a simple deduplication check against scraped_sources.json so
+        the same URL is never stored twice.
+        """
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        state = self._state_dir()
+        sources_path = state / "scraped_sources.json"
+        knowledge_path = state / "knowledge_store.json"
+
+        # ── Deduplication check ───────────────────────────────────────────────
+        sources: list[dict] = self._load_json(sources_path, [])
+        already_scraped = any(s.get("url") == url for s in sources)
+        if already_scraped:
+            return {"ok": True, "url": url, "words_extracted": 0, "stored": False, "duplicate": True}
+
+        # ── Fetch ─────────────────────────────────────────────────────────────
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "AIEmployee-Scraper/1.0 (research; contact: admin@example.com)"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw_html = resp.read().decode("utf-8", errors="replace")
+        except Exception as exc:
+            logger.warning("data_scrape_filter_store: fetch failed for %s — %s", url, exc)
+            return {"ok": False, "url": url, "error": str(exc), "words_extracted": 0, "stored": False, "duplicate": False}
+
+        # ── Extract text — strip HTML tags ────────────────────────────────────
+        text = re.sub(r"<[^>]+>", " ", raw_html)
+        text = re.sub(r"&[a-z]+;", " ", text)          # HTML entities
+        text = re.sub(r"\s{2,}", " ", text).strip()
+
+        # Optional keyword filter
+        if topic:
+            lines = [ln for ln in text.splitlines() if topic.lower() in ln.lower()]
+            text = "\n".join(lines) if lines else text
+
+        words_extracted = len(text.split())
+
+        # ── Store in knowledge_store.json ─────────────────────────────────────
+        knowledge: dict = self._load_json(knowledge_path, {"entries": []})
+        if not isinstance(knowledge, dict):
+            knowledge = {"entries": []}
+        if "entries" not in knowledge:
+            knowledge["entries"] = []
+
+        knowledge["entries"].append({
+            "id": str(uuid.uuid4())[:8],
+            "source": url,
+            "topic": topic,
+            "content": text[:5000],          # cap per entry to keep file manageable
+            "word_count": words_extracted,
+            "scraped_at": ts,
+        })
+        self._save_json(knowledge_path, knowledge)
+
+        # ── Update sources registry ───────────────────────────────────────────
+        sources.append({"url": url, "scraped_at": ts, "word_count": words_extracted, "stored": True})
+        self._save_json(sources_path, sources)
+
+        logger.info("data_scrape_filter_store: stored %d words from %s", words_extracted, url)
+        return {
+            "ok": True,
+            "url": url,
+            "words_extracted": words_extracted,
+            "stored": True,
+            "duplicate": False,
+        }
+
+    # ── Pipeline 3: outreach_response_conversion ──────────────────────────────
+
+    def outreach_response_conversion(
+        self,
+        template: str,
+        recipient: dict | None = None,
+        context: str = "",
+    ) -> dict:
+        """Personalise an outreach template and save a draft — never sends.
+
+        The HITL gate check belongs at the API/route layer before calling this
+        method. This pipeline only produces a local draft artifact so that a
+        human operator can review it before any real send action is taken.
+
+        See runtime/core/hitl_gate.py — callers that want gated approval
+        should call ``hitl_gate.require_approval()`` with action_type
+        ``"send_outreach"`` before invoking this method.
+        """
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        entry_id = str(uuid.uuid4())[:8]
+        recipient = recipient or {}
+        recipient_name = recipient.get("name", "Recipient")
+        state = self._state_dir()
+        outreach_dir = state / "outreach"
+        outreach_dir.mkdir(parents=True, exist_ok=True)
+
+        file_path = outreach_dir / f"{ts}_{entry_id}.md"
+        log_path = state / "outreach_log.json"
+
+        # ── Personalise via LLM ───────────────────────────────────────────────
+        system_prompt = (
+            "You are a professional outreach specialist. "
+            "Personalise the following message template for the given recipient. "
+            "Keep it concise, warm, and relevant. Output only the final message text."
+        )
+        user_prompt = (
+            f"Template:\n{template}\n\n"
+            f"Recipient: {recipient_name}\n"
+            f"Additional context: {context or 'none'}\n\n"
+            "Personalise the template for this recipient."
+        )
+        generated = self._llm_generate(user_prompt, system_prompt)
+        personalised = generated if generated else (
+            template.replace("{name}", recipient_name).replace("{{name}}", recipient_name)
+        )
+
+        body = (
+            f"# Outreach Draft — {recipient_name}\n\n"
+            f"**Created:** {ts}  \n"
+            f"**Status:** DRAFT — pending human approval\n\n"
+            "---\n\n"
+            f"{personalised}\n"
+        )
+        self._atomic_write(file_path, body)
+
+        # ── Update log ────────────────────────────────────────────────────────
+        log: list[dict] = self._load_json(log_path, [])
+        log_entry = {
+            "id": entry_id,
+            "recipient_name": recipient_name,
+            "recipient_email": recipient.get("email", ""),
+            "status": "draft",
+            "created_at": ts,
+            "file_path": str(file_path),
+        }
+        log.append(log_entry)
+        self._save_json(log_path, log)
+
+        logger.info("outreach_response_conversion: draft saved %s for %s", file_path, recipient_name)
+        return {
+            "ok": True,
+            "status": "draft",
+            "file_path": str(file_path),
+            "log_entry": log_entry,
+            "message": "Draft saved — human approval required before sending",
+        }
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
 

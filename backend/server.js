@@ -3220,6 +3220,127 @@ app.get('/api/memory/tree', requireAuth, (req, res) => {
   res.json(subsystems.getMemoryTree());
 });
 
+// ── Phase 4G Observability Endpoints ─────────────────────────────────────────
+
+app.get('/api/memory/stats', requireAuth, async (req, res) => {
+  const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
+  const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
+  const base = {
+    types: {
+      episodic:   { count: 0, last_write: null },
+      semantic:   { count: 0 },
+      procedural: { count: 0 },
+    },
+    total: 0,
+    chroma_collections: {},
+    knowledge_store_entries: ksEntries.length,
+    source: 'node-fallback',
+  };
+  try {
+    const pyData = await requestPythonJSON('/api/memory', 'GET', null, { timeoutMs: 3000 });
+    if (pyData && pyData._http_status >= 200 && pyData._http_status < 300) {
+      const episodicCount = pyData.total_clients || pyData.episodic_count || 0;
+      const semanticCount = pyData.semantic_count || ksEntries.length;
+      const proceduralCount = pyData.procedural_count || 0;
+      return res.json({
+        types: {
+          episodic:   { count: episodicCount, last_write: pyData.last_write || null },
+          semantic:   { count: semanticCount },
+          procedural: { count: proceduralCount },
+        },
+        total: episodicCount + semanticCount + proceduralCount,
+        chroma_collections: pyData.chroma_collections || {},
+        knowledge_store_entries: ksEntries.length,
+        source: 'node+python',
+      });
+    }
+  } catch (_) { /* fall through to node-fallback */ }
+  base.total = ksEntries.length;
+  return res.json(base);
+});
+
+app.get('/api/agents/active', requireAuth, (req, res) => {
+  const all = getAgents();
+  const active = all
+    .filter((a) => a.state === 'running' || a.state === 'busy')
+    .map((a) => ({ id: a.id, name: a.name, state: a.state, current_task: a.current_task || null }));
+  return res.json({ active, count: active.length, total: all.length });
+});
+
+app.get('/api/execution/queue', requireAuth, async (req, res) => {
+  const nodeItems = Array.isArray(_forgeQueue) ? _forgeQueue : [];
+  const count = (status) => nodeItems.filter((i) => i.status === status).length;
+  const base = {
+    items: nodeItems,
+    total: nodeItems.length,
+    pending:   count('pending'),
+    running:   count('running'),
+    completed: count('completed'),
+  };
+  try {
+    const pyData = await requestPythonJSON('/api/task/status', 'GET', null, { timeoutMs: 2000 });
+    if (pyData && pyData._http_status >= 200 && pyData._http_status < 300) {
+      const pyItems = Array.isArray(pyData.tasks) ? pyData.tasks : (Array.isArray(pyData.items) ? pyData.items : []);
+      const existingIds = new Set(nodeItems.map((i) => String(i.id)));
+      const merged = [...nodeItems, ...pyItems.filter((i) => !existingIds.has(String(i.id)))];
+      const mc = (status) => merged.filter((i) => i.status === status).length;
+      return res.json({
+        items: merged,
+        total: merged.length,
+        pending:   mc('pending'),
+        running:   mc('running'),
+        completed: mc('completed'),
+      });
+    }
+  } catch (_) { /* fall through to node-only */ }
+  return res.json(base);
+});
+
+app.get('/api/models/routing', requireAuth, (req, res) => {
+  const DEFAULT_ROUTING = {
+    coding:    { provider: 'nvidia_nim', model: 'qwen2.5-coder-32b',          fallback: 'claude-sonnet-4-6' },
+    reasoning: { provider: 'nvidia_nim', model: 'llama-3.3-nemotron-49b',     fallback: 'claude-opus-4-7' },
+    general:   { provider: 'ollama',     model: 'llama3.2',                   fallback: 'claude-haiku-4-5' },
+    analytics: { provider: 'anthropic',  model: 'claude-opus-4-7' },
+    creative:  { provider: 'ollama',     model: 'gemma4',                     fallback: 'claude-sonnet-4-6' },
+    bulk:      { provider: 'nvidia_nim', model: 'llama-3.1-8b',               fallback: 'llama3.2' },
+  };
+  const configPath = path.join(os.homedir(), '.ai-employee', 'model-routing.json');
+  const fileRouting = readJsonSafe(configPath, null);
+  if (fileRouting) {
+    return res.json({ routing: fileRouting, source: 'file', config_path: configPath });
+  }
+  return res.json({ routing: DEFAULT_ROUTING, source: 'default', config_path: configPath });
+});
+
+app.get('/api/rag/sources', requireAuth, async (req, res) => {
+  const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
+  const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
+  const nodeSourcesMap = new Map(ksEntries.map((e) => [String(e.id || e.title || Math.random()), e]));
+  let chromaStatus = 'empty';
+  try {
+    const pyData = await requestPythonJSON('/api/knowledge/sources', 'GET', null, { timeoutMs: 2000 });
+    if (pyData && pyData._http_status >= 200 && pyData._http_status < 300) {
+      const pySources = Array.isArray(pyData.sources) ? pyData.sources : [];
+      chromaStatus = pySources.length > 0 ? 'populated' : 'empty';
+      for (const s of pySources) {
+        const key = String(s.id || s.title || '');
+        if (key && !nodeSourcesMap.has(key)) nodeSourcesMap.set(key, s);
+      }
+    }
+  } catch (_) { chromaStatus = 'offline'; }
+  const sources = [...nodeSourcesMap.values()].map((e) => ({
+    id:         e.id         || null,
+    title:      e.title      || e.source || 'Untitled',
+    source:     e.source     || null,
+    tags:       e.tags       || [],
+    created_at: e.created_at || null,
+  }));
+  return res.json({ sources, total: sources.length, chroma_status: chromaStatus, embedding_model: 'all-MiniLM-L6-v2' });
+});
+
+// ── End Phase 4G ──────────────────────────────────────────────────────────────
+
 app.get('/api/system/manifest', (req, res) => {
   res.json(loadSystemManifest());
 });
