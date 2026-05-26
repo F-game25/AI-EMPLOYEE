@@ -87,6 +87,118 @@
           "source": "auto-research"
         },
         "stored_at": "2026-05-20T11:13:01Z"
+      },
+      {
+        "content": {
+          "goal": "vector databases",
+          "gap": "vector databases",
+          "findings": [
+            {
+              "url": "https://en.wikipedia.org/wiki/Vector_database",
+              "title": "Vector database",
+              "summary": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity ",
+              "source": "Wikipedia",
+              "fetched_at": 1779297190.723329,
+              "trust": 0.9,
+              "verification": {
+                "claim": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity",
+                "confidence": 0.7,
+                "decision": "auto_save",
+                "cross_references": [],
+                "contradictions": [],
+                "source_count": 1,
+                "source_trust_avg": 0.9,
+                "reasoning": "1 unique source(s) \u00b7 trust avg 0.90 \u00b7 0 supporting memory match(es) \u00b7 0 contradiction(s)"
+              }
+            }
+          ],
+          "source": "auto-research"
+        },
+        "stored_at": "2026-05-20T17:13:22Z"
+      },
+      {
+        "content": {
+          "goal": "vector databases",
+          "gap": "vector databases",
+          "findings": [
+            {
+              "url": "https://en.wikipedia.org/wiki/Vector_database",
+              "title": "Vector database",
+              "summary": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity ",
+              "source": "Wikipedia",
+              "fetched_at": 1779318825.949875,
+              "trust": 0.9,
+              "verification": {
+                "claim": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity",
+                "confidence": 0.7,
+                "decision": "auto_save",
+                "cross_references": [],
+                "contradictions": [],
+                "source_count": 1,
+                "source_trust_avg": 0.9,
+                "reasoning": "1 unique source(s) \u00b7 trust avg 0.90 \u00b7 0 supporting memory match(es) \u00b7 0 contradiction(s)"
+              }
+            }
+          ],
+          "source": "auto-research"
+        },
+        "stored_at": "2026-05-20T23:13:59Z"
+      },
+      {
+        "content": {
+          "goal": "vector databases",
+          "gap": "vector databases",
+          "findings": [
+            {
+              "url": "https://en.wikipedia.org/wiki/Vector_database",
+              "title": "Vector database",
+              "summary": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity ",
+              "source": "Wikipedia",
+              "fetched_at": 1779359634.3800893,
+              "trust": 0.9,
+              "verification": {
+                "claim": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity",
+                "confidence": 0.7,
+                "decision": "auto_save",
+                "cross_references": [],
+                "contradictions": [],
+                "source_count": 1,
+                "source_trust_avg": 0.9,
+                "reasoning": "1 unique source(s) \u00b7 trust avg 0.90 \u00b7 0 supporting memory match(es) \u00b7 0 contradiction(s)"
+              }
+            }
+          ],
+          "source": "auto-research"
+        },
+        "stored_at": "2026-05-21T10:34:06Z"
+      },
+      {
+        "content": {
+          "goal": "vector databases",
+          "gap": "vector databases",
+          "findings": [
+            {
+              "url": "https://en.wikipedia.org/wiki/Vector_database",
+              "title": "Vector database",
+              "summary": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity ",
+              "source": "Wikipedia",
+              "fetched_at": 1779381284.9454873,
+              "trust": 0.9,
+              "verification": {
+                "claim": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity",
+                "confidence": 0.7,
+                "decision": "auto_save",
+                "cross_references": [],
+                "contradictions": [],
+                "source_count": 1,
+                "source_trust_avg": 0.9,
+                "reasoning": "1 unique source(s) \u00b7 trust avg 0.90 \u00b7 0 supporting memory match(es) \u00b7 0 contradiction(s)"
+              }
+            }
+          ],
+          "source": "auto-research"
+        },
+        "stored_at": "2026-05-21T16:34:54Z"
       }
     ],
     "nexus": [
@@ -117,6 +229,108 @@
       {
         "content": "[txt] notes.txt: NEXUS OS Architecture Notes\n\nThe system uses a 10-phase cognition pipeline. Memory is organized into 5 lanes: semantic, knowledge graph, SQL, episodic, and procedural. The AscendForge module provides visual AI coding.",
         "stored_at": "2026-05-20T02:28:35Z"
+      }
+    ],
+    "task_outcomes": [
+      {
+        "content": {
+          "task_id": "6297ff7e-t1",
+          "goal": "write a hello world python file",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T21:51:59Z"
+      },
+      {
+        "content": {
+          "task_id": "6297ff7e-t2",
+          "goal": "write a hello world python file",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T21:51:59Z"
+      },
+      {
+        "content": {
+          "task_id": "cb7faf0e-t1",
+          "goal": "write a hello world python file",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T21:53:37Z"
+      },
+      {
+        "content": {
+          "task_id": "cb7faf0e-t2",
+          "goal": "write a hello world python file",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T21:53:38Z"
+      },
+      {
+        "content": {
+          "task_id": "f84860f6-t1",
+          "goal": "write a python function that returns factorial of n",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T23:30:11Z"
+      },
+      {
+        "content": {
+          "task_id": "f84860f6-t2",
+          "goal": "write a python function that returns factorial of n",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T23:30:11Z"
+      },
+      {
+        "content": {
+          "task_id": "7dbaf009-t1",
+          "goal": "write a python function that returns the factorial of n",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T23:33:54Z"
+      },
+      {
+        "content": {
+          "task_id": "7dbaf009-t2",
+          "goal": "write a python function that returns the factorial of n",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T23:33:55Z"
+      },
+      {
+        "content": {
+          "task_id": "62a3b8cf-t1",
+          "goal": "write a haiku about local AI",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T23:36:01Z"
+      },
+      {
+        "content": {
+          "task_id": "62a3b8cf-t2",
+          "goal": "write a haiku about local AI",
+          "skill": "ceo-briefing",
+          "status": "success",
+          "reward": 1.0
+        },
+        "stored_at": "2026-05-20T23:36:01Z"
       }
     ]
   },
@@ -281,6 +495,232 @@
         "source": "auto-research"
       },
       "stored_at": "2026-05-20T11:13:01Z"
+    },
+    {
+      "topic": "vector databases",
+      "content": {
+        "goal": "vector databases",
+        "gap": "vector databases",
+        "findings": [
+          {
+            "url": "https://en.wikipedia.org/wiki/Vector_database",
+            "title": "Vector database",
+            "summary": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity ",
+            "source": "Wikipedia",
+            "fetched_at": 1779297190.723329,
+            "trust": 0.9,
+            "verification": {
+              "claim": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity",
+              "confidence": 0.7,
+              "decision": "auto_save",
+              "cross_references": [],
+              "contradictions": [],
+              "source_count": 1,
+              "source_trust_avg": 0.9,
+              "reasoning": "1 unique source(s) \u00b7 trust avg 0.90 \u00b7 0 supporting memory match(es) \u00b7 0 contradiction(s)"
+            }
+          }
+        ],
+        "source": "auto-research"
+      },
+      "stored_at": "2026-05-20T17:13:22Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "6297ff7e-t1",
+        "goal": "write a hello world python file",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T21:51:59Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "6297ff7e-t2",
+        "goal": "write a hello world python file",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T21:51:59Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "cb7faf0e-t1",
+        "goal": "write a hello world python file",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T21:53:37Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "cb7faf0e-t2",
+        "goal": "write a hello world python file",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T21:53:38Z"
+    },
+    {
+      "topic": "vector databases",
+      "content": {
+        "goal": "vector databases",
+        "gap": "vector databases",
+        "findings": [
+          {
+            "url": "https://en.wikipedia.org/wiki/Vector_database",
+            "title": "Vector database",
+            "summary": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity ",
+            "source": "Wikipedia",
+            "fetched_at": 1779318825.949875,
+            "trust": 0.9,
+            "verification": {
+              "claim": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity",
+              "confidence": 0.7,
+              "decision": "auto_save",
+              "cross_references": [],
+              "contradictions": [],
+              "source_count": 1,
+              "source_trust_avg": 0.9,
+              "reasoning": "1 unique source(s) \u00b7 trust avg 0.90 \u00b7 0 supporting memory match(es) \u00b7 0 contradiction(s)"
+            }
+          }
+        ],
+        "source": "auto-research"
+      },
+      "stored_at": "2026-05-20T23:13:59Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "f84860f6-t1",
+        "goal": "write a python function that returns factorial of n",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T23:30:11Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "f84860f6-t2",
+        "goal": "write a python function that returns factorial of n",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T23:30:11Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "7dbaf009-t1",
+        "goal": "write a python function that returns the factorial of n",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T23:33:54Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "7dbaf009-t2",
+        "goal": "write a python function that returns the factorial of n",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T23:33:55Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "62a3b8cf-t1",
+        "goal": "write a haiku about local AI",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T23:36:01Z"
+    },
+    {
+      "topic": "task_outcomes",
+      "content": {
+        "task_id": "62a3b8cf-t2",
+        "goal": "write a haiku about local AI",
+        "skill": "ceo-briefing",
+        "status": "success",
+        "reward": 1.0
+      },
+      "stored_at": "2026-05-20T23:36:01Z"
+    },
+    {
+      "topic": "vector databases",
+      "content": {
+        "goal": "vector databases",
+        "gap": "vector databases",
+        "findings": [
+          {
+            "url": "https://en.wikipedia.org/wiki/Vector_database",
+            "title": "Vector database",
+            "summary": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity ",
+            "source": "Wikipedia",
+            "fetched_at": 1779359634.3800893,
+            "trust": 0.9,
+            "verification": {
+              "claim": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity",
+              "confidence": 0.7,
+              "decision": "auto_save",
+              "cross_references": [],
+              "contradictions": [],
+              "source_count": 1,
+              "source_trust_avg": 0.9,
+              "reasoning": "1 unique source(s) \u00b7 trust avg 0.90 \u00b7 0 supporting memory match(es) \u00b7 0 contradiction(s)"
+            }
+          }
+        ],
+        "source": "auto-research"
+      },
+      "stored_at": "2026-05-21T10:34:06Z"
+    },
+    {
+      "topic": "vector databases",
+      "content": {
+        "goal": "vector databases",
+        "gap": "vector databases",
+        "findings": [
+          {
+            "url": "https://en.wikipedia.org/wiki/Vector_database",
+            "title": "Vector database",
+            "summary": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity ",
+            "source": "Wikipedia",
+            "fetched_at": 1779381284.9454873,
+            "trust": 0.9,
+            "verification": {
+              "claim": "A vector database, vector store or vector search engine is a database that stores and retrieves embeddings of data in vector space. Vector databases typically implement approximate nearest neighbor algorithms so users can search for records semantically similar to a given input, unlike traditional databases which primarily look up records by exact match. Use-cases for vector databases include similarity search, semantic search, multi-modal search, recommendations engines, object detection, and retrieval-augmented generation (RAG).\nVector embeddings are mathematical representations of data in a high-dimensional space. In this space, each dimension corresponds to a feature of the data, with the number of dimensions ranging from a few hundred to tens of thousands, depending on the complexity",
+              "confidence": 0.7,
+              "decision": "auto_save",
+              "cross_references": [],
+              "contradictions": [],
+              "source_count": 1,
+              "source_trust_avg": 0.9,
+              "reasoning": "1 unique source(s) \u00b7 trust avg 0.90 \u00b7 0 supporting memory match(es) \u00b7 0 contradiction(s)"
+            }
+          }
+        ],
+        "source": "auto-research"
+      },
+      "stored_at": "2026-05-21T16:34:54Z"
     }
   ],
   "strategies": [],
@@ -288,7 +728,7 @@
     "goals": [],
     "business_type": "",
     "preferences": [],
-    "updated_at": null
+    "updated_at": "2026-05-20T23:34:59Z"
   },
   "entries": [
     {

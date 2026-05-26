@@ -627,7 +627,10 @@ function BlacklightToolsTab() {
 ═══════════════════════════════════════════════════════════════════════════════ */
 export default function SecurityPanel() {
   const activeSection = useAppStore(s => s.activeSection)
-  const [tab, setTab] = useState(SECTION_TAB_MAP[activeSection] || 'threats')
+  const [tab, setTab] = useState(() => {
+    const urlTab = new URLSearchParams(window.location.search).get('tab')
+    return SECTION_TAB_MAP[urlTab] || SECTION_TAB_MAP[activeSection] || 'threats'
+  })
   useEffect(() => {
     const next = SECTION_TAB_MAP[activeSection]
     if (next && next !== tab) setTab(next)

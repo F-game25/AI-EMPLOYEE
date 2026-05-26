@@ -233,6 +233,23 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
     }
   })
 
+  r.get('/knowledge/search/semantic', requireAuth, async (req, res) => {
+    const { q, limit = 10 } = req.query
+    if (!q) return res.status(400).json({ error: 'q required' })
+    try {
+      const r1 = await fetch(`${PYTHON_BACKEND}/api/knowledge/semantic_search`, {
+        method: 'POST',
+        headers: _authHeaders(req, { 'content-type': 'application/json' }),
+        body: JSON.stringify({ query: q, top_k: Number(limit) }),
+      })
+      res.setHeader('X-Search-Mode', r1.headers.get('X-Search-Mode') || 'vector')
+      res.status(r1.status).json(await r1.json())
+    } catch (_e) {
+      res.setHeader('X-Search-Mode', 'text-fallback')
+      res.json(searchKnowledge({ q, limit: Number(limit) }))
+    }
+  })
+
   r.get('/knowledge/:id', requireAuth, (req, res) => {
     const store = readJSON(path.join(STATE_DIR, 'state/knowledge_store.json'), { entries: [] })
     const entry = (store.entries || []).find(e => e.id === req.params.id)
@@ -925,6 +942,38 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
     res.json({ ok: true, task_id: `task_${Date.now()}`, queued_at: new Date().toISOString() })
   })
 
+  r.post('/research/discover', requireAuth, async (req, res) => {
+    const { query, max_sources = 10 } = req.body || {}
+    if (!query) return res.status(400).json({ error: 'query required' })
+    try {
+      const r1 = await fetch(`${PYTHON_BACKEND}/api/research/discover`, {
+        method: 'POST',
+        headers: _authHeaders(req, { 'content-type': 'application/json' }),
+        body: JSON.stringify({ query, max_sources }),
+      })
+      res.status(r1.status).json(await r1.json())
+    } catch (err) {
+      res.status(502).json({ error: String(err.message || err), sources: [] })
+    }
+  })
+
+  r.post('/research/execute', requireAuth, async (req, res) => {
+    const { query, sources, selected_urls, depth = 'normal' } = req.body || {}
+    if (!query) return res.status(400).json({ error: 'query required' })
+    const urls = Array.isArray(sources) ? sources : (Array.isArray(selected_urls) ? selected_urls : [])
+    if (!urls.length) return res.status(400).json({ error: 'sources[] or selected_urls[] required' })
+    try {
+      const r1 = await fetch(`${PYTHON_BACKEND}/api/research/execute`, {
+        method: 'POST',
+        headers: _authHeaders(req, { 'content-type': 'application/json' }),
+        body: JSON.stringify({ query, selected_urls: urls, depth }),
+      })
+      res.status(r1.status).json(await r1.json())
+    } catch (err) {
+      res.status(502).json({ error: String(err.message || err) })
+    }
+  })
+
   // ── Auth /me ──────────────────────────────────────────────────────────────
   r.get('/auth/me', requireAuth, (req, res) => {
     const p = req.jwtPayload || {}
@@ -1556,6 +1605,30 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
     } catch (e) {
       res.status(500).json({ error: e.message })
     }
+  })
+
+  r.get('/brain/graph', requireAuth, async (req, res) => {
+    // 1. Fast path: local snapshot (avoids Python timeout)
+    try {
+      const snap = JSON.parse(fs.readFileSync(path.join(STATE_DIR, 'state', 'neural_graph_snapshot.json'), 'utf8'))
+      if (snap?.nodes?.length) return res.json({ ...snap, source: 'snapshot' })
+    } catch { /* no snapshot yet */ }
+    // 2. Python with short timeout
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 3000)
+      const r1 = await fetch(`${PYTHON_BACKEND}/api/brain/graph`, { headers: _authHeaders(req), signal: controller.signal })
+      clearTimeout(timer)
+      if (r1.ok) {
+        const data = await r1.json()
+        if (data?.nodes?.length) {
+          try { fs.writeFileSync(path.join(STATE_DIR, 'state', 'neural_graph_snapshot.json'), JSON.stringify(data)) } catch {}
+          return res.json({ ...data, source: 'live' })
+        }
+      }
+    } catch { /* Python offline or timeout */ }
+    // 3. Honest empty state
+    res.json({ nodes: [], edges: [], source: 'offline', message: 'Neural graph offline — start Python backend' })
   })
 
   return r
