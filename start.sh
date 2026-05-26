@@ -371,7 +371,7 @@ _BACKEND_ENV=(
 if [[ "${AI_EMPLOYEE_NODE_RUN_AS_NODE:-0}" == "1" ]]; then
   _BACKEND_ENV+=("ELECTRON_RUN_AS_NODE=1")
 fi
-nohup "${_BACKEND_ENV[@]}" "$_NODE_BIN" backend/server.js >> "$APP_LOG_DIR/server.log" 2>&1 </dev/null &
+nohup "${_BACKEND_ENV[@]}" "$_NODE_BIN" --max-old-space-size=512 backend/server.js >> "$APP_LOG_DIR/server.log" 2>&1 </dev/null &
 BACKEND_PID=$!
 
 # Poll /health until the server responds (up to ~3 s, 0.1s intervals).

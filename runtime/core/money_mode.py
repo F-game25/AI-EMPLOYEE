@@ -260,11 +260,34 @@ class MoneyMode:
             },
         ]
         if not dry_run:
-            steps[0].update(self._safe_emit(
-                    action_type="opportunity_execution",
+            # ── HITL gate: block autonomous outreach emission ─────────────────
+            try:
+                from core.hitl_gate import get_hitl_gate
+                gate = get_hitl_gate().require_approval(
+                    agent="money_mode",
+                    action="opportunity_outreach_emit",
                     payload={"job_id": job_id, "opportunity": opportunity, "budget": budget},
-                    reason="Outreach pipeline execution",
-                ))
+                    submitted_by="money_mode",
+                    blocking=False,
+                )
+                if not gate.get("approved"):
+                    steps[0]["status"] = "pending_approval"
+                    steps[0]["gate_id"] = gate.get("request_id")
+                    logger.info(
+                        "run_opportunity_pipeline: HITL gate pending for '%s' (gate_id=%s)",
+                        opportunity, gate.get("request_id"),
+                    )
+                else:
+                    steps[0].update(self._safe_emit(
+                        action_type="opportunity_execution",
+                        payload={"job_id": job_id, "opportunity": opportunity, "budget": budget},
+                        reason="Outreach pipeline execution — HITL approved",
+                    ))
+            except Exception as exc:
+                # Default-deny on gate error — do not emit without approval.
+                logger.error("run_opportunity_pipeline: HITL gate error — %s", exc)
+                steps[0]["status"] = "pending_approval"
+                steps[0]["gate_error"] = str(exc)
 
         estimated_roi = round(
             max(expected_conversions, 1) * max(budget / max(target_contacts, 1), 10.0) * _OUTREACH_CONVERSION_MULTIPLIER,
@@ -725,18 +748,52 @@ class MoneyMode:
     ) -> dict:
         """Personalise an outreach template and save a draft — never sends.
 
-        The HITL gate check belongs at the API/route layer before calling this
-        method. This pipeline only produces a local draft artifact so that a
-        human operator can review it before any real send action is taken.
+        A HITL gate is enforced inside this method (defense-in-depth).  The
+        gate always runs in non-blocking mode so the pipeline returns
+        immediately with status='pending_approval'.  A human operator must
+        approve the gate via the dashboard before any downstream send action
+        can be taken.
 
-        See runtime/core/hitl_gate.py — callers that want gated approval
-        should call ``hitl_gate.require_approval()`` with action_type
-        ``"send_outreach"`` before invoking this method.
+        See runtime/core/hitl_gate.py for the gate API.
         """
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         entry_id = str(uuid.uuid4())[:8]
         recipient = recipient or {}
         recipient_name = recipient.get("name", "Recipient")
+
+        # ── HITL gate: human must approve before any real send ────────────────
+        try:
+            from core.hitl_gate import get_hitl_gate
+            gate = get_hitl_gate().require_approval(
+                agent="money_mode",
+                action="outreach_send",
+                payload={"recipient": recipient_name, "entry_id": entry_id},
+                submitted_by="money_mode",
+                blocking=False,
+            )
+            if not gate.get("approved"):
+                logger.info(
+                    "outreach_response_conversion: HITL gate pending for %s (gate_id=%s)",
+                    recipient_name, gate.get("request_id"),
+                )
+                return {
+                    "ok": False,
+                    "status": "pending_approval",
+                    "gate_id": gate.get("request_id"),
+                    "message": (
+                        f"Outreach to '{recipient_name}' queued for human approval. "
+                        f"Gate ID: {gate.get('request_id')}"
+                    ),
+                }
+        except Exception as exc:
+            # If the gate itself errors, default-deny — never proceed without approval.
+            logger.error("outreach_response_conversion: HITL gate error — %s", exc)
+            return {
+                "ok": False,
+                "status": "pending_approval",
+                "gate_id": None,
+                "message": f"HITL gate unavailable — outreach blocked for safety: {exc}",
+            }
         state = self._state_dir()
         outreach_dir = state / "outreach"
         outreach_dir.mkdir(parents=True, exist_ok=True)

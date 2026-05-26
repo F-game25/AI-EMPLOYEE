@@ -75,13 +75,35 @@ const subsystems = require('./subsystems');
 const { buildMoneyTemplate, buildThinkingSummary } = require('./money_mode');
 const brain = require('./brain/active_brain');
 const persistence = require('./persistence');
-const voiceManager = require('./core/voice_manager');
-const voiceApiRouter = require('./api/voice');
+
+// Phase 7A: defer heavy/native requires to cut synchronous startup cost.
+
+// better-sqlite3 is a native binary; only used in the forge_queue IIFE.
+let _Database;
+const getDatabase = () => _Database || (_Database = require('better-sqlite3'));
+
+// getNativeMemoryGraph triggers file I/O on init; only used in route handlers.
+let _nativeMemoryGraphMod;
+const getNativeMemoryGraph = (...args) => {
+  if (!_nativeMemoryGraphMod) _nativeMemoryGraphMod = require('./core/native-memory-graph');
+  return _nativeMemoryGraphMod.getNativeMemoryGraph(...args);
+};
+
+// Voice system spawns child processes via fish_speech; defer until init call.
+let _voiceManager;
+const voiceManager = new Proxy({}, {
+  get(_, prop) {
+    if (!_voiceManager) _voiceManager = require('./core/voice_manager');
+    const val = _voiceManager[prop];
+    return typeof val === 'function' ? val.bind(_voiceManager) : val;
+  },
+});
+let _voiceApiRouter;
+const getVoiceApiRouter = () => _voiceApiRouter || (_voiceApiRouter = require('./api/voice'));
+
 const ErrorRecoveryManager = require('./core/error_recovery');
 const TaskHistoryManager = require('./core/task_history');
 const { createTurnRunner } = require('./services/turn-runner');
-const Database = require('better-sqlite3');
-const { getNativeMemoryGraph } = require('./core/native-memory-graph');
 const { z } = require('zod');
 const economyService = require('./services/economy_service');
 
@@ -122,6 +144,43 @@ const SCHEMAS = {
   agentControl:   z.object({ agent_id: _zStrMax(200).min(1), action: z.enum(['start','stop','restart']).optional() }),
   systemHalt:     z.object({ reason: _zStrMax(500).optional() }),
   voiceSynthesize: z.object({ text: _zStrMax(2000).min(1), persona: z.record(z.any()).optional() }),
+  // Phase 6B additions
+  identityFinalize:   z.object({ user_chosen: _zStrMax(200).optional(), instance_name: _zStrMax(100).optional(), voice_preset: _zStrMax(50).optional(), color_palette: z.record(z.any()).optional() }),
+  agentsActivate:     z.object({ count: z.number().int().min(1).max(100).optional() }),
+  securityOfflineSync: z.object({ online: z.boolean().optional() }),
+  securityGatewayStrict: z.object({ enabled: z.boolean().optional() }),
+  autonomyMode:       z.object({ mode: z.enum(['OFF','ON','AUTO']) }),
+  automationControl:  z.object({ action: z.enum(['start','stop','override']), goal: _zStrMax(4000).optional(), override_action_id: _zStrMax(200).optional() }),
+  moneyPipeline:      z.object({ goal: _zStrMax(4000).optional(), config: z.record(z.any()).optional() }),
+  adminSafetyAction:  z.object({ action_id: _zStrMax(100).min(1), reason: _zStrMax(1000).min(8), confirmation: _zStrMax(200).min(1), execution_mode: _zStrMax(50).optional() }),
+  adminSafetyAudit:   z.object({ label: _zStrMax(200).min(1), endpoint: _zStrMax(300).optional(), reason: _zStrMax(1000).min(8), confirmation: _zStrMax(200).min(1), executed: z.boolean().optional(), risk: _zStrMax(20).optional(), execution_mode: _zStrMax(50).optional() }),
+  forgeSandbox:       z.object({ goal: _zGoal, module_path: _zStrMax(200).optional() }),
+  forgeBuildSystem:   z.object({ spec: _zStrMax(4000).min(1), project_name: _zStrMax(200).optional() }),
+  reconToolSearch:    z.object({ query: _zStrMax(500).optional() }),
+  reconToolRun:       z.object({ tool_id: _zStrMax(200).optional(), toolId: _zStrMax(200).optional(), input: _zStrMax(20000).optional() }),
+  reconCase:          z.object({ name: _zStrMax(120).optional(), target: _zStrMax(300).optional(), owner: _zStrMax(120).optional(), authorization: _zStrMax(2000).optional() }),
+  reconFinding:       z.object({ case_id: _zStrMax(80).optional(), title: _zStrMax(160).optional(), severity: z.enum(['info','low','medium','high']).optional(), evidence: z.record(z.any()).optional(), source_tool: _zStrMax(120).optional() }),
+  hermesTask:         z.object({ message: _zStrMax(4000).min(1), target_agent: _zStrMax(200).optional() }),
+  hermesBroadcast:    z.object({ message: _zStrMax(4000).min(1) }),
+  learningLadderBuild:    z.object({ topic: _zStrMax(200).min(1) }),
+  learningLadderComplete: z.object({ topic: _zStrMax(200).min(1), level: z.number().int().min(1).max(5), success: z.boolean().optional(), milestone_output: _zStrMax(2000).optional(), score: z.number().optional(), notes: _zStrMax(1000).optional() }),
+  agentLadderAssign:  z.object({ topic: _zStrMax(200).min(1) }),
+  agentLadderAdvance: z.object({ level: z.number().int().min(1).max(5), success: z.boolean().optional(), score: z.number().optional(), milestone_output: _zStrMax(2000).optional(), notes: _zStrMax(1000).optional() }),
+  forgeCodeAi:        z.object({ provider: _zStrMax(50).optional(), model: _zStrMax(100).optional(), messages: z.array(z.object({ role: _zStrMax(20).optional(), content: _zStrMax(8000) })).min(1), systemPrompt: _zStrMax(2000).optional() }),
+  middlewareProcess:  z.object({ message: _zStrMax(8000).optional(), task: _zStrMax(4000).optional() }).passthrough(),
+  moneyTask:          z.object({ task: _zStrMax(4000).optional(), mode: _zStrMax(20).optional() }),
+  codingAiSettings:   z.object({ provider: _zStrMax(50).optional(), model: _zStrMax(100).optional(), openrouter_api_key: _zStrMax(200).optional() }),
+  forgeTask:          z.object({ task: _zStrMax(4000).optional(), mode: _zStrMax(20).optional() }),
+  modelRoutePlan:     z.object({ task: _zStrMax(4000).optional(), message: _zStrMax(4000).optional(), goal: _zStrMax(4000).optional(), modality: _zStrMax(50).optional() }),
+  memoryClients:      z.object({ name: _zStrMax(200).optional(), email: _zStrMax(200).optional() }).passthrough(),
+  memoryInteraction:  z.object({ client_id: _zStrMax(200).optional(), content: _zStrMax(8000).optional() }).passthrough(),
+  errorReport:        z.object({ error: z.any(), context: z.record(z.any()).optional() }),
+  frontendError:      z.object({ msg: _zStrMax(500).optional(), stack: _zStrMax(2000).optional(), ts: z.any().optional(), source: _zStrMax(50).optional() }),
+  blacklistPolicy:    z.object({ network_osint_enabled: z.boolean().optional() }),
+  approvalDecision:   z.object({ reason: _zStrMax(500).optional() }),
+  forgeApproveItem:   z.object({ approved_by: _zStrMax(100).optional() }),
+  forgeRejectItem:    z.object({ rejected_by: _zStrMax(100).optional(), reason: _zStrMax(500).optional() }),
+  reliabilityFreeze:  z.object({ reason: _zStrMax(500).optional() }),
 };
 
 const PORT = process.env.PORT || 8787;
@@ -503,7 +562,7 @@ app.get('/api/proof/center', requireAuth, (_req, res) => {
 
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
-app.use('/api/voice', voiceApiRouter);
+app.use('/api/voice', getVoiceApiRouter());
 app.use('/api/settings', require('./routes/settings'));
 
 // Tasks API (real-time execution visibility)
@@ -1843,8 +1902,10 @@ app.get('/api/onboarding/palettes', requireAuth, (req, res) => {
 
 // POST /api/identity/finalize — save user onboarding choices
 app.post('/api/identity/finalize', requireAuth, async (req, res) => {
+  const _bodyIdentity = validate(SCHEMAS.identityFinalize, req, res);
+  if (!_bodyIdentity) return;
   try {
-    const { user_chosen, instance_name, voice_preset, color_palette } = req.body;
+    const { user_chosen, instance_name, voice_preset, color_palette } = _bodyIdentity;
     const fs = require('fs');
     const path = require('path');
     const homedir = process.env.HOME || process.env.USERPROFILE;
@@ -1924,7 +1985,9 @@ app.get('/internal/agents', requireLocalhost, (req, res) => {
 });
 
 app.post('/agents/activate', requireAuth, (req, res) => {
-  const { count } = req.body || {};
+  const _bodyActivate = validate(SCHEMAS.agentsActivate, req, res);
+  if (!_bodyActivate) return;
+  const { count } = _bodyActivate;
   const out = activateAgents(typeof count === 'number' ? count : undefined);
   res.json({ ok: true, ...out, mode: getMode(), agents: getAgents() });
 });
@@ -2955,7 +3018,8 @@ app.get('/api/security/honeypot/events', requireAuth, (req, res) => {
 });
 
 app.post('/api/security/offline-sync', requireAuth, (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.securityOfflineSync, req, res);
+  if (!body) return;
   const online = body.online !== false;
   const state = securitySyncPolicy.setOnline(online);
   res.json({
@@ -2970,7 +3034,9 @@ app.post('/api/security/anomaly/evaluate', requireAuth, (req, res) => {
 });
 
 app.post('/api/security/gateway/strict-mode', requireAuth, (req, res) => {
-  const enabled = Boolean((req.body || {}).enabled);
+  const _bodyGateway = validate(SCHEMAS.securityGatewayStrict, req, res);
+  if (!_bodyGateway) return;
+  const enabled = Boolean(_bodyGateway.enabled);
   const strict = apiGatewayProtector.setStrictMode(enabled, 'manual_override');
   res.json({
     strict_mode: strict,
@@ -3300,7 +3366,8 @@ app.get('/api/system/manifest', (req, res) => {
 });
 
 app.post('/api/model/route-plan', requireAuth, (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.modelRoutePlan, req, res);
+  if (!body) return;
   const task = String(body.task || body.message || body.goal || '').trim();
   if (!task) return res.status(400).json({ ok: false, error: 'task, message, or goal required' });
   res.json(buildModelRoutePlan(body));
@@ -3358,8 +3425,10 @@ app.get('/api/memory/search', requireAuth, async (req, res) => {
 });
 
 app.post('/api/memory/clients', requireAuth, async (req, res) => {
+  const _bodyMemClients = validate(SCHEMAS.memoryClients, req, res);
+  if (!_bodyMemClients) return;
   try {
-    const data = await requestPythonJSON('/api/memory/clients', 'POST', req.body || {}, { timeoutMs: 5000 });
+    const data = await requestPythonJSON('/api/memory/clients', 'POST', _bodyMemClients, { timeoutMs: 5000 });
     return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
   } catch (err) {
     return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
@@ -3385,8 +3454,10 @@ app.delete('/api/memory/clients/:clientId', requireAuth, async (req, res) => {
 });
 
 app.post('/api/memory/interactions', requireAuth, async (req, res) => {
+  const _bodyMemInt = validate(SCHEMAS.memoryInteraction, req, res);
+  if (!_bodyMemInt) return;
   try {
-    const data = await requestPythonJSON('/api/memory/interactions', 'POST', req.body || {}, { timeoutMs: 5000 });
+    const data = await requestPythonJSON('/api/memory/interactions', 'POST', _bodyMemInt, { timeoutMs: 5000 });
     return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
   } catch (err) {
     return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
@@ -3842,10 +3913,9 @@ const turnRunner = createTurnRunner({
 });
 
 app.post('/api/autonomy/mode', requireAuth, async (req, res) => {
-  const nextMode = String((req.body || {}).mode || '').toUpperCase();
-  if (!['OFF', 'ON', 'AUTO'].includes(nextMode)) {
-    return res.status(400).json({ error: 'Invalid mode. Use OFF, ON, or AUTO.' });
-  }
+  const _bodyAutonomy = validate(SCHEMAS.autonomyMode, req, res);
+  if (!_bodyAutonomy) return;
+  const nextMode = _bodyAutonomy.mode.toUpperCase();
   // Proxy to Python backend
   try {
     const data = await new Promise((resolve, reject) => {
@@ -3993,9 +4063,11 @@ app.get('/api/objectives/status', requireAuth, (req, res) => {
 });
 
 app.post('/api/automation/control', requireAuth, (req, res) => {
-  const action = String((req.body || {}).action || '').toLowerCase();
-  const goal = String((req.body || {}).goal || '').trim();
-  const overrideActionId = String((req.body || {}).override_action_id || '').trim();
+  const _bodyAuto = validate(SCHEMAS.automationControl, req, res);
+  if (!_bodyAuto) return;
+  const action = String(_bodyAuto.action || '').toLowerCase();
+  const goal = String(_bodyAuto.goal || '').trim();
+  const overrideActionId = String(_bodyAuto.override_action_id || '').trim();
 
   if (action === 'start') {
     activateAgents(3);
@@ -4056,8 +4128,10 @@ app.post('/api/automation/control', requireAuth, (req, res) => {
 });
 
 app.post('/api/money/content-pipeline', requireAuth, async (req, res) => {
+  const _bodyContent = validate(SCHEMAS.moneyPipeline, req, res);
+  if (!_bodyContent) return;
   try {
-    const result = await requestPythonJSON('/api/money/content-pipeline', 'POST', req.body || {}, {
+    const result = await requestPythonJSON('/api/money/content-pipeline', 'POST', _bodyContent, {
       headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 30000,
     });
@@ -4070,8 +4144,10 @@ app.post('/api/money/content-pipeline', requireAuth, async (req, res) => {
 });
 
 app.post('/api/money/lead-pipeline', requireAuth, async (req, res) => {
+  const _bodyLead = validate(SCHEMAS.moneyPipeline, req, res);
+  if (!_bodyLead) return;
   try {
-    const result = await requestPythonJSON('/api/money/lead-pipeline', 'POST', req.body || {}, {
+    const result = await requestPythonJSON('/api/money/lead-pipeline', 'POST', _bodyLead, {
       headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 30000,
     });
@@ -4084,8 +4160,10 @@ app.post('/api/money/lead-pipeline', requireAuth, async (req, res) => {
 });
 
 app.post('/api/money/opportunity-pipeline', requireAuth, async (req, res) => {
+  const _bodyOpp = validate(SCHEMAS.moneyPipeline, req, res);
+  if (!_bodyOpp) return;
   try {
-    const result = await requestPythonJSON('/api/money/opportunity-pipeline', 'POST', req.body || {}, {
+    const result = await requestPythonJSON('/api/money/opportunity-pipeline', 'POST', _bodyOpp, {
       headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 30000,
     });
@@ -4098,8 +4176,10 @@ app.post('/api/money/opportunity-pipeline', requireAuth, async (req, res) => {
 });
 
 app.post('/api/money/affiliate-draft', requireAuth, async (req, res) => {
+  const _bodyAffiliate = validate(SCHEMAS.moneyPipeline, req, res);
+  if (!_bodyAffiliate) return;
   try {
-    const result = await requestPythonJSON('/api/money/affiliate-draft', 'POST', req.body || {}, {
+    const result = await requestPythonJSON('/api/money/affiliate-draft', 'POST', _bodyAffiliate, {
       headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 30000,
     });
@@ -4627,7 +4707,8 @@ const ADMIN_SAFETY_ACTIONS = {
 };
 
 app.post('/api/admin/safety-action', requireAuth, (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.adminSafetyAction, req, res);
+  if (!body) return;
   const actionId = String(body.action_id || '');
   const action = ADMIN_SAFETY_ACTIONS[actionId];
   if (!action) return res.status(400).json({ ok: false, error: 'unknown safety action' });
@@ -4687,7 +4768,8 @@ app.post('/api/admin/safety-action', requireAuth, (req, res) => {
 });
 
 app.post('/api/admin/safety-audit', requireAuth, (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.adminSafetyAudit, req, res);
+  if (!body) return;
   const label = String(body.label || '').trim();
   const endpoint = String(body.endpoint || 'internal').trim();
   const reason = String(body.reason || '').trim();
@@ -4746,7 +4828,7 @@ setInterval(updateStabilityScore, 10000);
 const MAX_FORGE_QUEUE = 200;
 const _forgeDb = (() => {
   const dbPath = statePath('forge_queue.db');
-  const db = new Database(dbPath);
+  const db = new (getDatabase())(dbPath);
   db.pragma('journal_mode = WAL');
   db.exec(`
     CREATE TABLE IF NOT EXISTS forge_queue (
@@ -4922,8 +5004,10 @@ app.get('/api/approvals/inbox', requireAuth, (_req, res) => {
 function decideApproval(req, res, decision) {
   const approvalId = String(req.params.id || '').trim();
   if (!approvalId) return res.status(400).json({ ok: false, error: 'approval id required' });
+  const _bodyApproval = validate(SCHEMAS.approvalDecision, req, res);
+  if (!_bodyApproval) return;
   const actor = req.jwtPayload?.sub || req.jwtPayload?.role || 'operator';
-  const reason = String((req.body || {}).reason || '').slice(0, 500);
+  const reason = String(_bodyApproval.reason || '').slice(0, 500);
   const inboxItem = buildApprovalInboxItems().find((item) => item.id === approvalId);
   if (!inboxItem) return res.status(404).json({ ok: false, error: 'approval request not found' });
   if (inboxItem.status !== 'pending') {
@@ -5027,7 +5111,9 @@ app.get('/api/audit/stats', requireAuth, (req, res) => {
 // POST /api/error-report — frontend unhandled errors surfaced to backend logs
 const _frontendErrors = [];
 app.post('/api/error-report', requireAuth, (req, res) => {
-  const { msg = '', stack = '', ts, source = 'frontend' } = req.body || {};
+  const _bodyFrontendErr = validate(SCHEMAS.frontendError, req, res);
+  if (!_bodyFrontendErr) return;
+  const { msg = '', stack = '', ts, source = 'frontend' } = _bodyFrontendErr;
   const entry = { msg: String(msg).slice(0, 500), stack: String(stack).slice(0, 2000), ts: ts || Date.now(), source };
   _frontendErrors.unshift(entry);
   if (_frontendErrors.length > 100) _frontendErrors.length = 100;
@@ -5054,7 +5140,9 @@ app.get('/api/reliability/status', requireAuth, (req, res) => {
 
 // POST /api/reliability/forge/freeze
 app.post('/api/reliability/forge/freeze', requireAuth, (req, res) => {
-  const reason = String((req.body || {}).reason || 'manual');
+  const _bodyFreeze = validate(SCHEMAS.reliabilityFreeze, req, res);
+  if (!_bodyFreeze) return;
+  const reason = String(_bodyFreeze.reason || 'manual');
   reliabilityState.forgeFrozen = true;
   reliabilityState.freezeReason = reason;
   recordAuditEvent({ actor: 'operator', action: 'forge_freeze', outputData: { reason }, riskScore: 0.7 });
@@ -5105,10 +5193,12 @@ app.post('/api/forge/submit', requireAuth, _rl_forge, (req, res) => {
 
 // POST /api/forge/approve/:id
 app.post('/api/forge/approve/:id', requireAuth, (req, res) => {
+  const _bodyForgeApprove = validate(SCHEMAS.forgeApproveItem, req, res);
+  if (!_bodyForgeApprove) return;
   const item = _forgeQueue.find((r) => r.id === req.params.id);
   if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
   if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
-  const patch = { status: 'approved', decided_at: new Date().toISOString(), decided_by: (req.body || {}).approved_by || 'operator' };
+  const patch = { status: 'approved', decided_at: new Date().toISOString(), decided_by: _bodyForgeApprove.approved_by || 'operator' };
   _forgeQueueUpdate(item.id, patch);
   recordAuditEvent({ actor: item.decided_by, action: 'forge_approve', inputData: { request_id: item.id }, outputData: { status: 'approved' }, riskScore: 0.5 });
   res.json({ ok: true, request: item });
@@ -5116,10 +5206,12 @@ app.post('/api/forge/approve/:id', requireAuth, (req, res) => {
 
 // POST /api/forge/reject/:id
 app.post('/api/forge/reject/:id', requireAuth, (req, res) => {
+  const _bodyForgeReject = validate(SCHEMAS.forgeRejectItem, req, res);
+  if (!_bodyForgeReject) return;
   const item = _forgeQueue.find((r) => r.id === req.params.id);
   if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
   if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
-  const patch = { status: 'rejected', decided_at: new Date().toISOString(), decided_by: (req.body || {}).rejected_by || 'operator' };
+  const patch = { status: 'rejected', decided_at: new Date().toISOString(), decided_by: _bodyForgeReject.rejected_by || 'operator' };
   _forgeQueueUpdate(item.id, patch);
   recordAuditEvent({ actor: item.decided_by, action: 'forge_reject', inputData: { request_id: item.id }, outputData: { status: 'rejected' }, riskScore: 0.3 });
   res.json({ ok: true, request: item });
@@ -5163,9 +5255,9 @@ function runForgePython(payload, timeoutMs = 90000) {
 
 // POST /api/forge/sandbox
 app.post('/api/forge/sandbox', requireAuth, async (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.forgeSandbox, req, res);
+  if (!body) return;
   const goal = String(body.goal || '').trim();
-  if (!goal) return res.status(400).json({ ok: false, error: 'goal required' });
   const result = await runForgePython({ operation: 'sandbox', goal, module_path: body.module_path || 'forge_sandbox_test' });
   if (!result) return res.status(500).json({ ok: false, error: 'forge_python_failed' });
   res.json({ ok: true, ...result });
@@ -5173,7 +5265,8 @@ app.post('/api/forge/sandbox', requireAuth, async (req, res) => {
 
 // POST /api/forge/rollback
 app.post('/api/forge/rollback', requireAuth, async (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.forgeRollback, req, res);
+  if (!body) return;
   const snapshot_id = String(body.snapshot_id || 'latest').trim();
   const result = await runForgePython({ operation: 'rollback', snapshot_id });
   recordAuditEvent({ actor: body.rolled_back_by || 'operator', action: 'forge_rollback', inputData: { snapshot_id }, outputData: result || {}, riskScore: 0.6 });
@@ -5189,10 +5282,10 @@ app.get('/api/forge/snapshots', requireAuth, async (req, res) => {
 
 // POST /api/forge/build-system
 app.post('/api/forge/build-system', requireAuth, async (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.forgeBuildSystem, req, res);
+  if (!body) return;
   const spec = String(body.spec || '').trim();
   const project_name = String(body.project_name || 'project').trim();
-  if (!spec) return res.status(400).json({ ok: false, error: 'spec required' });
   const result = await runForgePython({ operation: 'build_system', spec, project_name }, 180000);
   if (!result) return res.status(500).json({ ok: false, error: 'forge_python_failed' });
   addActivity(`[FORGE] System built: ${project_name}`, 'automation');
@@ -5378,7 +5471,9 @@ app.get('/api/recon/tools', requireAuth, (req, res) => {
 });
 
 app.post('/api/recon/tools/search', requireAuth, (req, res) => {
-  const query = String((req.body || {}).query || '').trim();
+  const _bodyReconSearch = validate(SCHEMAS.reconToolSearch, req, res);
+  if (!_bodyReconSearch) return;
+  const query = String(_bodyReconSearch.query || '').trim();
   const q = query.toLowerCase();
   const matches = _reconTools()
     .map((tool) => {
@@ -5401,7 +5496,8 @@ app.post('/api/recon/tools/search', requireAuth, (req, res) => {
 });
 
 app.post('/api/recon/tools/run', requireAuth, async (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.reconToolRun, req, res);
+  if (!body) return;
   const toolId = String(body.tool_id || body.toolId || '').trim();
   const input = String(body.input || '').slice(0, 20000);
   const tool = blacklightTools.getTool(toolId);
@@ -5439,7 +5535,8 @@ app.get('/api/recon/cases', requireAuth, (_req, res) => {
 });
 
 app.post('/api/recon/cases', requireAuth, (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.reconCase, req, res);
+  if (!body) return;
   const cases = _readReconJson(_RECON_CASES_FILE, []);
   const item = {
     id: crypto.randomUUID(),
@@ -5465,7 +5562,8 @@ app.get('/api/recon/findings', requireAuth, (req, res) => {
 });
 
 app.post('/api/recon/findings', requireAuth, (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.reconFinding, req, res);
+  if (!body) return;
   const findings = _readReconJson(_RECON_FINDINGS_FILE, []);
   const item = {
     id: crypto.randomUUID(),
@@ -5587,8 +5685,10 @@ app.get('/api/blacklight/policy', requireAuth, (req, res) => {
 
 // POST /api/blacklight/policy (Change 2)
 app.post('/api/blacklight/policy', requireAuth, (req, res) => {
+  const _bodyBlPolicy = validate(SCHEMAS.blacklistPolicy, req, res);
+  if (!_bodyBlPolicy) return;
   const current = _loadBlPolicy();
-  const updated = { ...current, ...(req.body || {}) };
+  const updated = { ...current, ..._bodyBlPolicy };
   const safe = { network_osint_enabled: !!updated.network_osint_enabled };
   _saveBlPolicy(safe);
   res.json({ ok: true, policy: safe });
@@ -5596,7 +5696,9 @@ app.post('/api/blacklight/policy', requireAuth, (req, res) => {
 
 // POST /api/blacklight/tools/search — local natural-language tool routing.
 app.post('/api/blacklight/tools/search', requireAuth, (req, res) => {
-  const query = String((req.body || {}).query || '').trim();
+  const _bodyBlSearch = validate(SCHEMAS.reconToolSearch, req, res);
+  if (!_bodyBlSearch) return;
+  const query = String(_bodyBlSearch.query || '').trim();
   const matches = blacklightTools.searchTools(query, 12);
   recordAuditEvent({
     actor: 'operator',
@@ -5610,7 +5712,8 @@ app.post('/api/blacklight/tools/search', requireAuth, (req, res) => {
 
 // POST /api/blacklight/tools/run — safe local analyzers and defensive simulations.
 app.post('/api/blacklight/tools/run', requireAuth, _rl_blacklight, async (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.reconToolRun, req, res);
+  if (!body) return;
   const toolId = String(body.tool_id || body.toolId || '').trim();
   const input = String(body.input || '').slice(0, 20000);
   const tool = blacklightTools.getTool(toolId);
@@ -5723,10 +5826,10 @@ app.get('/api/hermes/status', requireAuth, (req, res) => {
 
 // POST /api/hermes/task
 app.post('/api/hermes/task', requireAuth, (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.hermesTask, req, res);
+  if (!body) return;
   const message = String(body.message || '').trim();
   const target_agent = String(body.target_agent || '').trim();
-  if (!message) return res.status(400).json({ ok: false, error: 'message required' });
   const result = handleGoalDrivenCommand(message);
   addActivity(`[HERMES] Task routed to ${target_agent || 'auto'}: ${message.slice(0, 60)}`, 'automation');
   res.json({ ok: true, handled: result?.handled || false, response: result?.reply || result?.message || null, agent: target_agent });
@@ -5734,9 +5837,9 @@ app.post('/api/hermes/task', requireAuth, (req, res) => {
 
 // POST /api/hermes/broadcast
 app.post('/api/hermes/broadcast', requireAuth, (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.hermesBroadcast, req, res);
+  if (!body) return;
   const message = String(body.message || '').trim();
-  if (!message) return res.status(400).json({ ok: false, error: 'message required' });
   broadcaster.broadcast('orchestrator:message', {
     message,
     from: 'hermes',
@@ -5755,8 +5858,9 @@ const agentLearningProfile = require('./core/agent_learning_profile');
 
 // POST /api/learning-ladder/build  { topic }
 app.post('/api/learning-ladder/build', requireAuth, (req, res) => {
-  const topic = String((req.body || {}).topic || '').trim();
-  if (!topic) return res.status(400).json({ ok: false, error: 'topic is required' });
+  const _bodyLadder = validate(SCHEMAS.learningLadderBuild, req, res);
+  if (!_bodyLadder) return;
+  const topic = String(_bodyLadder.topic || '').trim();
   try {
     const ladder = learningLadder.buildLadder(topic);
     addActivity(`[LEARNING] Ladder built: ${topic}`, 'learning');
@@ -5768,11 +5872,10 @@ app.post('/api/learning-ladder/build', requireAuth, (req, res) => {
 
 // POST /api/learning-ladder/complete  { topic, level, success, milestone_output, score, notes }
 app.post('/api/learning-ladder/complete', requireAuth, (req, res) => {
-  const body = req.body || {};
+  const body = validate(SCHEMAS.learningLadderComplete, req, res);
+  if (!body) return;
   const topic = String(body.topic || '').trim();
   const level = parseInt(body.level, 10);
-  if (!topic) return res.status(400).json({ ok: false, error: 'topic is required' });
-  if (!level || level < 1 || level > 5) return res.status(400).json({ ok: false, error: 'level must be 1–5' });
   try {
     const result = learningLadder.recordLevelCompletion({
       topic,
@@ -5818,9 +5921,10 @@ app.get('/api/learning-ladder/all', requireAuth, (req, res) => {
 // POST /api/agents/:agent_id/ladder/assign  { topic }
 app.post('/api/agents/:agent_id/ladder/assign', requireAuth, (req, res) => {
   const agentId = String(req.params.agent_id || '').trim();
-  const topic = String((req.body || {}).topic || '').trim();
+  const _bodyAssign = validate(SCHEMAS.agentLadderAssign, req, res);
+  if (!_bodyAssign) return;
+  const topic = String(_bodyAssign.topic || '').trim();
   if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
-  if (!topic) return res.status(400).json({ ok: false, error: 'topic is required' });
   try {
     const result = agentLearningProfile.assignLadder(agentId, topic);
     addActivity(`[LEARNING] Ladder '${topic}' assigned to agent ${agentId}`, 'learning');
@@ -5833,10 +5937,10 @@ app.post('/api/agents/:agent_id/ladder/assign', requireAuth, (req, res) => {
 // POST /api/agents/:agent_id/ladder/advance  { level, success, milestone_output, score, notes }
 app.post('/api/agents/:agent_id/ladder/advance', requireAuth, (req, res) => {
   const agentId = String(req.params.agent_id || '').trim();
-  const body = req.body || {};
+  const body = validate(SCHEMAS.agentLadderAdvance, req, res);
+  if (!body) return;
   const level = parseInt(body.level, 10);
   if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
-  if (!level || level < 1 || level > 5) return res.status(400).json({ ok: false, error: 'level must be 1–5' });
   try {
     const result = agentLearningProfile.advanceAgent({
       agentId,
@@ -6067,7 +6171,9 @@ app.get('/api/forge/status', requireAuth, (_req, res) => {
 
 // POST /api/forge/task  { task, mode }
 app.post('/api/forge/task', requireAuth, (req, res) => {
-  const { task = '', mode = 'on' } = req.body || {};
+  const _bodyForgeTask = validate(SCHEMAS.forgeTask, req, res);
+  if (!_bodyForgeTask) return;
+  const { task = '', mode = 'on' } = _bodyForgeTask;
   const label = String(task).trim();
   if (label) _forgeTaskState.last_action = label;
   _forgeTaskState.active = mode !== 'off';
@@ -6099,10 +6205,9 @@ app.get('/api/forge/code-ai/models', requireAuth, async (req, res) => {
 
 // POST /api/forge/code-ai — send message to coding AI
 app.post('/api/forge/code-ai', requireAuth, async (req, res) => {
-  const { provider, model, messages, systemPrompt } = req.body || {};
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ ok: false, error: 'messages array required' });
-  }
+  const _bodyCodeAi = validate(SCHEMAS.forgeCodeAi, req, res);
+  if (!_bodyCodeAi) return;
+  const { provider, model, messages, systemPrompt } = _bodyCodeAi;
   const sys = systemPrompt || 'You are a helpful coding assistant. Provide clear, concise code solutions with explanations.';
   const lastMsg = messages[messages.length - 1];
   if (!lastMsg || !lastMsg.content) {
@@ -6131,8 +6236,10 @@ app.post('/api/forge/code-ai', requireAuth, async (req, res) => {
 
 // POST /api/middleware/process — unified multi-model input processing
 app.post('/api/middleware/process', requireAuth, async (req, res) => {
+  const _bodyMiddleware = validate(SCHEMAS.middlewareProcess, req, res);
+  if (!_bodyMiddleware) return;
   try {
-    const result = await requestPythonJSON('/api/middleware/process', 'POST', req.body || {});
+    const result = await requestPythonJSON('/api/middleware/process', 'POST', _bodyMiddleware);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -6151,7 +6258,9 @@ app.get('/api/middleware/status', requireAuth, async (req, res) => {
 
 // POST /api/money/task  { task, mode }
 app.post('/api/money/task', requireAuth, (req, res) => {
-  const { task = '' } = req.body || {};
+  const _bodyMoneyTask = validate(SCHEMAS.moneyTask, req, res);
+  if (!_bodyMoneyTask) return;
+  const { task = '' } = _bodyMoneyTask;
   const label = String(task).trim();
   const run = runPipeline('opportunity');
   addActivity(`[MONEY] Task: ${label || 'unnamed'}`, 'automation');
@@ -6321,8 +6430,10 @@ app.get('/api/system/settings/coding-ai', requireAuth, (req, res) => {
 });
 
 app.post('/api/system/settings/coding-ai', requireAuth, (req, res) => {
+  const _bodyCodingAi = validate(SCHEMAS.codingAiSettings, req, res);
+  if (!_bodyCodingAi) return;
   try {
-    const { provider, model, openrouter_api_key } = req.body || {};
+    const { provider, model, openrouter_api_key } = _bodyCodingAi;
     const envPath = path.join(AI_HOME, '.env');
     const dir = path.dirname(envPath);
     fs.mkdirSync(dir, { recursive: true });
@@ -7291,7 +7402,9 @@ app.get('/api/errors/recent', requireAuth, (req, res) => {
 });
 
 app.post('/api/errors/report', requireAuth, (req, res) => {
-  const { error, context } = req.body || {};
+  const _bodyErrReport = validate(SCHEMAS.errorReport, req, res);
+  if (!_bodyErrReport) return;
+  const { error, context } = _bodyErrReport;
   if (!error) return res.status(400).json({ error: 'error required' });
 
   const logged = errorRecovery.logError(error, context);

@@ -16,6 +16,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runtime"))
 
 
+def _approved_gate_mock():
+    """Return a mock HITL gate that always approves (for pipeline unit tests)."""
+    gate_instance = MagicMock()
+    gate_instance.require_approval.return_value = {"approved": True, "request_id": "test-gate-001"}
+    mock = MagicMock(return_value=gate_instance)
+    return mock
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_urlopen_mock(html: bytes = b"<html><body>test content about testing</body></html>"):
@@ -168,6 +176,11 @@ class TestDataScrapeFilterStore:
 # ── outreach_response_conversion ──────────────────────────────────────────────
 
 class TestOutreachResponseConversion:
+
+    @pytest.fixture(autouse=True)
+    def _approve_gate(self, monkeypatch):
+        """Bypass the HITL gate so tests exercise pipeline logic, not the gate."""
+        monkeypatch.setattr("core.hitl_gate.get_hitl_gate", _approved_gate_mock())
 
     def test_returns_ok_and_draft_status(self, money_mode, monkeypatch):
         monkeypatch.setattr(
