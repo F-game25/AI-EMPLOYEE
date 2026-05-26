@@ -111,7 +111,7 @@ class TestRequireApprovalCalled:
     def test_require_approval_called_once(self, money_mode, no_llm, hitl_gate):
         with patch.object(hitl_gate, "require_approval", wraps=hitl_gate.require_approval) as spy:
             # Patch get_hitl_gate to return our spy-wrapped instance
-            with patch("core.money_mode.get_hitl_gate", return_value=hitl_gate):
+            with patch("core.hitl_gate.get_hitl_gate", return_value=hitl_gate):
                 money_mode.outreach_response_conversion(
                     "Hello {name}", {"name": "Dave"}, ""
                 )
@@ -121,7 +121,7 @@ class TestRequireApprovalCalled:
             assert call_kwargs["action"] == "outreach_send"
 
     def test_require_approval_payload_contains_recipient(self, money_mode, no_llm, hitl_gate):
-        with patch("core.money_mode.get_hitl_gate", return_value=hitl_gate):
+        with patch("core.hitl_gate.get_hitl_gate", return_value=hitl_gate):
             with patch.object(hitl_gate, "require_approval", wraps=hitl_gate.require_approval) as spy:
                 money_mode.outreach_response_conversion(
                     "Hello {name}", {"name": "Eve"}, ""
@@ -130,7 +130,7 @@ class TestRequireApprovalCalled:
                 assert payload["recipient"] == "Eve"
 
     def test_gate_pending_request_visible_in_hitl_queue(self, money_mode, no_llm, hitl_gate):
-        with patch("core.money_mode.get_hitl_gate", return_value=hitl_gate):
+        with patch("core.hitl_gate.get_hitl_gate", return_value=hitl_gate):
             money_mode.outreach_response_conversion(
                 "Hello {name}", {"name": "Frank"}, ""
             )
@@ -184,7 +184,7 @@ class TestOpportunityPipelineGate:
         assert result["steps"][0]["status"] == "dry_run"
 
     def test_gate_request_queued_for_opportunity(self, money_mode, hitl_gate):
-        with patch("core.money_mode.get_hitl_gate", return_value=hitl_gate):
+        with patch("core.hitl_gate.get_hitl_gate", return_value=hitl_gate):
             money_mode.run_opportunity_pipeline(
                 opportunity="Q4 campaign",
                 budget=250.0,
@@ -198,7 +198,7 @@ class TestOpportunityPipelineGate:
 
     def test_emit_called_after_manual_approval(self, money_mode, hitl_gate):
         """When a human approves via the gate, _safe_emit should be called."""
-        with patch("core.money_mode.get_hitl_gate", return_value=hitl_gate):
+        with patch("core.hitl_gate.get_hitl_gate", return_value=hitl_gate):
             with patch.object(money_mode, "_safe_emit", return_value={"status": "queued", "action_id": "x"}) as emit_spy:
                 # Approve before calling so gate returns approved=True
                 # We simulate this by making require_approval return approved immediately
@@ -248,7 +248,7 @@ class TestDealsJsonWritePaths:
 
     def test_hitl_gate_blocks_outreach_before_deal_update(self, money_mode, no_llm, hitl_gate):
         """Outreach gate fires before any outreach log entry is written."""
-        with patch("core.money_mode.get_hitl_gate", return_value=hitl_gate):
+        with patch("core.hitl_gate.get_hitl_gate", return_value=hitl_gate):
             result = money_mode.outreach_response_conversion(
                 "Hi {name}", {"name": "Gail"}, ""
             )
