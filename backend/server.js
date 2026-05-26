@@ -106,6 +106,7 @@ const TaskHistoryManager = require('./core/task_history');
 const { createTurnRunner } = require('./services/turn-runner');
 const { z } = require('zod');
 const economyService = require('./services/economy_service');
+const ollamaAdmin = require('./services/ollama_admin');
 
 // Initialize error recovery and task history
 const errorRecovery = new ErrorRecoveryManager();
@@ -3333,6 +3334,65 @@ app.get('/api/models/routing', requireAuth, (req, res) => {
   return res.json({ routing: DEFAULT_ROUTING, source: 'default', config_path: configPath });
 });
 
+app.post('/api/models/routing', requireAuth, (req, res) => {
+  const configPath = path.join(os.homedir(), '.ai-employee', 'model-routing.json');
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(req.body, null, 2), 'utf8');
+    return res.json({ ok: true, config_path: configPath });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/models/providers', requireAuth, (req, res) => {
+  const anthropicOk = !!(process.env.ANTHROPIC_API_KEY);
+  const openaiOk    = !!(process.env.OPENAI_API_KEY);
+  ollamaAdmin.isOllamaRunning().then(running => {
+    res.json({
+      providers: {
+        anthropic: { configured: anthropicOk, status: anthropicOk ? 'configured' : 'missing_key' },
+        openai:    { configured: openaiOk,    status: openaiOk    ? 'configured' : 'missing_key' },
+        ollama:    { configured: running,     status: running     ? 'running'    : 'not_running'  },
+      },
+    });
+  }).catch(() => res.json({ providers: { anthropic: { configured: anthropicOk }, openai: { configured: openaiOk }, ollama: { configured: false } } }));
+});
+
+app.get('/api/ollama/status', requireAuth, async (req, res) => {
+  const running = await ollamaAdmin.isOllamaRunning().catch(() => false);
+  const models  = running ? await ollamaAdmin.listModels().catch(() => []) : [];
+  res.json({ running, models });
+});
+
+app.get('/api/ollama/models', requireAuth, async (req, res) => {
+  const models = await ollamaAdmin.listModels().catch(() => []);
+  res.json({ models });
+});
+
+app.post('/api/ollama/pull', requireAuth, async (req, res) => {
+  const name = String((req.body || {}).name || '').trim();
+  if (!name) return res.status(400).json({ ok: false, error: 'name required' });
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  try {
+    for await (const chunk of ollamaAdmin.pullModelStream(name)) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    }
+    res.write(`data: ${JSON.stringify({ status: 'complete' })}\n\n`);
+  } catch (e) {
+    res.write(`data: ${JSON.stringify({ status: 'error', error: e.message })}\n\n`);
+  }
+  res.end();
+});
+
+app.delete('/api/ollama/models/:name', requireAuth, async (req, res) => {
+  const name = decodeURIComponent(req.params.name || '');
+  if (!name) return res.status(400).json({ ok: false, error: 'name required' });
+  const result = await ollamaAdmin.deleteModel(name).catch(e => ({ ok: false, error: e.message }));
+  res.json(result);
+});
+
 app.get('/api/rag/sources', requireAuth, async (req, res) => {
   const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
   const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
@@ -3357,6 +3417,54 @@ app.get('/api/rag/sources', requireAuth, async (req, res) => {
     created_at: e.created_at || null,
   }));
   return res.json({ sources, total: sources.length, chroma_status: chromaStatus, embedding_model: 'all-MiniLM-L6-v2' });
+});
+
+// ── Knowledge semantic / keyword search ──────────────────────────────────────
+app.get('/api/knowledge/search', requireAuth, async (req, res) => {
+  const q = String((req.query || {}).q || '').trim();
+  if (!q) return res.status(400).json({ ok: false, error: 'q required' });
+  const mode = String((req.query || {}).mode || 'keyword');
+  const alpha = Math.max(0, Math.min(1, Number((req.query || {}).alpha ?? 0.5)));
+  const limit = Math.max(1, Math.min(50, Number((req.query || {}).limit || 10) || 10));
+
+  if (mode === 'hybrid' || mode === 'semantic') {
+    try {
+      const pyUrl = `/memory/hybrid-search?q=${encodeURIComponent(q)}&alpha=${alpha}&limit=${limit}`;
+      const data = await requestPythonJSON(pyUrl, 'GET', null, { timeoutMs: 6000 });
+      if (data._http_status >= 200 && data._http_status < 300) {
+        const entries = (data.results || []).map(r => ({
+          id: r.source || r.rank,
+          title: r.source || 'Knowledge Entry',
+          content: r.content || '',
+          text: r.content || '',
+          source: r.source || '',
+          score: r.score ?? 0,
+          bm25_score: r.bm25_score ?? null,
+          vector_score: r.vector_score ?? null,
+          rank: r.rank ?? null,
+        }));
+        return res.json({ entries, total: entries.length, mode: 'hybrid', query: q });
+      }
+    } catch (_) { /* fallthrough to keyword */ }
+  }
+
+  // Keyword fallback: scan knowledge_store.json
+  const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
+  const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
+  const lower = q.toLowerCase();
+  const matched = ksEntries.filter(e =>
+    (e.content || e.text || '').toLowerCase().includes(lower) ||
+    (e.title || e.source || '').toLowerCase().includes(lower)
+  ).slice(0, limit).map(e => ({
+    id: e.id || e.title,
+    title: e.title || e.source || 'Untitled',
+    content: e.content || e.text || '',
+    text: e.content || e.text || '',
+    source: e.source || '',
+    score: null,
+    tags: e.tags || [],
+  }));
+  return res.json({ entries: matched, total: matched.length, mode: 'keyword', query: q });
 });
 
 // ── End Phase 4G ──────────────────────────────────────────────────────────────
@@ -4191,6 +4299,20 @@ app.post('/api/money/affiliate-draft', requireAuth, async (req, res) => {
     ok: false,
     error: 'Python MoneyMode backend unavailable; affiliate drafts require the approval-aware Python pipeline.',
   });
+});
+
+// GET /api/money/content-log
+app.get('/api/money/content-log', requireAuth, (req, res) => {
+  const p = path.join(STATE_DIR, 'content_log.json');
+  try { res.json({ ok: true, entries: JSON.parse(fs.readFileSync(p, 'utf8')) }); }
+  catch { res.json({ ok: true, entries: [] }); }
+});
+
+// GET /api/money/outreach-log
+app.get('/api/money/outreach-log', requireAuth, (req, res) => {
+  const p = path.join(STATE_DIR, 'outreach_log.json');
+  try { res.json({ ok: true, entries: JSON.parse(fs.readFileSync(p, 'utf8')) }); }
+  catch { res.json({ ok: true, entries: [] }); }
 });
 
 // ── Task execution endpoint ───────────────────────────────────────────────────
@@ -7294,6 +7416,45 @@ orchestrator.on('orchestrator:reply', (data) => {
   broadcaster.broadcast('orchestrator:message', data);
 });
 
+// ── Neural graph file watcher — broadcasts brain:graph_updated every 10s ─────
+const NEURAL_GRAPH_SNAPSHOT_PATH = statePath('neural_graph_snapshot.json');
+let _graphLastMtimeMs = 0;
+let _graphLastNodeCount = 0;
+let _graphLastEdgeCount = 0;
+
+function watchGraphFile() {
+  const readGraphStats = () => {
+    try {
+      if (!fs.existsSync(NEURAL_GRAPH_SNAPSHOT_PATH)) {
+        broadcaster.broadcast('brain:graph_updated', { nodes_count: 0, edges_count: 0, ts: Date.now() });
+        return;
+      }
+      const stat = fs.statSync(NEURAL_GRAPH_SNAPSHOT_PATH);
+      if (stat.mtimeMs === _graphLastMtimeMs) return; // no change
+      _graphLastMtimeMs = stat.mtimeMs;
+      const raw = JSON.parse(fs.readFileSync(NEURAL_GRAPH_SNAPSHOT_PATH, 'utf8'));
+      const nodes_count = Array.isArray(raw.nodes) ? raw.nodes.length : 0;
+      const edges_count = Array.isArray(raw.links || raw.edges) ? (raw.links || raw.edges).length : 0;
+      _graphLastNodeCount = nodes_count;
+      _graphLastEdgeCount = edges_count;
+      broadcaster.broadcast('brain:graph_updated', { nodes_count, edges_count, ts: Date.now() });
+    } catch (_) {
+      broadcaster.broadcast('brain:graph_updated', { nodes_count: 0, edges_count: 0, ts: Date.now() });
+    }
+  };
+  setInterval(readGraphStats, 10000).unref();
+  readGraphStats(); // initial read
+}
+
+// ── Graph delta endpoint ──────────────────────────────────────────────────────
+app.get('/api/brain/graph/delta', requireAuth, (req, res) => {
+  const since = Number(req.query.since) || 0;
+  const snapshot_ts = _graphLastMtimeMs || Date.now();
+  // Full snapshot is the source of truth; we return delta: [] with full: true
+  // so the client knows to refresh from /api/brain/graph or /api/neural-brain/graph.
+  res.json({ delta: [], full: true, snapshot_ts, nodes_count: _graphLastNodeCount, edges_count: _graphLastEdgeCount });
+});
+
 setInterval(() => {
   broadcaster.broadcast('system:status', sampleSystemStatus());
   broadcaster.broadcast('agents:list', { agents: getAgents() });
@@ -7585,6 +7746,8 @@ server.listen(PORT, LISTEN_HOST, () => {
   getSecretsBroker().then(broker => {
     console.log('[SecretsBroker] Initialized — backend:', broker.backendName);
   }).catch(e => console.error('[SecretsBroker] init error:', e));
+  // Start neural graph file watcher (broadcasts brain:graph_updated every 10s)
+  watchGraphFile();
   // Probe Python subsystems and broadcast system:ready when confirmed
   probeUntilReady().catch(e => console.error('[READINESS] probe error:', e));
 

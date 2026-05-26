@@ -188,6 +188,8 @@ export default function NeuralNetworkPage() {
   const [hydrated, setHydrated] = useState(false)
   const [webglOK] = useState(webglAvailable)
   const [isStaleFallback, setIsStaleFallback] = useState(false)
+  const [liveGraphUpdate, setLiveGraphUpdate] = useState(null) // { nodes_count, edges_count, ts }
+  const [livePulse, setLivePulse] = useState(false)
   const [activeView, setActiveView] = useState('TOP')
   const [showKnowledgeNodes,   setShowKnowledgeNodes]   = useState(true)
   const [showMemoryLinks,      setShowMemoryLinks]       = useState(true)
@@ -210,6 +212,29 @@ export default function NeuralNetworkPage() {
   const [mergeConfirm, setMergeConfirm] = useState('')
   const [selectedBackup, setSelectedBackup] = useState('')
   const retryCount = useRef(0)
+
+  // ── brain:graph_updated WebSocket listener ───────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      const t = e.detail?.type || e.type || ''
+      if (t !== 'brain:graph_updated') return
+      const data = e.detail?.data || e.detail || {}
+      setLiveGraphUpdate({ nodes_count: data.nodes_count ?? 0, edges_count: data.edges_count ?? 0, ts: data.ts ?? Date.now() })
+      setLivePulse(true)
+      // Re-fetch graph to get fresh node data
+      Promise.all([
+        api.get('/api/neural-brain/graph?depth=2&limit=300').catch(() => null),
+        api.get('/api/brain/graph').catch(() => null),
+      ]).then((payloads) => {
+        const candidates = payloads.map(p => normalizeGraphPayload(p || {}))
+        const best = candidates.reduce((a, b) => (b.nodes.length > a.nodes.length ? b : a), { nodes: [], links: [] })
+        if (best.nodes.length) setGraph(best)
+      }).catch(() => {})
+      setTimeout(() => setLivePulse(false), 2000)
+    }
+    window.addEventListener('ws:event', handler)
+    return () => window.removeEventListener('ws:event', handler)
+  }, [setGraph])
 
   // ── Vault graph fetch + WS live sync ─────────────────────────────────
   useEffect(() => {
@@ -559,6 +584,17 @@ export default function NeuralNetworkPage() {
               {nodeCount} nodes · {edgeCount} edges
             </div>
           )}
+
+          {/* LIVE indicator — appears top-left, pulses on update */}
+          <div className={`nnp__live-indicator${livePulse ? ' nnp__live-indicator--pulse' : ''}`} aria-live="polite">
+            <span className="nnp__live-dot" />
+            <span className="nnp__live-text">LIVE</span>
+            {liveGraphUpdate && (
+              <span className="nnp__live-ts">
+                {new Date(liveGraphUpdate.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Right Panel ──────────────────────────────────────────────── */}

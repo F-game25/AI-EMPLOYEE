@@ -698,6 +698,49 @@
   }
 }
 
+/* ── Tracking Grid (Content Calendar / ROI / Outreach) ───────────────────── */
+
+.ecc-tracking-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--nx-s-4);
+  align-items: start;
+}
+
+/* ── ROI 2x2 stat grid ───────────────────────────────────────────────────── */
+
+.ecc-roi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--nx-s-3);
+  margin-bottom: var(--nx-s-2);
+}
+
+.ecc-roi-stat {
+  background: var(--nx-surface-2);
+  border: 1px solid var(--nx-border-faint);
+  border-radius: var(--nx-r-sm);
+  padding: var(--nx-s-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ecc-roi-stat__label {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--nx-text-dim);
+  text-transform: uppercase;
+}
+
+.ecc-roi-stat__val {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--nx-text);
+  line-height: 1.2;
+}
+
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {

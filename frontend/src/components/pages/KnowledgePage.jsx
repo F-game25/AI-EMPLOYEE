@@ -35,6 +35,14 @@ export default function KnowledgePage() {
   const debounceRef = useRef(null)
   const searchAbortRef = useRef(null)
 
+  // Knowledge semantic search state
+  const [kSearchInput, setKSearchInput] = useState('')
+  const [kSearchMode, setKSearchMode] = useState('keyword') // 'keyword' | 'semantic'
+  const [kSearchResults, setKSearchResults] = useState(null) // null = no search yet
+  const [kSearchLoading, setKSearchLoading] = useState(false)
+  const kDebounceRef = useRef(null)
+  const kAbortRef = useRef(null)
+
   useEffect(() => {
     api.get('/api/vault/notes').then(d => {
       const notes = d?.notes || d || []
@@ -77,6 +85,30 @@ export default function KnowledgePage() {
     }, 200)
     return () => clearTimeout(debounceRef.current)
   }, [searchInput])
+
+  // Knowledge search — fires when input or mode changes
+  useEffect(() => {
+    clearTimeout(kDebounceRef.current)
+    const q = kSearchInput.trim()
+    if (!q) { setKSearchResults(null); return }
+    kDebounceRef.current = setTimeout(() => {
+      kAbortRef.current?.abort?.()
+      const ctrl = new AbortController()
+      kAbortRef.current = ctrl
+      setKSearchLoading(true)
+      const url = kSearchMode === 'semantic'
+        ? `/api/knowledge/search?q=${encodeURIComponent(q)}&mode=hybrid`
+        : `/api/knowledge/search?q=${encodeURIComponent(q)}`
+      api.get(url)
+        .then(d => {
+          if (ctrl.signal.aborted) return
+          setKSearchResults(d?.entries || [])
+        })
+        .catch(() => { if (!ctrl.signal.aborted) setKSearchResults([]) })
+        .finally(() => { if (!ctrl.signal.aborted) setKSearchLoading(false) })
+    }, 250)
+    return () => clearTimeout(kDebounceRef.current)
+  }, [kSearchInput, kSearchMode])
 
   // Unique tags derived from loaded notes (top 12 most common)
   const tagChips = useMemo(() => {
@@ -164,6 +196,7 @@ export default function KnowledgePage() {
           <button className={`kp-tab ${activeView === 'review' ? 'is-active' : ''}`} onClick={() => setActiveView('review')}>REVIEW QUEUE</button>
           <button className={`kp-tab ${activeView === 'broken' ? 'is-active' : ''}`} onClick={() => setActiveView('broken')}>BROKEN LINKS</button>
           <button className={`kp-tab ${activeView === 'rag' ? 'is-active' : ''}`} onClick={() => setActiveView('rag')}>RAG SOURCES</button>
+          <button className={`kp-tab ${activeView === 'search' ? 'is-active' : ''}`} onClick={() => setActiveView('search')}>SEARCH</button>
         </div>
         <div className="kp-toolbar__right">
           <button className="kp-action" onClick={() => setWizardOpen(true)}>+ LEARN TOPIC</button>
@@ -295,6 +328,84 @@ export default function KnowledgePage() {
       )}
 
       {activeView === 'rag' && <RagSourcesView />}
+
+      {activeView === 'search' && (
+        <div className="kp-ksearch">
+          <div className="kp-ksearch-bar">
+            <div className="kp-filter-search" style={{ flex: 1 }}>
+              <input
+                className="kp-filter-input"
+                type="search"
+                placeholder="Search knowledge base…"
+                value={kSearchInput}
+                onChange={e => setKSearchInput(e.target.value)}
+                aria-label="Knowledge search"
+                autoFocus
+              />
+              {kSearchInput && (
+                <button
+                  className="kp-filter-clear"
+                  onClick={() => { setKSearchInput(''); setKSearchResults(null) }}
+                  aria-label="Clear"
+                >×</button>
+              )}
+            </div>
+            <div className="kp-search-mode-toggle" role="group" aria-label="Search mode">
+              <button
+                className={`kp-mode-btn ${kSearchMode === 'keyword' ? 'is-active' : ''}`}
+                onClick={() => setKSearchMode('keyword')}
+              >KEYWORD</button>
+              <button
+                className={`kp-mode-btn ${kSearchMode === 'semantic' ? 'is-active' : ''}`}
+                onClick={() => setKSearchMode('semantic')}
+              >SEMANTIC</button>
+            </div>
+          </div>
+          {kSearchLoading && <div className="kp-ksearch-status">Searching…</div>}
+          {!kSearchLoading && kSearchResults === null && (
+            <div className="kp-empty"><div>Type to search the knowledge base</div><div>Toggle KEYWORD / SEMANTIC to switch mode</div></div>
+          )}
+          {!kSearchLoading && kSearchResults !== null && kSearchResults.length === 0 && (
+            <div className="kp-empty"><div>No results found</div></div>
+          )}
+          {!kSearchLoading && kSearchResults && kSearchResults.length > 0 && (
+            <div className="kp-ksearch-results">
+              <div className="kp-ksearch-count">{kSearchResults.length} result{kSearchResults.length !== 1 ? 's' : ''} · {kSearchMode === 'semantic' ? 'hybrid' : 'keyword'} mode</div>
+              {kSearchResults.map((r, i) => (
+                <div key={r.id || i} className="kp-ksearch-row">
+                  <div className="kp-ksearch-row__title">{r.title || r.topic || r.id || 'Untitled'}</div>
+                  <div className="kp-ksearch-row__body">{(r.content || r.text || '').slice(0, 200)}{(r.content || r.text || '').length > 200 ? '…' : ''}</div>
+                  <div className="kp-ksearch-row__meta">
+                    {r.source && (
+                      <span className="kp-ksearch-badge kp-ksearch-badge--source" title={r.source}>
+                        {r.source.length > 40 ? r.source.slice(0, 40) + '…' : r.source}
+                      </span>
+                    )}
+                    {(r.score != null || r._score != null) && (
+                      <span className="kp-ksearch-badge kp-ksearch-badge--score">
+                        Match: {Math.round((r.score ?? r._score) * 100)}%
+                      </span>
+                    )}
+                    {kSearchMode === 'semantic' && r.bm25_score != null && (
+                      <span className="kp-ksearch-badge kp-ksearch-badge--bm25">
+                        BM25: {r.bm25_score.toFixed(2)}
+                      </span>
+                    )}
+                    {kSearchMode === 'semantic' && r.vector_score != null && (
+                      <span className="kp-ksearch-badge kp-ksearch-badge--vector">
+                        Vector: {r.vector_score.toFixed(2)}
+                      </span>
+                    )}
+                    {r.tags?.length > 0 && r.tags.map(t => (
+                      <span key={t} className="kp-chip" style={{ fontSize: 9, padding: '1px 5px' }}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <LearnTopicWizard open={wizardOpen} onClose={() => { setWizardOpen(false); setRefreshKey(k => k + 1) }} />
     </div>

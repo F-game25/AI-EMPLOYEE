@@ -34,6 +34,15 @@ _STOPWORDS = {
 
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9\-]{1,}")
 
+# Named entity / specificity patterns
+_NAMED_ENTITY_RE = re.compile(r"\b[A-Z][A-Za-z0-9]{2,}(?:\s+[A-Z][A-Za-z0-9]{2,})*\b")
+_NUMBER_RE = re.compile(r"\b\d[\d,.%$€£]*\b")
+_SPECIFIC_PHRASE_RE = re.compile(
+    r"\b(less than|more than|greater than|at least|at most|between|minimum|maximum|"
+    r"within|deadline|by \w+|per \w+|exactly|specifically|requirement|constraint)\b",
+    re.IGNORECASE,
+)
+
 
 def _tokens(text: str) -> list[str]:
     return [t.lower() for t in _TOKEN_RE.findall(text or "") if t.lower() not in _STOPWORDS and len(t) > 2]
@@ -70,7 +79,12 @@ class ContextSufficiencyEvaluator:
         threshold = float(min_score if min_score is not None else self._min_score)
         goal = (goal or "").strip()
         if not goal:
-            return {"score": 0.0, "sufficient": False, "gaps": [], "memory_hits": 0, "graph_hits": 0}
+            return {
+                "score": 0.0, "sufficient": False, "gaps": [], "memory_hits": 0,
+                "graph_hits": 0, "knowledge_hits": 0,
+                "breakdown": {"keyword_overlap": 0.0, "specificity": 0.0, "historical": 0.0, "knowledge_hits": 0.0},
+                "recommendation": "Provide a goal to evaluate.",
+            }
 
         # Fast heuristic cache (60s TTL) — skip expensive retrieval for repeated goals
         cache_key = (goal[:120], hashlib.md5(goal.encode()).hexdigest()[:8])
@@ -86,13 +100,30 @@ class ContextSufficiencyEvaluator:
                     "graph_hits": 0,
                     "knowledge_hits": 0,
                     "cached": True,
+                    "breakdown": {"keyword_overlap": 0.0, "specificity": 0.0, "historical": 0.0, "knowledge_hits": 0.0},
+                    "recommendation": "Served from cache.",
                 }
 
         memories = self._safe_retrieve(goal, top_k=10)
         graph_hits = self._graph_hits(goal)
         knowledge_hits = self._knowledge_hits(goal)
 
-        score = self._coverage_score(goal, memories, graph_hits, knowledge_hits)
+        # Component scores for breakdown (weights: kw=0.3, spec=0.2, hist=0.2, ks=0.3)
+        kw_score = self._keyword_overlap_score(goal, memories)
+        spec_score = self._specificity_score(goal)
+        hist_score = self._historical_success_score(goal)
+        ks_score = min(1.0, knowledge_hits / 5.0)  # normalize: 5 hits → 1.0
+
+        weighted = (
+            0.3 * kw_score +
+            0.2 * spec_score +
+            0.2 * hist_score +
+            0.3 * ks_score
+        )
+
+        # Blend with legacy coverage score for backward stability
+        legacy = self._coverage_score(goal, memories, graph_hits, knowledge_hits)
+        score = 0.5 * weighted + 0.5 * legacy
 
         # Borderline → ask LLM (if available) for a tighter score + gap list
         gaps: list[str] = []
@@ -113,6 +144,8 @@ class ContextSufficiencyEvaluator:
         # Log confidence score (non-blocking, best-effort)
         self._log_score(goal, final_score)
 
+        recommendation = self._make_recommendation(final_score, threshold, kw_score, spec_score, hist_score, ks_score)
+
         return {
             "score": final_score,
             "sufficient": final_score >= threshold,
@@ -120,7 +153,86 @@ class ContextSufficiencyEvaluator:
             "memory_hits": len(memories),
             "graph_hits": graph_hits,
             "knowledge_hits": knowledge_hits,
+            "breakdown": {
+                "keyword_overlap": round(kw_score, 3),
+                "specificity": round(spec_score, 3),
+                "historical": round(hist_score, 3),
+                "knowledge_hits": round(ks_score, 3),
+            },
+            "recommendation": recommendation,
         }
+
+    @staticmethod
+    def _make_recommendation(score: float, threshold: float, kw: float, spec: float, hist: float, ks: float) -> str:
+        if score >= threshold:
+            return "Context is sufficient. Proceeding with execution."
+        parts = []
+        if kw < 0.3:
+            parts.append("add memory entries matching task keywords")
+        if spec < 0.3:
+            parts.append("include specific entities, numbers, or constraints in the goal")
+        if hist < 0.3:
+            parts.append("run similar tasks to build historical success data")
+        if ks < 0.3:
+            parts.append("expand the knowledge store with relevant domain content")
+        return "Insufficient context. Suggestions: " + "; ".join(parts) if parts else "Run research to improve context coverage."
+
+    # ── new component scorers ─────────────────────────────────────────────
+    @staticmethod
+    def _keyword_overlap_score(goal: str, memories: list[dict]) -> float:
+        """Fraction of goal tokens covered by at least one memory entry."""
+        goal_tokens = set(_tokens(goal))
+        if not goal_tokens or not memories:
+            return 0.0
+        covered = set()
+        for m in memories:
+            for t in _tokens(m.get("text") or ""):
+                if t in goal_tokens:
+                    covered.add(t)
+        return len(covered) / len(goal_tokens)
+
+    @staticmethod
+    def _specificity_score(goal: str) -> float:
+        """Score 0–1 measuring how specific/constrained the goal is."""
+        score = 0.0
+        # Named entities (capitalized multi-char tokens not at sentence start)
+        entities = _NAMED_ENTITY_RE.findall(goal)
+        if entities:
+            score += min(0.4, 0.15 * len(entities))
+        # Explicit numbers / quantities
+        numbers = _NUMBER_RE.findall(goal)
+        if numbers:
+            score += min(0.35, 0.15 * len(numbers))
+        # Constraint / requirement phrases
+        phrases = _SPECIFIC_PHRASE_RE.findall(goal)
+        if phrases:
+            score += min(0.25, 0.1 * len(phrases))
+        return min(1.0, score)
+
+    def _historical_success_score(self, goal: str) -> float:
+        """Estimate success likelihood from memory_index.json strategy records."""
+        state_dir = Path(os.getenv("STATE_DIR", "/home/lf/AI-EMPLOYEE/state"))
+        memory_index_path = state_dir / "memory_index.json"
+        if not memory_index_path.exists():
+            return 0.0
+        try:
+            with memory_index_path.open(encoding="utf-8") as fh:
+                data = json.load(fh)
+            memories = data.get("memories") or []
+            if not memories:
+                return 0.0
+            goal_tokens = set(_tokens(goal))
+            if not goal_tokens:
+                return 0.0
+            matched = 0
+            for m in memories:
+                text = (m.get("text") or "").lower()
+                if any(tok in text for tok in goal_tokens):
+                    matched += 1
+            # Normalize: 3+ matching memories → full historical credit
+            return min(1.0, matched / 3.0)
+        except Exception:
+            return 0.0
 
     def _log_score(self, goal: str, score: float) -> None:
         try:

@@ -247,6 +247,26 @@ class AutoResearchAgent:
             })
         return sources
 
+    async def run_research(self, query: str, sources: list[str]) -> list[dict]:
+        """Fetch and summarize the given sources. Returns [{source, summary, tokens}]."""
+        result = await self.research_selected(query, urls=sources)
+        findings = []
+        for gap in (result.get("gaps_researched") or []):
+            # Reconstruct per-source rows from what was persisted in memory
+            findings.append({"source": gap, "summary": "", "tokens": 0})
+        # Richer: pull from the raw findings stored in _research_one via the result dict
+        raw = result.get("findings") or []
+        if raw:
+            return [
+                {
+                    "source": f.get("url") or f.get("source", ""),
+                    "summary": f.get("summary", ""),
+                    "tokens": 0,
+                }
+                for f in raw
+            ]
+        return findings
+
     async def research_selected(
         self,
         query: str,

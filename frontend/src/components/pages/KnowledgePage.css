@@ -250,6 +250,89 @@
 }
 .kp-broken-fix:hover { background: rgba(34,197,94,0.2); }
 
+/* ── Knowledge Semantic Search ─────────────────────── */
+.kp-ksearch {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px;
+  gap: 12px;
+}
+.kp-ksearch-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.kp-search-mode-toggle {
+  display: flex;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.kp-mode-btn {
+  padding: 5px 12px;
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.5);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.kp-mode-btn + .kp-mode-btn { border-left: 1px solid rgba(255,255,255,0.12); }
+.kp-mode-btn:hover { color: #e5c76b; }
+.kp-mode-btn.is-active { background: rgba(229,199,107,0.15); color: #e5c76b; }
+.kp-ksearch-status { font-size: 11px; color: rgba(255,255,255,0.4); padding: 8px 0; }
+.kp-ksearch-count { font-size: 9px; letter-spacing: 1px; color: rgba(255,255,255,0.35); margin-bottom: 8px; }
+.kp-ksearch-results { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.kp-ksearch-row {
+  padding: 12px 14px;
+  background: rgba(13,13,24,0.5);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kp-ksearch-row:hover { border-color: rgba(229,199,107,0.2); }
+.kp-ksearch-row__title { font-size: 13px; font-weight: 600; color: #e5c76b; }
+.kp-ksearch-row__body { font-size: 11px; color: rgba(255,255,255,0.6); line-height: 1.5; }
+.kp-ksearch-row__meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.kp-ksearch-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 9px;
+  letter-spacing: 0.8px;
+}
+.kp-ksearch-badge--source {
+  background: rgba(34,211,238,0.1);
+  border: 1px solid rgba(34,211,238,0.25);
+  color: #22d3ee;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kp-ksearch-badge--score {
+  background: rgba(34,197,94,0.1);
+  border: 1px solid rgba(34,197,94,0.25);
+  color: #22c55e;
+}
+.kp-ksearch-badge--bm25 {
+  background: rgba(251,191,36,0.1);
+  border: 1px solid rgba(251,191,36,0.25);
+  color: #fbbf24;
+}
+.kp-ksearch-badge--vector {
+  background: rgba(168,85,247,0.1);
+  border: 1px solid rgba(168,85,247,0.25);
+  color: #a855f7;
+}
+
 /* ── Responsive (Batch 4) ── */
 @media (max-width: 900px) {
   .kp-vault { grid-template-columns: 1fr; }       /* stack master / detail / aside */

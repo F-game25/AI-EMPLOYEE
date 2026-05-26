@@ -118,6 +118,7 @@ class AgentController:
         goal: str,
         *,
         persist_task: Callable[[str, TaskNode], None] | None = None,
+        max_retry: int = 2,
     ) -> dict:
         run_id = str(uuid.uuid4())[:8]
         start = time.perf_counter()
@@ -129,7 +130,38 @@ class AgentController:
         # ── Context sufficiency + autonomous research loop ────────────────
         ctx_summary = self._run_context_research_loop(goal=goal, run_id=run_id)
 
-        graph = self.build_task_graph(goal=goal, run_id=run_id)
+        # ── Planning with retry on validation failure ──────────────────────
+        graph = None
+        last_failure: str = ""
+        effective_goal = goal
+        for attempt in range(max(1, max_retry)):
+            try:
+                graph = self.build_task_graph(goal=effective_goal, run_id=run_id)
+                graph.validate_no_cycles()
+                break
+            except Exception as exc:
+                last_failure = str(exc)
+                self._logger.log_event(
+                    component="controller",
+                    action="plan_retry",
+                    result="retrying",
+                    latency_ms=0.0,
+                    meta={"attempt": attempt + 1, "reason": last_failure},
+                )
+                # Inject failure context into the goal so the planner gets a richer signal
+                effective_goal = f"{goal}\n[previous plan failed: {last_failure}]"
+        if graph is None:
+            raise RuntimeError(f"Planning failed after {max_retry} attempts: {last_failure}")
+
+        # ── Plan quality scoring ───────────────────────────────────────────
+        quality_score, estimated_cost_tokens = self._score_plan_quality(goal, graph)
+        self._broadcast_fn("task:plan_quality", {
+            "goal": goal,
+            "task_count": len(graph.tasks),
+            "quality_score": round(quality_score, 3),
+            "estimated_cost_tokens": estimated_cost_tokens,
+        })
+
         if ctx_summary and graph.tasks:
             # Tag first task with context score + findings for downstream skills
             graph.tasks[0].context_score = float(ctx_summary.get("final_score", 0.0))
@@ -143,14 +175,67 @@ class AgentController:
                 persist_task(run_id, task)
             self._feedback_loop(goal=goal, task=task)
         summary = self._build_summary(run_id=run_id, goal=goal, graph=graph)
+        summary["plan_quality_score"] = round(quality_score, 3)
+        summary["estimated_cost_tokens"] = estimated_cost_tokens
         self._logger.log_event(
             component="controller",
             action="run_goal",
             result="success",
             latency_ms=(time.perf_counter() - start) * 1000,
-            meta={"run_id": run_id, "tasks": len(tasks)},
+            meta={"run_id": run_id, "tasks": len(tasks), "quality_score": quality_score},
         )
         return summary
+
+    @staticmethod
+    def _score_plan_quality(goal: str, graph: TaskGraph) -> tuple[float, int]:
+        """Return (quality_score 0–1, estimated_token_cost).
+
+        Quality dimensions:
+        - task_count_score: moderate task count (2-4) scores highest
+        - dependency_completeness: fraction of tasks whose declared deps exist
+        - goal_coverage: fraction of goal tokens appearing in task inputs
+        """
+        tasks = graph.tasks
+        n = len(tasks)
+        if n == 0:
+            return 0.0, 0
+
+        # 1. Task count score — penalise trivially short (0-1) or bloated (>8) plans
+        if n == 1:
+            task_count_score = 0.5
+        elif 2 <= n <= 4:
+            task_count_score = 1.0
+        elif 5 <= n <= 8:
+            task_count_score = 0.7
+        else:
+            task_count_score = 0.4
+
+        # 2. Dependency completeness
+        task_ids = {t.task_id for t in tasks}
+        total_deps = sum(len(t.dependencies) for t in tasks)
+        valid_deps = sum(1 for t in tasks for d in t.dependencies if d in task_ids)
+        dep_score = (valid_deps / total_deps) if total_deps > 0 else 1.0
+
+        # 3. Goal keyword coverage in task inputs
+        from core.context_evaluator import _tokens
+        goal_tokens = set(_tokens(goal))
+        if goal_tokens:
+            covered_tokens: set[str] = set()
+            for t in tasks:
+                inp_text = " ".join(str(v) for v in t.input.values())
+                for tok in _tokens(inp_text):
+                    if tok in goal_tokens:
+                        covered_tokens.add(tok)
+            coverage = len(covered_tokens) / len(goal_tokens)
+        else:
+            coverage = 1.0
+
+        quality = 0.4 * task_count_score + 0.3 * dep_score + 0.3 * coverage
+
+        # Estimated token cost: ~300 tokens per task (system prompt + input + output)
+        estimated_cost_tokens = n * 300
+
+        return min(1.0, quality), estimated_cost_tokens
 
     def _run_learn_topic_goal(
         self,

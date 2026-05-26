@@ -162,6 +162,75 @@ class KnowledgeStore:
         return self.update_user_profile(goals=goals, business_type=business_type or None, preferences=prefs)
 
 
+    def hybrid_search(
+        self,
+        query: str,
+        *,
+        top_k: int = 10,
+        alpha: float = 0.7,
+    ) -> list[dict[str, Any]]:
+        """Hybrid semantic + keyword search over embedded knowledge entries.
+
+        Args:
+            query:  Free-text query.
+            top_k:  Maximum results.
+            alpha:  Weight for vector score (0.0 = pure BM25/keyword, 1.0 = pure vector).
+
+        Returns:
+            List of result dicts with guaranteed ``source`` and ``score`` fields.
+        """
+        try:
+            from memory.vector_store import get_vector_store
+        except ImportError:
+            return self._keyword_fallback(query, top_k=top_k)
+
+        vs = get_vector_store()
+        raw = json.loads(self._path.read_text(encoding="utf-8"))
+        entries_map = {
+            f"ks:{e.get('id') or e.get('title','').replace(' ','_').lower()[:40]}": e
+            for e in raw.get("entries", [])
+            if e.get("id") or e.get("title")
+        }
+
+        # Vector / hybrid search via vector store
+        vs_results = vs.search(query, top_k=top_k)
+
+        results: list[dict[str, Any]] = []
+        q_tokens = set(query.lower().split())
+        for r in vs_results:
+            key = r.get("key", "")
+            original = entries_map.get(key, {})
+            text = r.get("text", "").lower()
+            kw_score = 1.0 if any(t in text for t in q_tokens if len(t) > 2) else 0.0
+            vec_score = float(r.get("_score", 0.0))
+            blended = vec_score * alpha + kw_score * (1.0 - alpha)
+            results.append({
+                "id":      original.get("id") or key.replace("ks:", ""),
+                "title":   original.get("title") or r.get("text", "")[:60],
+                "content": original.get("content") or r.get("text", ""),
+                "source":  original.get("source") or r.get("metadata", {}).get("source") or "knowledge_store",
+                "tags":    original.get("tags") or r.get("metadata", {}).get("tags") or [],
+                "score":   round(blended, 4),
+            })
+
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:top_k]
+
+    def _keyword_fallback(self, query: str, top_k: int = 10) -> list[dict[str, Any]]:
+        """BM25-style keyword fallback when vector store is unavailable."""
+        hits = self.search_knowledge(query)[:top_k]
+        return [
+            {
+                "id":      h.get("id", ""),
+                "title":   h.get("topic", ""),
+                "content": str(h.get("content", "")),
+                "source":  h.get("source", "knowledge_store"),
+                "tags":    h.get("tags", []),
+                "score":   0.5,
+            }
+            for h in hits
+        ]
+
     def embed_entries_to_vector_store(self) -> int:
         """Embed the `entries` array from the JSON file into the vector store.
 

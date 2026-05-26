@@ -24,7 +24,7 @@ function useEconomyData() {
     let alive = true
     async function load() {
       try {
-        const [summary, ledger, costs, pipelines, opportunities, wallet, moneyTasks] = await Promise.all([
+        const [summary, ledger, costs, pipelines, opportunities, wallet, moneyTasks, contentLog, outreachLog] = await Promise.all([
           fetchJson('/api/economy/summary').catch((e) => ({ state: 'degraded', error: e.message })),
           fetchJson('/api/economy/ledger').catch(() => ({ items: [] })),
           fetchJson('/api/economy/costs').catch(() => ({ items: [] })),
@@ -32,8 +32,10 @@ function useEconomyData() {
           fetchJson('/api/economy/opportunities').catch(() => ({ opportunities: [] })),
           fetchJson('/api/economy/wallet').catch(() => ({ wallet: { configured: false, state: 'degraded' } })),
           fetchJson('/api/money/tasks').catch(() => ({ tasks: [], policy: null })),
+          fetchJson('/api/money/content-log').catch(() => ({ entries: [] })),
+          fetchJson('/api/money/outreach-log').catch(() => ({ entries: [] })),
         ])
-        if (alive) setState({ loading: false, error: summary.error || null, data: { summary, ledger, costs, pipelines, opportunities, wallet, moneyTasks } })
+        if (alive) setState({ loading: false, error: summary.error || null, data: { summary, ledger, costs, pipelines, opportunities, wallet, moneyTasks, contentLog, outreachLog } })
       } catch (err) {
         if (alive) setState({ loading: false, error: err.message, data: null })
       }
@@ -110,6 +112,118 @@ function WalletPanel({ wallet }) {
   )
 }
 
+const STATUS_TONE = {
+  draft: 'warn',
+  published: 'success',
+  template: 'idle',
+  sent: 'success',
+  pending_approval: 'warn',
+}
+
+function ContentCalendarPanel({ entries = [] }) {
+  const fmtTs = (ts) => ts ? new Date(ts).toLocaleString() : '-'
+  return (
+    <Panel title="CONTENT CALENDAR" icon="[]" tone="gold" size="compact" actions={<StatusPill label={entries.length ? `${entries.length} ENTRIES` : 'EMPTY'} tone={entries.length ? 'success' : 'idle'} size="sm" />}>
+      <div className="ecc-native-list">
+        {entries.length ? entries.slice(0, 8).map((e, i) => (
+          <div key={e.id || i} className="ecc-native-row">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="ecc-native-row__title">{e.topic || e.title || 'Untitled'}</span>
+              <span className="ecc-native-row__sub">
+                {e.type && <span style={{ marginRight: 6 }}>{e.type}</span>}
+                {e.format && <span style={{ marginRight: 6 }}>{e.format}</span>}
+                {e.word_count ? `${e.word_count} words · ` : ''}{fmtTs(e.timestamp || e.created_at)}
+              </span>
+            </div>
+            <StatusPill label={(e.status || 'draft').toUpperCase()} tone={STATUS_TONE[e.status] || 'idle'} size="sm" />
+          </div>
+        )) : (
+          <div className="ecc-native-empty">No content published yet</div>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
+function ROITrackingPanel({ summary = {}, pipelines = [] }) {
+  const revenue = Number(summary.revenue || summary.total_revenue || 0)
+  const cost = Number(summary.cost || summary.total_cost || 0)
+  const profit = summary.profit != null ? Number(summary.profit) : revenue - cost
+  const roi = cost > 0 ? (profit / cost) * 100 : 0
+  const profitColor = profit >= 0 ? 'var(--nx-success)' : 'var(--nx-danger)'
+  return (
+    <Panel title="ROI TRACKING" icon="%" tone="gold" size="compact">
+      {!revenue && !cost && !pipelines.length ? (
+        <div className="ecc-native-empty">No economy data</div>
+      ) : (
+        <>
+          <div className="ecc-roi-grid">
+            <div className="ecc-roi-stat">
+              <span className="ecc-roi-stat__label">REVENUE</span>
+              <span className="ecc-roi-stat__val">{fmt$(revenue)}</span>
+            </div>
+            <div className="ecc-roi-stat">
+              <span className="ecc-roi-stat__label">COSTS</span>
+              <span className="ecc-roi-stat__val">{fmt$(cost)}</span>
+            </div>
+            <div className="ecc-roi-stat">
+              <span className="ecc-roi-stat__label">PROFIT</span>
+              <span className="ecc-roi-stat__val" style={{ color: profitColor }}>{fmt$(profit)}</span>
+            </div>
+            <div className="ecc-roi-stat">
+              <span className="ecc-roi-stat__label">ROI</span>
+              <span className="ecc-roi-stat__val" style={{ color: profitColor }}>{roi.toFixed(1)}%</span>
+            </div>
+          </div>
+          {pipelines.length > 0 && (
+            <table className="ecc-token-table" style={{ marginTop: 'var(--nx-s-3)' }}>
+              <thead>
+                <tr>
+                  <th className="ecc-token-table__th">Pipeline</th>
+                  <th className="ecc-token-table__th">Revenue</th>
+                  <th className="ecc-token-table__th">Cost</th>
+                  <th className="ecc-token-table__th">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pipelines.map((p, i) => (
+                  <tr key={p.id || p.name || i} className="ecc-token-table__row">
+                    <td className="ecc-token-table__op">{p.name || p.id || '-'}</td>
+                    <td className="ecc-token-table__op">{fmt$(p.revenue || p.value || 0)}</td>
+                    <td className="ecc-token-table__op">{fmt$(p.cost || 0)}</td>
+                    <td className="ecc-token-table__op">{p.status || 'idle'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </Panel>
+  )
+}
+
+function OutreachStatusPanel({ entries = [] }) {
+  const fmtTs = (ts) => ts ? new Date(ts).toLocaleString() : '-'
+  return (
+    <Panel title="OUTREACH STATUS" icon="@" tone="gold" size="compact" actions={<StatusPill label={entries.length ? `${entries.length} RECORDS` : 'EMPTY'} tone={entries.length ? 'success' : 'idle'} size="sm" />}>
+      <div className="ecc-native-list">
+        {entries.length ? entries.slice(0, 8).map((e, i) => (
+          <div key={e.id || i} className="ecc-native-row">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="ecc-native-row__title">{e.recipient_name || e.recipient || e.email || 'Unknown'}</span>
+              <span className="ecc-native-row__sub">{fmtTs(e.timestamp || e.sent_at || e.created_at)}</span>
+            </div>
+            <StatusPill label={(e.status || 'draft').toUpperCase()} tone={STATUS_TONE[e.status] || 'idle'} size="sm" />
+          </div>
+        )) : (
+          <div className="ecc-native-empty">No outreach drafted yet</div>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
 export default function MoneyModePage() {
   const setActiveSection = useAppStore(s => s.setActiveSection)
   const { loading, error, data } = useEconomyData()
@@ -120,6 +234,8 @@ export default function MoneyModePage() {
   const opportunities = data?.opportunities?.opportunities || []
   const tasks = data?.moneyTasks?.tasks || []
   const policy = data?.moneyTasks?.policy || {}
+  const contentEntries = data?.contentLog?.entries || []
+  const outreachEntries = data?.outreachLog?.entries || []
 
   const revenue = summary.revenue || summary.total_revenue || 0
   const cost = summary.cost || summary.total_cost || 0
@@ -261,6 +377,15 @@ export default function MoneyModePage() {
             ]}
           />
         </Panel>
+      </section>
+
+      <section aria-label="Money Mode Tracking Panels">
+        <SectionLabel icon="[]" tone="gold" rule>MONEY MODE TRACKING</SectionLabel>
+        <div className="ecc-tracking-grid">
+          <ContentCalendarPanel entries={contentEntries} />
+          <ROITrackingPanel summary={summary} pipelines={pipelines} />
+          <OutreachStatusPanel entries={outreachEntries} />
+        </div>
       </section>
     </div>
   )

@@ -3,15 +3,19 @@
  * /api/research/* — Research v2 proxy to Python FastAPI on port 18790.
  *   POST /api/research/discover  → returns candidate sources (no fetch)
  *   POST /api/research/execute   → kicks off backgrounded fetch + summarize on selected URLs
+ *
+ * Falls back to clearly-labelled mock data when Python backend is unavailable.
  */
 const http    = require('http')
+const crypto  = require('crypto')
 const express = require('express')
 
 const PYTHON_HOST = '127.0.0.1'
 const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || 18790
 const TIMEOUT_MS  = 30000
 
-function proxy(path, req, res) {
+// ── Proxy with fallback ───────────────────────────────────────────────────────
+function proxy(path, req, res, fallback) {
   const body = JSON.stringify(req.body || {})
   const proxyReq = http.request(
     `http://${PYTHON_HOST}:${PYTHON_PORT}${path}`,
@@ -32,43 +36,85 @@ function proxy(path, req, res) {
       })
     }
   )
-  proxyReq.on('error',   e => res.status(503).json({ error: `Research backend unavailable: ${e.message}` }))
-  proxyReq.on('timeout', () => { proxyReq.destroy(); res.status(504).json({ error: 'Research backend timed out' }) })
+  proxyReq.on('error',   () => fallback(res))
+  proxyReq.on('timeout', () => { proxyReq.destroy(); fallback(res) })
   proxyReq.write(body); proxyReq.end()
 }
 
-// 3 req/min per IP for execute (resource-intensive)
-function makeRateLimit(max, windowMs = 60_000) {
-  const buckets = new Map();
-  return (req, res, next) => {
-    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
-    const now = Date.now();
-    const hits = (buckets.get(ip) || []).filter((t) => now - t < windowMs);
-    hits.push(now);
-    buckets.set(ip, hits);
-    if (hits.length > max) {
-      res.set('Retry-After', Math.ceil(windowMs / 1000));
-      return res.status(429).json({ ok: false, error: 'Rate limit exceeded' });
-    }
-    next();
-  };
+// ── Mock fallbacks (clearly labelled, no real data) ───────────────────────────
+function mockDiscover(query, limit) {
+  const domains = ['example.com', 'docs.example.org', 'news.example.net', 'forum.example.io', 'scholar.example.edu']
+  const types   = ['web', 'docs', 'news', 'forum', 'academic']
+  const sources = Array.from({ length: Math.min(limit, 5) }, (_, i) => ({
+    id:          crypto.createHash('md5').update(`${query}-${i}`).digest('hex').slice(0, 12),
+    url:         `https://${domains[i]}/mock-result-${i + 1}`,
+    title:       `[MOCK] Result ${i + 1} for "${query}"`,
+    snippet:     `[MOCK DATA — Python backend offline] Placeholder result ${i + 1} matching "${query}".`,
+    domain:      domains[i],
+    trust_score: parseFloat((0.5 + i * 0.08).toFixed(2)),
+    source_type: types[i],
+  }))
+  return { ok: true, query, sources, mock: true }
 }
-const _rl_execute = makeRateLimit(3);
 
+function mockExecute(query, sources, session_id) {
+  const sid = session_id || crypto.randomBytes(6).toString('hex')
+  return {
+    ok: true,
+    session_id: sid,
+    status: 'completed',
+    mock: true,
+    results: (sources || []).map(url => ({
+      source:  url,
+      summary: `[MOCK DATA — Python backend offline] No summary available for "${url}" while research backend is down.`,
+      tokens:  0,
+    })),
+  }
+}
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+function makeRateLimit(max, windowMs = 60_000) {
+  const buckets = new Map()
+  return (req, res, next) => {
+    const ip  = req.ip || req.connection?.remoteAddress || 'unknown'
+    const now = Date.now()
+    const hits = (buckets.get(ip) || []).filter(t => now - t < windowMs)
+    hits.push(now)
+    buckets.set(ip, hits)
+    if (hits.length > max) {
+      res.set('Retry-After', Math.ceil(windowMs / 1000))
+      return res.status(429).json({ ok: false, error: 'Rate limit exceeded' })
+    }
+    next()
+  }
+}
+const _rl_execute = makeRateLimit(3)
+
+// ── Router ────────────────────────────────────────────────────────────────────
 module.exports = function createResearchRouter(requireAuth) {
   const router = express.Router()
 
   router.post('/discover', requireAuth, (req, res) => {
-    if (!(req.body?.query || '').trim()) return res.status(400).json({ error: 'query required' })
-    proxy('/api/research/discover', req, res)
+    const query = (req.body?.query || '').trim()
+    if (!query) return res.status(400).json({ error: 'query required' })
+    const limit = parseInt(req.body?.limit || req.body?.max_sources || 10, 10) || 10
+    proxy(
+      '/api/research/discover',
+      req, res,
+      () => res.json(mockDiscover(query, limit))
+    )
   })
 
   router.post('/execute', requireAuth, _rl_execute, (req, res) => {
-    const { query = '', selected_source_ids = [], selected_urls = [] } = req.body || {}
+    const { query = '', selected_source_ids = [], selected_urls = [], session_id } = req.body || {}
     if (!query.trim() || (!selected_source_ids.length && !selected_urls.length)) {
       return res.status(400).json({ error: 'query and selected_source_ids (or selected_urls) required' })
     }
-    proxy('/api/research/execute', req, res)
+    proxy(
+      '/api/research/execute',
+      req, res,
+      () => res.json(mockExecute(query, selected_urls, session_id))
+    )
   })
 
   return router

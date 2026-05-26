@@ -197,8 +197,28 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
     return { entries: entries.slice(0, Number(limit)), total: entries.length }
   }
 
-  r.get('/knowledge/search', requireAuth, (req, res) => {
+  r.get('/knowledge/search', requireAuth, async (req, res) => {
     try {
+      if (req.query.mode === 'hybrid') {
+        const { q, limit = 10 } = req.query
+        if (!q) return res.status(400).json({ error: 'q required', entries: [], total: 0 })
+        try {
+          const r1 = await fetch(`${PYTHON_BACKEND}/api/knowledge/semantic_search`, {
+            method: 'POST',
+            headers: _authHeaders(req, { 'content-type': 'application/json' }),
+            body: JSON.stringify({ query: q, top_k: Number(limit), mode: 'hybrid' }),
+          })
+          const data = await r1.json()
+          const results = Array.isArray(data.results) ? data.results : (Array.isArray(data.entries) ? data.entries : [])
+          return res.setHeader('X-Search-Mode', 'hybrid').status(r1.status).json({
+            entries: results,
+            total: results.length,
+            mode: 'hybrid',
+          })
+        } catch (_e) {
+          // Python unavailable — fall through to local keyword search
+        }
+      }
       res.json(searchKnowledge(req.query || {}))
     } catch (e) {
       res.status(500).json({ error: e.message, entries: [], total: 0 })

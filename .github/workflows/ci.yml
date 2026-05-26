@@ -100,6 +100,9 @@ jobs:
       - name: Run audit/economy service tests
         run: node tests/test_audit_economy_services.js
 
+      - name: Run rate-limit cache tests
+        run: node tests/test_rate_limit_cache.js
+
   # ─────────────────────────────────────────────────────────────────
   # FRONTEND BUILD CHECK
   # ─────────────────────────────────────────────────────────────────

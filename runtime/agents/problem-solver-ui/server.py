@@ -28136,6 +28136,18 @@ async def memory_adapter_add(req: dict):
     return {"id": mid}
 
 
+@app.get("/memory/hybrid-search")
+async def memory_hybrid_search(q: str = Query(..., min_length=1, max_length=500), alpha: float = Query(0.5, ge=0.0, le=1.0), limit: int = Query(10, ge=1, le=50)):
+    """Hybrid BM25 + vector search over the knowledge store."""
+    try:
+        from memory.memory_router import hybrid_search
+        results = hybrid_search(q, top_k=limit, alpha=alpha)
+        return {"results": results, "query": q, "alpha": alpha, "mode": "hybrid"}
+    except Exception as exc:
+        logger.warning(f"hybrid_search failed: {exc}")
+        return {"results": [], "query": q, "alpha": alpha, "mode": "hybrid", "error": str(exc)}
+
+
 # ── Verification engine + pending review queue ──────────────────────────
 @app.post("/api/memory/verify")
 async def memory_verify(req: dict):
