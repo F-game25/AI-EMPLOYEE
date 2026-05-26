@@ -133,6 +133,9 @@ const api = {
   voice: {
     synthesize: (text, persona) => api.post('/api/voice/synthesize', { text, persona }),
     status:     ()              => api.get('/api/voice/status'),
+    config:     ()              => api.get('/api/voice/config'),
+    saveConfig: (payload)       => api.post('/api/voice/config', payload),
+    fishStatus: ()              => api.get('/api/voice/fish-speech/status'),
   },
 
   // ── Product / Ops ─────────────────────────────────────────────────────────

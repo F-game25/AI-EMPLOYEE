@@ -9,6 +9,12 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:routes:core": "DASHBOARD_ROUTE_GROUP=core vitest run src/__tests__/DashboardRoutes.smoke.test.jsx --reporter=verbose",
+    "test:routes:operations": "DASHBOARD_ROUTE_GROUP=operations vitest run src/__tests__/DashboardRoutes.smoke.test.jsx --reporter=verbose",
+    "test:routes:intelligence": "DASHBOARD_ROUTE_GROUP=intelligence vitest run src/__tests__/DashboardRoutes.smoke.test.jsx --reporter=verbose",
+    "test:routes:security": "DASHBOARD_ROUTE_GROUP=security vitest run src/__tests__/DashboardRoutes.smoke.test.jsx --reporter=verbose",
+    "test:routes:system": "DASHBOARD_ROUTE_GROUP=system vitest run src/__tests__/DashboardRoutes.smoke.test.jsx --reporter=verbose",
+    "test:routes:smoke": "npm run test:routes:core && npm run test:routes:operations && npm run test:routes:intelligence && npm run test:routes:security && npm run test:routes:system",
     "test:watch": "vitest"
   },
   "dependencies": {

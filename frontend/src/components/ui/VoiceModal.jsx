@@ -15,12 +15,29 @@ export default function VoiceModal() {
   const [tab,  setTab]  = useState('persona')
   const [gender,    setGender]    = useState('NEUTRAL')
   const [tone,      setTone]      = useState('PROFESSIONAL')
+  const [provider,  setProvider]  = useState('fish_speech')
+  const [fishSettings, setFishSettings] = useState({
+    enabled: true,
+    baseUrl: 'http://127.0.0.1:8080',
+    referenceId: '',
+    temperature: 0.8,
+    topP: 0.8,
+    repetitionPenalty: 1.1,
+    chunkLength: 200,
+    maxNewTokens: 1024,
+    seed: '',
+    localFallback: true,
+  })
   const [recording,  setRecording]  = useState(false)
   const [transcript, setTranscript] = useState('')
   const [sending,    setSending]    = useState(false)
   const [aiResponse, setAiResponse] = useState('')
-  const [status,     setStatus]     = useState({ connected: false, backend: 'unknown' })
+  const [status,     setStatus]     = useState({ connected: false, backend: 'unknown', detail: '' })
+  const [saving,     setSaving]     = useState(false)
+  const [playback,   setPlayback]   = useState('')
+  const [lastArtifact, setLastArtifact] = useState(null)
   const recogRef = useRef(null)
+  const audioRef = useRef(null)
 
   // Listen for the dock to dispatch the open event
   useEffect(() => {
@@ -37,14 +54,28 @@ export default function VoiceModal() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
-  // Probe backend status when opened
+  const refreshStatus = useCallback(async () => {
+    try {
+      const data = await api.get('/api/voice/config')
+      const cfg = data.config || {}
+      const fish = cfg.fishSpeech || {}
+      setProvider(cfg.provider || 'fish_speech')
+      setFishSettings(prev => ({ ...prev, ...fish, seed: fish.seed ?? '' }))
+      const fishStatus = data.fish_speech?.status || 'unknown'
+      setStatus({
+        connected: true,
+        backend: cfg.provider === 'local' ? 'local fallback' : `fish: ${fishStatus}`,
+        detail: data.fish_speech?.last_error || data.fish_speech?.endpoint || '',
+      })
+    } catch (e) {
+      setStatus({ connected: false, backend: 'offline', detail: e.message })
+    }
+  }, [])
+
   useEffect(() => {
     if (!open) return
-    fetch('/api/voice/personaplex/status')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => d && setStatus({ connected: true, backend: d.backend || 'personaplex' }))
-      .catch(() => setStatus({ connected: false, backend: 'offline' }))
-  }, [open])
+    refreshStatus()
+  }, [open, refreshStatus])
 
   const applyPreset = useCallback((p) => {
     setGender(p.gender)
@@ -75,7 +106,7 @@ export default function VoiceModal() {
     setRecording(false)
   }, [])
 
-  const speakText = useCallback((text) => {
+  const speakBrowserFallback = useCallback((text) => {
     if (!('speechSynthesis' in window)) return
     window.speechSynthesis.cancel()
     const u = new SpeechSynthesisUtterance(text.slice(0, 500))
@@ -83,9 +114,93 @@ export default function VoiceModal() {
     window.speechSynthesis.speak(u)
   }, [])
 
+  const playBackendVoice = useCallback(async (text) => {
+    setPlayback('synthesizing locally...')
+    setLastArtifact(null)
+    const token = sessionStorage.getItem('ai_jwt')
+    const headers = { 'Content-Type': 'application/json' }
+    if (token) headers.Authorization = `Bearer ${token}`
+    const res = await fetch('/api/voice/synthesize', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        text,
+        provider,
+        persona: {
+          provider,
+          gender: gender.toLowerCase(),
+          tone: tone.toLowerCase(),
+          fishSpeech: {
+            ...fishSettings,
+            seed: fishSettings.seed === '' ? null : Number(fishSettings.seed),
+          },
+        },
+      }),
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const body = await res.json()
+        detail = body.error || body.setup || detail
+      } catch { /* ignore */ }
+      setPlayback(`backend unavailable: ${detail}. Browser fallback used.`)
+      speakBrowserFallback(text)
+      return false
+    }
+    const blob = await res.blob()
+    const artifactUrl = res.headers.get('X-Voice-Artifact-Url')
+    const artifactId = res.headers.get('X-Voice-Artifact-Id')
+    if (artifactUrl) setLastArtifact({ id: artifactId, url: artifactUrl })
+    if (audioRef.current) {
+      audioRef.current.pause()
+      URL.revokeObjectURL(audioRef.current.src)
+    }
+    const audio = new Audio(URL.createObjectURL(blob))
+    audioRef.current = audio
+    await audio.play()
+    setPlayback(artifactUrl ? `played Fish Speech audio, artifact ${artifactUrl}` : 'played backend audio')
+    return true
+  }, [fishSettings, gender, provider, speakBrowserFallback, tone])
+
   const testVoice = useCallback(() => {
-    speakText(`Voice ${tone.toLowerCase()} ${gender.toLowerCase()} ready.`)
-  }, [speakText, tone, gender])
+    const sample = `[professional calm tone] Voice ${tone.toLowerCase()} ${gender.toLowerCase()} ready. This is the local Fish Speech route.`
+    playBackendVoice(sample).catch((e) => {
+      setPlayback(`backend error: ${e.message}. Browser fallback used.`)
+      speakBrowserFallback(sample)
+    })
+  }, [gender, playBackendVoice, speakBrowserFallback, tone])
+
+  const saveVoiceConfig = useCallback(async () => {
+    setSaving(true)
+    setPlayback('')
+    try {
+      const payload = {
+        provider,
+        fishSpeech: {
+          ...fishSettings,
+          enabled: Boolean(fishSettings.enabled),
+          localFallback: Boolean(fishSettings.localFallback),
+          temperature: Number(fishSettings.temperature),
+          topP: Number(fishSettings.topP),
+          repetitionPenalty: Number(fishSettings.repetitionPenalty),
+          chunkLength: Number(fishSettings.chunkLength),
+          maxNewTokens: Number(fishSettings.maxNewTokens),
+          seed: fishSettings.seed === '' ? null : Number(fishSettings.seed),
+        },
+      }
+      await api.post('/api/voice/config', payload)
+      setPlayback('voice config saved')
+      await refreshStatus()
+    } catch (e) {
+      setPlayback(`save failed: ${e.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }, [fishSettings, provider, refreshStatus])
+
+  const updateFish = useCallback((key, value) => {
+    setFishSettings(prev => ({ ...prev, [key]: value }))
+  }, [])
 
   const handleSendToAI = useCallback(async () => {
     if (!transcript.trim()) return
@@ -95,13 +210,13 @@ export default function VoiceModal() {
       const data = await api.chat.send(transcript, undefined)
       const reply = data.reply || data.message || data.content || 'No response'
       setAiResponse(reply)
-      speakText(reply)
+      playBackendVoice(reply).catch(() => speakBrowserFallback(reply))
     } catch (e) {
       setAiResponse('Error: ' + e.message)
     } finally {
       setSending(false)
     }
-  }, [transcript, speakText])
+  }, [playBackendVoice, speakBrowserFallback, transcript])
 
   if (!open) return null
 
@@ -161,6 +276,7 @@ export default function VoiceModal() {
                 ))}
               </div>
               <button className="vm-action" onClick={testVoice}>▶ TEST VOICE</button>
+              {playback && <div className="vm-status-line">{playback}</div>}
             </div>
           )}
 
@@ -197,7 +313,7 @@ export default function VoiceModal() {
                 <div className="vm-ai-response">
                   <div className="vm-label">AI RESPONSE</div>
                   <div className="vm-response-text">{aiResponse}</div>
-                  <button className="vm-action vm-action--ghost" onClick={() => speakText(aiResponse)}>▶ REPLAY</button>
+                  <button className="vm-action vm-action--ghost" onClick={() => playBackendVoice(aiResponse)}>▶ REPLAY</button>
                 </div>
               )}
             </div>
@@ -205,13 +321,73 @@ export default function VoiceModal() {
 
           {tab === 'output' && (
             <div className="vm-section">
-              <div className="vm-label">SYNTHESIS</div>
-              <p className="vm-help">
-                Voice output uses the browser SpeechSynthesis API by default and
-                falls back to the PersonaPlex backend when reachable. Settings on
-                the Persona tab control voice characteristics.
-              </p>
-              <button className="vm-action" onClick={testVoice}>▶ SPEAK SAMPLE</button>
+              <div className="vm-label">LOCAL SYNTHESIS PROVIDER</div>
+              <div className="vm-options">
+                <button className={`vm-opt ${provider === 'fish_speech' ? 'active' : ''}`} onClick={() => setProvider('fish_speech')}>
+                  FISH S2 LOCAL
+                </button>
+                <button className={`vm-opt ${provider === 'local' ? 'active' : ''}`} onClick={() => setProvider('local')}>
+                  OS FALLBACK
+                </button>
+              </div>
+
+              <div className="vm-field">
+                <label>Fish server URL</label>
+                <input value={fishSettings.baseUrl || ''} onChange={e => updateFish('baseUrl', e.target.value)} />
+              </div>
+              <div className="vm-field">
+                <label>Reference voice ID</label>
+                <input value={fishSettings.referenceId || ''} onChange={e => updateFish('referenceId', e.target.value)} placeholder="my-speaker" />
+              </div>
+
+              <div className="vm-grid">
+                <label>
+                  Temperature
+                  <input type="range" min="0.1" max="1" step="0.05" value={fishSettings.temperature} onChange={e => updateFish('temperature', e.target.value)} />
+                  <span>{Number(fishSettings.temperature).toFixed(2)}</span>
+                </label>
+                <label>
+                  Top P
+                  <input type="range" min="0.1" max="1" step="0.05" value={fishSettings.topP} onChange={e => updateFish('topP', e.target.value)} />
+                  <span>{Number(fishSettings.topP).toFixed(2)}</span>
+                </label>
+                <label>
+                  Repetition
+                  <input type="range" min="0.9" max="2" step="0.05" value={fishSettings.repetitionPenalty} onChange={e => updateFish('repetitionPenalty', e.target.value)} />
+                  <span>{Number(fishSettings.repetitionPenalty).toFixed(2)}</span>
+                </label>
+                <label>
+                  Chunk
+                  <input type="number" min="100" max="1000" value={fishSettings.chunkLength} onChange={e => updateFish('chunkLength', e.target.value)} />
+                </label>
+                <label>
+                  Max tokens
+                  <input type="number" min="0" max="8192" value={fishSettings.maxNewTokens} onChange={e => updateFish('maxNewTokens', e.target.value)} />
+                </label>
+                <label>
+                  Seed
+                  <input type="number" value={fishSettings.seed ?? ''} onChange={e => updateFish('seed', e.target.value)} placeholder="random" />
+                </label>
+              </div>
+
+              <label className="vm-check">
+                <input type="checkbox" checked={Boolean(fishSettings.localFallback)} onChange={e => updateFish('localFallback', e.target.checked)} />
+                Keep local OS fallback enabled when Fish is offline
+              </label>
+
+              {status.detail && <div className="vm-status-line">{status.detail}</div>}
+              {playback && <div className="vm-status-line">{playback}</div>}
+              {lastArtifact?.url && (
+                <a className="vm-artifact" href={lastArtifact.url} target="_blank" rel="noreferrer">
+                  Open last voice artifact
+                </a>
+              )}
+
+              <div className="vm-actions">
+                <button className="vm-action" onClick={saveVoiceConfig} disabled={saving}>{saving ? 'SAVING...' : 'SAVE CONFIG'}</button>
+                <button className="vm-action vm-action--ghost" onClick={refreshStatus}>RETRY STATUS</button>
+                <button className="vm-action" onClick={testVoice}>▶ SPEAK SAMPLE</button>
+              </div>
             </div>
           )}
         </div>
