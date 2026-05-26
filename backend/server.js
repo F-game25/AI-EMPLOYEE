@@ -263,6 +263,57 @@ function requireAuth(req, res, next) {
   }
 }
 
+function requireLocalhost(req, res, next) {
+  const ip = req.ip || req.connection?.remoteAddress || '';
+  if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+  return res.status(403).json({ ok: false, error: 'localhost only' });
+}
+
+// Simple sliding-window rate limiter factory (no external deps).
+// windowMs: window length, max: max requests per window per IP.
+function makeRateLimit(max, windowMs = 60_000) {
+  const buckets = new Map(); // ip → [timestamp, ...]
+  return (req, res, next) => {
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    const now = Date.now();
+    const hits = (buckets.get(ip) || []).filter((t) => now - t < windowMs);
+    hits.push(now);
+    buckets.set(ip, hits);
+    if (hits.length > max) {
+      res.set('Retry-After', Math.ceil(windowMs / 1000));
+      return res.status(429).json({ ok: false, error: 'Rate limit exceeded' });
+    }
+    next();
+  };
+}
+const _rl_blacklight  = makeRateLimit(5);   // 5/min per IP
+const _rl_forge       = makeRateLimit(10);  // 10/min per IP
+const _rl_research    = makeRateLimit(3);   // 3/min per IP
+
+// Simple in-memory response cache with TTL.
+// Returns middleware that serves cached JSON for ttlMs, then refreshes.
+function makeTTLCache(ttlMs = 30_000) {
+  let _cache = null;
+  let _expiry = 0;
+  return (req, res, next) => {
+    if (_cache && Date.now() < _expiry) {
+      res.set('X-Cache', 'HIT');
+      return res.json(_cache);
+    }
+    const _json = res.json.bind(res);
+    res.json = (body) => {
+      _cache = body;
+      _expiry = Date.now() + ttlMs;
+      res.set('X-Cache', 'MISS');
+      return _json(body);
+    };
+    next();
+  };
+}
+const _cache_neurons   = makeTTLCache(30_000);
+const _cache_grades    = makeTTLCache(30_000);
+const _cache_blacklist = makeTTLCache(30_000);
+
 // Validate a WebSocket upgrade request token (query param ?token=...)
 function wsTokenValid(req) {
   try {
@@ -1690,14 +1741,7 @@ app.post('/internal/events', express.json({ limit: '2mb' }), (req, res) => {
 });
 
 // GET /api/security/status — Blacklight + system control state (localhost or auth)
-app.get('/api/security/status', (req, res) => {
-  const ip = req.ip || req.connection?.remoteAddress || '';
-  const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-  if (!isLocal) {
-    const authHeader = req.headers['authorization'] || '';
-    if (!authHeader.startsWith('Bearer ')) return res.status(401).json({ ok: false });
-  }
-  // Return last known blacklight state (forwarded via /internal/events)
+app.get('/api/security/status', requireAuth, (req, res) => {
   res.json({ ok: true, ...(_lastBlacklightStatus || { threat_score: 0, mode: 'NORMAL', active_threats: [] }) });
 });
 
@@ -1769,7 +1813,7 @@ app.get('/api/identity/public', async (req, res) => {
 });
 
 // GET /api/onboarding/palettes — generate 3 color palettes for onboarding
-app.get('/api/onboarding/palettes', (req, res) => {
+app.get('/api/onboarding/palettes', requireAuth, (req, res) => {
   const generatePalette = () => {
     const hue = Math.random() * 0.3 + 0.65;  // 65-95% of hue circle (purples/magentas)
     const saturation = 0.6 + Math.random() * 0.3;  // 60-90%
@@ -1798,7 +1842,7 @@ app.get('/api/onboarding/palettes', (req, res) => {
 });
 
 // POST /api/identity/finalize — save user onboarding choices
-app.post('/api/identity/finalize', async (req, res) => {
+app.post('/api/identity/finalize', requireAuth, async (req, res) => {
   try {
     const { user_chosen, instance_name, voice_preset, color_palette } = req.body;
     const fs = require('fs');
@@ -1871,11 +1915,11 @@ app.get('/version', (req, res) => {
   });
 });
 
-app.get('/agents', (req, res) => {
+app.get('/agents', requireAuth, (req, res) => {
   res.json({ agents: getAgents() });
 });
 
-app.get('/internal/agents', (req, res) => {
+app.get('/internal/agents', requireLocalhost, (req, res) => {
   res.json({ agents: getAgents(), internal: true });
 });
 
@@ -1917,7 +1961,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.get('/api/runtime/identity', (req, res) => {
+app.get('/api/runtime/identity', requireAuth, (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({
     ok: true,
@@ -2934,7 +2978,7 @@ app.post('/api/security/gateway/strict-mode', requireAuth, (req, res) => {
   });
 });
 
-app.get('/api/mode', (req, res) => {
+app.get('/api/mode', requireAuth, (req, res) => {
   const mode = getMode();
   const robotSignal = getRobotSignal();
   const template = buildMoneyTemplate({
@@ -2986,7 +3030,7 @@ app.get('/api/brain/status', requireAuth, (req, res) => {
   });
 });
 
-app.get('/internal/brain/status', (req, res) => {
+app.get('/internal/brain/status', requireLocalhost, (req, res) => {
   const core = brain.status() || {};
   const insights = brain.insights() || {};
   const strategies = Array.isArray(insights.learned_strategies) ? insights.learned_strategies.length : 0;
@@ -3008,7 +3052,7 @@ app.get('/api/brain/activity', requireAuth, (req, res) => {
   res.json(brain.activity(limit));
 });
 
-app.get('/api/brain/neurons', requireAuth, (req, res) => {
+app.get('/api/brain/neurons', requireAuth, _cache_neurons, (req, res) => {
   res.json(brain.neurons());
 });
 
@@ -3255,7 +3299,7 @@ app.get('/api/system/manifest', (req, res) => {
   res.json(loadSystemManifest());
 });
 
-app.post('/api/model/route-plan', (req, res) => {
+app.post('/api/model/route-plan', requireAuth, (req, res) => {
   const body = req.body || {};
   const task = String(body.task || body.message || body.goal || '').trim();
   if (!task) return res.status(400).json({ ok: false, error: 'task, message, or goal required' });
@@ -5033,7 +5077,7 @@ app.get('/api/forge/queue', requireAuth, (req, res) => {
 });
 
 // POST /api/forge/submit
-app.post('/api/forge/submit', requireAuth, (req, res) => {
+app.post('/api/forge/submit', requireAuth, _rl_forge, (req, res) => {
   const body = validate(SCHEMAS.forgeSubmit, req, res);
   if (!body) return;
   const goal = body.goal;
@@ -5497,7 +5541,7 @@ app.post('/api/doctor/run', requireAuth, async (req, res) => {
 // ── Blacklight (security monitoring) ─────────────────────────────────────────
 
 // GET /api/blacklight/status
-app.get('/api/blacklight/status', requireAuth, (req, res) => {
+app.get('/api/blacklight/status', requireAuth, _cache_blacklist, (req, res) => {
   res.json({
     active: _blacklightState.active,
     alerts_count: _blacklightState.alerts.length,
@@ -5565,7 +5609,7 @@ app.post('/api/blacklight/tools/search', requireAuth, (req, res) => {
 });
 
 // POST /api/blacklight/tools/run — safe local analyzers and defensive simulations.
-app.post('/api/blacklight/tools/run', requireAuth, async (req, res) => {
+app.post('/api/blacklight/tools/run', requireAuth, _rl_blacklight, async (req, res) => {
   const body = req.body || {};
   const toolId = String(body.tool_id || body.toolId || '').trim();
   const input = String(body.input || '').slice(0, 20000);
@@ -5836,7 +5880,7 @@ app.get('/api/agents/:agent_id/profile', requireAuth, (req, res) => {
 });
 
 // GET /api/agents/grades
-app.get('/api/agents/grades', requireAuth, (req, res) => {
+app.get('/api/agents/grades', requireAuth, _cache_grades, (req, res) => {
   try {
     const profiles = agentLearningProfile.getAllProfiles();
     const metrics = agentLearningProfile.getMetrics();
@@ -5874,7 +5918,7 @@ app.get('/api/system/halt', requireAuth, (req, res) => {
 // ── System health ─────────────────────────────────────────────────────────────
 const _srvStartMs = Date.now()
 
-app.get('/api/system/uptime', (req, res) => {
+app.get('/api/system/uptime', requireAuth, (req, res) => {
   const ms = Date.now() - _srvStartMs
   const s  = Math.floor(ms / 1000)
   res.json({
@@ -6010,7 +6054,7 @@ app.patch('/api/prompt-inspector/config', requireAuth, (req, res) => {
 const _forgeTaskState = { last_action: null, active: false, mode: 'active' };
 
 // GET /api/forge/status
-app.get('/api/forge/status', (_req, res) => {
+app.get('/api/forge/status', requireAuth, (_req, res) => {
   res.json({
     mode: reliabilityState.forgeFrozen ? 'frozen' : _forgeTaskState.mode,
     active: _forgeTaskState.active,
@@ -6096,7 +6140,7 @@ app.post('/api/middleware/process', requireAuth, async (req, res) => {
 });
 
 // GET /api/middleware/status — active model roles + Wave Field routing status
-app.get('/api/middleware/status', async (req, res) => {
+app.get('/api/middleware/status', requireAuth, async (req, res) => {
   try {
     const result = await requestPythonJSON('/api/middleware/status', 'GET');
     res.json(result);
@@ -6227,7 +6271,7 @@ app.get('/api/errors', requireAuth, (req, res) => {
 
 // ── Machine Identity ──────────────────────────────────────────────────────────
 
-app.get('/api/identity', (req, res) => {
+app.get('/api/identity', requireAuth, (req, res) => {
   const path = require('path');
   const fs = require('fs');
   const idPath = statePath('identity.json');
@@ -6329,7 +6373,7 @@ app.get('/api/agents/list', requireAuth, (req, res) => {
 
 // ── Auto-Update System ─────────────────────────────────────────────────────────
 
-app.get('/api/system/update-status', (req, res) => {
+app.get('/api/system/update-status', requireAuth, (req, res) => {
   const updaterPath = path.join(os.homedir(), '.ai-employee', 'state', 'updater.json');
   const versionPath = path.join(os.homedir(), '.ai-employee', 'state', 'version.json');
   try {

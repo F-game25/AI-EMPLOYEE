@@ -37,6 +37,24 @@ function proxy(path, req, res) {
   proxyReq.write(body); proxyReq.end()
 }
 
+// 3 req/min per IP for execute (resource-intensive)
+function makeRateLimit(max, windowMs = 60_000) {
+  const buckets = new Map();
+  return (req, res, next) => {
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    const now = Date.now();
+    const hits = (buckets.get(ip) || []).filter((t) => now - t < windowMs);
+    hits.push(now);
+    buckets.set(ip, hits);
+    if (hits.length > max) {
+      res.set('Retry-After', Math.ceil(windowMs / 1000));
+      return res.status(429).json({ ok: false, error: 'Rate limit exceeded' });
+    }
+    next();
+  };
+}
+const _rl_execute = makeRateLimit(3);
+
 module.exports = function createResearchRouter(requireAuth) {
   const router = express.Router()
 
@@ -45,7 +63,7 @@ module.exports = function createResearchRouter(requireAuth) {
     proxy('/api/research/discover', req, res)
   })
 
-  router.post('/execute', requireAuth, (req, res) => {
+  router.post('/execute', requireAuth, _rl_execute, (req, res) => {
     const { query = '', selected_source_ids = [], selected_urls = [] } = req.body || {}
     if (!query.trim() || (!selected_source_ids.length && !selected_urls.length)) {
       return res.status(400).json({ error: 'query and selected_source_ids (or selected_urls) required' })
