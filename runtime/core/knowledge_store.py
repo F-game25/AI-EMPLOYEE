@@ -162,6 +162,54 @@ class KnowledgeStore:
         return self.update_user_profile(goals=goals, business_type=business_type or None, preferences=prefs)
 
 
+    def embed_entries_to_vector_store(self) -> int:
+        """Embed the `entries` array from the JSON file into the vector store.
+
+        Runs at startup and whenever new entries are added. Idempotent —
+        skips entries already indexed (keyed by 'ks:<id>'). Returns the
+        number of newly embedded entries.
+        """
+        try:
+            from memory.vector_store import get_vector_store
+        except ImportError:
+            return 0
+
+        vs = get_vector_store()
+        raw = json.loads(self._path.read_text(encoding="utf-8"))
+        entries = raw.get("entries", [])
+        if not entries:
+            return 0
+
+        embedded = 0
+        for e in entries:
+            eid = e.get("id") or e.get("title", "").replace(" ", "_").lower()[:40]
+            if not eid:
+                continue
+            key = f"ks:{eid}"
+            title = e.get("title", eid)
+            content = e.get("content", "")
+            text = f"{title}\n\n{content}".strip()
+            if not text:
+                continue
+            try:
+                vs.store(
+                    key,
+                    text,
+                    metadata={
+                        "source": e.get("source", "knowledge_store"),
+                        "tags": e.get("tags", []),
+                        "created_at": e.get("created_at", ""),
+                        "memory_type": "knowledge_graph",
+                    },
+                    importance=e.get("importance", 0.5),
+                    overwrite=False,
+                )
+                embedded += 1
+            except Exception:
+                pass
+        return embedded
+
+
 _instance: KnowledgeStore | None = None
 _instance_lock = threading.Lock()
 

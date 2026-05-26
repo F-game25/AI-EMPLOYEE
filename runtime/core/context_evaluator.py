@@ -9,10 +9,15 @@ Score: 0.0 = nothing relevant in memory; 1.0 = rich, redundant coverage.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
+import os
 import re
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -54,6 +59,11 @@ class ContextSufficiencyEvaluator:
         # LLM-judgment cache: query → (judgment, ts)
         self._llm_cache: dict[str, tuple[dict, float]] = {}
         self._llm_cache_ttl = 300.0
+        # Heuristic eval cache: (goal, context_hash) → (score, ts)
+        self._heuristic_cache: dict[tuple[str, str], tuple[float, float]] = {}
+        self._heuristic_cache_ttl = 60.0
+        # Log path for confidence scores
+        self._score_log = Path(os.getenv("STATE_DIR", "/home/lf/AI-EMPLOYEE/state")) / "context_scores.jsonl"
 
     # ── public API ────────────────────────────────────────────────────────
     def evaluate(self, goal: str, *, min_score: Optional[float] = None) -> dict:
@@ -61,6 +71,22 @@ class ContextSufficiencyEvaluator:
         goal = (goal or "").strip()
         if not goal:
             return {"score": 0.0, "sufficient": False, "gaps": [], "memory_hits": 0, "graph_hits": 0}
+
+        # Fast heuristic cache (60s TTL) — skip expensive retrieval for repeated goals
+        cache_key = (goal[:120], hashlib.md5(goal.encode()).hexdigest()[:8])
+        now = time.time()
+        if cache_key in self._heuristic_cache:
+            cached_score, cached_ts = self._heuristic_cache[cache_key]
+            if now - cached_ts < self._heuristic_cache_ttl:
+                return {
+                    "score": cached_score,
+                    "sufficient": cached_score >= threshold,
+                    "gaps": [],
+                    "memory_hits": 0,
+                    "graph_hits": 0,
+                    "knowledge_hits": 0,
+                    "cached": True,
+                }
 
         memories = self._safe_retrieve(goal, top_k=10)
         graph_hits = self._graph_hits(goal)
@@ -79,14 +105,35 @@ class ContextSufficiencyEvaluator:
         if not gaps:
             gaps = self._extract_keyword_gaps(goal, memories)
 
+        final_score = round(max(0.0, min(1.0, score)), 3)
+
+        # Update heuristic cache
+        self._heuristic_cache[cache_key] = (final_score, now)
+
+        # Log confidence score (non-blocking, best-effort)
+        self._log_score(goal, final_score)
+
         return {
-            "score": round(max(0.0, min(1.0, score)), 3),
-            "sufficient": score >= threshold,
+            "score": final_score,
+            "sufficient": final_score >= threshold,
             "gaps": gaps[:5],
             "memory_hits": len(memories),
             "graph_hits": graph_hits,
             "knowledge_hits": knowledge_hits,
         }
+
+    def _log_score(self, goal: str, score: float) -> None:
+        try:
+            entry = json.dumps({
+                "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "goal": goal[:80],
+                "score": score,
+                "method": "heuristic",
+            })
+            with self._score_log.open("a", encoding="utf-8") as fh:
+                fh.write(entry + "\n")
+        except Exception:
+            pass
 
     # ── scoring internals ─────────────────────────────────────────────────
     def _coverage_score(self, goal: str, memories: list[dict], graph_hits: int, knowledge_hits: int) -> float:

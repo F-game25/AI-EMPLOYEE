@@ -284,18 +284,18 @@ class MiddlewareOrchestrator:
         the `segment-anything` package is available.
         """
         try:
-            # Real SAM path (only runs if package is installed)
             import importlib
-            sam_lib = importlib.import_module("segment_anything")  # noqa: F841
-            # TODO: load SAM model, run inference, return real labels
-            raise NotImplementedError("SAM real inference not wired yet")
-        except (ImportError, NotImplementedError):
-            logger.debug("SAM stub: segment-anything not installed, returning mock labels")
-            return {
-                "labels": ["object_0", "object_1", "background"],
-                "regions": 3,
-                "stub": True,
-            }
+            importlib.import_module("segment_anything")
+            # segment-anything is installed but inference is not implemented yet.
+            # Return a 501-style stub so callers know this is intentional.
+            logger.info("SAM: package present but inference not implemented — returning stub")
+        except ImportError:
+            logger.debug("SAM stub: segment-anything not installed")
+        return {
+            "labels": ["object_0", "object_1", "background"],
+            "regions": 3,
+            "stub": True,
+        }
 
     def _call_lcm(self, text: str) -> str:
         """

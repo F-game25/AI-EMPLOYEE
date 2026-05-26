@@ -15,9 +15,13 @@ Routing file schema (state/model-routing.json or ~/.ai-employee/model-routing.js
 Priority: subsystem > agent > tasks[task_type] > _default > env fallback.
 """
 import json
+import logging
 import os
+import threading
 import urllib.request
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Optional, Tuple
 
 _OLLAMA_REACHABLE: Optional[bool] = None
@@ -62,6 +66,7 @@ class LLMRouter:
         self._cache = None
         self._mtime = 0.0
         self._path = self._resolve_path()
+        self._lock = threading.RLock()
         self._ensure_defaults()
 
     def _resolve_path(self) -> Path:
@@ -80,18 +85,30 @@ class LLMRouter:
             except Exception:
                 pass
 
+    def reload(self) -> dict:
+        """Force an immediate config reload from disk regardless of mtime."""
+        with self._lock:
+            self._mtime = 0.0
+            self._cache = None
+            cfg = self._load()
+            logger.info("LLM routing config reloaded (forced): %s", self._path)
+            return cfg
+
     def _load(self) -> dict:
-        try:
-            mtime = self._path.stat().st_mtime if self._path.exists() else 0
-            if self._cache is None or mtime > self._mtime:
-                if self._path.exists():
-                    self._cache = json.loads(self._path.read_text())
-                else:
-                    self._cache = {}
-                self._mtime = mtime
-        except Exception:
-            self._cache = {}
-        return self._cache or {}
+        with self._lock:
+            try:
+                mtime = self._path.stat().st_mtime if self._path.exists() else 0
+                if self._cache is None or mtime > self._mtime:
+                    if self._path.exists():
+                        self._cache = json.loads(self._path.read_text())
+                        if mtime > self._mtime:
+                            logger.info("LLM routing config reloaded from %s", self._path)
+                    else:
+                        self._cache = {}
+                    self._mtime = mtime
+            except Exception:
+                self._cache = {}
+            return self._cache or {}
 
     def _env_fallback(self) -> Tuple[str, str]:
         backend = os.getenv('LLM_BACKEND', 'anthropic').strip().lower()

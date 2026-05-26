@@ -18434,6 +18434,18 @@ def get_doctor():
 
 # ── Self-evolution control ────────────────────────────────────────────────────
 
+@app.post("/api/models/reload")
+def post_models_reload(current_user: dict = Depends(get_current_user)):
+    """Force-reload the model routing config from ~/.ai-employee/model-routing.json."""
+    try:
+        from core.llm_router import get_llm_router
+        cfg = get_llm_router().reload()
+        return JSONResponse({"ok": True, "config": cfg})
+    except Exception as exc:
+        logger.warning("models/reload failed: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
 @app.get("/api/evolution/status")
 def get_evolution_status():
     try:
@@ -28290,6 +28302,18 @@ async def set_budget_endpoint(body: dict, _rbac=Depends(require_permission("admi
         float(body.get("daily_usd", 10.0)),
         float(body.get("monthly_usd", 200.0)),
     ))
+
+
+@app.on_event("startup")
+async def _embed_knowledge_store_entries():
+    """Embed knowledge_store.json entries into vector store at startup (idempotent)."""
+    try:
+        from core.knowledge_store import get_knowledge_store
+        n = get_knowledge_store().embed_entries_to_vector_store()
+        if n:
+            logger.info(f"✅ Embedded {n} knowledge store entries into vector store")
+    except Exception as e:
+        logger.warning(f"Knowledge store embedding skipped: {e}")
 
 
 @app.on_event("startup")
