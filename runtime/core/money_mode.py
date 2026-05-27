@@ -849,6 +849,262 @@ class MoneyMode:
             "message": "Draft saved — human approval required before sending",
         }
 
+# ── Business-building workflow functions ──────────────────────────────────────
+
+async def niche_research_workflow(tenant_id: str, niche: str) -> dict:
+    """Research a niche market: demand, competition, monetization angles."""
+    mm = get_money_mode()
+    job_id = str(uuid.uuid4())[:8]
+
+    # HITL gate before storing results
+    try:
+        from core.hitl_gate import get_hitl_gate
+        gate = get_hitl_gate().require_approval(
+            agent="money_mode",
+            action="niche_research_store",
+            payload={"niche": niche, "tenant_id": tenant_id, "job_id": job_id},
+            submitted_by="money_mode",
+            blocking=False,
+        )
+        gate_id = gate.get("request_id")
+    except Exception as exc:
+        logger.error("niche_research_workflow: HITL gate error — %s", exc)
+        gate_id = None
+
+    # Research via LLM
+    system = "You are a market research analyst. Return structured JSON only."
+    prompt = (
+        f"Analyze the '{niche}' niche market. Respond with valid JSON containing:\n"
+        "demand_score (0-10), competition_score (0-10), margin_potential (0-10), "
+        "top_angles (array of 3 strings), summary (1-2 sentences)."
+    )
+    raw = mm._llm_generate(prompt, system)
+    try:
+        parsed = json.loads(raw or "{}")
+    except Exception:
+        parsed = {}
+
+    result = {
+        "job_id": job_id,
+        "niche": niche,
+        "demand_score": parsed.get("demand_score", 5),
+        "competition_score": parsed.get("competition_score", 5),
+        "margin_potential": parsed.get("margin_potential", 5),
+        "top_angles": parsed.get("top_angles", ["content marketing", "affiliate", "consulting"]),
+        "summary": parsed.get("summary", f"Market research for '{niche}' — requires manual review."),
+        "gate_id": gate_id,
+        "requires_manual": raw is None,
+    }
+
+    # Persist only after gate is queued (human will review)
+    state = mm._state_dir()
+    state.mkdir(parents=True, exist_ok=True)
+    path = state / f"niche_research_{tenant_id}_{job_id}.json"
+    mm._save_json(path, result)
+    logger.info("niche_research_workflow: saved %s (gate=%s)", path, gate_id)
+    return result
+
+
+async def offer_creation_workflow(tenant_id: str, niche: str, angle: str) -> dict:
+    """Create a product/service offer: name, positioning, price, USP."""
+    mm = get_money_mode()
+    job_id = str(uuid.uuid4())[:8]
+
+    # HITL gate required
+    try:
+        from core.hitl_gate import get_hitl_gate
+        gate = get_hitl_gate().require_approval(
+            agent="money_mode",
+            action="offer_creation",
+            payload={"niche": niche, "angle": angle, "tenant_id": tenant_id},
+            submitted_by="money_mode",
+            blocking=False,
+        )
+        gate_id = gate.get("request_id")
+    except Exception as exc:
+        logger.error("offer_creation_workflow: HITL gate error — %s", exc)
+        gate_id = None
+
+    system = "You are a product strategist. Return structured JSON only."
+    prompt = (
+        f"Create a product/service offer for the '{niche}' niche using the '{angle}' angle.\n"
+        "Return JSON with: name, tagline, price_point (string), usp, target_customer, pain_solved."
+    )
+    raw = mm._llm_generate(prompt, system)
+    try:
+        parsed = json.loads(raw or "{}")
+    except Exception:
+        parsed = {}
+
+    return {
+        "job_id": job_id,
+        "name": parsed.get("name", f"{niche.title()} Pro"),
+        "tagline": parsed.get("tagline", f"The smartest way to {angle}"),
+        "price_point": parsed.get("price_point", "$97/month"),
+        "usp": parsed.get("usp", "Results-focused, no fluff"),
+        "target_customer": parsed.get("target_customer", f"{niche} professionals"),
+        "pain_solved": parsed.get("pain_solved", "Saves time and increases revenue"),
+        "gate_id": gate_id,
+        "requires_manual": raw is None,
+        "status": "pending_approval",
+    }
+
+
+async def content_calendar_workflow(tenant_id: str, offer: dict, weeks: int = 4) -> dict:
+    """Generate content calendar for an offer."""
+    mm = get_money_mode()
+    job_id = str(uuid.uuid4())[:8]
+    weeks = max(1, min(weeks, 12))
+
+    system = "You are a content strategist. Return structured JSON only."
+    prompt = (
+        f"Create a {weeks}-week content calendar for this offer:\n{json.dumps(offer)}\n"
+        "Return JSON: {weeks: [{week: int, theme: str, posts: [{platform: str, hook: str, body: str, cta: str}]}]}"
+    )
+    raw = mm._llm_generate(prompt, system)
+    try:
+        parsed = json.loads(raw or "{}")
+    except Exception:
+        parsed = {}
+
+    offer_name = offer.get("name", "offer")
+    calendar = {
+        "job_id": job_id,
+        "offer": offer_name,
+        "total_weeks": weeks,
+        "weeks": parsed.get("weeks") or [
+            {
+                "week": i + 1,
+                "theme": f"Week {i + 1} — {offer_name}",
+                "posts": [
+                    {"platform": "linkedin", "hook": f"Week {i+1} insight", "body": "[Draft content]", "cta": "Learn more"},
+                ],
+            }
+            for i in range(weeks)
+        ],
+        "requires_manual": raw is None,
+    }
+
+    state = mm._state_dir()
+    state.mkdir(parents=True, exist_ok=True)
+    path = state / f"content_calendar_{tenant_id}.json"
+    mm._save_json(path, calendar)
+    logger.info("content_calendar_workflow: saved %s (%d weeks)", path, weeks)
+    return calendar
+
+
+async def lead_research_workflow(tenant_id: str, criteria: dict) -> dict:
+    """Research potential leads matching criteria. NO cold outreach without HITL."""
+    mm = get_money_mode()
+    job_id = str(uuid.uuid4())[:8]
+
+    # HITL approval REQUIRED before any external action
+    try:
+        from core.hitl_gate import get_hitl_gate
+        gate = get_hitl_gate().require_approval(
+            agent="money_mode",
+            action="lead_research_external",
+            payload={"criteria": criteria, "tenant_id": tenant_id, "job_id": job_id},
+            submitted_by="money_mode",
+            blocking=False,
+        )
+        gate_id = gate.get("request_id")
+    except Exception as exc:
+        logger.error("lead_research_workflow: HITL gate error — %s", exc)
+        gate_id = None
+
+    system = "You are a B2B sales researcher. Return structured JSON only."
+    prompt = (
+        f"Generate lead search strategies for these criteria:\n{json.dumps(criteria)}\n"
+        "Return JSON: {strategies: [str], search_queries: [str], platforms: [str]}"
+    )
+    raw = mm._llm_generate(prompt, system)
+    try:
+        parsed = json.loads(raw or "{}")
+    except Exception:
+        parsed = {}
+
+    result = {
+        "job_id": job_id,
+        "criteria": criteria,
+        "strategies": parsed.get("strategies", ["LinkedIn Sales Navigator search", "Industry directory scrape"]),
+        "search_queries": parsed.get("search_queries", []),
+        "platforms": parsed.get("platforms", ["linkedin", "apollo"]),
+        "gate_id": gate_id,
+        "requires_human_approval": True,
+        "cold_outreach_blocked": True,
+        "note": "Lead data logged only. Cold outreach is BLOCKED until human approves gate.",
+        "requires_manual": raw is None,
+    }
+
+    # Log lead data — never auto-act
+    state = mm._state_dir()
+    state.mkdir(parents=True, exist_ok=True)
+    log_path = state / f"lead_research_log_{tenant_id}.json"
+    entries: list = mm._load_json(log_path, [])
+    entries.append({"job_id": job_id, "criteria": criteria, "gate_id": gate_id,
+                    "logged_at": datetime.now(timezone.utc).isoformat()})
+    mm._save_json(log_path, entries)
+    return result
+
+
+async def proposal_generation_workflow(tenant_id: str, client_info: dict, offer: dict) -> dict:
+    """Generate a client proposal document. ALWAYS requires HITL before sending."""
+    mm = get_money_mode()
+    job_id = str(uuid.uuid4())[:8]
+
+    # ALWAYS requires HITL before sending
+    try:
+        from core.hitl_gate import get_hitl_gate
+        gate = get_hitl_gate().require_approval(
+            agent="money_mode",
+            action="proposal_send",
+            payload={"client_info": client_info, "offer": offer, "tenant_id": tenant_id},
+            submitted_by="money_mode",
+            blocking=False,
+        )
+        gate_id = gate.get("request_id")
+    except Exception as exc:
+        logger.error("proposal_generation_workflow: HITL gate error — %s", exc)
+        gate_id = None
+
+    system = "You are a professional proposal writer. Return structured JSON only."
+    prompt = (
+        f"Write a client proposal for:\nClient: {json.dumps(client_info)}\nOffer: {json.dumps(offer)}\n"
+        "Return JSON: {title, executive_summary, solution, timeline, pricing, next_steps}"
+    )
+    raw = mm._llm_generate(prompt, system)
+    try:
+        parsed = json.loads(raw or "{}")
+    except Exception:
+        parsed = {}
+
+    client_name = client_info.get("name", "Client")
+    offer_name = offer.get("name", "Solution")
+    proposal = {
+        "job_id": job_id,
+        "title": parsed.get("title", f"Proposal: {offer_name} for {client_name}"),
+        "executive_summary": parsed.get("executive_summary", "[Draft — review before sending]"),
+        "solution": parsed.get("solution", f"We propose {offer_name} to address your needs."),
+        "timeline": parsed.get("timeline", "4-6 weeks"),
+        "pricing": parsed.get("pricing", offer.get("price_point", "Contact for pricing")),
+        "next_steps": parsed.get("next_steps", "Schedule discovery call"),
+        "gate_id": gate_id,
+        "status": "draft_pending_approval",
+        "requires_manual": raw is None,
+        "note": "DRAFT — human approval required via HITL gate before sending to client.",
+    }
+
+    # Save draft artifact
+    state = mm._state_dir()
+    proposals_dir = state / "proposals"
+    proposals_dir.mkdir(parents=True, exist_ok=True)
+    path = proposals_dir / f"{job_id}_{tenant_id}.json"
+    mm._save_json(path, proposal)
+    logger.info("proposal_generation_workflow: draft saved %s (gate=%s)", path, gate_id)
+    return proposal
+
+
 # ── Singleton ─────────────────────────────────────────────────────────────────
 
 _instance: MoneyMode | None = None

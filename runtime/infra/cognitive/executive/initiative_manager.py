@@ -47,11 +47,13 @@ def create(init: Initiative) -> str:
 
 
 def update(init_id: str, **kwargs) -> None:
+    # Strict allowlist prevents SQL injection via column-name interpolation.
     allowed = {"status", "priority", "deadline", "actual_cost_tokens", "description"}
     sets = {k: v for k, v in kwargs.items() if k in allowed}
     if not sets:
         return
     sets["updated_at"] = time.time()
+    # All keys are either from the allowlist above or the literal "updated_at" — safe to interpolate.
     cols = ", ".join(f"{k}=?" for k in sets)
     with cognitive_conn() as c:
         c.execute(f"UPDATE initiatives SET {cols} WHERE id=?", (*sets.values(), init_id))

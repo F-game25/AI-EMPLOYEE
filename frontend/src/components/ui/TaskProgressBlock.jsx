@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 const STATUS_ICON  = { pending: '○', active: '●', done: '✓', error: '✗' }
@@ -39,8 +39,64 @@ function MiniGraph({ data = [] }) {
   return <canvas ref={canvasRef} width={200} height={36} style={{ width: '100%', height: 36, marginTop: 8 }} />
 }
 
-export default function TaskProgressBlock({ taskId, title, steps = [], graph = [] }) {
-  const isActive  = steps.some(s => s.status === 'active')
+export default function TaskProgressBlock({ taskId, title, steps: propSteps = [], graph: propGraph = [] }) {
+  // SSE-driven state — active when taskId is provided and not externally controlled
+  const [liveSteps, setLiveSteps] = useState(null)  // null = use props
+  const [liveGraph, setLiveGraph] = useState(null)
+  const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    if (!taskId) return
+    const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ai_jwt') : null
+    // EventSource doesn't support custom headers; pass token as query param for SSE auth
+    const url = `/api/tasks/${taskId}/progress${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    const es = new EventSource(url)
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.type === 'heartbeat' || data.type === 'connected') return
+        if (data.type === 'snapshot' && Array.isArray(data.steps)) {
+          setLiveSteps(data.steps.map(s => ({
+            id: s.id ?? s.step_id,
+            label: s.label ?? s.name ?? String(s.id),
+            status: s.status ?? 'pending',
+            elapsed: s.elapsed_ms ?? s.elapsed ?? null,
+          })))
+        } else if (data.type === 'task_progress' && Array.isArray(data.steps)) {
+          setLiveSteps(data.steps.map(s => ({
+            id: s.id ?? s.step_id,
+            label: s.label ?? s.name ?? String(s.id),
+            status: s.status ?? 'pending',
+            elapsed: s.elapsed_ms ?? s.elapsed ?? null,
+          })))
+          if (typeof data.percent === 'number') {
+            setLiveGraph(prev => [...(prev || []), data.percent])
+          }
+        } else if (data.type === 'workflow_update') {
+          const status = data.status === 'complete' ? 'done'
+            : data.status === 'running' ? 'active'
+            : data.status === 'failed' ? 'error' : 'pending'
+          setLiveSteps(prev => {
+            const next = (prev || propSteps).map(s =>
+              (s.id === data.task_id || s.id === data.taskId) ? { ...s, status } : s
+            )
+            return next
+          })
+        }
+        if (data.status === 'completed' || data.status === 'failed' || data.status === 'done' || data.status === 'error') {
+          setDone(true)
+          es.close()
+        }
+      } catch (_) {}
+    }
+    es.onerror = () => { es.close() }
+    return () => { es.close() }
+  }, [taskId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const steps = (liveSteps !== null ? liveSteps : propSteps)
+  const graph  = (liveGraph !== null ? liveGraph : propGraph)
+
+  const isActive  = !done && steps.some(s => s.status === 'active')
   const doneCount = steps.filter(s => s.status === 'done').length
   const errCount  = steps.filter(s => s.status === 'error').length
 

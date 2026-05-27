@@ -64,4 +64,10 @@ router.get('/sources', requirePermission(PERMISSIONS.SYSTEM_READ), async (req, r
   await _proxy(req, res, '/rag/sources');
 });
 
+router.post('/retrieve', requirePermission(PERMISSIONS.AGENTS_READ), async (req, res) => {
+  const { query, top_k = 5, alpha = 0.5, rerank = true, compress = true, cite = true } = req.body || {};
+  if (!query) return res.status(400).json({ ok: false, error: 'query required' });
+  await _proxy(req, res, '/rag/retrieve', { query, top_k, alpha, rerank, compress, cite }, 'POST');
+});
+
 module.exports = router;

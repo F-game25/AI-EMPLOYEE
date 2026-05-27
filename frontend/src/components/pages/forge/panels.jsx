@@ -4,6 +4,19 @@ import { toastSuccess, toastError } from '../../nexus-ui/Toaster'
 import { JPOST, JGET, JPOST_JSON, TEMPLATES, DEFAULT_SKILL_PACKS, textFrom, titleize, normalizeAction, isPendingAction, canBatchApprove } from './helpers'
 import { MiniField, StructuredList, StructuredMessageBlock } from './primitives'
 
+const RUN_WRITE_TYPES = new Set(['write_file', 'file_create', 'file_update', 'scaffold_create'])
+const CLOSED_ACTION_STATUSES = new Set(['staged', 'verified', 'applied', 'verify_failed', 'rejected', 'failed', 'blocked', 'deployed'])
+
+function needsOperatorDecision(action) {
+  const normalized = normalizeAction(action)
+  return isPendingAction(normalized) && !CLOSED_ACTION_STATUSES.has(normalized.status.toLowerCase())
+}
+
+function formatCount(value, label) {
+  const count = Array.isArray(value) ? value.length : Number(value || 0)
+  return `${count} ${label}${count === 1 ? '' : 's'}`
+}
+
 export function SkillPackSelector({ project, draftGoal, selectedSkillIds, onChange }) {
   const [skills, setSkills] = useState([])
   const [pack, setPack] = useState('all')
@@ -175,11 +188,12 @@ export function NewProjectModal({ onClose, onCreate }) {
 
 export function FileTree({ project, selectedFile, onSelect }) {
   const [tree, setTree] = useState(null)
+  const projectId = project?.id
 
   useEffect(() => {
-    if (!project) return
-    JGET(`/api/forge/files/tree?project_id=${project.id}`).then(r => r.json()).then(d => setTree(d.tree || [])).catch(() => setTree([]))
-  }, [project?.id])
+    if (!projectId) return
+    JGET(`/api/forge/files/tree?project_id=${projectId}`).then(r => r.json()).then(d => setTree(d.tree || [])).catch(() => setTree([]))
+  }, [projectId])
 
   if (!project) return <EmptyState icon="📁" title="No project" sub="Select or create a project" />
   if (!tree) return <div className="af-file-loading">Loading…</div>
@@ -206,30 +220,26 @@ export function FileTree({ project, selectedFile, onSelect }) {
   )
 }
 
-export function ChatPane({ project, sessionId, messages, onSend, sending, selectedSkillIds, onSkillChange }) {
+export function ChatPane({ project, messages, onSend, sending, selectedSkillIds, onSkillChange }) {
   const inputRef = useRef(null)
   const endRef   = useRef(null)
   const [text, setText] = useState('')
   const [displayedContent, setDisplayedContent] = useState('')
-  const [typingIdx, setTypingIdx] = useState(0)
+  const lastMessage = messages[messages.length - 1]
+  const lastAssistantContent = lastMessage?.role === 'assistant' ? lastMessage.content || '' : ''
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, displayedContent])
 
   useEffect(() => {
-    const lastMsg = messages[messages.length - 1]
-    if (lastMsg?.role === 'assistant' && lastMsg.content) {
-      setDisplayedContent('')
-      setTypingIdx(0)
-      const target = lastMsg.content
-      let i = 0
-      const t = setInterval(() => {
-        i += 3
-        setDisplayedContent(target.slice(0, i))
-        if (i >= target.length) clearInterval(t)
-      }, 16)
-      return () => clearInterval(t)
-    }
-  }, [messages.length])
+    if (!lastAssistantContent) return undefined
+    let i = 0
+    const t = setInterval(() => {
+      i += 3
+      setDisplayedContent(lastAssistantContent.slice(0, i))
+      if (i >= lastAssistantContent.length) clearInterval(t)
+    }, 16)
+    return () => clearInterval(t)
+  }, [lastAssistantContent])
 
   const send = () => {
     if (!text.trim() || sending) return
@@ -267,7 +277,7 @@ export function ChatPane({ project, sessionId, messages, onSend, sending, select
         )}
         {messages.map((m, i) => {
           const isLastAssistant = i === messages.length - 1 && m.role === 'assistant'
-          const bodyText = isLastAssistant ? displayedContent : m.content
+          const bodyText = isLastAssistant ? (m.content ? displayedContent : '') : m.content
           const showCursor = isLastAssistant && displayedContent.length < (m.content?.length || 0)
           return (
             <div key={i} className={`af-msg af-msg--${m.role}`}>
@@ -323,6 +333,17 @@ export function ChatPane({ project, sessionId, messages, onSend, sending, select
 
 export function DiffViewer({ diff }) {
   if (!diff) return <EmptyState icon="📋" title="No changes yet" sub="Start chatting to see proposed file changes" />
+  if (typeof diff === 'string') {
+    return (
+      <div className="af-diff">
+        <div className="af-diff__header">
+          <span className="af-diff__filename">Unified diff</span>
+          <StatusPill tone="gold" label="PATCH" />
+        </div>
+        <pre className="af-diff__raw">{diff}</pre>
+      </div>
+    )
+  }
   return (
     <div className="af-diff">
       <div className="af-diff__header">
@@ -346,10 +367,125 @@ export function DiffViewer({ diff }) {
   )
 }
 
+export function RunTimeline({ run, onVerify, onApply, busy }) {
+  if (!run) {
+    return (
+      <div className="af-run af-run--empty">
+        <div className="af-run__empty">
+          <span className="af-run__empty-mark">◆</span>
+          <strong>No active run</strong>
+          <p>Create a run from chat to see the real context pack, policy decisions, verification results, and apply state.</p>
+        </div>
+      </div>
+    )
+  }
+  const latestTest = (run.test_results || []).slice(-1)[0]
+  const report = run.final_report || {}
+  const patches = run.patches || []
+  const actions = run.actions || []
+  const stagedCount = patches.filter(patch => ['staged', 'verified', 'applied'].includes(String(patch.status || '').toLowerCase())).length
+  const blockedCount = patches.filter(patch => patch.policy?.allowed === false || String(patch.status || '').toLowerCase() === 'blocked').length
+  const writeCount = actions.filter(action => RUN_WRITE_TYPES.has(action.type)).length || patches.length
+  const canVerify = !busy && stagedCount > 0 && blockedCount === 0 && run.status !== 'applied'
+  const canApply = !busy && run.status === 'verified' && latestTest?.all_passed === true && blockedCount === 0
+  const verifyReason = busy
+    ? 'Run operation in progress'
+    : blockedCount > 0
+      ? 'Blocked patches must be resolved first'
+      : stagedCount === 0
+        ? 'Approve and stage a write action first'
+        : run.status === 'applied'
+          ? 'Run has already been applied'
+          : 'Run is staged and ready to verify'
+  const applyReason = busy
+    ? 'Run operation in progress'
+    : run.status !== 'verified'
+      ? 'Verification must pass before apply'
+      : latestTest?.all_passed !== true
+        ? 'Latest verification did not pass'
+        : blockedCount > 0
+          ? 'Blocked patches cannot be applied'
+          : 'Verified run is ready to apply'
+  const stages = [
+    ['intake', 'Intake', true],
+    ['context', 'Context', !!run.context_pack],
+    ['plan', 'Plan', !!run.plan],
+    ['patch', 'Patch', (run.patches || []).length > 0],
+    ['approval', 'Approval', stagedCount > 0],
+    ['verify', 'Verify', !!latestTest?.all_passed],
+    ['apply', 'Apply', run.status === 'applied'],
+    ['report', 'Report', !!run.final_report],
+  ]
+  return (
+    <div className="af-run">
+      <div className="af-run__head">
+        <div>
+          <span className="af-run__eyebrow">Active Run</span>
+          <strong>{run.id}</strong>
+          <p>{run.goal}</p>
+        </div>
+        <StatusPill label={String(run.status || 'new').toUpperCase()} tone={run.status === 'applied' || run.status === 'verified' ? 'success' : run.status === 'blocked' || run.status === 'verify_failed' ? 'alert' : 'gold'} size="sm" />
+      </div>
+      <div className="af-run__console">
+        <div className="af-run__console-title">
+          <span>Run Console</span>
+          <em>{run.mode || 'supervised'} / {run.provider || 'local-first'}</em>
+        </div>
+        <div className="af-run__console-grid">
+          <span><b>{formatCount(writeCount, 'write')}</b><small>proposed</small></span>
+          <span><b>{formatCount(stagedCount, 'patch')}</b><small>staged</small></span>
+          <span><b>{formatCount(blockedCount || run.review?.blocked, 'block')}</b><small>policy</small></span>
+        </div>
+      </div>
+      <div className="af-run__timeline">
+        {stages.map(([id, label, done]) => (
+          <div key={id} className={`af-run__step ${done ? 'af-run__step--done' : ''}`}>
+            <span />
+            <em>{label}</em>
+          </div>
+        ))}
+      </div>
+      <div className="af-run__grid">
+        <MiniField label="Goal" value={run.goal} />
+        <MiniField label="Files found" value={run.context_pack?.relevant_files?.length || 0} />
+        <MiniField label="Tree paths" value={run.context_pack?.tree_paths?.length || 0} />
+        <MiniField label="Patches" value={run.patches?.length || 0} />
+        <MiniField label="Blocked" value={run.review?.blocked || 0} />
+        <MiniField label="Last verify" value={latestTest ? (latestTest.all_passed ? 'passed' : 'failed') : 'not run'} />
+        <MiniField label="Applied files" value={report.applied_files?.length || 0} />
+      </div>
+      {run.ui_error && <div className="af-run__error">{run.ui_error}</div>}
+      {run.review?.summary && <div className="af-run__review">{run.review.summary}</div>}
+      {run.context_pack?.verification_commands?.length > 0 && (
+        <StructuredList title="Verification" items={run.context_pack.verification_commands.map(command => ({ label: command }))} />
+      )}
+      {latestTest?.results?.length > 0 && (
+        <div className="af-run__tests">
+          {latestTest.results.map((result, index) => (
+            <div key={index} className={`af-run__test ${result.pass ? 'ok' : 'fail'}`}>
+              <span>{result.pass ? 'PASS' : 'FAIL'}</span>
+              <code>{result.command || 'verification'}</code>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="af-run__actions">
+        <button className="af-btn af-btn--ghost af-btn--sm" onClick={onVerify} disabled={!canVerify} title={verifyReason}>
+          {busy ? 'Working...' : 'Verify Staged'}
+        </button>
+        <button className="af-btn af-btn--primary af-btn--sm" onClick={onApply} disabled={!canApply} title={applyReason}>
+          Apply Verified
+        </button>
+      </div>
+      <div className="af-run__gate">{canApply ? applyReason : verifyReason}</div>
+    </div>
+  )
+}
+
 export function ActionQueue({ actions, busyActions, onApprove, onReject, onApproveSafeBatch }) {
   if (actions.length === 0) return <EmptyState icon="✓" title="No pending actions" sub="Actions proposed by Forge appear here for approval" />
   const normalized = actions.map(normalizeAction)
-  const pending = normalized.filter(isPendingAction)
+  const pending = normalized.filter(needsOperatorDecision)
   const safeBatch = pending.length > 0 && pending.every(canBatchApprove)
   const hasUnsafePending = pending.some(a => !canBatchApprove(a))
 
@@ -360,8 +496,11 @@ export function ActionQueue({ actions, busyActions, onApprove, onReject, onAppro
         {safeBatch && <button className="af-btn af-btn--primary af-btn--sm" onClick={onApproveSafeBatch}>Approve Safe Batch</button>}
         {hasUnsafePending && <span className="af-actions__gate">Individual approval required</span>}
       </div>
-      {normalized.map(action => (
-        <div key={action.id} className={`af-action af-action--${action.type.toLowerCase()} af-action--risk-${action.risk}`}>
+      {normalized.map(action => {
+        const open = needsOperatorDecision(action)
+        const busy = !!busyActions[action.id]
+        return (
+        <div key={action.id} className={`af-action ${open ? '' : 'af-action--closed'} af-action--${action.type.toLowerCase()} af-action--risk-${action.risk}`}>
           <div className="af-action__rail" />
           <div className="af-action__type-badge">{action.type.toUpperCase()}</div>
           <div className="af-action__detail">
@@ -388,17 +527,17 @@ export function ActionQueue({ actions, busyActions, onApprove, onReject, onAppro
             )}
           </div>
           <div className="af-action__btns">
-            {isPendingAction(action) ? (
+            {open ? (
               <>
-                <button className="af-btn af-btn--sm af-btn--success" disabled={busyActions[action.id]} onClick={() => onApprove(action.id)}>✓</button>
-                <button className="af-btn af-btn--sm af-btn--danger"  disabled={busyActions[action.id]} onClick={() => onReject(action.id)}>✕</button>
+                <button className="af-btn af-btn--sm af-btn--success" disabled={busy} onClick={() => onApprove(action.id)} title="Approve and stage this action">✓</button>
+                <button className="af-btn af-btn--sm af-btn--danger"  disabled={busy} onClick={() => onReject(action.id)} title="Reject this action">✕</button>
               </>
             ) : (
-              <span className="af-action__locked">closed</span>
+              <span className="af-action__locked">{titleize(action.status, 'closed')}</span>
             )}
           </div>
         </div>
-      ))}
+      )})}
     </div>
   )
 }
@@ -413,10 +552,10 @@ export function Terminal({ lines }) {
         <span className="af-terminal__dot af-terminal__dot--r" />
         <span className="af-terminal__dot af-terminal__dot--y" />
         <span className="af-terminal__dot af-terminal__dot--g" />
-        <span className="af-terminal__title">TERMINAL</span>
+        <span className="af-terminal__title">RUN CONSOLE</span>
       </div>
       <div className="af-terminal__body">
-        {lines.length === 0 && <span className="af-terminal__empty">No output yet.</span>}
+        {lines.length === 0 && <span className="af-terminal__empty">No run output yet. Create, stage, verify, or apply a run to stream real events here.</span>}
         {lines.map((l, i) => (
           <div key={i} className={`af-terminal__line af-terminal__line--${l.type || 'out'}`}>
             <span className="af-terminal__prompt">{l.type === 'cmd' ? '$ ' : '  '}</span>
@@ -442,10 +581,7 @@ export function PolicyPreview({ actions }) {
 
   useEffect(() => {
     const action = actions[0]
-    if (!action) {
-      setLastDecision(null)
-      return
-    }
+    if (!action) return
     const normalized = normalizeAction(action)
     JPOST('/api/autonomy/tool-call/evaluate', {
       tool: normalized.type,
@@ -457,7 +593,8 @@ export function PolicyPreview({ actions }) {
       .catch(() => setLastDecision({ state: 'degraded', decision: 'requires_approval' }))
   }, [actions])
 
-  const decision = lastDecision?.decision || 'waiting'
+  const visibleDecision = actions.length ? lastDecision : null
+  const decision = visibleDecision?.decision || 'waiting'
   const tone = decision === 'allow' || decision === 'allow_logged' ? 'success' : decision === 'block' ? 'alert' : 'warn'
 
   return (
@@ -477,7 +614,7 @@ export function PolicyPreview({ actions }) {
         </div>
         <div className="af-policy__row">
           <span>First pending action</span>
-          <strong>{lastDecision?.risk || 'none'}</strong>
+          <strong>{visibleDecision?.risk || 'none'}</strong>
         </div>
       </div>
     </div>
@@ -506,9 +643,12 @@ export function ForgeSystemPanel({ onQueueItems }) {
   }, [onQueueItems])
 
   useEffect(() => {
-    load()
+    const first = window.setTimeout(load, 0)
     const t = window.setInterval(load, 30000)
-    return () => window.clearInterval(t)
+    return () => {
+      window.clearTimeout(first)
+      window.clearInterval(t)
+    }
   }, [load])
 
   const readiness = data.readiness?.readiness || data.readiness || {}
@@ -527,6 +667,8 @@ export function ForgeSystemPanel({ onQueueItems }) {
         <span>Forge Operations</span>
         <StatusPill label={String(readyState).toUpperCase()} tone={statusTone} size="sm" />
       </div>
+      {data.loading && <div className="af-ops__notice">Loading live Forge status...</div>}
+      {!data.loading && !data.status && <div className="af-ops__notice af-ops__notice--warn">Forge status endpoint did not respond.</div>}
       <div className="af-mini-grid">
         <MiniField label="Mode" value={status.mode || status.state} />
         <MiniField label="Active" value={status.active} />
@@ -636,15 +778,16 @@ export function FileEditor({ project, selectedFile, onSave }) {
   const [original, setOriginal] = useState('')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
+  const projectId = project?.id
 
   useEffect(() => {
-    if (!project || !selectedFile) return
+    if (!projectId || !selectedFile) return
     setLoading(true)
-    JGET(`/api/forge/files/read?project_id=${project.id}&file_path=${encodeURIComponent(selectedFile)}`)
+    JGET(`/api/forge/files/read?project_id=${projectId}&file_path=${encodeURIComponent(selectedFile)}`)
       .then(r => r.json())
       .then(d => { setContent(d.content || ''); setOriginal(d.content || '') })
       .finally(() => setLoading(false))
-  }, [project?.id, selectedFile])
+  }, [projectId, selectedFile])
 
   const save = async () => {
     setSaving(true)

@@ -601,7 +601,10 @@ const agentStateRegistry = new AgentStateRegistry();
 const agentsMonitorRouter = createAgentsMonitorRouter(broadcaster, requireAuth, agentStateRegistry);
 app.use('/api/agents', agentsMonitorRouter);
 
-// AscendForge — agentic vibecoder
+// AscendForge canonical router.
+// Keep this mount before the legacy inline /api/forge handlers below. Express
+// is first-match wins, so overlapping canonical routes intentionally take
+// precedence while old submit/approve/reject/task/code-ai aliases remain live.
 app.use('/api/forge', require('./routes/forge')(requireAuth));
 app.use('/api/compute', require('./routes/compute')(requireAuth));
 
@@ -3480,6 +3483,84 @@ app.get('/api/knowledge/search', requireAuth, async (req, res) => {
 
 // ── End Phase 4G ──────────────────────────────────────────────────────────────
 
+// ── Knowledge Vault proxy routes ──────────────────────────────────────────────
+for (const [method, path, pyPath] of [
+  ['get',  '/api/knowledge/vault/list',        '/knowledge/vault/list'],
+  ['get',  '/api/knowledge/vault/pending',      '/knowledge/vault/pending'],
+  ['post', '/api/knowledge/vault/add',          '/knowledge/vault/add'],
+  ['post', '/api/knowledge/vault/queue-topic',  '/knowledge/vault/queue-topic'],
+]) {
+  app[method](path, requireAuth, async (req, res) => {
+    try {
+      const r = await fetch(`http://127.0.0.1:18790${pyPath}`, {
+        method: method.toUpperCase(),
+        headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.authorization || '' },
+        body: method === 'get' ? undefined : JSON.stringify(req.body),
+      });
+      res.status(r.status).json(await r.json());
+    } catch (e) { res.status(502).json({ ok: false, error: 'vault unavailable' }); }
+  });
+}
+app.get('/api/knowledge/vault/:title', requireAuth, async (req, res) => {
+  try {
+    const r = await fetch(
+      `http://127.0.0.1:18790/knowledge/vault/${encodeURIComponent(req.params.title)}`,
+      { headers: { 'Authorization': req.headers.authorization || '' } }
+    );
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(502).json({ ok: false, error: 'vault unavailable' }); }
+});
+app.post('/api/knowledge/vault/:title/verify', requireAuth, async (req, res) => {
+  try {
+    const r = await fetch(
+      `http://127.0.0.1:18790/knowledge/vault/${encodeURIComponent(req.params.title)}/verify`,
+      { method: 'POST', headers: { 'Authorization': req.headers.authorization || '' } }
+    );
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(502).json({ ok: false, error: 'vault unavailable' }); }
+});
+
+// ── Tool / Skill registry proxy routes ────────────────────────────────────────
+for (const [m, p, pyP] of [
+  ['get',  '/api/tools/list',      '/tools/list'],
+  ['get',  '/api/skills/list',     '/skills/list'],
+  ['get',  '/api/skills/suggest',  '/skills/suggest'],
+]) {
+  app[m](p, requireAuth, async (req, res) => {
+    const qs = m === 'get' ? '?' + new URLSearchParams(req.query).toString() : '';
+    try {
+      const r = await fetch(`http://127.0.0.1:${PYTHON_BACKEND_PORT}${pyP}${qs}`, {
+        headers: { 'Authorization': req.headers.authorization || '' },
+      });
+      res.status(r.status).json(await r.json());
+    } catch (e) { res.status(502).json({ ok: false, error: 'tools service unavailable' }); }
+  });
+}
+for (const ep of ['tools', 'skills']) {
+  app.post(`/api/${ep}/:name/execute`, requireAuth, async (req, res) => {
+    try {
+      const r = await fetch(
+        `http://127.0.0.1:${PYTHON_BACKEND_PORT}/${ep}/${req.params.name}/execute`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.authorization || '' },
+          body: JSON.stringify(req.body),
+        },
+      );
+      res.status(r.status).json(await r.json());
+    } catch (e) { res.status(502).json({ ok: false, error: 'service unavailable' }); }
+  });
+}
+app.get('/api/tools/:name', requireAuth, async (req, res) => {
+  try {
+    const r = await fetch(
+      `http://127.0.0.1:${PYTHON_BACKEND_PORT}/tools/${encodeURIComponent(req.params.name)}`,
+      { headers: { 'Authorization': req.headers.authorization || '' } },
+    );
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(502).json({ ok: false, error: 'tools service unavailable' }); }
+});
+
 app.get('/api/system/manifest', requireAuth, (req, res) => {
   res.json(loadSystemManifest());
 });
@@ -4312,6 +4393,73 @@ app.post('/api/money/affiliate-draft', requireAuth, async (req, res) => {
   });
 });
 
+// ── Business-building money workflows (proxy to Python) ──────────────────────
+
+app.post('/api/money/niche-research', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/niche-research', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] niche-research unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true });
+  }
+});
+
+app.post('/api/money/offer-creation', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/offer-creation', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] offer-creation unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true });
+  }
+});
+
+app.post('/api/money/content-calendar', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/content-calendar', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] content-calendar unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true });
+  }
+});
+
+app.post('/api/money/lead-research', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/lead-research', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] lead-research unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true, cold_outreach_blocked: true });
+  }
+});
+
+app.post('/api/money/proposal', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/proposal', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] proposal unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable — proposals require approval-aware pipeline', requires_manual: true });
+  }
+});
+
 // GET /api/money/content-log
 app.get('/api/money/content-log', requireAuth, (req, res) => {
   const p = path.join(STATE_DIR, 'content_log.json');
@@ -4324,6 +4472,72 @@ app.get('/api/money/outreach-log', requireAuth, (req, res) => {
   const p = path.join(STATE_DIR, 'outreach_log.json');
   try { res.json({ ok: true, entries: JSON.parse(fs.readFileSync(p, 'utf8')) }); }
   catch { res.json({ ok: true, entries: [] }); }
+});
+
+// ── Roadmap Engine routes (proxy to Python) ──────────────────────────────────
+app.post('/api/roadmap/create', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/roadmap/create', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 30000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] create unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
+  }
+});
+
+app.post('/api/roadmap/generate', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/roadmap/generate', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 60000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] generate unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
+  }
+});
+
+app.get('/api/roadmap/list/:tenantId', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON(`/roadmap/list/${req.params.tenantId}`, 'GET', null, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 15000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] list unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, roadmaps: [], error: 'roadmap service unavailable' });
+  }
+});
+
+app.get('/api/roadmap/:roadmapId', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON(`/roadmap/${req.params.roadmapId}`, 'GET', null, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 15000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] get unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
+  }
+});
+
+app.post('/api/roadmap/:roadmapId/execute', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON(`/roadmap/${req.params.roadmapId}/execute`, 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 120000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] execute unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
+  }
 });
 
 // ── Task execution endpoint ───────────────────────────────────────────────────
@@ -5289,6 +5503,11 @@ app.post('/api/reliability/forge/unfreeze', requireAuth, (req, res) => {
   recordAuditEvent({ actor: 'operator', action: 'forge_unfreeze', outputData: {}, riskScore: 0.5 });
   res.json({ ok: true, forge_frozen: false });
 });
+
+// Legacy Forge compatibility endpoints.
+// backend/routes/forge.js is mounted earlier and owns any overlapping
+// /api/forge routes. These inline handlers are retained for older dashboard
+// clients/tests that still use legacy-only endpoints such as submit/approve/reject.
 
 // GET /api/forge/queue
 app.get('/api/forge/queue', requireAuth, (req, res) => {
@@ -6286,7 +6505,9 @@ app.patch('/api/prompt-inspector/config', requireAuth, (req, res) => {
   res.json({ ok: true, config: promptInspectorConfig, inspector_status: promptInspectorConfig });
 });
 
-// ── Forge task tracking + missing endpoint aliases ────────────────────────────
+// ── Legacy Forge task tracking + missing endpoint aliases ────────────────────
+// Canonical /api/forge/status is served by backend/routes/forge.js because that
+// router is mounted first. The remaining aliases here preserve older UI flows.
 
 const _forgeTaskState = { last_action: null, active: false, mode: 'active' };
 
@@ -6769,11 +6990,14 @@ function completeTask(taskId, status = 'done') {
 
 function broadcastTaskUpdate(taskId, update) {
   const conns = taskConnections.get(taskId);
-  if (!conns) return;
-  const msg = JSON.stringify(update);
-  conns.forEach(ws => {
-    if (ws.readyState === 1) ws.send(msg); // OPEN = 1
-  });
+  if (conns) {
+    const msg = JSON.stringify(update);
+    conns.forEach(ws => { if (ws.readyState === 1) ws.send(msg); });
+  }
+  // Also push to SSE listeners (defined in Task Progress API section below)
+  if (typeof _notifySSEListeners === 'function') {
+    _notifySSEListeners(taskId, { type: update.type || 'task_update', taskId, ...update });
+  }
 }
 
 // Cleanup old tasks every 10 minutes (keep max 1 hour in memory)
@@ -7493,6 +7717,60 @@ setInterval(() => {
 }, 5000);
 
 // ── Task Progress API ─────────────────────────────────────────────────────────
+
+// SSE listener registry: taskId → Set<res>
+const _sseTaskListeners = new Map();
+
+function _notifySSEListeners(taskId, data) {
+  const set = _sseTaskListeners.get(taskId);
+  if (!set || set.size === 0) return;
+  const payload = `data: ${JSON.stringify(data)}\n\n`;
+  set.forEach(res => { try { res.write(payload); } catch (_) {} });
+}
+
+// Patch broadcaster so SSE clients receive task_progress + workflow:update events.
+(function patchBroadcasterForSSE() {
+  const _orig = broadcaster.broadcast.bind(broadcaster);
+  broadcaster.broadcast = function patchedBroadcast(event, data) {
+    _orig(event, data);
+    if (event === 'task_progress' && data) {
+      const id = data.taskId || data.task_id;
+      if (id) _notifySSEListeners(id, { type: 'task_progress', ...data });
+    } else if (event === 'workflow:update' && Array.isArray(data?.nodes)) {
+      data.nodes.forEach(node => {
+        const id = node.task_id || node.taskId;
+        if (id) _notifySSEListeners(id, { type: 'workflow_update', ...node });
+      });
+    }
+  };
+})();
+
+// GET /api/tasks/:taskId/progress — SSE stream for live task progress.
+// Must be declared before /api/tasks/:taskId (Express matches first-wins).
+app.get('/api/tasks/:taskId/progress', requireAuth, (req, res) => {
+  const { taskId } = req.params;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering if present
+  res.flushHeaders();
+
+  if (!_sseTaskListeners.has(taskId)) _sseTaskListeners.set(taskId, new Set());
+  _sseTaskListeners.get(taskId).add(res);
+
+  // Send current state immediately as snapshot
+  const entry = taskStore.get(taskId);
+  if (entry) {
+    res.write(`data: ${JSON.stringify({ type: 'snapshot', taskId, task: entry.task, steps: entry.steps })}\n\n`);
+  } else {
+    res.write(`data: ${JSON.stringify({ type: 'connected', taskId })}\n\n`);
+  }
+
+  req.on('close', () => {
+    const set = _sseTaskListeners.get(taskId);
+    if (set) { set.delete(res); if (set.size === 0) _sseTaskListeners.delete(taskId); }
+  });
+});
 
 app.get('/api/tasks/:taskId', requireAuth, (req, res) => {
   const { taskId } = req.params;

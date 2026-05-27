@@ -4,6 +4,10 @@
  * This router owns the desktop-facing Forge contract. Python ForgeController
  * remains the execution safety layer for sandbox/snapshot/rollback operations,
  * while Node owns persistent project/session/plan/action state for the UI.
+ *
+ * Mount order is part of the compatibility contract: server.js mounts this
+ * router before legacy inline /api/forge handlers, so routes defined here win
+ * and legacy-only aliases continue to work behind it.
  */
 'use strict'
 
@@ -22,6 +26,8 @@ const PROJECTS_FILE = path.join(FORGE_HOME, 'projects.json')
 const SESSIONS_FILE = path.join(FORGE_HOME, 'sessions.json')
 const PLANS_FILE = path.join(FORGE_HOME, 'plans.json')
 const ACTIONS_FILE = path.join(FORGE_HOME, 'actions.json')
+const RUNS_FILE = path.join(FORGE_HOME, 'runs.json')
+const RUN_WORKSPACES_DIR = path.join(FORGE_HOME, 'runs')
 const AUDIT_FILE = path.join(FORGE_HOME, 'audit.jsonl')
 const PYTHON_FORGE_SCRIPT = path.join(REPO_ROOT, 'backend', 'run_forge.py')
 
@@ -35,6 +41,7 @@ const DANGEROUS_ACTIONS = new Set([
   'rollback',
 ])
 const WRITE_ACTIONS = new Set(['file_create', 'file_update', 'file_delete', 'scaffold_create'])
+const RUN_WRITE_ACTIONS = new Set(['write_file', 'file_create', 'file_update', 'scaffold_create'])
 const PROTECTED_PATH_PATTERNS = [
   /^launcher\//,
   /^backend\/routes\/auth/i,
@@ -48,6 +55,30 @@ const PROTECTED_PATH_PATTERNS = [
   /^start\.sh$/,
   /^stop\.sh$/,
 ]
+const SECRET_PATH_PATTERNS = [
+  /(^|\/)\.env($|\.)/i,
+  /(^|\/)\.ssh\//i,
+  /(^|\/)\.aws\//i,
+  /secret/i,
+  /credential/i,
+  /\.pem$/i,
+  /\.key$/i,
+]
+const BLOCKED_CODE_PATTERNS = [
+  /\beval\s*\(/,
+  /\bexec\s*\(/,
+  /\b__import__\s*\(/,
+  /\bos\.system\s*\(/,
+  /\bsubprocess\.(run|Popen|call|check_output|check_call)\s*\(/,
+  /\bshutil\.rmtree\s*\(/,
+  /\bfs\.rmSync\s*\(/,
+  /\bchild_process\b/,
+  /\bfetch\s*\(\s*['"]https?:\/\//,
+  /\brequests\.(get|post|put|delete|patch)\s*\(\s*['"]https?:\/\//,
+]
+const MAX_RUNS = 500
+const MAX_STAGED_COPY_FILES = 2500
+const MAX_STAGED_COPY_BYTES = 50 * 1024 * 1024
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true })
@@ -96,6 +127,8 @@ function loadPlans() { return asList(PLANS_FILE) }
 function savePlans(list) { writeJson(PLANS_FILE, list.slice(0, 1000)) }
 function loadActions() { return asList(ACTIONS_FILE) }
 function saveActions(list) { writeJson(ACTIONS_FILE, list.slice(0, 2000)) }
+function loadRuns() { return asList(RUNS_FILE) }
+function saveRuns(list) { writeJson(RUNS_FILE, list.slice(0, MAX_RUNS)) }
 
 function findProject(id) {
   return loadProjects().find(project => project.id === id) || null
@@ -109,6 +142,25 @@ function updateProject(project) {
 
 function findAction(id) {
   return loadActions().find(action => action.id === id) || null
+}
+
+function findRun(id) {
+  return loadRuns().find(run => run.id === id || run.run_id === id) || null
+}
+
+function updateRun(id, patch) {
+  const runs = loadRuns()
+  const updated = runs.map(run => (run.id === id || run.run_id === id)
+    ? { ...run, ...patch, updated_at: nowIso() }
+    : run)
+  saveRuns(updated)
+  return updated.find(run => run.id === id || run.run_id === id) || null
+}
+
+function upsertRun(run) {
+  const runs = loadRuns().filter(item => item.id !== run.id && item.run_id !== run.run_id)
+  saveRuns([{ ...run, updated_at: nowIso() }, ...runs])
+  return findRun(run.id)
 }
 
 function updateAction(id, patch) {
@@ -181,6 +233,188 @@ function buildTree(dir, base = dir, depth = 0) {
         bytes: fs.statSync(full).size,
       }
     })
+}
+
+function flattenTreePaths(nodes, out = []) {
+  for (const node of nodes || []) {
+    if (node.path) out.push(node.path)
+    if (node.children) flattenTreePaths(node.children, out)
+  }
+  return out
+}
+
+function actionFiles(action) {
+  if (Array.isArray(action.files)) return action.files.map(file => normalizeRelPath(file.path)).filter(Boolean)
+  const filePath = normalizeRelPath(action.file_path || action.path || '')
+  return filePath ? [filePath] : []
+}
+
+function actionContentForPath(action, relPath) {
+  if (Array.isArray(action.files)) {
+    const found = action.files.find(file => normalizeRelPath(file.path) === relPath)
+    return String(found?.content || '')
+  }
+  return String(action.proposed_content ?? action.content ?? '')
+}
+
+function countChangedLines(action) {
+  const text = Array.isArray(action.files)
+    ? action.files.map(file => String(file.content || '')).join('\n')
+    : String(action.proposed_content ?? action.content ?? '')
+  return text.split('\n').length
+}
+
+function validateRunActionPolicy(action, project) {
+  const violations = []
+  const files = actionFiles(action)
+  const content = Array.isArray(action.files)
+    ? action.files.map(file => String(file.content || '')).join('\n')
+    : String(action.proposed_content ?? action.content ?? '')
+  if (!project) violations.push({ rule: 'project_required', message: 'Project not found for action.' })
+  if (!RUN_WRITE_ACTIONS.has(action.type)) {
+    violations.push({ rule: 'unsupported_action', message: `Run apply supports staged write actions only: ${action.type}` })
+  }
+  if (!files.length) violations.push({ rule: 'file_required', message: 'Write action has no target file.' })
+  for (const filePath of files) {
+    if (filePath.startsWith('..') || path.isAbsolute(filePath)) {
+      violations.push({ rule: 'path_escape', file: filePath, message: 'Path must stay inside the project root.' })
+      continue
+    }
+    try {
+      if (project) resolveInsideProject(project, filePath)
+    } catch (err) {
+      violations.push({ rule: 'path_escape', file: filePath, message: err.message })
+    }
+    if (project && !canWritePath(project, filePath)) {
+      violations.push({ rule: 'write_scope', file: filePath, message: 'Path is outside approved write scope.' })
+    }
+    if (project && isProtectedPath(project, filePath)) {
+      violations.push({ rule: 'protected_path', file: filePath, message: 'Protected system path requires a separate manual change.' })
+    }
+    if (SECRET_PATH_PATTERNS.some(pattern => pattern.test(filePath))) {
+      violations.push({ rule: 'secret_path', file: filePath, message: 'Secret/config path is blocked by default.' })
+    }
+  }
+  if (countChangedLines(action) > 300) {
+    violations.push({ rule: 'patch_too_large', message: 'Staged action exceeds the V1 300-line limit.' })
+  }
+  for (const pattern of BLOCKED_CODE_PATTERNS) {
+    if (pattern.test(content)) {
+      violations.push({ rule: 'dangerous_code', message: `Blocked code pattern: ${pattern.source}` })
+    }
+  }
+  const risk = violations.length ? 'high' : (files.length > 3 || countChangedLines(action) > 100 ? 'medium' : 'low')
+  return {
+    allowed: violations.length === 0,
+    decision: violations.length === 0 ? 'requires_approval' : 'blocked',
+    risk_level: risk,
+    files,
+    lines_changed: countChangedLines(action),
+    violations,
+  }
+}
+
+function runWorkspaceRoot(runId) {
+  return path.join(RUN_WORKSPACES_DIR, runId, 'workspace')
+}
+
+function copyProjectToWorkspace(project, workspaceRoot) {
+  const srcRoot = safeProjectRoot(project)
+  ensureDir(workspaceRoot)
+  let copiedFiles = 0
+  let copiedBytes = 0
+
+  const copyDir = (src, dest) => {
+    if (copiedFiles >= MAX_STAGED_COPY_FILES || copiedBytes >= MAX_STAGED_COPY_BYTES) return
+    ensureDir(dest)
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      if (PROJECT_SKIP.has(entry.name) || entry.name.startsWith('.forge_')) continue
+      const from = path.join(src, entry.name)
+      const to = path.join(dest, entry.name)
+      if (entry.isDirectory()) {
+        copyDir(from, to)
+        continue
+      }
+      if (!entry.isFile()) continue
+      const stat = fs.statSync(from)
+      if (copiedFiles + 1 > MAX_STAGED_COPY_FILES || copiedBytes + stat.size > MAX_STAGED_COPY_BYTES) return
+      ensureDir(path.dirname(to))
+      fs.copyFileSync(from, to)
+      copiedFiles += 1
+      copiedBytes += stat.size
+    }
+  }
+
+  copyDir(srcRoot, workspaceRoot)
+  return { copied_files: copiedFiles, copied_bytes: copiedBytes, truncated: copiedFiles >= MAX_STAGED_COPY_FILES || copiedBytes >= MAX_STAGED_COPY_BYTES }
+}
+
+function ensureRunWorkspace(run, project) {
+  const workspace = runWorkspaceRoot(run.id)
+  if (fs.existsSync(path.join(workspace, '.forge_workspace.json'))) return workspace
+  if (fs.existsSync(workspace)) fs.rmSync(workspace, { recursive: true, force: true })
+  const copy = copyProjectToWorkspace(project, workspace)
+  fs.writeFileSync(path.join(workspace, '.forge_workspace.json'), JSON.stringify({
+    run_id: run.id,
+    project_id: project.id,
+    source_root: safeProjectRoot(project),
+    created_at: nowIso(),
+    ...copy,
+  }, null, 2))
+  return workspace
+}
+
+function resolveInsideWorkspace(workspaceRoot, relativePath) {
+  const target = path.resolve(workspaceRoot, normalizeRelPath(relativePath))
+  if (target !== workspaceRoot && !target.startsWith(workspaceRoot + path.sep)) {
+    const err = new Error('path escapes run workspace')
+    err.status = 403
+    throw err
+  }
+  return target
+}
+
+function stageRunAction(run, project, action) {
+  const policy = validateRunActionPolicy(action, project)
+  if (!policy.allowed) return { ok: false, policy }
+  const workspace = ensureRunWorkspace(run, project)
+  const stagedFiles = []
+  for (const rel of policy.files) {
+    const target = resolveInsideWorkspace(workspace, rel)
+    ensureDir(path.dirname(target))
+    const content = actionContentForPath(action, rel)
+    fs.writeFileSync(target, content, 'utf8')
+    stagedFiles.push({ path: rel, bytes: Buffer.byteLength(content, 'utf8') })
+  }
+  return { ok: true, policy, workspace, staged_files: stagedFiles }
+}
+
+function applyStagedRun(run, project) {
+  const workspace = runWorkspaceRoot(run.id)
+  if (!fs.existsSync(workspace)) return { ok: false, error: 'run workspace missing' }
+  const approvedActions = (run.actions || []).filter(action => RUN_WRITE_ACTIONS.has(action.type) && ['approved', 'staged', 'verified'].includes(action.status))
+  if (!approvedActions.length) return { ok: false, error: 'no approved staged write actions' }
+  const applied = []
+  const snapshots = []
+  for (const action of approvedActions) {
+    for (const rel of actionFiles(action)) {
+      const staged = resolveInsideWorkspace(workspace, rel)
+      if (!fs.existsSync(staged)) return { ok: false, error: `staged file missing: ${rel}` }
+      const target = resolveInsideProject(project, rel)
+      if (!canWritePath(project, rel) || isProtectedPath(project, rel)) return { ok: false, error: `blocked target: ${rel}` }
+      const snapDir = path.join(safeProjectRoot(project), '.forge_snapshots')
+      ensureDir(snapDir)
+      if (fs.existsSync(target)) {
+        const snap = path.join(snapDir, `${Date.now()}_${path.basename(rel)}`)
+        fs.copyFileSync(target, snap)
+        snapshots.push({ path: rel, snapshot: snap })
+      }
+      ensureDir(path.dirname(target))
+      fs.copyFileSync(staged, target)
+      applied.push({ path: rel, bytes: fs.statSync(target).size })
+    }
+  }
+  return { ok: true, applied, snapshots }
 }
 
 function inferPackageType(project) {
@@ -599,6 +833,26 @@ function callCodeIndex(suffix, payload, timeoutMs = 120000) {
   return _httpJson(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}/api/code-index/${suffix}`, payload, timeoutMs, headers)
 }
 
+function getCodeIndexSummary(projectId, timeoutMs = 8000) {
+  return new Promise(resolve => {
+    const http = require('http')
+    const token = _codeIndexToken()
+    const req = http.get(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}/api/code-index/summary/${projectId}`, {
+      timeout: timeoutMs,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }, resp => {
+      let text = ''
+      resp.on('data', chunk => { text += chunk })
+      resp.on('end', () => {
+        try { resolve({ ok: resp.statusCode < 400, status: resp.statusCode, ...JSON.parse(text || '{}') }) }
+        catch { resolve({ ok: false, error: 'parse_error' }) }
+      })
+    })
+    req.on('error', err => resolve({ ok: false, error: err.message }))
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }) })
+  })
+}
+
 // Retrieve the most relevant code snippets for a goal, formatted for the prompt.
 async function retrieveForgeContext(project, query) {
   try {
@@ -607,6 +861,57 @@ async function retrieveForgeContext(project, query) {
     const blocks = r.results.map(h => `--- ${h.path}${h.symbol ? ` :: ${h.symbol}` : ''} ---\n${(h.snippet || '').slice(0, 900)}`).join('\n\n')
     return `\nRelevant existing code (retrieved from the indexed project — read before editing):\n${blocks}\n`
   } catch { return '' }
+}
+
+async function buildContextPack(project, goal, payload = {}) {
+  const tree = buildTree(safeProjectRoot(project))
+  const flatTree = flattenTreePaths(tree).slice(0, 200)
+  const [summary, context] = await Promise.allSettled([
+    getCodeIndexSummary(project.id),
+    callCodeIndex('context', { project_id: project.id, query: goal, k: Number(payload.k) || 6 }, 20000),
+  ])
+  const sessions = loadSessions()
+    .filter(session => session.project_id === project.id)
+    .slice(0, 3)
+    .map(session => ({
+      id: session.id,
+      provider: session.provider,
+      recent: (session.history || []).slice(-4).map(item => ({
+        role: item.role,
+        content: String(item.content || '').slice(0, 500),
+        ts: item.ts,
+      })),
+    }))
+  const summaryValue = summary.status === 'fulfilled' ? summary.value : { ok: false, error: 'summary unavailable' }
+  const contextValue = context.status === 'fulfilled' ? context.value : { ok: false, results: [], error: 'context unavailable' }
+  return {
+    goal,
+    project: {
+      id: project.id,
+      name: project.name,
+      target_type: project.target_type,
+      package_type: project.package_type,
+      write_access: !!project.write_access,
+      allowed_write_paths: project.allowed_write_paths || [],
+    },
+    repo_summary: summaryValue?.ok ? summaryValue : { ok: false, error: summaryValue?.error || 'not indexed yet' },
+    relevant_files: Array.isArray(contextValue?.results) ? contextValue.results : [],
+    tree_paths: flatTree,
+    recent_sessions: sessions,
+    constraints: {
+      approval_required_for_writes: true,
+      staged_apply_required: true,
+      blocked_by_default: ['secrets', 'wallets', 'payments', 'force_push', 'destructive_delete', 'arbitrary_shell'],
+    },
+    risk_policy: {
+      protected_path_patterns: PROTECTED_PATH_PATTERNS.map(pattern => pattern.source),
+      secret_path_patterns: SECRET_PATH_PATTERNS.map(pattern => pattern.source),
+      max_staged_lines_per_action: 300,
+      verify_allowlist: 'build/test/lint/typecheck/py_compile/vitest/tsc/eslint/pytest only',
+    },
+    verification_commands: project.verification_commands || defaultVerificationCommands(project),
+    generated_at: nowIso(),
+  }
 }
 
 function _replyText(d) {
@@ -703,6 +1008,279 @@ module.exports = function createForgeRouter(requireAuth) {
   router.post('/execute', requireAuth, (req, res) => {
     try {
       res.json(engine.execute(req.body || {}))
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
+    }
+  })
+
+  router.post('/runs', requireAuth, async (req, res) => {
+    try {
+      const project = findProject(req.body?.project_id)
+      if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+      const goal = String(req.body?.goal || '').trim()
+      if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
+
+      const runId = `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+      const contextPack = await buildContextPack(project, goal, req.body || {})
+      const targetFiles = contextPack.relevant_files.map(item => item.path).filter(Boolean).slice(0, 8)
+      const plan = createPlan(engine, project, {
+        goal,
+        provider: req.body?.provider,
+        target_files: targetFiles,
+        target_type: project.target_type,
+      })
+      const preflightActions = actionsForPlan(plan, project, {})
+
+      let aiText = ''
+      try {
+        const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
+        const historySnippet = contextPack.recent_sessions
+          .flatMap(session => session.recent || [])
+          .slice(-6)
+          .map(item => `${item.role}: ${String(item.content || '').slice(0, 300)}`)
+          .join('\n')
+        const codeContext = contextPack.relevant_files
+          .map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`)
+          .join('\n\n')
+        const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
+        const aiResult = await callPythonChat(prompt, 60000)
+        aiText = aiResult?.response || aiResult?.reply || ''
+      } catch { /* degraded plan-only run */ }
+
+      const codeActions = aiText ? extractCodeActions(aiText, project).slice(0, 12) : []
+      for (const action of codeActions) {
+        const policy = validateRunActionPolicy(action, project)
+        action.run_id = runId
+        action.plan_id = plan.id
+        action.approval_required = true
+        action.status = policy.allowed ? 'pending_approval' : 'blocked'
+        action.risk = policy.risk_level === 'high' ? 'dangerous' : policy.risk_level
+        action.risk_level = policy.risk_level
+        action.expected_result = 'File is staged in the run workspace, verified, then applied after owner approval.'
+        action.rollback_plan = 'Restore from per-file .forge_snapshots copy if apply must be reverted.'
+        action.policy_decision = policy
+        action.created_at = nowIso()
+        action.updated_at = nowIso()
+      }
+      if (codeActions.length) {
+        saveActions([...codeActions, ...loadActions()])
+        for (const action of codeActions) appendAudit('forge_run_action_proposed', { id: action.id, type: action.type, risk: action.risk_level, project_id: project.id, allowed: action.policy_decision?.allowed })
+      }
+
+      const actions = [...preflightActions, ...codeActions].map(action => ({ ...action, run_id: runId }))
+      const patches = actions
+        .filter(action => RUN_WRITE_ACTIONS.has(action.type))
+        .map(action => ({
+          action_id: action.id,
+          files: actionFiles(action),
+          diff: action.diff || null,
+          policy: action.policy_decision || validateRunActionPolicy(action, project),
+          status: action.status || 'pending_approval',
+        }))
+      const run = {
+        id: runId,
+        run_id: runId,
+        project_id: project.id,
+        goal,
+        status: patches.some(patch => patch.policy?.allowed === false) ? 'blocked' : 'awaiting_approval',
+        mode: req.body?.mode || 'supervised',
+        provider: req.body?.provider || 'local-first',
+        max_iterations: Math.min(5, Math.max(1, Number(req.body?.max_iterations) || 3)),
+        context_pack: contextPack,
+        plan,
+        actions,
+        patches,
+        approvals: [],
+        test_results: [],
+        review: {
+          status: patches.length ? 'policy_checked' : 'plan_only',
+          summary: patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated; run is ready for planning review.',
+          blocked: patches.filter(patch => patch.policy?.allowed === false).length,
+        },
+        final_report: null,
+        audit_ids: [],
+        workspace_path: runWorkspaceRoot(runId),
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      }
+      upsertRun(run)
+      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length })
+      res.json({ ok: true, state: 'live', run_id: runId, status: run.status, context_pack: contextPack, plan, actions, patches, run })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
+    }
+  })
+
+  router.get('/runs/:id', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    res.json({ ok: true, state: 'live', run })
+  })
+
+  router.post('/runs/:id/approve', requireAuth, async (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_run_approve')) return
+    try {
+      const run = findRun(req.params.id)
+      if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+      const project = findProject(run.project_id)
+      if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+      if (!project.write_access) return res.status(403).json({ ok: false, error: 'project is not writable' })
+
+      const actionId = String(req.body?.action_id || '').trim()
+      const actions = run.actions || []
+      const targets = actionId ? actions.filter(action => action.id === actionId) : actions.filter(action => RUN_WRITE_ACTIONS.has(action.type))
+      if (!targets.length) return res.status(404).json({ ok: false, error: actionId ? 'action not found' : 'no write actions to approve' })
+
+      const staged = []
+      const failures = []
+      const nextActions = actions.map(action => {
+        if (!targets.some(target => target.id === action.id)) return action
+        const result = stageRunAction(run, project, action)
+        if (result.ok) staged.push({ action_id: action.id, files: result.staged_files, policy: result.policy })
+        else failures.push({ action_id: action.id, policy: result.policy })
+        return {
+          ...action,
+          status: result.ok ? 'staged' : 'blocked',
+          approved_at: result.ok ? nowIso() : action.approved_at,
+          approved_by: result.ok ? (req.user?.email || req.body?.approved_by || 'operator') : action.approved_by,
+          policy_decision: result.policy,
+          staged_files: result.staged_files || [],
+          updated_at: nowIso(),
+        }
+      })
+      const approvals = [
+        ...(run.approvals || []),
+        ...staged.map(item => ({
+          action_id: item.action_id,
+          approved_by: req.user?.email || req.body?.approved_by || 'operator',
+          approved_at: nowIso(),
+          policy: item.policy,
+        })),
+      ]
+      const patches = (run.patches || []).map(patch => {
+        const stagedPatch = staged.find(item => item.action_id === patch.action_id)
+        const failedPatch = failures.find(item => item.action_id === patch.action_id)
+        if (stagedPatch) return { ...patch, status: 'staged', policy: stagedPatch.policy, staged_files: stagedPatch.files }
+        if (failedPatch) return { ...patch, status: 'blocked', policy: failedPatch.policy }
+        return patch
+      })
+      const status = failures.length ? 'blocked' : 'staged'
+      const updated = updateRun(run.id, {
+        status,
+        actions: nextActions,
+        patches,
+        approvals,
+        review: {
+          ...(run.review || {}),
+          status: failures.length ? 'policy_blocked' : 'staged',
+          summary: failures.length
+            ? `${failures.length} action(s) blocked by policy.`
+            : `${staged.length} action(s) approved and staged in the run workspace.`,
+        },
+      })
+      appendAudit('forge_run_approved', { run_id: run.id, staged: staged.length, failures: failures.length })
+      res.status(failures.length ? 409 : 200).json({ ok: failures.length === 0, state: failures.length ? 'degraded' : 'live', run: updated, staged, failures })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
+    }
+  })
+
+  router.post('/runs/:id/verify', requireAuth, async (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_run_verify')) return
+    try {
+      const run = findRun(req.params.id)
+      if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+      const project = findProject(run.project_id)
+      if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+      const workspace = runWorkspaceRoot(run.id)
+      if (!fs.existsSync(workspace)) return res.status(409).json({ ok: false, error: 'run workspace missing; approve/stage a patch first' })
+      const cmds = (Array.isArray(req.body?.commands) && req.body.commands.length)
+        ? req.body.commands
+        : (run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project))
+      const verify = await runVerifyCommands(project, cmds, workspace)
+      const testResult = {
+        id: `verify-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+        all_passed: verify.all_passed,
+        results: verify.results,
+        workspace,
+        commands: cmds,
+        verified_at: nowIso(),
+        verified_by: req.user?.email || req.body?.approved_by || 'operator',
+      }
+      const nextActions = (run.actions || []).map(action => {
+        if (!RUN_WRITE_ACTIONS.has(action.type) || !['staged', 'verified'].includes(action.status)) return action
+        return { ...action, status: verify.all_passed ? 'verified' : 'verify_failed', updated_at: nowIso() }
+      })
+      const nextPatches = (run.patches || []).map(patch => {
+        if (!['staged', 'verified'].includes(patch.status)) return patch
+        return { ...patch, status: verify.all_passed ? 'verified' : 'verify_failed' }
+      })
+      const updated = updateRun(run.id, {
+        status: verify.all_passed ? 'verified' : 'verify_failed',
+        actions: nextActions,
+        patches: nextPatches,
+        test_results: [...(run.test_results || []), testResult],
+        review: {
+          ...(run.review || {}),
+          status: verify.all_passed ? 'verification_passed' : 'verification_failed',
+          summary: verify.all_passed
+            ? 'All staged verification commands passed.'
+            : 'One or more staged verification commands failed.',
+        },
+      })
+      appendAudit('forge_run_verified', { run_id: run.id, all_passed: verify.all_passed, commands: cmds.length })
+      res.status(verify.all_passed ? 200 : 409).json({ ok: verify.all_passed, state: verify.all_passed ? 'live' : 'degraded', run: updated, test_result: testResult })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
+    }
+  })
+
+  router.post('/runs/:id/apply', requireAuth, async (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_run_apply')) return
+    try {
+      const run = findRun(req.params.id)
+      if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+      const project = findProject(run.project_id)
+      if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+      if (!project.write_access) return res.status(403).json({ ok: false, error: 'project is not writable' })
+      const latestTest = (run.test_results || []).slice(-1)[0]
+      if (!latestTest?.all_passed && req.body?.force !== true) {
+        return res.status(409).json({ ok: false, error: 'verification must pass before apply' })
+      }
+      const blocked = (run.patches || []).filter(patch => patch.policy?.allowed === false || patch.status === 'blocked')
+      if (blocked.length) return res.status(409).json({ ok: false, error: 'blocked patches cannot be applied', blocked })
+
+      const result = applyStagedRun(run, project)
+      if (!result.ok) return res.status(409).json({ ok: false, state: 'degraded', ...result })
+      const finalReport = {
+        status: 'applied',
+        summary: `Applied ${result.applied.length} file(s) from staged run ${run.id}.`,
+        applied_files: result.applied,
+        snapshots: result.snapshots,
+        test_result: latestTest || null,
+        applied_at: nowIso(),
+        applied_by: req.user?.email || req.body?.approved_by || 'operator',
+        next_steps: ['Review the diff in git status.', 'Run the broader project verification suite before release.'],
+      }
+      const nextActions = (run.actions || []).map(action => RUN_WRITE_ACTIONS.has(action.type) && ['verified', 'staged', 'approved'].includes(action.status)
+        ? { ...action, status: 'applied', result: finalReport, updated_at: nowIso() }
+        : action)
+      const nextPatches = (run.patches || []).map(patch => ['verified', 'staged', 'approved'].includes(patch.status)
+        ? { ...patch, status: 'applied' }
+        : patch)
+      const updated = updateRun(run.id, {
+        status: 'applied',
+        actions: nextActions,
+        patches: nextPatches,
+        final_report: finalReport,
+        review: {
+          ...(run.review || {}),
+          status: 'applied',
+          summary: finalReport.summary,
+        },
+      })
+      appendAudit('forge_run_applied', { run_id: run.id, project_id: project.id, files: result.applied.length, snapshots: result.snapshots.length })
+      res.json({ ok: true, state: 'live', run: updated, final_report: finalReport })
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
     }
@@ -1068,9 +1646,9 @@ module.exports = function createForgeRouter(requireAuth) {
   })
 
   // Shared verification runner (used by the agentic loop).
-  async function runVerifyCommands(project, cmds) {
+  async function runVerifyCommands(project, cmds, rootOverride = null) {
     const { exec } = require('child_process')
-    const root = safeProjectRoot(project)
+    const root = rootOverride || safeProjectRoot(project)
     const results = []
     for (const cmd of cmds) {
       if (!isVerifyAllowed(cmd)) { results.push({ command: cmd, pass: false, skipped: true, output: 'not in verify allowlist' }); continue }
@@ -1100,18 +1678,44 @@ module.exports = function createForgeRouter(requireAuth) {
       ? req.body.commands : (project.verification_commands || defaultVerificationCommands(project))
     const autoRollback = req.body?.auto_rollback !== false
 
-    const root = safeProjectRoot(project)
-    const originals = new Map()   // path → original content (or null if new)
-    const captureOriginal = (rel) => {
-      if (originals.has(rel)) return
-      try { const t = resolveInsideProject(project, rel); originals.set(rel, fs.existsSync(t) ? fs.readFileSync(t, 'utf8') : null) }
-      catch { /* path escapes — skip */ }
-    }
-
+    const runId = `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+    const contextPack = await buildContextPack(project, goal, req.body || {})
+    const plan = createPlan(engine, project, {
+      goal,
+      provider: req.body?.provider,
+      target_files: contextPack.relevant_files.map(item => item.path).filter(Boolean).slice(0, 8),
+      target_type: project.target_type,
+    })
+    const run = upsertRun({
+      id: runId,
+      run_id: runId,
+      project_id: project.id,
+      goal,
+      status: 'running',
+      mode: 'agentic_supervised',
+      provider: req.body?.provider || 'local-first',
+      max_iterations: maxIters,
+      context_pack: contextPack,
+      plan,
+      actions: [],
+      patches: [],
+      approvals: [],
+      test_results: [],
+      review: { status: 'running', summary: 'Agentic staged run started.' },
+      final_report: null,
+      audit_ids: [],
+      workspace_path: runWorkspaceRoot(runId),
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    })
+    ensureRunWorkspace(run, project)
+    const root = runWorkspaceRoot(runId)
     const transcript = []
     let success = false
     let lastErrors = ''
-    appendAudit('forge_agentic_start', { project_id: project.id, goal: goal.slice(0, 120), max_iters: maxIters })
+    const allActions = []
+    const allPatches = []
+    appendAudit('forge_agentic_start', { run_id: runId, project_id: project.id, goal: goal.slice(0, 120), max_iters: maxIters })
 
     for (let iter = 1; iter <= maxIters; iter++) {
       const codeContext = await retrieveForgeContext(project, goal)
@@ -1130,37 +1734,74 @@ module.exports = function createForgeRouter(requireAuth) {
 
       const written = []
       for (const a of actions) {
-        captureOriginal(normalizeRelPath(a.file_path))
-        // eslint-disable-next-line no-await-in-loop
-        const w = await executeAction(a, project)
-        written.push({ path: a.file_path, ok: w.ok !== false, error: w.error || null })
+        a.id = a.id || crypto.randomUUID()
+        a.run_id = runId
+        a.plan_id = plan.id
+        a.status = 'generated'
+        a.approval_required = true
+        const policy = validateRunActionPolicy(a, project)
+        a.policy_decision = policy
+        a.risk_level = policy.risk_level
+        a.risk = policy.risk_level === 'high' ? 'dangerous' : policy.risk_level
+        let staged = { ok: false, error: 'policy blocked' }
+        if (policy.allowed) staged = stageRunAction(run, project, a)
+        a.status = staged.ok ? 'staged' : 'blocked'
+        a.staged_files = staged.staged_files || []
+        allActions.push(a)
+        allPatches.push({
+          action_id: a.id,
+          files: actionFiles(a),
+          diff: a.diff || null,
+          policy: staged.policy || policy,
+          status: staged.ok ? 'staged' : 'blocked',
+          iteration: iter,
+        })
+        written.push({ path: a.file_path, ok: staged.ok, error: staged.error || staged.policy?.violations?.[0]?.message || null })
       }
 
       // eslint-disable-next-line no-await-in-loop
-      const verify = written.some(w => w.ok) ? await runVerifyCommands(project, verifyCmds) : { all_passed: false, results: [{ output: 'no files written' }] }
+      const verify = written.some(w => w.ok) ? await runVerifyCommands(project, verifyCmds, root) : { all_passed: false, results: [{ output: 'no staged files written' }] }
       lastErrors = verify.all_passed ? '' : verify.results.filter(r => !r.pass).map(r => `${r.command || 'apply'}: ${r.output || r.error}`).join('\n')
       transcript.push({ iteration: iter, files_written: written, verify })
-      appendAudit('forge_agentic_iter', { project_id: project.id, iter, files: written.length, passed: verify.all_passed })
+      updateRun(runId, {
+        status: verify.all_passed ? 'verified' : 'running',
+        actions: allActions,
+        patches: allPatches,
+        test_results: [
+          ...(findRun(runId)?.test_results || []),
+          { id: `verify-${iter}`, iteration: iter, all_passed: verify.all_passed, results: verify.results, verified_at: nowIso(), workspace: root },
+        ],
+        review: {
+          status: verify.all_passed ? 'verification_passed' : 'iteration_failed',
+          summary: verify.all_passed ? `Verification passed on iteration ${iter}. Apply still requires owner approval.` : `Iteration ${iter} failed verification in staged workspace.`,
+        },
+      })
+      appendAudit('forge_agentic_iter', { run_id: runId, project_id: project.id, iter, files: written.length, passed: verify.all_passed })
 
       if (verify.all_passed) { success = true; break }
     }
 
-    // Auto-rollback the whole run if we never reached green.
-    let rolledBack = false
-    if (!success && autoRollback && originals.size) {
-      for (const [rel, content] of originals.entries()) {
-        try {
-          const t = resolveInsideProject(project, rel)
-          if (content === null) { if (fs.existsSync(t)) fs.unlinkSync(t) }
-          else fs.writeFileSync(t, content, 'utf8')
-        } catch { /* best effort */ }
-      }
-      rolledBack = true
-      appendAudit('forge_agentic_rollback', { project_id: project.id, files: originals.size })
+    let workspaceCleaned = false
+    if (!success && autoRollback && fs.existsSync(path.dirname(root))) {
+      fs.rmSync(path.dirname(root), { recursive: true, force: true })
+      workspaceCleaned = true
+      appendAudit('forge_agentic_workspace_removed', { run_id: runId })
     }
-    appendAudit('forge_agentic_done', { project_id: project.id, success, iterations: transcript.length, rolled_back: rolledBack })
-    res.json({ ok: true, success, iterations: transcript.length, transcript, rolled_back: rolledBack,
-      summary: success ? `Goal achieved in ${transcript.length} iteration(s).` : `Did not reach green in ${transcript.length} iteration(s); ${rolledBack ? 'changes rolled back.' : 'changes left in place.'}` })
+    const finalRun = updateRun(runId, {
+      status: success ? 'verified' : 'verify_failed',
+      final_report: {
+        status: success ? 'verified_not_applied' : 'failed_not_applied',
+        summary: success
+          ? `Goal reached green in ${transcript.length} staged iteration(s). Apply requires owner approval.`
+          : `Did not reach green in ${transcript.length} staged iteration(s); no project files were modified.`,
+        transcript,
+        workspace_removed: workspaceCleaned,
+        generated_at: nowIso(),
+      },
+    })
+    appendAudit('forge_agentic_done', { run_id: runId, project_id: project.id, success, iterations: transcript.length, workspace_removed: workspaceCleaned })
+    res.json({ ok: true, success, run_id: runId, run: finalRun, iterations: transcript.length, transcript, rolled_back: workspaceCleaned,
+      summary: finalRun.final_report.summary })
   })
 
   router.post('/rollback', requireAuth, async (req, res) => {

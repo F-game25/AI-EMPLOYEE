@@ -401,7 +401,7 @@ function ContainerGrid() {
       <div className="infra-section-label">LIVE SERVICE STATUS</div>
       <div className="infra-containers__grid">
         {services.map(c => (
-          <div key={c.name} className="infra-card">
+          <div key={c.name} className={`infra-card${c.status && c.status !== 'live' ? ` infra-card--${c.status}` : ''}`}>
             <span className="infra-card__dot" style={{ background: CONT_DOT[c.status] ?? 'var(--nx-text-muted)', boxShadow: `0 0 6px ${CONT_DOT[c.status] ?? 'transparent'}` }} />
             <div className="infra-card__name">{c.name}</div>
             <div className="infra-card__meta">

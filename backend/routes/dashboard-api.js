@@ -306,8 +306,30 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   })
 
   r.post('/knowledge/upload', requireAuth, (req, res) => {
-    // Multipart file upload — acknowledge, actual parsing done by Python backend
-    res.json({ ok: true, message: 'File queued for ingestion', queue_id: `q_${Date.now()}` })
+    // Proxy multipart upload to Python backend for chunking + embedding
+    const http = require('http')
+    const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || 18790
+    const fwdHeaders = { ...req.headers, host: `127.0.0.1:${PYTHON_PORT}` }
+    // Forward the original Authorization header so Python require_auth passes
+    const authHeader = req.headers['authorization'] || req.headers['Authorization']
+    if (authHeader) fwdHeaders['authorization'] = authHeader
+    const pyReq = http.request({
+      hostname: '127.0.0.1',
+      port: PYTHON_PORT,
+      path: '/knowledge/upload',
+      method: 'POST',
+      headers: fwdHeaders,
+    }, pyRes => {
+      res.status(pyRes.statusCode || 200)
+      Object.entries(pyRes.headers).forEach(([k, v]) => {
+        if (k !== 'transfer-encoding') res.setHeader(k, v)
+      })
+      pyRes.pipe(res)
+    })
+    pyReq.on('error', err => {
+      if (!res.headersSent) res.status(502).json({ ok: false, error: 'Python backend unavailable', detail: err.message })
+    })
+    req.pipe(pyReq)
   })
 
   r.get('/knowledge/ingest-queue', requireAuth, (req, res) => {

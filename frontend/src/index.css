@@ -1209,6 +1209,45 @@ body {
   border-radius: 8px; font-size: 13px; font-weight: 600; transition: top .15s;
 }
 .skip-link:focus { top: 8px; outline: 2px solid #fff; }
+/* ── Global state utility classes ────────────────────────────────── */
+.nx-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 48px 24px;
+  color: var(--nx-text-muted, #888);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.nx-error-banner {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid #ef4444;
+  color: #ef4444;
+  padding: 12px 16px;
+  border-radius: var(--nx-r-md, 8px);
+  margin-bottom: 12px;
+  font-size: 0.875rem;
+}
+
+.nx-skeleton {
+  background: linear-gradient(90deg,
+    var(--nx-surface, #0b0d18) 25%,
+    var(--nx-surface-2, #10131f) 50%,
+    var(--nx-surface, #0b0d18) 75%);
+  background-size: 200% 100%;
+  animation: nx-shimmer 1.5s infinite;
+  border-radius: var(--nx-r-sm, 4px);
+  height: 16px;
+}
+
+@keyframes nx-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* Stronger keyboard focus on interactive controls. */
 button:focus-visible, a:focus-visible, [role="tab"]:focus-visible,
 input:focus-visible, select:focus-visible, textarea:focus-visible {

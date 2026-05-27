@@ -98,6 +98,16 @@ async def get_graph(depth: int = Query(2, ge=1, le=5), limit: int = Query(200, g
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/graph/snapshot")
+async def get_graph_snapshot(limit: int = Query(200, ge=10, le=1000)):
+    """Alias for /graph — returns the full graph snapshot for dashboard use."""
+    try:
+        from neural_brain.core.consciousness_engine import get_engine
+        return get_engine().get_graph_snapshot(limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/graph/views/{view}")
 async def get_graph_view(view: str, limit: int = Query(300, ge=10, le=1000)):
     """One of the four living memory graphs: shortterm|longterm|relations|unified."""

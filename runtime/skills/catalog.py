@@ -1,4 +1,11 @@
-"""Skill catalog with class-based stateless skill modules."""
+"""Skill catalog with class-based stateless skill modules.
+
+``SkillCatalog`` manages ``SkillBase`` instances for the orchestrator.
+``ExecutableSkillRegistry`` (also a singleton, exposed via
+``get_skill_catalog()``) extends it with ``register_skill()``,
+``execute_skill()``, and ``find_for_goal()`` for use by API routes and
+direct skill execution.
+"""
 from __future__ import annotations
 
 import json
@@ -151,9 +158,120 @@ _instance: SkillCatalog | None = None
 _instance_lock = threading.Lock()
 
 
-def get_skill_catalog() -> SkillCatalog:
+def get_skill_catalog() -> "ExecutableSkillCatalog":
+    """Return the ExecutableSkillCatalog singleton."""
     global _instance
     with _instance_lock:
         if _instance is None:
-            _instance = SkillCatalog()
-    return _instance
+            _instance = ExecutableSkillCatalog()
+    return _instance  # type: ignore[return-value]
+
+
+# ── Executable skill registry ─────────────────────────────────────────────────
+
+class ExecutableSkillCatalog(SkillCatalog):
+    """SkillCatalog extended with register/execute/find_for_goal for API use."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._exec_skills: dict[str, dict[str, Any]] = {}
+        self._register_exec_defaults()
+
+    # ── Registration ──────────────────────────────────────────────────────────
+
+    def register_skill(self, name: str, version: str, fn: Callable,
+                       tools_required: list[str], description: str,
+                       risk_level: int = 1) -> None:
+        self._exec_skills[name] = {
+            "name": name, "version": version, "fn": fn,
+            "tools": tools_required, "description": description,
+            "risk_level": risk_level,
+        }
+
+    # ── Lookup ────────────────────────────────────────────────────────────────
+
+    def get_skill(self, name: str) -> dict | None:
+        return self._exec_skills.get(name)
+
+    def list_skills(self) -> list[dict]:  # type: ignore[override]
+        return [
+            {
+                "name": k, "version": v["version"],
+                "description": v["description"],
+                "tools": v["tools"], "risk_level": v["risk_level"],
+            }
+            for k, v in self._exec_skills.items()
+        ]
+
+    def find_for_goal(self, goal: str) -> list[dict]:
+        gl = goal.lower()
+        return [s for s in self.list_skills()
+                if any(w in gl for w in s["description"].lower().split())]
+
+    # ── Execution ─────────────────────────────────────────────────────────────
+
+    def execute_skill(self, name: str, params: dict,
+                      agent_id: str = "system") -> dict:
+        skill = self._exec_skills.get(name)
+        if not skill:
+            return {"ok": False, "error": f"Skill '{name}' not found"}
+        try:
+            return {"ok": True, "skill": name, "result": skill["fn"](**params)}
+        except Exception as e:
+            return {"ok": False, "skill": name, "error": str(e)}
+
+    # ── Default skills ────────────────────────────────────────────────────────
+
+    def _register_exec_defaults(self) -> None:
+        self.register_skill("market_research", "1.0", self._market_research,
+                            ["web_search", "llm_infer"],
+                            "Research a market or topic", 0)
+        self.register_skill("content_creation", "1.0", self._content_creation,
+                            ["llm_infer", "write_file"],
+                            "Create written content", 1)
+        self.register_skill("document_intelligence", "1.0", self._doc_intelligence,
+                            ["read_file", "llm_infer", "embed_text"],
+                            "Analyze documents", 0)
+        self.register_skill("lead_generation", "1.0", self._lead_gen,
+                            ["web_search", "call_api"],
+                            "Find potential leads", 2)
+        self.register_skill("customer_support", "1.0", self._support,
+                            ["llm_infer", "get_memory"],
+                            "Handle customer queries", 1)
+
+    def _market_research(self, topic: str, **_):
+        from tools.registry import get_tool_registry
+        r = get_tool_registry()
+        search_result = r.execute("web_search", {"query": topic, "limit": 5})
+        llm_result = r.execute("llm_infer", {
+            "prompt": f"Summarize market research for: {topic}", "max_tokens": 500,
+        })
+        return {"topic": topic, "sources": search_result, "summary": llm_result}
+
+    def _content_creation(self, topic: str, format: str = "article", **_):
+        from tools.registry import get_tool_registry
+        return get_tool_registry().execute(
+            "llm_infer",
+            {"prompt": f"Write a {format} about: {topic}", "max_tokens": 1000},
+        )
+
+    def _doc_intelligence(self, path: str, query: str = "", **_):
+        from tools.registry import get_tool_registry
+        r = get_tool_registry()
+        doc = r.execute("read_file", {"path": path})
+        return r.execute("llm_infer", {
+            "prompt": f"Analyze this document: {doc}\n\nQuery: {query}",
+            "max_tokens": 800,
+        })
+
+    def _lead_gen(self, criteria: str, **_):
+        return {"stub": True,
+                "blocked": "Lead generation requires HITL approval",
+                "criteria": criteria}
+
+    def _support(self, query: str, **_):
+        from tools.registry import get_tool_registry
+        return get_tool_registry().execute(
+            "llm_infer",
+            {"prompt": f"Help customer with: {query}", "max_tokens": 500},
+        )

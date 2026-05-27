@@ -18435,7 +18435,7 @@ def get_doctor():
 # ── Self-evolution control ────────────────────────────────────────────────────
 
 @app.post("/api/models/reload")
-def post_models_reload(current_user: dict = Depends(get_current_user)):
+def post_models_reload(_auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Force-reload the model routing config from ~/.ai-employee/model-routing.json."""
     try:
         from core.llm_router import get_llm_router
@@ -20931,6 +20931,119 @@ def money_affiliate_draft(payload: dict, _auth: None = Depends(require_auth)):
         niche=niche,
         output_format=str(payload.get("output_format") or "blog_post"),
     ))
+
+
+@app.post("/money/niche-research")
+async def money_niche_research(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import niche_research_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    niche = str(payload.get("niche") or "").strip()
+    if not niche:
+        raise HTTPException(400, "niche required")
+    result = await niche_research_workflow(tenant_id, niche)
+    return JSONResponse(result)
+
+
+@app.post("/money/offer-creation")
+async def money_offer_creation(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import offer_creation_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    niche = str(payload.get("niche") or "").strip()
+    angle = str(payload.get("angle") or "").strip()
+    if not niche or not angle:
+        raise HTTPException(400, "niche and angle required")
+    result = await offer_creation_workflow(tenant_id, niche, angle)
+    return JSONResponse(result)
+
+
+@app.post("/money/content-calendar")
+async def money_content_calendar(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import content_calendar_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    offer = payload.get("offer") or {}
+    weeks = int(payload.get("weeks") or 4)
+    if not isinstance(offer, dict):
+        raise HTTPException(400, "offer must be an object")
+    result = await content_calendar_workflow(tenant_id, offer, weeks)
+    return JSONResponse(result)
+
+
+@app.post("/money/lead-research")
+async def money_lead_research(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import lead_research_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    criteria = payload.get("criteria") or {}
+    if not isinstance(criteria, dict):
+        raise HTTPException(400, "criteria must be an object")
+    result = await lead_research_workflow(tenant_id, criteria)
+    return JSONResponse(result)
+
+
+@app.post("/money/proposal")
+async def money_proposal(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import proposal_generation_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    client_info = payload.get("client_info") or {}
+    offer = payload.get("offer") or {}
+    if not isinstance(client_info, dict) or not isinstance(offer, dict):
+        raise HTTPException(400, "client_info and offer must be objects")
+    result = await proposal_generation_workflow(tenant_id, client_info, offer)
+    return JSONResponse(result)
+
+
+# ── Roadmap Engine routes ─────────────────────────────────────────────────────
+
+@app.post("/roadmap/create")
+async def roadmap_create(payload: dict, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    from dataclasses import asdict  # noqa: PLC0415
+    goal = str(payload.get("goal") or "").strip()
+    tenant_id = str(payload.get("tenant_id") or "default")
+    if not goal:
+        raise HTTPException(400, "goal required")
+    roadmap = get_roadmap_engine().create_roadmap(goal, tenant_id)
+    return JSONResponse(asdict(roadmap))
+
+
+@app.post("/roadmap/generate")
+async def roadmap_generate(payload: dict, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    from dataclasses import asdict  # noqa: PLC0415
+    roadmap_id = str(payload.get("roadmap_id") or "").strip()
+    if not roadmap_id:
+        raise HTTPException(400, "roadmap_id required")
+    engine = get_roadmap_engine()
+    roadmap = engine.get_roadmap(roadmap_id)
+    if not roadmap:
+        raise HTTPException(404, f"Roadmap {roadmap_id} not found")
+    roadmap = engine.generate_milestones(roadmap)
+    return JSONResponse(asdict(roadmap))
+
+
+@app.get("/roadmap/{roadmap_id}")
+async def roadmap_get(roadmap_id: str, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    status = get_roadmap_engine().roadmap_status(roadmap_id)
+    if not status.get("ok"):
+        raise HTTPException(404, status.get("error", "not found"))
+    return JSONResponse(status)
+
+
+@app.post("/roadmap/{roadmap_id}/execute")
+async def roadmap_execute(roadmap_id: str, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    result = await get_roadmap_engine().execute_roadmap(roadmap_id)
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error", "not found"))
+    return JSONResponse(result)
+
+
+@app.get("/roadmap/list/{tenant_id}")
+async def roadmap_list(tenant_id: str, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    from dataclasses import asdict  # noqa: PLC0415
+    roadmaps = get_roadmap_engine().list_roadmaps(tenant_id)
+    return JSONResponse({"ok": True, "roadmaps": [asdict(r) for r in roadmaps]})
 
 
 @app.post("/api/task/cancel")
@@ -27947,6 +28060,100 @@ async def research_screenshot(hash_name: str):
     return FileResponse(str(path), media_type="image/png")
 
 
+# ── Knowledge Upload — chunk + embed + persist ──────────────────────────────
+def _chunk_text(text: str, chunk_size: int = 512, overlap: int = 51) -> list[str]:
+    words = text.split()
+    if not words:
+        return [text] if text.strip() else []
+    chunks, i = [], 0
+    while i < len(words):
+        chunks.append(' '.join(words[i:i + chunk_size]))
+        i += chunk_size - overlap
+    return chunks or [text]
+
+
+@app.post("/knowledge/upload")
+async def knowledge_upload(request: Request, _auth: None = Depends(require_auth)):
+    """Chunk uploaded files into 512-token segments, embed, and persist to memory."""
+    from fastapi import UploadFile
+    import uuid as _uuid
+    try:
+        form = await request.form()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to parse form data: {exc}")
+
+    files = form.getlist("files") or form.getlist("file")
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    try:
+        from memory.memory_router import get_memory_router
+        router = get_memory_router()
+        use_router = True
+    except Exception:
+        router = None
+        use_router = False
+
+    try:
+        from core.knowledge_store import get_knowledge_store
+        ks = get_knowledge_store()
+        use_ks = True
+    except Exception:
+        ks = None
+        use_ks = False
+
+    results = []
+    uploaded_at = datetime.utcnow().isoformat()
+
+    for upload in files:
+        filename = getattr(upload, "filename", None) or "unknown"
+        try:
+            raw = await upload.read()
+            content = raw.decode("utf-8", errors="replace")
+        except Exception as exc:
+            results.append({"filename": filename, "error": str(exc), "chunks": 0})
+            continue
+
+        chunks = _chunk_text(content, chunk_size=512, overlap=51)
+        total = len(chunks)
+        stored = 0
+
+        for idx, chunk in enumerate(chunks):
+            chunk_key = f"upload_{_uuid.uuid4().hex[:12]}_{idx}"
+            entry = {
+                "source": filename,
+                "content": chunk,
+                "chunk_index": idx,
+                "total_chunks": total,
+                "uploaded_at": uploaded_at,
+            }
+            if use_router:
+                try:
+                    router.store(
+                        chunk_key,
+                        chunk,
+                        memory_type="semantic",
+                        source=filename,
+                        importance=0.7,
+                        extra={"chunk_index": idx, "total_chunks": total, "uploaded_at": uploaded_at},
+                    )
+                    stored += 1
+                except Exception as exc:
+                    logger.warning("memory_router.store failed for chunk %d of %s: %s", idx, filename, exc)
+            if use_ks:
+                try:
+                    ks.add_knowledge(topic=f"upload:{filename}", content=entry)
+                    if not use_router:
+                        stored += 1
+                except Exception as exc:
+                    logger.warning("knowledge_store.add_knowledge failed for chunk %d of %s: %s", idx, filename, exc)
+
+        results.append({"filename": filename, "chunks": total, "stored": stored})
+        logger.info("knowledge_upload: %s → %d chunks, %d stored", filename, total, stored)
+
+    return JSONResponse({"ok": True, "files": results})
+
+
 # --- Vault (Obsidian-compatible markdown store) -----------------------------
 try:
     from memory.vault import Vault as _VaultCls, get_vault as _get_vault_for_tenant
@@ -28156,6 +28363,34 @@ async def memory_hybrid_search(q: str = Query(..., min_length=1, max_length=500)
         return {"results": [], "query": q, "alpha": alpha, "mode": "hybrid", "error": str(exc)}
 
 
+class _RagRetrieveRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    alpha: float = 0.5
+    rerank: bool = True
+    compress: bool = True
+    cite: bool = True
+
+
+@app.post("/rag/retrieve")
+async def rag_retrieve_endpoint(body: _RagRetrieveRequest):
+    """Full RAG pipeline: hybrid search → optional rerank → compress → cite."""
+    try:
+        from memory.memory_router import rag_retrieve
+        result = rag_retrieve(
+            query=body.query,
+            top_k=body.top_k,
+            alpha=body.alpha,
+            rerank=body.rerank,
+            compress=body.compress,
+            cite=body.cite,
+        )
+        return result
+    except Exception as exc:
+        logger.warning(f"rag_retrieve failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ── Verification engine + pending review queue ──────────────────────────
 @app.post("/api/memory/verify")
 async def memory_verify(req: dict):
@@ -28353,6 +28588,147 @@ async def set_budget_endpoint(body: dict, _rbac=Depends(require_permission("admi
         float(body.get("daily_usd", 10.0)),
         float(body.get("monthly_usd", 200.0)),
     ))
+
+
+class _OrchestrateV2Request(BaseModel):
+    goal: str
+    tenant_id: str = "default"
+    agent_id: str = "orchestrator"
+
+
+@app.post("/v2/orchestrate", tags=["orchestration"])
+async def orchestrate_v2(req: _OrchestrateV2Request, _auth=Depends(require_auth)):
+    """Run the 10-phase OrchestratorV2 pipeline for a given goal."""
+    try:
+        from core.orchestrator_v2 import OrchestratorV2
+        result = await run_in_threadpool(OrchestratorV2().run, req.goal, req.tenant_id, req.agent_id)
+        return JSONResponse(content=result, status_code=200 if result.get("success") else 422)
+    except Exception as exc:
+        logger.error("OrchestratorV2 error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Knowledge Vault routes ────────────────────────────────────────────────────
+
+@app.get("/knowledge/vault/list")
+async def kv_list(_auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    return {"entries": get_knowledge_vault().list_all()}
+
+
+@app.get("/knowledge/vault/pending")
+async def kv_pending(_auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    return {"entries": get_knowledge_vault().list_pending_review()}
+
+
+@app.get("/knowledge/vault/{title:path}")
+async def kv_get(title: str, _auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    entry = get_knowledge_vault().get_entry(title)
+    if not entry:
+        raise HTTPException(status_code=404, detail="entry not found")
+    return entry
+
+
+@app.post("/knowledge/vault/add")
+async def kv_add(body: dict, _auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    b = body or {}
+    title = str(b.get('title', '')).strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    slug = get_knowledge_vault().add_entry(
+        title=title,
+        content=str(b.get('content', '')),
+        source=str(b.get('source', 'manual')),
+        confidence=float(b.get('confidence', 0.7)),
+        tags=b.get('tags') or [],
+    )
+    return {"ok": True, "slug": slug}
+
+
+@app.post("/knowledge/vault/{title:path}/verify")
+async def kv_verify(title: str, _auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    vault = get_knowledge_vault()
+    if not vault.get_entry(title):
+        raise HTTPException(status_code=404, detail="entry not found")
+    vault.mark_verified(title)
+    return {"ok": True, "title": title, "status": "verified"}
+
+
+@app.post("/knowledge/vault/queue-topic")
+async def kv_queue_topic(body: dict, _auth=Depends(require_auth)):
+    from memory.knowledge_scheduler import get_knowledge_scheduler
+    b = body or {}
+    topic = str(b.get('topic', '')).strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic required")
+    get_knowledge_scheduler().queue_topic(topic, priority=int(b.get('priority', 5)))
+    return {"ok": True, "topic": topic}
+
+
+# ── Tool registry routes ───────────────────────────────────────────────────────
+
+@app.get("/tools/list")
+async def tools_list(_auth=Depends(require_auth)):
+    from tools.registry import get_tool_registry
+    return {"tools": get_tool_registry().list_tools()}
+
+
+@app.get("/tools/{name}")
+async def tool_get(name: str, _auth=Depends(require_auth)):
+    from tools.registry import get_tool_registry
+    tool = get_tool_registry().get(name)
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
+    return {k: v for k, v in tool.items() if k != "fn"}
+
+
+@app.post("/tools/{name}/execute")
+async def tool_execute(name: str, req: dict, _auth=Depends(require_auth)):
+    from tools.registry import get_tool_registry
+    return get_tool_registry().execute(
+        name,
+        req.get("payload", {}),
+        req.get("agent_id", "api"),
+    )
+
+
+# ── Skill catalog routes ───────────────────────────────────────────────────────
+
+@app.get("/skills/list")
+async def skills_list(_auth=Depends(require_auth)):
+    from skills.catalog import get_skill_catalog
+    return {"skills": get_skill_catalog().list_skills()}
+
+
+@app.get("/skills/suggest")
+async def skills_suggest(goal: str = "", _auth=Depends(require_auth)):
+    from skills.catalog import get_skill_catalog
+    return {"skills": get_skill_catalog().find_for_goal(goal)}
+
+
+@app.post("/skills/{name}/execute")
+async def skill_execute(name: str, req: dict, _auth=Depends(require_auth)):
+    from skills.catalog import get_skill_catalog
+    return get_skill_catalog().execute_skill(
+        name,
+        req.get("params", {}),
+        req.get("agent_id", "api"),
+    )
+
+
+@app.on_event("startup")
+async def _start_knowledge_scheduler():
+    try:
+        from memory.knowledge_scheduler import get_knowledge_scheduler
+        scheduler = get_knowledge_scheduler()
+        await scheduler.start()
+        logger.info("KnowledgeScheduler started")
+    except Exception as exc:
+        logger.warning(f"KnowledgeScheduler startup failed: {exc}")
 
 
 @app.on_event("startup")

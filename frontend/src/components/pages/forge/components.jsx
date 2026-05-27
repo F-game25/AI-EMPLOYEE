@@ -5,4 +5,5 @@ export {
   SkillPackSelector, ProjectPicker, NewProjectModal, FileTree, ChatPane,
   DiffViewer, ActionQueue, Terminal, PolicyPreview, ForgeSystemPanel,
   AgentBlueprintPanel, FileEditor, UnderstandPane, AgenticPane,
+  RunTimeline,
 } from './panels'

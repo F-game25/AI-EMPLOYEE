@@ -3,19 +3,27 @@
  * 3-pane layout: Project tree + chat | File diff viewer + editor | Action queue + terminal
  * Multi-turn agentic loop with per-action approval gates.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { SectionLabel, StatusPill, EmptyState } from '../nexus-ui'
+import { useCallback, useEffect, useState } from 'react'
+import { SectionLabel, StatusPill } from '../nexus-ui'
 import { toastSuccess, toastError } from '../nexus-ui/Toaster'
 import './AscendForgePage.css'
-import { JPOST, LLM_PROVIDERS, compactId, normalizeAction, isPendingAction, canBatchApprove, mergeActionLists, postFirst } from './forge/helpers'
-import { MiniField, StructuredList, StructuredMessageBlock, SkillPackSelector, ProjectPicker, NewProjectModal, FileTree, ChatPane, DiffViewer, ActionQueue, Terminal, PolicyPreview, ForgeSystemPanel, AgentBlueprintPanel, FileEditor, UnderstandPane, AgenticPane } from './forge/components'
+import { JPOST, JPOST_JSON, LLM_PROVIDERS, compactId, normalizeAction, isPendingAction, canBatchApprove, mergeActionLists, postFirst } from './forge/helpers'
+import { ProjectPicker, NewProjectModal, FileTree, ChatPane, DiffViewer, ActionQueue, Terminal, PolicyPreview, ForgeSystemPanel, AgentBlueprintPanel, FileEditor, UnderstandPane, AgenticPane, RunTimeline } from './forge/components'
 
 
 
 /* ─── Main page ────────────────────────────────────────────────────── */
 
+const CLOSED_ACTION_STATUSES = new Set(['staged', 'verified', 'applied', 'verify_failed', 'rejected', 'failed', 'blocked', 'deployed'])
+
+function needsOperatorDecision(action) {
+  const normalized = normalizeAction(action)
+  return isPendingAction(normalized) && !CLOSED_ACTION_STATUSES.has(normalized.status.toLowerCase())
+}
+
 export default function AscendForgePage() {
   const [project, setProject]       = useState(null)
+  const projectId = project?.id
   const [showNewProj, setShowNewProj] = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
   const [sessionId, setSessionId]   = useState(null)
@@ -27,6 +35,8 @@ export default function AscendForgePage() {
   const [currentDiff, setCurrentDiff] = useState(null)
   const [provider, setProvider]     = useState('anthropic')
   const [selectedSkillIds, setSelectedSkillIds] = useState([])
+  const [activeRun, setActiveRun] = useState(null)
+  const [runBusy, setRunBusy] = useState(false)
   const [tab, setTab]               = useState('chat') // 'chat' | 'tree'
   const [fileViewTab, setFileViewTab] = useState('diff') // 'diff' | 'editor'
   const [editorFile, setEditorFile] = useState(null) // file path string for editor
@@ -38,72 +48,76 @@ export default function AscendForgePage() {
 
   // Create/resume forge session when project changes
   useEffect(() => {
-    if (!project) return
-    JPOST('/api/forge/sessions', { project_id: project.id, provider, selected_skill_ids: selectedSkillIds }).then(r => r.json()).then(d => {
+    if (!projectId) return
+    JPOST('/api/forge/sessions', { project_id: projectId, provider, selected_skill_ids: selectedSkillIds }).then(r => r.json()).then(d => {
       setSessionId(d.session_id)
       setMessages(d.history || [])
     }).catch(e => toastError(`Session error: ${e.message}`))
-  }, [project?.id, provider])
+  }, [projectId, provider, selectedSkillIds])
 
   const sendMessage = useCallback(async (text) => {
     if (!sessionId || sending) return
     setSending(true)
     setMessages(prev => [...prev, { role: 'user', content: text }])
-    setMessages(prev => [...prev, { role: 'assistant', content: '▋', ts: new Date().toISOString(), _streaming: true }])
-
-    let accumulated = ''
     try {
-      // streaming: raw fetch intentional (SSE body reader; api client buffers JSON)
-      const jwt = sessionStorage.getItem('ai_jwt')
-      const resp = await fetch(`/api/forge/sessions/${sessionId}/messages/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}) },
-        body: JSON.stringify({ content: text, selected_skill_ids: selectedSkillIds }),
+      const d = await JPOST_JSON('/api/forge/runs', {
+        project_id: project.id,
+        goal: text,
+        provider,
+        selected_skill_ids: selectedSkillIds,
+        max_iterations: 3,
       })
-      const reader = resp.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop()
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const ev = JSON.parse(line.slice(6))
-            if (ev.text !== undefined) {
-              accumulated += ev.text
-              setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, content: accumulated + '▋' } : m))
-            } else if (ev.content !== undefined) {
-              // done event — finalise message
-              const finalMsg = { role: 'assistant', ts: new Date().toISOString(), content: ev.content, actions: ev.actions || [], _streaming: false }
-              setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? finalMsg : m))
-              if (ev.actions?.length) {
-                mergeActions(ev.actions.map(a => ({ ...a, id: a.id || compactId(), source: a.source || 'session' })))
-              }
-            } else if (ev.error) {
-              toastError(`Forge error: ${ev.error}`)
-            }
-          } catch { /* malformed SSE line — skip */ }
-        }
-      }
+      const run = d.run || { id: d.run_id, status: d.status, context_pack: d.context_pack, plan: d.plan, actions: d.actions }
+      setActiveRun(run)
+      const runActions = (d.actions || []).map(a => ({ ...a, id: a.id || compactId(), source: 'run', run_id: d.run_id || run.id }))
+      mergeActions(runActions)
+      const firstDiff = runActions.find(action => action.diff)?.diff || d.patches?.find(patch => patch.diff)?.diff || null
+      if (firstDiff) setCurrentDiff(firstDiff)
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        ts: new Date().toISOString(),
+        content: `Run ${d.run_id || run.id} created. Forge gathered context, built a supervised plan, and staged ${runActions.length} action(s) for review.`,
+        plan: d.plan,
+        actions: runActions,
+        run,
+      }])
+      addTerm(`Created run ${d.run_id || run.id}`, 'cmd')
+      addTerm(`Status: ${run.status || d.status}`, 'out')
     } catch (e) {
-      setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, content: `Error: ${e.message}`, _streaming: false } : m))
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${e.message}` }])
+      addTerm(`RUN CREATE FAILED: ${e.message}`, 'err')
       toastError(`Send failed: ${e.message}`)
     } finally {
       setSending(false)
     }
-  }, [sessionId, sending, selectedSkillIds, mergeActions])
+  }, [sessionId, sending, selectedSkillIds, mergeActions, project, provider])
 
   const approveAction = async (id) => {
     const action = actions.find(a => a.id === id)
     if (!action) return
     const normalized = normalizeAction(action)
+    if (!needsOperatorDecision(normalized)) {
+      toastError(`Action is already ${normalized.status}`)
+      return
+    }
     setBusyActions(prev => ({ ...prev, [id]: true }))
     addTerm(`Approving: ${normalized.label}`, 'cmd')
     try {
+      if (activeRun?.id && normalized.run_id === activeRun.id) {
+        const d = await JPOST_JSON(`/api/forge/runs/${activeRun.id}/approve`, {
+          action_id: normalized.id,
+          ownerApproved: true,
+          approval: 'owner-approved',
+          approved_by: 'operator',
+        })
+        setActiveRun(d.run)
+        setActions(prev => prev.map(a => normalizeAction(a).id === id
+          ? { ...a, status: d.failures?.length ? 'blocked' : 'staged', policy_decision: d.staged?.[0]?.policy || a.policy_decision }
+          : a))
+        addTerm(d.ok ? 'Staged in run workspace' : 'Policy blocked staging', d.ok ? 'out' : 'err')
+        toastSuccess(`Action staged: ${normalized.label}`)
+        return
+      }
       const approveTarget = normalized.snapshotId || normalized.id
       const queueFirst = normalized.source === 'queue' || normalized.snapshotId
       const paths = queueFirst
@@ -159,12 +173,59 @@ export default function AscendForgePage() {
   }
 
   const approveSafeBatch = () => {
-    const safe = actions.map(normalizeAction).filter(canBatchApprove)
-    if (safe.length === 0 || safe.length !== actions.filter(isPendingAction).length) {
+    const decisionItems = actions.map(normalizeAction).filter(needsOperatorDecision)
+    const safe = decisionItems.filter(canBatchApprove)
+    if (safe.length === 0 || safe.length !== decisionItems.length) {
       toastError('Batch approval is available only for all-low-risk action sets')
       return
     }
     safe.forEach(a => approveAction(a.id))
+  }
+
+  const verifyRun = async () => {
+    if (!activeRun?.id) return
+    setRunBusy(true)
+    addTerm(`Verifying staged run ${activeRun.id}`, 'cmd')
+    try {
+      const d = await JPOST_JSON(`/api/forge/runs/${activeRun.id}/verify`, {
+        ownerApproved: true,
+        approval: 'owner-approved',
+        approved_by: 'operator',
+      })
+      setActiveRun(d.run)
+      const result = d.test_result
+      ;(result?.results || []).forEach(item => addTerm(`${item.pass ? 'PASS' : 'FAIL'} ${item.command || 'verification'}`, item.pass ? 'out' : 'err'))
+      d.ok ? toastSuccess('Run verification passed') : toastError('Run verification failed')
+    } catch (e) {
+      setActiveRun(prev => prev ? { ...prev, ui_error: e.message } : prev)
+      addTerm(`VERIFY FAILED: ${e.message}`, 'err')
+      toastError(e.message)
+    } finally {
+      setRunBusy(false)
+    }
+  }
+
+  const applyRun = async () => {
+    if (!activeRun?.id) return
+    setRunBusy(true)
+    addTerm(`Applying verified run ${activeRun.id}`, 'cmd')
+    try {
+      const d = await JPOST_JSON(`/api/forge/runs/${activeRun.id}/apply`, {
+        ownerApproved: true,
+        approval: 'owner-approved',
+        approved_by: 'operator',
+      })
+      setActiveRun(d.run)
+      setActions(prev => prev.map(action => action.run_id === activeRun.id ? { ...action, status: 'applied' } : action))
+      ;(d.final_report?.applied_files || []).forEach(file => addTerm(`Applied ${file.path}`, 'out'))
+      toastSuccess('Verified run applied')
+    } catch (e) {
+      setActiveRun(prev => prev ? { ...prev, ui_error: e.message } : prev)
+      addTerm(`APPLY FAILED: ${e.message}`, 'err')
+      toastError(e.message)
+    } finally {
+      setRunBusy(false)
+    }
   }
 
   const handleProjectCreated = useCallback((result) => {
@@ -217,7 +278,6 @@ export default function AscendForgePage() {
           {tab === 'chat' && (
             <ChatPane
               project={project}
-              sessionId={sessionId}
               messages={messages}
               onSend={sendMessage}
               sending={sending}
@@ -272,6 +332,7 @@ export default function AscendForgePage() {
               {actions.length > 0 && <span className="af-badge">{actions.length}</span>}
             </div>
             <ForgeSystemPanel onQueueItems={items => mergeActions(items.map(item => ({ ...item, source: 'queue', type: item.type || 'forge_request' })))} />
+            <RunTimeline run={activeRun} onVerify={verifyRun} onApply={applyRun} busy={runBusy} />
             <PolicyPreview actions={actions} />
             <AgentBlueprintPanel />
             <ActionQueue

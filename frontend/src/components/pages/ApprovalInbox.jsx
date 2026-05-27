@@ -186,12 +186,15 @@ export default function ApprovalInbox() {
       </section>
 
       <section className="approval-list">
+        {loading && !items.length && (
+          <div className="approval-empty"><b>Loading approvals…</b></div>
+        )}
         {filtered.map(item => (
           <ApprovalCard key={item.id} item={item} onDecide={decide} busy={busyId === item.id} />
         ))}
-        {!filtered.length && (
+        {!loading && !filtered.length && (
           <div className="approval-empty">
-            <b>No approvals in this view</b>
+            <b>{filter === 'pending' ? 'No approvals pending ✓' : 'No approvals in this view'}</b>
             <span>Risky actions will appear here when a task requests external effects or Forge needs owner/operator approval.</span>
           </div>
         )}

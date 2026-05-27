@@ -295,6 +295,21 @@
   box-shadow: var(--nx-glow-gold-sm);
 }
 
+/* Status-based card highlighting */
+.infra-card--unavailable {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.infra-card--degraded {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.infra-card--not_configured {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
 .infra-card__dot {
   position: absolute;
   top: 8px;
@@ -425,24 +440,24 @@
 .infra-ops-row {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
-  gap: var(--nx-s4);
-  margin-top: var(--nx-s4);
+  gap: var(--nx-s-4);
+  margin-top: var(--nx-s-4);
 }
 
 /* ── Diagnostics Panel ─────────────────────────────────────────── */
 .infra-diag-panel,
 .infra-emergency-panel {
-  background: var(--nx-bg-panel);
+  background: var(--nx-surface);
   border: 1px solid var(--nx-border);
   border-radius: var(--nx-r-md);
-  padding: var(--nx-s4);
+  padding: var(--nx-s-4);
 }
 .infra-diag-head,
 .infra-emergency-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: var(--nx-s3);
+  margin-bottom: var(--nx-s-3);
 }
 .infra-diag-title,
 .infra-emergency-title {

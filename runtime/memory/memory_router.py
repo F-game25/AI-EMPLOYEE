@@ -451,6 +451,94 @@ def _normalize(scores: list[float]) -> list[float]:
     return [(s - lo) / span for s in scores]
 
 
+def _compress_passage(query: str, passage: str, max_sentences: int = 3) -> str:
+    """Score sentences by keyword overlap with query, keep top N in original order."""
+    import re
+    query_words = set(query.lower().split())
+    sentences = re.split(r'(?<=[.!?])\s+', passage)
+    scored = [
+        (sum(1 for w in s.lower().split() if w in query_words), i, s)
+        for i, s in enumerate(sentences)
+    ]
+    scored.sort(reverse=True)
+    kept = sorted(scored[:max_sentences], key=lambda x: x[1])
+    return ' '.join(s for _, _, s in kept) or passage[:500]
+
+
+def rag_retrieve(
+    query: str,
+    top_k: int = 5,
+    alpha: float = 0.5,
+    rerank: bool = True,
+    compress: bool = True,
+    cite: bool = True,
+    tenant_id: str = "default",
+) -> dict:
+    """Full RAG pipeline: hybrid search → rerank → compress → cite.
+
+    Returns:
+        {
+            query: str,
+            results: [{source, content, score, rank, citations: [{text, source}]}],
+            context: str,    # compressed, citation-annotated context ready for LLM
+            sources: [str],  # unique source list
+        }
+    """
+    # Step 1: Hybrid search — fetch 2× candidates for reranking headroom
+    candidates = hybrid_search(query, top_k=top_k * 2, alpha=alpha)
+
+    # Step 2: Rerank with cross-encoder when requested
+    if rerank and candidates:
+        try:
+            from sentence_transformers import CrossEncoder  # type: ignore
+            _ce = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+            pairs = [(query, r['content']) for r in candidates]
+            ce_scores = _ce.predict(pairs)
+            for r, s in zip(candidates, ce_scores):
+                r['_ce_score'] = float(s)
+            candidates.sort(key=lambda r: r.get('_ce_score', 0.0), reverse=True)
+        except Exception:
+            pass  # graceful degradation: keep hybrid ranking
+
+    top_results = candidates[:top_k]
+
+    # Step 3 + 4: Compress and cite
+    context_parts: list[str] = []
+    sources: list[dict] = []
+    out_results: list[dict] = []
+
+    for i, r in enumerate(top_results):
+        src_id = f"[{i + 1}]"
+        raw_content = r.get('content') or ''
+        compressed = _compress_passage(query, raw_content) if compress else raw_content[:500]
+
+        citation = {"text": compressed, "source": r.get('source', '')}
+        entry = {
+            "source": r.get('source', ''),
+            "content": raw_content,
+            "compressed_content": compressed,
+            "score": r.get('score', 0.0),
+            "rank": i + 1,
+            "citations": [citation] if cite else [],
+        }
+        out_results.append(entry)
+
+        if cite:
+            context_parts.append(f"{compressed} {src_id}")
+            sources.append({"id": src_id, "source": r.get('source', ''), "score": r.get('score', 0.0)})
+
+    context = "\n\n".join(context_parts)
+    if cite and sources:
+        context += "\n\nSources:\n" + "\n".join(f"{s['id']} {s['source']}" for s in sources)
+
+    return {
+        "query": query,
+        "results": out_results,
+        "context": context,
+        "sources": [s['source'] for s in sources] if cite else list({r.get('source', '') for r in top_results}),
+    }
+
+
 def hybrid_search(
     query: str,
     top_k: int = 5,
