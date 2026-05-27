@@ -625,11 +625,12 @@ export function ForgeSystemPanel({ onQueueItems }) {
   const [data, setData] = useState({ loading: true })
 
   const load = useCallback(async () => {
-    const [readiness, status, snapshots, queue] = await Promise.allSettled([
+    const [readiness, status, snapshots, queue, runs] = await Promise.allSettled([
       JGET('/api/readiness').then(r => r.json()),
       JGET('/api/forge/status').then(r => r.json()),
       JGET('/api/forge/snapshots').then(r => r.json()),
       JGET('/api/forge/queue').then(r => r.json()),
+      JGET('/api/forge/runs?limit=5').then(r => r.json()),
     ])
     const next = {
       loading: false,
@@ -637,6 +638,7 @@ export function ForgeSystemPanel({ onQueueItems }) {
       status: status.status === 'fulfilled' ? status.value : null,
       snapshots: snapshots.status === 'fulfilled' ? snapshots.value : null,
       queue: queue.status === 'fulfilled' ? queue.value : null,
+      runs: runs.status === 'fulfilled' ? runs.value : null,
     }
     setData(next)
     if (next.queue?.items) onQueueItems(next.queue.items)
@@ -656,6 +658,8 @@ export function ForgeSystemPanel({ onQueueItems }) {
   const snapshots = data.snapshots?.snapshots || []
   const summary = data.snapshots?.summary || {}
   const latest = snapshots[0] || {}
+  const recentRuns = data.runs?.runs || []
+  const persistence = status.persistence || data.runs?.persistence || {}
   const readyState = readiness.ready === true || readiness.status === 'ok'
     ? 'ready'
     : readiness.status || (data.loading ? 'loading' : 'degraded')
@@ -674,6 +678,8 @@ export function ForgeSystemPanel({ onQueueItems }) {
         <MiniField label="Active" value={status.active} />
         <MiniField label="Frozen" value={status.frozen ?? status.forge_frozen} />
         <MiniField label="Queue" value={status.queue_depth ?? data.queue?.total} />
+        <MiniField label="Run Store" value={persistence.backend || textFrom(status.persistence)} />
+        <MiniField label="Runs" value={status.runs_total ?? data.runs?.total} />
         <MiniField label="Snapshots" value={summary.total_snapshots ?? snapshots.length} />
         <MiniField label="Latest" value={latest.id || latest.snapshot_id} />
       </div>
@@ -688,6 +694,16 @@ export function ForgeSystemPanel({ onQueueItems }) {
         <div className="af-ops__latest">
           <span>{latest.module}</span>
           <strong>{latest.status || latest.tag || 'snapshot'}</strong>
+        </div>
+      )}
+      {recentRuns.length > 0 && (
+        <div className="af-ops__runs">
+          {recentRuns.slice(0, 3).map(run => (
+            <div className="af-ops__run" key={run.run_id || run.id}>
+              <span>{run.goal || run.run_id || run.id}</span>
+              <strong>{titleize(run.workspace_mode || run.status || 'new')}</strong>
+            </div>
+          ))}
         </div>
       )}
     </div>

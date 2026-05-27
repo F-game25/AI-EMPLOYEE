@@ -636,6 +636,37 @@
   white-space: nowrap;
 }
 .af-ops__latest strong { color: #e5c76b; font-weight: 600; }
+.af-ops__runs {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(229,199,107,.12);
+}
+.af-ops__run {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(229,199,107,.1);
+  border-radius: 5px;
+  background: rgba(0,0,0,.18);
+  padding: 6px 7px;
+  font-size: 10px;
+}
+.af-ops__run span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #c9b98a;
+}
+.af-ops__run strong {
+  color: #e5c76b;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
 .af-policy {
   margin: 8px;
   border: 1px solid #2d3748;

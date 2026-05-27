@@ -80,6 +80,7 @@ class DockerSandbox {
       command,            // ['python3', 'agent.py', '--task', task_json]
       env = {},           // scoped secrets — injected, never logged
       workdir = '/workspace',
+      workspace_path = null,
       profile = 'default',
       tenant_id = 'system',
       trace_id,
@@ -101,12 +102,15 @@ class DockerSandbox {
       '--memory-swap', limits.mem,          // prevent swap
       '--read-only',                        // immutable root FS
       '--tmpfs', '/tmp:size=64m',
-      '--tmpfs', '/workspace:size=256m',
       '--security-opt', 'no-new-privileges',
       '--cap-drop', 'ALL',
       '--user', '65534:65534',             // nobody:nobody
       '--workdir', workdir,
     ];
+
+    if (!workspace_path) {
+      args.push('--tmpfs', '/workspace:size=256m');
+    }
 
     // Inject scoped env (secrets never in args, only -e)
     for (const [k, v] of Object.entries(env)) {
@@ -117,6 +121,11 @@ class DockerSandbox {
     args.push('-e', `TRACE_ID=${trace_id || ''}`);
     args.push('-e', `TENANT_ID=${tenant_id}`);
     args.push('-e', `AGENT_ID=${agent_id}`);
+
+    if (workspace_path) {
+      const hostWorkspace = path.resolve(workspace_path);
+      args.push('-v', `${hostWorkspace}:/workspace:rw`);
+    }
 
     args.push(image, ...command);
 
@@ -161,6 +170,7 @@ class ProcessSandbox {
       agent_id,
       command,
       env = {},
+      workdir = process.env.HOME,
       profile = 'default',
       tenant_id = 'system',
       trace_id,
@@ -182,7 +192,7 @@ class ProcessSandbox {
 
     const result = await _spawnWithTimeout(command[0], command.slice(1), limits.timeout_ms, {
       env: safeEnv,
-      cwd: process.env.HOME,
+      cwd: workdir,
     });
 
     const duration_ms = Date.now() - start;
@@ -220,7 +230,10 @@ class SandboxExecutor {
    *   agent_id     string   — identifies the agent
    *   command      string[] — executable + args
    *   env          object   — key/value secrets (scoped, not logged)
+   *   workdir      string   — working directory inside the selected runner
+   *   workspace_path string — optional host workspace mounted at /workspace in Docker
    *   profile      string   — 'default' | 'light' | 'heavy' | 'browser' | 'code'
+   *   sandbox      string   — optional 'process' override for host-tool verification
    *   tenant_id    string
    *   trace_id     string
    * @returns {SandboxResult}
@@ -228,7 +241,8 @@ class SandboxExecutor {
   async run(spec) {
     if (!this._active) throw new Error('SandboxExecutor not initialized');
     try {
-      const result = await this._active.run(spec);
+      const runner = spec?.sandbox === 'process' ? this._process : this._active;
+      const result = await runner.run(spec);
       await _emitEvent(result.audit, result.success);
       return result;
     } catch (e) {

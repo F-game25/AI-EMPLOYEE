@@ -16,8 +16,9 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const crypto = require('crypto')
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
 const { getAscendForgeEngine, DEFAULT_APPROVAL_POLICY } = require('../ascendforge/engine')
+const { getSandboxExecutor } = require('../infra/sandbox/executor')
 const { ForgeStore } = require('../services/forge_store')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
@@ -107,6 +108,11 @@ function appendAudit(event, details = {}) {
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function latestVerificationPassed(run) {
+  const latest = Array.isArray(run?.test_results) ? run.test_results.slice(-1)[0] : null
+  return latest ? latest.all_passed === true : null
 }
 
 function slugify(value) {
@@ -345,17 +351,71 @@ function copyProjectToWorkspace(project, workspaceRoot) {
   return { copied_files: copiedFiles, copied_bytes: copiedBytes, truncated: copiedFiles >= MAX_STAGED_COPY_FILES || copiedBytes >= MAX_STAGED_COPY_BYTES }
 }
 
+function runGit(root, args, timeoutMs = 10000) {
+  const result = spawnSync('git', ['-C', root, ...args], {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    maxBuffer: 1024 * 1024,
+  })
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: String(result.stdout || '').trim(),
+    stderr: String(result.stderr || result.error?.message || '').trim(),
+  }
+}
+
+function gitWorkspaceSource(project) {
+  const root = safeProjectRoot(project)
+  const inside = runGit(root, ['rev-parse', '--is-inside-work-tree'])
+  if (!inside.ok || inside.stdout !== 'true') return { ok: false, reason: 'not_git_repo' }
+  const top = runGit(root, ['rev-parse', '--show-toplevel'])
+  if (!top.ok || !top.stdout) return { ok: false, reason: 'git_root_unavailable', detail: top.stderr }
+  const status = runGit(top.stdout, ['status', '--porcelain'])
+  if (!status.ok) return { ok: false, reason: 'git_status_failed', detail: status.stderr }
+  if (status.stdout) return { ok: false, reason: 'dirty_source_tree' }
+  const head = runGit(top.stdout, ['rev-parse', '--verify', 'HEAD'])
+  if (!head.ok || !head.stdout) return { ok: false, reason: 'head_unavailable', detail: head.stderr }
+  return { ok: true, root: top.stdout, head: head.stdout }
+}
+
+function createGitWorktreeWorkspace(project, workspaceRoot) {
+  const source = gitWorkspaceSource(project)
+  if (!source.ok) return { ok: false, reason: source.reason, detail: source.detail || null }
+  ensureDir(path.dirname(workspaceRoot))
+  const added = runGit(source.root, ['worktree', 'add', '--detach', workspaceRoot, source.head], 60000)
+  if (!added.ok) {
+    return { ok: false, reason: 'worktree_add_failed', detail: added.stderr || added.stdout }
+  }
+  return {
+    ok: true,
+    workspace_mode: 'git_worktree',
+    git_root: source.root,
+    git_head: source.head,
+    created_from: source.head,
+  }
+}
+
 function ensureRunWorkspace(run, project) {
   const workspace = runWorkspaceRoot(run.id)
   if (fs.existsSync(path.join(workspace, '.forge_workspace.json'))) return workspace
-  if (fs.existsSync(workspace)) fs.rmSync(workspace, { recursive: true, force: true })
-  const copy = copyProjectToWorkspace(project, workspace)
+  if (fs.existsSync(workspace)) removeRunWorkspace(run.id)
+  let workspaceInfo = createGitWorktreeWorkspace(project, workspace)
+  if (!workspaceInfo.ok) {
+    const copy = copyProjectToWorkspace(project, workspace)
+    workspaceInfo = {
+      workspace_mode: 'directory_copy',
+      fallback_reason: workspaceInfo.reason || 'worktree_unavailable',
+      fallback_detail: workspaceInfo.detail || null,
+      ...copy,
+    }
+  }
   fs.writeFileSync(path.join(workspace, '.forge_workspace.json'), JSON.stringify({
     run_id: run.id,
     project_id: project.id,
     source_root: safeProjectRoot(project),
     created_at: nowIso(),
-    ...copy,
+    ...workspaceInfo,
   }, null, 2))
   return workspace
 }
@@ -370,6 +430,25 @@ function resolveInsideWorkspace(workspaceRoot, relativePath) {
   return target
 }
 
+function readWorkspaceMetadata(workspaceRoot) {
+  return readJson(path.join(workspaceRoot, '.forge_workspace.json'), null)
+}
+
+function removeRunWorkspace(runId) {
+  const workspace = runWorkspaceRoot(runId)
+  const runDir = path.dirname(workspace)
+  const meta = readWorkspaceMetadata(workspace)
+  if (meta?.workspace_mode === 'git_worktree' && meta.git_root) {
+    const removed = runGit(meta.git_root, ['worktree', 'remove', '--force', workspace], 60000)
+    if (!removed.ok && fs.existsSync(workspace)) fs.rmSync(workspace, { recursive: true, force: true })
+    runGit(meta.git_root, ['worktree', 'prune'], 60000)
+  } else if (fs.existsSync(workspace)) {
+    fs.rmSync(workspace, { recursive: true, force: true })
+  }
+  if (fs.existsSync(runDir)) fs.rmSync(runDir, { recursive: true, force: true })
+  return { workspace, workspace_mode: meta?.workspace_mode || 'unknown' }
+}
+
 function stageRunAction(run, project, action) {
   const policy = validateRunActionPolicy(action, project)
   if (!policy.allowed) return { ok: false, policy }
@@ -382,7 +461,7 @@ function stageRunAction(run, project, action) {
     fs.writeFileSync(target, content, 'utf8')
     stagedFiles.push({ path: rel, bytes: Buffer.byteLength(content, 'utf8') })
   }
-  return { ok: true, policy, workspace, staged_files: stagedFiles }
+  return { ok: true, policy, workspace, workspace_meta: readWorkspaceMetadata(workspace), staged_files: stagedFiles }
 }
 
 function applyStagedRun(run, project) {
@@ -392,6 +471,7 @@ function applyStagedRun(run, project) {
   if (!approvedActions.length) return { ok: false, error: 'no approved staged write actions' }
   const applied = []
   const snapshots = []
+  const workspaceMeta = readWorkspaceMetadata(workspace)
   for (const action of approvedActions) {
     for (const rel of actionFiles(action)) {
       const staged = resolveInsideWorkspace(workspace, rel)
@@ -410,7 +490,7 @@ function applyStagedRun(run, project) {
       applied.push({ path: rel, bytes: fs.statSync(target).size })
     }
   }
-  return { ok: true, applied, snapshots }
+  return { ok: true, applied, snapshots, workspace_meta: workspaceMeta }
 }
 
 function inferPackageType(project) {
@@ -1107,6 +1187,37 @@ module.exports = function createForgeRouter(requireAuth) {
     }
   })
 
+  router.get('/runs', requireAuth, (req, res) => {
+    const projectId = String(req.query.project_id || '').trim()
+    const status = String(req.query.status || '').trim()
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50))
+    const runs = loadRuns()
+      .filter(run => !projectId || run.project_id === projectId)
+      .filter(run => !status || run.status === status)
+      .slice(0, limit)
+      .map(run => ({
+        id: run.id,
+        run_id: run.run_id || run.id,
+        project_id: run.project_id,
+        goal: run.goal,
+        status: run.status,
+        mode: run.mode,
+        provider: run.provider,
+        action_count: Array.isArray(run.actions) ? run.actions.length : 0,
+        patch_count: Array.isArray(run.patches) ? run.patches.length : 0,
+        verification_count: Array.isArray(run.test_results) ? run.test_results.length : 0,
+        latest_verification_passed: latestVerificationPassed(run),
+        workspace_mode: run.final_report?.workspace_meta?.workspace_mode
+          || (Array.isArray(run.test_results) ? run.test_results.slice(-1)[0]?.workspace_meta?.workspace_mode : null)
+          || (Array.isArray(run.patches) ? run.patches.find(patch => patch.workspace_meta)?.workspace_meta?.workspace_mode : null)
+          || null,
+        review_status: run.review?.status || null,
+        created_at: run.created_at,
+        updated_at: run.updated_at,
+      }))
+    res.json({ ok: true, state: 'live', runs, total: runs.length, persistence: forgeRunStore.status() })
+  })
+
   router.get('/runs/:id', requireAuth, (req, res) => {
     const run = findRun(req.params.id)
     if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
@@ -1132,7 +1243,7 @@ module.exports = function createForgeRouter(requireAuth) {
       const nextActions = actions.map(action => {
         if (!targets.some(target => target.id === action.id)) return action
         const result = stageRunAction(run, project, action)
-        if (result.ok) staged.push({ action_id: action.id, files: result.staged_files, policy: result.policy })
+        if (result.ok) staged.push({ action_id: action.id, files: result.staged_files, policy: result.policy, workspace_meta: result.workspace_meta })
         else failures.push({ action_id: action.id, policy: result.policy })
         return {
           ...action,
@@ -1141,6 +1252,7 @@ module.exports = function createForgeRouter(requireAuth) {
           approved_by: result.ok ? (req.user?.email || req.body?.approved_by || 'operator') : action.approved_by,
           policy_decision: result.policy,
           staged_files: result.staged_files || [],
+          workspace_meta: result.workspace_meta || action.workspace_meta || null,
           updated_at: nowIso(),
         }
       })
@@ -1151,12 +1263,13 @@ module.exports = function createForgeRouter(requireAuth) {
           approved_by: req.user?.email || req.body?.approved_by || 'operator',
           approved_at: nowIso(),
           policy: item.policy,
+          workspace_meta: item.workspace_meta || null,
         })),
       ]
       const patches = (run.patches || []).map(patch => {
         const stagedPatch = staged.find(item => item.action_id === patch.action_id)
         const failedPatch = failures.find(item => item.action_id === patch.action_id)
-        if (stagedPatch) return { ...patch, status: 'staged', policy: stagedPatch.policy, staged_files: stagedPatch.files }
+        if (stagedPatch) return { ...patch, status: 'staged', policy: stagedPatch.policy, staged_files: stagedPatch.files, workspace_meta: stagedPatch.workspace_meta || null }
         if (failedPatch) return { ...patch, status: 'blocked', policy: failedPatch.policy }
         return patch
       })
@@ -1194,11 +1307,13 @@ module.exports = function createForgeRouter(requireAuth) {
         ? req.body.commands
         : (run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project))
       const verify = await runVerifyCommands(project, cmds, workspace)
+      const workspaceMeta = readWorkspaceMetadata(workspace)
       const testResult = {
         id: `verify-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
         all_passed: verify.all_passed,
         results: verify.results,
         workspace,
+        workspace_meta: workspaceMeta,
         commands: cmds,
         verified_at: nowIso(),
         verified_by: req.user?.email || req.body?.approved_by || 'operator',
@@ -1253,6 +1368,7 @@ module.exports = function createForgeRouter(requireAuth) {
         summary: `Applied ${result.applied.length} file(s) from staged run ${run.id}.`,
         applied_files: result.applied,
         snapshots: result.snapshots,
+        workspace_meta: result.workspace_meta || latestTest?.workspace_meta || null,
         test_result: latestTest || null,
         applied_at: nowIso(),
         applied_by: req.user?.email || req.body?.approved_by || 'operator',
@@ -1611,6 +1727,47 @@ module.exports = function createForgeRouter(requireAuth) {
   ]
   const isVerifyAllowed = (cmd) => VERIFY_ALLOW.some(re => re.test(String(cmd).trim()))
 
+  function splitVerifyCommand(cmd) {
+    const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean)
+    if (!parts.length || !isVerifyAllowed(parts.join(' '))) {
+      const err = new Error('command not in verify allowlist')
+      err.status = 403
+      throw err
+    }
+    return parts
+  }
+
+  async function runSandboxedVerifyCommand(project, cmd, root) {
+    const started = Date.now()
+    const executor = await getSandboxExecutor()
+    const command = splitVerifyCommand(cmd)
+    const result = await executor.run({
+      agent_id: `forge-verify-${project.id}`,
+      command,
+      workdir: root,
+      workspace_path: root,
+      profile: 'code',
+      sandbox: 'process',
+      tenant_id: project.tenant_id || 'default',
+      trace_id: `forge-verify-${Date.now().toString(36)}`,
+      env: {
+        CI: '1',
+        NODE_ENV: process.env.NODE_ENV || 'test',
+      },
+    })
+    const output = `${result.stdout || ''}${result.stderr || ''}`.slice(-2000)
+    return {
+      command: cmd,
+      pass: result.success === true,
+      code: result.exit_code,
+      output,
+      duration_ms: result.duration_ms ?? (Date.now() - started),
+      sandbox_type: result.container_id ? 'docker' : 'process',
+      sandbox_profile: result.audit?.profile || 'code',
+      sandbox_audit: result.audit || null,
+    }
+  }
+
   router.post('/verify', requireAuth, async (req, res) => {
     if (!requireOwnerApproval(req, res, 'forge_verify')) return
     const project = findProject(req.body?.project_id)
@@ -1619,17 +1776,8 @@ module.exports = function createForgeRouter(requireAuth) {
       ? req.body.commands
       : (project.verification_commands || defaultVerificationCommands(project))
     const root = safeProjectRoot(project)
-    const { exec } = require('child_process')
-    const results = []
-    for (const cmd of cmds) {
-      if (!isVerifyAllowed(cmd)) { results.push({ command: cmd, pass: false, skipped: true, output: 'command not in verify allowlist' }); continue }
-      const r = await new Promise(resolve => {
-        exec(cmd, { cwd: root, timeout: 180000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env } }, (err, stdout, stderr) => {
-          resolve({ command: cmd, pass: !err, code: err?.code ?? 0, output: String(stdout + stderr).slice(-2000) })
-        })
-      })
-      results.push(r)
-    }
+    const verify = await runVerifyCommands(project, cmds, root)
+    const results = verify.results
     const allPassed = results.every(r => r.pass)
     appendAudit('forge_verify', { project_id: project.id, all_passed: allPassed, commands: cmds.length })
     // Optional auto-rollback on failure when a pre-edit snapshot is supplied
@@ -1643,17 +1791,12 @@ module.exports = function createForgeRouter(requireAuth) {
 
   // Shared verification runner (used by the agentic loop).
   async function runVerifyCommands(project, cmds, rootOverride = null) {
-    const { exec } = require('child_process')
     const root = rootOverride || safeProjectRoot(project)
     const results = []
     for (const cmd of cmds) {
       if (!isVerifyAllowed(cmd)) { results.push({ command: cmd, pass: false, skipped: true, output: 'not in verify allowlist' }); continue }
       // eslint-disable-next-line no-await-in-loop
-      const r = await new Promise(resolve => {
-        exec(cmd, { cwd: root, timeout: 180000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env } },
-          (err, stdout, stderr) => resolve({ command: cmd, pass: !err, code: err?.code ?? 0, output: String(stdout + stderr).slice(-1500) }))
-      })
-      results.push(r)
+      results.push(await runSandboxedVerifyCommand(project, cmd, root))
     }
     return { all_passed: results.length > 0 && results.every(r => r.pass), results }
   }
@@ -1779,7 +1922,7 @@ module.exports = function createForgeRouter(requireAuth) {
 
     let workspaceCleaned = false
     if (!success && autoRollback && fs.existsSync(path.dirname(root))) {
-      fs.rmSync(path.dirname(root), { recursive: true, force: true })
+      removeRunWorkspace(runId)
       workspaceCleaned = true
       appendAudit('forge_agentic_workspace_removed', { run_id: runId })
     }

@@ -17,7 +17,7 @@ router.get('/status', async (req, res) => {
 
 // Admin-only direct execution endpoint (for testing / agent orchestrator)
 router.post('/run', async (req, res) => {
-  const { agent_id, command, env = {}, profile = 'default' } = req.body || {};
+  const { agent_id, command, env = {}, profile = 'default', workdir, workspace_path, sandbox } = req.body || {};
   if (!agent_id || !Array.isArray(command) || command.length === 0) {
     return res.status(400).json({ ok: false, error: 'agent_id and command[] required' });
   }
@@ -28,6 +28,9 @@ router.post('/run', async (req, res) => {
       command,
       env,
       profile,
+      workdir,
+      workspace_path,
+      sandbox,
       tenant_id: req.tenantId || 'system',
       trace_id:  req.headers['x-trace-id'],
     });

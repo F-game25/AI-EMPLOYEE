@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-run-routes-'));
 const stateDir = path.join(tmpRoot, 'state');
@@ -16,7 +17,20 @@ fs.mkdirSync(forgeDir, { recursive: true });
 fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
 fs.writeFileSync(path.join(projectRoot, 'package.json'), '{"scripts":{"test":"node --check src/app.js"}}\n');
 
+function git(args) {
+  const result = spawnSync('git', ['-C', projectRoot, ...args], { encoding: 'utf8' });
+  assert.equal(result.status, 0, `git ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
+  return result.stdout.trim();
+}
+
+git(['init']);
+git(['config', 'user.email', 'forge-route-test@example.com']);
+git(['config', 'user.name', 'Forge Route Test']);
+git(['add', 'package.json']);
+git(['commit', '-m', 'seed project']);
+
 const createForgeRouter = require('../backend/routes/forge');
+const Database = require('../backend/node_modules/better-sqlite3');
 
 const project = {
   id: 'project-test',
@@ -189,6 +203,25 @@ function assertPolicyRule(response, rule) {
     assert(created.body.run_id.startsWith('run-'));
     assert.equal(created.body.run.project_id, project.id);
     assert.equal(created.body.run.context_pack.constraints.approval_required_for_writes, true);
+    const status = await invokeRoute(router, 'GET', '/status');
+    assert.equal(status.status, 200);
+    assert.equal(status.body.persistence.backend, 'sqlite');
+    const listed = await invokeRoute(router, 'GET', '/runs?limit=10');
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.persistence.backend, 'sqlite');
+    assert(listed.body.runs.some((run) => run.run_id === created.body.run_id));
+    const dbPath = path.join(forgeDir, 'forge_runs.db');
+    assert.equal(fs.existsSync(dbPath), true);
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM forge_runs WHERE run_id = ?').get(created.body.run_id).count,
+      1,
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'forge_run_actions'").get().count,
+      1,
+    );
+    db.close();
 
     saveRuns([makeRun('run-needs-approval', {
       file_path: 'src/app.js',
@@ -236,8 +269,12 @@ function assertPolicyRule(response, rule) {
     assert.equal(staged.status, 200);
     assert.equal(staged.body.ok, true);
     assert.equal(staged.body.run.status, 'staged');
+    assert.equal(staged.body.staged[0].workspace_meta.workspace_mode, 'git_worktree');
     const stagedFile = path.join(forgeDir, 'runs', 'run-happy-path', 'workspace', 'src', 'app.js');
     assert.equal(fs.readFileSync(stagedFile, 'utf8'), 'module.exports = 1;\n');
+    const workspaceMeta = readJson(path.join('runs', 'run-happy-path', 'workspace', '.forge_workspace.json'));
+    assert.equal(workspaceMeta.workspace_mode, 'git_worktree');
+    assert.equal(Boolean(workspaceMeta.git_head), true);
     assert.equal(fs.existsSync(path.join(projectRoot, 'src', 'app.js')), false);
 
     const applyBeforeVerify = await invokeRoute(router, 'POST', '/runs/run-happy-path/apply', { ownerApproved: true });
@@ -267,15 +304,29 @@ function assertPolicyRule(response, rule) {
     assert.equal(passedVerify.status, 200);
     assert.equal(passedVerify.body.ok, true);
     assert.equal(passedVerify.body.run.status, 'verified');
+    assert.equal(passedVerify.body.test_result.workspace_meta.workspace_mode, 'git_worktree');
+    assert.equal(passedVerify.body.test_result.results[0].sandbox_type, 'process');
+    assert.equal(passedVerify.body.test_result.results[0].sandbox_profile, 'code');
+    assert(passedVerify.body.test_result.results[0].sandbox_audit);
 
     const applied = await invokeRoute(router, 'POST', '/runs/run-happy-path/apply', { ownerApproved: true });
     assert.equal(applied.status, 200);
     assert.equal(applied.body.ok, true);
     assert.equal(applied.body.run.status, 'applied');
+    assert.equal(applied.body.run.final_report.workspace_meta.workspace_mode, 'git_worktree');
     assert.equal(fs.readFileSync(path.join(projectRoot, 'src', 'app.js'), 'utf8'), 'module.exports = 1;\n');
 
     const runs = readJson('runs.json');
     assert(runs.some((run) => run.id === 'run-happy-path' && run.status === 'applied'));
+
+    saveRuns([makeRun('run-dirty-fallback', {
+      file_path: 'src/dirty.js',
+      content: 'module.exports = 2;\n',
+    })]);
+    const dirtyFallback = await invokeRoute(router, 'POST', '/runs/run-dirty-fallback/approve', { ownerApproved: true });
+    assert.equal(dirtyFallback.status, 200);
+    assert.equal(dirtyFallback.body.staged[0].workspace_meta.workspace_mode, 'directory_copy');
+    assert.equal(dirtyFallback.body.staged[0].workspace_meta.fallback_reason, 'dirty_source_tree');
     console.log('[✓] forge run route contract tests passed');
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });

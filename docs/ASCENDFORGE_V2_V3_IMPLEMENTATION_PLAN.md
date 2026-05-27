@@ -5,6 +5,32 @@ replacement architecture. It is the migration path from the existing supervised
 Forge contract to durable storage, isolated execution, multi-agent review, and
 measurable quality gates.
 
+## Implementation Status
+
+Started:
+
+- `backend/services/forge_store.js` provides the first V2 ForgeStore layer.
+- Forge runs are now written to `state/forge/forge_runs.db` when
+  `better-sqlite3` is available.
+- `state/forge/runs.json` remains a compatibility mirror and fallback.
+- `forge_runs`, `forge_run_actions`, and `forge_run_audit` tables are created
+  for queryable run/action/audit state.
+- `GET /api/forge/runs` lists recent runs for dashboard and evaluation views.
+- `/api/forge/status` exposes Forge run persistence metadata.
+- Run staging now uses a per-run `git worktree` when the source project is a
+  clean git repository, with directory-copy fallback for dirty or non-git
+  projects.
+- Run artifacts include `workspace_meta` so approval, verification, apply, and
+  dashboard views can distinguish `git_worktree` from fallback copies.
+- Verification commands now execute through `backend/infra/sandbox/executor.js`
+  using the `code` profile, preserving allowlists while adding sandbox audit
+  metadata to test results. Forge currently uses the process sandbox override
+  for host build tools; the executor also supports mounting a workspace into
+  Docker at `/workspace` once a project-specific code image is configured.
+- `tests/test_forge_run_routes.js` verifies SQLite persistence, JSON mirror
+  compatibility, run listing, git worktree staging, dirty-tree fallback, policy
+  blocking, sandboxed staged verification, and apply.
+
 ## Current V1 Baseline
 
 Canonical V1 lives in `backend/routes/forge.js` and is mounted at
