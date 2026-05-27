@@ -56,6 +56,39 @@ const AGENT_IMAGES = {
   'code':     process.env.SANDBOX_CODE_IMAGE    || BASE_IMAGE,
 };
 
+const ALLOWED_COMMANDS = new Set([
+  'python3', 'python', 'node', 'npm', 'npx', 'git',
+  'pytest', 'py.test', 'bash', 'sh',
+  ...String(process.env.SANDBOX_ALLOWED_COMMANDS || '').split(',').map((item) => item.trim()).filter(Boolean),
+]);
+
+function resolveCommandSpec(command) {
+  if (!Array.isArray(command) || command.length === 0) throw new Error('sandbox command must be a non-empty argv array');
+  const executable = String(command[0] || '').trim();
+  const base = path.basename(executable);
+  if (!ALLOWED_COMMANDS.has(base)) throw new Error(`sandbox command not allowlisted: ${base || 'empty'}`);
+  if (executable.includes('\0')) throw new Error('sandbox command contains invalid bytes');
+  const args = command.slice(1).map((arg) => {
+    const value = String(arg);
+    if (value.includes('\0')) throw new Error('sandbox argument contains invalid bytes');
+    return value.slice(0, 20_000);
+  });
+  return { cmd: base, args };
+}
+
+function resolveWorkspacePath(workspacePath) {
+  if (!workspacePath) return null;
+  const hostWorkspace = path.resolve(String(workspacePath));
+  const allowedRoots = [
+    path.resolve(process.env.AI_EMPLOYEE_WORKSPACE_ROOT || path.join(process.env.HOME || '/tmp', '.ai-employee')),
+    path.resolve(process.env.STATE_DIR || path.join(process.env.HOME || '/tmp', '.ai-employee', 'state')),
+    path.resolve('/tmp'),
+  ];
+  const allowed = allowedRoots.some((root) => hostWorkspace === root || hostWorkspace.startsWith(root + path.sep));
+  if (!allowed) throw new Error('workspace path is outside allowed sandbox roots');
+  return hostWorkspace;
+}
+
 // ── Result type ───────────────────────────────────────────────────────────────
 
 /**
@@ -90,6 +123,7 @@ class DockerSandbox {
     const image  = AGENT_IMAGES[profile] || AGENT_IMAGES.default;
     const name   = `aie-${agent_id}-${_short()}`;
     const start  = Date.now();
+    const checkedCommand = resolveCommandSpec(command);
 
     // Build docker run args
     const args = [
@@ -123,11 +157,11 @@ class DockerSandbox {
     args.push('-e', `AGENT_ID=${agent_id}`);
 
     if (workspace_path) {
-      const hostWorkspace = path.resolve(workspace_path);
+      const hostWorkspace = resolveWorkspacePath(workspace_path);
       args.push('-v', `${hostWorkspace}:/workspace:rw`);
     }
 
-    args.push(image, ...command);
+    args.push(image, checkedCommand.cmd, ...checkedCommand.args);
 
     const result = await _spawnWithTimeout('docker', args, limits.timeout_ms);
     const duration_ms = Date.now() - start;
@@ -190,7 +224,8 @@ class ProcessSandbox {
       ...env,
     };
 
-    const result = await _spawnWithTimeout(command[0], command.slice(1), limits.timeout_ms, {
+    const checkedCommand = resolveCommandSpec(command);
+    const result = await _spawnWithTimeout(checkedCommand.cmd, checkedCommand.args, limits.timeout_ms, {
       env: safeEnv,
       cwd: workdir,
     });
@@ -260,8 +295,12 @@ function _spawnWithTimeout(cmd, args, timeoutMs, opts = {}) {
   return new Promise((resolve) => {
     const chunks = { out: [], err: [] };
     let totalOut = 0, totalErr = 0;
+    const safeCmd = String(cmd || '').trim();
+    if (safeCmd !== 'docker' && !ALLOWED_COMMANDS.has(path.basename(safeCmd))) {
+      return resolve({ success: false, exit_code: -1, stdout: '', stderr: 'command not allowlisted' });
+    }
 
-    const child = spawn(cmd, args, {
+    const child = spawn(safeCmd, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       ...opts,
     });

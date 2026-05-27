@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { getAscendForgeEngine } = require('../ascendforge/engine');
+const { createRouteRateLimit } = require('../middleware/route-rate-limit');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const CONFIG_FILE = path.join(REPO_ROOT, 'runtime', 'config', 'fork_integration_manifest.json');
@@ -305,6 +306,7 @@ function createRouter(requireAuth) {
   const router = express.Router();
   const protect = typeof requireAuth === 'function' ? requireAuth : (_req, _res, next) => next();
   const forge = getAscendForgeEngine();
+  router.use(createRouteRateLimit({ keyPrefix: 'fork-integrations', max: 120, windowMs: 60_000 }));
 
   router.get('/vendor/sources', (_req, res) => {
     const manifest = loadIntegrationManifest();

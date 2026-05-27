@@ -437,6 +437,10 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '64kb' }));
 
+// Hard ceiling for every API route. This must be registered before API route
+// handlers so it protects routers mounted below instead of only unmatched paths.
+app.use('/api/', _rl_api_global);
+
 // ── Multi-tenancy middleware (extracts tenant from JWT) ───────────────────────
 app.use(tenantMiddleware(JWT_SECRET));
 // Inject role from JWT claims onto req.user (RBAC — non-breaking augmentation)
@@ -7901,13 +7905,6 @@ app.get('/metrics', (req, res) => {
 
   res.type('text/plain; version=0.0.4').send(metrics + '\n');
 });
-
-// ── Global /api/* catch-all rate limiter ──────────────────────────────────────
-// Runs after all specific-route middlewares. Requests that already consumed a
-// tighter per-route limiter above still count here — that is intentional:
-// the global bucket provides a hard ceiling against endpoint enumeration and
-// slow-rate scatter attacks that individually stay under per-route limits.
-app.use('/api/', _rl_api_global);
 
 app.get('*', (req, res, next) => {
   if (!HAS_FRONTEND_DIST) {

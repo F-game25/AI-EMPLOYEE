@@ -16,6 +16,7 @@ const fs      = require('fs')
 const http    = require('http')
 const os      = require('os')
 const path    = require('path')
+const { createRouteRateLimit } = require('../middleware/route-rate-limit')
 
 const PYTHON_HOST = '127.0.0.1'
 const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || 18790
@@ -126,6 +127,7 @@ function proxyToPython(method, urlPath, req, res) {
 // --- router ---------------------------------------------------------------
 module.exports = function createVaultRouter(requireAuth) {
   const router = express.Router()
+  router.use(createRouteRateLimit({ keyPrefix: 'vault', max: 120, windowMs: 60_000 }))
 
   router.get('/notes', requireAuth, (req, res) => {
     const vaultRoot = vaultRootForRequest(req)

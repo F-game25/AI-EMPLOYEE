@@ -61,7 +61,7 @@ function init() {
       const raw = fs.readFileSync(_BRAIN_FILE, 'utf8');
       const saved = JSON.parse(raw);
       restoreState(saved);
-      console.log('[brain] Restored brain state from', _BRAIN_FILE);
+      console.log('[brain] Restored brain state');
     }
   } catch (err) {
     console.warn('[brain] Could not restore brain state:', err && err.message ? err.message : err);

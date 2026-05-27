@@ -18,6 +18,12 @@ const { CHANNELS } = require('../websocket/channels');
 const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'), 'state'));
 const TASKS_FILE = path.join(STATE_DIR, 'tasks.json');
 
+function safeObjectKey(value, fallback = 'default') {
+  const key = String(value || fallback).trim().slice(0, 160);
+  if (!key || ['__proto__', 'prototype', 'constructor'].includes(key)) return fallback;
+  return key;
+}
+
 class TaskDashboardGateway {
   constructor() {
     this.connManager = null;
@@ -56,12 +62,12 @@ class TaskDashboardGateway {
 
   _getTenantTasks(tenantId) {
     const all = this._readTasks();
-    return all[tenantId] || {};
+    return all[safeObjectKey(tenantId)] || {};
   }
 
   _setTenantTasks(tenantId, tasks) {
     const all = this._readTasks();
-    all[tenantId] = tasks;
+    all[safeObjectKey(tenantId)] = tasks;
     this._writeTasks(all);
   }
 
@@ -95,7 +101,7 @@ class TaskDashboardGateway {
     };
 
     const tenantTasks = this._getTenantTasks(tenantId);
-    tenantTasks[taskId] = task;
+    tenantTasks[safeObjectKey(taskId, task.id)] = task;
     this._setTenantTasks(tenantId, tenantTasks);
 
     this.publishTaskUpdate(tenantId, taskId, { event: 'created', task });
@@ -105,7 +111,7 @@ class TaskDashboardGateway {
 
   getTask(tenantId, taskId) {
     const tasks = this._getTenantTasks(tenantId);
-    return tasks[taskId] || null;
+    return tasks[safeObjectKey(taskId, '')] || null;
   }
 
   listTasks(tenantId, { page = 1, pageSize = 20, status = null, priority = null } = {}) {
@@ -139,7 +145,7 @@ class TaskDashboardGateway {
 
   updateTaskStatus(tenantId, taskId, status, result = null) {
     const tasks = this._getTenantTasks(tenantId);
-    const task = tasks[taskId];
+    const task = tasks[safeObjectKey(taskId, '')];
 
     if (!task) return null;
 
@@ -171,7 +177,7 @@ class TaskDashboardGateway {
 
   addTrace(tenantId, taskId, { agentId, action, duration_ms = 0, output = '' }) {
     const tasks = this._getTenantTasks(tenantId);
-    const task = tasks[taskId];
+    const task = tasks[safeObjectKey(taskId, '')];
 
     if (!task) return null;
 

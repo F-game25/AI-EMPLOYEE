@@ -10,6 +10,9 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
 env:
   STATE_DIR: /tmp/ci-state
   JWT_SECRET_KEY: ci-test-secret-not-real

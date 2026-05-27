@@ -3,8 +3,10 @@ const fs = require('fs').promises
 const path = require('path')
 const crypto = require('crypto')
 const validator = require('../validators/settings-validator')
+const { createRouteRateLimit } = require('../middleware/route-rate-limit')
 
 const router = express.Router()
+router.use(createRouteRateLimit({ keyPrefix: 'settings', max: 60, windowMs: 60_000 }))
 
 // Encryption key — must be set via env var; fallback generates a stable per-process key (dev only)
 const RAW_KEY = process.env.SETTINGS_ENCRYPTION_KEY || (() => {

@@ -48,11 +48,22 @@ function audit(event, details = {}) {
 }
 
 function slugify(value) {
-  return String(value || 'agent')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'agent'
+  const input = String(value || 'agent').toLowerCase()
+  let out = ''
+  let pendingDash = false
+  for (const ch of input) {
+    const code = ch.charCodeAt(0)
+    const isAlphaNum = (code >= 97 && code <= 122) || (code >= 48 && code <= 57)
+    if (isAlphaNum) {
+      if (pendingDash && out) out += '-'
+      out += ch
+      pendingDash = false
+    } else {
+      pendingDash = true
+    }
+    if (out.length >= 80) break
+  }
+  return out || 'agent'
 }
 
 function loadSkillsLibrary() {

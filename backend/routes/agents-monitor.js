@@ -19,6 +19,7 @@ const path = require('path');
 const os = require('os');
 const { AgentStateRegistry } = require('../agents-monitor/agent-state');
 const { getAscendForgeEngine } = require('../ascendforge/engine');
+const { createRouteRateLimit } = require('../middleware/route-rate-limit');
 
 const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'), 'state'));
 const AGENTS_STATE_DIR = path.join(STATE_DIR, 'agents');
@@ -40,7 +41,10 @@ const METRICS_WINDOW_MS = 3600000; // 1 hour for metrics aggregation
  * Returns empty array if file doesn't exist
  */
 function readAgentLog(agentId) {
-  const logPath = path.join(AGENTS_STATE_DIR, `${agentId}.jsonl`);
+  const safeAgentId = safeAgentIdParam(agentId);
+  if (!safeAgentId) return [];
+  const logPath = safeJoin(AGENTS_STATE_DIR, `${safeAgentId}.jsonl`);
+  if (!logPath) return [];
   if (!fs.existsSync(logPath)) {
     return [];
   }
@@ -58,9 +62,22 @@ function readAgentLog(agentId) {
       })
       .filter(Boolean);
   } catch (err) {
-    console.error(`[AGENT-MONITOR] Error reading log for ${agentId}:`, err.message);
+    console.error('[AGENT-MONITOR] Error reading log:', err.message);
     return [];
   }
+}
+
+function safeAgentIdParam(value) {
+  const s = String(value || '').trim();
+  if (!s || s.length > 120) return null;
+  if (['__proto__', 'prototype', 'constructor'].includes(s)) return null;
+  return /^[a-zA-Z0-9_.:-]+$/.test(s) ? s : null;
+}
+
+function safeJoin(root, rel) {
+  const base = path.resolve(root);
+  const target = path.resolve(base, rel);
+  return target === base || target.startsWith(base + path.sep) ? target : null;
 }
 
 /**
@@ -163,6 +180,7 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
   const router = express.Router();
   const requireAuth = requireAuthMiddleware || defaultRequireAuth;
   const registry = agentStateRegistry || new AgentStateRegistry();
+  router.use(createRouteRateLimit({ keyPrefix: 'agents-monitor', max: 120, windowMs: 60_000 }));
 
   /**
    * GET /api/agents/:agentId/capabilities
@@ -170,11 +188,13 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
    */
   router.get('/:agentId/capabilities', requireAuth, (req, res) => {
     try {
-      const blueprint = getAscendForgeEngine().getBlueprint(req.params.agentId);
+      const agentId = safeAgentIdParam(req.params.agentId);
+      if (!agentId) return res.status(400).json({ ok: false, error: 'invalid agent id' });
+      const blueprint = getAscendForgeEngine().getBlueprint(agentId);
       if (!blueprint) {
         return res.status(404).json({ ok: false, error: 'agent capability contract not found' });
       }
-      res.json({ ok: true, state: 'live', agent_id: req.params.agentId, capabilities: blueprint });
+      res.json({ ok: true, state: 'live', agent_id: agentId, capabilities: blueprint });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message || 'failed to load agent capabilities' });
     }
@@ -187,14 +207,16 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
   router.get('/:agentId/skills', requireAuth, (req, res) => {
     try {
       const engine = getAscendForgeEngine();
-      const blueprint = engine.getBlueprint(req.params.agentId);
+      const agentId = safeAgentIdParam(req.params.agentId);
+      if (!agentId) return res.status(400).json({ ok: false, error: 'invalid agent id' });
+      const blueprint = engine.getBlueprint(agentId);
       if (!blueprint) {
         return res.status(404).json({ ok: false, error: 'agent skill contract not found' });
       }
       const skills = (blueprint.selected_skill_ids || [])
         .map(skillId => engine.getSkill(skillId))
         .filter(Boolean);
-      res.json({ ok: true, state: 'live', agent_id: req.params.agentId, skills });
+      res.json({ ok: true, state: 'live', agent_id: agentId, skills });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message || 'failed to load agent skills' });
     }
@@ -237,12 +259,13 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
    */
   router.get('/monitor/:agentId', requireAuth, (req, res) => {
     const tenantId = req.tenant?.id || 'default';
-    const { agentId } = req.params;
+    const agentId = safeAgentIdParam(req.params.agentId);
+    if (!agentId) return res.status(400).json({ error: 'invalid agent id' });
 
     try {
       const agent = registry.getAgent(agentId, tenantId);
       if (!agent) {
-        return res.status(404).json({ error: `Agent ${agentId} not found` });
+        return res.status(404).json({ error: 'Agent not found' });
       }
 
       const entries = readAgentLog(agentId);
@@ -257,7 +280,7 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
-      console.error(`[AGENT-MONITOR] Error fetching activity for ${agentId}:`, err.message);
+      console.error('[AGENT-MONITOR] Error fetching activity:', err.message);
       res.status(500).json({ error: 'Failed to fetch agent state' });
     }
   });
@@ -268,12 +291,13 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
    */
   router.get('/monitor/:agentId/metrics', requireAuth, (req, res) => {
     const tenantId = req.tenant?.id || 'default';
-    const { agentId } = req.params;
+    const agentId = safeAgentIdParam(req.params.agentId);
+    if (!agentId) return res.status(400).json({ error: 'invalid agent id' });
 
     try {
       const agent = registry.getAgent(agentId, tenantId);
       if (!agent) {
-        return res.status(404).json({ error: `Agent ${agentId} not found` });
+        return res.status(404).json({ error: 'Agent not found' });
       }
 
       const metrics = aggregateMetrics(agentId);
@@ -287,7 +311,7 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
-      console.error(`[AGENT-MONITOR] Error computing metrics for ${agentId}:`, err.message);
+      console.error('[AGENT-MONITOR] Error computing metrics:', err.message);
       res.status(500).json({ error: 'Failed to compute metrics' });
     }
   });
@@ -298,12 +322,13 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
    */
   router.post('/monitor/:agentId/restart', requireAuth, (req, res) => {
     const tenantId = req.tenant?.id || 'default';
-    const { agentId } = req.params;
+    const agentId = safeAgentIdParam(req.params.agentId);
+    if (!agentId) return res.status(400).json({ error: 'invalid agent id' });
 
     try {
       const agent = registry.getAgent(agentId, tenantId);
       if (!agent) {
-        return res.status(404).json({ error: `Agent ${agentId} not found` });
+        return res.status(404).json({ error: 'Agent not found' });
       }
 
       const signal = {
@@ -314,7 +339,8 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
       };
 
       // Write signal to agent log
-      const logPath = path.join(AGENTS_STATE_DIR, `${agentId}.jsonl`);
+      const logPath = safeJoin(AGENTS_STATE_DIR, `${agentId}.jsonl`);
+      if (!logPath) return res.status(400).json({ error: 'invalid agent id' });
       fs.mkdirSync(AGENTS_STATE_DIR, { recursive: true });
       fs.appendFileSync(logPath, JSON.stringify(signal) + '\n');
 
@@ -333,7 +359,7 @@ function createAgentsMonitorRouter(broadcasterModule, requireAuthMiddleware, age
         signal,
       });
     } catch (err) {
-      console.error(`[AGENT-MONITOR] Error signaling restart for ${agentId}:`, err.message);
+      console.error('[AGENT-MONITOR] Error signaling restart:', err.message);
       res.status(500).json({ error: 'Failed to signal restart' });
     }
   });

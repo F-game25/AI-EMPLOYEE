@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { getNativeMemoryGraph } = require('../core/native-memory-graph');
+const { createRouteRateLimit } = require('../middleware/route-rate-limit');
 
 const AI_HOME = path.resolve(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'));
 const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(AI_HOME, 'state'));
@@ -199,7 +200,7 @@ function inspectSqlDatabase(dbInfo) {
     const tables = rows.map((row) => {
       let columns = [];
       try {
-        columns = db.prepare(`PRAGMA table_info(${JSON.stringify(row.name)})`).all().map((col) => col.name);
+        columns = db.prepare('SELECT name FROM pragma_table_info(?)').all(String(row.name)).map((col) => col.name);
       } catch {}
       return { name: row.name, columns };
     });
@@ -223,15 +224,31 @@ function sqlStatus() {
   };
 }
 
+function stripTrailingSemicolons(value) {
+  let s = String(value || '').trim();
+  while (s.endsWith(';')) s = s.slice(0, -1).trimEnd();
+  return s;
+}
+
+function sqlTokens(value) {
+  return String(value || '')
+    .toLowerCase()
+    .split(/[^a-z_]+/)
+    .filter(Boolean);
+}
+
 function validateReadOnlySql(sql) {
-  const cleaned = String(sql || '').trim().replace(/;+\s*$/, '');
+  const cleaned = stripTrailingSemicolons(sql);
   if (!cleaned) return { ok: false, error: 'sql required' };
+  if (cleaned.length > 5000) return { ok: false, error: 'sql too large' };
   if (cleaned.includes(';')) return { ok: false, error: 'multiple statements are blocked' };
-  if (!/^(select|with)\b/i.test(cleaned)) return { ok: false, error: 'only SELECT/WITH read-only queries are allowed' };
-  if (/\b(insert|update|delete|drop|alter|create|replace|attach|detach|vacuum|reindex|pragma)\b/i.test(cleaned)) {
+  const tokens = sqlTokens(cleaned);
+  if (!['select', 'with'].includes(tokens[0])) return { ok: false, error: 'only SELECT/WITH read-only queries are allowed' };
+  const blocked = new Set(['insert', 'update', 'delete', 'drop', 'alter', 'create', 'replace', 'attach', 'detach', 'vacuum', 'reindex', 'pragma']);
+  if (tokens.some((token) => blocked.has(token))) {
     return { ok: false, error: 'write/admin SQL keywords are blocked' };
   }
-  return { ok: true, sql: /\blimit\s+\d+\b/i.test(cleaned) ? cleaned : `${cleaned} LIMIT ${MAX_SQL_ROWS}` };
+  return { ok: true, sql: tokens.includes('limit') ? cleaned : `${cleaned} LIMIT ${MAX_SQL_ROWS}` };
 }
 
 function runReadOnlySql({ database, sql, params = [] }, actor = 'operator') {
@@ -594,6 +611,7 @@ async function runHybridQuery(payload) {
 function createHybridMemoryRouter(requireAuth) {
   const router = express.Router();
   const protect = requireAuth || ((_req, _res, next) => next());
+  router.use(createRouteRateLimit({ keyPrefix: 'hybrid-memory', max: 120, windowMs: 60_000 }));
 
   router.get('/router/status', protect, async (_req, res) => {
     res.json(await routerStatus());

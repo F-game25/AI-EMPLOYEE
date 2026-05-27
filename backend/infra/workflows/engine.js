@@ -188,7 +188,7 @@ class InProcessWorkflowEngine {
 
     // Execute asynchronously
     setImmediate(() => this._runExecution(id, def).catch(e =>
-      console.error(`${LOG} Execution ${id} crashed:`, e)
+      console.error(LOG, 'Execution crashed', { workflow_id: id, error: e?.message || String(e) })
     ));
 
     return { workflow_id: id, state: WF_STATE.PENDING };

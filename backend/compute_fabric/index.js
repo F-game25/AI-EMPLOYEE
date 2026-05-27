@@ -129,9 +129,9 @@ function requestApproval(plan = {}) {
   const nonce = crypto.randomBytes(8).toString('hex');
   const expires = Date.now() + 5 * 60 * 1000;
   const challenge = { nonce, expires, est_total_usd: est.est_total_usd, gpu: est.recommended_gpu, plan_summary: `${est.gpu_count}× ${est.recommended_gpu} for ${est.est_hours}h ≈ $${est.est_total_usd}` };
-  const approvals = _readJSON(APPROVALS_PATH, {});
-  approvals[nonce] = { ...challenge, used: false, created: _now() };
-  _writeJSON(APPROVALS_PATH, approvals);
+  const approvals = new Map(Object.entries(_readJSON(APPROVALS_PATH, {})));
+  approvals.set(nonce, { ...challenge, used: false, created: _now() });
+  _writeJSON(APPROVALS_PATH, Object.fromEntries(approvals));
   audit('approval_requested', { nonce, est_total_usd: est.est_total_usd, gpu: est.recommended_gpu });
   return { ...challenge, requires: 'Owner must verify to receive a single-use approval token. No charge occurs.' };
 }
@@ -141,8 +141,8 @@ function _sign(nonce, expires) {
 }
 
 function verifyOwner({ nonce, ownerApproved }) {
-  const approvals = _readJSON(APPROVALS_PATH, {});
-  const a = approvals[nonce];
+  const approvals = new Map(Object.entries(_readJSON(APPROVALS_PATH, {})));
+  const a = approvals.get(String(nonce || ''));
   if (!a) return { ok: false, error: 'unknown approval challenge' };
   if (a.used) return { ok: false, error: 'approval already used' };
   if (Date.now() > a.expires) return { ok: false, error: 'approval expired' };
@@ -157,11 +157,11 @@ function _consumeToken(token) {
   if (!nonce || !expires || !sig) return { ok: false, error: 'malformed approval token' };
   if (sig !== _sign(nonce, Number(expires))) return { ok: false, error: 'invalid approval signature' };
   if (Date.now() > Number(expires)) return { ok: false, error: 'approval token expired' };
-  const approvals = _readJSON(APPROVALS_PATH, {});
-  const a = approvals[nonce];
+  const approvals = new Map(Object.entries(_readJSON(APPROVALS_PATH, {})));
+  const a = approvals.get(nonce);
   if (!a) return { ok: false, error: 'unknown approval' };
   if (a.used) return { ok: false, error: 'approval already used' };
-  a.used = true; a.used_at = _now(); _writeJSON(APPROVALS_PATH, approvals);
+  a.used = true; a.used_at = _now(); approvals.set(nonce, a); _writeJSON(APPROVALS_PATH, Object.fromEntries(approvals));
   return { ok: true, approval: a };
 }
 

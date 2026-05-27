@@ -25,7 +25,34 @@ const ARCHIVE_ROOT = path.join(STATE_DIR, 'compute_fabric', 'job_archive');
 const HEARTBEAT_STALE_S = Number(process.env.COMPUTE_HEARTBEAT_STALE_S || 120);
 
 function _now() { return new Date().toISOString(); }
-function _dir(jobId) { return path.join(ARCHIVE_ROOT, String(jobId).replace(/[^\w.-]/g, '_')); }
+function _safeId(value, fallback = 'job') {
+  const safe = String(value || fallback).replace(/[^\w.-]/g, '_').slice(0, 120);
+  if (['__proto__', 'prototype', 'constructor'].includes(safe)) return fallback;
+  return safe || fallback;
+}
+function _safeRel(value, fallback = 'artifact') {
+  const cleaned = String(value || fallback)
+    .split(/[\\/]+/)
+    .map((part) => _safeId(part, 'part'))
+    .filter(Boolean)
+    .join(path.sep);
+  return cleaned || fallback;
+}
+function _safeInside(root, rel) {
+  const base = path.resolve(root);
+  const target = path.resolve(base, rel);
+  if (target !== base && !target.startsWith(base + path.sep)) throw new Error('path escaped archive root');
+  return target;
+}
+function _allowedSourceDir(fromDir) {
+  const source = path.resolve(String(fromDir || ''));
+  const allowedRoots = [
+    path.resolve(process.env.COMPUTE_SYNC_ROOT || path.join(process.env.HOME || '/tmp', '.ai-employee')),
+    path.resolve('/tmp'),
+  ];
+  return allowedRoots.some((root) => source === root || source.startsWith(root + path.sep)) ? source : null;
+}
+function _dir(jobId) { return _safeInside(ARCHIVE_ROOT, _safeId(jobId)); }
 function _ensure(jobId) {
   const d = _dir(jobId);
   fs.mkdirSync(path.join(d, 'artifacts'), { recursive: true });
@@ -60,8 +87,8 @@ function heartbeatAge(jobId) {
 
 function writeCheckpoint(jobId, name, data) {
   _ensure(jobId);
-  const safe = String(name || `ckpt-${Date.now()}`).replace(/[^\w.-]/g, '_');
-  const p = path.join(_dir(jobId), 'checkpoints', `${safe}.json`);
+  const safe = _safeId(name || `ckpt-${Date.now()}`, 'checkpoint');
+  const p = _safeInside(path.join(_dir(jobId), 'checkpoints'), `${safe}.json`);
   _writeJSON(p, { name: safe, ts: _now(), data });
   heartbeat(jobId, { status: 'checkpoint', checkpoint: safe });
   return { ok: true, checkpoint: safe };
@@ -79,8 +106,9 @@ function listCheckpoints(jobId) {
 // Collect a single artifact into the archive (from content or a source file).
 function collectArtifact(jobId, { rel, content, src }) {
   _ensure(jobId);
-  const relName = String(rel || (src ? path.basename(src) : `artifact-${Date.now()}`)).replace(/\.\.+/g, '.').replace(/^\/+/, '');
-  const dest = path.join(_dir(jobId), 'artifacts', relName);
+  const relName = _safeRel(rel || (src ? path.basename(src) : `artifact-${Date.now()}`));
+  const artifactsRoot = path.join(_dir(jobId), 'artifacts');
+  const dest = _safeInside(artifactsRoot, relName);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   let buf;
   if (content != null) buf = Buffer.from(String(content));
@@ -104,7 +132,8 @@ function _updateManifestEntry(jobId, rel, buf) {
 // Pull every file from a source dir (the remote/working dir) into the archive.
 function forceSync(jobId, fromDir) {
   _ensure(jobId);
-  if (!fromDir || !fs.existsSync(fromDir)) {
+  const sourceDir = fromDir ? _allowedSourceDir(fromDir) : null;
+  if (!sourceDir || !fs.existsSync(sourceDir)) {
     // No source provided — just re-verify what's already archived.
     return verifyManifest(jobId);
   }
@@ -117,7 +146,7 @@ function forceSync(jobId, fromDir) {
       else if (st.size <= 50 * 1024 * 1024) { collectArtifact(jobId, { rel: path.join(base, name), src: full }); count++; }
     }
   };
-  walk(fromDir, '');
+  walk(sourceDir, '');
   heartbeat(jobId, { status: 'synced', synced_files: count });
   return { ok: true, synced_files: count, ...verifyManifest(jobId) };
 }
@@ -129,7 +158,7 @@ function verifyManifest(jobId) {
   let allMatch = true;
   const checked = [];
   for (const f of m.files || []) {
-    const p = path.join(_dir(jobId), 'artifacts', f.rel);
+    const p = _safeInside(path.join(_dir(jobId), 'artifacts'), _safeRel(f.rel));
     let match = false;
     try { match = fs.existsSync(p) && _sha256(fs.readFileSync(p)) === f.sha256; } catch { match = false; }
     if (!match) allMatch = false;

@@ -6,9 +6,11 @@
 const express = require('express');
 const cf = require('../compute_fabric');
 const persist = require('../compute_fabric/persistence');
+const { createRouteRateLimit } = require('../middleware/route-rate-limit');
 
 module.exports = function createComputeRouter(requireAuth) {
   const router = express.Router();
+  router.use(createRouteRateLimit({ keyPrefix: 'compute', max: 60, windowMs: 60_000 }));
 
   router.get('/local-status', requireAuth, async (_req, res) => {
     res.json({ ok: true, ...(await cf.localStatus()), live_provisioning: cf.LIVE });

@@ -20,6 +20,7 @@ const { spawn, spawnSync } = require('child_process')
 const { getAscendForgeEngine, DEFAULT_APPROVAL_POLICY } = require('../ascendforge/engine')
 const { getSandboxExecutor } = require('../infra/sandbox/executor')
 const { ForgeStore } = require('../services/forge_store')
+const { createRouteRateLimit } = require('../middleware/route-rate-limit')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 const STATE_DIR = path.resolve(process.env.STATE_DIR || process.env.AI_EMPLOYEE_STATE_DIR || path.join(os.homedir(), '.ai-employee', 'state'))
@@ -116,11 +117,22 @@ function latestVerificationPassed(run) {
 }
 
 function slugify(value) {
-  return String(value || 'project')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'project'
+  const input = String(value || 'project').toLowerCase()
+  let out = ''
+  let pendingDash = false
+  for (const ch of input) {
+    const code = ch.charCodeAt(0)
+    const isAlphaNum = (code >= 97 && code <= 122) || (code >= 48 && code <= 57)
+    if (isAlphaNum) {
+      if (pendingDash && out) out += '-'
+      out += ch
+      pendingDash = false
+    } else {
+      pendingDash = true
+    }
+    if (out.length >= 80) break
+  }
+  return out || 'project'
 }
 
 function asList(file) {
@@ -801,42 +813,95 @@ function buildForgeSystemPrompt(project, treeSnippet, historySnippet) {
   )
 }
 
+function isPathCandidate(value) {
+  const s = String(value || '').trim().replace(/^title=/, '').replace(/^["'`]|["'`]$/g, '')
+  if (!s || s.length > 180 || s.includes('..') || s.includes('\\')) return false
+  const dot = s.lastIndexOf('.')
+  if (dot <= 0 || dot === s.length - 1 || s.length - dot > 8) return false
+  for (const ch of s) {
+    const code = ch.charCodeAt(0)
+    const ok =
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      (code >= 48 && code <= 57) ||
+      ch === '_' || ch === '-' || ch === '.' || ch === '/'
+    if (!ok) return false
+  }
+  return true
+}
+
+function extractFenceBlocks(text) {
+  const lines = String(text || '').slice(0, 200_000).split('\n')
+  const blocks = []
+  let current = null
+  let offset = 0
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      if (current) {
+        current.code = current.body.join('\n')
+        blocks.push(current)
+        current = null
+      } else {
+        const header = line.slice(3).trim()
+        const separator = header.search(/[ \t:]/)
+        const lang = separator === -1 ? header : header.slice(0, separator)
+        const hint = separator === -1 ? '' : header.slice(separator + 1).trim()
+        current = { lang, hint, body: [], index: offset }
+      }
+    } else if (current) {
+      current.body.push(line)
+    }
+    offset += line.length + 1
+  }
+  return blocks
+}
+
+function trailingPathCandidate(text) {
+  const tail = String(text || '').slice(-180).replace(/[`*:#>\s]+$/g, '').split(/\s+/).pop() || ''
+  const cleaned = tail.replace(/^[`*#>]+/, '').replace(/[`*:]+$/, '')
+  return isPathCandidate(cleaned) ? cleaned : ''
+}
+
+function leadingCommentPath(code) {
+  const firstLine = String(code || '').split('\n')[0] || ''
+  for (const prefix of ['#', '//', '<!--', '/*']) {
+    const trimmed = firstLine.trimStart()
+    if (trimmed.startsWith(prefix)) {
+      const candidate = trimmed.slice(prefix.length).trim().split(/\s+/)[0]
+      return isPathCandidate(candidate) ? candidate : ''
+    }
+  }
+  return ''
+}
+
 function extractCodeActions(text, project) {
   const actions = []
-  // Group 1: lang, group 2: optional path hint on the fence line, group 3: code body
-  const codeBlockRe = /```([\w+]+)?(?:[ \t:]+([^\n`]+))?\n([\s\S]*?)```/g
   const extMap = {
     javascript: 'js', typescript: 'ts', jsx: 'jsx', tsx: 'tsx', python: 'py', rust: 'rs',
     css: 'css', html: 'html', json: 'json', bash: 'sh', shell: 'sh', sh: 'sh', go: 'go',
     java: 'java', yaml: 'yml', yml: 'yml', sql: 'sql', toml: 'toml', md: 'md',
   }
-  const PATH_RE = /[\w./-]+\.[a-zA-Z0-9]{1,6}/
-  let match
   let idx = 0
-  while ((match = codeBlockRe.exec(text)) !== null) {
-    const lang = (match[1] || 'txt').toLowerCase()
-    const fenceHint = (match[2] || '').trim()
-    const code = match[3]
+  for (const block of extractFenceBlocks(text)) {
+    const lang = (block.lang || 'txt').toLowerCase()
+    const fenceHint = (block.hint || '').trim()
+    const code = block.code || ''
     const ext = extMap[lang] || lang
 
     // 1. path declared on the fence line, e.g. ```js src/app.js  or  ```python:main.py
     let filePath = ''
-    if (fenceHint && PATH_RE.test(fenceHint)) {
+    if (fenceHint && isPathCandidate(fenceHint)) {
       filePath = fenceHint.replace(/^["'`]|["'`]$/g, '').replace(/^title=/, '').trim()
     }
     // 2. path mentioned in the line(s) just before the block (e.g. **src/app.js** or `src/app.js`)
     if (!filePath) {
-      const before = text.slice(Math.max(0, match.index - 160), match.index)
-      const m = before.match(/([`*#>\s])([\w./-]+\.[a-zA-Z0-9]{1,6})[`*:\s]*$/)
-      if (m) filePath = m[2]
+      filePath = trailingPathCandidate(String(text || '').slice(Math.max(0, block.index - 180), block.index))
     }
     // 3. path from a leading comment on the first code line (# path  // path  <!-- path)
     let codeBody = code
     if (!filePath) {
-      const firstLine = (code.split('\n')[0] || '').trim()
-      const m = firstLine.match(/^(?:#|\/\/|<!--|\/\*)\s*([\w./-]+\.[a-zA-Z0-9]{1,6})/)
-      if (m) {
-        filePath = m[1]
+      filePath = leadingCommentPath(code)
+      if (filePath) {
         // Strip the path-hint comment line from the code body
         codeBody = code.split('\n').slice(1).join('\n').replace(/^\n/, '')
       }
@@ -1018,6 +1083,10 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
   const rlRuns = opts.rlRuns || ((_req, _res, next) => next())
   const router = express.Router()
   const engine = getAscendForgeEngine()
+  const rlGeneral = opts.rlGeneral || createRouteRateLimit({ keyPrefix: 'forge', max: 120, windowMs: 60_000 })
+  const rlMutation = opts.rlMutation || createRouteRateLimit({ keyPrefix: 'forge-mutation', max: 30, windowMs: 60_000 })
+
+  router.use(rlGeneral)
 
   function requireOwnerApproval(req, res, action) {
     if (req.body?.ownerApproved === true || req.body?.approval === 'owner-approved') return true
@@ -1038,11 +1107,11 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     })
   })
 
-  router.post('/skills/recommend', requireAuth, (req, res) => {
+  router.post('/skills/recommend', requireAuth, rlMutation, (req, res) => {
     res.json(engine.recommendSkills(req.body || {}))
   })
 
-  router.post('/plan', requireAuth, (req, res) => {
+  router.post('/plan', requireAuth, rlMutation, (req, res) => {
     try {
       const project = req.body?.project_id ? findProject(req.body.project_id) : null
       if (req.body?.project_id && !project) return res.status(404).json({ ok: false, error: 'project not found' })

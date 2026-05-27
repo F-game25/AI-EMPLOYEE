@@ -29,6 +29,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 
 const LOG = '[SecretsBroker]';
 
@@ -73,11 +74,43 @@ const LOCAL_STORE_PATH = path.join(
 
 // ── Vault backend ─────────────────────────────────────────────────────────────
 
+function isAllowedVaultHost(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  if (['localhost', '127.0.0.1', '::1'].includes(host)) return true;
+  if (net.isIP(host)) {
+    return host.startsWith('10.') || host.startsWith('192.168.') || host.startsWith('172.16.') || host === '127.0.0.1';
+  }
+  const allowlist = String(process.env.VAULT_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  return allowlist.includes(host);
+}
+
+function normalizeVaultAddress(value) {
+  const parsed = new URL(String(value || 'http://localhost:8200'));
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('VAULT_ADDR protocol must be http or https');
+  if (!isAllowedVaultHost(parsed.hostname)) throw new Error('VAULT_ADDR host is not allowlisted');
+  parsed.username = '';
+  parsed.password = '';
+  parsed.hash = '';
+  parsed.search = '';
+  return parsed.toString().replace(/\/$/, '');
+}
+
+function safeVaultPath(value) {
+  return String(value || '')
+    .split('/')
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part.slice(0, 128)))
+    .join('/');
+}
+
 class VaultBackend {
   constructor() {
-    this._addr  = process.env.VAULT_ADDR  || 'http://localhost:8200';
+    this._addr  = normalizeVaultAddress(process.env.VAULT_ADDR || 'http://localhost:8200');
     this._token = process.env.VAULT_TOKEN || '';
-    this._mount = process.env.VAULT_MOUNT || 'secret';
+    this._mount = safeVaultPath(process.env.VAULT_MOUNT || 'secret') || 'secret';
   }
 
   get name() { return 'vault'; }
@@ -93,7 +126,8 @@ class VaultBackend {
   }
 
   async get(path) {
-    const res = await fetch(`${this._addr}/v1/${this._mount}/data/${path}`, {
+    const secretPath = safeVaultPath(path);
+    const res = await fetch(`${this._addr}/v1/${this._mount}/data/${secretPath}`, {
       headers: { 'X-Vault-Token': this._token },
       signal: AbortSignal.timeout(5000),
     });
@@ -103,7 +137,8 @@ class VaultBackend {
   }
 
   async set(path, value, metadata = {}) {
-    const res = await fetch(`${this._addr}/v1/${this._mount}/data/${path}`, {
+    const secretPath = safeVaultPath(path);
+    const res = await fetch(`${this._addr}/v1/${this._mount}/data/${secretPath}`, {
       method: 'POST',
       headers: { 'X-Vault-Token': this._token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ data: value, options: { cas: 0 } }),
@@ -117,7 +152,8 @@ class VaultBackend {
   }
 
   async delete(path) {
-    const res = await fetch(`${this._addr}/v1/${this._mount}/data/${path}`, {
+    const secretPath = safeVaultPath(path);
+    const res = await fetch(`${this._addr}/v1/${this._mount}/data/${secretPath}`, {
       method: 'DELETE',
       headers: { 'X-Vault-Token': this._token },
     });

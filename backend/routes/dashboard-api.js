@@ -8,6 +8,7 @@ const express = require('express')
 const path    = require('path')
 const fs      = require('fs')
 const crypto  = require('crypto')
+const { createRouteRateLimit } = require('../middleware/route-rate-limit')
 
 const STATE_DIR = path.join(process.env.HOME || '/root', '.ai-employee')
 
@@ -45,6 +46,12 @@ function safeFileParam(value, maxLen = 120) {
   return s;
 }
 
+function boundedInt(value, fallback, min, max) {
+  const n = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(min, Math.min(max, n))
+}
+
 function firstExisting(paths) {
   return paths.find(file => {
     try { return fs.existsSync(file) } catch { return false }
@@ -80,6 +87,8 @@ function normalizeStrategy(raw, index) {
 
 module.exports = function createDashboardAPIRouter(requireAuth) {
   const r = express.Router()
+  const dashboardRateLimit = createRouteRateLimit({ keyPrefix: 'dashboard-api', max: 180, windowMs: 60_000 })
+  r.use(dashboardRateLimit)
 
   // ── SECURITY ─────────────────────────────────────────────────────────────
 
@@ -119,7 +128,9 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   })
 
   r.get('/security/audit', requireAuth, (req, res) => {
-    const { actor, action, from, to, page = 1, limit = 50 } = req.query
+    const { actor, action, from, to } = req.query
+    const page = boundedInt(req.query.page, 1, 1, 1000)
+    const limit = boundedInt(req.query.limit, 50, 1, 200)
     // Try reading from audit.db via sqlite3 — fallback to stub
     const entries = []
     try {
@@ -131,7 +142,8 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
       if (action) { q += ' AND action LIKE ?'; params.push(`%${action}%`) }
       if (from)   { q += ' AND timestamp >= ?'; params.push(from) }
       if (to)     { q += ' AND timestamp <= ?'; params.push(to) }
-      q += ` ORDER BY timestamp DESC LIMIT ${limit} OFFSET ${(page - 1) * limit}`
+      q += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+      params.push(limit, (page - 1) * limit)
       entries.push(...db.prepare(q).all(...params))
       db.close()
     } catch {

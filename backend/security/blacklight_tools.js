@@ -405,7 +405,7 @@ function handleSslCert(input) {
     let host = String(input || '').trim().replace(/^https?:\/\//, '').split('/')[0];
     const port = host.includes(':') ? parseInt(host.split(':')[1]) : 443;
     host = host.split(':')[0];
-    const socket = tls.connect({ host, port, rejectUnauthorized: false, servername: host }, () => {
+    const socket = tls.connect({ host, port, rejectUnauthorized: true, servername: host }, () => {
       const cert = socket.getPeerCertificate(true);
       socket.destroy();
       resolve({
