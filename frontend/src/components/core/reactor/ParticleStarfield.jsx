@@ -79,6 +79,8 @@ export default function ParticleStarfield() {
     && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
 
   const [frameloop, setFrameloop] = useState('always')
+  const [canvasKey, setCanvasKey] = useState(0)
+  const [contextLost, setContextLost] = useState(false)
 
   useEffect(() => {
     if (typeof document === 'undefined') return
@@ -88,17 +90,38 @@ export default function ParticleStarfield() {
   }, [])
 
   const onCreated = useCallback(({ gl }) => {
-    gl.domElement.addEventListener('webglcontextlost', e => e.preventDefault())
-    gl.domElement.addEventListener('webglcontextrestored', () => gl.forceContextRestore?.())
+    const canvas = gl.domElement
+    const onLost = (event) => {
+      event.preventDefault()
+      setContextLost(true)
+      setFrameloop('never')
+    }
+    const onRestored = () => {
+      setContextLost(false)
+      setCanvasKey(key => key + 1)
+      setFrameloop(document.hidden ? 'never' : 'always')
+    }
+    canvas.addEventListener('webglcontextlost', onLost, false)
+    canvas.addEventListener('webglcontextrestored', onRestored, false)
   }, [])
 
   if (reducedMotion) return null
+  if (contextLost) {
+    return <div className="particle-starfield-fallback" aria-hidden="true" />
+  }
 
   return (
     <Canvas
+      key={canvasKey}
       style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       camera={{ position: [0, 0, 400], fov: 50 }}
-      gl={{ antialias: false, alpha: true, powerPreference: 'low-power' }}
+      gl={{
+        antialias: false,
+        alpha: true,
+        powerPreference: 'low-power',
+        failIfMajorPerformanceCaveat: false,
+        preserveDrawingBuffer: false,
+      }}
       frameloop={frameloop}
       dpr={[1, LOW_END ? 1 : 1.5]}
       onCreated={onCreated}

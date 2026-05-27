@@ -25,6 +25,28 @@ const { app, BrowserWindow, ipcMain, shell, clipboard, screen } = electron
 const path = require('path')
 const fs = require('fs')
 
+function clearGpuShaderCaches() {
+  const removed = []
+  try {
+    const roots = [
+      app.getPath('userData'),
+      process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || null,
+    ].filter(Boolean)
+    const names = ['GPUCache', 'ShaderCache', 'DawnCache']
+    for (const root of roots) {
+      for (const name of names) {
+        const target = path.join(root, name)
+        if (!fs.existsSync(target)) continue
+        fs.rmSync(target, { recursive: true, force: true })
+        removed.push(target)
+      }
+    }
+  } catch (e) {
+    log.warn(`GPU shader cache cleanup failed: ${e.message}`)
+  }
+  if (removed.length) log.info(`GPU shader cache cleared (${removed.length} director${removed.length === 1 ? 'y' : 'ies'})`)
+}
+
 // Capture Chromium internals to disk so renderer crashes/GPU init failures
 // are visible without DevTools.
 try {
@@ -1089,6 +1111,7 @@ app.on('ready', () => {
   } catch (e) {
     log.warn(`clearCache failed (non-fatal): ${e.message}`)
   }
+  clearGpuShaderCaches()
   createLauncherWindow()
   // Defer updater wiring until AFTER the launcher window has finished loading
   // its renderer. Loading electron-updater synchronously here (which does I/O
