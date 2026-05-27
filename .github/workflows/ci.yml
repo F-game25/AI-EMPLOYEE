@@ -97,6 +97,9 @@ jobs:
       - name: Install root deps
         run: npm ci
 
+      - name: Install backend deps
+        run: npm --prefix backend ci
+
       - name: Node syntax check — backend/server.js
         run: node --check backend/server.js
 
