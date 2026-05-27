@@ -97,8 +97,8 @@ jobs:
       - name: Install root deps
         run: npm ci
 
-      - name: Install backend deps
-        run: npm --prefix backend ci
+      - name: Install backend test deps
+        run: npm install --no-save better-sqlite3@12.9.0
 
       - name: Node syntax check — backend/server.js
         run: node --check backend/server.js
