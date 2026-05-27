@@ -62,6 +62,7 @@ def isolated_ai_home(tmp_path, monkeypatch):
     (fake_home / "state").mkdir()
 
     monkeypatch.setenv("AI_HOME", str(fake_home))
+    monkeypatch.setenv("AUTO_RESEARCH_MODE", "off")
     # Patch the module-level constants that were already bound at import time
     # for ascend_forge and turbo_quant.
     for mod_name in ("ascend_forge", "turbo_quant"):
