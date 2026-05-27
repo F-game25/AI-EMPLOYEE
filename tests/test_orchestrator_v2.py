@@ -1,0 +1,94 @@
+"""Tests for runtime/core/orchestrator_v2.py — OrchestratorV2."""
+import os
+import sys
+import types
+import unittest
+from unittest.mock import MagicMock, patch
+
+# Add runtime to path FIRST so 'core' resolves to the real package
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "runtime"))
+
+
+def _inject_stubs():
+    """Inject minimal stubs so OrchestratorV2 can be imported without the full runtime."""
+    # core.orchestrator — get_llm_client
+    import core  # real package
+    orch_mod = types.ModuleType("core.orchestrator")
+    llm_stub = MagicMock()
+    llm_stub.complete.return_value = {"output": '{"category": "ops", "urgency": 3}'}
+    orch_mod.get_llm_client = MagicMock(return_value=llm_stub)
+    sys.modules["core.orchestrator"] = orch_mod
+
+    for name in ["core.knowledge_store", "core.memory_index", "core.model_routing",
+                 "core.hitl_gate", "core.execution_engine", "core.bus",
+                 "core.observability.metrics_collector", "core.observability"]:
+        sys.modules.setdefault(name, types.ModuleType(name))
+
+    # core.bus — get_message_bus
+    bus_mod = sys.modules["core.bus"]
+    bus_stub = MagicMock()
+    bus_stub.publish_sync = MagicMock()
+    bus_mod.get_message_bus = MagicMock(return_value=bus_stub)
+
+    # core.observability.metrics_collector — get_metrics_collector
+    mc_mod = sys.modules["core.observability.metrics_collector"]
+    mc_stub = MagicMock()
+    mc_stub.increment = MagicMock()
+    mc_mod.get_metrics_collector = MagicMock(return_value=mc_stub)
+
+
+_inject_stubs()
+
+from core.orchestrator_v2 import OrchestratorV2, _PipelineAbort  # noqa: E402
+
+
+class TestOrchestratorV2Init(unittest.TestCase):
+    def test_instantiates(self):
+        o = OrchestratorV2()
+        self.assertIsNotNone(o)
+
+    def test_has_llm_client(self):
+        o = OrchestratorV2()
+        self.assertIsNotNone(o._llm)
+
+
+class TestOrchestratorV2Run(unittest.TestCase):
+    def setUp(self):
+        self.orch = OrchestratorV2()
+
+    def test_run_returns_dict_with_required_keys(self):
+        result = self.orch.run("test goal")
+        for key in ("success", "result", "phases_completed", "errors", "task_id"):
+            self.assertIn(key, result)
+
+    def test_task_id_has_prefix(self):
+        result = self.orch.run("hello")
+        self.assertTrue(result["task_id"].startswith("ov2-"))
+
+    def test_classify_intent_defaults_on_bad_llm(self):
+        # LLM returns non-JSON — should gracefully default to 'ops'
+        self.orch._llm.complete.return_value = {"output": "not json"}
+        ctx = {"goal": "do something", "tenant_id": "default"}
+        self.orch._classify_intent(ctx)
+        self.assertEqual(ctx["intent"], "ops")
+        self.assertEqual(ctx["urgency"], 3)
+
+    def test_run_with_empty_goal_still_completes(self):
+        result = self.orch.run("")
+        self.assertIn("task_id", result)
+
+    def test_phases_completed_is_list(self):
+        result = self.orch.run("some task")
+        self.assertIsInstance(result["phases_completed"], list)
+
+    def test_pipeline_abort_returns_failure(self):
+        def _bad_classify(ctx):
+            raise _PipelineAbort("budget exceeded")
+        self.orch._classify_intent = _bad_classify
+        result = self.orch.run("goal")
+        self.assertFalse(result["success"])
+        self.assertIn("classify_intent", result["errors"])
+
+
+if __name__ == "__main__":
+    unittest.main()
