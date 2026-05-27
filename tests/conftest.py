@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,14 @@ if str(_RUNTIME_DIR) not in sys.path:
 _AGENTS_DIR = Path(__file__).parent.parent / "runtime" / "agents"
 if str(_AGENTS_DIR) not in sys.path:
     sys.path.insert(1, str(_AGENTS_DIR))
+
+_KNOWLEDGE_STORE = _RUNTIME_DIR / "core" / "knowledge_store.py"
+if _KNOWLEDGE_STORE.exists():
+    spec = importlib.util.spec_from_file_location("core.knowledge_store", _KNOWLEDGE_STORE)
+    if spec and spec.loader:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["core.knowledge_store"] = module
+        spec.loader.exec_module(module)
 
 
 @pytest.fixture(autouse=True)
