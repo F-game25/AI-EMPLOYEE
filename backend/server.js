@@ -605,7 +605,7 @@ app.use('/api/agents', agentsMonitorRouter);
 // Keep this mount before the legacy inline /api/forge handlers below. Express
 // is first-match wins, so overlapping canonical routes intentionally take
 // precedence while old submit/approve/reject/task/code-ai aliases remain live.
-app.use('/api/forge', require('./routes/forge')(requireAuth));
+app.use('/api/forge', require('./routes/forge')(requireAuth, { rlRuns: _rl_forge }));
 app.use('/api/compute', require('./routes/compute')(requireAuth));
 
 // Workflows — template library + CRUD

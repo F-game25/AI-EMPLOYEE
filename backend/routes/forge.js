@@ -1009,7 +1009,8 @@ async function callPythonChat(message, timeoutMs = 30000) {
   return { ok: false, error: py.error || og.error || 'no_reply' }
 }
 
-module.exports = function createForgeRouter(requireAuth) {
+module.exports = function createForgeRouter(requireAuth, opts = {}) {
+  const rlRuns = opts.rlRuns || ((_req, _res, next) => next())
   const router = express.Router()
   const engine = getAscendForgeEngine()
 
@@ -1089,7 +1090,7 @@ module.exports = function createForgeRouter(requireAuth) {
     }
   })
 
-  router.post('/runs', requireAuth, async (req, res) => {
+  router.post('/runs', requireAuth, rlRuns, async (req, res) => {
     try {
       const project = findProject(req.body?.project_id)
       if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
@@ -1185,6 +1186,79 @@ module.exports = function createForgeRouter(requireAuth) {
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
     }
+  })
+
+  // SSE streaming variant of POST /runs — emits progress events then the run object.
+  router.post('/runs/stream', requireAuth, rlRuns, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no')
+    res.flushHeaders()
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    try {
+      const project = findProject(req.body?.project_id)
+      if (!project) { send('error', { error: 'project not found' }); return res.end() }
+      const goal = String(req.body?.goal || '').trim()
+      if (!goal) { send('error', { error: 'goal required' }); return res.end() }
+
+      send('progress', { stage: 'context', message: 'Building context pack…' })
+      const runId = `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+      const contextPack = await buildContextPack(project, goal, req.body || {})
+      send('progress', { stage: 'plan', message: 'Creating plan…' })
+      const targetFiles = contextPack.relevant_files.map(item => item.path).filter(Boolean).slice(0, 8)
+      const plan = createPlan(engine, project, { goal, provider: req.body?.provider, target_files: targetFiles, target_type: project.target_type })
+      const preflightActions = actionsForPlan(plan, project, {})
+      send('progress', { stage: 'llm', message: 'Calling AI model…' })
+
+      let aiText = ''
+      try {
+        const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
+        const historySnippet = contextPack.recent_sessions.flatMap(s => s.recent || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
+        const codeContext = contextPack.relevant_files.map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`).join('\n\n')
+        const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
+        const aiResult = await callPythonChat(prompt, 60000)
+        aiText = aiResult?.response || aiResult?.reply || ''
+        if (aiText) send('progress', { stage: 'extract', message: `AI responded — extracting code actions…` })
+      } catch { /* degraded plan-only */ }
+
+      const codeActions = aiText ? extractCodeActions(aiText, project).slice(0, 12) : []
+      for (const action of codeActions) {
+        const policy = validateRunActionPolicy(action, project)
+        action.run_id = runId; action.plan_id = plan.id; action.approval_required = true
+        action.status = policy.allowed ? 'pending_approval' : 'blocked'
+        action.risk = policy.risk_level === 'high' ? 'dangerous' : policy.risk_level
+        action.risk_level = policy.risk_level
+        action.expected_result = 'File is staged in the run workspace, verified, then applied after owner approval.'
+        action.rollback_plan = 'Restore from per-file .forge_snapshots copy if apply must be reverted.'
+        action.policy_decision = policy; action.created_at = nowIso(); action.updated_at = nowIso()
+      }
+      if (codeActions.length) {
+        saveActions([...codeActions, ...loadActions()])
+        for (const action of codeActions) appendAudit('forge_run_action_proposed', { id: action.id, type: action.type, risk: action.risk_level, project_id: project.id, allowed: action.policy_decision?.allowed })
+      }
+      const actions = [...preflightActions, ...codeActions].map(action => ({ ...action, run_id: runId }))
+      const patches = actions.filter(action => RUN_WRITE_ACTIONS.has(action.type)).map(action => ({
+        action_id: action.id, files: actionFiles(action), diff: action.diff || null,
+        policy: action.policy_decision || validateRunActionPolicy(action, project),
+        status: action.status || 'pending_approval',
+      }))
+      const run = {
+        id: runId, run_id: runId, project_id: project.id, goal, status: patches.some(p => p.policy?.allowed === false) ? 'blocked' : 'awaiting_approval',
+        mode: req.body?.mode || 'supervised', provider: req.body?.provider || 'local-first',
+        max_iterations: Math.min(5, Math.max(1, Number(req.body?.max_iterations) || 3)),
+        context_pack: contextPack, plan, actions, patches, approvals: [], test_results: [],
+        review: { status: patches.length ? 'policy_checked' : 'plan_only', summary: patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated.', blocked: patches.filter(p => p.policy?.allowed === false).length },
+        final_report: null, audit_ids: [], workspace_path: runWorkspaceRoot(runId), created_at: nowIso(), updated_at: nowIso(),
+      }
+      upsertRun(run)
+      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length })
+      send('run', { ok: true, state: 'live', run_id: runId, status: run.status, context_pack: contextPack, plan, actions, patches, run })
+      send('done', { run_id: runId })
+    } catch (err) {
+      send('error', { error: err.message })
+    }
+    res.end()
   })
 
   router.get('/runs', requireAuth, (req, res) => {

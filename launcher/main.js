@@ -645,11 +645,11 @@ async function startSystem(event, { extraEnv = {}, skipExisting = true } = {}) {
   tracker.start('preflight')
   setStatus({ state: 'starting', phase: 'preflight', message: 'Running pre-flight checks', lastError: null })
 
-  const preflightEnv = backend.buildPublicEnv()
+  const preflightEnv = backend.buildEnv(extraEnv)
   const jwtKey = preflightEnv.JWT_SECRET_KEY || process.env.JWT_SECRET_KEY
   if (!jwtKey) {
-    tracker.fail('preflight', 'JWT_SECRET_KEY not found — run: bash start.sh once to generate it')
-    showDiagnostics('JWT_SECRET_KEY is missing. Run "bash start.sh" once in a terminal to generate it, then retry.')
+    tracker.fail('preflight', 'JWT_SECRET_KEY could not be generated or loaded')
+    showDiagnostics('JWT_SECRET_KEY could not be generated or loaded. Check the launcher app-home permissions and retry.')
     return { success: false }
   }
 

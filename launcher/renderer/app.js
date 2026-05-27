@@ -6,6 +6,7 @@
 
 // ── Canonical phases (must mirror launcher/src/phases.js) ─────────────
 const PHASES = [
+  { id: 'preflight',         label: 'PRE-FLIGHT' },
   { id: 'deps-check',        label: 'DEPS-CHECK' },
   { id: 'backend-spawn',     label: 'BACKEND-SPAWN' },
   { id: 'node-port-bound',   label: 'NODE-PORT-BOUND' },
@@ -29,6 +30,8 @@ const state = {
   failedPhase: null,
   failedReason: null,
   diagnostics: null,
+  lastReadiness: null,
+  lastDeps: null,
 }
 
 // ── Screen switching ───────────────────────────────────────────────────
@@ -327,6 +330,65 @@ function setSystemUp(up) {
   updateStatusBar()
 }
 
+// ── Runtime status matrix ───────────────────────────────────────────────
+function setMatrixCard(cardId, valueId, metaId, value, meta, kind = 'idle') {
+  const card = $(cardId)
+  const valueEl = $(valueId)
+  const metaEl = $(metaId)
+  if (card) card.dataset.kind = kind
+  if (valueEl) valueEl.textContent = value
+  if (metaEl) metaEl.textContent = meta
+}
+
+function renderStatusMatrix({ readiness = state.lastReadiness, deps = state.lastDeps, diagnostics = state.diagnostics } = {}) {
+  const checks = readiness?.checks || {}
+  const route = readiness?.route || diagnostics?.runtimeRoute || {}
+  const policy = diagnostics?.policy || state.diagnostics?.policy
+  const nodePort = route.nodePort || route.node || '8787'
+  const pythonPort = route.pythonPort || route.python || '18790'
+  const host = route.host || '127.0.0.1'
+
+  const gatewayOk = checks.api_health || checks.health || checks.node_port || state.systemUp
+  setMatrixCard(
+    'cardGateway', 'statusGateway', 'statusGatewayMeta',
+    gatewayOk ? 'online' : state.running ? 'starting' : 'standby',
+    `Node ${host}:${nodePort}`,
+    gatewayOk ? 'ok' : state.running ? 'warn' : 'idle'
+  )
+
+  const pythonOk = checks.python_port || readiness?.readiness?.pythonReady
+  setMatrixCard(
+    'cardPython', 'statusPython', 'statusPythonMeta',
+    pythonOk ? 'online' : gatewayOk ? 'degraded' : state.running ? 'starting' : 'standby',
+    `Backend :${pythonPort}`,
+    pythonOk ? 'ok' : gatewayOk ? 'warn' : 'idle'
+  )
+
+  const bundleReady = deps?.frontend_dist || (checks.index && checks.assets)
+  setMatrixCard(
+    'cardDashboard', 'statusDashboard', 'statusDashboardMeta',
+    bundleReady ? 'ready' : state.running ? 'checking' : 'unknown',
+    bundleReady ? 'React bundle available' : 'Run rebuild if missing',
+    bundleReady ? 'ok' : state.running ? 'warn' : 'idle'
+  )
+
+  const offline = policy?.network?.offlineByDefault !== false
+  const updates = policy?.network?.allowAutoUpdate === true
+  setMatrixCard(
+    'cardPolicy', 'statusPolicy', 'statusPolicyMeta',
+    offline ? 'local' : 'network',
+    updates ? 'Updates allowed' : 'Updates locked',
+    offline ? 'ok' : 'warn'
+  )
+
+  setMatrixCard(
+    'cardRoute', 'statusRoute', 'statusRouteMeta',
+    host,
+    `UI :${nodePort} / AI :${pythonPort}`,
+    gatewayOk ? 'ok' : 'idle'
+  )
+}
+
 // ── Boot subtitle ─────────────────────────────────────────────────────
 function setSub(text) {
   const el = $('bootSub')
@@ -351,8 +413,10 @@ async function handleStart() {
   try {
     const result = await window.ai.startSystem()
     if (result?.success || result?.alreadyRunning) {
+      state.lastReadiness = result.readiness || result.launch?.readiness || state.lastReadiness
       setSystemUp(true)
       setSub(result.alreadyRunning ? 'System already running — open the dashboard' : 'Backend ready — open the dashboard')
+      renderStatusMatrix()
     } else {
       setSub('Startup did not complete. See diagnostics.')
     }
@@ -361,6 +425,7 @@ async function handleStart() {
     setSub('Startup failed. See diagnostics.')
   } finally {
     state.running = false
+    renderStatusMatrix()
     updateButtons()
   }
 }
@@ -371,6 +436,7 @@ async function handleCancel() {
   state.running = false
   setSystemUp(false)
   setSub('Startup cancelled.')
+  renderStatusMatrix()
   updateButtons()
 }
 
@@ -386,6 +452,8 @@ async function handleStop() {
     state.currentPhase = null
     setSub('System stopped. Press START to bring it online again.')
     setTicker('system stopped')
+    state.lastReadiness = null
+    renderStatusMatrix()
     renderBar()
     renderStream()
   } catch (err) {
@@ -446,6 +514,7 @@ async function handleSysmenuAction(action) {
     case 'restart-verbose': return handleRestartVerbose()
     case 'open-logs':       return handleOpenLogs()
     case 'copy-diag':       return handleCopyDiag()
+    case 'export-diag':     return handleExportDiag()
   }
 }
 
@@ -488,6 +557,15 @@ async function handleCopyDiag() {
     setTimeout(() => (btn.textContent = orig), 1800)
   }
 }
+async function handleExportDiag() {
+  const r = await window.ai.exportDiagnostics()
+  if (r?.success) {
+    pushLog(`[diag] exported ${r.path}`)
+    setSub(`Diagnostics exported: ${r.path}`)
+  } else {
+    setSub(`Diagnostics export failed: ${r?.error || 'unknown error'}`)
+  }
+}
 async function handleRestartVerbose() {
   setScreen('boot')
   setSub('Restarting backend with verbose logging…')
@@ -509,6 +587,7 @@ async function handleRestartVerbose() {
 // ── Diagnostics screen population ─────────────────────────────────────
 function showDiagnostics({ message, diagnostics }) {
   state.diagnostics = diagnostics
+  renderStatusMatrix({ diagnostics })
   // Update phase state from the main-process snapshot (authoritative)
   if (diagnostics?.phases) {
     state.completedPhases = new Set(diagnostics.phases.completed || [])
@@ -531,6 +610,7 @@ function showDiagnostics({ message, diagnostics }) {
 // ── Setup screen (deps check) ─────────────────────────────────────────
 async function checkDeps() {
   const deps = await window.ai.checkDependencies()
+  state.lastDeps = deps
   const list = $('depsList')
   list.innerHTML = ''
   const rows = [
@@ -553,12 +633,18 @@ async function checkDeps() {
     installBtn.textContent = deps.install_allowed ? 'INSTALL DEPENDENCIES' : 'OFFLINE INSTALL LOCKED'
     installBtn.title = deps.install_reason || ''
   }
+  try {
+    state.diagnostics = await window.ai.getDiagnostics()
+  } catch {}
+  renderStatusMatrix({ deps, diagnostics: state.diagnostics })
   return deps.setup_complete
 }
 
 // ── Wire main-process events ──────────────────────────────────────────
 window.ai.onStartLog((line) => pushLog(line))
 window.ai.onStartReady((data) => {
+  state.lastReadiness = data?.readiness || data
+  renderStatusMatrix()
   setSub(data?.degraded ? 'Backend ready (degraded)' : 'Backend ready')
 })
 window.ai.onStartError((msg) => pushLog(`[ERROR] ${msg}`))
@@ -642,6 +728,7 @@ window.ai.onUiLoadStatus((status) => {
   if (status?.message) setSub(status.message)
   if (status?.message) state.subStep = String(status.message).toLowerCase()
   if (status?.lastError) pushLog(`[STATE] ${status.lastError}`)
+  renderStatusMatrix()
 })
 
 window.ai.onUiLoadFailed((payload) => {
@@ -678,6 +765,7 @@ async function init() {
   // Diagnostics screen buttons
   $('diagOpenLogsBtn').addEventListener('click', handleOpenLogs)
   $('diagCopyBtn').addEventListener('click',     handleCopyDiag)
+  $('diagExportBtn').addEventListener('click',   handleExportDiag)
   $('diagVerboseBtn').addEventListener('click',  handleRestartVerbose)
 
   // ── Backend state events: keep state.systemUp accurate so the action
@@ -737,6 +825,7 @@ async function init() {
     try {
       const status = await window.ai.checkStatus()
       if (status?.running) {
+        state.lastReadiness = status.readiness
         bootStartTs = Date.now()
         setSystemUp(true)   // ← tells updateButtons() to show STOP + OPEN
         ;['deps-check', 'backend-spawn', 'node-port-bound', 'health-ok'].forEach(p => state.completedPhases.add(p))
@@ -750,14 +839,17 @@ async function init() {
         setTicker('system already online · ready when you are')
         startTickerLoop()
         renderAllRails()
+        renderStatusMatrix()
         updateButtons()
       } else {
         setSub('Press START to bring the AI workforce online.')
         setTicker('press START to bring the system online')
+        renderStatusMatrix()
       }
     } catch {
       setSub('Press START to bring the AI workforce online.')
       setTicker('press START to bring the system online')
+      renderStatusMatrix()
     }
   }
 

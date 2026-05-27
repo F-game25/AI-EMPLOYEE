@@ -50,7 +50,7 @@ const required = [
   'src/log.js', 'src/paths.js', 'src/backend.js',
   'src/health.js', 'src/phases.js', 'src/update.js',
   'renderer/index.html', 'renderer/styles.css', 'renderer/tokens.css', 'renderer/app.js',
-  'scripts/after-pack.js', 'scripts/generate-icons.py',
+  'scripts/start.js', 'scripts/after-pack.js', 'scripts/generate-icons.py',
   'assets/icon.svg', 'assets/icon.png', 'assets/icon.ico', 'assets/icon.icns',
 ]
 required.forEach(rel => {
@@ -68,7 +68,7 @@ const jsFiles = [
   'src/log.js', 'src/paths.js', 'src/backend.js',
   'src/health.js', 'src/first_boot.js', 'src/phases.js', 'src/update.js',
   'renderer/app.js',
-  'scripts/after-pack.js', 'scripts/verify.js',
+  'scripts/start.js', 'scripts/after-pack.js', 'scripts/verify.js',
 ]
 jsFiles.forEach(rel => {
   check(rel, () => { execFileSync(process.execPath, ['-c', cd(rel)], { stdio: 'pipe' }); return 'parses' })
@@ -98,6 +98,20 @@ sends.forEach(ch => {
 })
 
 // ── 4. Defensive update.js — must not throw in plain Node ───────────────
+section('PHASE CONTRACT')
+check('renderer phase list mirrors main phase tracker', () => {
+  const { PHASES } = require(cd('src/phases.js'))
+  const renderer = fs.readFileSync(cd('renderer/app.js'), 'utf8')
+  const block = renderer.match(/const PHASES = \[([\s\S]*?)\]\nconst PHASE_LABEL_WIDTH/)
+  if (!block) throw new Error('renderer PHASES block not found')
+  const rendererPhases = [...block[1].matchAll(/id:\s*'([^']+)'/g)].map(m => m[1])
+  const expected = PHASES.join(',')
+  const actual = rendererPhases.join(',')
+  if (actual !== expected) throw new Error(`phase mismatch: renderer=[${actual}] main=[${expected}]`)
+  return `${rendererPhases.length} phases`
+})
+
+// ── 5. Defensive update.js — must not throw in plain Node ───────────────
 section('UPDATE WRAPPER (defensive)')
 check('require(./src/update) without electron', () => {
   // Spawn a child so we don't pollute this process
@@ -105,7 +119,7 @@ check('require(./src/update) without electron', () => {
   return 'no throw at require time'
 })
 
-// ── 5. Tokens file mirrors design system ────────────────────────────────
+// ── 6. Tokens file mirrors design system ────────────────────────────────
 section('DESIGN TOKENS')
 check('tokens.css defines --nx-gold + --nx-cyan + --nx-danger', () => {
   const css = fs.readFileSync(cd('renderer/tokens.css'), 'utf8')

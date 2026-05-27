@@ -84,6 +84,18 @@ function isOwnedLock(lock) {
     lock.nonce.length >= 16
 }
 
+function lockPorts(lock, desiredNode, desiredPython) {
+  return {
+    nodePort: Number(lock?.ports?.node || desiredNode),
+    pythonPort: Number(lock?.ports?.python || desiredPython),
+  }
+}
+
+function lockAgeMs(lock) {
+  const ts = Date.parse(lock?.startedAt || '')
+  return Number.isFinite(ts) ? Date.now() - ts : Infinity
+}
+
 function loadDotEnv(file) {
   const values = {}
   try {
@@ -246,12 +258,24 @@ class BackendManager extends EventEmitter {
     const desiredPython = Number.parseInt(env.PYTHON_BACKEND_PORT || env.AI_BACKEND_PORT || '18790', 10)
     const lock = readJson(this.lockFile())
 
-    // Stale lock: if recorded PIDs are all dead, remove the lock so we don't
-    // falsely treat this as an already-running system.
-    if (lock && isOwnedLock(lock) && lock.pids) {
-      const anyAlive = Object.values(lock.pids).some(pid => processAlive(pid))
-      if (!anyAlive) {
-        try { fs.unlinkSync(this.lockFile()) } catch {}
+    if (lock && isOwnedLock(lock)) {
+      const { nodePort, pythonPort } = lockPorts(lock, desiredNode, desiredPython)
+      const anyPidAlive = Object.values(lock.pids || {}).some(pid => processAlive(pid))
+      const nodePortOpen = await portOpen(nodePort, host)
+      const identity = await httpJson(`http://${host}:${nodePort}/api/runtime/identity`)
+      const health = await httpJson(`http://${host}:${nodePort}/api/health`)
+      const identityMatches = identity?.app === 'AETERNUS NEXUS' && identity?.nonce === lock.nonce
+      const runtimeLooksAlive = nodePortOpen && (identityMatches || health?.status === 'ok' || health?.node_ok === true)
+      const runtimeStillBooting = anyPidAlive && lockAgeMs(lock) < 120000
+      if (runtimeLooksAlive || runtimeStillBooting) {
+        return {
+          reused: true,
+          nonce: lock.nonce,
+          nodePort,
+          pythonPort,
+          host,
+          identityMatched: identityMatches,
+        }
       }
     }
 
@@ -289,6 +313,49 @@ class BackendManager extends EventEmitter {
     return { reused: false, nonce, nodePort, pythonPort, host }
   }
 
+  async cleanupOwnedRuntimeIfStale(env) {
+    const host = env.LISTEN_HOST || '127.0.0.1'
+    const desiredNode = Number.parseInt(env.PROBLEM_SOLVER_UI_PORT || env.PORT || '8787', 10)
+    const desiredPython = Number.parseInt(env.PYTHON_BACKEND_PORT || env.AI_BACKEND_PORT || '18790', 10)
+    const lock = readJson(this.lockFile())
+
+    if (!isOwnedLock(lock)) {
+      for (const pidFile of ['backend.pid', 'python-backend.pid']) {
+        try {
+          const pid = Number(fs.readFileSync(path.join(PATHS.runDir, pidFile), 'utf8').trim())
+          if (!processAlive(pid)) fs.unlinkSync(path.join(PATHS.runDir, pidFile))
+        } catch {}
+      }
+      return false
+    }
+
+    const { nodePort } = lockPorts(lock, desiredNode, desiredPython)
+    const anyPidAlive = Object.values(lock.pids || {}).some(pid => processAlive(pid))
+    const nodePortOpen = await portOpen(nodePort, host)
+    const identity = await httpJson(`http://${host}:${nodePort}/api/runtime/identity`)
+    const health = await httpJson(`http://${host}:${nodePort}/api/health`)
+    const identityMatches = identity?.app === 'AETERNUS NEXUS' && identity?.nonce === lock.nonce
+    const runtimeHealthy = nodePortOpen && (identityMatches || health?.status === 'ok' || health?.node_ok === true)
+    if (anyPidAlive && lockAgeMs(lock) < 120000) return false
+    if (runtimeHealthy) return false
+
+    let killedAny = false
+    for (const [name, pid] of Object.entries(lock.pids || {})) {
+      if (!processAlive(pid)) continue
+      try {
+        process.kill(Number(pid), 'SIGTERM')
+        killedAny = true
+        this.appendLog(`[launcher] Sent SIGTERM to stale owned ${name} PID ${pid}`, 'warn')
+      } catch {}
+    }
+    for (const pidFile of ['backend.pid', 'python-backend.pid']) {
+      try { fs.unlinkSync(path.join(PATHS.runDir, pidFile)) } catch {}
+    }
+    try { fs.unlinkSync(this.lockFile()) } catch {}
+    if (killedAny) await new Promise(r => setTimeout(r, 500))
+    return killedAny
+  }
+
   buildLaunchResult(route, pids = {}, commands = {}) {
     const uiOrigin = `http://${route.host}:${route.nodePort}`
     return {
@@ -313,31 +380,14 @@ class BackendManager extends EventEmitter {
     fs.mkdirSync(PATHS.logDir, { recursive: true })
     fs.mkdirSync(PATHS.runDir, { recursive: true })
 
-    // Kill any stale OS-level processes before choosing ports so they don't
-    // hold port 8787 or cause a false `reused` detection via nonce match.
-    let killedAny = false
-    for (const pidFile of ['backend.pid', 'python-backend.pid']) {
-      try {
-        const pid = Number(fs.readFileSync(path.join(PATHS.runDir, pidFile), 'utf8').trim())
-        if (pid > 0) {
-          try { process.kill(pid, 'SIGTERM'); killedAny = true } catch {}
-          this.appendLog(`[launcher] Sent SIGTERM to stale PID ${pid} (${pidFile})`, 'info')
-        }
-      } catch {}
-    }
-    if (killedAny) await new Promise(r => setTimeout(r, 300))
+    await this.cleanupOwnedRuntimeIfStale(env)
 
     const route = await this.choosePorts(env, crypto.randomBytes(16).toString('hex'))
     if (route.reused) {
-      // Verify Python is actually alive — Node alive + same nonce doesn't mean Python is up.
       const pythonAlive = await portOpen(route.pythonPort, route.host)
-      if (pythonAlive) {
-        this.launch = this.buildLaunchResult(route, readJson(this.lockFile())?.pids || {}, readJson(this.lockFile())?.commands || {})
-        this.appendLog(`Reusing owned runtime at ${this.launch.dashboardUrl}`)
-        return { ...this.launch, alreadyRunning: true, reused: true }
-      }
-      this.appendLog('Owned Node running but Python is dead — forcing fresh start', 'warn')
-      try { fs.unlinkSync(this.lockFile()) } catch {}
+      this.launch = this.buildLaunchResult(route, readJson(this.lockFile())?.pids || {}, readJson(this.lockFile())?.commands || {})
+      this.appendLog(`Reusing owned runtime at ${this.launch.dashboardUrl}${pythonAlive ? '' : ' (Python backend degraded)'}`)
+      return { ...this.launch, alreadyRunning: true, reused: true, degradedPython: !pythonAlive }
     }
     this.cancel()
 

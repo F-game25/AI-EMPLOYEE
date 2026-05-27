@@ -130,6 +130,67 @@ body.is-transparent {
   50%      { filter: brightness(1.15) saturate(1.1); }
 }
 
+/* ── Live launch status matrix ───────────────────────────────────────── */
+.launch-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--nx-s2);
+}
+.launch-card {
+  min-width: 0;
+  min-height: 58px;
+  padding: 8px 9px;
+  border: 1px solid var(--nx-border-faint);
+  border-radius: var(--nx-r-sm);
+  background: rgba(0,0,0,0.24);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+}
+.launch-card__label {
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--nx-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.launch-card__value {
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.launch-card__meta {
+  font-size: 8.5px;
+  line-height: 1.25;
+  color: var(--nx-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.launch-card[data-kind="ok"] {
+  border-color: rgba(34,197,94,0.22);
+  background: rgba(34,197,94,0.035);
+}
+.launch-card[data-kind="ok"] .launch-card__value { color: var(--nx-success); }
+.launch-card[data-kind="warn"] {
+  border-color: rgba(245,185,74,0.28);
+  background: rgba(245,185,74,0.045);
+}
+.launch-card[data-kind="warn"] .launch-card__value { color: var(--nx-warning); }
+.launch-card[data-kind="fail"] {
+  border-color: rgba(239,68,68,0.28);
+  background: rgba(239,68,68,0.045);
+}
+.launch-card[data-kind="fail"] .launch-card__value { color: var(--nx-danger); }
+
 /* ════════════════════════════════════════════════════════════════════
    CYBERPUNK TERMINAL BOOT CONSOLE
    A square, flat panel with a chrome bar, ASCII progress bar, live

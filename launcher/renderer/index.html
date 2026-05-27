@@ -36,6 +36,34 @@
       <p class="boot__sub" id="bootSub">Press START to bring the AI workforce online.</p>
     </div>
 
+    <section class="launch-grid" aria-label="Runtime status">
+      <div class="launch-card" data-kind="idle" id="cardGateway">
+        <span class="launch-card__label">Gateway</span>
+        <strong class="launch-card__value" id="statusGateway">standby</strong>
+        <small class="launch-card__meta" id="statusGatewayMeta">Node route pending</small>
+      </div>
+      <div class="launch-card" data-kind="idle" id="cardPython">
+        <span class="launch-card__label">Python</span>
+        <strong class="launch-card__value" id="statusPython">standby</strong>
+        <small class="launch-card__meta" id="statusPythonMeta">AI backend pending</small>
+      </div>
+      <div class="launch-card" data-kind="idle" id="cardDashboard">
+        <span class="launch-card__label">Dashboard</span>
+        <strong class="launch-card__value" id="statusDashboard">checking</strong>
+        <small class="launch-card__meta" id="statusDashboardMeta">Bundle not checked</small>
+      </div>
+      <div class="launch-card" data-kind="idle" id="cardPolicy">
+        <span class="launch-card__label">Policy</span>
+        <strong class="launch-card__value" id="statusPolicy">local</strong>
+        <small class="launch-card__meta" id="statusPolicyMeta">Offline-first</small>
+      </div>
+      <div class="launch-card" data-kind="idle" id="cardRoute">
+        <span class="launch-card__label">Route</span>
+        <strong class="launch-card__value" id="statusRoute">127.0.0.1</strong>
+        <small class="launch-card__meta" id="statusRouteMeta">Ports pending</small>
+      </div>
+    </section>
+
     <!-- Cyberpunk terminal boot console -->
     <section class="console" aria-label="Boot progress">
       <header class="console__head">
@@ -84,6 +112,7 @@
       <button class="sysmenu__item" data-action="restart-verbose">↻ RESTART (VERBOSE)</button>
       <button class="sysmenu__item" data-action="open-logs">▤ OPEN LOGS FOLDER</button>
       <button class="sysmenu__item" data-action="copy-diag">⎘ COPY DIAGNOSTICS</button>
+      <button class="sysmenu__item" data-action="export-diag">⇩ EXPORT DIAGNOSTICS</button>
     </div>
   </main>
 
@@ -127,6 +156,7 @@
     <div class="boot__actions boot__actions--diag">
       <button class="btn btn--ghost" id="diagOpenLogsBtn">OPEN LOGS FOLDER</button>
       <button class="btn btn--ghost" id="diagCopyBtn">COPY DIAGNOSTICS</button>
+      <button class="btn btn--ghost" id="diagExportBtn">EXPORT DIAGNOSTICS</button>
       <button class="btn btn--primary" id="diagVerboseBtn">RESTART WITH VERBOSE</button>
     </div>
   </main>

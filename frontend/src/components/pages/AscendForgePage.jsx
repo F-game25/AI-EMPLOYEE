@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { SectionLabel, StatusPill } from '../nexus-ui'
 import { toastSuccess, toastError } from '../nexus-ui/Toaster'
 import './AscendForgePage.css'
-import { JPOST, JPOST_JSON, LLM_PROVIDERS, compactId, normalizeAction, isPendingAction, canBatchApprove, mergeActionLists, postFirst } from './forge/helpers'
+import { JPOST, JPOST_JSON, TOKEN, LLM_PROVIDERS, compactId, normalizeAction, isPendingAction, canBatchApprove, mergeActionLists, postFirst } from './forge/helpers'
 import { ProjectPicker, NewProjectModal, FileTree, ChatPane, DiffViewer, ActionQueue, Terminal, PolicyPreview, ForgeSystemPanel, AgentBlueprintPanel, FileEditor, UnderstandPane, AgenticPane, RunTimeline } from './forge/components'
 
 
@@ -59,19 +59,53 @@ export default function AscendForgePage() {
     if (!sessionId || sending) return
     setSending(true)
     setMessages(prev => [...prev, { role: 'user', content: text }])
+    addTerm(`Sending goal to Forge…`, 'cmd')
     try {
-      const d = await JPOST_JSON('/api/forge/runs', {
-        project_id: project.id,
-        goal: text,
-        provider,
-        selected_skill_ids: selectedSkillIds,
-        max_iterations: 3,
+      const body = JSON.stringify({ project_id: project.id, goal: text, provider, selected_skill_ids: selectedSkillIds, max_iterations: 3 })
+      const resp = await fetch('/api/forge/runs/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {}) },
+        body,
       })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }))
+        throw new Error(err.error || `HTTP ${resp.status}`)
+      }
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let runData = null
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop()
+        for (const part of parts) {
+          const lines = part.split('\n')
+          let event = 'message'; let data = ''
+          for (const line of lines) {
+            if (line.startsWith('event: ')) event = line.slice(7).trim()
+            else if (line.startsWith('data: ')) data = line.slice(6)
+          }
+          try {
+            const parsed = JSON.parse(data)
+            if (event === 'progress') addTerm(parsed.message || parsed.stage, 'out')
+            else if (event === 'run') runData = parsed
+            else if (event === 'error') throw new Error(parsed.error || 'stream error')
+          } catch (parseErr) {
+            if (parseErr.message !== 'stream error') continue
+            throw parseErr
+          }
+        }
+      }
+      if (!runData) throw new Error('No run data received from stream')
+      const d = runData
       const run = d.run || { id: d.run_id, status: d.status, context_pack: d.context_pack, plan: d.plan, actions: d.actions }
       setActiveRun(run)
       const runActions = (d.actions || []).map(a => ({ ...a, id: a.id || compactId(), source: 'run', run_id: d.run_id || run.id }))
       mergeActions(runActions)
-      const firstDiff = runActions.find(action => action.diff)?.diff || d.patches?.find(patch => patch.diff)?.diff || null
+      const firstDiff = runActions.find(a => a.diff)?.diff || d.patches?.find(p => p.diff)?.diff || null
       if (firstDiff) setCurrentDiff(firstDiff)
       setMessages(prev => [...prev, {
         role: 'assistant',
