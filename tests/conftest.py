@@ -19,7 +19,7 @@ if str(_RUNTIME_DIR) not in sys.path:
 
 _AGENTS_DIR = Path(__file__).parent.parent / "runtime" / "agents"
 if str(_AGENTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_AGENTS_DIR))
+    sys.path.insert(1, str(_AGENTS_DIR))
 
 
 @pytest.fixture(autouse=True)

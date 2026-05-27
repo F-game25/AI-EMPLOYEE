@@ -19,6 +19,7 @@ env:
   STRICT_PIPELINE: "0"
   LOG_LEVEL: WARNING
   EVOLUTION_MODE: "OFF"
+  PYTHONPATH: runtime:runtime/agents
 
 jobs:
   # ─────────────────────────────────────────────────────────────────
