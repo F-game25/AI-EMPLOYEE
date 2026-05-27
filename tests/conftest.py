@@ -12,7 +12,11 @@ from pathlib import Path
 
 import pytest
 
-# ── Make runtime/agents importable from any test ─────────────────────────────
+# ── Make runtime packages importable from any test ───────────────────────────
+_RUNTIME_DIR = Path(__file__).parent.parent / "runtime"
+if str(_RUNTIME_DIR) not in sys.path:
+    sys.path.insert(0, str(_RUNTIME_DIR))
+
 _AGENTS_DIR = Path(__file__).parent.parent / "runtime" / "agents"
 if str(_AGENTS_DIR) not in sys.path:
     sys.path.insert(0, str(_AGENTS_DIR))
