@@ -18,6 +18,7 @@ const os = require('os')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
 const { getAscendForgeEngine, DEFAULT_APPROVAL_POLICY } = require('../ascendforge/engine')
+const { ForgeStore } = require('../services/forge_store')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 const STATE_DIR = path.resolve(process.env.STATE_DIR || process.env.AI_EMPLOYEE_STATE_DIR || path.join(os.homedir(), '.ai-employee', 'state'))
@@ -79,6 +80,7 @@ const BLOCKED_CODE_PATTERNS = [
 const MAX_RUNS = 500
 const MAX_STAGED_COPY_FILES = 2500
 const MAX_STAGED_COPY_BYTES = 50 * 1024 * 1024
+const forgeRunStore = new ForgeStore({ forgeHome: FORGE_HOME, runsFile: RUNS_FILE, maxRuns: MAX_RUNS })
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true })
@@ -100,6 +102,7 @@ function writeJson(file, data) {
 function appendAudit(event, details = {}) {
   ensureDir(path.dirname(AUDIT_FILE))
   fs.appendFileSync(AUDIT_FILE, JSON.stringify({ ts: new Date().toISOString(), event, details }) + '\n', { mode: 0o600 })
+  forgeRunStore.recordAudit(event, details)
 }
 
 function nowIso() {
@@ -127,8 +130,8 @@ function loadPlans() { return asList(PLANS_FILE) }
 function savePlans(list) { writeJson(PLANS_FILE, list.slice(0, 1000)) }
 function loadActions() { return asList(ACTIONS_FILE) }
 function saveActions(list) { writeJson(ACTIONS_FILE, list.slice(0, 2000)) }
-function loadRuns() { return asList(RUNS_FILE) }
-function saveRuns(list) { writeJson(RUNS_FILE, list.slice(0, MAX_RUNS)) }
+function loadRuns() { return forgeRunStore.loadRuns() }
+function saveRuns(list) { forgeRunStore.saveRuns(list) }
 
 function findProject(id) {
   return loadProjects().find(project => project.id === id) || null
@@ -145,22 +148,15 @@ function findAction(id) {
 }
 
 function findRun(id) {
-  return loadRuns().find(run => run.id === id || run.run_id === id) || null
+  return forgeRunStore.findRun(id)
 }
 
 function updateRun(id, patch) {
-  const runs = loadRuns()
-  const updated = runs.map(run => (run.id === id || run.run_id === id)
-    ? { ...run, ...patch, updated_at: nowIso() }
-    : run)
-  saveRuns(updated)
-  return updated.find(run => run.id === id || run.run_id === id) || null
+  return forgeRunStore.updateRun(id, patch)
 }
 
 function upsertRun(run) {
-  const runs = loadRuns().filter(item => item.id !== run.id && item.run_id !== run.run_id)
-  saveRuns([{ ...run, updated_at: nowIso() }, ...runs])
-  return findRun(run.id)
+  return forgeRunStore.upsertRun(run)
 }
 
 function updateAction(id, patch) {
@@ -1863,7 +1859,8 @@ module.exports = function createForgeRouter(requireAuth) {
       queue_depth: loadActions().filter(action => action.status === 'proposed').length,
       projects_total: loadProjects().length,
       plans_total: loadPlans().length,
-      persistence: 'file_state',
+      runs_total: loadRuns().length,
+      persistence: forgeRunStore.status(),
       approval_policy: DEFAULT_APPROVAL_POLICY,
     })
   })
