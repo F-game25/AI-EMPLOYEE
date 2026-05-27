@@ -22,13 +22,31 @@ _AGENTS_DIR = Path(__file__).parent.parent / "runtime" / "agents"
 if str(_AGENTS_DIR) not in sys.path:
     sys.path.insert(1, str(_AGENTS_DIR))
 
-_KNOWLEDGE_STORE = _RUNTIME_DIR / "core" / "knowledge_store.py"
-if _KNOWLEDGE_STORE.exists():
-    spec = importlib.util.spec_from_file_location("core.knowledge_store", _KNOWLEDGE_STORE)
+def _pin_runtime_core_module(name: str) -> None:
+    """Load selected runtime/core modules ahead of similarly named packages."""
+    module_name = f"core.{name}"
+    module_path = _RUNTIME_DIR / "core" / f"{name}.py"
+    if not module_path.exists():
+        return
+
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec and spec.loader:
         module = importlib.util.module_from_spec(spec)
-        sys.modules["core.knowledge_store"] = module
+        sys.modules[module_name] = module
         spec.loader.exec_module(module)
+
+
+for _module_name in (
+    "contracts",
+    "knowledge_store",
+    "memory_index",
+    "learning_engine",
+    "planner",
+    "task_log_store",
+    "agent_controller",
+    "task_engine",
+):
+    _pin_runtime_core_module(_module_name)
 
 
 @pytest.fixture(autouse=True)
