@@ -831,10 +831,15 @@ function extractCodeActions(text, project) {
       if (m) filePath = m[2]
     }
     // 3. path from a leading comment on the first code line (# path  // path  <!-- path)
+    let codeBody = code
     if (!filePath) {
       const firstLine = (code.split('\n')[0] || '').trim()
       const m = firstLine.match(/^(?:#|\/\/|<!--|\/\*)\s*([\w./-]+\.[a-zA-Z0-9]{1,6})/)
-      if (m) filePath = m[1]
+      if (m) {
+        filePath = m[1]
+        // Strip the path-hint comment line from the code body
+        codeBody = code.split('\n').slice(1).join('\n').replace(/^\n/, '')
+      }
     }
     // 4. fallback to a generated name
     if (!filePath) filePath = `generated_${idx + 1}.${ext}`
@@ -845,15 +850,15 @@ function extractCodeActions(text, project) {
       type: 'write_file',
       label: `Write ${filePath}`,
       file_path: filePath,
-      description: code.slice(0, 100),
+      description: codeBody.slice(0, 100),
       status: 'pending_approval',
       risk_level: 'low',
       risk_score: 0.1,
       project_id: project?.id,
-      proposed_content: code,
-      content: code,
+      proposed_content: codeBody,
+      content: codeBody,
       language: lang,
-      diff: `--- ${filePath}\n+++ ${filePath}\n${code.split('\n').map(l => '+' + l).join('\n')}`,
+      diff: `--- ${filePath}\n+++ ${filePath}\n${codeBody.split('\n').map(l => '+' + l).join('\n')}`,
     })
     idx++
   }
