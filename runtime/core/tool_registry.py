@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,31 @@ class ToolResult:
         if self.error:
             d["error"] = self.error
         return d
+
+
+class _VisibleTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._skip_depth = 0
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag.lower() in {"script", "style"}:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in {"script", "style"} and self._skip_depth:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_depth:
+            self.parts.append(data)
+
+
+def _html_to_visible_text(raw: str) -> str:
+    parser = _VisibleTextParser()
+    parser.feed(raw)
+    return " ".join(" ".join(parser.parts).split()).strip()
 
 
 class Tool(ABC):
@@ -186,12 +212,7 @@ class FetchPageTool(Tool):
         except urllib.error.URLError as exc:
             return ToolResult(status="error", error=f"fetch_failed: {exc}").to_dict()
 
-        # Strip HTML tags minimally via regex
-        import re
-        text = re.sub(r"<style[^>]*>.*?</style>", " ", raw, flags=re.DOTALL)
-        text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL)
-        text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
+        text = _html_to_visible_text(raw)
         text = text[:8000]  # cap at 8k chars
 
         return ToolResult(
