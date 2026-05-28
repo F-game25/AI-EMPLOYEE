@@ -13,11 +13,17 @@ def _inject_stubs():
     """Inject minimal stubs so OrchestratorV2 can be imported without the full runtime."""
     # core.orchestrator — get_llm_client
     import core  # real package
-    orch_mod = types.ModuleType("core.orchestrator")
+    orch_mod = sys.modules.get("core.orchestrator")
+    if orch_mod is None:
+        orch_mod = types.ModuleType("core.orchestrator")
+        sys.modules["core.orchestrator"] = orch_mod
     llm_stub = MagicMock()
     llm_stub.complete.return_value = {"output": '{"category": "ops", "urgency": 3}'}
     orch_mod.get_llm_client = MagicMock(return_value=llm_stub)
-    sys.modules["core.orchestrator"] = orch_mod
+    if not hasattr(orch_mod, "INTENT_CATEGORIES"):
+        orch_mod.INTENT_CATEGORIES = ("lead_gen", "content", "social", "research", "email", "support", "finance", "ops")
+    if not hasattr(orch_mod, "LLMClient"):
+        orch_mod.LLMClient = MagicMock
 
     for name in ["core.knowledge_store", "core.memory_index", "core.model_routing",
                  "core.hitl_gate", "core.execution_engine", "core.bus",
