@@ -16,7 +16,10 @@ from pathlib import Path
 
 import pytest
 
-os.environ["JWT_SECRET_KEY"] = "ci-test-jwt-secret-for-isolated-pytest-runs-only-32bytes"
+os.environ.setdefault(
+    "JWT_SECRET_KEY",
+    "ci-test-jwt-secret-for-isolated-pytest-runs-only-32bytes",
+)
 
 # ── Make runtime packages importable from any test ───────────────────────────
 _RUNTIME_DIR = Path(__file__).parent.parent / "runtime"

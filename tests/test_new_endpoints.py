@@ -67,9 +67,12 @@ def _make_test_token(secret: str | None = None, role: str = "admin",
     payload = {
         "sub": "test-user",
         "tenant_id": tenant_id,
+        "org_name": "Pytest",
+        "email": "pytest@example.com",
         "role": role,
         "exp": int(time.time()) + 3600,
         "jti": "test-jti-12345",
+        "type": "access",
     }
     # Build a HS256-style JWT (header.payload.signature)
     def b64url(data: bytes) -> str:
