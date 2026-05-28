@@ -66,9 +66,17 @@ def _extract_topics(text: str, n: int = 5) -> list[str]:
 
 def _append_ingestion_log(record: dict[str, Any]) -> None:
     log_path = _state_path() / "ingestion_log.jsonl"
+    safe_record = {
+        "ts": record.get("ts"),
+        "tenant_id": record.get("tenant_id"),
+        "file_type": record.get("file_type"),
+        "source_file_name": Path(str(record.get("source_file", ""))).name,
+        "text_len": len(str(record.get("text", ""))),
+        "status": record.get("status"),
+    }
     try:
         with log_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
+            f.write(json.dumps(safe_record) + "\n")
     except Exception as e:
         logger.warning("Failed to write ingestion log: %s", e)
 

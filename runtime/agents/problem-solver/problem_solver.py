@@ -80,9 +80,7 @@ def main():
                 entry["restart_count"] = restart_counts[bot]
                 entry["rc"] = rc
                 entry["out"] = "<redacted>"
-                print(
-                    f"[{now_iso()}] auto-restarted agent (count={restart_counts[bot]}) rc={rc}"
-                )
+                print("[problem-solver] auto-restarted agent")
             state["agents"].append(entry)
 
         write_state(state)

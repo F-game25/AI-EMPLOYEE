@@ -201,9 +201,9 @@ def analyze_image(file_path: str, provider: Optional[str] = None) -> dict:
     try:
         image_data = base64.standard_b64encode(path.read_bytes()).decode("utf-8")
     except Exception as e:
-        logger.warning("Could not read image %s: %s", file_path, e)
+        logger.warning("Could not read image (%s)", type(e).__name__)
         return {**base, "text": f"Image: {path.name}", "provider_used": "none",
-                "metadata": {"error": str(e)}}
+                "metadata": {"error": type(e).__name__}}
 
     # Resolve provider order
     forced = provider or _router_provider()
@@ -244,8 +244,8 @@ def analyze_image(file_path: str, provider: Optional[str] = None) -> dict:
             return {**base, **result}
 
         except Exception as e:
-            logger.warning("Vision provider %s failed for %s: %s", prov, file_path, e)
+            logger.warning("Vision provider %s failed (%s)", prov, type(e).__name__)
 
     # Graceful fallback
-    logger.warning("No vision provider succeeded for %s; returning minimal text", file_path)
+    logger.warning("No vision provider succeeded; returning minimal text")
     return {**base, "text": f"Image: {path.name}", "provider_used": "none", "metadata": {}}
