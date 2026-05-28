@@ -49,16 +49,20 @@ def create(init: Initiative) -> str:
 
 def update(init_id: str, **kwargs) -> None:
     _ensure_tables()
-    # Strict allowlist prevents SQL injection via column-name interpolation.
-    allowed = {"status", "priority", "deadline", "actual_cost_tokens", "description"}
-    sets = {k: v for k, v in kwargs.items() if k in allowed}
+    update_sql = {
+        "status": "UPDATE initiatives SET status=?, updated_at=? WHERE id=?",
+        "priority": "UPDATE initiatives SET priority=?, updated_at=? WHERE id=?",
+        "deadline": "UPDATE initiatives SET deadline=?, updated_at=? WHERE id=?",
+        "actual_cost_tokens": "UPDATE initiatives SET actual_cost_tokens=?, updated_at=? WHERE id=?",
+        "description": "UPDATE initiatives SET description=?, updated_at=? WHERE id=?",
+    }
+    sets = {k: v for k, v in kwargs.items() if k in update_sql}
     if not sets:
         return
-    sets["updated_at"] = time.time()
-    # All keys are either from the allowlist above or the literal "updated_at" — safe to interpolate.
-    cols = ", ".join(f"{k}=?" for k in sets)
+    updated_at = time.time()
     with cognitive_conn() as c:
-        c.execute(f"UPDATE initiatives SET {cols} WHERE id=?", (*sets.values(), init_id))
+        for key, value in sets.items():
+            c.execute(update_sql[key], (value, updated_at, init_id))
 
 
 def list_initiatives(tenant_id: str, status: Optional[str] = None) -> list[dict]:

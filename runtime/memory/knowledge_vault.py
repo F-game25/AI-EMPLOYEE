@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-_WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
 _SLUG_RE = re.compile(r'[^\w\-]')
 
 _DEFAULT_VAULT = os.path.join(os.path.expanduser('~'), '.ai-employee', 'vault')
@@ -32,6 +31,22 @@ def _slug(title: str) -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _extract_wikilinks(content: str) -> list[str]:
+    links: list[str] = []
+    pos = 0
+    while True:
+        start = content.find('[[', pos)
+        if start < 0:
+            return links
+        end = content.find(']]', start + 2)
+        if end < 0:
+            return links
+        target = content[start + 2:end].strip()
+        if target:
+            links.append(target)
+        pos = end + 2
 
 
 def _write_json(path: Path, data) -> None:
@@ -125,7 +140,7 @@ class KnowledgeVault:
             'tags': tags or existing_meta.get('tags', []),
         }
 
-        wikilinks = _WIKILINK_RE.findall(content)
+        wikilinks = _extract_wikilinks(content)
         raw = _render_frontmatter(meta) + f'\n{content}\n'
         path.write_text(raw, encoding='utf-8')
 

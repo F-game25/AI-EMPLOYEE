@@ -96,7 +96,8 @@ class TestHybridSearch:
         results = hybrid_search("machine learning neural networks", top_k=3, alpha=0.0)
         # With alpha=0 (pure BM25), ML docs should outscore Python doc
         sources = [r["source"] for r in results]
-        python_idx = next((i for i, s in enumerate(sources) if "b.com" in s), None)
+        from urllib.parse import urlparse
+        python_idx = next((i for i, s in enumerate(sources) if urlparse(s).hostname == "b.com"), None)
         # python doc should not be ranked first
         assert python_idx != 0 or len(results) == 1
 

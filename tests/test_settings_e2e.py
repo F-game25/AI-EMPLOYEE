@@ -176,7 +176,9 @@ class SettingsValidator:
 
         # Slack webhook validation
         if settings.get('slackWebhookUrl') and isinstance(settings['slackWebhookUrl'], str):
-            if not settings['slackWebhookUrl'].startswith('https://hooks.slack.com'):
+            from urllib.parse import urlparse
+            parsed_webhook = urlparse(settings['slackWebhookUrl'])
+            if parsed_webhook.scheme != 'https' or parsed_webhook.hostname != 'hooks.slack.com':
                 errors.append({
                     'field': 'notifications.slackWebhookUrl',
                     'message': 'Invalid Slack webhook URL'

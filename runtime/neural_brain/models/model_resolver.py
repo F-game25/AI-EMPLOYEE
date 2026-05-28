@@ -73,9 +73,18 @@ def _ollama_models(timeout: float = 2.0) -> list[dict]:
 
 def _params_b_from_name(name: str) -> float:
     """Best-effort parameter count (billions) parsed from a model tag, default 7."""
-    import re
-    m = re.search(r"(\d+(?:\.\d+)?)\s*b", (name or "").lower())
-    return float(m.group(1)) if m else 7.0
+    lowered = (name or "").lower()
+    marker = lowered.find("b")
+    if marker <= 0:
+        return 7.0
+    start = marker - 1
+    while start >= 0 and (lowered[start].isdigit() or lowered[start] == "."):
+        start -= 1
+    candidate = lowered[start + 1:marker]
+    try:
+        return float(candidate) if candidate else 7.0
+    except ValueError:
+        return 7.0
 
 
 # GGUF quant ladder (largest→smallest) — same philosophy as lifecycle_manager.select_quant.

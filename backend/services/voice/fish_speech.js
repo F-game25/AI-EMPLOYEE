@@ -58,7 +58,8 @@ function configure(options = {}) {
 }
 
 function normalizeOptions(options = {}) {
-  const baseUrl = String(options.baseUrl || DEFAULT_BASE_URL).trim().replace(/\/+$/, '');
+  let baseUrl = String(options.baseUrl || DEFAULT_BASE_URL).trim();
+  while (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
   return {
     ...DEFAULT_OPTIONS,
     ...options,

@@ -9,6 +9,17 @@ const VALID_MODELS = {
   ollama: ['llama2', 'mistral', 'neural-chat', 'dolphin-mixtral'],
 };
 
+function isValidAlertEmail(value) {
+  if (typeof value !== 'string' || value.length > 254) return false;
+  const at = value.indexOf('@');
+  if (at <= 0 || at !== value.lastIndexOf('@') || at === value.length - 1) return false;
+  const local = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  if (!local || !domain || /\s/.test(value) || domain.includes('..')) return false;
+  const labels = domain.split('.');
+  return labels.length >= 2 && labels.every((label) => label.length > 0);
+}
+
 /**
  * Validate API keys section
  */
@@ -214,8 +225,7 @@ function validateNotificationSettings(settings) {
 
   // Validate email format
   if (settings.emailForAlerts && typeof settings.emailForAlerts === 'string') {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(settings.emailForAlerts)) {
+    if (!isValidAlertEmail(settings.emailForAlerts)) {
       errors.push({
         field: 'notifications.emailForAlerts',
         message: 'Invalid email format',
