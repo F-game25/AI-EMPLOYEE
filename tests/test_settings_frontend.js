@@ -530,7 +530,8 @@ describe('SettingsPage Component Tests', () => {
       const tab = new MockNotificationsTab();
       tab.updateField('slackWebhookUrl', 'http://example.com/webhook');
 
-      const isValidSlack = tab.getFormData().slackWebhookUrl.startsWith('https://hooks.slack.com');
+      const webhookUrl = new URL(tab.getFormData().slackWebhookUrl);
+      const isValidSlack = webhookUrl.protocol === 'https:' && webhookUrl.hostname === 'hooks.slack.com';
       assert.strictEqual(isValidSlack, false);
     });
 

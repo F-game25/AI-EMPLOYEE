@@ -2585,7 +2585,11 @@ app.get('/api/neural-brain/memory/list', requireAuth, async (req, res) => {
 
 app.delete('/api/neural-brain/memory/:id', requireAuth, async (req, res) => {
   try {
-    const r = await fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/memory/${req.params.id}`, { method: 'DELETE' });
+    const memoryId = String(req.params.id || '');
+    if (!/^[A-Za-z0-9_.:-]{1,160}$/.test(memoryId)) {
+      return res.status(400).json({ ok: false, error: 'invalid memory id' });
+    }
+    const r = await fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/memory/${encodeURIComponent(memoryId)}`, { method: 'DELETE' });
     if (r?.ok) return res.json(await r.json());
   } catch (_) {}
   res.json({ ok: true });

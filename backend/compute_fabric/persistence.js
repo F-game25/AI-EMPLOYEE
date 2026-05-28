@@ -52,6 +52,12 @@ function _allowedSourceDir(fromDir) {
   ];
   return allowedRoots.some((root) => source === root || source.startsWith(root + path.sep)) ? source : null;
 }
+function _allowedSourceFile(src) {
+  const source = path.resolve(String(src || ''));
+  const allowedDir = _allowedSourceDir(path.dirname(source));
+  if (!allowedDir) return null;
+  return source === path.resolve(allowedDir, path.basename(source)) ? source : null;
+}
 function _dir(jobId) { return _safeInside(ARCHIVE_ROOT, _safeId(jobId)); }
 function _ensure(jobId) {
   const d = _dir(jobId);
@@ -112,7 +118,11 @@ function collectArtifact(jobId, { rel, content, src }) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   let buf;
   if (content != null) buf = Buffer.from(String(content));
-  else if (src && fs.existsSync(src)) buf = fs.readFileSync(src);
+  else if (src) {
+    const safeSrc = _allowedSourceFile(src);
+    if (!safeSrc || !fs.existsSync(safeSrc)) return { ok: false, error: 'source file outside allowed sync roots' };
+    buf = fs.readFileSync(safeSrc);
+  }
   else return { ok: false, error: 'no content or readable src' };
   fs.writeFileSync(dest, buf);
   _updateManifestEntry(jobId, relName, buf);

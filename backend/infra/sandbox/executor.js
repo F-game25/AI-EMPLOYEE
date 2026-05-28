@@ -89,6 +89,12 @@ function resolveWorkspacePath(workspacePath) {
   return hostWorkspace;
 }
 
+function resolveProcessWorkdir(workdir) {
+  const fallback = path.resolve(process.env.SANDBOX_PROCESS_WORKDIR || process.env.AI_EMPLOYEE_WORKSPACE_ROOT || '/tmp');
+  const resolved = resolveWorkspacePath(workdir || fallback);
+  return resolved || fallback;
+}
+
 // ── Result type ───────────────────────────────────────────────────────────────
 
 /**
@@ -204,7 +210,7 @@ class ProcessSandbox {
       agent_id,
       command,
       env = {},
-      workdir = process.env.HOME,
+      workdir = process.env.SANDBOX_PROCESS_WORKDIR || process.env.AI_EMPLOYEE_WORKSPACE_ROOT || '/tmp',
       profile = 'default',
       tenant_id = 'system',
       trace_id,
@@ -225,9 +231,10 @@ class ProcessSandbox {
     };
 
     const checkedCommand = resolveCommandSpec(command);
+    const safeWorkdir = resolveProcessWorkdir(workdir);
     const result = await _spawnWithTimeout(checkedCommand.cmd, checkedCommand.args, limits.timeout_ms, {
       env: safeEnv,
-      cwd: workdir,
+      cwd: safeWorkdir,
     });
 
     const duration_ms = Date.now() - start;

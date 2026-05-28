@@ -225,7 +225,14 @@ function validateNotificationSettings(settings) {
 
   // Validate Slack webhook URL
   if (settings.slackWebhookUrl && typeof settings.slackWebhookUrl === 'string') {
-    if (!settings.slackWebhookUrl.startsWith('https://hooks.slack.com')) {
+    let validSlackWebhook = false;
+    try {
+      const webhookUrl = new URL(settings.slackWebhookUrl);
+      validSlackWebhook = webhookUrl.protocol === 'https:' && webhookUrl.hostname === 'hooks.slack.com';
+    } catch {
+      validSlackWebhook = false;
+    }
+    if (!validSlackWebhook) {
       errors.push({
         field: 'notifications.slackWebhookUrl',
         message: 'Invalid Slack webhook URL (must start with https://hooks.slack.com)',
