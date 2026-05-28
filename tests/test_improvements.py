@@ -14,9 +14,11 @@ import json
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -63,6 +65,25 @@ def server(tmp_path):
     mod = _load_server(tmp_path)
     mod.app.dependency_overrides[mod.require_auth] = lambda: None
     client = TestClient(mod.app, raise_server_exceptions=True)
+    tenant_id = "test-tenant"
+    mod._tenant_manager.ensure_tenant(tenant_id, org_name="Test", user_email="test@example.com")
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "sub": "test-user",
+            "role": "admin",
+            "tenant_id": tenant_id,
+            "org_name": "Test",
+            "email": "test@example.com",
+            "iat": now,
+            "exp": now + 600,
+            "jti": str(uuid.uuid4()),
+            "type": "access",
+        },
+        mod._jwt_secret_env,
+        algorithm="HS256",
+    )
+    client.headers.update({"Authorization": f"Bearer {token}"})
     yield mod, client
     mod.app.dependency_overrides.clear()
 
