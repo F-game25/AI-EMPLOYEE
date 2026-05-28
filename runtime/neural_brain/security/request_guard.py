@@ -31,6 +31,7 @@ _PUBLIC_PATHS = frozenset({
     "/api/auth/login",
     "/api/auth/register",
     "/api/auth/refresh",
+    "/auth/oidc/providers",
     "/api/identity/public",
     "/api/health",
     "/health",
