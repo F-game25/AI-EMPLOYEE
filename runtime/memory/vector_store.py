@@ -62,6 +62,20 @@ def _default_path() -> Path:
     return path
 
 
+def _safe_store_path(path: Path) -> Path:
+    allowed_roots = [
+        os.path.realpath(os.getenv("STATE_DIR") or Path.home() / ".ai-employee" / "state"),
+        os.path.realpath("/tmp"),
+        os.path.realpath(os.getcwd()),
+    ]
+    candidate = os.path.realpath(path)
+    if not any(os.path.commonpath([root, candidate]) == root for root in allowed_roots):
+        raise ValueError("vector store path is outside allowed state/workspace roots")
+    safe = Path(candidate)
+    safe.parent.mkdir(parents=True, exist_ok=True)
+    return safe
+
+
 def _ts() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -70,7 +84,7 @@ class VectorStore:
     """File-backed long-term semantic memory with vector similarity search."""
 
     def __init__(self, path: Path | None = None) -> None:
-        self._path = path or _default_path()
+        self._path = _safe_store_path(path or _default_path())
         self._entries: dict[str, dict[str, Any]] = {}
         self._load()
 

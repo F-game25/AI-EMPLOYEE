@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -66,9 +68,15 @@ class RoadmapEngine:
         base = os.environ.get("STATE_DIR") or os.environ.get("AI_EMPLOYEE_STATE_DIR")
         if not base:
             base = str(Path.home() / ".ai-employee" / "state")
-        return Path(base) / "roadmaps"
+        root = os.path.realpath(base)
+        path = os.path.realpath(os.path.join(root, "roadmaps"))
+        if os.path.commonpath([root, path]) != root:
+            raise ValueError("invalid roadmap state directory")
+        return Path(path)
 
     def _path(self, roadmap_id: str) -> Path:
+        if not _SAFE_ID.fullmatch(roadmap_id):
+            raise ValueError("invalid roadmap id")
         return self._state_dir() / f"{roadmap_id}.json"
 
     def _save(self, roadmap: Roadmap) -> None:

@@ -39,6 +39,21 @@ _PY_SYMBOL = re.compile(r"^\s*(?:async\s+)?(?:def|class)\s+(\w+)", re.M)
 _JS_SYMBOL = re.compile(r"^\s*(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|class\s+(\w+)|const\s+(\w+)\s*=\s*(?:async\s*)?\()", re.M)
 _PY_IMPORT = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", re.M)
 _JS_IMPORT = re.compile(r"""(?:import[^'"]*['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))""")
+_SAFE_PROJECT_ID = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+
+
+def _safe_project_id(project_id: str) -> str:
+    if not _SAFE_PROJECT_ID.fullmatch(project_id):
+        raise ValueError("invalid project id")
+    return project_id
+
+
+def _safe_project_root(root: str) -> Path:
+    allowed_root = os.path.realpath(os.environ.get("ASCENDFORGE_ALLOWED_ROOT", os.getcwd()))
+    candidate = os.path.realpath(os.path.join(allowed_root, root))
+    if os.path.commonpath([allowed_root, candidate]) != allowed_root:
+        raise ValueError("project root is outside allowed workspace")
+    return Path(candidate)
 
 
 def _state_dir() -> Path:
@@ -54,7 +69,8 @@ def _index_dir() -> Path:
 
 def _store_for(project_id: str):
     from memory.vector_store import VectorStore
-    return VectorStore(path=_index_dir() / f"{project_id}.json")
+    safe_project = _safe_project_id(project_id)
+    return VectorStore(path=_index_dir() / f"{safe_project}.json")
 
 
 def _chunk(text: str, lang: str) -> list[tuple[str, str]]:
@@ -106,7 +122,11 @@ def _imports(text: str, lang: str) -> list[str]:
 
 def index_project(root: str, project_id: str, *, max_files: int = _MAX_FILES) -> dict:
     """Index a project tree into its own vector store + write an architecture summary."""
-    root_p = Path(root).resolve()
+    try:
+        project_id = _safe_project_id(project_id)
+        root_p = _safe_project_root(root)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     if not root_p.is_dir():
         return {"ok": False, "error": f"not a directory: {root}"}
     store = _store_for(project_id)
@@ -197,6 +217,10 @@ def query_context(project_id: str, query: str, *, k: int = 6) -> dict:
 
 
 def get_summary(project_id: str) -> dict:
+    try:
+        project_id = _safe_project_id(project_id)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "project_id": project_id}
     p = _index_dir() / f"{project_id}.summary.json"
     if not p.exists():
         return {"ok": False, "error": "not indexed yet", "project_id": project_id}

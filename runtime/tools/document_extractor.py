@@ -53,6 +53,14 @@ _CODE_LANGUAGES = {
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
+def _safe_document_path(file_path: str) -> Path:
+    root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
+    candidate = os.path.realpath(os.path.join(root, file_path))
+    if os.path.commonpath([root, candidate]) != root:
+        raise ValueError("file path is outside the allowed workspace")
+    return Path(candidate)
+
+
 def _strip_html(text: str) -> str:
     """Remove HTML tags and collapse whitespace."""
     text = re.sub(r"<[^>]+>", " ", text)
@@ -192,7 +200,10 @@ def _extract_image(path: Path) -> dict[str, Any]:
 
 def extract(file_path: str) -> dict[str, Any]:
     """Extract text from a file. Returns dict with text, metadata, pages, language, file_type."""
-    path = Path(file_path)
+    try:
+        path = _safe_document_path(file_path)
+    except ValueError as exc:
+        return {"error": str(exc)}
     ext = path.suffix.lower()
 
     if not path.exists():

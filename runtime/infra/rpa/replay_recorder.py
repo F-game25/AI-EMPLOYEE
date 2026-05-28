@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -12,10 +13,27 @@ from .schema import ActionResult, ReplayFrame
 logger = logging.getLogger(__name__)
 
 _BASE = Path(os.path.expanduser("~/.ai-employee"))
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+
+
+def _safe_component(value: str, label: str) -> str:
+    if not _SAFE_ID.fullmatch(value):
+        raise ValueError(f"invalid {label}")
+    return value
 
 
 def _session_dir(tenant_id: str, session_id: str) -> Path:
-    d = _BASE / "tenants" / tenant_id / "rpa" / "sessions" / session_id
+    root = os.path.realpath(_BASE / "tenants")
+    d = os.path.realpath(os.path.join(
+        root,
+        _safe_component(tenant_id, "tenant_id"),
+        "rpa",
+        "sessions",
+        _safe_component(session_id, "session_id"),
+    ))
+    if os.path.commonpath([root, d]) != root:
+        raise ValueError("session path escapes tenant root")
+    d = Path(d)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -65,5 +83,9 @@ class ReplayRecorder:
         return frames
 
     def screenshot_bytes(self, key: str) -> Optional[bytes]:
-        p = self._dir / key
+        root = os.path.realpath(self._dir)
+        p = os.path.realpath(os.path.join(root, key))
+        if os.path.commonpath([root, p]) != root:
+            return None
+        p = Path(p)
         return p.read_bytes() if p.exists() else None

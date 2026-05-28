@@ -28,6 +28,13 @@ _OUTREACH_COST_PER_CONTACT = 25
 _OUTREACH_RESPONSE_RATE = 0.25
 _OUTREACH_CONVERSION_RATE = 0.35
 _MONEY_MODE_AGENTS = ("lead_hunter", "email_ninja", "intel_agent", "social_guru")
+_SAFE_PATH_COMPONENT = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+
+
+def _safe_component(value: str, label: str) -> str:
+    if not _SAFE_PATH_COMPONENT.fullmatch(value):
+        raise ValueError(f"invalid {label}")
+    return value
 
 
 class MoneyMode:
@@ -555,17 +562,33 @@ class MoneyMode:
             "STATE_DIR",
             os.path.join(os.path.expanduser("~/.ai-employee"), "state"),
         )
-        return Path(base)
+        return Path(os.path.realpath(base))
 
-    @staticmethod
-    def _atomic_write(path: Path, data: str) -> None:
+    def _safe_state_path(self, *parts: str) -> Path:
+        root = os.path.realpath(self._state_dir())
+        candidate = os.path.realpath(os.path.join(root, *parts))
+        if os.path.commonpath([root, candidate]) != root:
+            raise ValueError("money mode path escapes state directory")
+        return Path(candidate)
+
+    def _atomic_write(self, path: Path, data: str) -> None:
         """Write *data* to *path* atomically via a .tmp sibling."""
+        root = os.path.realpath(self._state_dir())
+        target = os.path.realpath(path)
+        if os.path.commonpath([root, target]) != root:
+            raise ValueError("money mode write path escapes state directory")
+        path = Path(target)
         tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(data, encoding="utf-8")
         tmp.rename(path)
 
-    @staticmethod
-    def _load_json(path: Path, default: Any) -> Any:
+    def _load_json(self, path: Path, default: Any) -> Any:
+        root = os.path.realpath(self._state_dir())
+        target = os.path.realpath(path)
+        if os.path.commonpath([root, target]) != root:
+            return default
+        path = Path(target)
         if path.exists():
             try:
                 return json.loads(path.read_text(encoding="utf-8"))
@@ -602,12 +625,9 @@ class MoneyMode:
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         entry_id = str(uuid.uuid4())[:8]
         safe_topic = re.sub(r"[^\w\-]", "_", topic[:30])
-        state = self._state_dir()
-        content_dir = state / "content"
-        content_dir.mkdir(parents=True, exist_ok=True)
 
-        file_path = content_dir / f"{ts}_{safe_topic}.md"
-        log_path = state / "content_log.json"
+        file_path = self._safe_state_path("content", f"{ts}_{safe_topic}.md")
+        log_path = self._safe_state_path("content_log.json")
 
         # ── Generate via LLM ──────────────────────────────────────────────────
         system_prompt = (
@@ -794,12 +814,8 @@ class MoneyMode:
                 "gate_id": None,
                 "message": f"HITL gate unavailable — outreach blocked for safety: {exc}",
             }
-        state = self._state_dir()
-        outreach_dir = state / "outreach"
-        outreach_dir.mkdir(parents=True, exist_ok=True)
-
-        file_path = outreach_dir / f"{ts}_{entry_id}.md"
-        log_path = state / "outreach_log.json"
+        file_path = self._safe_state_path("outreach", f"{ts}_{entry_id}.md")
+        log_path = self._safe_state_path("outreach_log.json")
 
         # ── Personalise via LLM ───────────────────────────────────────────────
         system_prompt = (
@@ -897,9 +913,9 @@ async def niche_research_workflow(tenant_id: str, niche: str) -> dict:
     }
 
     # Persist only after gate is queued (human will review)
-    state = mm._state_dir()
-    state.mkdir(parents=True, exist_ok=True)
-    path = state / f"niche_research_{tenant_id}_{job_id}.json"
+    path = mm._safe_state_path(
+        f"niche_research_{_safe_component(tenant_id, 'tenant_id')}_{_safe_component(job_id, 'job_id')}.json"
+    )
     mm._save_json(path, result)
     logger.info("niche_research_workflow: saved %s (gate=%s)", path, gate_id)
     return result
@@ -985,9 +1001,7 @@ async def content_calendar_workflow(tenant_id: str, offer: dict, weeks: int = 4)
         "requires_manual": raw is None,
     }
 
-    state = mm._state_dir()
-    state.mkdir(parents=True, exist_ok=True)
-    path = state / f"content_calendar_{tenant_id}.json"
+    path = mm._safe_state_path(f"content_calendar_{_safe_component(tenant_id, 'tenant_id')}.json")
     mm._save_json(path, calendar)
     logger.info("content_calendar_workflow: saved %s (%d weeks)", path, weeks)
     return calendar
@@ -1038,9 +1052,7 @@ async def lead_research_workflow(tenant_id: str, criteria: dict) -> dict:
     }
 
     # Log lead data — never auto-act
-    state = mm._state_dir()
-    state.mkdir(parents=True, exist_ok=True)
-    log_path = state / f"lead_research_log_{tenant_id}.json"
+    log_path = mm._safe_state_path(f"lead_research_log_{_safe_component(tenant_id, 'tenant_id')}.json")
     entries: list = mm._load_json(log_path, [])
     entries.append({"job_id": job_id, "criteria": criteria, "gate_id": gate_id,
                     "logged_at": datetime.now(timezone.utc).isoformat()})
@@ -1096,10 +1108,10 @@ async def proposal_generation_workflow(tenant_id: str, client_info: dict, offer:
     }
 
     # Save draft artifact
-    state = mm._state_dir()
-    proposals_dir = state / "proposals"
-    proposals_dir.mkdir(parents=True, exist_ok=True)
-    path = proposals_dir / f"{job_id}_{tenant_id}.json"
+    path = mm._safe_state_path(
+        "proposals",
+        f"{_safe_component(job_id, 'job_id')}_{_safe_component(tenant_id, 'tenant_id')}.json",
+    )
     mm._save_json(path, proposal)
     logger.info("proposal_generation_workflow: draft saved %s (gate=%s)", path, gate_id)
     return proposal

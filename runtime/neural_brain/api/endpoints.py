@@ -1,11 +1,14 @@
 """FastAPI endpoints for Neural Brain."""
 import json
+import os
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/neural-brain", tags=["neural-brain"])
+_SAFE_TRACE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 # Mount forge sub-router (lazy import to avoid circular issues at module load)
 try:
@@ -189,7 +192,13 @@ async def get_status():
 async def get_reasoning_trace(trace_id: str):
     """Retrieve full reasoning trace."""
     try:
-        trace_file = Path("state/neural_brain/traces") / f"{trace_id}.jsonl"
+        if not _SAFE_TRACE_ID.fullmatch(trace_id):
+            raise HTTPException(status_code=400, detail="Invalid trace id")
+        trace_root = os.path.realpath("state/neural_brain/traces")
+        trace_file = os.path.realpath(os.path.join(trace_root, f"{trace_id}.jsonl"))
+        if os.path.commonpath([trace_root, trace_file]) != trace_root:
+            raise HTTPException(status_code=400, detail="Invalid trace path")
+        trace_file = Path(trace_file)
         if not trace_file.exists():
             raise HTTPException(status_code=404, detail="Trace not found")
         traces = []

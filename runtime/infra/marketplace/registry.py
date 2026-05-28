@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -20,6 +21,13 @@ logger = logging.getLogger(__name__)
 
 _DB = Path(os.path.expanduser("~/.ai-employee/marketplace.db"))
 _PLUGINS_DIR = Path(os.path.expanduser("~/.ai-employee/plugins"))
+_SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+
+
+def _safe_component(value: str, label: str) -> str:
+    if not _SAFE_COMPONENT.fullmatch(value):
+        raise ValueError(f"invalid {label}")
+    return value
 
 
 def _conn() -> sqlite3.Connection:
@@ -96,8 +104,15 @@ class PluginRegistry:
             pass  # MANIFEST.sha256 is optional
 
         # Validate all archive member paths before extraction (prevent zip slip)
-        plugin_dir = _PLUGINS_DIR / tenant_id / manifest.id
-        plugin_dir = plugin_dir.resolve()
+        plugins_root = os.path.realpath(_PLUGINS_DIR)
+        plugin_dir = os.path.realpath(os.path.join(
+            plugins_root,
+            _safe_component(tenant_id, "tenant_id"),
+            _safe_component(manifest.id, "plugin_id"),
+        ))
+        if os.path.commonpath([plugins_root, plugin_dir]) != plugins_root:
+            return {"ok": False, "error": "Plugin path escapes plugin root"}
+        plugin_dir = Path(plugin_dir)
         for member in zf.infolist():
             # Reject absolute paths and traversal sequences
             if member.filename.startswith("/") or member.filename.startswith("\\"):

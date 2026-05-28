@@ -46,6 +46,14 @@ _NVIDIA_ENDPOINT      = "https://integrate.api.nvidia.com/v1/chat/completions"
 _ANTHROPIC_MODEL      = "claude-haiku-4-5-20251001"
 
 
+def _safe_workspace_file(file_path: str) -> Path:
+    root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
+    candidate = os.path.realpath(os.path.join(root, file_path))
+    if os.path.commonpath([root, candidate]) != root:
+        raise ValueError("file path is outside the allowed workspace")
+    return Path(candidate)
+
+
 # ── Provider detection helpers ────────────────────────────────────────────────
 
 def _ollama_host() -> str:
@@ -177,7 +185,11 @@ def analyze_image(file_path: str, provider: Optional[str] = None) -> dict:
     Returns:
         { text, file_type, source_file, metadata, provider_used }
     """
-    path = Path(file_path)
+    try:
+        path = _safe_workspace_file(file_path)
+    except ValueError as exc:
+        return {"text": "", "file_type": "", "source_file": "", "provider_used": "none",
+                "metadata": {"error": str(exc)}}
     ext  = path.suffix.lower().lstrip(".")
     base = {"file_type": ext, "source_file": str(file_path)}
 

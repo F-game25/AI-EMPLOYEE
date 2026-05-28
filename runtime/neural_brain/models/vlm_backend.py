@@ -1,9 +1,19 @@
 """Vision Language Model routing — llava:7b."""
 import logging
 import base64
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_image_path(value: str) -> Path | None:
+    root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
+    candidate = os.path.realpath(os.path.join(root, value))
+    if os.path.commonpath([root, candidate]) != root:
+        return None
+    path = Path(candidate)
+    return path if path.is_file() else None
 
 
 def route_vlm(request: dict) -> dict:
@@ -26,9 +36,10 @@ def route_vlm(request: dict) -> dict:
                 if img.startswith("data:image"):
                     # Already base64
                     b64_images.append(img.split(",")[1] if "," in img else img)
-                elif Path(img).exists():
+                elif _safe_image_path(img):
                     # File path
-                    with open(img, "rb") as f:
+                    safe_path = _safe_image_path(img)
+                    with open(safe_path, "rb") as f:
                         b64_images.append(base64.b64encode(f.read()).decode())
                 else:
                     # Assume it's already base64
