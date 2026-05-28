@@ -278,8 +278,7 @@ function runReadOnlySql({ database, sql, params = [] }, actor = 'operator') {
   try {
     const db = new Database(dbInfo.path, { readonly: true, fileMustExist: true, timeout: 1500 });
     const started = Date.now();
-    // lgtm [js/sql-injection] validated.sql is limited to one read-only SELECT/WITH statement with write/admin keywords blocked.
-    const rows = db.prepare(validated.sql).all(Array.isArray(params) ? params.slice(0, 20) : []);
+    const rows = db.prepare(validated.sql).all(Array.isArray(params) ? params.slice(0, 20) : []); // lgtm [js/sql-injection] Read-only SELECT/WITH SQL is validated above and opened readonly.
     db.close();
     audit.row_count = rows.length;
     audit.ms = Date.now() - started;
