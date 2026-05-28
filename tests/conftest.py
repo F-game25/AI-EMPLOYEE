@@ -37,11 +37,18 @@ def _pin_runtime_core_module(name: str) -> None:
 
 
 for _module_name in (
+    "state_paths",
+    "bus",
+    "cost_ledger",
+    "model_routing",
+    "phase_reporter",
+    "wavefield_provider",
     "contracts",
     "knowledge_store",
     "memory_index",
     "learning_engine",
     "planner",
+    "orchestrator",
     "task_log_store",
     "agent_controller",
     "task_engine",
