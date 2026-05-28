@@ -104,6 +104,129 @@ CREATE TABLE IF NOT EXISTS guardrail_violations (
     detail TEXT NOT NULL,
     occurred_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS outcome_records (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    success INTEGER NOT NULL,
+    quality_score REAL NOT NULL,
+    duration_ms REAL NOT NULL,
+    cost_tokens INTEGER DEFAULT 0,
+    user_feedback INTEGER,
+    recorded_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_or_agent ON outcome_records(agent_id, tenant_id, recorded_at);
+
+CREATE TABLE IF NOT EXISTS effectiveness_scores (
+    agent_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    score REAL DEFAULT 1.0,
+    sample_count INTEGER DEFAULT 0,
+    trend TEXT DEFAULT 'stable',
+    computed_at REAL NOT NULL,
+    PRIMARY KEY (agent_id, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS routing_suggestions (
+    id TEXT PRIMARY KEY,
+    task_type TEXT NOT NULL,
+    from_agent TEXT NOT NULL,
+    to_agent TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    sample_size INTEGER NOT NULL,
+    quality_delta REAL NOT NULL,
+    suggested_at REAL NOT NULL,
+    accepted INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS strategy_preferences (
+    seq_key TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    confidence REAL DEFAULT 0.5,
+    sample_count INTEGER DEFAULT 1,
+    PRIMARY KEY (seq_key, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS teammate_identity (
+    tenant_id TEXT PRIMARY KEY,
+    name TEXT DEFAULT 'Aeternus',
+    persona_summary TEXT NOT NULL,
+    operational_focus TEXT DEFAULT 'general',
+    expertise_areas TEXT DEFAULT '[]',
+    interaction_count INTEGER DEFAULT 0,
+    formed_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversation_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    topic TEXT,
+    recorded_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cm_user ON conversation_memory(user_id, tenant_id, recorded_at);
+
+CREATE TABLE IF NOT EXISTS user_habits (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    workflow_type TEXT NOT NULL,
+    typical_hour INTEGER NOT NULL,
+    frequency INTEGER DEFAULT 1,
+    confidence REAL DEFAULT 0.5,
+    detected_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_uh_user ON user_habits(user_id, tenant_id);
+
+CREATE TABLE IF NOT EXISTS comm_profiles (
+    user_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    prefers_brief INTEGER DEFAULT 0,
+    technical_depth INTEGER DEFAULT 1,
+    formality INTEGER DEFAULT 1,
+    emoji_ok INTEGER DEFAULT 0,
+    sample_count INTEGER DEFAULT 0,
+    PRIMARY KEY (user_id, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS proactive_insights (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    user_id TEXT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    insight_type TEXT NOT NULL,
+    priority INTEGER DEFAULT 5,
+    dismissed INTEGER DEFAULT 0,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pi_tenant ON proactive_insights(tenant_id, dismissed);
+
+CREATE TABLE IF NOT EXISTS deadlines (
+    id TEXT PRIMARY KEY,
+    initiative_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    deadline_ts REAL NOT NULL,
+    priority INTEGER DEFAULT 5,
+    status TEXT DEFAULT 'pending',
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dl_tenant ON deadlines(tenant_id, status);
+
+CREATE TABLE IF NOT EXISTS op_cycles (
+    workflow_type TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    period_days INTEGER NOT NULL,
+    confidence REAL NOT NULL,
+    last_peak REAL NOT NULL,
+    detected_at REAL NOT NULL,
+    PRIMARY KEY (workflow_type, tenant_id)
+);
 """
 
 
