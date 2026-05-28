@@ -36,10 +36,12 @@ _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9\-]{1,}")
 
 # Named entity / specificity patterns
 _NAMED_ENTITY_RE = re.compile(r"\b[A-Z][A-Za-z0-9]{2,}(?:\s+[A-Z][A-Za-z0-9]{2,})*\b")
+_ACRONYM_RE = re.compile(r"\b[A-Z]{2,}\b")
 _NUMBER_RE = re.compile(r"\b\d[\d,.%$€£]*\b")
+_COMPARISON_SYMBOL_RE = re.compile(r"(?:<=|>=|<|>)\s*\d")
 _SPECIFIC_PHRASE_RE = re.compile(
     r"\b(less than|more than|greater than|at least|at most|between|minimum|maximum|"
-    r"within|deadline|by \w+|per \w+|exactly|specifically|requirement|constraint)\b",
+    r"within|deadline|by \w+|per \w+|exactly|specifically|requirement|constraint|moq)\b",
     re.IGNORECASE,
 )
 
@@ -197,8 +199,10 @@ class ContextSufficiencyEvaluator:
         score = 0.0
         # Named entities (capitalized multi-char tokens not at sentence start)
         entities = _NAMED_ENTITY_RE.findall(goal)
-        if entities:
-            score += min(0.4, 0.15 * len(entities))
+        acronyms = _ACRONYM_RE.findall(goal)
+        entity_count = len(entities) + len(acronyms)
+        if entity_count:
+            score += min(0.4, 0.15 * entity_count)
         # Explicit numbers / quantities
         numbers = _NUMBER_RE.findall(goal)
         if numbers:
@@ -207,6 +211,8 @@ class ContextSufficiencyEvaluator:
         phrases = _SPECIFIC_PHRASE_RE.findall(goal)
         if phrases:
             score += min(0.25, 0.1 * len(phrases))
+        if _COMPARISON_SYMBOL_RE.search(goal):
+            score += 0.1
         return min(1.0, score)
 
     def _historical_success_score(self, goal: str) -> float:
