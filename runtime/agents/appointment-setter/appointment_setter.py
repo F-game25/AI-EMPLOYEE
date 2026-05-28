@@ -56,13 +56,13 @@ def load_chatlog():
     except Exception:
         return []
 
-def append_chatlog(e):
+def append_chatlog(message_len: int):
     CHATLOG.parent.mkdir(parents=True, exist_ok=True)
     safe = {
-        "type": e.get("type"),
-        "bot": e.get("bot"),
-        "ts": e.get("ts"),
-        "message_len": len(str(e.get("message", ""))),
+        "type": "bot",
+        "bot": "appointment-setter",
+        "ts": now_iso(),
+        "message_len": message_len,
     }
     with open(CHATLOG, "a") as f:
         f.write(json.dumps(safe) + "\n")
@@ -360,7 +360,7 @@ def process_chatlog(last_idx: int) -> int:
 
         if response:
             print(f"[appointment-setter] response ready ({len(response)} chars)")
-            append_chatlog({"type": "bot", "bot": "appointment-setter", "message": response, "ts": now_iso()})
+            append_chatlog(len(response))
 
     return new_idx
 

@@ -1570,11 +1570,12 @@ def _log_activity(
     entry: dict = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "event_type": event_type,
-        "description": _redact_sensitive_text(description),
+        "description_len": len(description),
+        "description_hash": hashlib.sha256(description.encode("utf-8", errors="ignore")).hexdigest()[:16],
         "source": source,
     }
     if details:
-        entry["details"] = _redact_sensitive_details(details)
+        entry["detail_keys"] = sorted(str(k) for k in details.keys())[:50]
     try:
         ACTIVITY_LOG.parent.mkdir(parents=True, exist_ok=True)
         with _ACTIVITY_LOCK:
