@@ -3547,8 +3547,12 @@ for (const [m, p, pyP] of [
 for (const ep of ['tools', 'skills']) {
   app.post(`/api/${ep}/:name/execute`, requireAuth, async (req, res) => {
     try {
+      const toolName = String(req.params.name || '');
+      if (!/^[A-Za-z0-9_.:-]{1,160}$/.test(toolName)) {
+        return res.status(400).json({ ok: false, error: 'invalid tool name' });
+      }
       const r = await fetch(
-        `http://127.0.0.1:${PYTHON_BACKEND_PORT}/${ep}/${req.params.name}/execute`,
+        `http://127.0.0.1:${PYTHON_BACKEND_PORT}/${ep}/${encodeURIComponent(toolName)}/execute`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.authorization || '' },
@@ -4779,9 +4783,8 @@ app.post('/api/chat', requireAuth, _rl_chat, async (req, res) => {
   }
   if (learnTopic) {
     // Fire learning session via Node proxy (don't block chat response)
-    const proto = req.protocol || 'http';
-    const host = req.get('host') || `localhost:${PORT}`;
-    fetch(`${proto}://${host}/api/learning/execute`, {
+    const localPort = Number.parseInt(String(PORT), 10) || 8787;
+    fetch(`http://127.0.0.1:${localPort}/api/learning/execute`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'authorization': req.headers.authorization || '' },
       body: JSON.stringify({ topic: learnTopic, depth: 'normal' }),
