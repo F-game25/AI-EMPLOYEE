@@ -55,7 +55,7 @@ def client():
 # token generation; uses the same stdlib HMAC approach as break_glass.py)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _make_test_token(secret: str = "test-secret", role: str = "admin",
+def _make_test_token(secret: str | None = None, role: str = "admin",
                      tenant_id: str = "test-tenant") -> str:
     """Create a minimal signed token that passes require_auth when REQUIRE_AUTH=1."""
     import base64
@@ -63,6 +63,7 @@ def _make_test_token(secret: str = "test-secret", role: str = "admin",
     import json
     import time
 
+    signing_secret = secret or os.environ.get("JWT_SECRET_KEY", "test-secret")
     payload = {
         "sub": "test-user",
         "tenant_id": tenant_id,
@@ -77,7 +78,7 @@ def _make_test_token(secret: str = "test-secret", role: str = "admin",
     header = b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     body = b64url(json.dumps(payload).encode())
     signing_input = f"{header}.{body}"
-    sig = hmac.new(secret.encode(), signing_input.encode(), "sha256").digest()
+    sig = hmac.new(signing_secret.encode(), signing_input.encode(), "sha256").digest()
     return f"{signing_input}.{b64url(sig)}"
 
 
