@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib
 import importlib.util
 import time
 import uuid
@@ -81,6 +82,11 @@ def _pin_runtime_core_module(name: str) -> None:
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
+        try:
+            core_pkg = importlib.import_module("core")
+            setattr(core_pkg, name, module)
+        except Exception:
+            pass
 
 
 for _module_name in (
