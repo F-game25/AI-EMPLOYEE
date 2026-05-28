@@ -9,9 +9,13 @@ from __future__ import annotations
 import os
 import sys
 import importlib.util
+import time
+import uuid
 from pathlib import Path
 
 import pytest
+
+os.environ["JWT_SECRET_KEY"] = "ci-test-jwt-secret-for-isolated-pytest-runs-only-32bytes"
 
 # ── Make runtime packages importable from any test ───────────────────────────
 _RUNTIME_DIR = Path(__file__).parent.parent / "runtime"
@@ -21,6 +25,49 @@ if str(_RUNTIME_DIR) not in sys.path:
 _AGENTS_DIR = Path(__file__).parent.parent / "runtime" / "agents"
 if str(_AGENTS_DIR) not in sys.path:
     sys.path.insert(1, str(_AGENTS_DIR))
+
+
+def _install_testclient_auth_header() -> None:
+    """Attach a valid zero-trust/tenant JWT to TestClient API calls by default."""
+    try:
+        import jwt
+        from starlette.testclient import TestClient
+    except Exception:
+        return
+
+    if getattr(TestClient, "_ai_employee_auth_patched", False):
+        return
+
+    original_request = TestClient.request
+
+    def request_with_default_auth(self, method, url, *args, **kwargs):
+        headers = dict(kwargs.pop("headers", {}) or {})
+        has_auth = any(str(key).lower() == "authorization" for key in headers)
+        if str(url).startswith("/api/") and not str(url).startswith("/api/auth/") and not has_auth:
+            now = int(time.time())
+            token = jwt.encode(
+                {
+                    "sub": "pytest-user",
+                    "role": "admin",
+                    "tenant_id": "test-tenant",
+                    "org_name": "Pytest",
+                    "email": "pytest@example.com",
+                    "iat": now,
+                    "exp": now + 600,
+                    "jti": str(uuid.uuid4()),
+                    "type": "access",
+                },
+                os.environ["JWT_SECRET_KEY"],
+                algorithm="HS256",
+            )
+            headers["Authorization"] = f"Bearer {token}"
+        return original_request(self, method, url, *args, headers=headers, **kwargs)
+
+    TestClient.request = request_with_default_auth
+    TestClient._ai_employee_auth_patched = True
+
+
+_install_testclient_auth_header()
 
 def _pin_runtime_core_module(name: str) -> None:
     """Load selected runtime/core modules ahead of similarly named packages."""
