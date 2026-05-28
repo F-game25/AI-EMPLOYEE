@@ -20750,7 +20750,11 @@ def submit_task(payload: dict):
                 continue
             target = _resolve_agent_target(agent_id)
             if target and _agent_dir_exists(target) and _SAFE_AGENT_ID_PAT.match(target):
-                pid_file = AI_HOME / "run" / (target + ".pid")
+                run_root = os.path.realpath(AI_HOME / "run")
+                pid_path = os.path.normpath(os.path.join(run_root, target + ".pid"))
+                if os.path.commonpath([run_root, pid_path]) != run_root:
+                    continue
+                pid_file = Path(pid_path)
                 already_running = False
                 if pid_file.exists():
                     try:

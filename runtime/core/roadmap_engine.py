@@ -77,7 +77,11 @@ class RoadmapEngine:
     def _path(self, roadmap_id: str) -> Path:
         if not _SAFE_ID.fullmatch(roadmap_id):
             raise ValueError("invalid roadmap id")
-        return self._state_dir() / f"{roadmap_id}.json"
+        base = os.path.realpath(self._state_dir())
+        fullpath = os.path.normpath(os.path.join(base, f"{roadmap_id}.json"))
+        if os.path.commonpath([base, fullpath]) != base:
+            raise ValueError("roadmap path escapes state directory")
+        return Path(fullpath)
 
     def _save(self, roadmap: Roadmap) -> None:
         d = self._state_dir()

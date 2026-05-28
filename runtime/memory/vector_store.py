@@ -63,15 +63,15 @@ def _default_path() -> Path:
 
 
 def _safe_store_path(path: Path) -> Path:
-    allowed_roots = [
-        os.path.realpath(os.getenv("STATE_DIR") or Path.home() / ".ai-employee" / "state"),
-        os.path.realpath("/tmp"),
-        os.path.realpath(os.getcwd()),
-    ]
-    candidate = os.path.realpath(path)
-    if not any(os.path.commonpath([root, candidate]) == root for root in allowed_roots):
-        raise ValueError("vector store path is outside allowed state/workspace roots")
-    safe = Path(candidate)
+    base = os.path.realpath(os.getenv("STATE_DIR") or Path.home() / ".ai-employee" / "state")
+    filename = Path(path).name
+    if not filename.endswith(".json") or filename in {"", ".", ".."}:
+        raise ValueError("invalid vector store filename")
+    subdir = "code_index" if Path(path).parent.name == "code_index" else ""
+    fullpath = os.path.normpath(os.path.join(base, subdir, filename))
+    if os.path.commonpath([base, fullpath]) != base:
+        raise ValueError("vector store path is outside allowed state root")
+    safe = Path(fullpath)
     safe.parent.mkdir(parents=True, exist_ok=True)
     return safe
 

@@ -55,7 +55,10 @@ _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 def _safe_document_path(file_path: str) -> Path:
     root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
-    candidate = os.path.realpath(os.path.join(root, file_path))
+    filename = os.path.basename(file_path)
+    if filename in {"", ".", ".."}:
+        raise ValueError("invalid file name")
+    candidate = os.path.normpath(os.path.join(root, filename))
     if os.path.commonpath([root, candidate]) != root:
         raise ValueError("file path is outside the allowed workspace")
     return Path(candidate)

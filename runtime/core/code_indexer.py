@@ -50,7 +50,15 @@ def _safe_project_id(project_id: str) -> str:
 
 def _safe_project_root(root: str) -> Path:
     allowed_root = os.path.realpath(os.environ.get("ASCENDFORGE_ALLOWED_ROOT", os.getcwd()))
-    candidate = os.path.realpath(os.path.join(allowed_root, root))
+    if root in {"", "."}:
+        return Path(allowed_root)
+    absolute_candidate = os.path.realpath(root)
+    if os.path.commonpath([allowed_root, absolute_candidate]) == allowed_root:
+        return Path(absolute_candidate)
+    project_dir = os.path.basename(root.rstrip(os.sep))
+    if project_dir in {"", ".", ".."}:
+        raise ValueError("invalid project root")
+    candidate = os.path.normpath(os.path.join(allowed_root, project_dir))
     if os.path.commonpath([allowed_root, candidate]) != allowed_root:
         raise ValueError("project root is outside allowed workspace")
     return Path(candidate)
@@ -71,6 +79,15 @@ def _store_for(project_id: str):
     from memory.vector_store import VectorStore
     safe_project = _safe_project_id(project_id)
     return VectorStore(path=_index_dir() / f"{safe_project}.json")
+
+
+def _summary_path(project_id: str) -> Path:
+    safe_project = _safe_project_id(project_id)
+    base = os.path.realpath(_index_dir())
+    fullpath = os.path.normpath(os.path.join(base, f"{safe_project}.summary.json"))
+    if os.path.commonpath([base, fullpath]) != base:
+        raise ValueError("summary path escapes index directory")
+    return Path(fullpath)
 
 
 def _chunk(text: str, lang: str) -> list[tuple[str, str]]:
@@ -185,7 +202,7 @@ def index_project(root: str, project_id: str, *, max_files: int = _MAX_FILES) ->
         "import_edges": import_edges,
         "duration_s": round(time.time() - t0, 2),
     }
-    (_index_dir() / f"{project_id}.summary.json").write_text(json.dumps(summary, indent=2))
+    _summary_path(project_id).write_text(json.dumps(summary, indent=2))
     logger.info("indexed %s: %d files, %d chunks in %.1fs", project_id, files, chunks, summary["duration_s"])
     return {"ok": True, **summary}
 
@@ -221,7 +238,10 @@ def get_summary(project_id: str) -> dict:
         project_id = _safe_project_id(project_id)
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "project_id": project_id}
-    p = _index_dir() / f"{project_id}.summary.json"
+    try:
+        p = _summary_path(project_id)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "project_id": project_id}
     if not p.exists():
         return {"ok": False, "error": "not indexed yet", "project_id": project_id}
     try:
