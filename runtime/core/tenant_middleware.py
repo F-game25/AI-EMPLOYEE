@@ -29,6 +29,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
             "/auth/register",
             "/auth/login",
             "/auth/refresh",
+            "/auth/oidc/providers",
             "/auth/token",
             "/version",
             "/openapi.json",
