@@ -135,8 +135,8 @@ try:
     client = LLMClient()
     print(f"✓ LLMClient initialized")
     print(f"  - Backend: {client.backend}")
-    print(f"  - State directory: {client.state_dir}")
-    print(f"  - Log path: {client.log_path}")
+    print("  - State directory: configured")
+    print("  - Log path: configured")
     RESULTS['tests']['llm_client_config'] = 'PASS'
 except Exception as e:
     print(f"✗ LLMClient initialization failed: {e}")

@@ -156,7 +156,7 @@ class CodexEngine:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.log_path = self.state_dir / "codex_analysis.jsonl"
-        logger.info(f"CodexEngine initialized: cache_dir={self.cache_dir}, state_dir={self.state_dir}")
+        logger.info("CodexEngine initialized with configured cache and state directories")
 
     def analyze(self, file_path: str, content: str, language: Optional[str] = None) -> AnalysisResult:
         """

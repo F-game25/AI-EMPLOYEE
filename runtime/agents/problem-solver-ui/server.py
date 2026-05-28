@@ -1551,9 +1551,13 @@ _SENSITIVE_DETAIL_PAT = re.compile(
 def _redact_sensitive_details(details: dict) -> dict:
     """Return a copy of details with values for sensitive-named keys redacted."""
     return {
-        k: "***" if _SENSITIVE_DETAIL_PAT.search(str(k)) else v
+        k: "***" if _SENSITIVE_DETAIL_PAT.search(str(k)) else _redact_sensitive_text(str(v))
         for k, v in details.items()
     }
+
+
+def _redact_sensitive_text(value: str) -> str:
+    return _SENSITIVE_DETAIL_PAT.sub("***", value)[:500]
 
 
 def _log_activity(
@@ -1566,7 +1570,7 @@ def _log_activity(
     entry: dict = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "event_type": event_type,
-        "description": description,
+        "description": _redact_sensitive_text(description),
         "source": source,
     }
     if details:

@@ -85,7 +85,7 @@ class RoadmapEngine:
         try:
             return json.loads(p.read_text(encoding="utf-8"))
         except Exception as exc:
-            logger.error("roadmap_engine: failed to load %s — %s", p, exc)
+            logger.error("roadmap_engine: failed to load roadmap %s (%s)", roadmap_id, type(exc).__name__)
             return None
 
     @staticmethod

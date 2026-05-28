@@ -1301,7 +1301,9 @@ def _http_get_json(url: str, headers: Optional[dict] = None, timeout: int = WEB_
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8", errors="replace"))
     except Exception as exc:
-        logger.debug("_http_get_json error for %s: %s", url, exc)
+        parsed = urllib.parse.urlparse(url)
+        safe_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+        logger.debug("_http_get_json error for %s (%s)", safe_url, type(exc).__name__)
         return None
 
 

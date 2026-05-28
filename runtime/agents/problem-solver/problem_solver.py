@@ -79,7 +79,7 @@ def main():
                 entry["action"] = "restarted"
                 entry["restart_count"] = restart_counts[bot]
                 entry["rc"] = rc
-                entry["out"] = out[-400:].strip()
+                entry["out"] = "<redacted>"
                 print(
                     f"[{now_iso()}] auto-restarted {bot} (count={restart_counts[bot]}) rc={rc}"
                 )
