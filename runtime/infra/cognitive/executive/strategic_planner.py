@@ -31,6 +31,7 @@ _ensure_table()
 
 def _store_decision(d: ExecutiveDecision) -> None:
     import json
+    _ensure_table()
     with cognitive_conn() as c:
         c.execute(
             "INSERT OR REPLACE INTO executive_decisions VALUES (?,?,?,?,?,?,?,?)",
@@ -42,6 +43,7 @@ def _store_decision(d: ExecutiveDecision) -> None:
 
 def list_decisions(tenant_id: str, limit: int = 20) -> list[dict]:
     import json
+    _ensure_table()
     with cognitive_conn() as c:
         rows = c.execute(
             "SELECT * FROM executive_decisions WHERE tenant_id=? ORDER BY decided_at DESC LIMIT ?",

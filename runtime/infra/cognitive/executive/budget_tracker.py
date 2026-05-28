@@ -27,6 +27,7 @@ def _today() -> str:
 
 
 def record_usage(tenant_id: str, tokens: int) -> None:
+    _ensure_table()
     day = _today()
     with cognitive_conn() as c:
         c.execute(
@@ -43,6 +44,7 @@ def record_usage(tenant_id: str, tokens: int) -> None:
 
 
 def get_used_today(tenant_id: str) -> int:
+    _ensure_table()
     day = _today()
     with cognitive_conn() as c:
         row = c.execute(

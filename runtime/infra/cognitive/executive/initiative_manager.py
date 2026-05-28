@@ -35,6 +35,7 @@ _ensure_tables()
 
 
 def create(init: Initiative) -> str:
+    _ensure_tables()
     with cognitive_conn() as c:
         c.execute(
             "INSERT OR REPLACE INTO initiatives VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -47,6 +48,7 @@ def create(init: Initiative) -> str:
 
 
 def update(init_id: str, **kwargs) -> None:
+    _ensure_tables()
     # Strict allowlist prevents SQL injection via column-name interpolation.
     allowed = {"status", "priority", "deadline", "actual_cost_tokens", "description"}
     sets = {k: v for k, v in kwargs.items() if k in allowed}
@@ -60,6 +62,7 @@ def update(init_id: str, **kwargs) -> None:
 
 
 def list_initiatives(tenant_id: str, status: Optional[str] = None) -> list[dict]:
+    _ensure_tables()
     with cognitive_conn() as c:
         if status:
             rows = c.execute(
@@ -94,6 +97,7 @@ class InitiativeManager:
             await asyncio.sleep(60)
 
     def _advance_all(self) -> None:
+        _ensure_tables()
         with cognitive_conn() as c:
             rows = c.execute("SELECT id, tenant_id, status, dependencies, deadline FROM initiatives").fetchall()
         for row in rows:
