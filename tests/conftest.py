@@ -43,6 +43,7 @@ for _module_name in (
     "model_routing",
     "phase_reporter",
     "wavefield_provider",
+    "hitl_gate",
     "contracts",
     "knowledge_store",
     "memory_index",
