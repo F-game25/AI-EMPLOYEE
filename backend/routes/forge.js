@@ -2936,29 +2936,23 @@ Respond with ONLY valid JSON (no markdown fences):
   // One goal → plan → generate → apply → verify → feed errors back → fix → re-verify,
   // bounded and owner-gated. Captures original file contents and auto-rolls-back the
   // whole run if it can't reach green. Reuses the indexer context + verify allowlist.
-  router.post('/agentic-run', requireAuth, async (req, res) => {
-    if (!requireOwnerApproval(req, res, 'forge_agentic_run')) return
-    const project = findProject(req.body?.project_id)
-    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-    if (!project.write_access) return res.status(403).json({ ok: false, error: 'project is not writable' })
-    const goal = String(req.body?.goal || '').trim()
-    if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
-    const maxIters = Math.min(5, Math.max(1, Number(req.body?.max_iterations) || 3))
-    const verifyCmds = (Array.isArray(req.body?.commands) && req.body.commands.length)
-      ? req.body.commands : (project.verification_commands || defaultVerificationCommands(project))
-    const autoRollback = req.body?.auto_rollback !== false
-    const autonomyLevelNum = Math.min(3, Math.max(0, Number(req.body?.autonomy_level ?? 2)))
 
-    let runId = null
-    try {
-    runId = `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
-    const contextPack = await buildContextPack(project, goal, req.body || {})
+  // Shared execution core — called by both the HTTP route and the autopilot loop.
+  async function _executeAgenticRun(project, goal, opts = {}) {
+    const maxIters = Math.min(5, Math.max(1, Number(opts.max_iterations) || 3))
+    const verifyCmds = (Array.isArray(opts.commands) && opts.commands.length)
+      ? opts.commands : (project.verification_commands || defaultVerificationCommands(project))
+    const autoRollback = opts.auto_rollback !== false
+    const autonomyLevelNum = Math.min(3, Math.max(0, Number(opts.autonomy_level ?? 2)))
+    const linkedBacklogId = opts.linked_backlog_id || null
+
+    let runId = `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+    const contextPack = await buildContextPack(project, goal, opts)
     const repoIdx = generateRepoIndex(project)
-    // Capture baseline before any modifications for regression comparison
     const baseline = await captureBaseline(project, verifyCmds).catch(() => null)
     const plan = createPlan(engine, project, {
       goal,
-      provider: req.body?.provider,
+      provider: opts.provider,
       target_files: contextPack.relevant_files.map(item => item.path).filter(Boolean).slice(0, 8),
       target_type: project.target_type,
     })
@@ -2969,7 +2963,7 @@ Respond with ONLY valid JSON (no markdown fences):
       goal,
       status: 'planning',
       mode: 'agentic_supervised',
-      provider: req.body?.provider || 'local-first',
+      provider: opts.provider || 'local-first',
       autonomy_level: autonomyLevelNum,
       max_iterations: maxIters,
       context_pack: contextPack,
@@ -2981,6 +2975,7 @@ Respond with ONLY valid JSON (no markdown fences):
       review: { status: 'running', summary: 'Agentic staged run started.' },
       final_report: null,
       audit_ids: [],
+      linked_backlog_id: linkedBacklogId,
       workspace_path: runWorkspaceRoot(runId),
       created_at: nowIso(),
       updated_at: nowIso(),
@@ -2993,22 +2988,16 @@ Respond with ONLY valid JSON (no markdown fences):
     const allActions = []
     const allPatches = []
     appendAudit('forge_agentic_start', { run_id: runId, project_id: project.id, goal: goal.slice(0, 120), max_iters: maxIters })
-
-    // Reset forge agent statuses for this run
     ;['planner','coder','tester','security','reviewer'].forEach(a => setForgeAgentStatus(a, 'idle', ''))
 
     for (let iter = 1; iter <= maxIters; iter++) {
-      // ── Stage 1: Planner ──
       updateRun(runId, { status: 'planning' })
       // eslint-disable-next-line no-await-in-loop
       const plannerStage = await runPlannerAgent(project, goal, contextPack, repoIdx, lastErrors, runId)
-
-      // ── Stage 2: Coder ──
       updateRun(runId, { status: 'executing' })
       // eslint-disable-next-line no-await-in-loop
       const coderStage = await runCoderAgent(project, plannerStage, goal, root, runId, iter)
       const actions = coderStage.actions || []
-
       const written = []
       for (const a of actions) {
         a.id = a.id || crypto.randomUUID()
@@ -3024,44 +3013,38 @@ Respond with ONLY valid JSON (no markdown fences):
         if (policy.allowed) staged = stageRunAction(run, project, a)
         a.status = staged.ok ? 'staged' : 'blocked'
         a.staged_files = staged.staged_files || []
-        // Attach rich patch metadata from the staging result
         if (staged.patches?.length) {
           a.patches = staged.patches
           a.unified_diff = staged.patches[0]?.unified_diff || null
           a.action_type  = staged.patches[0]?.action_type  || 'create'
           a.before_hash  = staged.patches[0]?.before_hash  || null
           a.after_hash   = staged.patches[0]?.after_hash   || null
-          // Persist each patch to the forge_patches SQLite table
           for (const p of staged.patches) forgeRunStore.recordPatch({ ...p, action_id: a.id, run_id: runId, iteration: iter })
         }
         allActions.push(a)
         for (const p of (staged.patches || [])) allPatches.push({ ...p, iteration: iter })
-        written.push({ path: a.file_path, ok: staged.ok, unified_diff: a.unified_diff || null, action_type: a.action_type || 'create', error: staged.error || staged.policy?.violations?.[0]?.message || null })
+        written.push({ path: a.file_path, ok: staged.ok, unified_diff: a.unified_diff || null, action_type: a.action_type || 'create', error: staged.error || null })
       }
 
-      // ── WAITING_APPROVAL gate: pause based on autonomy level + file risk ──
+      // High-risk gate: pause for human approval before testing
       const riskyActions = allActions.filter(a => a.status === 'staged' && requiresApproval(a.file_path || '', autonomyLevelNum))
       if (riskyActions.length) {
         updateRun(runId, {
           status: 'waiting_approval',
           actions: allActions,
           patches: allPatches,
-          review: { status: 'waiting_approval', summary: `${riskyActions.length} high-risk file(s) require human approval before testing: ${riskyActions.map(a => a.file_path).join(', ')}` },
+          review: { status: 'waiting_approval', summary: `${riskyActions.length} high-risk file(s) require human approval` },
         })
         appendAudit('forge_agentic_waiting_approval', { run_id: runId, project_id: project.id, iter, risky_files: riskyActions.map(a => a.file_path) })
-        // Return early — resume via POST /runs/:id/continue after human approves
-        return res.json({ ok: true, success: false, waiting_approval: true, run_id: runId, run: findRun(runId), pending_approvals: riskyActions.map(a => ({ action_id: a.id, file_path: a.file_path, risk_level: a.risk_level, unified_diff: a.unified_diff })), summary: `Paused: ${riskyActions.length} high-risk file(s) need approval` })
+        return { ok: true, success: false, waiting_approval: true, run_id: runId, run: findRun(runId), pending_approvals: riskyActions.map(a => ({ action_id: a.id, file_path: a.file_path, risk_level: a.risk_level, unified_diff: a.unified_diff })) }
       }
 
-      // ── Stage 3: Tester ──
       updateRun(runId, { status: 'testing' })
       // eslint-disable-next-line no-await-in-loop
       let testerStage = await runTesterAgent(project, verifyCmds, root, runId)
       let verify = written.some(w => w.ok)
         ? { all_passed: testerStage.output.all_passed, results: testerStage.output.results }
         : { all_passed: false, results: [{ command: 'stage', pass: false, output: 'no staged files written' }] }
-
-      // ── Stage 3b: Debug (up to 2 retries when tests fail) ──
       const debugStages = []
       if (!verify.all_passed && written.some(w => w.ok)) {
         for (let retry = 1; retry <= 2; retry++) {
@@ -3069,74 +3052,44 @@ Respond with ONLY valid JSON (no markdown fences):
           const debugStage = await runDebugAgent(project, testerStage, actions, root, runId, iter, retry)
           debugStages.push(debugStage)
           if (debugStage.output?.repair_staged) {
-            // Re-run tester on the failed command only first
             const failedCmds = testerStage.output.failures?.map(f => f.command).filter(Boolean) || []
             // eslint-disable-next-line no-await-in-loop
             testerStage = await runTesterAgent(project, failedCmds.length ? failedCmds : verifyCmds, root, runId)
             verify = { all_passed: testerStage.output.all_passed, results: testerStage.output.results }
             if (verify.all_passed) break
-          } else {
-            break // debug couldn't produce a fix, no point retrying
-          }
+          } else { break }
         }
       }
-
-      // ── Stage 4: Security ──
       updateRun(runId, { status: 'reviewing' })
       // eslint-disable-next-line no-await-in-loop
       const securityStage = await runSecurityAgent(project, actions.filter(a => a.status === 'staged'), runId)
-      const securityBlock = securityStage.output?.verdict === 'block'
-
-      // ── Stage 5: Reviewer ──
       // eslint-disable-next-line no-await-in-loop
       const reviewerStage = await runReviewerAgent(project, actions.filter(a => a.status === 'staged'), plannerStage.output, runId, securityStage)
+      const securityBlock = securityStage.output?.verdict === 'block'
       const reviewerBlock = reviewerStage.output?.verdict === 'block'
-
       const blocked = securityBlock || reviewerBlock
       lastErrors = securityBlock
-        ? `Security blocked: ${securityStage.output?.summary || 'security violation in staged code'}`
-        : reviewerBlock
-          ? `Reviewer blocked: ${reviewerStage.output?.summary || 'architecture/security violation'}`
-          : (verify.all_passed ? '' : testerStage.output.failures?.map(f => `${f.command}: ${f.output}`).join('\n') || '')
-
+        ? `Security blocked: ${securityStage.output?.summary || ''}`
+        : reviewerBlock ? `Reviewer blocked: ${reviewerStage.output?.summary || ''}`
+        : (verify.all_passed ? '' : testerStage.output.failures?.map(f => `${f.command}: ${f.output}`).join('\n') || '')
       const regressionDelta = compareToBaseline(baseline, testerStage.output)
-      transcript.push({
-        iteration: iter,
-        files_written: written,
-        verify,
-        planner: plannerStage,
-        coder: { agent: 'coder', status: coderStage.status, output: coderStage.output, duration_ms: coderStage.duration_ms, started_at: coderStage.started_at, finished_at: coderStage.finished_at },
-        tester: testerStage,
-        debug: debugStages.length ? debugStages : undefined,
-        security: securityStage,
-        reviewer: reviewerStage,
-        regression: regressionDelta,
-      })
+      transcript.push({ iteration: iter, files_written: written, verify, planner: plannerStage, coder: { agent: 'coder', status: coderStage.status, output: coderStage.output, duration_ms: coderStage.duration_ms }, tester: testerStage, debug: debugStages.length ? debugStages : undefined, security: securityStage, reviewer: reviewerStage, regression: regressionDelta })
       updateRun(runId, {
         status: (verify.all_passed && !reviewerBlock) ? 'verified' : 'executing',
-        actions: allActions,
-        patches: allPatches,
-        test_results: [
-          ...(findRun(runId)?.test_results || []),
-          { id: `verify-${iter}`, iteration: iter, all_passed: verify.all_passed && !blocked, results: verify.results, reviewer: reviewerStage.output, security: securityStage.output, verified_at: nowIso(), workspace: root },
-        ],
+        actions: allActions, patches: allPatches,
+        test_results: [...(findRun(runId)?.test_results || []), { id: `verify-${iter}`, iteration: iter, all_passed: verify.all_passed && !blocked, results: verify.results, reviewer: reviewerStage.output, security: securityStage.output, verified_at: nowIso(), workspace: root }],
         review: {
           status: (verify.all_passed && !blocked) ? 'verification_passed' : 'iteration_failed',
-          summary: (verify.all_passed && !blocked)
-            ? `All agents passed on iteration ${iter}. Apply still requires owner approval.`
-            : securityBlock ? `Iteration ${iter}: security blocked — ${securityStage.output?.summary}` : reviewerBlock ? `Iteration ${iter}: reviewer blocked — ${reviewerStage.output?.summary}` : `Iteration ${iter} failed tests in staged workspace.`,
+          summary: (verify.all_passed && !blocked) ? `All agents passed on iteration ${iter}.` : securityBlock ? `Security blocked — ${securityStage.output?.summary}` : reviewerBlock ? `Reviewer blocked — ${reviewerStage.output?.summary}` : `Iteration ${iter} failed tests.`,
           reviewer_findings: reviewerStage.output?.findings || [],
           security_findings: securityStage.output?.findings || [],
         },
       })
       appendAudit('forge_agentic_iter', { run_id: runId, project_id: project.id, iter, files: written.length, passed: verify.all_passed, reviewer_verdict: reviewerStage.output?.verdict, security_verdict: securityStage.output?.verdict })
-
       if (verify.all_passed && !blocked) { success = true; break }
     }
 
-    // Reset agent statuses to idle after loop
     ;['planner','coder','tester','security','reviewer'].forEach(a => setForgeAgentStatus(a, 'idle', ''))
-
     let workspaceCleaned = false
     if (!success && autoRollback && fs.existsSync(path.dirname(root))) {
       removeRunWorkspace(runId)
@@ -3144,24 +3097,26 @@ Respond with ONLY valid JSON (no markdown fences):
       appendAudit('forge_agentic_workspace_removed', { run_id: runId })
     }
     const finalReport = buildFinalReport({ success, transcript, goal, workspaceCleaned, baseline })
-    const finalRun = updateRun(runId, {
-      status: success ? 'verified' : 'verify_failed',
-      final_report: finalReport,
-    })
+    const finalRun = updateRun(runId, { status: success ? 'verified' : 'verify_failed', final_report: finalReport })
     appendAudit('forge_agentic_done', { run_id: runId, project_id: project.id, success, iterations: transcript.length, workspace_removed: workspaceCleaned })
-    // Record task outcome for cross-run learning
     try { recordTaskMemory(runId, goal, transcript, success, repoIdx?.stack) } catch { /* best-effort */ }
-    res.json({ ok: true, success, run_id: runId, run: finalRun, iterations: transcript.length, transcript, rolled_back: workspaceCleaned,
-      summary: finalRun?.final_report?.summary || (success ? 'Run completed.' : 'Run failed.') })
+    return { ok: true, success, run_id: runId, run: finalRun, iterations: transcript.length, transcript, rolled_back: workspaceCleaned, summary: finalRun?.final_report?.summary || (success ? 'Run completed.' : 'Run failed.') }
+  }
+
+  router.post('/agentic-run', requireAuth, async (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_agentic_run')) return
+    const project = findProject(req.body?.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    if (!project.write_access) return res.status(403).json({ ok: false, error: 'project is not writable' })
+    const goal = String(req.body?.goal || '').trim()
+    if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
+    try {
+      const result = await _executeAgenticRun(project, goal, req.body || {})
+      res.json(result)
     } catch (err) {
-      // Top-level catch: mark run as failed and always send a response
       const errMsg = err?.message || String(err)
-      if (runId) {
-        try { updateRun(runId, { status: 'failed', error: errMsg, final_report: { status: 'error', summary: errMsg, generated_at: nowIso() } }) } catch { /* best-effort */ }
-        try { appendAudit('forge_agentic_error', { run_id: runId, project_id: project.id, error: errMsg }) } catch { /* best-effort */ }
-        try { ;['planner','coder','tester','security','reviewer'].forEach(a => setForgeAgentStatus(a, 'idle', '')) } catch { /* best-effort */ }
-      }
-      if (!res.headersSent) res.status(500).json({ ok: false, error: errMsg, run_id: runId })
+      try { ;['planner','coder','tester','security','reviewer'].forEach(a => setForgeAgentStatus(a, 'idle', '')) } catch { /* best-effort */ }
+      if (!res.headersSent) res.status(500).json({ ok: false, error: errMsg })
     }
   })
 
@@ -3317,7 +3272,13 @@ Respond with ONLY valid JSON (no markdown fences):
   const autopilotSessions = new Map()
 
   function getAutopilotStatus(projectId) {
-    return autopilotSessions.get(projectId) || { active: false, runsCompleted: 0, consecutiveFails: 0 }
+    const session = autopilotSessions.get(projectId)
+    if (!session) return { active: false, runsCompleted: 0, consecutiveFails: 0 }
+    const currentRun = session.currentRunId ? findRun(session.currentRunId) : null
+    return {
+      ...session,
+      current_run: currentRun ? { id: currentRun.id, status: currentRun.status, goal: currentRun.goal } : null,
+    }
   }
 
   async function _runAutopilotTick(projectId) {
@@ -3356,17 +3317,49 @@ Respond with ONLY valid JSON (no markdown fences):
     }
     const project = findProject(projectId)
     if (!project) { session.active = false; return }
-    const runId = crypto.randomUUID()
+
+    // Phase 6: execute the run end-to-end via the shared agentic core
     forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'IN_PROGRESS' })
-    forgeRunStore.upsertRun({ id: runId, run_id: runId, project_id: project.id, goal: item.description || item.title, status: 'planning', mode: 'agentic', linked_backlog_id: item.backlog_id, autonomy_level: autonomyLevel, created_at: nowIso(), updated_at: nowIso(), actions: [], patches: [] })
-    session.currentRunId = runId
+    session.currentRunId = null
     session.runsCompleted++
-    // Mark item so UI shows it's being processed
-    forgeRunStore.recordAudit('autopilot_run_started', { project_id: projectId, backlog_id: item.backlog_id, run_id: runId })
-    // In Phase 5, autopilot creates the run record and pauses for user to trigger agentic-run
-    // Full chained execution is Phase 6 scope
-    session.active = false
-    forgeRunStore.recordAudit('autopilot_run_queued', { project_id: projectId, run_id: runId, note: 'run created, trigger via agentic-run endpoint' })
+    forgeRunStore.recordAudit('autopilot_run_started', { project_id: projectId, backlog_id: item.backlog_id })
+
+    let runResult = null
+    try {
+      runResult = await _executeAgenticRun(project, item.description || item.title, {
+        autonomy_level: autonomyLevel,
+        linked_backlog_id: item.backlog_id,
+        auto_rollback: true,
+        max_iterations: 3,
+      })
+    } catch (err) {
+      forgeRunStore.recordAudit('autopilot_run_error', { project_id: projectId, backlog_id: item.backlog_id, error: err.message })
+    }
+
+    if (runResult?.waiting_approval) {
+      // High-risk item hit an approval gate — pause autopilot; human must review then resume
+      forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'WAITING_APPROVAL' })
+      session.active = false
+      forgeRunStore.recordAudit('autopilot_paused', { project_id: projectId, reason: 'waiting_approval', run_id: runResult.run_id, backlog_id: item.backlog_id })
+      return
+    }
+
+    if (runResult?.success) {
+      forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'DONE' })
+      session.consecutiveFails = 0
+      forgeRunStore.recordAudit('autopilot_run_done', { project_id: projectId, backlog_id: item.backlog_id, run_id: runResult.run_id, success: true })
+    } else {
+      forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'FAILED' })
+      session.consecutiveFails = (session.consecutiveFails || 0) + 1
+      forgeRunStore.recordAudit('autopilot_run_done', { project_id: projectId, backlog_id: item.backlog_id, run_id: runResult?.run_id, success: false })
+    }
+
+    session.currentRunId = runResult?.run_id || null
+
+    // Chain to next item after a 5-second cooldown, if still active
+    if (session.active) {
+      setTimeout(() => _runAutopilotTick(projectId), 5_000)
+    }
   }
 
   router.post('/projects/:id/autopilot/start', requireAuth, (req, res) => {
@@ -3400,6 +3393,19 @@ Respond with ONLY valid JSON (no markdown fences):
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     res.json({ ok: true, status: getAutopilotStatus(project.id) })
+  })
+
+  // Resume autopilot after a human-approval gate was satisfied
+  router.post('/projects/:id/autopilot/resume', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const session = autopilotSessions.get(project.id)
+    if (!session) return res.status(404).json({ ok: false, error: 'no autopilot session for this project' })
+    if (session.active) return res.json({ ok: true, message: 'already active', status: getAutopilotStatus(project.id) })
+    session.active = true
+    forgeRunStore.recordAudit('autopilot_resumed', { project_id: project.id, runs_completed: session.runsCompleted })
+    setImmediate(() => _runAutopilotTick(project.id))
+    res.json({ ok: true, message: 'autopilot resumed', status: getAutopilotStatus(project.id) })
   })
 
   // ═══════════════════════════════════════════════════════════════════════════

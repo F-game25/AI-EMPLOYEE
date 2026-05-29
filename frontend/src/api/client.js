@@ -147,9 +147,10 @@ const api = {
     deleteBacklogItem:   (id)        => api.delete(`/api/forge/backlog/${id}`),
     runBacklogItem:      (id, body)  => api.post(`/api/forge/backlog/${id}/run`, body),
 
-    // ── Phase 5 — Autopilot ──────────────────────────────────────────
+    // ── Phase 5/6 — Autopilot ────────────────────────────────────────
     startAutopilot:      (pid, body) => api.post(`/api/forge/projects/${pid}/autopilot/start`, body || {}),
     stopAutopilot:       (pid)       => api.post(`/api/forge/projects/${pid}/autopilot/stop`, {}),
+    resumeAutopilot:     (pid)       => api.post(`/api/forge/projects/${pid}/autopilot/resume`, {}),
     autopilotStatus:     (pid)       => api.get(`/api/forge/projects/${pid}/autopilot/status`),
 
     // ── Phase 5 — Decomposer ─────────────────────────────────────────

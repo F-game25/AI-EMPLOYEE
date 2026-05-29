@@ -330,16 +330,29 @@ function ForgeOnboarding({ onNew, onBrowse }) {
 function Phase5StatusCard({ project, backlogCount, autopilot, suggestions, onNavigate, onRefreshSummary }) {
   const [apBusy, setApBusy] = useState(false)
 
-  const toggleAutopilot = async () => {
+  const isWaitingApproval = !autopilot?.active && autopilot?.consecutiveFails === 0 && autopilot?.runsCompleted > 0 && autopilot?.current_run?.status === 'waiting_approval'
+
+  const handleAutopilot = async () => {
     if (!project?.id) return
     setApBusy(true)
     try {
-      if (autopilot?.active) await api.forge.stopAutopilot(project.id)
-      else await api.forge.startAutopilot(project.id, {})
+      if (autopilot?.active) {
+        await api.forge.stopAutopilot(project.id)
+      } else if (isWaitingApproval) {
+        await api.forge.resumeAutopilot(project.id)
+      } else {
+        await api.forge.startAutopilot(project.id, {})
+      }
       onRefreshSummary?.()
-    } catch { /* ignore — summary will refresh on next load */ }
+    } catch { /* summary refreshes on next poll */ }
     finally { setApBusy(false) }
   }
+
+  const currentRun = autopilot?.current_run
+  const apLabel = autopilot?.active ? 'RUNNING' : isWaitingApproval ? 'PAUSED' : 'IDLE'
+  const apColor = autopilot?.active ? 'var(--af-green)' : isWaitingApproval ? '#f59e0b' : 'var(--af-text-dim)'
+  const apBtnLabel = apBusy ? '...' : autopilot?.active ? 'Stop' : isWaitingApproval ? 'Resume' : 'Start'
+  const apBtnClass = autopilot?.active ? 'af-btn--danger' : isWaitingApproval ? 'af-btn--primary' : 'af-btn--ghost'
 
   const rows = [
     { label: 'Backlog', value: `${backlogCount} active`, tab: 'backlog', accent: backlogCount > 0 ? 'var(--af-bronze-bright)' : 'var(--af-text-dim)' },
@@ -354,25 +367,34 @@ function Phase5StatusCard({ project, backlogCount, autopilot, suggestions, onNav
   ]
 
   return (
-    <ForgePanel title="Intelligence" sub="phase 5">
+    <ForgePanel title="Intelligence" sub="phase 6">
       <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 0 }}>
         {/* Autopilot row */}
         <div className="af-p5-row" style={{ paddingBottom: 8, marginBottom: 6, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <span style={{ font: '500 10px monospace', color: 'var(--af-text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Autopilot</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ font: '600 10px monospace', color: autopilot?.active ? 'var(--af-green)' : 'var(--af-text-dim)' }}>
-              {autopilot?.active ? 'ACTIVE' : 'IDLE'}
-            </span>
+            <span style={{ font: '600 10px monospace', color: apColor }}>{apLabel}</span>
             <button
-              className={`af-btn af-btn--sm ${autopilot?.active ? 'af-btn--danger' : 'af-btn--ghost'}`}
+              className={`af-btn af-btn--sm ${apBtnClass}`}
               style={{ fontSize: 9, padding: '2px 7px' }}
-              onClick={toggleAutopilot}
+              onClick={handleAutopilot}
               disabled={apBusy || !project}
             >
-              {apBusy ? '...' : autopilot?.active ? 'Stop' : 'Start'}
+              {apBtnLabel}
             </button>
           </div>
         </div>
+        {/* Current run status when autopilot is active */}
+        {currentRun && (
+          <div style={{ marginBottom: 6, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ font: '400 9.5px monospace', color: 'var(--af-text-dim)', marginBottom: 2 }}>
+              {autopilot?.runsCompleted || 0}/{autopilot?.maxRuns || 10} runs · {autopilot?.consecutiveFails || 0} fails
+            </div>
+            <div style={{ font: '400 10px monospace', color: 'var(--af-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {currentRun.status?.toUpperCase()} · {(currentRun.goal || '').slice(0, 40)}
+            </div>
+          </div>
+        )}
         {/* Navigation links */}
         {rows.map(r => (
           <button key={r.tab} className="af-p5-link" onClick={() => onNavigate(r.tab)}>
