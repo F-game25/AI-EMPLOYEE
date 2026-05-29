@@ -2056,6 +2056,16 @@ def _decode_any_token(token_str: str) -> Optional[dict[str, Any]]:
                 return payload
     except Exception:
         pass
+    # TenantMiddleware validates standard HS256 JWTs before route dependencies run.
+    # Keep require_auth aligned with that path even when another `security` package
+    # has already been imported and the local AuthManager fallback is active.
+    try:
+        import jwt as _jwt_std  # type: ignore
+        payload = _jwt_std.decode(token_str, _jwt_secret_env, algorithms=["HS256"])
+        if isinstance(payload, dict) and "sub" in payload:
+            return payload
+    except Exception:
+        pass
     # Fallback: try stdlib HMAC token
     try:
         auth_fb = AuthManager(
