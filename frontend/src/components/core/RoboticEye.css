@@ -5,6 +5,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  contain: layout style paint;
   --iris-speed: 4s;
   --gear-speed: 20s;
   --flare-intensity: 0.5;

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useCognitiveStore } from '../../store/cognitiveStore'
 import { useEventFeedStore } from '../../store/eventFeedStore'
+import { useAppStore } from '../../store/appStore'
 import { WaveformStrip } from '../nexus-ui'
 import { useTelemetryBuffer } from '../../hooks/useTelemetryBuffer'
 import './NeuralActivityStrip.css'
@@ -22,10 +23,11 @@ function classifyEvent(t) {
 }
 
 export default function NeuralActivityStrip() {
-  const reasoningSteps = useCognitiveStore(s => s.reasoningSteps || [])
+  const wsConnected     = useAppStore(s => s.wsConnected)
+  const reasoningSteps  = useCognitiveStore(s => s.reasoningSteps || [])
   const memoryWritesArr = useCognitiveStore(s => s.memoryWrites || [])
   const modelCallsArr   = useCognitiveStore(s => s.modelCalls || [])
-  const recentEvents = useEventFeedStore(s => s.events || [])
+  const recentEvents    = useEventFeedStore(s => s.events || [])
 
   const [pulses, setPulses] = useState({ cognitive: 0, memory: 0, agents: 0, models: 0 })
 
@@ -36,12 +38,13 @@ export default function NeuralActivityStrip() {
     if (channel) setPulses(p => ({ ...p, [channel]: Date.now() }))
   }, [recentEvents])
 
-  // Re-render every 600ms so LED active-state expiry refreshes
+  // Re-render every 600ms so LED active-state expiry refreshes — only when WS is live
   const [, setTick] = useState(0)
   useEffect(() => {
-    const id = setInterval(() => setTick(n => n + 1), 600)
+    if (!wsConnected) return
+    const id = setInterval(() => setTick(n => n + 1), 3000)
     return () => clearInterval(id)
-  }, [])
+  }, [wsConnected])
 
   const reasoningRate = reasoningSteps.length
   const memoryCount   = memoryWritesArr.length

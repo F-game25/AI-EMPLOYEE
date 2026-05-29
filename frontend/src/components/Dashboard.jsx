@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { useAppStore } from '../store/appStore'
 import Sidebar from './layout/Sidebar'
 import MobileNav from './layout/MobileNav'
+import MobileShell from './mobile/MobileShell'
 import ContextPanel from './layout/ContextPanel'
 import CommandDock from './dock/CommandDock'
 import ChatPanel from './core/ChatPanel'
@@ -40,6 +41,7 @@ const ModelFabricPage   = lazy(() => import('./pages/ModelFabricPage'))
 const ComputeCenterPage = lazy(() => import('./pages/ComputeCenterPage'))
 const AgentsPage        = lazy(() => import('./pages/AgentsPage'))
 const MoneyModePage     = lazy(() => import('./pages/MoneyModePage'))
+const OrdersPage        = lazy(() => import('./pages/OrdersPage'))
 const SecurityPanel     = lazy(() => import('./pages/SecurityPanel'))
 const MemoryPage        = lazy(() => import('./pages/MemoryPage'))
 const KnowledgePage     = lazy(() => import('./pages/KnowledgePage'))
@@ -74,6 +76,7 @@ const PAGES = {
   'agents':         AgentsPage,
   'memory':         MemoryPage,
   'economy':        MoneyModePage,
+  'orders':         OrdersPage,
   // OPERATIONS
   'tasks':          OperationsPage,
   'workflows':      WorkflowsPage,
@@ -208,6 +211,11 @@ export default function Dashboard() {
   const isFullscreen = activeSection === 'dashboard' || activeSection === 'nexus'
   const showCommandDock = true
 
+  // On mobile: render the full NEXUS OS mobile shell instead of the sidebar layout
+  if (isMobile) {
+    return <MobileShell />
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -246,7 +254,7 @@ export default function Dashboard() {
               {/* Always a flex column with a definite height: full-height pages (Forge,
                   graphs) fill it; long pages scroll inside it. Scroll lives here, not on
                   the parent, so height:100% pages don't collapse in non-fullscreen. */}
-              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: isFullscreen ? 'hidden' : 'auto' }}>
+              <div style={{ flex: 1, minHeight: 0, height: 0, display: 'flex', flexDirection: 'column', overflowY: isFullscreen ? 'hidden' : 'auto' }}>
                 <PageComponent />
                 <DashboardMountedSignal section={activeSection} />
               </div>

@@ -3,19 +3,64 @@
 
 const BASE = import.meta.env.VITE_API_BASE ?? '';
 
+function getToken() {
+  return localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || null
+}
+
+function storeToken(token) {
+  if (!token) return
+  localStorage.setItem('ai_jwt', token)
+  sessionStorage.setItem('ai_jwt', token)
+}
+
+let _refreshing = false
+let _refreshPromise = null
+
+async function refreshToken() {
+  if (_refreshing) return _refreshPromise
+  _refreshing = true
+  _refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${BASE}/api/auth/auto-token`, { method: 'GET' })
+      if (res.ok) {
+        const data = await res.json()
+        const token = data.token || data.access_token
+        if (token) { storeToken(token); return token }
+      }
+    } catch { /* network error — fall through */ }
+    return null
+  })().finally(() => { _refreshing = false; _refreshPromise = null })
+  return _refreshPromise
+}
+
 async function _fetch(method, path, body, opts = {}) {
-  const headers = { 'Content-Type': 'application/json', ...opts.headers };
+  const doRequest = (token) => {
+    const headers = { 'Content-Type': 'application/json', ...opts.headers }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    return fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      signal: opts.signal,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  }
 
-  // Attach JWT if stored
-  const token = sessionStorage.getItem('ai_jwt');
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  let res = await doRequest(getToken())
 
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    signal: opts.signal,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  if (res.status === 401 && !opts._retry) {
+    const newToken = await refreshToken()
+    if (newToken) {
+      res = await doRequest(newToken)
+    }
+    if (res.status === 401) {
+      localStorage.removeItem('ai_jwt')
+      sessionStorage.removeItem('ai_jwt')
+      window.dispatchEvent(new CustomEvent('nx:auth-expired'))
+      const err = new Error('Session expired — please log in again')
+      err.status = 401
+      throw err
+    }
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -81,6 +126,65 @@ const api = {
     queue:     ()            => api.get('/api/forge/queue'),
     snapshots: ()            => api.get('/api/forge/snapshots'),
     status:    ()            => api.get('/api/forge/status'),
+
+    // ── Phase 5 — Backlog ────────────────────────────────────────────
+    getBacklog:          (pid)       => api.get(`/api/forge/projects/${pid}/backlog`),
+    createBacklogItem:   (pid, body) => api.post(`/api/forge/projects/${pid}/backlog`, body),
+    updateBacklogItem:   (id, body)  => api.patch(`/api/forge/backlog/${id}`, body),
+    deleteBacklogItem:   (id)        => api.delete(`/api/forge/backlog/${id}`),
+    runBacklogItem:      (id, body)  => api.post(`/api/forge/backlog/${id}/run`, body),
+
+    // ── Phase 5 — Autopilot ──────────────────────────────────────────
+    startAutopilot:      (pid, body) => api.post(`/api/forge/projects/${pid}/autopilot/start`, body || {}),
+    stopAutopilot:       (pid)       => api.post(`/api/forge/projects/${pid}/autopilot/stop`, {}),
+    autopilotStatus:     (pid)       => api.get(`/api/forge/projects/${pid}/autopilot/status`),
+
+    // ── Phase 5 — Decomposer ─────────────────────────────────────────
+    decomposeTask:       (pid, body) => api.post(`/api/forge/projects/${pid}/decompose`, body),
+
+    // ── Phase 5 — Skills ─────────────────────────────────────────────
+    getSkills:           ()          => api.get('/api/forge/skills'),
+    getSkill:            (id)        => api.get(`/api/forge/skills/${id}`),
+    reloadSkills:        ()          => api.post('/api/forge/skills/reload', {}),
+    applySkill:          (rid, body) => api.post(`/api/forge/runs/${rid}/apply-skill`, body),
+
+    // ── Phase 5 — Model Router ───────────────────────────────────────
+    getModels:           ()          => api.get('/api/forge/models'),
+    createModel:         (body)      => api.post('/api/forge/models', body),
+    updateModel:         (id, body)  => api.patch(`/api/forge/models/${id}`, body),
+    testModelRouter:     (body)      => api.post('/api/forge/model-router/test', body),
+    modelRoutingStats:   (pid)       => api.get(`/api/forge/projects/${pid}/model-routing-stats`),
+
+    // ── Phase 5 — Roadmap ────────────────────────────────────────────
+    getRoadmap:          (pid)       => api.get(`/api/forge/projects/${pid}/roadmap`),
+    generateRoadmap:     (pid)       => api.post(`/api/forge/projects/${pid}/roadmap/generate`, {}),
+    updateRoadmap:       (pid, body) => api.patch(`/api/forge/projects/${pid}/roadmap`, body),
+
+    // ── Phase 5 — Suggestions ────────────────────────────────────────
+    getSuggestions:      (pid)       => api.get(`/api/forge/projects/${pid}/suggestions`),
+    acceptSuggestion:    (id)        => api.post(`/api/forge/suggestions/${id}/accept`, {}),
+    rejectSuggestion:    (id)        => api.post(`/api/forge/suggestions/${id}/reject`, {}),
+    suggestionToBacklog: (id)        => api.post(`/api/forge/suggestions/${id}/create-backlog-item`, {}),
+
+    // ── Phase 5 — Cycles ─────────────────────────────────────────────
+    getCycles:           (pid)       => api.get(`/api/forge/projects/${pid}/cycles`),
+    createCycle:         (pid, body) => api.post(`/api/forge/projects/${pid}/cycles`, body),
+    getCycle:            (id)        => api.get(`/api/forge/cycles/${id}`),
+    pauseCycle:          (id)        => api.post(`/api/forge/cycles/${id}/pause`, {}),
+    resumeCycle:         (id)        => api.post(`/api/forge/cycles/${id}/resume`, {}),
+    cancelCycle:         (id)        => api.post(`/api/forge/cycles/${id}/cancel`, {}),
+
+    // ── Phase 5 — Memory ─────────────────────────────────────────────
+    getMemory:           (pid, cat)  => api.get(`/api/forge/projects/${pid}/memory${cat ? `?category=${cat}` : ''}`),
+
+    // ── Phase 5 — Metrics / Replay / Patches / Approvals ────────────
+    getForgeMetrics:     (pid)       => api.get(`/api/forge/projects/${pid}/forge-metrics`),
+    getRunReplay:        (rid)       => api.get(`/api/forge/runs/${rid}/replay`),
+    getRunPatches:       (rid)       => api.get(`/api/forge/runs/${rid}/patches`),
+    getPendingApprovals: (rid)       => api.get(`/api/forge/runs/${rid}/pending-approvals`),
+    approveRunAction:    (rid, body) => api.post(`/api/forge/runs/${rid}/approve-action`, body),
+    rejectRunAction:     (rid, body) => api.post(`/api/forge/runs/${rid}/reject-action`, body),
+    continueRun:         (rid)       => api.post(`/api/forge/runs/${rid}/continue`, {}),
   },
 
   // ── System ────────────────────────────────────────────────────────────────

@@ -1,0 +1,34 @@
+/* ════════════════════════════════════════════════════════════════════
+   PanelConnections — fixed SVG overlay for inter-panel data-flow lines
+   z-index 5: above background, below panel content
+   ════════════════════════════════════════════════════════════════════ */
+
+.nx-connections {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+  overflow: visible;
+}
+
+.nx-conn-line {
+  stroke-dasharray: 8 12;
+  animation: nx-flow 2s linear infinite;
+}
+
+.nx-conn-line--active {
+  animation-duration: 0.8s;
+}
+
+@keyframes nx-flow {
+  to { stroke-dashoffset: -80; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-conn-line {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}

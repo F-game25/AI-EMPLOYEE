@@ -4,12 +4,22 @@ import { API_URL } from '../config/api'
 import './BootSequence.css'
 
 const BOOT_STEPS = [
-  { id: 'launcher', label: 'Launcher supervisor', detail: 'Electron shell online' },
+  { id: 'launcher', label: 'Launcher supervisor', detail: 'Nexus OS runtime connected' },
   { id: 'health', label: 'Backend health', detail: 'Waiting for Node gateway' },
   { id: 'agents', label: 'Agent registry', detail: 'Counting active agents' },
   { id: 'auth', label: 'Secure session', detail: 'Binding operator token' },
   { id: 'websocket', label: 'Realtime bus', detail: 'Bootstrapping event stream' },
   { id: 'dashboard', label: 'Dashboard render', detail: 'Mounting command center' },
+]
+
+// Cinematic flash lines — scripted messages that appear 400ms apart
+const CINEMATIC_LINES = [
+  'LOADING NEURAL CORE...',
+  'INITIALIZING COGNITIVE MESH',
+  'AGENTS ONLINE',
+  'SECURE MODE ACTIVE',
+  'MEMORY FABRIC LINKED',
+  'REALTIME BUS READY',
 ]
 
 const PHASE_TO_STEP = {
@@ -91,6 +101,7 @@ export default function BootSequence({ onComplete, subState }) {
   const [progress, setProgress] = useState(8)
   const [checks, setChecks] = useState({ launcher: 'running', health: 'running', agents: 'running', auth: 'running', websocket: 'running', dashboard: 'running' })
   const [lines, setLines] = useState(['> AETERNUS NEXUS boot supervisor engaged'])
+  const [cinematicIdx, setCinematicIdx] = useState(0)
   const [agentCount, setAgentCount] = useState(null)
   const [launchMessage, setLaunchMessage] = useState(() => (
     typeof window !== 'undefined' && window.ai
@@ -118,6 +129,15 @@ export default function BootSequence({ onComplete, subState }) {
     particlesRef.current.init()
     return () => particlesRef.current?.stop()
   }, [])
+
+  // Cinematic flash lines — cycle through CINEMATIC_LINES every 400ms
+  useEffect(() => {
+    if (cinematicIdx >= CINEMATIC_LINES.length) return
+    const id = setTimeout(() => {
+      setCinematicIdx(i => i + 1)
+    }, 400)
+    return () => clearTimeout(id)
+  }, [cinematicIdx])
 
   useEffect(() => {
     let cancelled = false
@@ -166,7 +186,7 @@ export default function BootSequence({ onComplete, subState }) {
       })
     }
 
-    fetch('/api/health', { signal: AbortSignal.timeout(4500) })
+    fetch('/health', { signal: AbortSignal.timeout(4500) })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`health ${r.status}`)))
       .then(data => {
         if (cancelled) return
@@ -180,7 +200,11 @@ export default function BootSequence({ onComplete, subState }) {
         setProgress(p => Math.max(p, 30))
       })
 
-    fetch(`${API_URL}/agents`, { signal: AbortSignal.timeout(4500) })
+    const storedToken = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt')
+    fetch(`${API_URL}/agents`, {
+      signal: AbortSignal.timeout(4500),
+      headers: storedToken ? { Authorization: `Bearer ${storedToken}` } : {},
+    })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`agents ${r.status}`)))
       .then(data => {
         if (cancelled) return
@@ -300,6 +324,19 @@ export default function BootSequence({ onComplete, subState }) {
             >
               {line}
             </motion.div>
+          ))}
+        </div>
+
+        {/* Cinematic flash line overlay */}
+        <div className="boot-sequence__cinematic" aria-hidden="true">
+          {CINEMATIC_LINES.slice(0, cinematicIdx).map((line, i) => (
+            <div
+              key={line}
+              className="boot-sequence__cinematic-line"
+              style={{ animationDelay: `${i * 0.12}s` }}
+            >
+              {line}
+            </div>
           ))}
         </div>
       </div>

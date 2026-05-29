@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-TaskStatus = Literal["pending", "running", "success", "failed"]
+TaskStatus = Literal["pending", "planning", "executing", "testing", "reviewing", "waiting_approval", "completed", "running", "success", "failed"]
+
+AgentName = Literal["planner", "coder", "tester", "reviewer"]
 
 
 @dataclass
@@ -87,6 +89,28 @@ class TaskGraph:
             "run_id": self.run_id,
             "goal": self.goal,
             "tasks": [task.to_contract() for task in self.tasks],
+        }
+
+
+@dataclass
+class ForgeAgentResult:
+    """Result from a single forge agent stage within an agentic run iteration."""
+
+    agent: str  # planner | coder | tester | reviewer
+    status: str  # running | done | failed | skipped
+    output: dict[str, Any] = field(default_factory=dict)
+    duration_ms: int = 0
+    started_at: str = ""
+    finished_at: str = ""
+
+    def to_contract(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent,
+            "status": self.status,
+            "output": self.output,
+            "duration_ms": self.duration_ms,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
         }
 
 

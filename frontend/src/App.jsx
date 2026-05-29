@@ -1,4 +1,4 @@
-import { useCallback, useEffect, lazy, Suspense } from 'react'
+import { useCallback, useEffect, useRef, lazy, Suspense } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useAppStore } from './store/appStore'
@@ -7,12 +7,15 @@ import ErrorScreen from './components/ErrorScreen'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useWebSocket, bootstrapWsStore } from './hooks/useWebSocket'
 import Toaster from './components/nexus-ui/Toaster'
+import LoginPage from './components/LoginPage'
+import { PerformanceModeProvider } from './context/PerformanceModeContext'
 
 const Dashboard = lazy(() => import('./components/Dashboard'))
 import ContextCheckModal from './components/dashboard/ContextCheckModal'
 let localAuthPromise = null
 const READINESS_POLL_MS = 1500
 const READINESS_DEGRADED_AFTER_MS = 12000
+const BOOT_MIN_MS = 2800
 
 function notifyBootPhase(phase, message, extra = {}) {
   const payload = { phase, message, ...extra, ts: Date.now() }
@@ -28,8 +31,12 @@ function notifyBootPhase(phase, message, extra = {}) {
   }
 }
 
+function getStoredToken() {
+  return localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || null
+}
+
 function ensureLocalOperatorToken() {
-  const existing = sessionStorage.getItem('ai_jwt')
+  const existing = getStoredToken()
   if (existing) return Promise.resolve(existing)
   if (localAuthPromise) return localAuthPromise
 
@@ -38,12 +45,15 @@ function ensureLocalOperatorToken() {
     .then(r => r.ok ? r.json() : null)
     .then(d => {
       if (d?.token) {
+        // Persist in both storages: localStorage survives restarts, sessionStorage
+        // is required by useWebSocket.js and the main.jsx fetch interceptor.
+        localStorage.setItem('ai_jwt', d.token)
         sessionStorage.setItem('ai_jwt', d.token)
         notifyBootPhase('auth', 'Operator token acquired', { status: 'ok' })
         window.dispatchEvent(new CustomEvent('nx:auth-ready'))
         return d.token
       }
-      notifyBootPhase('auth', 'Operator token unavailable', { status: 'degraded' })
+      notifyBootPhase('auth', 'Operator token unavailable — login required', { status: 'degraded' })
       return null
     })
     .catch(err => {
@@ -94,59 +104,62 @@ function AppContent() {
   const setPythonBackendReady = useAppStore(s => s.setPythonBackendReady)
   const setReadiness = useAppStore(s => s.setReadiness)
   const login = useAppStore(s => s.login)
+  const bootStartRef = useRef(Date.now())
   useWebSocket()
 
   useEffect(() => {
     notifyBootPhase('app-init', 'React application initialized')
   }, [])
 
-  // Fetch a session JWT on boot so api.client can attach auth headers
-  useEffect(() => {
-    ensureLocalOperatorToken().finally(() => {
-      // Mark store as bootstrapped so queued WS events can be replayed
-      bootstrapWsStore()
-      notifyBootPhase('websocket-bootstrap', 'WebSocket store bootstrapped')
-    })
-  }, [])
-
-  // REST readiness check — transition to dashboard when Node responds, but keep
-  // polling AI-core readiness so fragile pages can gate themselves correctly.
+  // Fetch a session JWT on boot, then poll readiness with the token.
+  // /api/readiness requires auth — we must have a token before the first call.
   useEffect(() => {
     let cancelled = false
     const started = Date.now()
-    const check = () => {
+
+    const check = (token) => {
       notifyBootPhase('readiness', 'Checking system readiness')
-      fetch('/api/readiness', { signal: AbortSignal.timeout(5000) })
+      const headers = token ? { Authorization: `Bearer ${token}` } : {}
+      fetch('/api/readiness', { signal: AbortSignal.timeout(5000), headers })
         .then(r => r.ok ? r.json() : null)
         .then(d => {
           if (cancelled) return
           if (d) {
             setReadiness?.(d)
-            ensureLocalOperatorToken().finally(() => {
-              if (cancelled) return
-              const pythonOk = !!d.pythonReady
-              setPythonBackendReady(pythonOk)
-              const fullyReady = !!(d.nodeReady && d.pythonReady && d.neuralBrainReady && d.graphReady)
-              notifyBootPhase(
-                'readiness',
-                fullyReady ? 'System online' : `System starting: ${d.phase || 'AI core initializing'}`,
-                { status: fullyReady ? 'ok' : 'degraded', readiness: d },
-              )
-              setAppState(fullyReady ? 'dashboard' : 'degraded')
-              if (!fullyReady && Date.now() - started < READINESS_DEGRADED_AFTER_MS) {
-                setTimeout(check, READINESS_POLL_MS)
-              }
-            })
+            const pythonOk = !!d.pythonReady
+            setPythonBackendReady(pythonOk)
+            const fullyReady = !!(d.nodeReady && d.pythonReady && d.neuralBrainReady && d.graphReady)
+            notifyBootPhase(
+              'readiness',
+              fullyReady ? 'System online' : `System starting: ${d.phase || 'AI core initializing'}`,
+              { status: fullyReady ? 'ok' : 'degraded', readiness: d },
+            )
+            const elapsed = Date.now() - bootStartRef.current
+            const delay = Math.max(0, BOOT_MIN_MS - elapsed)
+            setTimeout(() => {
+              if (!cancelled) setAppState(fullyReady ? 'dashboard' : 'degraded')
+            }, delay)
+            if (!fullyReady && Date.now() - started < READINESS_DEGRADED_AFTER_MS) {
+              setTimeout(() => check(token), READINESS_POLL_MS)
+            }
             return
           }
-          if (!cancelled) setTimeout(check, READINESS_POLL_MS)
+          if (!cancelled) setTimeout(() => check(token), READINESS_POLL_MS)
         })
         .catch(() => {
           notifyBootPhase('readiness', 'Readiness check delayed; retrying', { status: 'pending' })
-          if (!cancelled) setTimeout(check, READINESS_POLL_MS)
+          if (!cancelled) setTimeout(() => check(token), READINESS_POLL_MS)
         })
     }
-    check()
+
+    // Acquire token first, then bootstrap WS store, then start readiness polling
+    ensureLocalOperatorToken().then(token => {
+      if (cancelled) return
+      bootstrapWsStore()
+      notifyBootPhase('websocket-bootstrap', 'WebSocket store bootstrapped')
+      check(token)
+    })
+
     return () => { cancelled = true }
   }, [setAppState, setPythonBackendReady, setReadiness])
 
@@ -173,19 +186,43 @@ function AppContent() {
     return () => window.removeEventListener('ws:system:ready', onSystemReady)
   }, [setAppState, setPythonBackendReady, setReadiness])
 
-  // Fallback: if still in boot/connecting after 8s, force dashboard
+  // Handle token expiry from any API call → show login page
   useEffect(() => {
-    if (appState === 'dashboard' || appState === 'degraded' || appState === 'error') return
+    const onExpired = () => {
+      notifyBootPhase('auth', 'Session expired — showing login', { status: 'degraded' })
+      setAppState('login')
+    }
+    window.addEventListener('nx:auth-expired', onExpired)
+    return () => window.removeEventListener('nx:auth-expired', onExpired)
+  }, [setAppState])
+
+  // Fallback: if still in boot/connecting after 8s, check for token
+  useEffect(() => {
+    if (appState === 'dashboard' || appState === 'degraded' || appState === 'error' || appState === 'login') return
     const t = setTimeout(() => {
-      console.warn('[APP] Boot timeout — forcing dashboard')
-      notifyBootPhase('dashboard-timeout', 'Boot timeout; opening degraded dashboard', { status: 'degraded' })
-      setAppState('degraded')
+      // If we have no token at all, go to login; otherwise degrade to dashboard
+      if (!getStoredToken()) {
+        notifyBootPhase('auth', 'No token found — showing login', { status: 'degraded' })
+        setAppState('login')
+      } else {
+        console.warn('[APP] Boot timeout — forcing dashboard')
+        notifyBootPhase('dashboard-timeout', 'Boot timeout; opening degraded dashboard', { status: 'degraded' })
+        setAppState('degraded')
+      }
     }, 8000)
     return () => clearTimeout(t)
   }, [appState, setAppState])
 
   const handleBootComplete = useCallback(() => {
     notifyBootPhase('handoff', 'Boot animation handoff complete')
+    login('operator')
+  }, [login])
+
+  const handleLoginSuccess = useCallback((token) => {
+    localStorage.setItem('ai_jwt', token)
+    sessionStorage.setItem('ai_jwt', token)
+    notifyBootPhase('auth', 'Login successful', { status: 'ok' })
+    window.dispatchEvent(new CustomEvent('nx:auth-ready'))
     login('operator')
   }, [login])
 
@@ -196,6 +233,9 @@ function AppContent() {
     <AnimatePresence mode="sync">
       {isBootPhase && (
         <BootSequence key="boot" onComplete={handleBootComplete} subState={bootSubState} />
+      )}
+      {appState === 'login' && (
+        <LoginPage key="login" onSuccess={handleLoginSuccess} />
       )}
       {(appState === 'dashboard' || appState === 'degraded') && (
         <Suspense fallback={<AppLoadingFallback />}>
@@ -212,10 +252,12 @@ export default function App() {
   return (
     <BrowserRouter>
       <ErrorBoundary label="Application" severity="fatal">
-        <div className="app">
-          <AppContent />
-          <Toaster />
-        </div>
+        <PerformanceModeProvider>
+          <div className="app">
+            <AppContent />
+            <Toaster />
+          </div>
+        </PerformanceModeProvider>
       </ErrorBoundary>
     </BrowserRouter>
   )

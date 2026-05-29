@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import api from '../../api/client'
 import { useLiveData } from '../../hooks/useLiveData'
 import { useSystemStore } from '../../store/systemStore'
-import { Sparkline } from '../nexus-ui'
+import { Sparkline, EmptyState } from '../nexus-ui'
 import LoadingSkeleton from '../nexus-ui/LoadingSkeleton'
 import './ModelsPage.css'
 import { buildModelOptions, modelProvider, FALLBACK_MODEL_OPTIONS } from './models/shared'
@@ -252,12 +252,10 @@ function OllamaManager() {
     setPulling(true); setPullStatus({ status: 'starting' })
     try {
       // streaming: raw fetch intentional (NDJSON pull-progress reader)
+      const jwt = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || ''
       const res = await fetch('/api/ollama/pull', {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'authorization': `Bearer ${sessionStorage.getItem('ai_jwt') || ''}`,
-        },
+        headers: { 'content-type': 'application/json', 'authorization': `Bearer ${jwt}` },
         body: JSON.stringify({ name: pullName.trim() }),
       })
       const reader = res.body.getReader()
@@ -270,11 +268,9 @@ function OllamaManager() {
         const events = buf.split('\n\n')
         buf = events.pop()
         for (const e of events) {
-          if (e.startsWith('data: ')) {
-            try {
-              const evt = JSON.parse(e.slice(6))
-              setPullStatus(evt)
-            } catch {}
+          const line = e.trim()
+          if (line.startsWith('data: ')) {
+            try { setPullStatus(JSON.parse(line.slice(6))) } catch {}
           }
         }
       }
@@ -301,7 +297,9 @@ function OllamaManager() {
           ))}
         </div>
       )}
-      {!error && models.length === 0 && <div className="mp-empty">No local models. Pull one below ↓</div>}
+      {!error && models.length === 0 && (
+        <EmptyState title="No models configured" sub="Pull a model below to get started with local inference" />
+      )}
       <div className="mp-ollama__pull">
         <input
           className="mp-input"
@@ -491,7 +489,7 @@ function PerformanceTab() {
       )}
       <div className="mp-perf-table-wrap">
         {!metricsLoading && metricsRows?.length === 0 ? (
-          <div className="mp-empty">No live model metrics for this window</div>
+          <EmptyState title="No models configured" sub="Add a model in Settings to get started" />
         ) : (
           <table className="mp-perf-table">
             <thead>

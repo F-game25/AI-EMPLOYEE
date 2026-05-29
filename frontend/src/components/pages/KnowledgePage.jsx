@@ -6,6 +6,7 @@ import BacklinksPanel from '../knowledge/BacklinksPanel'
 import LearnTopicWizard from '../knowledge/LearnTopicWizard'
 import StandingTopicsPanel from '../knowledge/StandingTopicsPanel'
 import LoadingSkeleton from '../nexus-ui/LoadingSkeleton'
+import EmptyState from '../nexus-ui/EmptyState'
 import './KnowledgePage.css'
 
 const SORT_OPTIONS = [
@@ -181,17 +182,20 @@ export default function KnowledgePage() {
     } catch (e) { console.error('delete failed', e) }
   }
 
-  const handleOpenObsidian = () => {
-    const path = currentNote?.path || '~/.ai-employee/vault'
-    navigator.clipboard?.writeText(path).catch(() => {})
-    alert(`Vault path copied:\n${path}\n\nOpen this folder in Obsidian as a vault.`)
+  const handleExportPath = () => {
+    const vaultPath = '~/.ai-employee/vault'
+    navigator.clipboard?.writeText(vaultPath).catch(() => {})
+    // toast instead of alert — non-blocking
+    import('../nexus-ui/Toaster').then(m => (m.toastSuccess || m.default?.toastSuccess)?.('Vault path copied to clipboard'))
+      .catch(() => {})
   }
 
   return (
     <div className="kp-page">
       <div className="kp-toolbar">
         <div className="kp-toolbar__left">
-          <button className={`kp-tab ${activeView === 'vault' ? 'is-active' : ''}`} onClick={() => setActiveView('vault')}>VAULT</button>
+          <button className={`kp-tab ${activeView === 'vault' ? 'is-active' : ''}`} onClick={() => setActiveView('vault')}>NOTES</button>
+          <button className={`kp-tab ${activeView === 'graph' ? 'is-active' : ''}`} onClick={() => setActiveView('graph')}>KNOWLEDGE GRAPH</button>
           <button className={`kp-tab ${activeView === 'topics' ? 'is-active' : ''}`} onClick={() => setActiveView('topics')}>STANDING TOPICS</button>
           <button className={`kp-tab ${activeView === 'review' ? 'is-active' : ''}`} onClick={() => setActiveView('review')}>REVIEW QUEUE</button>
           <button className={`kp-tab ${activeView === 'broken' ? 'is-active' : ''}`} onClick={() => setActiveView('broken')}>BROKEN LINKS</button>
@@ -201,7 +205,7 @@ export default function KnowledgePage() {
         <div className="kp-toolbar__right">
           <button className="kp-action" onClick={() => setWizardOpen(true)}>+ LEARN TOPIC</button>
           <button className="kp-action" onClick={() => handleNewNote()}>+ NEW NOTE</button>
-          <button className="kp-action kp-action--ghost" onClick={handleOpenObsidian}>↗ OPEN IN OBSIDIAN</button>
+          <button className="kp-action kp-action--ghost" onClick={handleExportPath} title="Copy vault path to clipboard for backup">⊡ EXPORT PATH</button>
         </div>
       </div>
 
@@ -272,8 +276,8 @@ export default function KnowledgePage() {
           <div className="kp-vault__center">
             {!currentNote && (
               <div className="kp-welcome">
-                <div className="kp-welcome__title">VAULT</div>
-                <div className="kp-welcome__sub">{allNoteTitles.length} notes · pick one from the left, or start a new one</div>
+                <div className="kp-welcome__title">MEMORY VAULT</div>
+                <div className="kp-welcome__sub">{allNoteTitles.length} notes · internal knowledge store — fully local, no external apps needed</div>
                 <div className="kp-welcome__actions">
                   <button className="kp-primary" onClick={() => setWizardOpen(true)}>+ TEACH ME ABOUT …</button>
                   <button className="kp-secondary" onClick={() => handleNewNote()}>+ NEW BLANK NOTE</button>
@@ -313,6 +317,8 @@ export default function KnowledgePage() {
           </div>
         </div>
       )}
+
+      {activeView === 'graph' && <VaultGraphView onOpenNote={id => { setActiveView('vault'); setSelectedId(id) }} />}
 
       {activeView === 'topics' && (
         <StandingTopicsPanel
@@ -479,6 +485,166 @@ function RagSourcesView() {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ── Vault Knowledge Graph ─────────────────────────────────────────────────────
+function VaultGraphView({ onOpenNote }) {
+  const canvasRef = useRef(null)
+  const [graphData, setGraphData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [hovered, setHovered] = useState(null)
+  const simRef = useRef(null)
+
+  useEffect(() => {
+    api.get('/api/vault/graph')
+      .then(d => setGraphData(d))
+      .catch(() => setGraphData({ nodes: [], links: [] }))
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !graphData) return
+    const { nodes, links } = graphData
+    if (!nodes?.length) return
+
+    const W = canvas.offsetWidth || 800
+    const H = canvas.offsetHeight || 500
+    canvas.width = W
+    canvas.height = H
+    const ctx = canvas.getContext('2d')
+
+    // Simple force-directed layout (no d3 dependency)
+    const pos = nodes.map((_, i) => ({
+      x: W / 2 + Math.cos(i / nodes.length * Math.PI * 2) * Math.min(W, H) * 0.35,
+      y: H / 2 + Math.sin(i / nodes.length * Math.PI * 2) * Math.min(W, H) * 0.35,
+      vx: 0, vy: 0,
+    }))
+    const nodeMap = Object.fromEntries(nodes.map((n, i) => [n.id, i]))
+
+    const tick = () => {
+      // repulsion
+      for (let i = 0; i < pos.length; i++) {
+        for (let j = i + 1; j < pos.length; j++) {
+          const dx = pos[i].x - pos[j].x, dy = pos[i].y - pos[j].y
+          const d = Math.sqrt(dx * dx + dy * dy) || 1
+          const f = 2400 / (d * d)
+          pos[i].vx += dx / d * f; pos[i].vy += dy / d * f
+          pos[j].vx -= dx / d * f; pos[j].vy -= dy / d * f
+        }
+        // pull to center
+        pos[i].vx += (W / 2 - pos[i].x) * 0.002
+        pos[i].vy += (H / 2 - pos[i].y) * 0.002
+      }
+      // attraction along links
+      for (const l of (links || [])) {
+        const si = nodeMap[l.source ?? l.from], ti = nodeMap[l.target ?? l.to]
+        if (si == null || ti == null) continue
+        const dx = pos[ti].x - pos[si].x, dy = pos[ti].y - pos[si].y
+        const d = Math.sqrt(dx * dx + dy * dy) || 1
+        const f = (d - 80) * 0.05
+        pos[si].vx += dx / d * f; pos[si].vy += dy / d * f
+        pos[ti].vx -= dx / d * f; pos[ti].vy -= dy / d * f
+      }
+      // integrate + damp
+      for (const p of pos) {
+        p.vx *= 0.85; p.vy *= 0.85
+        p.x = Math.max(20, Math.min(W - 20, p.x + p.vx))
+        p.y = Math.max(20, Math.min(H - 20, p.y + p.vy))
+      }
+    }
+
+    let frame = 0
+    const draw = () => {
+      if (frame < 120) tick()
+      frame++
+      ctx.clearRect(0, 0, W, H)
+      // edges
+      for (const l of (links || [])) {
+        const si = nodeMap[l.source ?? l.from], ti = nodeMap[l.target ?? l.to]
+        if (si == null || ti == null) continue
+        ctx.beginPath()
+        ctx.moveTo(pos[si].x, pos[si].y)
+        ctx.lineTo(pos[ti].x, pos[ti].y)
+        ctx.strokeStyle = 'rgba(229,199,107,0.18)'
+        ctx.lineWidth = 1
+        ctx.stroke()
+      }
+      // nodes
+      nodes.forEach((n, i) => {
+        const r = 5 + Math.min((n.link_count || 0) * 1.5, 10)
+        ctx.beginPath()
+        ctx.arc(pos[i].x, pos[i].y, r, 0, Math.PI * 2)
+        ctx.fillStyle = hovered === n.id ? '#E89A4F' : 'rgba(205,127,50,0.75)'
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(229,199,107,0.5)'
+        ctx.lineWidth = 1
+        ctx.stroke()
+        if (nodes.length < 60 || r > 8) {
+          ctx.fillStyle = 'rgba(255,255,255,0.7)'
+          ctx.font = '10px monospace'
+          ctx.fillText((n.title || n.id || '').slice(0, 18), pos[i].x + r + 3, pos[i].y + 4)
+        }
+      })
+    }
+
+    simRef.current = pos
+    let rafId
+    let lastTs = 0
+    const loop = (ts) => {
+      rafId = requestAnimationFrame(loop)
+      if (document.hidden || ts - lastTs < 40) return
+      lastTs = ts
+      draw()
+    }
+    rafId = requestAnimationFrame(loop)
+    const onVis = () => {
+      if (document.hidden) { cancelAnimationFrame(rafId); rafId = null }
+      else if (!rafId) rafId = requestAnimationFrame(loop)
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      cancelAnimationFrame(rafId)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [graphData, hovered])
+
+  if (loading) return <LoadingSkeleton variant="list" rows={5} />
+
+  const nodes = graphData?.nodes || []
+  if (!nodes.length) return (
+    <EmptyState
+      title="Knowledge graph is empty"
+      sub="Add notes to the vault — connections appear when notes link to each other via [[wikilinks]]."
+    />
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 12, padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 10, letterSpacing: '0.12em', color: 'var(--nx-gold, #e5c76b)', textTransform: 'uppercase', fontFamily: 'monospace' }}>
+          KNOWLEDGE GRAPH · {nodes.length} nodes · {graphData?.links?.length || 0} links
+        </span>
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}>internal · no external apps required</span>
+      </div>
+      <canvas
+        ref={canvasRef}
+        style={{ flex: 1, borderRadius: 6, border: '1px solid rgba(229,199,107,0.12)', background: 'rgba(7,8,15,0.95)', cursor: 'pointer' }}
+        onClick={e => {
+          const canvas = canvasRef.current
+          const pos = simRef.current
+          if (!canvas || !pos || !nodes) return
+          const rect = canvas.getBoundingClientRect()
+          const mx = (e.clientX - rect.left) * (canvas.width / rect.width)
+          const my = (e.clientY - rect.top) * (canvas.height / rect.height)
+          for (let i = 0; i < pos.length; i++) {
+            const dx = pos[i].x - mx, dy = pos[i].y - my
+            if (Math.sqrt(dx * dx + dy * dy) < 14) { onOpenNote?.(nodes[i].id); break }
+          }
+        }}
+      />
     </div>
   )
 }

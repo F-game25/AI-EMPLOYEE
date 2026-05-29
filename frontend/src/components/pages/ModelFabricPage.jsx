@@ -191,7 +191,7 @@ function LifecyclePanel() {
         <span className="mf-chip">{lc?.models_loaded ?? 0} loaded / {lc?.models_registered ?? 0} known</span>
         {lc?.heavy_load_busy && <span className="mf-chip">heavy load in progress…</span>}
         <button className="mf-btn mf-btn--sm" onClick={unloadIdle} disabled={busy}>Unload idle</button>
-        <button className="mf-btn mf-btn--sm" onClick={load} disabled={busy}>↻</button>
+        <button className="mf-btn mf-btn--sm" onClick={load} disabled={busy} aria-label="Reload models" title="Reload">↻</button>
       </div>
       <ul className="mf-hits">
         {(lc?.models || []).length === 0 && <li className="mf-empty">No models resident — all load on demand.</li>}

@@ -61,10 +61,14 @@ const DataStreamBeam = ({ beam }) => {
     });
   };
 
-  // Use RAF for animation
   useEffect(() => {
-    const interval = setInterval(frame, 16); // ~60fps
-    return () => clearInterval(interval);
+    let rafId
+    const loop = () => {
+      rafId = requestAnimationFrame(loop)
+      if (!document.hidden) frame()
+    }
+    rafId = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(rafId)
   }, [beam.speed]);
 
   return (

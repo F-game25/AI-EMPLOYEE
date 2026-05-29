@@ -3,10 +3,8 @@ import { useAppStore } from '../../store/appStore';
 import './TopStrip.css';
 
 export const TopStrip = () => {
-  const {
-    activeSection,
-    sampleSystemStatus,
-  } = useAppStore();
+  const activeSection = useAppStore(s => s.activeSection);
+  const sampleSystemStatus = useAppStore(s => s.sampleSystemStatus);
   const [time, setTime] = useState(new Date());
   const [metrics, setMetrics] = useState({
     cpu: 0,

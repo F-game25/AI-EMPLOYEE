@@ -293,11 +293,48 @@
   }
 }
 
+/* ── Cinematic flash line overlay ────────────────────────────────────────── */
+.boot-sequence__cinematic {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  pointer-events: none;
+  padding: 0 0 clamp(12px, 3vw, 32px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.boot-sequence__cinematic-line {
+  font-family: var(--nx-font-mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(229, 199, 107, 0.72);
+  opacity: 0;
+  animation: boot-flash-line 1.2s ease-out forwards;
+}
+
+@keyframes boot-flash-line {
+  0%   { opacity: 0;    transform: translateY(6px) scaleX(0.96); }
+  15%  { opacity: 1;    transform: translateY(0)   scaleX(1); }
+  60%  { opacity: 0.65; }
+  100% { opacity: 0.12; transform: translateY(0)   scaleX(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .boot-eye__orbit,
   .boot-eye__aperture,
   .boot-eye__scan,
   .boot-step--running .boot-step__dot {
     animation-duration: 8s;
+  }
+  .boot-sequence__cinematic-line {
+    animation: none;
+    opacity: 0.5;
   }
 }

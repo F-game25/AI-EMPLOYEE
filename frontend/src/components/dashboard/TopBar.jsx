@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../store/appStore'
 import { useSystemStore, selectBackendHealth } from '../../store/systemStore'
 import { useSecurityStore } from '../../store/securityStore'
@@ -60,7 +61,7 @@ function OfflineBanner({ reason }) {
     const target = last.ts + seconds * 1000
     const tick = () => setCountdown(Math.max(0, Math.ceil((target - Date.now()) / 1000)))
     tick()
-    const id = setInterval(tick, 500)
+    const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [heartbeatLogs])
 
@@ -111,18 +112,46 @@ function threatToEnum(score) {
   return { label: 'OK', tone: 'success', color: '#00FFB4' }
 }
 
+const LIVE_THRESHOLD_MS = 30_000
+
+function LiveBadge() {
+  const [isLive, setIsLive] = useState(() => {
+    const t = window.__lastWsEvent
+    return typeof t === 'number' && Date.now() - t < LIVE_THRESHOLD_MS
+  })
+
+  useEffect(() => {
+    const tick = () => {
+      const t = window.__lastWsEvent
+      setIsLive(typeof t === 'number' && Date.now() - t < LIVE_THRESHOLD_MS)
+    }
+    const id = setInterval(tick, 5000)
+    // Also update immediately on any WS message
+    const onMsg = () => { window.__lastWsEvent = Date.now(); setIsLive(true) }
+    window.addEventListener('ws:any', onMsg)
+    return () => { clearInterval(id); window.removeEventListener('ws:any', onMsg) }
+  }, [])
+
+  return (
+    <div className={`nx-topbar__live nx-topbar__live--${isLive ? 'live' : 'standby'}`} aria-label={isLive ? 'Live data' : 'Standby'}>
+      <span className="nx-topbar__live-dot" />
+      <span className="nx-topbar__live-label">{isLive ? 'LIVE' : 'STANDBY'}</span>
+    </div>
+  )
+}
+
 export default function TopBar() {
-  const wsConnected   = useAppStore(s => s.wsConnected)
-  const systemStatus  = useAppStore(s => s.systemStatus)
-  const systemHealth  = useAppStore(s => s.systemHealth) || {}
-  const nnStatus      = useAppStore(s => s.nnStatus)
-  const activeSection = useAppStore(s => s.activeSection)
+  const { wsConnected, systemStatus, systemHealth: _systemHealth, nnStatus, activeSection } = useAppStore(
+    useShallow(s => ({ wsConnected: s.wsConnected, systemStatus: s.systemStatus, systemHealth: s.systemHealth, nnStatus: s.nnStatus, activeSection: s.activeSection }))
+  )
+  const systemHealth = _systemHealth || {}
   const { updateReady, updateComplete, applying, applyUpdate } = useUpdateCheck()
   const toggleMobileSidebar = useSystemStore(s => s.toggleMobileSidebar)
 
   const threatScore  = useSecurityStore(s => s.securityStatus?.threat_score) ?? 0
-  const revenueToday = useEconomyStore(s => s.revenue?.today) ?? 0
-  const revenueYday  = useEconomyStore(s => s.revenue?.yesterday) ?? 0
+  const { revenueToday, revenueYday } = useEconomyStore(
+    useShallow(s => ({ revenueToday: s.revenue?.today ?? 0, revenueYday: s.revenue?.yesterday ?? 0 }))
+  )
   const modelCalls   = useCognitiveStore(s => s.modelCalls) || []
 
   // Tokens/sec EMA over last 30 samples (modelCalls is event-stream length proxy)
@@ -288,6 +317,11 @@ export default function TopBar() {
 
           {/* Route-aware mini-eye */}
           <MiniEye size={22} className="nx-topbar__mini-eye" />
+
+          <span className="nx-topbar__divider" />
+
+          {/* LIVE data badge */}
+          <LiveBadge />
 
           <span className="nx-topbar__divider" />
 

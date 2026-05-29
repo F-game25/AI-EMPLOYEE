@@ -107,6 +107,7 @@ const { createTurnRunner } = require('./services/turn-runner');
 const { z } = require('zod');
 const economyService = require('./services/economy_service');
 const ollamaAdmin = require('./services/ollama_admin');
+const autoUpdateWatchdog = require('./services/auto-update-watchdog');
 
 // Initialize error recovery and task history
 const errorRecovery = new ErrorRecoveryManager();
@@ -324,8 +325,10 @@ function requireAuth(req, res, next) {
 }
 
 function requireLocalhost(req, res, next) {
-  const ip = req.ip || req.connection?.remoteAddress || '';
-  if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+  // Use raw socket address — req.ip is X-Forwarded-For-aware (trust proxy: 1)
+  // and is therefore spoofable by external callers sending a forged header.
+  const rawIp = req.socket?.remoteAddress || req.connection?.remoteAddress || '';
+  if (rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1') return next();
   return res.status(403).json({ ok: false, error: 'localhost only' });
 }
 
@@ -425,8 +428,11 @@ app.use(helmet({
       fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
+      upgradeInsecureRequests: null,               // disabled — app runs on HTTP (no TLS)
     },
   },
+  // HSTS must be off for HTTP-only local server (Tauri/WebKit honours it and breaks loads)
+  strictTransportSecurity: false,
   crossOriginEmbedderPolicy: false,
 }));
 app.use(cors({
@@ -471,6 +477,30 @@ app.get('/api/artifacts/:filename', requireAuth, (req, res) => {
   const fpath = path.join(ARTIFACTS_DIR, fname);
   if (!require('fs').existsSync(fpath)) return res.status(404).json({ error: 'Artifact not found' });
   res.download(fpath);
+});
+// Preview HTML artifacts inline (no auth cookie needed — token in query param for iframe src)
+app.get('/api/preview/:filename', (req, res) => {
+  const fname = path.basename(req.params.filename);
+  if (!fname.endsWith('.html')) return res.status(400).send('Only HTML files can be previewed');
+  const fpath = path.join(ARTIFACTS_DIR, fname);
+  if (!fs.existsSync(fpath)) return res.status(404).send('Preview not found');
+  // Validate JWT from query param (iframes cannot send Authorization headers)
+  const token = req.query.token;
+  if (token) {
+    try {
+      const jwt = require('jsonwebtoken');
+      jwt.verify(token, process.env.JWT_SECRET_KEY || '');
+    } catch {
+      return res.status(401).send('Unauthorized');
+    }
+  } else {
+    // Fall back to cookie-based auth check via requireAuth pattern
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).send('Unauthorized');
+  }
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.send(fs.readFileSync(fpath, 'utf8'));
 });
 app.get('/api/artifacts', requireAuth, (_req, res) => {
   const fs = require('fs');
@@ -571,14 +601,14 @@ app.get('/api/proof/center', requireAuth, (_req, res) => {
 
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
-app.use('/api/voice', getVoiceApiRouter());
-app.use('/api/settings', require('./routes/settings'));
+app.use('/api/voice', requireAuth, getVoiceApiRouter());
+app.use('/api/settings', requireAuth, require('./routes/settings'));
 
 // Tasks API (real-time execution visibility)
 const taskGateway = require('./orchestrator/task-dashboard-gateway');
 const createTasksRouter = require('./routes/tasks');
-app.use('/api/tasks', createTasksRouter(taskGateway, broadcaster));
-app.use('/api/schedules', createTasksRouter.createSchedulesRouter(taskGateway, broadcaster));
+app.use('/api/tasks', requireAuth, createTasksRouter(taskGateway, broadcaster));
+app.use('/api/schedules', requireAuth, createTasksRouter.createSchedulesRouter(taskGateway, broadcaster));
 
 // Web Search API — proxies to Python /search with CloakBrowser support
 const createSearchRouter = require('./routes/search');
@@ -591,6 +621,11 @@ app.use('/api/research', createResearchRouter(requireAuth));
 // Vault API — Obsidian-compatible markdown knowledge store
 const createVaultRouter = require('./routes/vault');
 app.use('/api/vault', createVaultRouter(requireAuth));
+
+const createTopicsRouter = require('./routes/topics');
+const createLearningRouter = require('./routes/learning');
+app.use('/api/topics', createTopicsRouter(requireAuth));
+app.use('/api/learning', createLearningRouter(requireAuth));
 
 const GPU_USAGE_BASELINE = 18;
 let currentGpuUsage = GPU_USAGE_BASELINE;
@@ -615,6 +650,22 @@ app.use('/api/workflows', require('./routes/workflows')(requireAuth));
 const createHybridMemoryRouter = require('./routes/hybrid-memory-router');
 app.use('/api/memory', createHybridMemoryRouter(requireAuth));
 
+// Orders pipeline — website-sales flow (Lars)
+app.use('/api/orders', require('./routes/orders')(requireAuth));
+
+// Serve generated demo HTML files (read-only, auth-gated via query token)
+app.get('/api/demos/:filename', (req, res) => {
+  const fname = path.basename(req.params.filename);
+  if (!fname.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
+  // Allow JWT in query param so the URL can be used as <a href> / window.open
+  const token = req.query.token || (req.headers.authorization || '').replace('Bearer ', '');
+  try { jwt.verify(token, JWT_SECRET); } catch { return res.status(401).send('Unauthorized'); }
+  const demoPath = path.join(AI_HOME, 'state', 'artifacts', 'demos', fname);
+  if (!fs.existsSync(demoPath)) return res.status(404).send('Demo niet gevonden');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(demoPath);
+});
+
 // Dashboard API — security, knowledge, memory, intelligence, cognition, integrations, hooks
 app.use('/api', require('./routes/dashboard-api')(requireAuth));
 
@@ -636,25 +687,25 @@ const { createExecutionRouter } = require('./routes/execution');
 const { router: executionRouter, pipelineTraces } = createExecutionRouter({
   broadcaster,
 });
-app.use('/api/execution', executionRouter);
-app.use('/api/events', eventRoutes);
-app.use('/api/workflows', workflowRoutes);
-app.use('/api/sandbox', sandboxRoutes);
-app.use('/api/secrets', secretsRoutes);
+app.use('/api/execution', requireAuth, executionRouter);
+app.use('/api/events', requireAuth, eventRoutes);
+app.use('/api/workflows', requireAuth, workflowRoutes);
+app.use('/api/sandbox', requireAuth, sandboxRoutes);
+app.use('/api/secrets', requireAuth, secretsRoutes);
 // Phase 2 — Enterprise Intelligence
-app.use('/api/rag',        ragRoutes);
-app.use('/api/planning',   planningRoutes);
-app.use('/api/economics',  economicsRoutes);
-app.use('/api/governance', governanceRoutes);
-app.use('/api/telemetry',  telemetryRoutes);
+app.use('/api/rag',        requireAuth, ragRoutes);
+app.use('/api/planning',   requireAuth, planningRoutes);
+app.use('/api/economics',  requireAuth, economicsRoutes);
+app.use('/api/governance', requireAuth, governanceRoutes);
+app.use('/api/telemetry',  requireAuth, telemetryRoutes);
 
 // Phase 3 — Autonomous Workforce
-app.use('/api/rpa',         rpaRoutes);
-app.use('/api/healing',     healingRoutes);
-app.use('/api/marketplace', marketplaceRoutes);
-app.use('/api/deployment',  deploymentRoutes);
-app.use('/api/simulation',  simulationRoutes);
-app.use('/api/cognitive',   cognitiveRoutes);
+app.use('/api/rpa',         requireAuth, rpaRoutes);
+app.use('/api/healing',     requireAuth, healingRoutes);
+app.use('/api/marketplace', requireAuth, marketplaceRoutes);
+app.use('/api/deployment',  requireAuth, deploymentRoutes);
+app.use('/api/simulation',  requireAuth, simulationRoutes);
+app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
 
 // Incremented by broadcaster heartbeat loop; sampled into system status.
 let heartbeatCounter = 0;
@@ -1708,7 +1759,7 @@ app.get('/health', (req, res) => {
 
 // GET /health/full — detailed health check (external calls, slow)
 // Called by dashboard, not by boot scripts. Includes all subsystem checks.
-app.get('/health/full', async (req, res) => {
+app.get('/health/full', requireAuth, async (req, res) => {
   const checks = {
     node: { status: 'ok' },
     python_backend: { status: 'pending' },
@@ -1788,13 +1839,31 @@ app.get('/health/full', async (req, res) => {
 // the Python runtime (problem-solver-ui :18790) to push events onto the
 // Node WebSocket broadcaster. Body: { event: string, data: object }.
 // Locked to loopback so external clients cannot inject dashboard events.
+// Uses req.socket.remoteAddress (not req.ip) — trust proxy: 1 makes req.ip
+// X-Forwarded-For-aware and therefore spoofable by external callers.
+// Allowlist of valid event names for /internal/events.
+// Rejects arbitrary event names to prevent state spoofing via blacklight events.
+const _INTERNAL_EVENT_ALLOWLIST = new Set([
+  'blacklight:status', 'blacklight:mode_change', 'blacklight:lockdown',
+  'task:context_check', 'task:research_started', 'task:research_completed',
+  'task:research_budget_exhausted', 'task:update', 'task:done',
+  'heartbeat', 'activity:item', 'workflow:update', 'execution:log', 'execution:step',
+  'orchestrator:queued', 'memory:router:trace', 'event_stream',
+  'objective:update', 'chat:message', 'security:update',
+]);
 app.post('/internal/events', express.json({ limit: '2mb' }), (req, res) => {
-  const ip = req.ip || req.connection?.remoteAddress || '';
-  const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  const rawIp = req.socket?.remoteAddress || req.connection?.remoteAddress || '';
+  const isLocal = rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1';
   if (!isLocal) return res.status(403).json({ ok: false, error: 'localhost only' });
   const { event, data } = req.body || {};
   if (typeof event !== 'string' || !event) {
     return res.status(400).json({ ok: false, error: 'event required' });
+  }
+  if (event.length > 120) {
+    return res.status(400).json({ ok: false, error: 'event name too long' });
+  }
+  if (!_INTERNAL_EVENT_ALLOWLIST.has(event)) {
+    return res.status(400).json({ ok: false, error: 'unknown event type' });
   }
   try {
     broadcaster.broadcast(event, data || {});
@@ -1971,6 +2040,19 @@ app.post('/api/identity/finalize', requireAuth, async (req, res) => {
 
 app.get('/version', (req, res) => {
   res.set('Cache-Control', 'no-store, must-revalidate');
+  // Authenticated callers get full version details; unauthenticated get minimal response.
+  // This prevents enumeration of git commit hashes and server start timestamps by attackers.
+  const isAuthed = (() => {
+    try {
+      const authHeader = req.headers.authorization || '';
+      if (!authHeader.startsWith('Bearer ')) return false;
+      jwt.verify(authHeader.slice(7), JWT_SECRET);
+      return true;
+    } catch (_) { return false; }
+  })();
+  if (!isAuthed) {
+    return res.json({ ok: true });
+  }
   let versionState = null;
   try {
     const versionFile = path.join(REPO_ROOT, 'state', 'version.json');
@@ -1982,8 +2064,6 @@ app.get('/version', (req, res) => {
     commit: GIT_COMMIT,
     timestamp: new Date().toISOString(),
     started_at: SERVER_START_TIMESTAMP,
-    cwd: process.cwd(),
-    file: __filename,
     version_state: versionState,
   });
 });
@@ -2004,7 +2084,7 @@ app.post('/agents/activate', requireAuth, (req, res) => {
   res.json({ ok: true, ...out, mode: getMode(), agents: getAgents() });
 });
 
-app.get('/status', (req, res) => {
+app.get('/status', requireAuth, (req, res) => {
   const stats = sampleSystemStatus();
   res.json({ status: 'online', agents: stats.total_agents, running_agents: stats.running_agents, timestamp: stats.timestamp });
 });
@@ -2014,7 +2094,7 @@ app.get('/api/status', requireAuth, (req, res) => {
   const stats = sampleSystemStatus();
   res.json({ status: 'online', agents: stats.total_agents, running_agents: stats.running_agents, timestamp: stats.timestamp });
 });
-app.get('/api/health', (req, res) => {
+app.get('/api/health', requireAuth, (req, res) => {
   const stats = sampleSystemStatus();
   const agents = getAgents();
   res.json({
@@ -2581,7 +2661,9 @@ app.get('/api/neural-brain/memory/list', requireAuth, async (req, res) => {
 
 app.delete('/api/neural-brain/memory/:id', requireAuth, async (req, res) => {
   try {
-    const r = await fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/memory/${req.params.id}`, { method: 'DELETE' });
+    const memId = encodeURIComponent(String(req.params.id || '').trim());
+    if (!memId) return res.status(400).json({ ok: false, error: 'id required' });
+    const r = await fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/memory/${memId}`, { method: 'DELETE' });
     if (r?.ok) return res.json(await r.json());
   } catch (_) {}
   res.json({ ok: true });
@@ -2725,9 +2807,15 @@ app.post('/api/agents/stop-all', requireAuth, (req, res) => {
 });
 app.get('/api/agents', requireAuth, (req, res) => {
   const agents = getAgents();
-  // Include tenant context if available (for debugging/admin purposes only)
+  // Merge live forge agent statuses if the engine exposes them
+  let forgeAgents = [];
+  try {
+    const { getAscendForgeEngine } = require('./ascendforge/engine');
+    const eng = getAscendForgeEngine();
+    if (eng.forgeAgentStatus) forgeAgents = Object.values(eng.forgeAgentStatus);
+  } catch { /* engine not loaded yet — skip */ }
   const response = {
-    agents,
+    agents: [...agents, ...forgeAgents],
     tenant: req.tenant ? { tenant_id: req.tenant.tenantId, org_name: req.tenant.orgName } : null,
   };
   res.json(response);
@@ -3401,8 +3489,11 @@ app.post('/api/ollama/pull', requireAuth, _rl_ollama_pull, async (req, res) => {
 });
 
 app.delete('/api/ollama/models/:name', requireAuth, async (req, res) => {
-  const name = decodeURIComponent(req.params.name || '');
+  const name = decodeURIComponent(req.params.name || '').trim();
   if (!name) return res.status(400).json({ ok: false, error: 'name required' });
+  if (name.length > 100) return res.status(400).json({ ok: false, error: 'model name too long (max 100 chars)' });
+  // Same allowlist as pull: lowercase alphanumeric, colon, dot, hyphen, underscore
+  if (!/^[a-z0-9:._\-]+$/.test(name)) return res.status(400).json({ ok: false, error: 'invalid model name format' });
   const result = await ollamaAdmin.deleteModel(name).catch(e => ({ ok: false, error: e.message }));
   res.json(result);
 });
@@ -3539,8 +3630,10 @@ for (const [m, p, pyP] of [
 for (const ep of ['tools', 'skills']) {
   app.post(`/api/${ep}/:name/execute`, requireAuth, async (req, res) => {
     try {
+      const epName = encodeURIComponent(String(req.params.name || '').trim());
+      if (!epName) return res.status(400).json({ ok: false, error: 'name required' });
       const r = await fetch(
-        `http://127.0.0.1:${PYTHON_BACKEND_PORT}/${ep}/${req.params.name}/execute`,
+        `http://127.0.0.1:${PYTHON_BACKEND_PORT}/${ep}/${epName}/execute`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.authorization || '' },
@@ -4503,7 +4596,9 @@ app.post('/api/roadmap/generate', requireAuth, async (req, res) => {
 
 app.get('/api/roadmap/list/:tenantId', requireAuth, async (req, res) => {
   try {
-    const result = await requestPythonJSON(`/roadmap/list/${req.params.tenantId}`, 'GET', null, {
+    const tenantId = encodeURIComponent(String(req.params.tenantId || '').trim());
+    if (!tenantId) return res.status(400).json({ ok: false, error: 'tenantId required' });
+    const result = await requestPythonJSON(`/api/roadmap/list/${tenantId}`, 'GET', null, {
       headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 15000,
     });
@@ -4516,7 +4611,9 @@ app.get('/api/roadmap/list/:tenantId', requireAuth, async (req, res) => {
 
 app.get('/api/roadmap/:roadmapId', requireAuth, async (req, res) => {
   try {
-    const result = await requestPythonJSON(`/roadmap/${req.params.roadmapId}`, 'GET', null, {
+    const roadmapId = encodeURIComponent(String(req.params.roadmapId || '').trim());
+    if (!roadmapId) return res.status(400).json({ ok: false, error: 'roadmapId required' });
+    const result = await requestPythonJSON(`/api/roadmap/${roadmapId}`, 'GET', null, {
       headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 15000,
     });
@@ -4529,7 +4626,9 @@ app.get('/api/roadmap/:roadmapId', requireAuth, async (req, res) => {
 
 app.post('/api/roadmap/:roadmapId/execute', requireAuth, async (req, res) => {
   try {
-    const result = await requestPythonJSON(`/roadmap/${req.params.roadmapId}/execute`, 'POST', req.body, {
+    const roadmapId = encodeURIComponent(String(req.params.roadmapId || '').trim());
+    if (!roadmapId) return res.status(400).json({ ok: false, error: 'roadmapId required' });
+    const result = await requestPythonJSON(`/api/roadmap/${roadmapId}/execute`, 'POST', req.body, {
       headers: { Authorization: pythonServiceAuthorization(req) },
       timeoutMs: 120000,
     });
@@ -6934,6 +7033,38 @@ app.post('/api/system/run-update', requireAuth, (req, res) => {
   req.on('close', () => { if (_updateRunning) { child.kill('SIGTERM'); _updateRunning = false; } });
 });
 
+// ── Auto-Update Settings + Watchdog Status ────────────────────────────────────
+
+app.get('/api/system/auto-update-settings', requireAuth, (_req, res) => {
+  res.json(autoUpdateWatchdog.getStatus());
+});
+
+app.patch('/api/system/auto-update-settings', requireAuth, (req, res) => {
+  const allowed = ['auto_update_enabled','update_channel','update_interval_minutes',
+                   'auto_restart_on_update','watchdog_enabled','watchdog_interval_seconds',
+                   'watchdog_max_failures'];
+  const patch = {};
+  for (const k of allowed) {
+    if (req.body[k] !== undefined) patch[k] = req.body[k];
+  }
+  // Coerce types
+  if (patch.update_interval_minutes !== undefined) patch.update_interval_minutes = Math.max(15, parseInt(patch.update_interval_minutes, 10) || 60);
+  if (patch.watchdog_interval_seconds !== undefined) patch.watchdog_interval_seconds = Math.max(10, parseInt(patch.watchdog_interval_seconds, 10) || 30);
+  if (patch.watchdog_max_failures !== undefined) patch.watchdog_max_failures = Math.max(1, parseInt(patch.watchdog_max_failures, 10) || 3);
+  const settings = autoUpdateWatchdog.applySettings(patch);
+  broadcaster.broadcast('system:update:settings_changed', { settings });
+  res.json({ ok: true, settings });
+});
+
+app.post('/api/system/trigger-update', requireAuth, (_req, res) => {
+  autoUpdateWatchdog.triggerManualUpdate();
+  res.json({ ok: true, message: 'Update triggered' });
+});
+
+app.get('/api/system/watchdog-status', requireAuth, (_req, res) => {
+  res.json(autoUpdateWatchdog.getStatus().watchdog);
+});
+
 // ── Task Tracking System ──────────────────────────────────────────────────────
 // Stores live task progress; in-memory with TTL cleanup (use Redis for production)
 
@@ -7040,8 +7171,11 @@ setInterval(() => {
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
-  // All WebSocket connections must present a valid JWT token.
-  if (!wsTokenValid(req)) {
+  // Localhost connections (Tauri/Electron webview, dev browser) bypass token check;
+  // remote connections must present a valid JWT token.
+  const _wsRemote = req.socket?.remoteAddress || '';
+  const _wsIsLocal = _wsRemote === '127.0.0.1' || _wsRemote === '::1' || _wsRemote === '::ffff:127.0.0.1';
+  if (!_wsIsLocal && !wsTokenValid(req)) {
     ws.close(4401, 'Unauthorized');
     return;
   }
@@ -8023,6 +8157,9 @@ server.listen(PORT, LISTEN_HOST, () => {
   console.log(`[SERVER] RUNNING FROM: ${process.cwd()}`);
   console.log(`[SERVER] FILE PATH: ${__filename}`);
   console.log(`[SERVER] LATEST COMMIT: ${GIT_COMMIT}`);
+  if (!process.env.METRICS_TOKEN) {
+    console.warn('[SERVER] ⚠  METRICS_TOKEN not set — /metrics endpoint is publicly accessible. Set METRICS_TOKEN in ~/.ai-employee/.env to require bearer token auth.');
+  }
   if (HAS_FRONTEND_DIST) {
     console.log(`[SERVER] Serving frontend bundle from ${FRONTEND_DIST}`);
   } else {
@@ -8053,6 +8190,30 @@ server.listen(PORT, LISTEN_HOST, () => {
   watchGraphFile();
   // Probe Python subsystems and broadcast system:ready when confirmed
   probeUntilReady().catch(e => console.error('[READINESS] probe error:', e));
+
+  // ── Auto-update + Watchdog service ─────────────────────────────────────────
+  const _restartBackends = async () => {
+    console.log('[watchdog] Restarting backends via start.sh…');
+    const startSh = path.join(REPO_ROOT, 'start.sh');
+    if (!fs.existsSync(startSh)) { console.warn('[watchdog] start.sh not found — skip restart'); return; }
+    const { spawn: _spawn } = require('child_process');
+    return new Promise((resolve) => {
+      const child = _spawn('bash', [startSh, '--restart-only'], {
+        cwd: REPO_ROOT,
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env },
+      });
+      child.unref();
+      setTimeout(resolve, 1000);
+    });
+  };
+  autoUpdateWatchdog.init({
+    broadcaster,
+    nodePort: PORT,
+    restartFn: _restartBackends,
+  });
+  console.log('[AutoUpdate] Watchdog + auto-update service initialized');
 
   // FIX-2 cont: 2026-05-12 — Invalidate frontend cache on SIGHUP (hot reload)
   process.on('SIGHUP', () => {

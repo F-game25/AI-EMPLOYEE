@@ -7,6 +7,7 @@ import { NxToggle, NxSlider, NxField, NxSaveBtn, useSave, SafetyConfirmModal } f
 import SecurityTab from './settings/SecurityTab'
 import BillingTab from './settings/BillingTab'
 import TeamTab from './settings/TeamTab'
+import { useAppPerformance } from '../../context/PerformanceModeContext'
 
 /* ── Constants ─────────────────────────────────────────────────────────── */
 
@@ -96,6 +97,26 @@ function GeneralTab() {
   )
 }
 
+const STAGE_LABEL = {
+  starting: 'Initializing', fetching: 'Fetching remote', comparing: 'Comparing versions',
+  applying: 'Applying update', building: 'Building frontend', restarting: 'Restarting services',
+  done: 'Complete', error: 'Error', running: 'Running',
+}
+
+const CHANNEL_OPTS = [
+  { value: 'stable', label: 'STABLE', desc: 'Tested releases from main branch' },
+  { value: 'beta',   label: 'BETA',   desc: 'Latest changes from develop branch' },
+]
+
+const INTERVAL_OPTS = [
+  { value: 15,  label: '15 min' },
+  { value: 30,  label: '30 min' },
+  { value: 60,  label: '1 hour' },
+  { value: 120, label: '2 hours' },
+  { value: 360, label: '6 hours' },
+  { value: 720, label: '12 hours' },
+]
+
 function UpdateSection() {
   const {
     checking, applying, progress, stage, log, error,
@@ -104,71 +125,240 @@ function UpdateSection() {
   } = useUpdateCheck()
   const logRef = useRef(null)
 
+  // Auto-update + watchdog settings
+  const [cfg, setCfg] = useState({
+    auto_update_enabled: false,
+    update_channel: 'stable',
+    update_interval_minutes: 60,
+    auto_restart_on_update: true,
+    watchdog_enabled: true,
+    watchdog_interval_seconds: 30,
+    watchdog_max_failures: 3,
+  })
+  const [watchdog, setWatchdog] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  // Load current settings + watchdog status on mount
+  useEffect(() => {
+    const jwt = sessionStorage.getItem('ai_jwt')
+    const h = jwt ? { Authorization: `Bearer ${jwt}` } : {}
+    fetch('/api/system/auto-update-settings', { headers: h })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.settings) setCfg(p => ({ ...p, ...d.settings }))
+        if (d?.watchdog) setWatchdog(d.watchdog)
+      })
+      .catch(() => {})
+  }, [])
+
+  // Poll watchdog status every 15s
+  useEffect(() => {
+    const jwt = sessionStorage.getItem('ai_jwt')
+    const h = jwt ? { Authorization: `Bearer ${jwt}` } : {}
+    const iv = setInterval(() => {
+      fetch('/api/system/watchdog-status', { headers: h })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setWatchdog(d) })
+        .catch(() => {})
+    }, 15000)
+    return () => clearInterval(iv)
+  }, [])
+
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [log])
 
-  const stageLabel = {
-    starting: 'Initializing…', fetching: 'Fetching remote…', comparing: 'Comparing versions…',
-    applying: 'Applying update…', building: 'Building frontend…', restarting: 'Restarting services…',
-    done: 'Complete', error: 'Error', running: 'Running…',
+  const set = (k, v) => setCfg(p => ({ ...p, [k]: v }))
+
+  const saveSettings = async () => {
+    setSaving(true)
+    const jwt = sessionStorage.getItem('ai_jwt')
+    try {
+      const r = await fetch('/api/system/auto-update-settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}) },
+        body: JSON.stringify(cfg),
+      })
+      if (r.ok) { setSaved(true); setTimeout(() => setSaved(false), 2500) }
+    } catch { /* network error — skip */ }
+    setSaving(false)
   }
 
+  const wdStatus = watchdog?.status || 'idle'
+  const wdPill = wdStatus === 'healthy' ? 'ok' : wdStatus === 'restarting' ? 'warn' : wdStatus === 'idle' ? 'dim' : 'err'
+
   return (
-    <div className="nx-section">
-      <div className="nx-section-label">SYSTEM UPDATES</div>
-      <div className="nx-update-meta">
-        <div className="nx-update-row">
-          <span className="nx-update-key">CURRENT COMMIT</span>
-          <code className="nx-commit">{currentCommit || '—'}</code>
-        </div>
-        {remoteCommit && (
-          <div className="nx-update-row">
-            <span className="nx-update-key">REMOTE COMMIT</span>
-            <code className="nx-commit nx-commit--remote">{remoteCommit}</code>
-          </div>
-        )}
-        {lastChecked && (
-          <div className="nx-update-row">
-            <span className="nx-update-key">LAST CHECKED</span>
-            <span className="nx-update-val">{new Date(lastChecked).toLocaleTimeString()}</span>
-          </div>
-        )}
-        {updateComplete && <div className="nx-badge nx-badge--ok">✓ UPDATE APPLIED — reload to activate</div>}
-        {error && <div className="nx-badge nx-badge--err">✗ {error}</div>}
-      </div>
+    <>
+      {/* ── Auto-Update Config ─────────────────────────────────────────── */}
+      <div className="nx-section">
+        <div className="nx-section-label">AUTO-UPDATE</div>
+        <p className="nx-help-text">
+          When enabled, the system automatically pulls and applies new code on a schedule.
+          Updates are applied without downtime — services hot-restart only when needed.
+        </p>
 
-      {applying && (
-        <div className="nx-progress-wrap">
-          <div className="nx-progress-bar"><div className="nx-progress-fill" style={{ width: `${progress}%` }} /></div>
-          <span className="nx-progress-label">{stageLabel[stage] || stage || '…'} — {progress}%</span>
-        </div>
-      )}
-
-      {log.length > 0 && (
-        <div className="nx-log" ref={logRef}>
-          {log.map((e, i) => (
-            <div key={i} className={`nx-log-line nx-log-line--${e.level || 'info'}`}>
-              <span className="nx-log-stage">[{e.stage || '—'}]</span>{e.text}
+        <div className="nx-toggle-list">
+          <div className="nx-toggle-row">
+            <div className="nx-toggle-info">
+              <span className="nx-toggle-title">AUTO-UPDATE</span>
+              <span className="nx-toggle-desc">Pull and apply code updates automatically on schedule</span>
             </div>
-          ))}
+            <NxToggle
+              value={cfg.auto_update_enabled}
+              onChange={v => set('auto_update_enabled', v)}
+            />
+          </div>
+          <div className="nx-toggle-row">
+            <div className="nx-toggle-info">
+              <span className="nx-toggle-title">AUTO-RESTART ON UPDATE</span>
+              <span className="nx-toggle-desc">Restart services automatically after an update is applied</span>
+            </div>
+            <NxToggle
+              value={cfg.auto_restart_on_update}
+              onChange={v => set('auto_restart_on_update', v)}
+            />
+          </div>
         </div>
-      )}
 
-      <div className="nx-btn-row">
-        <button className="nx-save-btn" onClick={checkForUpdates} disabled={checking || applying}>
-          {checking ? 'CHECKING…' : 'CHECK FOR UPDATES'}
-        </button>
-        <button className="nx-save-btn nx-save-btn--green" onClick={applyUpdate} disabled={applying || checking}>
-          {applying ? `UPDATING… ${progress}%` : 'UPDATE SYSTEM NOW'}
-        </button>
-        {updateComplete && (
-          <button className="nx-save-btn nx-save-btn--reload" onClick={() => window.location.reload()}>
-            RELOAD NOW →
-          </button>
-        )}
+        <div className="nx-form-grid" style={{ marginTop: 'var(--nx-s-4)' }}>
+          <NxField label="UPDATE CHANNEL">
+            <select className="nx-input" value={cfg.update_channel} onChange={e => set('update_channel', e.target.value)}>
+              {CHANNEL_OPTS.map(o => <option key={o.value} value={o.value}>{o.label} — {o.desc}</option>)}
+            </select>
+          </NxField>
+          <NxField label="CHECK INTERVAL">
+            <select
+              className="nx-input"
+              value={cfg.update_interval_minutes}
+              onChange={e => set('update_interval_minutes', parseInt(e.target.value, 10))}
+              disabled={!cfg.auto_update_enabled}
+            >
+              {INTERVAL_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </NxField>
+        </div>
+
+        <NxSaveBtn label={saved ? 'SAVED ✓' : saving ? 'SAVING…' : 'SAVE UPDATE SETTINGS'} saving={saving} saved={saved} onClick={saveSettings} />
       </div>
-    </div>
+
+      <div className="nx-divider" />
+
+      {/* ── Watchdog Config ────────────────────────────────────────────── */}
+      <div className="nx-section">
+        <div className="nx-section-label">HEALTH WATCHDOG</div>
+        <p className="nx-help-text">
+          The watchdog monitors all services continuously. When a component fails repeated health
+          checks it is automatically restarted — keeping the system operational without manual intervention.
+        </p>
+
+        {/* Live watchdog status */}
+        <div className="nx-watchdog-status">
+          <div className={`nx-wd-pill nx-wd-pill--${wdPill}`}>
+            <span className="nx-wd-dot" />
+            {wdStatus.toUpperCase()}
+          </div>
+          {watchdog && (
+            <div className="nx-wd-stats">
+              <span>NODE {watchdog.node_ok ? '✓' : '✗'}</span>
+              <span>PYTHON {watchdog.python_ok ? '✓' : '✗'}</span>
+              {watchdog.restarts_today > 0 && <span className="nx-wd-restarts">RESTARTS TODAY: {watchdog.restarts_today}</span>}
+              {watchdog.last_restart && <span className="nx-wd-last">LAST RESTART {new Date(watchdog.last_restart).toLocaleTimeString()}</span>}
+            </div>
+          )}
+        </div>
+
+        <div className="nx-toggle-list" style={{ marginTop: 'var(--nx-s-4)' }}>
+          <div className="nx-toggle-row">
+            <div className="nx-toggle-info">
+              <span className="nx-toggle-title">ENABLE WATCHDOG</span>
+              <span className="nx-toggle-desc">Continuously monitor and auto-recover failed services</span>
+            </div>
+            <NxToggle value={cfg.watchdog_enabled} onChange={v => set('watchdog_enabled', v)} />
+          </div>
+        </div>
+
+        <div className="nx-form-grid" style={{ marginTop: 'var(--nx-s-4)' }}>
+          <NxField label="CHECK INTERVAL (SECONDS)">
+            <input
+              className="nx-input"
+              type="number" min={10} max={300}
+              value={cfg.watchdog_interval_seconds}
+              onChange={e => set('watchdog_interval_seconds', Math.max(10, parseInt(e.target.value, 10) || 30))}
+              disabled={!cfg.watchdog_enabled}
+            />
+          </NxField>
+          <NxField label="FAILURES BEFORE RESTART">
+            <input
+              className="nx-input"
+              type="number" min={1} max={10}
+              value={cfg.watchdog_max_failures}
+              onChange={e => set('watchdog_max_failures', Math.max(1, parseInt(e.target.value, 10) || 3))}
+              disabled={!cfg.watchdog_enabled}
+            />
+          </NxField>
+        </div>
+      </div>
+
+      <div className="nx-divider" />
+
+      {/* ── Manual Update ─────────────────────────────────────────────── */}
+      <div className="nx-section">
+        <div className="nx-section-label">MANUAL UPDATE</div>
+
+        <div className="nx-update-meta">
+          <div className="nx-update-row">
+            <span className="nx-update-key">CURRENT COMMIT</span>
+            <code className="nx-commit">{currentCommit || '—'}</code>
+          </div>
+          {remoteCommit && (
+            <div className="nx-update-row">
+              <span className="nx-update-key">REMOTE COMMIT</span>
+              <code className="nx-commit nx-commit--remote">{remoteCommit}</code>
+            </div>
+          )}
+          {lastChecked && (
+            <div className="nx-update-row">
+              <span className="nx-update-key">LAST CHECKED</span>
+              <span className="nx-update-val">{new Date(lastChecked).toLocaleTimeString()}</span>
+            </div>
+          )}
+          {updateComplete && <div className="nx-badge nx-badge--ok">✓ UPDATE APPLIED — reload to activate</div>}
+          {error && <div className="nx-badge nx-badge--err">✗ {error}</div>}
+        </div>
+
+        {applying && (
+          <div className="nx-progress-wrap">
+            <div className="nx-progress-bar"><div className="nx-progress-fill" style={{ width: `${progress}%` }} /></div>
+            <span className="nx-progress-label">{STAGE_LABEL[stage] || stage || '…'} — {progress}%</span>
+          </div>
+        )}
+
+        {log.length > 0 && (
+          <div className="nx-log" ref={logRef}>
+            {log.map((e, i) => (
+              <div key={i} className={`nx-log-line nx-log-line--${e.level || 'info'}`}>
+                <span className="nx-log-stage">[{e.stage || '—'}]</span>{e.text}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="nx-btn-row">
+          <button className="nx-save-btn" onClick={checkForUpdates} disabled={checking || applying}>
+            {checking ? 'CHECKING…' : 'CHECK FOR UPDATES'}
+          </button>
+          <button className="nx-save-btn nx-save-btn--green" onClick={applyUpdate} disabled={applying || checking}>
+            {applying ? `APPLYING… ${progress}%` : 'APPLY UPDATE NOW'}
+          </button>
+          {updateComplete && (
+            <button className="nx-save-btn nx-save-btn--reload" onClick={() => window.location.reload()}>
+              RELOAD NOW →
+            </button>
+          )}
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -415,6 +605,47 @@ function RenderingSection() {
   )
 }
 
+function HardwareProfileSection() {
+  const { tier, hardware, setTierOverride } = useAppPerformance()
+  const [perfOverride, setPerfOverride] = useState(localStorage.getItem('nx_perf_tier') || 'auto')
+
+  const handlePerfOverride = (val) => {
+    setPerfOverride(val)
+    setTierOverride(val === 'auto' ? null : val)
+  }
+
+  return (
+    <>
+      <div className="nx-divider" />
+      <div className="nx-section">
+        <div className="nx-section-label">HARDWARE PROFILE</div>
+        <div className="nx-hw-profile-card">
+          <div className="nx-hw-stats">
+            <div className="nx-hw-stat"><span>GPU</span><strong>{hardware?.gpu || 'CPU-only'}</strong></div>
+            <div className="nx-hw-stat"><span>VRAM</span><strong>{hardware?.vram_gb ? `${hardware.vram_gb} GB` : '—'}</strong></div>
+            <div className="nx-hw-stat"><span>RAM</span><strong>{hardware?.ram_gb ? `${hardware.ram_gb} GB` : '—'}</strong></div>
+            <div className="nx-hw-stat"><span>CPU Cores</span><strong>{hardware?.cpu_cores || '—'}</strong></div>
+          </div>
+          <div className="nx-hw-tier-row">
+            <span>Detected tier:</span>
+            <span className={`nx-hw-tier-pill nx-hw-tier--${tier}`}>{tier.toUpperCase()}</span>
+          </div>
+          <div className="nx-hw-override-row">
+            <label>Performance mode</label>
+            <select value={perfOverride} onChange={e => handlePerfOverride(e.target.value)} className="nx-hw-select">
+              <option value="auto">Auto (Recommended)</option>
+              <option value="high">High — full 3D + effects</option>
+              <option value="medium">Medium — reduced effects</option>
+              <option value="low">Low — 2D fallbacks, no animations</option>
+            </select>
+            <span className="nx-hw-reload-hint">Changing this will reload the app</span>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function AppearanceTab() {
   const [cfg, setCfg] = useState({ theme: 'nexus-dark', sidebar_collapsed: false, reduced_motion: false, font_size: 13 })
   const set = (k, v) => setCfg(p => ({ ...p, [k]: v }))
@@ -476,6 +707,7 @@ function AppearanceTab() {
       </div>
 
       <RenderingSection />
+      <HardwareProfileSection />
     </div>
   )
 }

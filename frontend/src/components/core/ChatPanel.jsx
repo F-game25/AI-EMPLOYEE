@@ -2,7 +2,11 @@ import { useState, useRef, useEffect, useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import { sendChatMessage } from '../../hooks/useWebSocket'
+import { enableDevMode, disableDevMode, isDevModeActive } from '../../hooks/useDevMode'
 import './ChatPanel.css'
+
+const DEV_ON_PHRASE  = 'aethernus nexus dev mode'
+const DEV_OFF_PHRASE = 'aethernus nexus dev off'
 
 export default function ChatPanel({ isOpen, onClose }) {
   const messages = useAppStore(s => s.chatMessages) || []
@@ -30,6 +34,19 @@ export default function ChatPanel({ isOpen, onClose }) {
   const handleSend = () => {
     const text = input.trim()
     if (!text) return
+    const lower = text.toLowerCase()
+    if (lower === DEV_ON_PHRASE) {
+      enableDevMode()
+      addChatMessage?.({ role: 'assistant', content: '⚡ Dev mode activated. Reload to see dev overlays.', ts: Date.now() })
+      setInput('')
+      return
+    }
+    if (lower === DEV_OFF_PHRASE) {
+      disableDevMode()
+      addChatMessage?.({ role: 'assistant', content: '✓ Dev mode deactivated.', ts: Date.now() })
+      setInput('')
+      return
+    }
     addChatMessage?.({ role: 'user', content: text, ts: Date.now() })
     sendChatMessage(text)
     setInput('')
@@ -47,7 +64,13 @@ export default function ChatPanel({ isOpen, onClose }) {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
 
-  const proofHref = item => item?.url || (item?.path ? `/api/artifacts/${encodeURIComponent(item.path.split('/').pop())}` : null)
+  const proofHref = item => item?.url || item?.preview_url || (item?.path ? `/api/artifacts/${encodeURIComponent(item.path.split('/').pop())}` : null)
+  const isHtmlPreview = item => item?.type === 'html_preview' || (item?.url || '').endsWith('.html') || (item?.preview_url || '').includes('/api/preview/')
+  const previewSrc = item => {
+    const url = item?.preview_url || item?.url || ''
+    const token = sessionStorage.getItem('ai_jwt')
+    return token ? `${url}?token=${encodeURIComponent(token)}` : url
+  }
 
   const renderTurnMeta = msg => {
     if (msg.type !== 'turn' && !msg.turn_id) return null
@@ -55,6 +78,9 @@ export default function ChatPanel({ isOpen, onClose }) {
     const proof = Array.isArray(msg.proof) ? msg.proof : []
     const artifacts = Array.isArray(msg.artifacts) ? msg.artifacts : []
     const errors = Array.isArray(msg.errors) ? msg.errors : []
+    const allArtifacts = [...proof, ...artifacts].slice(0, 6)
+    const htmlPreviews = allArtifacts.filter(isHtmlPreview)
+    const otherArtifacts = allArtifacts.filter(a => !isHtmlPreview(a))
     return (
       <div className="turn-meta">
         <div className="turn-meta__bar">
@@ -74,10 +100,24 @@ export default function ChatPanel({ isOpen, onClose }) {
             ))}
           </div>
         )}
-        {(proof.length > 0 || artifacts.length > 0) && (
+        {htmlPreviews.map((item, i) => (
+          <div key={`preview-${i}`} className="turn-section turn-section--preview">
+            <span className="turn-section__label">
+              {item.label || item.name || 'Website Preview'}
+              <a href={proofHref(item)} target="_blank" rel="noreferrer" className="turn-preview-link">↗ open</a>
+            </span>
+            <iframe
+              src={previewSrc(item)}
+              className="turn-preview-iframe"
+              title={item.label || 'Website Preview'}
+              sandbox="allow-same-origin allow-scripts"
+            />
+          </div>
+        ))}
+        {otherArtifacts.length > 0 && (
           <div className="turn-section">
             <span className="turn-section__label">Proof</span>
-            {[...proof, ...artifacts].slice(0, 6).map((item, i) => {
+            {otherArtifacts.map((item, i) => {
               const href = proofHref(item)
               const label = item.label || item.name || item.type || 'proof'
               return (

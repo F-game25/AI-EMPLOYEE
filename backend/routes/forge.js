@@ -177,15 +177,37 @@ function safeProjectRoot(project) {
   return root
 }
 
-function resolveInsideProject(project, relativePath) {
-  const root = safeProjectRoot(project)
+// Symlink-safe path containment check. Resolves symlinks on existing paths
+// to prevent breakout attacks where a symlink points outside the root.
+function safeResolve(root, relativePath) {
   const target = path.resolve(root, String(relativePath || ''))
   if (target !== root && !target.startsWith(root + path.sep)) {
-    const err = new Error('path escapes project root')
+    const err = new Error('path escapes root boundary')
+    err.status = 403
+    throw err
+  }
+  // For existing paths, resolve symlinks and re-check containment
+  try {
+    if (fs.existsSync(target)) {
+      const real = fs.realpathSync(target)
+      if (real !== root && !real.startsWith(root + path.sep)) {
+        const err = new Error('symlink escapes root boundary')
+        err.status = 403
+        throw err
+      }
+    }
+  } catch (e) {
+    if (e.status === 403) throw e
+    // lstat/realpath failure on broken symlink — reject it
+    const err = new Error('path resolution failed (possible broken symlink)')
     err.status = 403
     throw err
   }
   return target
+}
+
+function resolveInsideProject(project, relativePath) {
+  return safeResolve(safeProjectRoot(project), relativePath)
 }
 
 function normalizeRelPath(filePath) {
@@ -421,13 +443,7 @@ function ensureRunWorkspace(run, project) {
 }
 
 function resolveInsideWorkspace(workspaceRoot, relativePath) {
-  const target = path.resolve(workspaceRoot, normalizeRelPath(relativePath))
-  if (target !== workspaceRoot && !target.startsWith(workspaceRoot + path.sep)) {
-    const err = new Error('path escapes run workspace')
-    err.status = 403
-    throw err
-  }
-  return target
+  return safeResolve(workspaceRoot, normalizeRelPath(relativePath))
 }
 
 function readWorkspaceMetadata(workspaceRoot) {
@@ -454,14 +470,41 @@ function stageRunAction(run, project, action) {
   if (!policy.allowed) return { ok: false, policy }
   const workspace = ensureRunWorkspace(run, project)
   const stagedFiles = []
+  const patches = []
   for (const rel of policy.files) {
     const target = resolveInsideWorkspace(workspace, rel)
     ensureDir(path.dirname(target))
     const content = actionContentForPath(action, rel)
+
+    // Capture before-state from project (not workspace) for accurate diff
+    const projectPath = resolveInsideProject(project, rel)
+    const beforeExists = fs.existsSync(projectPath)
+    const beforeContent = beforeExists ? (() => { try { return fs.readFileSync(projectPath, 'utf8') } catch { return '' } })() : ''
+    const beforeHash = beforeContent ? crypto.createHash('sha256').update(beforeContent).digest('hex').slice(0, 16) : null
+    const afterHash  = crypto.createHash('sha256').update(content).digest('hex').slice(0, 16)
+    const actionType = action.type === 'file_delete' ? 'delete' : (beforeExists ? 'edit' : 'create')
+    const unified_diff = generateUnifiedDiff(beforeContent, content, rel)
+
     fs.writeFileSync(target, content, 'utf8')
     stagedFiles.push({ path: rel, bytes: Buffer.byteLength(content, 'utf8') })
+    patches.push({
+      patch_id: `patch-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      action_id: action.id || null,
+      run_id: run.id,
+      file_path: rel,
+      action_type: actionType,
+      before_hash: beforeHash,
+      after_hash: afterHash,
+      before_line_count: beforeContent ? beforeContent.split('\n').length : 0,
+      after_line_count: content.split('\n').length,
+      unified_diff,
+      risk_level: policy.risk_level || 'low',
+      status: 'staged',
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    })
   }
-  return { ok: true, policy, workspace, workspace_meta: readWorkspaceMetadata(workspace), staged_files: stagedFiles }
+  return { ok: true, policy, workspace, workspace_meta: readWorkspaceMetadata(workspace), staged_files: stagedFiles, patches }
 }
 
 function applyStagedRun(run, project) {
@@ -575,17 +618,90 @@ function persistActions(newActions) {
   return newActions
 }
 
+// Produces a standard unified diff (RFC 3281-compatible) with 3-line context.
+function generateUnifiedDiff(beforeContent, afterContent, filePath) {
+  const before = String(beforeContent || '').split('\n')
+  const after  = String(afterContent  || '').split('\n')
+  if (before.join('\n') === after.join('\n')) return ''
+
+  // LCS-based diff using Myers algorithm (simple O(ND) implementation)
+  const lcs = (a, b) => {
+    const m = a.length, n = b.length
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
+    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1])
+    const seq = []
+    let i = m, j = n
+    while (i > 0 && j > 0) {
+      if (a[i-1] === b[j-1]) { seq.unshift([i-1, j-1]); i--; j-- }
+      else if (dp[i-1][j] >= dp[i][j-1]) i--
+      else j--
+    }
+    return seq
+  }
+
+  const common = lcs(before, after)
+  const ops = [] // { type: 'ctx'|'del'|'add', bi: before-idx, ai: after-idx, line: string }
+  let bi = 0, ai = 0
+  for (const [cb, ca] of common) {
+    while (bi < cb) { ops.push({ type: 'del', bi, line: before[bi] }); bi++ }
+    while (ai < ca) { ops.push({ type: 'add', ai, line: after[ai]  }); ai++ }
+    ops.push({ type: 'ctx', bi, ai, line: before[bi] }); bi++; ai++
+  }
+  while (bi < before.length) { ops.push({ type: 'del', bi, line: before[bi] }); bi++ }
+  while (ai < after.length)  { ops.push({ type: 'add', ai, line: after[ai]  }); ai++ }
+
+  // Group into hunks with CONTEXT=3
+  const CTX = 3
+  const changed = ops.reduce((acc, op, i) => { if (op.type !== 'ctx') acc.push(i); return acc }, [])
+  if (!changed.length) return ''
+
+  const hunks = []
+  let hunkOps = null, hunkStart = -1
+  for (const ci of changed) {
+    const lo = Math.max(0, ci - CTX), hi = Math.min(ops.length - 1, ci + CTX)
+    if (hunkOps && lo <= hunkStart + hunkOps.length + CTX) {
+      // extend current hunk
+      const needed = ops.slice(hunkStart + hunkOps.length, hi + 1)
+      hunkOps.push(...needed)
+    } else {
+      if (hunkOps) hunks.push({ start: hunkStart, ops: hunkOps })
+      hunkStart = lo
+      hunkOps = ops.slice(lo, hi + 1)
+    }
+  }
+  if (hunkOps) hunks.push({ start: hunkStart, ops: hunkOps })
+
+  const lines = [`--- a/${filePath}`, `+++ b/${filePath}`]
+  for (const { start, ops: hops } of hunks) {
+    const dels = hops.filter(o => o.type !== 'add')
+    const adds = hops.filter(o => o.type !== 'del')
+    const bStart = (dels[0]?.bi ?? 0) + 1
+    const aStart = (adds[0]?.ai ?? 0) + 1
+    lines.push(`@@ -${bStart},${dels.length} +${aStart},${adds.length} @@`)
+    for (const op of hops) {
+      if (op.type === 'ctx') lines.push(` ${op.line}`)
+      else if (op.type === 'del') lines.push(`-${op.line}`)
+      else lines.push(`+${op.line}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+// Legacy shim — kept for non-agentic run paths that still call it.
 function buildDiffForFiles(files) {
   if (!files?.length) return null
+  // For new-file-only scenarios generate a proper unified diff
+  if (files.length === 1) {
+    const ud = generateUnifiedDiff('', files[0].content || '', files[0].path)
+    return ud ? { unified: ud, path: files[0].path, isNew: true } : null
+  }
   return {
-    path: files.length === 1 ? files[0].path : `${files.length} files`,
+    path: `${files.length} files`,
     isNew: true,
     hunks: files.slice(0, 4).map(file => ({
       header: `create ${file.path}`,
-      lines: String(file.content || '')
-        .split('\n')
-        .slice(0, 40)
-        .map(line => ({ type: 'add', content: line })),
+      lines: String(file.content || '').split('\n').slice(0, 40).map(line => ({ type: 'add', content: line })),
     })),
   }
 }
@@ -1019,6 +1135,28 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
   const router = express.Router()
   const engine = getAscendForgeEngine()
 
+  // ── Autonomy Levels ─────────────────────────────────────────────────────────
+  // Controls what actions require human approval vs proceed automatically.
+  // Level 0 = read-only (inspect only), Level 3 = full autopilot.
+  const AUTONOMY_LEVELS = {
+    0: { name: 'ReadOnly',  canEdit: false, canTest: false, requireApproval: { low: true,  medium: true,  high: true  } },
+    1: { name: 'SafeEdits', canEdit: true,  canTest: false, requireApproval: { low: false, medium: true,  high: true  } },
+    2: { name: 'Guided',    canEdit: true,  canTest: true,  requireApproval: { low: false, medium: false, high: true  } },
+    3: { name: 'Autopilot', canEdit: true,  canTest: true,  requireApproval: { low: false, medium: false, high: false } },
+  }
+
+  function getAutonomyLevel(levelNum) {
+    const n = Math.min(3, Math.max(0, Number(levelNum) || 2))
+    return { ...AUTONOMY_LEVELS[n], level: n }
+  }
+
+  function requiresApproval(filePath, autonomyLevelNum) {
+    const level = getAutonomyLevel(autonomyLevelNum)
+    if (!level.canEdit) return true
+    const risk = classifyFileRisk(filePath)
+    return level.requireApproval[risk] === true
+  }
+
   function requireOwnerApproval(req, res, action) {
     if (req.body?.ownerApproved === true || req.body?.approval === 'owner-approved') return true
     res.status(403).json({ ok: false, state: 'disabled', action, error: 'owner approval required', approval_required: true })
@@ -1442,6 +1580,12 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
 
       const result = applyStagedRun(run, project)
       if (!result.ok) return res.status(409).json({ ok: false, state: 'degraded', ...result })
+      // Sync SQLite forge_patches table to 'applied' status
+      for (const patch of (run.patches || [])) {
+        if (['staged', 'approved', 'verified'].includes(patch.status)) {
+          forgeRunStore.updatePatchStatus(patch.patch_id || patch.action_id, 'applied')
+        }
+      }
       const finalReport = {
         status: 'applied',
         summary: `Applied ${result.applied.length} file(s) from staged run ${run.id}.`,
@@ -1475,6 +1619,145 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
     }
+  })
+
+  // Returns the structured per-iteration agent transcript for an agentic run.
+  router.get('/runs/:id/transcript', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const transcript = run.final_report?.transcript || []
+    res.json({ ok: true, run_id: run.id, status: run.status, iterations: transcript.length, transcript })
+  })
+
+  // Returns staged actions that require human approval before the run can proceed.
+  router.get('/runs/:id/pending-approvals', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const pending = (run.actions || []).filter(a => a.status === 'staged' && requiresApproval(a.file_path || '', run.autonomy_level ?? 2))
+    res.json({ ok: true, run_id: run.id, status: run.status, pending_approvals: pending.map(a => ({ action_id: a.id, file_path: a.file_path, risk_level: a.risk_level, unified_diff: a.unified_diff || null, action_type: a.action_type || 'create' })) })
+  })
+
+  // Approves a single staged action; if all pending approved, run can continue.
+  router.post('/runs/:id/approve-action', requireAuth, (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_approve_action')) return
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const actionId = String(req.body?.action_id || '').trim()
+    if (!actionId) return res.status(400).json({ ok: false, error: 'action_id required' })
+    const updatedActions = (run.actions || []).map(a => a.id === actionId ? { ...a, status: 'approved', approved_by: req.user?.email || 'operator', approved_at: nowIso(), approval_reason: req.body?.reason || '' } : a)
+    forgeRunStore.updatePatchStatus(actionId, 'approved')
+    const updated = updateRun(run.id, { actions: updatedActions })
+    appendAudit('forge_action_approved', { run_id: run.id, action_id: actionId, approved_by: req.user?.email || 'operator' })
+    const stillPending = updatedActions.filter(a => a.status === 'staged' && requiresApproval(a.file_path || '', run.autonomy_level ?? 2))
+    res.json({ ok: true, run: updated, still_pending: stillPending.length, can_continue: stillPending.length === 0 })
+  })
+
+  // Rejects a staged action; removes its staged files from the workspace.
+  router.post('/runs/:id/reject-action', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const actionId = String(req.body?.action_id || '').trim()
+    if (!actionId) return res.status(400).json({ ok: false, error: 'action_id required' })
+    const updatedActions = (run.actions || []).map(a => a.id === actionId ? { ...a, status: 'rejected', rejected_by: req.user?.email || 'operator', rejected_at: nowIso(), rejection_reason: req.body?.reason || '' } : a)
+    forgeRunStore.updatePatchStatus(actionId, 'rejected')
+    // Remove rejected file from workspace
+    const action = (run.actions || []).find(a => a.id === actionId)
+    if (action?.file_path) {
+      const workspace = runWorkspaceRoot(run.id)
+      try { const fp = resolveInsideWorkspace(workspace, action.file_path); if (fs.existsSync(fp)) fs.unlinkSync(fp) } catch { /* best-effort */ }
+    }
+    const updated = updateRun(run.id, { actions: updatedActions })
+    appendAudit('forge_action_rejected', { run_id: run.id, action_id: actionId, rejected_by: req.user?.email || 'operator' })
+    res.json({ ok: true, run: updated })
+  })
+
+  // Continues a waiting_approval run after all pending actions are resolved.
+  // This endpoint must be called by the UI after all approvals/rejections are done.
+  router.post('/runs/:id/continue', requireAuth, async (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_run_continue')) return
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    if (run.status !== 'waiting_approval') return res.status(400).json({ ok: false, error: `run is not in waiting_approval state (current: ${run.status})` })
+    const stillPending = (run.actions || []).filter(a => a.status === 'staged' && requiresApproval(a.file_path || '', run.autonomy_level ?? 2))
+    if (stillPending.length) return res.status(400).json({ ok: false, error: `${stillPending.length} action(s) still pending approval`, pending: stillPending.map(a => a.id) })
+    // Resume at tester stage — run the approved workspace through verification
+    updateRun(run.id, { status: 'testing' })
+    const project = findProject(run.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const root = runWorkspaceRoot(run.id)
+    const verifyCmds = project.verification_commands || defaultVerificationCommands(project)
+    try {
+      const testerStage = await runTesterAgent(project, verifyCmds, root, run.id)
+      const passed = testerStage.output.all_passed
+      updateRun(run.id, {
+        status: passed ? 'verified' : 'verify_failed',
+        test_results: [...(run.test_results || []), { id: `verify-continue-${Date.now()}`, all_passed: passed, results: testerStage.output.results, verified_at: nowIso() }],
+        review: { status: passed ? 'verification_passed' : 'iteration_failed', summary: passed ? 'Verification passed after approval. Apply to proceed.' : 'Verification failed after approval.' },
+      })
+      appendAudit('forge_agentic_continue', { run_id: run.id, project_id: project.id, passed })
+      res.json({ ok: true, run: findRun(run.id), tester: testerStage, passed, summary: passed ? 'Verification passed. You may now apply the run.' : 'Verification failed — review errors and try again.' })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  // Returns all patches for a run (from SQLite forge_patches table).
+  router.get('/runs/:id/patches', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const patches = forgeRunStore.getPatchesForRun(req.params.id)
+    // Fall back to run.patches (in-memory) when SQLite is unavailable
+    const fallback = Array.isArray(run.patches) ? run.patches : []
+    res.json({ ok: true, run_id: run.id, patches: patches.length ? patches : fallback })
+  })
+
+  // Returns a structured chronological replay timeline for a run.
+  router.get('/runs/:id/replay', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const auditEvents = forgeRunStore.getAuditEventsForRun(req.params.id)
+    const patches = forgeRunStore.getPatchesForRun(req.params.id)
+    const transcript = run.final_report?.transcript || []
+
+    // Build chronological timeline from transcript + audit events
+    const timeline = []
+    for (const t of transcript) {
+      const iter = t.iteration
+      for (const agentKey of ['planner','coder','tester','debug','security','reviewer']) {
+        const stage = Array.isArray(t[agentKey]) ? t[agentKey] : t[agentKey] ? [t[agentKey]] : []
+        for (const s of stage) {
+          if (!s) continue
+          timeline.push({ ts: s.started_at || run.created_at, type: 'agent_start', iteration: iter, agent: s.agent, status: s.status })
+          if (s.finished_at) timeline.push({ ts: s.finished_at, type: 'agent_done', iteration: iter, agent: s.agent, status: s.status, duration_ms: s.duration_ms, output_summary: s.output?.summary || s.output?.verdict || null })
+        }
+      }
+      for (const f of (t.files_written || [])) {
+        timeline.push({ ts: run.created_at, type: 'patch', iteration: iter, file: f.path, action_type: f.action_type || 'create', ok: f.ok })
+      }
+      if (t.regression) {
+        timeline.push({ ts: run.updated_at, type: 'regression', iteration: iter, data: t.regression })
+      }
+    }
+    for (const e of auditEvents) {
+      if (['forge_action_approved','forge_action_rejected'].includes(e.event)) {
+        timeline.push({ ts: e.created_at, type: 'approval', event: e.event, data: e.details })
+      }
+    }
+    timeline.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
+
+    res.json({ ok: true, run_id: run.id, goal: run.goal, status: run.status, created_at: run.created_at, completed_at: run.updated_at, timeline, patches, final_report: run.final_report })
+  })
+
+  // Returns aggregate metrics for a project.
+  router.get('/projects/:id/forge-metrics', requireAuth, (req, res) => {
+    const metrics = forgeRunStore.getMetricsForProject(req.params.id)
+    if (!metrics) return res.status(503).json({ ok: false, error: 'metrics unavailable (SQLite not initialized)' })
+    res.json({ ok: true, project_id: req.params.id, ...metrics })
+  })
+
+  // Returns live forge agent statuses (merged by /api/agents).
+  router.get('/agents/status', requireAuth, (_req, res) => {
+    res.json({ ok: true, agents: Object.values(forgeAgentStatus) })
   })
 
   router.get('/projects', requireAuth, (_req, res) => {
@@ -1794,6 +2077,23 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     res.status(result?.ok === false ? 500 : 200).json({ ok: result?.ok !== false, state: result?.ok === false ? 'degraded' : 'live', ...result })
   })
 
+  // ── Command Safety Classifier ─────────────────────────────────────────────────
+  // Every command must be classified before execution. BLOCKED commands are never
+  // run. DANGEROUS commands are logged with extra audit entries.
+  const CMD_BLOCKED   = [ /rm\s+-rf/, /git\s+(push\s+.*--force|clean\s+-fd|reset\s+--hard)/, /chmod\s+-[Rr]/, /curl\s+.*\|.*sh/, /wget\s+.*\|.*sh/, /cat\s+.*\.env/, /\benv\b.*(?:SECRET|API_KEY|TOKEN)/i, /mkfs\b/, /:\s*\(\)\s*\{.*\}/, /dd\s+if=/ ]
+  const CMD_DANGEROUS = [ /npm\s+install\b/, /pip\s+install\b/, /yarn\s+add\b/, /pnpm\s+add\b/, /migrate\b/, /db:drop\b/, /database:drop\b/ ]
+  const CMD_CAUTION   = [ /npm\s+run\b/, /npx\b/, /python3?\s+\S+\.py\b/, /node\s+\S+\.js\b/ ]
+  const CMD_SAFE      = [ /^npm\s+(test|run\s+(lint|build|typecheck|verify))\b/, /^pytest\b/, /^python3?\s+-m\s+(pytest|py_compile)\b/, /^npx\s+(vitest|tsc|eslint)\b/, /^node\s+(--check|-c)\b/ ]
+
+  function classifyCommand(cmd) {
+    const c = String(cmd || '').trim()
+    if (CMD_BLOCKED.some(r => r.test(c)))   return { level: 'BLOCKED',   reason: 'Command matches blocked pattern' }
+    if (CMD_SAFE.some(r => r.test(c)))       return { level: 'SAFE',      reason: 'Command is in safe allowlist' }
+    if (CMD_DANGEROUS.some(r => r.test(c))) return { level: 'DANGEROUS', reason: 'Command modifies dependencies or database' }
+    if (CMD_CAUTION.some(r => r.test(c)))   return { level: 'CAUTION',   reason: 'Command runs arbitrary scripts' }
+    return { level: 'CAUTION', reason: 'Unknown command — treating as caution' }
+  }
+
   // ── Self-update verify loop (WS4): run allowlisted verification, auto-rollback ──
   // Only build/test/compile commands are permitted — never an arbitrary shell.
   const VERIFY_ALLOW = [
@@ -1818,6 +2118,15 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
 
   async function runSandboxedVerifyCommand(project, cmd, root) {
     const started = Date.now()
+    // Safety classifier runs before the allowlist — blocks absolutely dangerous commands
+    const classification = classifyCommand(cmd)
+    if (classification.level === 'BLOCKED') {
+      appendAudit('forge_command_blocked', { project_id: project.id, command: cmd, reason: classification.reason })
+      return { command: cmd, pass: false, skipped: true, output: `Command blocked by safety classifier: ${classification.reason}`, classification }
+    }
+    if (classification.level === 'DANGEROUS') {
+      appendAudit('forge_command_dangerous', { project_id: project.id, command: cmd, reason: classification.reason })
+    }
     const executor = await getSandboxExecutor()
     const command = splitVerifyCommand(cmd)
     const result = await executor.run({
@@ -1868,6 +2177,39 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     res.json({ ok: true, all_passed: allPassed, results, rolled_back: rolledBack })
   })
 
+  // Captures the pre-modification baseline: runs verification on the original project.
+  async function captureBaseline(project, verifyCmds) {
+    const root = safeProjectRoot(project)
+    const results = []
+    for (const cmd of verifyCmds.slice(0, 3)) { // limit baseline to 3 cmds (speed)
+      if (!isVerifyAllowed(cmd)) continue
+      // eslint-disable-next-line no-await-in-loop
+      const r = await runSandboxedVerifyCommand(project, cmd, root)
+      results.push({ command: cmd, pass: r.pass, output: (r.output || '').slice(-200) })
+    }
+    return { captured_at: nowIso(), commands: results }
+  }
+
+  // Compares tester output against baseline to show regression delta.
+  function compareToBaseline(baseline, testerOutput) {
+    if (!baseline?.commands?.length) return null
+    const baseMap = Object.fromEntries(baseline.commands.map(r => [r.command, r.pass]))
+    const nowMap = Object.fromEntries((testerOutput?.results || []).map(r => [r.command, r.pass]))
+    const fixed = [], broken = [], unchangedPass = [], unchangedFail = [], newlyBroken = []
+    for (const [cmd, wasPassing] of Object.entries(baseMap)) {
+      const nowPassing = nowMap[cmd] ?? null
+      if (nowPassing === null) continue
+      if (!wasPassing && nowPassing) fixed.push(cmd)
+      else if (wasPassing && !nowPassing) broken.push(cmd)
+      else if (wasPassing) unchangedPass.push(cmd)
+      else unchangedFail.push(cmd)
+    }
+    for (const cmd of Object.keys(nowMap)) {
+      if (!(cmd in baseMap) && !nowMap[cmd]) newlyBroken.push(cmd)
+    }
+    return { fixed, broken, unchanged_pass: unchangedPass, unchanged_fail: unchangedFail, newly_broken: newlyBroken }
+  }
+
   // Shared verification runner (used by the agentic loop).
   async function runVerifyCommands(project, cmds, rootOverride = null) {
     const root = rootOverride || safeProjectRoot(project)
@@ -1878,6 +2220,707 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       results.push(await runSandboxedVerifyCommand(project, cmd, root))
     }
     return { all_passed: results.length > 0 && results.every(r => r.pass), results }
+  }
+
+  // ── Repo Intelligence V2 ─────────────────────────────────────────────────────
+  // Classifies a file path by risk level for approval gating.
+  function classifyFileRisk(relPath) {
+    const p = relPath.toLowerCase()
+    if (/auth|security|middleware|schema|migration|\.env|secret|wallet|payment|credential|password|token|ssl|tls/.test(p)) return 'high'
+    if (/database|model|seed|route|api|config|settings/.test(p)) return 'medium'
+    return 'low'
+  }
+
+  // Detects project stack from filesystem signals.
+  function detectProjectStack(project) {
+    const root = safeProjectRoot(project)
+    const has = f => fs.existsSync(path.join(root, f))
+    const readPkg = () => { try { return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) } catch { return {} } }
+
+    const isPython = has('requirements.txt') || has('pyproject.toml') || has('setup.py')
+    const isNode   = has('package.json')
+    const pkg = isNode ? readPkg() : {}
+    const scripts = Object.keys(pkg.scripts || {})
+    const devDeps  = Object.keys(pkg.devDependencies || {})
+    const allDeps  = [...Object.keys(pkg.dependencies || {}), ...devDeps]
+
+    const testRunner = devDeps.includes('vitest') || scripts.includes('vitest') ? 'vitest'
+      : devDeps.includes('jest') || has('jest.config.js') || has('jest.config.ts') ? 'jest'
+      : devDeps.includes('mocha') ? 'mocha'
+      : isPython && has('pytest.ini') ? 'pytest'
+      : isPython ? 'pytest'
+      : 'unknown'
+
+    return {
+      type: isPython && isNode ? 'fullstack' : isNode ? 'node' : isPython ? 'python' : 'generic',
+      hasTests: has('tests') || has('test') || has('__tests__') || scripts.includes('test'),
+      testRunner,
+      hasBuild: scripts.includes('build'),
+      hasTsc: devDeps.includes('typescript') || has('tsconfig.json'),
+      hasLint: scripts.includes('lint') || devDeps.includes('eslint') || has('.eslintrc.js') || has('.eslintrc.json'),
+      hasRuff: isPython && (has('ruff.toml') || has('pyproject.toml')),
+      hasMypy: isPython && has('mypy.ini'),
+      scripts,
+      allDeps,
+    }
+  }
+
+  // Generates a rich repo_index.json with import graph, risk map, and route detection.
+  function generateRepoIndex(project) {
+    const root = safeProjectRoot(project)
+    const indexPath = path.join(FORGE_HOME, 'projects', project.id, 'repo_index.json')
+    const tree = buildTree(root)
+    const allPaths = flattenTreePaths(tree)
+
+    const fileStats = {}
+    const riskMap = {}
+    for (const rel of allPaths.slice(0, 300)) {
+      try {
+        const abs = path.join(root, rel)
+        const st = fs.statSync(abs)
+        const ext = path.extname(rel)
+        fileStats[rel] = { lines: st.size > 0 ? Math.round(st.size / 40) : 0, size_bytes: st.size, ext }
+        riskMap[rel] = classifyFileRisk(rel)
+      } catch { /* skip */ }
+    }
+
+    // Parse external deps from package.json / requirements.txt
+    const externalDeps = []
+    const pkgPath = path.join(root, 'package.json')
+    const reqPath = path.join(root, 'requirements.txt')
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+        externalDeps.push(...Object.keys(pkg.dependencies || {}), ...Object.keys(pkg.devDependencies || {}))
+      } catch { /* skip */ }
+    }
+    if (fs.existsSync(reqPath)) {
+      try {
+        fs.readFileSync(reqPath, 'utf8').split('\n').forEach(l => { const m = l.trim().match(/^([a-zA-Z0-9_-]+)/); if (m) externalDeps.push(m[1]) })
+      } catch { /* skip */ }
+    }
+
+    // Import graph: regex-scan JS/TS files for require/import
+    const importGraph = {}
+    for (const rel of allPaths.filter(p => /\.(js|ts|jsx|tsx)$/.test(p)).slice(0, 100)) {
+      try {
+        const content = fs.readFileSync(path.join(root, rel), 'utf8')
+        const imports = []
+        for (const m of content.matchAll(/(?:require|import)\s*\(?\s*['"](\.[^'"]+)['"]/g)) {
+          imports.push(m[1])
+        }
+        if (imports.length) importGraph[rel] = imports
+      } catch { /* skip */ }
+    }
+
+    // Route map: detect Express/Fastify routes in JS files
+    const routeMap = []
+    for (const rel of allPaths.filter(p => /\.(js|ts)$/.test(p) && !/node_modules/.test(p)).slice(0, 80)) {
+      try {
+        const content = fs.readFileSync(path.join(root, rel), 'utf8')
+        let lineN = 0
+        for (const line of content.split('\n')) {
+          lineN++
+          const m = line.match(/(?:router|app)\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]/)
+          if (m) routeMap.push({ method: m[1].toUpperCase(), path: m[2], file: rel, line: lineN })
+        }
+      } catch { /* skip */ }
+    }
+
+    const testFiles = allPaths.filter(p => /test|spec/i.test(p) && /\.(js|ts|py)$/.test(p))
+    const entryPoints = allPaths.filter(p => /^(index|main|app|server)\.(js|ts|py)$/.test(path.basename(p)))
+    const highRiskFiles = Object.entries(riskMap).filter(([, r]) => r === 'high').map(([f]) => f)
+    const stack = detectProjectStack(project)
+
+    // V3: env var usage scan (names only, never values)
+    const envVarsUsed = new Set()
+    for (const rel of allPaths.filter(p => /\.(js|ts|jsx|tsx|py)$/.test(p)).slice(0, 80)) {
+      try {
+        const content = fs.readFileSync(path.join(root, rel), 'utf8')
+        for (const m of content.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g)) envVarsUsed.add(m[1])
+        for (const m of content.matchAll(/os\.environ(?:\.get)?\s*\(\s*['"]([^'"]+)['"]/g)) envVarsUsed.add(m[1])
+      } catch { /* skip */ }
+    }
+
+    // V3: config files detection
+    const CONFIG_PATTERNS = /^(\.|)(eslint|prettier|tsconfig|jest\.config|vitest\.config|babel\.config|vite\.config|webpack\.config|rollup\.config|pyproject|setup\.cfg|mypy|ruff|\.env\.example)/
+    const configFiles = allPaths.filter(p => CONFIG_PATTERNS.test(path.basename(p)))
+
+    // V3: generated files detection
+    const generatedFiles = allPaths.filter(p => /\.(min\.(js|css)|map)$/.test(p) || /^(dist|build|__pycache__|\.next|\.nuxt)\//.test(p))
+
+    // V3: incremental file hashing for cache invalidation
+    const existingIndex = readJson(indexPath, null)
+    const fileHashes = {}
+    const prevHashes = existingIndex?.file_hashes || {}
+    for (const rel of allPaths.slice(0, 200)) {
+      try {
+        const abs = path.join(root, rel)
+        const prev = prevHashes[rel]
+        if (prev) {
+          // Quick mtime check before hashing
+          const mtime = fs.statSync(abs).mtimeMs.toString(36)
+          if (prev.startsWith(mtime + ':')) { fileHashes[rel] = prev; continue }
+        }
+        const content = fs.readFileSync(abs)
+        const mtime = fs.statSync(abs).mtimeMs.toString(36)
+        fileHashes[rel] = mtime + ':' + crypto.createHash('sha256').update(content).digest('hex').slice(0, 8)
+      } catch { /* skip */ }
+    }
+
+    const index = {
+      project_id: project.id,
+      generated_at: nowIso(),
+      last_indexed_at: nowIso(),
+      file_count: allPaths.length,
+      file_stats: fileStats,
+      file_hashes: fileHashes,
+      risk_map: riskMap,
+      high_risk_files: highRiskFiles,
+      dependencies: { external: [...new Set(externalDeps)].slice(0, 80), internal: [] },
+      import_graph: importGraph,
+      route_map: routeMap.slice(0, 50),
+      test_files: testFiles.slice(0, 30),
+      entry_points: entryPoints.slice(0, 10),
+      env_vars_used: [...envVarsUsed].slice(0, 50),
+      config_files: configFiles.slice(0, 20),
+      generated_files: generatedFiles.slice(0, 20),
+      stack,
+    }
+    try {
+      ensureDir(path.dirname(indexPath))
+      fs.writeFileSync(indexPath, JSON.stringify(index, null, 2))
+    } catch { /* best-effort */ }
+    return index
+  }
+
+  function repoIndexSummary(index) {
+    if (!index) return ''
+    const topFiles = Object.entries(index.file_stats || {})
+      .sort((a, b) => b[1].size_bytes - a[1].size_bytes)
+      .slice(0, 20)
+      .map(([p]) => p)
+    const routes = (index.route_map || []).slice(0, 10).map(r => `${r.method} ${r.path}`).join(', ')
+    const highRisk = (index.high_risk_files || []).slice(0, 8).join(', ')
+    const stack = index.stack ? `${index.stack.type} / testRunner:${index.stack.testRunner}` : 'unknown'
+    return [
+      `Stack: ${stack}`,
+      `Files: ${index.file_count}`,
+      `Top files: ${topFiles.join(', ')}`,
+      `Deps: ${(index.dependencies?.external || []).slice(0, 20).join(', ')}`,
+      `Routes: ${routes || 'none detected'}`,
+      `High-risk files: ${highRisk || 'none'}`,
+      `Tests: ${(index.test_files || []).slice(0, 8).join(', ')}`,
+      `Entry points: ${(index.entry_points || []).join(', ')}`,
+    ].join('\n')
+  }
+
+  // ── Agent Memory Store ───────────────────────────────────────────────────────
+  const AGENT_MEMORY_FILE = path.join(FORGE_HOME, 'agent_memory.json')
+
+  function loadAgentMemory() { return readJson(AGENT_MEMORY_FILE, {}) }
+  function saveAgentMemory(mem) { try { writeJson(AGENT_MEMORY_FILE, mem) } catch { /* best-effort */ } }
+
+  function recordAgentOutcome(projectId, agentName, entry) {
+    const mem = loadAgentMemory()
+    if (!mem[projectId]) mem[projectId] = {}
+    if (!mem[projectId][agentName]) mem[projectId][agentName] = []
+    mem[projectId][agentName].unshift({ ...entry, recorded_at: nowIso() })
+    mem[projectId][agentName] = mem[projectId][agentName].slice(0, 20)
+    saveAgentMemory(mem)
+  }
+
+  function getAgentHistory(projectId, agentName, limit = 3) {
+    const mem = loadAgentMemory()
+    return (mem?.[projectId]?.[agentName] || []).slice(0, limit)
+  }
+
+  function agentHistoryContext(projectId, agentName) {
+    const hist = getAgentHistory(projectId, agentName)
+    if (!hist.length) return ''
+    const lines = hist.map(h => `  - goal: "${(h.goal || '').slice(0, 60)}", success: ${h.success}, duration_ms: ${h.duration_ms || 0}`).join('\n')
+    return `\nPrevious ${agentName} runs on this project:\n${lines}\n`
+  }
+
+  // ── Task Memory Store ────────────────────────────────────────────────────────
+  // Cross-run learning: stores per-task outcomes and feeds similar past results
+  // into the Planner Agent prompt to avoid repeating failed approaches.
+  const TASK_MEMORY_FILE = path.join(FORGE_HOME, 'task_memory.json')
+  const STOPWORDS = new Set(['a','an','the','and','or','to','of','in','for','on','with','as','by','at','from','is','it','be','do','add','make'])
+
+  function _goalKeywords(goal) {
+    return goal.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w))
+  }
+
+  function loadTaskMemory() {
+    const data = readJson(TASK_MEMORY_FILE, [])
+    return Array.isArray(data) ? data.slice(0, 200) : []
+  }
+
+  function saveTaskMemory(entries) {
+    try { writeJson(TASK_MEMORY_FILE, entries.slice(0, 200)) } catch { /* best-effort */ }
+  }
+
+  // Task Memory V2 — richer record schema + multi-factor similarity scoring.
+  function recordTaskMemory(runId, goal, transcript, success, stack) {
+    if (!Array.isArray(transcript) || !transcript.length) return
+    const entries = loadTaskMemory()
+    const lastT = transcript[transcript.length - 1] || {}
+    const planner = lastT.planner?.output || {}
+    const filesModified = [...new Set(transcript.flatMap(t => (t.files_written || []).filter(f => f.ok).map(f => f.path)))]
+    const failureReasons = transcript.filter(t => !t.verify?.all_passed)
+      .flatMap(t => (t.tester?.output?.failures || []).map(f => f.failure_reason || 'unknown'))
+    const securityFindingsCount = transcript.reduce((n, t) => n + (t.security?.output?.findings?.length || 0), 0)
+    const reviewerFindingsCount = transcript.reduce((n, t) => n + (t.reviewer?.output?.findings?.length || 0), 0)
+    const debugRetries = transcript.reduce((n, t) => n + (t.debug?.length || 0), 0)
+    const approvalRequired = transcript.some(t => t.files_written?.some(f => classifyFileRisk(f.path || '') === 'high'))
+    const highRiskFiles = [...new Set(transcript.flatMap(t => (t.files_written || []).filter(f => classifyFileRisk(f.path || '') === 'high').map(f => f.path)))]
+    // Classify primary failure type
+    const failureType = !success
+      ? (failureReasons.includes('security_block') ? 'security_block'
+        : failureReasons.includes('syntax_error') ? 'syntax_error'
+        : failureReasons.includes('type_error') ? 'type_error'
+        : failureReasons.length ? 'test_failure' : 'unknown')
+      : null
+    const lessons = success
+      ? `Succeeded in ${transcript.length} iter(s). Modified: ${filesModified.slice(0, 5).join(', ')}`
+      : `Failed in ${transcript.length} iter(s). Primary: ${failureType || 'unknown'}. Issues: ${failureReasons.slice(0, 2).join(' | ')}`
+    // Reusable patterns — files that were successfully modified
+    const reusablePatterns = filesModified.slice(0, 5).map(f => `edit ${f}`)
+
+    entries.unshift({
+      task_id: `task-${runId}`,
+      project_id: planner.project_id || null,
+      goal,
+      goal_keywords: _goalKeywords(goal),
+      planner_objectives: planner.objectives || [],
+      files_modified: filesModified.slice(0, 20),
+      stack: stack ? { type: stack.type, testRunner: stack.testRunner } : null,
+      success,
+      iterations_needed: transcript.length,
+      reviewer_verdict: lastT.reviewer?.output?.verdict || null,
+      security_verdict: lastT.security?.output?.verdict || null,
+      security_findings_count: securityFindingsCount,
+      reviewer_findings_count: reviewerFindingsCount,
+      debug_retries: debugRetries,
+      approval_required: approvalRequired,
+      high_risk_files_touched: highRiskFiles,
+      failure_reasons: failureReasons.slice(0, 5),
+      failure_type: failureType,
+      reusable_patterns: reusablePatterns,
+      lessons,
+      created_at: nowIso(),
+    })
+    saveTaskMemory(entries)
+  }
+
+  // Multi-factor similarity: keyword (0.4) + stack (0.2) + file overlap (0.2) + failure type (0.2)
+  function findSimilarTasks(goal, projectId, limit = 3, stack) {
+    const entries = loadTaskMemory()
+    const queryKw = new Set(_goalKeywords(goal))
+    if (!queryKw.size) return []
+    return entries
+      .map(e => {
+        // Factor 1: Keyword Jaccard
+        const eKw = new Set(e.goal_keywords || [])
+        const kwIntersect = [...queryKw].filter(k => eKw.has(k)).length
+        const kwUnion = new Set([...queryKw, ...eKw]).size
+        const kwScore = kwUnion ? kwIntersect / kwUnion : 0
+
+        // Factor 2: Stack type match
+        const stackScore = (stack && e.stack) ? (e.stack.type === stack.type ? 1 : 0) : 0.5
+
+        // Factor 3: File path overlap (goal keywords vs modified files)
+        const fileWords = new Set((e.files_modified || []).flatMap(f => path.basename(f).replace(/\.[^.]+$/, '').toLowerCase().split(/[^a-z0-9]+/)))
+        const fileOverlap = [...queryKw].filter(k => fileWords.has(k)).length
+        const fileScore = queryKw.size ? Math.min(1, fileOverlap / queryKw.size) : 0
+
+        // Factor 4: Failure type relevance (0 = unknown match, 1 = known pattern)
+        const failScore = e.failure_type && e.failure_type !== 'unknown' ? 0.5 : 0
+
+        const combined = kwScore * 0.4 + stackScore * 0.2 + fileScore * 0.2 + failScore * 0.2
+        return { ...e, _score: combined }
+      })
+      .filter(e => e._score > 0.12)
+      .sort((a, b) => b._score - a._score)
+      .slice(0, limit)
+  }
+
+  function similarTasksContext(goal, projectId, stack) {
+    const tasks = findSimilarTasks(goal, projectId, 3, stack)
+    if (!tasks.length) return ''
+    const lines = tasks.map(t => {
+      const parts = [`goal: "${t.goal.slice(0, 60)}"`, `success: ${t.success}`]
+      if (t.failure_type) parts.push(`failed_with: ${t.failure_type}`)
+      if (t.lessons) parts.push(`lesson: "${t.lessons.slice(0, 100)}"`)
+      return `  - ${parts.join(', ')}`
+    })
+    return `\nSimilar past tasks (use to avoid known failure patterns):\n${lines.join('\n')}\n`
+  }
+
+  // ── In-memory forge agent status (for /api/agents) ───────────────────────────
+  const forgeAgentStatus = {
+    planner:  { id: 'forge-planner',  name: 'Planner',  model: 'claude-sonnet-4-6', tone: 'gold',   status: 'idle', task: '' },
+    coder:    { id: 'forge-coder',    name: 'Coder',    model: 'claude-sonnet-4-6', tone: 'info',   status: 'idle', task: '' },
+    tester:   { id: 'forge-tester',   name: 'Tester',   model: 'local',             tone: 'purple', status: 'idle', task: '' },
+    security: { id: 'forge-security', name: 'Security', model: 'claude-haiku-4-5',  tone: 'danger', status: 'idle', task: '' },
+    reviewer: { id: 'forge-reviewer', name: 'Reviewer', model: 'claude-haiku-4-5',  tone: 'teal',   status: 'idle', task: '' },
+  }
+  engine.forgeAgentStatus = forgeAgentStatus
+
+  function setForgeAgentStatus(name, status, task = '') {
+    if (forgeAgentStatus[name]) {
+      forgeAgentStatus[name].status = status
+      forgeAgentStatus[name].task = task
+    }
+  }
+
+  // ── Four Forge Agent Stage Functions ─────────────────────────────────────────
+
+  async function runPlannerAgent(project, goal, contextPack, repoIdx, lastErrors, runId) {
+    const t0 = Date.now()
+    setForgeAgentStatus('planner', 'thinking', `Planning: ${goal.slice(0, 60)}`)
+    const history = agentHistoryContext(project.id, 'planner')
+    const repoSummary = repoIndexSummary(repoIdx)
+    const errorNote = lastErrors ? `\nPrevious attempt failed:\n${lastErrors.slice(0, 800)}\nAdjust the plan accordingly.\n` : ''
+    const ctxSnippets = contextPack?.relevant_files?.length
+      ? contextPack.relevant_files.map(f => `${f.path}: ${(f.snippet || '').slice(0, 200)}`).join('\n') : ''
+
+    const similarCtx = similarTasksContext(goal, project.id, repoIdx?.stack)
+
+    const prompt = `You are a senior software planner. Analyse the goal and repository, then output a JSON plan.
+
+Repository:
+${repoSummary}
+
+Relevant existing code:
+${ctxSnippets || '(none indexed yet)'}
+${history}${similarCtx}${errorNote}
+Goal: ${goal}
+
+Respond with ONLY valid JSON (no markdown fences) matching this schema:
+{
+  "objectives": ["string"],
+  "relevant_files": ["path/relative/to/project"],
+  "dependencies": { "external": ["pkg"], "internal": ["path"] },
+  "risks": ["string"],
+  "implementation_steps": ["string"],
+  "success_criteria": ["string"]
+}`
+
+    let plannerOutput = null
+    let raw = ''
+    try {
+      const r = await callPythonChat(prompt, 60000)
+      raw = r?.response || r?.reply || ''
+      // Strip markdown fences if present
+      const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+      plannerOutput = JSON.parse(cleaned)
+    } catch {
+      plannerOutput = { objectives: [goal], relevant_files: [], dependencies: { external: [], internal: [] }, risks: [], implementation_steps: [goal], success_criteria: ['build passes'], raw_output: raw }
+    }
+
+    const duration_ms = Date.now() - t0
+    recordAgentOutcome(project.id, 'planner', { run_id: runId, goal, success: !!plannerOutput, duration_ms })
+    setForgeAgentStatus('planner', 'done', 'Plan ready')
+    return { agent: 'planner', status: 'done', output: plannerOutput, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+  }
+
+  async function runCoderAgent(project, plannerStage, goal, root, runId, iter) {
+    const t0 = Date.now()
+    setForgeAgentStatus('coder', 'writing', `Writing files (iter ${iter})`)
+    const plan = plannerStage.output || {}
+    const history = agentHistoryContext(project.id, 'coder')
+    const steps = (plan.implementation_steps || []).join('\n')
+    const files = (plan.relevant_files || []).join(', ')
+
+    const flatTree = []
+    const flatten = (nodes) => { for (const n of nodes) { flatTree.push(n.path); if (n.children) flatten(n.children) } }
+    flatten(buildTree(root))
+
+    const sys = buildForgeSystemPrompt(project, flatTree.slice(0, 50).join('\n'), '')
+    const prompt = `${sys}
+${history}
+Goal: ${goal}
+
+Plan:
+Files to modify/create: ${files || '(determine from context)'}
+Steps:
+${steps || goal}
+
+Output the COMPLETE file content for every file that needs to be created or modified.
+Each file must be in a code block labelled with its relative path.`
+
+    let aiText = ''
+    try { const r = await callPythonChat(prompt, 90000); aiText = r?.response || r?.reply || '' } catch { /* */ }
+    const actions = aiText ? extractCodeActions(aiText, project).slice(0, 8) : []
+
+    const duration_ms = Date.now() - t0
+    recordAgentOutcome(project.id, 'coder', { run_id: runId, goal, success: actions.length > 0, duration_ms, files_generated: actions.length })
+    setForgeAgentStatus('coder', actions.length ? 'done' : 'failed', `${actions.length} file(s) generated`)
+    return { agent: 'coder', status: actions.length ? 'done' : 'failed', output: { actions_count: actions.length, raw_length: aiText.length }, actions, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+  }
+
+  // Build a dynamic command list from the detected stack, checking which scripts exist.
+  function buildStackVerifyCommands(project, stack) {
+    const root = safeProjectRoot(project)
+    const scripts = new Set(stack.scripts || [])
+    const cmds = []
+    if (stack.type === 'node' || stack.type === 'fullstack') {
+      if (stack.hasLint && scripts.has('lint')) cmds.push('npm run lint')
+      if (stack.hasTsc  && scripts.has('typecheck')) cmds.push('npm run typecheck')
+      if (stack.hasTsc  && !scripts.has('typecheck')) cmds.push('npx tsc --noEmit')
+      if (stack.hasBuild && scripts.has('build')) cmds.push('npm run build')
+      if (stack.hasTests && scripts.has('test'))  cmds.push('npm test')
+      if (!cmds.length) {
+        // Bare minimum: syntax check entry points
+        const entry = stack.entryPoints?.[0]
+        if (entry && /\.js$/.test(entry)) cmds.push(`node --check ${entry}`)
+      }
+    }
+    if (stack.type === 'python' || stack.type === 'fullstack') {
+      if (stack.hasRuff) cmds.push('ruff check .')
+      if (stack.hasMypy) cmds.push('mypy .')
+      cmds.push('python3 -m py_compile $(find . -name "*.py" -maxdepth 4 | head -30)')
+      if (stack.testRunner === 'pytest') cmds.push('python3 -m pytest --tb=short -q')
+    }
+    if (stack.type === 'generic' || !cmds.length) cmds.push('echo "no verification commands available"')
+    return cmds.filter(c => isVerifyAllowed(c))
+  }
+
+  // Classify failure output into a human-readable reason + suggested fix.
+  function classifyFailure(output) {
+    const o = String(output || '')
+    if (/SyntaxError|Unexpected token|Cannot use import|Expected/.test(o)) return { reason: 'syntax_error', fix: 'Check the flagged line for syntax issues (missing bracket, comma, semicolon)' }
+    if (/Cannot find module|ModuleNotFoundError|No module named/.test(o)) return { reason: 'missing_import', fix: 'Add missing import or install the dependency listed in the error' }
+    if (/TypeScript error|TS\d{4}|Type '.*' is not assignable/.test(o)) return { reason: 'type_error', fix: 'Fix TypeScript type mismatch shown in the error output' }
+    if (/AssertionError|FAIL|FAILED|not ok/.test(o)) return { reason: 'test_failure', fix: 'The test assertion failed — check the expected vs actual values' }
+    if (/ENOENT|No such file/.test(o)) return { reason: 'missing_file', fix: 'A required file is missing — ensure the file path is correct' }
+    if (/EACCES|permission denied/i.test(o)) return { reason: 'permission_error', fix: 'Permission issue — check file permissions' }
+    return { reason: 'unknown', fix: 'Review the full error output and fix the reported issue' }
+  }
+
+  async function runTesterAgent(project, verifyCmds, root, runId) {
+    const t0 = Date.now()
+    setForgeAgentStatus('tester', 'running', 'Running tests')
+
+    // Use stack-detected commands if caller passed the defaults or nothing
+    const stack = detectProjectStack(project)
+    const dynamicCmds = buildStackVerifyCommands(project, { ...stack, entryPoints: (generateRepoIndex(project)?.entry_points || []) })
+    // Prefer caller's verifyCmds if they look intentional (non-default); otherwise use stack-detected
+    const defaultCmds = new Set(defaultVerificationCommands(project))
+    const cmdsToRun = (verifyCmds.length && !verifyCmds.every(c => defaultCmds.has(c))) ? verifyCmds : (dynamicCmds.length ? dynamicCmds : verifyCmds)
+
+    const verify = await runVerifyCommands(project, cmdsToRun, root)
+    const failures = verify.results.filter(r => !r.pass).map(r => {
+      const out = r.output || r.error || ''
+      const { reason, fix } = classifyFailure(out)
+      return { command: r.command, output: out.slice(0, 400), stdout_tail: out.slice(-200), stderr_tail: '', failure_reason: reason, suggested_fix: fix }
+    })
+    const duration_ms = Date.now() - t0
+    recordAgentOutcome(project.id, 'tester', { run_id: runId, success: verify.all_passed, duration_ms, commands: cmdsToRun.length })
+    setForgeAgentStatus('tester', verify.all_passed ? 'done' : 'failed', verify.all_passed ? 'All tests pass' : `${failures.length} failure(s)`)
+    return { agent: 'tester', status: verify.all_passed ? 'done' : 'failed', output: { all_passed: verify.all_passed, results: verify.results, failures, stack_type: stack.type, commands_used: cmdsToRun }, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+  }
+
+  async function runSecurityAgent(project, actions, runId) {
+    const t0 = Date.now()
+    setForgeAgentStatus('security', 'scanning', 'Security scan')
+
+    // Stage 1: fast synchronous regex pre-scan (no LLM cost)
+    const blockedPatterns = BLOCKED_CODE_PATTERNS
+    const preFindings = []
+    for (const a of actions) {
+      const content = String(a.content || '')
+      for (const pat of blockedPatterns) {
+        if (pat.test(content)) {
+          preFindings.push({ file: a.file_path, line: 0, severity: 'critical', type: 'unsafe_exec', message: `Blocked pattern detected: ${pat.toString().slice(0, 60)}` })
+          break
+        }
+      }
+      // Secret detection
+      if (/(?:api_key|apikey|secret|password|token|bearer)\s*[:=]\s*['"][^'"]{8,}/i.test(content)) {
+        preFindings.push({ file: a.file_path, line: 0, severity: 'critical', type: 'hardcoded_cred', message: 'Possible hardcoded secret or API key detected' })
+      }
+    }
+
+    // If pre-scan found critical issues, block immediately without LLM call
+    if (preFindings.some(f => f.severity === 'critical')) {
+      const duration_ms = Date.now() - t0
+      const output = { verdict: 'block', findings: preFindings, summary: `Pre-scan blocked: ${preFindings.length} critical pattern(s) found` }
+      recordAgentOutcome(project.id, 'security', { run_id: runId, success: false, duration_ms, findings: preFindings.length, pre_scan_block: true })
+      setForgeAgentStatus('security', 'failed', 'Security blocked')
+      return { agent: 'security', status: 'blocked', output, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+    }
+
+    // Stage 2: LLM semantic security review
+    const fileList = actions.slice(0, 4).map(a => `File: ${a.file_path}\n${(a.content || '').slice(0, 500)}`).join('\n---\n')
+    const prompt = `You are a security reviewer. Scan the following staged code changes for: secrets, injection, auth bypass, path traversal, unsafe exec, insecure CORS, hardcoded credentials.
+
+${fileList || '(no staged files)'}
+
+Respond with ONLY valid JSON (no markdown fences):
+{
+  "verdict": "pass",
+  "findings": [{ "file": "path", "line": 0, "severity": "info|warning|critical", "type": "secret|injection|auth_bypass|path_traversal|unsafe_exec|hardcoded_cred|insecure_cors", "message": "string" }],
+  "summary": "string"
+}`
+
+    let secOutput = { verdict: 'pass', findings: [], summary: 'No security issues found' }
+    try {
+      const r = await callPythonChat(prompt, 30000)
+      const raw = r?.response || r?.reply || ''
+      const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      if (parsed.verdict && Array.isArray(parsed.findings)) secOutput = parsed
+    } catch { /* fallback to pass */ }
+
+    const duration_ms = Date.now() - t0
+    recordAgentOutcome(project.id, 'security', { run_id: runId, success: secOutput.verdict !== 'block', duration_ms, findings: secOutput.findings?.length || 0 })
+    setForgeAgentStatus('security', secOutput.verdict === 'block' ? 'failed' : 'done', secOutput.summary?.slice(0, 60) || 'Done')
+    return { agent: 'security', status: secOutput.verdict === 'block' ? 'blocked' : 'done', output: secOutput, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+  }
+
+  async function runDebugAgent(project, testerStage, coderActions, root, runId, iter, retryN) {
+    const t0 = Date.now()
+    setForgeAgentStatus('tester', 'running', `Debug retry ${retryN}`)
+    const failures = testerStage.output?.failures || []
+    if (!failures.length) return { agent: 'debug', status: 'skipped', output: { reason: 'no failures to debug' }, duration_ms: 0, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+
+    const history = agentHistoryContext(project.id, 'debugger')
+    const failureText = failures.map(f => `Command: ${f.command}\nOutput:\n${f.output}\nReason: ${f.failure_reason || 'unknown'}\nSuggested fix: ${f.suggested_fix || 'none'}`).join('\n---\n')
+    const stagedContent = coderActions.filter(a => a.status === 'staged').slice(0, 4)
+      .map(a => {
+        let content = ''
+        try { const fp = path.join(root, a.file_path || ''); content = fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8').split('\n').slice(0, 60).join('\n') : (a.content || '').slice(0, 1200) } catch { content = (a.content || '').slice(0, 1200) }
+        return `File: ${a.file_path}\n${content}`
+      }).join('\n---\n')
+
+    const prompt = `You are a debug agent. A verification command failed. Analyse the failure and produce a minimal targeted fix.
+${history}
+Verification failures:
+${failureText}
+
+Staged file content:
+${stagedContent || '(no staged files)'}
+
+Respond with ONLY valid JSON (no markdown fences):
+{
+  "root_cause": "string",
+  "affected_file": "relative/path",
+  "fix_description": "string",
+  "patch": "complete corrected file content OR empty string if no fix possible"
+}`
+
+    let debugOutput = { root_cause: 'unknown', affected_file: null, fix_description: 'Unable to diagnose', patch: '' }
+    let raw = ''
+    try {
+      const r = await callPythonChat(prompt, 45000)
+      raw = r?.response || r?.reply || ''
+      const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      if (parsed.root_cause) debugOutput = parsed
+    } catch {
+      debugOutput.raw_output = raw
+    }
+
+    // If a patch is provided, stage it as a repair action
+    let repairStaged = false
+    if (debugOutput.patch && debugOutput.affected_file) {
+      const repairAction = { id: crypto.randomUUID(), type: 'file_update', file_path: debugOutput.affected_file, content: debugOutput.patch, run_id: runId }
+      const fakeRun = { id: runId, workspace_path: root }
+      const staged = stageRunAction(fakeRun, project, repairAction)
+      repairStaged = staged.ok
+      if (staged.patches?.length) {
+        for (const p of staged.patches) forgeRunStore.recordPatch({ ...p, action_id: repairAction.id, run_id: runId, iteration: iter })
+      }
+    }
+
+    const duration_ms = Date.now() - t0
+    recordAgentOutcome(project.id, 'debugger', { run_id: runId, success: repairStaged, duration_ms, retry: retryN })
+    setForgeAgentStatus('tester', repairStaged ? 'running' : 'failed', repairStaged ? 'Repair staged, re-testing' : 'Could not fix')
+    return { agent: 'debug', status: repairStaged ? 'done' : 'no_fix', output: { ...debugOutput, repair_staged: repairStaged }, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+  }
+
+  async function runReviewerAgent(project, actions, plannerOutput, runId, securityStage) {
+    const t0 = Date.now()
+    setForgeAgentStatus('reviewer', 'reviewing', 'Reviewing changes')
+    const history = agentHistoryContext(project.id, 'reviewer')
+    const fileList = actions.map(a => `${a.file_path}: ${(a.content || '').slice(0, 300)}`).join('\n---\n')
+    const risks = (plannerOutput?.risks || []).join(', ')
+    const secFindings = (securityStage?.output?.findings || [])
+      .map(f => `  [${f.severity}] ${f.file}: ${f.message}`).join('\n') || 'none'
+
+    const prompt = `You are a code reviewer. Review the following staged file changes for: architecture violations, duplicate logic, dead code, broken imports. (Security was handled separately — focus on code quality and architecture.)
+
+Known risks from planner: ${risks || 'none'}
+Security pre-scan findings: ${secFindings}
+${history}
+Staged changes:
+${fileList.slice(0, 3000) || '(no files staged)'}
+
+Respond with ONLY valid JSON (no markdown fences):
+{
+  "verdict": "pass",
+  "findings": [{ "file": "path", "line": 0, "severity": "info|warning|error", "type": "architecture|duplicate|dead_code|import", "message": "string" }],
+  "summary": "string"
+}`
+
+    let reviewerOutput = { verdict: 'pass', findings: [], summary: 'Review skipped (no staged files or LLM unavailable)' }
+    let raw = ''
+    try {
+      const r = await callPythonChat(prompt, 45000)
+      raw = r?.response || r?.reply || ''
+      const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      if (parsed.verdict && Array.isArray(parsed.findings)) reviewerOutput = parsed
+    } catch {
+      reviewerOutput.raw_output = raw
+    }
+
+    const duration_ms = Date.now() - t0
+    recordAgentOutcome(project.id, 'reviewer', { run_id: runId, success: reviewerOutput.verdict !== 'block', duration_ms, findings: reviewerOutput.findings?.length || 0 })
+    setForgeAgentStatus('reviewer', reviewerOutput.verdict === 'block' ? 'failed' : 'done', reviewerOutput.summary?.slice(0, 60) || 'Done')
+    return { agent: 'reviewer', status: reviewerOutput.verdict === 'block' ? 'blocked' : 'done', output: reviewerOutput, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+  }
+
+  // Builds the structured Final Report V2 for a completed or failed agentic run.
+  function buildFinalReport({ success, transcript, goal, workspaceCleaned, baseline }) {
+    const allFilesWritten = transcript.flatMap(t => t.files_written || [])
+    const allSecurityFindings = transcript.flatMap(t => t.security?.output?.findings || [])
+    const allReviewerFindings = transcript.flatMap(t => t.reviewer?.output?.findings || [])
+    const allDebugAttempts = transcript.flatMap(t => Array.isArray(t.debug) ? t.debug : [])
+    const approvalRequired = transcript.some(t => (t.files_written || []).some(f => classifyFileRisk(f.path || '') === 'high'))
+    const lastTester = transcript.slice(-1)[0]?.tester?.output || {}
+    const lastRegression = transcript.slice(-1)[0]?.regression || null
+    const filesChanged = [...new Set(allFilesWritten.filter(f => f.ok).map(f => f.path))]
+    const remainingIssues = success ? [] : (lastTester.failures || []).map(f => f.failure_reason || 'unknown')
+    const firstFix = lastTester.failures?.[0]?.suggested_fix || 'Review error output'
+    return {
+      status: success ? 'verified_not_applied' : 'failed_not_applied',
+      summary: success
+        ? `Goal reached green in ${transcript.length} iteration(s). Apply to persist changes.`
+        : `Failed after ${transcript.length} iteration(s). ${remainingIssues.slice(0,2).join(', ')}`,
+      goal,
+      files_changed: filesChanged,
+      diffs_created: allFilesWritten.filter(f => f.unified_diff).length,
+      tests_run: transcript.flatMap(t => t.tester?.output?.results || []).length,
+      test_results: lastTester.results || [],
+      debug_attempts: allDebugAttempts.length,
+      security_findings: allSecurityFindings,
+      reviewer_findings: allReviewerFindings,
+      approval_required: approvalRequired,
+      regression_comparison: lastRegression,
+      baseline_commands: baseline?.commands?.length || 0,
+      risks: transcript[0]?.planner?.output?.risks || [],
+      remaining_issues: remainingIssues.slice(0, 5),
+      recommended_next_task: success
+        ? `Verify ${filesChanged.slice(0, 3).join(', ')} in staging environment before shipping`
+        : `Fix: ${firstFix}`,
+      workspace_removed: workspaceCleaned,
+      generated_at: nowIso(),
+      transcript,
+    }
   }
 
   // ── WS4 Phase 3: autonomous agentic loop ──────────────────────────────────────
@@ -1895,9 +2938,15 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     const verifyCmds = (Array.isArray(req.body?.commands) && req.body.commands.length)
       ? req.body.commands : (project.verification_commands || defaultVerificationCommands(project))
     const autoRollback = req.body?.auto_rollback !== false
+    const autonomyLevelNum = Math.min(3, Math.max(0, Number(req.body?.autonomy_level ?? 2)))
 
-    const runId = `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+    let runId = null
+    try {
+    runId = `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
     const contextPack = await buildContextPack(project, goal, req.body || {})
+    const repoIdx = generateRepoIndex(project)
+    // Capture baseline before any modifications for regression comparison
+    const baseline = await captureBaseline(project, verifyCmds).catch(() => null)
     const plan = createPlan(engine, project, {
       goal,
       provider: req.body?.provider,
@@ -1909,9 +2958,10 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       run_id: runId,
       project_id: project.id,
       goal,
-      status: 'running',
+      status: 'planning',
       mode: 'agentic_supervised',
       provider: req.body?.provider || 'local-first',
+      autonomy_level: autonomyLevelNum,
       max_iterations: maxIters,
       context_pack: contextPack,
       plan,
@@ -1935,20 +2985,20 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     const allPatches = []
     appendAudit('forge_agentic_start', { run_id: runId, project_id: project.id, goal: goal.slice(0, 120), max_iters: maxIters })
 
-    for (let iter = 1; iter <= maxIters; iter++) {
-      const codeContext = await retrieveForgeContext(project, goal)
-      const flatTree = []
-      const flatten = (nodes) => { for (const n of nodes) { flatTree.push(n.path); if (n.children) flatten(n.children) } }
-      flatten(buildTree(root))
-      const sys = buildForgeSystemPrompt(project, flatTree.slice(0, 50).join('\n'), '') + codeContext
-      const fixNote = lastErrors
-        ? `\n\nThe previous attempt FAILED verification with:\n${lastErrors.slice(0, 1500)}\nFix the cause. Re-output the COMPLETE corrected file(s).`
-        : ''
-      const prompt = `${sys}\n\nGoal: ${goal}${fixNote}\n\nOutput the full file(s) needed, each in a code block labelled with its path.`
+    // Reset forge agent statuses for this run
+    ;['planner','coder','tester','security','reviewer'].forEach(a => setForgeAgentStatus(a, 'idle', ''))
 
-      let aiText = ''
-      try { const r = await callPythonChat(prompt, 90000); aiText = r?.response || r?.reply || '' } catch { /* */ }
-      const actions = aiText ? extractCodeActions(aiText, project).slice(0, 8) : []
+    for (let iter = 1; iter <= maxIters; iter++) {
+      // ── Stage 1: Planner ──
+      updateRun(runId, { status: 'planning' })
+      // eslint-disable-next-line no-await-in-loop
+      const plannerStage = await runPlannerAgent(project, goal, contextPack, repoIdx, lastErrors, runId)
+
+      // ── Stage 2: Coder ──
+      updateRun(runId, { status: 'executing' })
+      // eslint-disable-next-line no-await-in-loop
+      const coderStage = await runCoderAgent(project, plannerStage, goal, root, runId, iter)
+      const actions = coderStage.actions || []
 
       const written = []
       for (const a of actions) {
@@ -1965,39 +3015,118 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         if (policy.allowed) staged = stageRunAction(run, project, a)
         a.status = staged.ok ? 'staged' : 'blocked'
         a.staged_files = staged.staged_files || []
+        // Attach rich patch metadata from the staging result
+        if (staged.patches?.length) {
+          a.patches = staged.patches
+          a.unified_diff = staged.patches[0]?.unified_diff || null
+          a.action_type  = staged.patches[0]?.action_type  || 'create'
+          a.before_hash  = staged.patches[0]?.before_hash  || null
+          a.after_hash   = staged.patches[0]?.after_hash   || null
+          // Persist each patch to the forge_patches SQLite table
+          for (const p of staged.patches) forgeRunStore.recordPatch({ ...p, action_id: a.id, run_id: runId, iteration: iter })
+        }
         allActions.push(a)
-        allPatches.push({
-          action_id: a.id,
-          files: actionFiles(a),
-          diff: a.diff || null,
-          policy: staged.policy || policy,
-          status: staged.ok ? 'staged' : 'blocked',
-          iteration: iter,
-        })
-        written.push({ path: a.file_path, ok: staged.ok, error: staged.error || staged.policy?.violations?.[0]?.message || null })
+        for (const p of (staged.patches || [])) allPatches.push({ ...p, iteration: iter })
+        written.push({ path: a.file_path, ok: staged.ok, unified_diff: a.unified_diff || null, action_type: a.action_type || 'create', error: staged.error || staged.policy?.violations?.[0]?.message || null })
       }
 
+      // ── WAITING_APPROVAL gate: pause based on autonomy level + file risk ──
+      const riskyActions = allActions.filter(a => a.status === 'staged' && requiresApproval(a.file_path || '', autonomyLevelNum))
+      if (riskyActions.length) {
+        updateRun(runId, {
+          status: 'waiting_approval',
+          actions: allActions,
+          patches: allPatches,
+          review: { status: 'waiting_approval', summary: `${riskyActions.length} high-risk file(s) require human approval before testing: ${riskyActions.map(a => a.file_path).join(', ')}` },
+        })
+        appendAudit('forge_agentic_waiting_approval', { run_id: runId, project_id: project.id, iter, risky_files: riskyActions.map(a => a.file_path) })
+        // Return early — resume via POST /runs/:id/continue after human approves
+        return res.json({ ok: true, success: false, waiting_approval: true, run_id: runId, run: findRun(runId), pending_approvals: riskyActions.map(a => ({ action_id: a.id, file_path: a.file_path, risk_level: a.risk_level, unified_diff: a.unified_diff })), summary: `Paused: ${riskyActions.length} high-risk file(s) need approval` })
+      }
+
+      // ── Stage 3: Tester ──
+      updateRun(runId, { status: 'testing' })
       // eslint-disable-next-line no-await-in-loop
-      const verify = written.some(w => w.ok) ? await runVerifyCommands(project, verifyCmds, root) : { all_passed: false, results: [{ output: 'no staged files written' }] }
-      lastErrors = verify.all_passed ? '' : verify.results.filter(r => !r.pass).map(r => `${r.command || 'apply'}: ${r.output || r.error}`).join('\n')
-      transcript.push({ iteration: iter, files_written: written, verify })
+      let testerStage = await runTesterAgent(project, verifyCmds, root, runId)
+      let verify = written.some(w => w.ok)
+        ? { all_passed: testerStage.output.all_passed, results: testerStage.output.results }
+        : { all_passed: false, results: [{ command: 'stage', pass: false, output: 'no staged files written' }] }
+
+      // ── Stage 3b: Debug (up to 2 retries when tests fail) ──
+      const debugStages = []
+      if (!verify.all_passed && written.some(w => w.ok)) {
+        for (let retry = 1; retry <= 2; retry++) {
+          // eslint-disable-next-line no-await-in-loop
+          const debugStage = await runDebugAgent(project, testerStage, actions, root, runId, iter, retry)
+          debugStages.push(debugStage)
+          if (debugStage.output?.repair_staged) {
+            // Re-run tester on the failed command only first
+            const failedCmds = testerStage.output.failures?.map(f => f.command).filter(Boolean) || []
+            // eslint-disable-next-line no-await-in-loop
+            testerStage = await runTesterAgent(project, failedCmds.length ? failedCmds : verifyCmds, root, runId)
+            verify = { all_passed: testerStage.output.all_passed, results: testerStage.output.results }
+            if (verify.all_passed) break
+          } else {
+            break // debug couldn't produce a fix, no point retrying
+          }
+        }
+      }
+
+      // ── Stage 4: Security ──
+      updateRun(runId, { status: 'reviewing' })
+      // eslint-disable-next-line no-await-in-loop
+      const securityStage = await runSecurityAgent(project, actions.filter(a => a.status === 'staged'), runId)
+      const securityBlock = securityStage.output?.verdict === 'block'
+
+      // ── Stage 5: Reviewer ──
+      // eslint-disable-next-line no-await-in-loop
+      const reviewerStage = await runReviewerAgent(project, actions.filter(a => a.status === 'staged'), plannerStage.output, runId, securityStage)
+      const reviewerBlock = reviewerStage.output?.verdict === 'block'
+
+      const blocked = securityBlock || reviewerBlock
+      lastErrors = securityBlock
+        ? `Security blocked: ${securityStage.output?.summary || 'security violation in staged code'}`
+        : reviewerBlock
+          ? `Reviewer blocked: ${reviewerStage.output?.summary || 'architecture/security violation'}`
+          : (verify.all_passed ? '' : testerStage.output.failures?.map(f => `${f.command}: ${f.output}`).join('\n') || '')
+
+      const regressionDelta = compareToBaseline(baseline, testerStage.output)
+      transcript.push({
+        iteration: iter,
+        files_written: written,
+        verify,
+        planner: plannerStage,
+        coder: { agent: 'coder', status: coderStage.status, output: coderStage.output, duration_ms: coderStage.duration_ms, started_at: coderStage.started_at, finished_at: coderStage.finished_at },
+        tester: testerStage,
+        debug: debugStages.length ? debugStages : undefined,
+        security: securityStage,
+        reviewer: reviewerStage,
+        regression: regressionDelta,
+      })
       updateRun(runId, {
-        status: verify.all_passed ? 'verified' : 'running',
+        status: (verify.all_passed && !reviewerBlock) ? 'verified' : 'executing',
         actions: allActions,
         patches: allPatches,
         test_results: [
           ...(findRun(runId)?.test_results || []),
-          { id: `verify-${iter}`, iteration: iter, all_passed: verify.all_passed, results: verify.results, verified_at: nowIso(), workspace: root },
+          { id: `verify-${iter}`, iteration: iter, all_passed: verify.all_passed && !blocked, results: verify.results, reviewer: reviewerStage.output, security: securityStage.output, verified_at: nowIso(), workspace: root },
         ],
         review: {
-          status: verify.all_passed ? 'verification_passed' : 'iteration_failed',
-          summary: verify.all_passed ? `Verification passed on iteration ${iter}. Apply still requires owner approval.` : `Iteration ${iter} failed verification in staged workspace.`,
+          status: (verify.all_passed && !blocked) ? 'verification_passed' : 'iteration_failed',
+          summary: (verify.all_passed && !blocked)
+            ? `All agents passed on iteration ${iter}. Apply still requires owner approval.`
+            : securityBlock ? `Iteration ${iter}: security blocked — ${securityStage.output?.summary}` : reviewerBlock ? `Iteration ${iter}: reviewer blocked — ${reviewerStage.output?.summary}` : `Iteration ${iter} failed tests in staged workspace.`,
+          reviewer_findings: reviewerStage.output?.findings || [],
+          security_findings: securityStage.output?.findings || [],
         },
       })
-      appendAudit('forge_agentic_iter', { run_id: runId, project_id: project.id, iter, files: written.length, passed: verify.all_passed })
+      appendAudit('forge_agentic_iter', { run_id: runId, project_id: project.id, iter, files: written.length, passed: verify.all_passed, reviewer_verdict: reviewerStage.output?.verdict, security_verdict: securityStage.output?.verdict })
 
-      if (verify.all_passed) { success = true; break }
+      if (verify.all_passed && !blocked) { success = true; break }
     }
+
+    // Reset agent statuses to idle after loop
+    ;['planner','coder','tester','security','reviewer'].forEach(a => setForgeAgentStatus(a, 'idle', ''))
 
     let workspaceCleaned = false
     if (!success && autoRollback && fs.existsSync(path.dirname(root))) {
@@ -2005,21 +3134,26 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       workspaceCleaned = true
       appendAudit('forge_agentic_workspace_removed', { run_id: runId })
     }
+    const finalReport = buildFinalReport({ success, transcript, goal, workspaceCleaned, baseline })
     const finalRun = updateRun(runId, {
       status: success ? 'verified' : 'verify_failed',
-      final_report: {
-        status: success ? 'verified_not_applied' : 'failed_not_applied',
-        summary: success
-          ? `Goal reached green in ${transcript.length} staged iteration(s). Apply requires owner approval.`
-          : `Did not reach green in ${transcript.length} staged iteration(s); no project files were modified.`,
-        transcript,
-        workspace_removed: workspaceCleaned,
-        generated_at: nowIso(),
-      },
+      final_report: finalReport,
     })
     appendAudit('forge_agentic_done', { run_id: runId, project_id: project.id, success, iterations: transcript.length, workspace_removed: workspaceCleaned })
+    // Record task outcome for cross-run learning
+    try { recordTaskMemory(runId, goal, transcript, success, repoIdx?.stack) } catch { /* best-effort */ }
     res.json({ ok: true, success, run_id: runId, run: finalRun, iterations: transcript.length, transcript, rolled_back: workspaceCleaned,
-      summary: finalRun.final_report.summary })
+      summary: finalRun?.final_report?.summary || (success ? 'Run completed.' : 'Run failed.') })
+    } catch (err) {
+      // Top-level catch: mark run as failed and always send a response
+      const errMsg = err?.message || String(err)
+      if (runId) {
+        try { updateRun(runId, { status: 'failed', error: errMsg, final_report: { status: 'error', summary: errMsg, generated_at: nowIso() } }) } catch { /* best-effort */ }
+        try { appendAudit('forge_agentic_error', { run_id: runId, project_id: project.id, error: errMsg }) } catch { /* best-effort */ }
+        try { ;['planner','coder','tester','security','reviewer'].forEach(a => setForgeAgentStatus(a, 'idle', '')) } catch { /* best-effort */ }
+      }
+      if (!res.headersSent) res.status(500).json({ ok: false, error: errMsg, run_id: runId })
+    }
   })
 
   router.post('/rollback', requireAuth, async (req, res) => {
@@ -2085,6 +3219,561 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       persistence: forgeRunStore.status(),
       approval_policy: DEFAULT_APPROVAL_POLICY,
     })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 5 — BACKLOG
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const BACKLOG_STATUSES = ['IDEA','READY','PLANNING','IN_PROGRESS','WAITING_APPROVAL','BLOCKED','DONE','FAILED','CANCELLED']
+  const BACKLOG_CATEGORIES = ['BUG','FEATURE','REFACTOR','SECURITY','UI','PERFORMANCE','TESTING','DOCS','ARCHITECTURE','AUTOMATION']
+
+  router.get('/projects/:id/backlog', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, backlog: forgeRunStore.getBacklog(project.id) })
+  })
+
+  router.post('/projects/:id/backlog', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const { title, description, priority, category, status, risk_level, estimated_complexity, dependencies, acceptance_criteria, linked_files, source } = req.body || {}
+    if (!title) return res.status(400).json({ ok: false, error: 'title required' })
+    const item = forgeRunStore.upsertBacklogItem({
+      backlog_id: crypto.randomUUID(),
+      project_id: project.id,
+      title, description: description || '',
+      priority: typeof priority === 'number' ? priority : 50,
+      category: BACKLOG_CATEGORIES.includes(category) ? category : 'FEATURE',
+      status: BACKLOG_STATUSES.includes(status) ? status : 'IDEA',
+      risk_level: ['low','medium','high'].includes(risk_level) ? risk_level : 'low',
+      estimated_complexity: estimated_complexity || null,
+      dependencies: Array.isArray(dependencies) ? dependencies : [],
+      acceptance_criteria: acceptance_criteria || null,
+      linked_files: Array.isArray(linked_files) ? linked_files : [],
+      source: source || 'manual',
+      created_at: nowIso(), updated_at: nowIso(),
+    })
+    res.json({ ok: true, item })
+  })
+
+  router.patch('/backlog/:backlogId', requireAuth, (req, res) => {
+    const item = forgeRunStore.findBacklogItem(req.params.backlogId)
+    if (!item) return res.status(404).json({ ok: false, error: 'backlog item not found' })
+    const updated = forgeRunStore.updateBacklogItem(req.params.backlogId, req.body || {})
+    res.json({ ok: true, item: updated })
+  })
+
+  router.delete('/backlog/:backlogId', requireAuth, (req, res) => {
+    const item = forgeRunStore.findBacklogItem(req.params.backlogId)
+    if (!item) return res.status(404).json({ ok: false, error: 'backlog item not found' })
+    forgeRunStore.deleteBacklogItem(req.params.backlogId)
+    res.json({ ok: true, deleted: req.params.backlogId })
+  })
+
+  router.post('/backlog/:backlogId/run', requireAuth, (req, res) => {
+    const item = forgeRunStore.findBacklogItem(req.params.backlogId)
+    if (!item) return res.status(404).json({ ok: false, error: 'backlog item not found' })
+    if (item.status !== 'READY') return res.status(400).json({ ok: false, error: `item must be READY (current: ${item.status})` })
+    const project = findProject(item.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const runId = crypto.randomUUID()
+    const autonomyLevel = typeof req.body?.autonomy_level === 'number' ? req.body.autonomy_level : 2
+    forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'IN_PROGRESS' })
+    forgeRunStore.upsertRun({ id: runId, run_id: runId, project_id: project.id, goal: item.description || item.title, status: 'planning', mode: 'agentic', linked_backlog_id: item.backlog_id, autonomy_level: autonomyLevel, created_at: nowIso(), updated_at: nowIso(), actions: [], patches: [] })
+    res.json({ ok: true, run_id: runId, backlog_id: item.backlog_id, message: 'agentic run initiated — use POST /api/forge/agentic-run with this goal to execute' })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 5 — AUTOPILOT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const autopilotSessions = new Map()
+
+  function getAutopilotStatus(projectId) {
+    return autopilotSessions.get(projectId) || { active: false, runsCompleted: 0, consecutiveFails: 0 }
+  }
+
+  async function _runAutopilotTick(projectId) {
+    const session = autopilotSessions.get(projectId)
+    if (!session || !session.active) return
+    const MAX_RUNS = session.maxRuns || 10
+    if (session.runsCompleted >= MAX_RUNS) {
+      session.active = false
+      forgeRunStore.recordAudit('autopilot_stopped', { project_id: projectId, reason: 'max_runs_reached', runs: session.runsCompleted })
+      return
+    }
+    if (session.consecutiveFails >= 3) {
+      session.active = false
+      forgeRunStore.recordAudit('autopilot_paused', { project_id: projectId, reason: 'consecutive_failures', count: session.consecutiveFails })
+      return
+    }
+    const backlog = forgeRunStore.getBacklog(projectId)
+    const doneIds = new Set(backlog.filter(i => i.status === 'DONE').map(i => i.backlog_id))
+    const ready = backlog.filter(i => {
+      if (i.status !== 'READY') return false
+      const deps = Array.isArray(i.dependencies) ? i.dependencies : []
+      return deps.every(d => doneIds.has(d))
+    }).sort((a, b) => (b.priority || 50) - (a.priority || 50))
+    if (!ready.length) {
+      session.active = false
+      forgeRunStore.recordAudit('autopilot_stopped', { project_id: projectId, reason: 'no_ready_items' })
+      return
+    }
+    const item = ready[0]
+    const autonomyLevel = session.autonomyLevel ?? 2
+    if (item.risk_level === 'high' && autonomyLevel < 3) {
+      forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'WAITING_APPROVAL' })
+      session.active = false
+      forgeRunStore.recordAudit('autopilot_paused', { project_id: projectId, reason: 'high_risk_requires_approval', backlog_id: item.backlog_id })
+      return
+    }
+    const project = findProject(projectId)
+    if (!project) { session.active = false; return }
+    const runId = crypto.randomUUID()
+    forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'IN_PROGRESS' })
+    forgeRunStore.upsertRun({ id: runId, run_id: runId, project_id: project.id, goal: item.description || item.title, status: 'planning', mode: 'agentic', linked_backlog_id: item.backlog_id, autonomy_level: autonomyLevel, created_at: nowIso(), updated_at: nowIso(), actions: [], patches: [] })
+    session.currentRunId = runId
+    session.runsCompleted++
+    // Mark item so UI shows it's being processed
+    forgeRunStore.recordAudit('autopilot_run_started', { project_id: projectId, backlog_id: item.backlog_id, run_id: runId })
+    // In Phase 5, autopilot creates the run record and pauses for user to trigger agentic-run
+    // Full chained execution is Phase 6 scope
+    session.active = false
+    forgeRunStore.recordAudit('autopilot_run_queued', { project_id: projectId, run_id: runId, note: 'run created, trigger via agentic-run endpoint' })
+  }
+
+  router.post('/projects/:id/autopilot/start', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const existing = autopilotSessions.get(project.id)
+    if (existing?.active) return res.json({ ok: true, message: 'already running', status: existing })
+    const session = {
+      active: true,
+      runsCompleted: 0,
+      consecutiveFails: 0,
+      maxRuns: typeof req.body?.max_runs === 'number' ? req.body.max_runs : 10,
+      autonomyLevel: typeof req.body?.autonomy_level === 'number' ? req.body.autonomy_level : 2,
+      startedAt: nowIso(),
+    }
+    autopilotSessions.set(project.id, session)
+    forgeRunStore.recordAudit('autopilot_started', { project_id: project.id, max_runs: session.maxRuns, autonomy_level: session.autonomyLevel })
+    setImmediate(() => _runAutopilotTick(project.id))
+    res.json({ ok: true, message: 'autopilot started', status: session })
+  })
+
+  router.post('/projects/:id/autopilot/stop', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const session = autopilotSessions.get(project.id)
+    if (session) { session.active = false; forgeRunStore.recordAudit('autopilot_stopped', { project_id: project.id, reason: 'user_stopped', runs: session.runsCompleted }) }
+    res.json({ ok: true, message: 'autopilot stopped', status: session || { active: false } })
+  })
+
+  router.get('/projects/:id/autopilot/status', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, status: getAutopilotStatus(project.id) })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 5 — DECOMPOSER AGENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async function runDecomposerAgent(project, goal, repoIdx, taskMemory, backlogContext) {
+    const systemPrompt = 'You are a software task decomposer. Break a high-level goal into specific ordered subtasks. Output ONLY a JSON array — no prose, no markdown.'
+    const userPrompt = `Project: ${project.name}
+Stack: ${JSON.stringify(repoIdx?.stack || {})}
+Goal: ${goal}
+Existing backlog: ${(backlogContext || []).map(b => b.title).join(', ') || 'none'}
+Recent tasks: ${(taskMemory || []).slice(0, 3).map(t => t.goal || t.task || '').join('; ') || 'none'}
+
+Output a JSON array:
+[{"title":"...","description":"...","risk_level":"low|medium|high","affected_areas":["frontend"|"backend"|"tests"|"config"],"required_skills":[],"depends_on":[],"acceptance_criteria":"..."}]`
+    const result = await callPythonChat([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ]).catch(() => null)
+    if (!result) return []
+    try {
+      const text = typeof result === 'string' ? result : (result.content || result.message || JSON.stringify(result))
+      const match = text.match(/\[[\s\S]*\]/)
+      return match ? JSON.parse(match[0]) : []
+    } catch { return [] }
+  }
+
+  router.post('/projects/:id/decompose', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const { goal, add_to_backlog } = req.body || {}
+    if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
+    try {
+      const [repoIdx, taskMemory, backlog] = await Promise.all([
+        generateRepoIndex(project).catch(() => ({})),
+        Promise.resolve(loadTaskMemory(project.id)),
+        Promise.resolve(forgeRunStore.getBacklog(project.id)),
+      ])
+      const subtasks = await runDecomposerAgent(project, goal, repoIdx, taskMemory, backlog)
+      let addedItems = []
+      if (add_to_backlog && subtasks.length) {
+        addedItems = subtasks.map((st, i) => forgeRunStore.upsertBacklogItem({
+          backlog_id: crypto.randomUUID(), project_id: project.id,
+          title: st.title, description: st.description || '',
+          priority: 50 - i, category: 'FEATURE',
+          status: 'IDEA', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
+          acceptance_criteria: st.acceptance_criteria || null, source: 'decomposer',
+          dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
+          created_at: nowIso(), updated_at: nowIso(),
+        }))
+      }
+      res.json({ ok: true, parent_goal: goal, subtasks, count: subtasks.length, added_to_backlog: addedItems.length })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 5 — FORGE SKILLS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  let _forgeSkillsCache = null
+  function _loadForgeSkills() {
+    if (_forgeSkillsCache) return _forgeSkillsCache
+    const dir = path.join(__dirname, '../../runtime/skills/forge')
+    if (!fs.existsSync(dir)) return []
+    try {
+      const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'))
+      _forgeSkillsCache = files.map(f => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch { return null } }).filter(Boolean)
+      return _forgeSkillsCache
+    } catch { return [] }
+  }
+
+  function findForgeSkillsForGoal(goal) {
+    const goalLower = (goal || '').toLowerCase()
+    return _loadForgeSkills().filter(s => (Array.isArray(s.triggers) ? s.triggers : []).some(t => goalLower.includes(t.toLowerCase())))
+  }
+
+  router.get('/skills', requireAuth, (_req, res) => {
+    res.json({ ok: true, skills: _loadForgeSkills() })
+  })
+
+  router.get('/skills/:skillId', requireAuth, (req, res) => {
+    const skill = _loadForgeSkills().find(s => s.skill_id === req.params.skillId)
+    if (!skill) return res.status(404).json({ ok: false, error: 'skill not found' })
+    res.json({ ok: true, skill })
+  })
+
+  router.post('/skills/reload', requireAuth, (_req, res) => {
+    _forgeSkillsCache = null
+    const skills = _loadForgeSkills()
+    res.json({ ok: true, count: skills.length, skills: skills.map(s => s.skill_id) })
+  })
+
+  router.post('/runs/:id/apply-skill', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const { skill_id } = req.body || {}
+    if (!skill_id) return res.status(400).json({ ok: false, error: 'skill_id required' })
+    const skill = _loadForgeSkills().find(s => s.skill_id === skill_id)
+    if (!skill) return res.status(404).json({ ok: false, error: 'skill not found' })
+    updateRun(run.id, { applied_skill: skill_id, skill_checklist: skill.checklist || [] })
+    res.json({ ok: true, run_id: run.id, skill_applied: skill_id, checklist: skill.checklist || [] })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 5 — MODEL ROUTER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function _scoreModel(model, context) {
+    let score = 0
+    if (model.role === context.stage) score += 30
+    if (model.role === 'any') score += 10
+    if (context.complexity === 'high' && model.cost_tier === 'high') score += 20
+    if (context.complexity === 'low' && model.cost_tier === 'low') score += 15
+    if (context.prefer_speed && model.speed_tier === 'fast') score += 20
+    if (context.prefer_cost && model.cost_tier === 'low') score += 20
+    return score
+  }
+
+  function routeModel(stage, context) {
+    const models = forgeRunStore.getModels().filter(m => m.enabled)
+    if (!models.length) return null
+    const ctx = { ...(context || {}), stage }
+    const candidates = models.filter(m => !m.role || m.role === stage || m.role === 'any')
+    if (!candidates.length) return null
+    return candidates.sort((a, b) => _scoreModel(b, ctx) - _scoreModel(a, ctx))[0]
+  }
+
+  router.get('/models', requireAuth, (_req, res) => {
+    res.json({ ok: true, models: forgeRunStore.getModels() })
+  })
+
+  router.post('/models', requireAuth, (req, res) => {
+    const { model_id, provider, role, cost_tier, speed_tier, context_window, supports_tools, supports_json, supports_code, local_or_remote } = req.body || {}
+    if (!model_id || !provider) return res.status(400).json({ ok: false, error: 'model_id and provider required' })
+    const model = forgeRunStore.upsertModel({ model_id, provider, role: role || 'any', cost_tier: cost_tier || 'medium', speed_tier: speed_tier || 'medium', context_window: context_window || 200000, supports_tools: supports_tools !== false, supports_json: supports_json !== false, supports_code: supports_code !== false, local_or_remote: local_or_remote || 'remote', enabled: true, created_at: nowIso(), updated_at: nowIso() })
+    res.json({ ok: true, model })
+  })
+
+  router.patch('/models/:modelId', requireAuth, (req, res) => {
+    const existing = forgeRunStore.getModel(req.params.modelId)
+    if (!existing) return res.status(404).json({ ok: false, error: 'model not found' })
+    const updated = forgeRunStore.updateModel(req.params.modelId, req.body || {})
+    res.json({ ok: true, model: updated })
+  })
+
+  router.post('/model-router/test', requireAuth, (req, res) => {
+    const { stage, context } = req.body || {}
+    if (!stage) return res.status(400).json({ ok: false, error: 'stage required' })
+    const model = routeModel(stage, context || {})
+    res.json({ ok: true, stage, selected: model, fallback: model ? null : 'existing_env_behavior' })
+  })
+
+  router.get('/projects/:id/model-routing-stats', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, stats: forgeRunStore.getModelRoutingStats(project.id) })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 5 — ROADMAP ENGINE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  router.get('/projects/:id/roadmap', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, roadmap: forgeRunStore.getRoadmap(project.id) })
+  })
+
+  router.post('/projects/:id/roadmap/generate', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    try {
+      const [repoIdx, metrics, taskMemory, backlog, suggestions] = await Promise.all([
+        generateRepoIndex(project).catch(() => ({})),
+        Promise.resolve(forgeRunStore.getMetricsForProject(project.id)),
+        Promise.resolve(loadTaskMemory(project.id)),
+        Promise.resolve(forgeRunStore.getBacklog(project.id)),
+        Promise.resolve(forgeRunStore.getSuggestions(project.id)),
+      ])
+      const systemPrompt = 'You are a senior software architect. Produce a structured project roadmap as JSON. Output ONLY valid JSON — no prose, no markdown.'
+      const userPrompt = `Project: ${project.name}
+Stack: ${JSON.stringify(repoIdx?.stack || {})}
+Metrics: total_runs=${metrics?.total_runs || 0}, success_rate=${metrics?.success_rate || 0}
+Recent tasks: ${taskMemory.slice(0, 5).map(t => t.goal || t.task || '').join('; ') || 'none'}
+Backlog: ${backlog.map(b => `[${b.status}] ${b.title}`).join('\n') || 'empty'}
+Open suggestions: ${suggestions.filter(s => s.status === 'new').map(s => s.title).join(', ') || 'none'}
+
+Return JSON:
+{"current_state":"...","known_issues":[],"technical_debt":[],"missing_features":[],"security_improvements":[],"performance_improvements":[],"recommended_next_tasks":[{"title":"...","priority":"high|medium|low","category":"BUG|FEATURE|REFACTOR|SECURITY|UI|PERFORMANCE|TESTING"}],"estimated_complexity":"low|medium|high"}`
+      const result = await callPythonChat([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ]).catch(() => null)
+      let content = {}
+      if (result) {
+        try {
+          const text = typeof result === 'string' ? result : (result.content || result.message || JSON.stringify(result))
+          const match = text.match(/\{[\s\S]*\}/)
+          if (match) content = JSON.parse(match[0])
+        } catch {}
+      }
+      const roadmap = forgeRunStore.upsertRoadmap(project.id, content)
+      res.json({ ok: true, roadmap })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.patch('/projects/:id/roadmap', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const existing = forgeRunStore.getRoadmap(project.id)
+    const roadmap = forgeRunStore.upsertRoadmap(project.id, { ...(existing?.content || {}), ...(req.body || {}) })
+    res.json({ ok: true, roadmap })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 5 — SUGGESTIONS + MEMORY CONSOLIDATION V3
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function generateSuggestions(run, projectId) {
+    const transcript = run?.final_report?.transcript || []
+    const allSecFindings = transcript.flatMap(t => t.security?.output?.findings || [])
+    const allRevFindings = transcript.flatMap(t => t.reviewer?.output?.findings || [])
+    const debugAttempts = transcript.flatMap(t => t.debug || [])
+    const failures = transcript.flatMap(t => t.tester?.output?.failures || [])
+    const suggestions = []
+    if (allSecFindings.length)
+      suggestions.push({ suggestion_id: crypto.randomUUID(), project_id: projectId, source_run_id: run.id, category: 'security', title: 'Security findings require attention', description: `${allSecFindings.length} security issue(s) found during run`, evidence: allSecFindings.slice(0, 5), recommended_fix: 'Review and fix security findings before merging', risk_level: 'high', status: 'new', created_at: nowIso(), updated_at: nowIso() })
+    if (allRevFindings.length >= 3)
+      suggestions.push({ suggestion_id: crypto.randomUUID(), project_id: projectId, source_run_id: run.id, category: 'refactor', title: 'Multiple reviewer findings indicate code quality issues', description: `${allRevFindings.length} reviewer finding(s)`, evidence: allRevFindings.slice(0, 5), recommended_fix: 'Refactor affected modules', risk_level: 'medium', status: 'new', created_at: nowIso(), updated_at: nowIso() })
+    if (debugAttempts.length >= 2)
+      suggestions.push({ suggestion_id: crypto.randomUUID(), project_id: projectId, source_run_id: run.id, category: 'testing', title: 'High debug retry count — add more tests', description: `${debugAttempts.length} debug attempt(s) required`, evidence: failures.slice(0, 3).map(f => f.failure_reason || f.test || ''), recommended_fix: 'Add unit tests for the affected area', risk_level: 'low', status: 'new', created_at: nowIso(), updated_at: nowIso() })
+    if (run.status === 'failed' && failures.length)
+      suggestions.push({ suggestion_id: crypto.randomUUID(), project_id: projectId, source_run_id: run.id, category: 'testing', title: 'Run failed — investigate verification commands', description: failures.map(f => f.failure_reason || f.test || '').join('; '), evidence: failures.slice(0, 3), recommended_fix: 'Review verification commands for flakiness', risk_level: 'medium', status: 'new', created_at: nowIso(), updated_at: nowIso() })
+    return suggestions
+  }
+
+  function consolidateMemory(project, run) {
+    if (!run?.final_report) return
+    const projectId = project.id
+    const transcript = run.final_report.transcript || []
+    const candidateFacts = []
+    const filesChanged = [...new Set(transcript.flatMap(t => (t.files_written || []).filter(f => f.ok).map(f => f.path)))]
+    for (const fp of filesChanged)
+      candidateFacts.push({ category: 'file_pattern', fact: `Modified in "${(run.goal || 'task').slice(0,60)}": ${fp}` })
+    const cmds = [...new Set(transcript.flatMap(t => (t.tester?.output?.results || []).filter(r => r.pass).map(r => r.command)))]
+    for (const cmd of cmds.slice(0, 5))
+      candidateFacts.push({ category: 'command', fact: `Verified working: ${cmd}` })
+    const revFindings = transcript.flatMap(t => (t.reviewer?.output?.findings || []).filter(f => f.severity === 'info'))
+    for (const f of revFindings.slice(0, 3))
+      candidateFacts.push({ category: 'architecture', fact: `Architecture note: ${typeof f === 'string' ? f : (f.message || JSON.stringify(f)).slice(0,200)}` })
+    if (run.status === 'failed')
+      for (const fp of filesChanged.slice(0, 5))
+        candidateFacts.push({ category: 'risk', fact: `Touched in failed run: ${fp}` })
+    for (const factData of candidateFacts) {
+      const existing = forgeRunStore.findMemoryFactByContent(projectId, factData.fact)
+      if (existing) {
+        const count = (existing.usage_count || 0) + 1
+        forgeRunStore.upsertMemoryFact({ ...existing, confidence: count >= 3 ? 'high' : count >= 2 ? 'medium' : 'low', usage_count: count, last_used_at: nowIso(), updated_at: nowIso() })
+      } else {
+        forgeRunStore.upsertMemoryFact({ memory_id: crypto.randomUUID(), project_id: projectId, source_run_id: run.id, category: factData.category, fact: factData.fact, evidence: [], confidence: 'low', usage_count: 1, last_used_at: nowIso(), created_at: nowIso(), updated_at: nowIso() })
+      }
+    }
+  }
+
+  router.get('/projects/:id/suggestions', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, suggestions: forgeRunStore.getSuggestions(project.id) })
+  })
+
+  router.post('/suggestions/:suggestionId/accept', requireAuth, (req, res) => {
+    const s = forgeRunStore.findSuggestion(req.params.suggestionId)
+    if (!s) return res.status(404).json({ ok: false, error: 'suggestion not found' })
+    res.json({ ok: true, suggestion: forgeRunStore.updateSuggestion(s.suggestion_id, { status: 'accepted' }) })
+  })
+
+  router.post('/suggestions/:suggestionId/reject', requireAuth, (req, res) => {
+    const s = forgeRunStore.findSuggestion(req.params.suggestionId)
+    if (!s) return res.status(404).json({ ok: false, error: 'suggestion not found' })
+    res.json({ ok: true, suggestion: forgeRunStore.updateSuggestion(s.suggestion_id, { status: 'rejected' }) })
+  })
+
+  router.post('/suggestions/:suggestionId/create-backlog-item', requireAuth, (req, res) => {
+    const s = forgeRunStore.findSuggestion(req.params.suggestionId)
+    if (!s) return res.status(404).json({ ok: false, error: 'suggestion not found' })
+    const item = forgeRunStore.upsertBacklogItem({
+      backlog_id: crypto.randomUUID(), project_id: s.project_id, title: s.title,
+      description: s.description || s.recommended_fix || '',
+      priority: s.risk_level === 'high' ? 80 : s.risk_level === 'medium' ? 60 : 40,
+      category: { security: 'SECURITY', refactor: 'REFACTOR', testing: 'TESTING' }[s.category] || 'FEATURE',
+      status: 'READY', risk_level: s.risk_level || 'low', source: 'suggestion',
+      created_at: nowIso(), updated_at: nowIso(),
+    })
+    forgeRunStore.updateSuggestion(s.suggestion_id, { status: 'implemented' })
+    res.json({ ok: true, backlog_item: item, suggestion_id: s.suggestion_id })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 5 — DEVELOPMENT CYCLES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  router.post('/projects/:id/cycles', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const { goal, backlog_item_ids, autonomy_level, max_runs, max_duration_sec, success_criteria } = req.body || {}
+    if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
+    const cycleId = crypto.randomUUID()
+    let itemIds = Array.isArray(backlog_item_ids) ? backlog_item_ids : []
+    if (!itemIds.length) {
+      try {
+        const [repoIdx, taskMemory, backlog] = await Promise.all([
+          generateRepoIndex(project).catch(() => ({})),
+          Promise.resolve(loadTaskMemory(project.id)),
+          Promise.resolve(forgeRunStore.getBacklog(project.id)),
+        ])
+        const subtasks = await runDecomposerAgent(project, goal, repoIdx, taskMemory, backlog)
+        const added = subtasks.map((st, i) => forgeRunStore.upsertBacklogItem({
+          backlog_id: crypto.randomUUID(), project_id: project.id, title: st.title,
+          description: st.description || '', priority: 50 - i, category: 'FEATURE',
+          status: 'READY', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
+          acceptance_criteria: st.acceptance_criteria || null, source: 'cycle',
+          dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
+          created_at: nowIso(), updated_at: nowIso(),
+        }))
+        itemIds = added.map(i => i.backlog_id)
+      } catch {}
+    }
+    const cycle = forgeRunStore.upsertCycle({
+      cycle_id: cycleId, project_id: project.id, goal, status: 'RUNNING',
+      autonomy_level: typeof autonomy_level === 'number' ? autonomy_level : 2,
+      max_runs: typeof max_runs === 'number' ? max_runs : 20,
+      max_duration_sec: typeof max_duration_sec === 'number' ? max_duration_sec : 3600,
+      started_at: nowIso(), backlog_items: itemIds, run_ids: [],
+      success_criteria: success_criteria || null, current_phase: 'executing',
+      created_at: nowIso(), updated_at: nowIso(),
+    })
+    autopilotSessions.set(project.id, { active: true, runsCompleted: 0, consecutiveFails: 0, maxRuns: cycle.max_runs, autonomyLevel: cycle.autonomy_level, cycleId, startedAt: nowIso() })
+    setImmediate(() => _runAutopilotTick(project.id))
+    res.json({ ok: true, cycle })
+  })
+
+  router.get('/projects/:id/cycles', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, cycles: forgeRunStore.getCycles(project.id) })
+  })
+
+  router.get('/cycles/:cycleId', requireAuth, (req, res) => {
+    const cycle = forgeRunStore.findCycle(req.params.cycleId)
+    if (!cycle) return res.status(404).json({ ok: false, error: 'cycle not found' })
+    res.json({ ok: true, cycle })
+  })
+
+  router.post('/cycles/:cycleId/pause', requireAuth, (req, res) => {
+    const cycle = forgeRunStore.findCycle(req.params.cycleId)
+    if (!cycle) return res.status(404).json({ ok: false, error: 'cycle not found' })
+    const session = autopilotSessions.get(cycle.project_id)
+    if (session) session.active = false
+    const updated = forgeRunStore.updateCycle(cycle.cycle_id, { status: 'PAUSED' })
+    forgeRunStore.recordAudit('cycle_paused', { cycle_id: cycle.cycle_id })
+    res.json({ ok: true, cycle: updated })
+  })
+
+  router.post('/cycles/:cycleId/resume', requireAuth, (req, res) => {
+    const cycle = forgeRunStore.findCycle(req.params.cycleId)
+    if (!cycle) return res.status(404).json({ ok: false, error: 'cycle not found' })
+    const updated = forgeRunStore.updateCycle(cycle.cycle_id, { status: 'RUNNING' })
+    autopilotSessions.set(cycle.project_id, { active: true, runsCompleted: 0, consecutiveFails: 0, maxRuns: cycle.max_runs, autonomyLevel: cycle.autonomy_level, cycleId: cycle.cycle_id, startedAt: nowIso() })
+    setImmediate(() => _runAutopilotTick(cycle.project_id))
+    forgeRunStore.recordAudit('cycle_resumed', { cycle_id: cycle.cycle_id })
+    res.json({ ok: true, cycle: updated })
+  })
+
+  router.post('/cycles/:cycleId/cancel', requireAuth, (req, res) => {
+    const cycle = forgeRunStore.findCycle(req.params.cycleId)
+    if (!cycle) return res.status(404).json({ ok: false, error: 'cycle not found' })
+    const session = autopilotSessions.get(cycle.project_id)
+    if (session) session.active = false
+    for (const bid of (cycle.backlog_items || [])) {
+      const it = forgeRunStore.findBacklogItem(bid)
+      if (it && it.status === 'IN_PROGRESS') forgeRunStore.updateBacklogItem(bid, { status: 'CANCELLED' })
+    }
+    const updated = forgeRunStore.updateCycle(cycle.cycle_id, { status: 'CANCELLED', ended_at: nowIso() })
+    forgeRunStore.recordAudit('cycle_cancelled', { cycle_id: cycle.cycle_id })
+    res.json({ ok: true, cycle: updated })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 5 — MEMORY INSIGHTS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  router.get('/projects/:id/memory', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, facts: forgeRunStore.getMemoryFacts(project.id, req.query.category || undefined) })
   })
 
   return router

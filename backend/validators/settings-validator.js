@@ -452,6 +452,15 @@ function getDefaultSettings() {
       retryDelaySeconds: 1,
       customHeaders: {},
     },
+    updates: {
+      auto_update_enabled: false,
+      update_channel: 'stable',     // stable | beta
+      update_interval_minutes: 60,  // how often the daemon polls (min 15)
+      auto_restart_on_update: true, // restart Node/Python after applying update
+      watchdog_enabled: true,       // health watchdog runs regardless of auto-update
+      watchdog_interval_seconds: 30,
+      watchdog_max_failures: 3,     // consecutive failures before restart attempt
+    },
   };
 }
 

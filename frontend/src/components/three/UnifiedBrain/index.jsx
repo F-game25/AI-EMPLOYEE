@@ -1,4 +1,5 @@
-import { useRef, useEffect, useCallback, Suspense } from 'react'
+import { useRef, useEffect, useCallback, Suspense, useMemo } from 'react'
+import { useAppPerformance } from '../../../context/PerformanceModeContext'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Environment } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
@@ -9,10 +10,21 @@ import AgentNetwork from './AgentNetwork'
 import CrossNetworkEdges from './CrossNetworkEdges'
 import BrainParticles from './BrainParticles'
 import FiberStreamParticles from './FiberStreamParticles'
+import OrbitalNodes3D from './OrbitalNodes3D'
 import { CoreSphere } from '../NeuralCore/CoreSphere'
 import { useBrainScene } from './useBrainScene'
 import { useBrainStore } from '../../../store/brainStore'
 import { useAgentStore } from '../../../store/agentStore'
+
+const WS_ACTIVITY_EVENTS = [
+  'ws:memory:added', 'ws:task:completed', 'ws:learning:completed',
+  'ws:learning:started', 'ws:notification', 'ws:topic:skill_updated',
+]
+const ACTIVE_TTL_MS = 8000
+
+// Bloom params for idle / active states
+const BLOOM_IDLE   = { threshold: 0.35, intensity: 0.8 }
+const BLOOM_ACTIVE = { threshold: 0.20, intensity: 1.6 }
 
 const VIEW_CAMERA = {
   TOP:   [0, 30, 0.001],  // tiny z offset avoids degenerate up-vector
@@ -69,10 +81,9 @@ function _positionForNode(node, idx, total) {
 function VaultNode({ node, position }) {
   const meshRef = useRef()
   useFrame(({ clock }) => {
-    if (meshRef.current) {
-      const t = clock.getElapsedTime()
-      meshRef.current.scale.setScalar(1 + Math.sin(t * 1.5 + node.id?.length || 0) * 0.06)
-    }
+    if (!meshRef.current || document.hidden) return
+    const t = clock.getElapsedTime()
+    meshRef.current.scale.setScalar(1 + Math.sin(t * 1.5 + node.id?.length || 0) * 0.06)
   })
   const color = FOLDER_COLOR[node.folder] || '#22d3ee'
   return (
@@ -86,10 +97,9 @@ function VaultNode({ node, position }) {
 function VaultLink({ from, to, color }) {
   const ref = useRef()
   useFrame(({ clock }) => {
-    if (ref.current) {
-      const t = clock.getElapsedTime()
-      ref.current.material.opacity = 0.25 + Math.sin(t * 1.2) * 0.08
-    }
+    if (!ref.current || document.hidden) return
+    const t = clock.getElapsedTime()
+    ref.current.material.opacity = 0.25 + Math.sin(t * 1.2) * 0.08
   })
   const dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2]
   const len = Math.sqrt(dx*dx + dy*dy + dz*dz) || 0.001
@@ -133,7 +143,55 @@ function VaultNetwork() {
   )
 }
 
-function BrainScene({ showKnowledgeNodes, showAgentConnections, showVaultNetwork, density }) {
+/**
+ * Tracks brain active state and smoothly lerps Bloom params.
+ * Rendered inside Canvas so useFrame is available.
+ */
+function AdaptiveBloom() {
+  const lastActiveRef    = useRef(0)
+  const bloomRef         = useRef()
+  const currentIntensity = useRef(BLOOM_IDLE.intensity)
+  const currentThreshold = useRef(BLOOM_IDLE.threshold)
+  const reducedMotion    = useMemo(
+    () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+    []
+  )
+
+  useEffect(() => {
+    if (reducedMotion) return
+    function markActive() { lastActiveRef.current = Date.now() }
+    WS_ACTIVITY_EVENTS.forEach(ev => window.addEventListener(ev, markActive))
+    return () => WS_ACTIVITY_EVENTS.forEach(ev => window.removeEventListener(ev, markActive))
+  }, [reducedMotion])
+
+  useFrame((_, delta) => {
+    if (!bloomRef.current || reducedMotion || document.hidden) return
+    const isActive = Date.now() - lastActiveRef.current < ACTIVE_TTL_MS
+    const target = isActive ? BLOOM_ACTIVE : BLOOM_IDLE
+    const speed = delta * 2.0
+
+    currentIntensity.current += (target.intensity - currentIntensity.current) * speed
+    currentThreshold.current += (target.threshold - currentThreshold.current) * speed
+
+    bloomRef.current.intensity        = currentIntensity.current
+    bloomRef.current.luminancePass.threshold = currentThreshold.current
+  })
+
+  return (
+    <EffectComposer>
+      <Bloom
+        ref={bloomRef}
+        blendFunction={BlendFunction.SCREEN}
+        luminanceThreshold={BLOOM_IDLE.threshold}
+        luminanceSmoothing={0.9}
+        intensity={BLOOM_IDLE.intensity}
+        mipmapBlur
+      />
+    </EffectComposer>
+  )
+}
+
+function BrainScene({ showKnowledgeNodes, showAgentConnections, showVaultNetwork, density, particleBudget }) {
   const cognitiveRef = useRef()
   const memoryRef = useRef()
   const agentsRef = useRef()
@@ -142,8 +200,9 @@ function BrainScene({ showKnowledgeNodes, showAgentConnections, showVaultNetwork
 
   const refs = { cognitiveRef, memoryRef, agentsRef, edgesRef }
 
-  // Drain command queue each frame
+  // Drain command queue each frame (skip when tab hidden)
   useFrame(() => {
+    if (document.hidden) return
     drainQueue(refs)
   })
 
@@ -199,10 +258,13 @@ function BrainScene({ showKnowledgeNodes, showAgentConnections, showVaultNetwork
       {showVaultNetwork !== false && <VaultNetwork />}
 
       {/* Ambient particles */}
-      <BrainParticles />
+      {particleBudget > 0 && <BrainParticles maxCount={particleBudget} />}
 
       {/* Fiber-optic streaming trails — cinematic Kronos brain aesthetic */}
-      <FiberStreamParticles />
+      {particleBudget > 0 && <FiberStreamParticles maxCount={Math.floor(particleBudget / 2)} />}
+
+      {/* WS-reactive orbital subsystem nodes */}
+      <OrbitalNodes3D />
 
       {/* Scene lighting */}
       <ambientLight intensity={0.05} />
@@ -221,6 +283,8 @@ export default function UnifiedBrain({
   activeView = 'FRONT',
   density = 1.0,
 } = {}) {
+  const { tier, is3DAllowed, particleBudget } = useAppPerformance()
+
   const onCreated = useCallback(({ gl, setFrameloop }) => {
     const canvas = gl.domElement
     // On context loss: preventDefault (lets the browser/SwiftShader restore) and
@@ -230,9 +294,21 @@ export default function UnifiedBrain({
       try { setFrameloop?.('never') } catch { /* */ }
     })
     canvas.addEventListener('webglcontextrestored', () => {
-      try { setFrameloop?.('always') } catch { /* */ }
+      try { setFrameloop?.('demand') } catch { /* */ }
     })
   }, [])
+
+  if (!is3DAllowed) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)', borderRadius: 12 }}>
+        <div style={{ textAlign: 'center', color: '#4ade80', opacity: 0.7 }}>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>◉</div>
+          <div style={{ fontSize: 13, letterSpacing: 2 }}>NEURAL CORE</div>
+          <div style={{ fontSize: 11, opacity: 0.5, marginTop: 4 }}>3D disabled — low performance mode</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -258,7 +334,8 @@ export default function UnifiedBrain({
 
       <Canvas
         camera={{ position: VIEW_CAMERA[activeView] || VIEW_CAMERA.FRONT, fov: 55 }}
-        dpr={[1, 1.5]}
+        dpr={tier === 'high' ? [1, 1.5] : [1, 1]}
+        frameloop="demand"
         gl={{ antialias: true, alpha: false, powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false }}
         style={{ background: '#000000' }}
         onCreated={onCreated}
@@ -270,6 +347,7 @@ export default function UnifiedBrain({
             showAgentConnections={showAgentConnections}
             showVaultNetwork={showVaultNetwork}
             density={density}
+            particleBudget={particleBudget}
           />
           <OrbitControls
             enablePan={false}
@@ -278,9 +356,7 @@ export default function UnifiedBrain({
             autoRotate
             autoRotateSpeed={0.3}
           />
-          <EffectComposer>
-            <Bloom blendFunction={BlendFunction.SCREEN} luminanceThreshold={0.08} luminanceSmoothing={0.9} intensity={2.2} mipmapBlur />
-          </EffectComposer>
+          {tier === 'high' && <AdaptiveBloom />}
         </Suspense>
       </Canvas>
     </div>

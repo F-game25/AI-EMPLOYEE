@@ -35,6 +35,7 @@ const CognitiveNetwork = forwardRef(function CognitiveNetwork(_, ref) {
   }))
 
   useFrame((_, delta) => {
+    if (document.hidden) return
     NODES.forEach(n => {
       const mesh = meshRefs.current[n.id]
       if (!mesh) return

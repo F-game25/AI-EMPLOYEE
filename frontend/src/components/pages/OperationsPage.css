@@ -299,3 +299,17 @@
   .ops-kanban { overflow-x: scroll; }
   .ops-col    { min-width: 180px; }
 }
+
+@media (max-width: 768px) {
+  .ops-header { flex-wrap: wrap; gap: 8px; }
+  .ops-header__tabs { overflow-x: auto; flex-wrap: nowrap; width: 100%; }
+  .ops-kanban { flex-direction: column; overflow-x: hidden; overflow-y: auto; }
+  .ops-col { min-width: unset; width: 100%; flex: 0 0 auto; border-right: none; border-bottom: 1px solid var(--nx-border-faint); }
+  .ops-col:last-child { border-bottom: none; }
+  .ops-col--failed { flex: 0 0 auto; }
+  .ops-sched-head,
+  .ops-sched-row { grid-template-columns: 1fr auto; gap: 4px; }
+  .ops-sched-head span:not(:first-child):not(:last-child),
+  .ops-sched-row span:not(:first-child):not(:last-child),
+  .ops-sched-row code { display: none; }
+}

@@ -20,7 +20,7 @@
   display: grid;
   place-items: center;
   isolation: isolate;
-  contain: layout style;
+  contain: layout style paint;
   --reactor-size: 870px;
   --iris-size: 580px;
   --iris-color: var(--eye-iris-color, #fbbf24);

@@ -9,7 +9,8 @@ import './PresenceLayer.css';
  */
 
 export const PresenceLayer = () => {
-  const { userId, userName } = useAppStore();
+  const userId = useAppStore(s => s.userId);
+  const userName = useAppStore(s => s.userName);
   const wsConnected = useWebSocketStore(s => s.isConnected);
   const [remoteUsers, setRemoteUsers] = useState(new Map());
   const [localMousePos, setLocalMousePos] = useState({ x: 0, y: 0 });

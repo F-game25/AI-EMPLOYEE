@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { useCognitiveStore } from '../../store/cognitiveStore'
 import { useSystemStore } from '../../store/systemStore'
+import { useAgentStore } from '../../store/agentStore'
+import { useTaskStore } from '../../store/taskStore'
 import { NavRailItem, StatusPill } from '../nexus-ui'
 import './Sidebar.css'
 
@@ -85,6 +87,11 @@ const NAV_GROUPS = [
         id: 'economy',
         label: 'Economy',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8c0-3.3 2.7-6 6-6s6 2.7 6 6-2.7 6-6 6-6-2.7-6-6z"/><path d="M8 5v6M6 7h4"/></svg>,
+      },
+      {
+        id: 'orders',
+        label: 'Orders',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="12" height="11" rx="1"/><path d="M2 7h12M5 3V2M11 3V2M5 11h6"/></svg>,
       },
     ],
   },
@@ -268,6 +275,10 @@ export default function Sidebar() {
   const [collapsedGroups, setCollapsedGroups] = useState({})
   const mobileOpen = useSystemStore(s => s.mobileSidebarOpen)
   const setMobileSidebarOpen = useSystemStore(s => s.setMobileSidebarOpen)
+  const agentCount = useAgentStore(s => s.agents?.length ?? 0)
+  const opsSummary = useTaskStore(s => s.opsSummary)
+  const activeTaskCount = (opsSummary?.active_tasks ?? 0) + (opsSummary?.queued_tasks ?? 0)
+  const liveCounts = { agents: agentCount || null, tasks: activeTaskCount || null }
 
   const cpu  = systemHealth.cpu_percent ?? 0
   const ram  = systemHealth.memory_percent ?? 0
@@ -322,6 +333,8 @@ export default function Sidebar() {
                 className="nx-sidebar__group-toggle"
                 onClick={() => toggleGroup(group)}
                 title={isCollapsed ? `Show ${group}` : `Hide ${group}`}
+                aria-label={isCollapsed ? `Show ${group}` : `Hide ${group}`}
+                aria-expanded={!isCollapsed}
               >
                 {!collapsed && (
                   <>
@@ -340,7 +353,7 @@ export default function Sidebar() {
                     <NavRailItem
                       key={id}
                       icon={itemIcon}
-                      label={label}
+                      label={liveCounts[id] != null && !collapsed ? `${label} (${liveCounts[id]})` : label}
                       active={activeSection === id}
                       compact={collapsed}
                       onClick={() => setActiveSection(id)}
@@ -382,6 +395,8 @@ export default function Sidebar() {
           className="nx-sidebar__collapse"
           onClick={() => setCollapsed(!collapsed)}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d={collapsed ? 'M6 3l5 5-5 5' : 'M10 3L5 8l5 5'} />

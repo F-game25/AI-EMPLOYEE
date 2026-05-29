@@ -668,6 +668,64 @@ select.nx-input option { background: var(--nx-surface-3); color: var(--nx-text);
 .nx-log-line--error { color: var(--nx-danger);  }
 .nx-log-stage { color: var(--nx-cyan); margin-right: var(--nx-s-2); opacity: 0.7; }
 
+/* ── Watchdog status ─────────────────────────────────────────────────────── */
+
+.nx-watchdog-status {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-4);
+  padding: var(--nx-s-3) var(--nx-s-4);
+  background: rgba(0,0,0,0.25);
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  margin-bottom: var(--nx-s-4);
+  flex-wrap: wrap;
+}
+
+.nx-wd-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 3px 10px 3px 8px;
+  border-radius: 3px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+.nx-wd-pill--ok   { color: var(--nx-success); border-color: rgba(34,197,94,0.3);  background: rgba(34,197,94,0.08);  }
+.nx-wd-pill--err  { color: var(--nx-danger);  border-color: rgba(239,68,68,0.3);  background: rgba(239,68,68,0.08);  }
+.nx-wd-pill--warn { color: var(--nx-warning); border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.08); }
+.nx-wd-pill--dim  { color: var(--nx-text-dim); border-color: var(--nx-border);    background: transparent; }
+
+.nx-wd-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.nx-wd-pill--ok   .nx-wd-dot { animation: wdPulse 2s ease-in-out infinite; }
+.nx-wd-pill--err  .nx-wd-dot { animation: wdPulse 0.8s ease-in-out infinite; }
+.nx-wd-pill--warn .nx-wd-dot { animation: wdPulse 1.2s ease-in-out infinite; }
+
+@keyframes wdPulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.nx-wd-stats {
+  display: flex;
+  gap: var(--nx-s-4);
+  font-size: 10px;
+  color: var(--nx-text-muted);
+  letter-spacing: 0.1em;
+  flex-wrap: wrap;
+}
+.nx-wd-restarts { color: var(--nx-warning); }
+.nx-wd-last     { color: var(--nx-text-dim); }
+
 /* ── Danger zone ─────────────────────────────────────────────────────────── */
 
 .nx-danger-warning {
@@ -1337,3 +1395,26 @@ select.nx-input option { background: var(--nx-surface-3); color: var(--nx-text);
 
 .nx-evo-stats { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--nx-text-muted, #9a927e); margin-bottom: 10px; }
 .nx-evo-stats b { color: var(--nx-text, #ecead8); }
+
+/* ── Hardware Profile card ─────────────────────────────────────────────────── */
+
+.nx-hw-profile-card { display: flex; flex-direction: column; gap: 16px; padding: 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }
+.nx-hw-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.nx-hw-stat { display: flex; flex-direction: column; gap: 4px; }
+.nx-hw-stat span { font-size: 11px; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; }
+.nx-hw-stat strong { font-size: 13px; font-weight: 600; }
+.nx-hw-tier-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.nx-hw-tier-pill { padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+.nx-hw-tier--high   { background: rgba(74,222,128,0.15);  color: #4ade80; border: 1px solid rgba(74,222,128,0.3);  }
+.nx-hw-tier--medium { background: rgba(251,191,36,0.15);  color: #fbbf24; border: 1px solid rgba(251,191,36,0.3);  }
+.nx-hw-tier--low    { background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+.nx-hw-override-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.nx-hw-override-row label { font-size: 13px; opacity: 0.7; }
+.nx-hw-select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: inherit; border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer; font-family: var(--nx-font-mono); }
+.nx-hw-select option { background: var(--nx-surface-3, #181a25); color: var(--nx-text, #ecead8); }
+.nx-hw-reload-hint { font-size: 11px; opacity: 0.4; font-style: italic; }
+
+@media (max-width: 600px) {
+  .nx-hw-stats { grid-template-columns: repeat(2, 1fr); }
+  .nx-hw-override-row { flex-direction: column; align-items: flex-start; }
+}

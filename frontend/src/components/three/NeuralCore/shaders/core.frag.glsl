@@ -7,6 +7,8 @@ varying float vThinking;
 uniform float u_load;
 uniform float u_errorMix;
 uniform float u_thinking;
+uniform float u_pulseIntensity;
+uniform vec3  u_pulseColor;
 
 void main() {
   vec3 normal = normalize(vNormal);
@@ -24,18 +26,23 @@ void main() {
   // Thinking state: add purple glow
   vec3 thinkingColor = mix(baseColor, vec3(0.67, 0.33, 0.97), u_thinking * 0.3);
 
+  // Activity pulse — blend toward pulse color
+  float pulseNorm = clamp((u_pulseIntensity - 1.0) / 1.5, 0.0, 1.0);
+  vec3 pulsedColor = mix(thinkingColor, u_pulseColor, pulseNorm * 0.55);
+
   // Rim glow (gold)
   vec3 rimColor = vec3(1.0, 0.85, 0.48);
-  vec3 finalColor = mix(thinkingColor, rimColor, fresnel * 0.6);
+  vec3 finalColor = mix(pulsedColor, rimColor, fresnel * 0.6);
 
   // Specular highlight
   vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
   float spec = pow(max(dot(normal, lightDir), 0.0), 16.0);
   finalColor += rimColor * spec * 0.4;
 
-  // Add glow based on displacement
+  // Add glow based on displacement + pulse
   float glowAmount = vDisplacement * u_thinking * 2.0;
   finalColor += vec3(1.0, 0.85, 0.48) * glowAmount;
+  finalColor += u_pulseColor * pulseNorm * 0.4 * fresnel;
 
-  gl_FragColor = vec4(finalColor, 1.0);
+  gl_FragColor = vec4(finalColor * u_pulseIntensity, 1.0);
 }

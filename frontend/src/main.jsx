@@ -1,4 +1,3 @@
-import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
@@ -61,11 +60,7 @@ window.addEventListener('unhandledrejection', (evt) => {
   reportError(`Unhandled rejection: ${msg}`, reason?.stack)
 })
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+createRoot(document.getElementById('root')).render(<App />)
 
 // Warm-start the Dashboard chunk so it's cached by the time BootSequence completes.
 // Fire-and-forget — runs in parallel with first paint, doesn't block.

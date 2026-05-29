@@ -82,6 +82,15 @@
   --nx-text-faint:    #36342a;
   --nx-text-on-gold:  #14110a;
 
+  /* Semantic type scale */
+  --nx-text-2xs: 8px;
+  --nx-text-xs:  10px;
+  --nx-text-sm:  11px;
+  --nx-text-md:  13px;
+  --nx-text-lg:  15px;
+  --nx-text-xl:  18px;
+  --nx-text-2xl: 22px;
+
   /* ── Typography ─────────────────────────────────────────────────── */
   --nx-font-display:  'Inter', system-ui, -apple-system, sans-serif;
   --nx-font-mono:     'JetBrains Mono', ui-monospace, monospace;
@@ -129,3 +138,38 @@
     --nx-dur-slow: 0ms;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   HOLOGRAPHIC WORKSPACE — Snap Grid (12-col × 8-row)
+   ════════════════════════════════════════════════════════════════════ */
+.nx-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  gap: var(--nx-gap, 12px);
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.nx-grid--dashboard {
+  grid-template-areas:
+    "neural neural neural neural neural neural neural neural neural neural neural neural"
+    "neural neural neural neural neural neural neural neural neural neural neural neural"
+    "mem    mem    mem    agt    agt    agt    rsrc   rsrc   rsrc   sec    sec    sec   "
+    "mem    mem    mem    agt    agt    agt    rsrc   rsrc   rsrc   sec    sec    sec   "
+    "eco    eco    eco    eco    kno    kno    kno    kno    task   task   task   task  "
+    "eco    eco    eco    eco    kno    kno    kno    kno    task   task   task   task  "
+    "feed   feed   feed   feed   feed   feed   feed   feed   feed   feed   feed   feed "
+    "feed   feed   feed   feed   feed   feed   feed   feed   feed   feed   feed   feed ";
+}
+
+.nx-area--neural { grid-area: neural; }
+.nx-area--mem    { grid-area: mem; }
+.nx-area--agt    { grid-area: agt; }
+.nx-area--rsrc   { grid-area: rsrc; }
+.nx-area--sec    { grid-area: sec; }
+.nx-area--eco    { grid-area: eco; }
+.nx-area--kno    { grid-area: kno; }
+.nx-area--task   { grid-area: task; }
+.nx-area--feed   { grid-area: feed; }

@@ -152,7 +152,7 @@
 
 .nx-panel__title {
   font-family: var(--nx-font-display);
-  font-size: 11px;
+  font-size: var(--nx-text-sm);
   font-weight: 600;
   letter-spacing: var(--nx-tracking-cap);
   text-transform: uppercase;
@@ -168,7 +168,7 @@
 
 .nx-panel__sub {
   font-family: var(--nx-font-mono);
-  font-size: 10px;
+  font-size: var(--nx-text-xs);
   letter-spacing: var(--nx-tracking-mid);
   color: var(--nx-text-dim);
   margin-left: var(--nx-s-2);
@@ -180,6 +180,14 @@
   align-items: center;
   gap: var(--nx-s-2);
   flex-shrink: 0;
+}
+
+.nx-panel__freshness-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.4s, box-shadow 0.4s;
 }
 
 /* ── Body ──────────────────────────────────────────────────────────── */
@@ -210,11 +218,49 @@
   justify-content: space-between;
   gap: var(--nx-s-3);
   font-family: var(--nx-font-mono);
-  font-size: 10px;
+  font-size: var(--nx-text-xs);
   letter-spacing: var(--nx-tracking-mid);
   color: var(--nx-text-dim);
   position: relative;
   z-index: 2;
+}
+
+/* ── Parallax depth ────────────────────────────────────────────────── */
+.nx-panel {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.nx-panel[data-depth="0"] { --shadow-spread: 0px; }
+.nx-panel[data-depth="1"] {
+  --shadow-spread: 8px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.04) inset,
+    0 0 0 1px rgba(229,199,107,0.10) inset,
+    0 4px 24px rgba(229,199,107,0.06),
+    0 18px 48px rgba(0,0,0,0.55);
+}
+.nx-panel[data-depth="2"] {
+  --shadow-spread: 16px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.06) inset,
+    0 0 0 1px rgba(229,199,107,0.16) inset,
+    0 8px 40px rgba(229,199,107,0.10),
+    0 24px 64px rgba(0,0,0,0.62);
+}
+
+.nx-panel--parallax {
+  transition: transform 80ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-panel,
+  .nx-panel--parallax {
+    transition: box-shadow var(--nx-dur) var(--nx-ease),
+                border-color var(--nx-dur) var(--nx-ease),
+                background var(--nx-dur) var(--nx-ease) !important;
+    transform: none !important;
+  }
 }
 
 /* ── Sizes ─────────────────────────────────────────────────────────── */

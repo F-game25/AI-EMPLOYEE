@@ -103,7 +103,7 @@ const MEMORY_TABS = [
   { id: 'episodic', label: 'Episodic' },
   { id: 'procedural', label: 'Procedural' },
 ]
-const READINESS_POLL_MS = 1500
+const READINESS_POLL_MS = 3000
 
 const BRAIN_STATE_TONE = s => {
   switch ((s || '').toUpperCase()) {
@@ -172,6 +172,16 @@ function useMediaQuery(query) {
   return matches
 }
 
+// ── Delayed fallback — prevents the 2D graph flashing before Three.js inits ──
+function DelayedFallback({ delay = 500, children }) {
+  const [show, setShow] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setShow(true), delay)
+    return () => clearTimeout(t)
+  }, [delay])
+  return show ? children : null
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function NeuralNetworkPage() {
@@ -186,7 +196,7 @@ export default function NeuralNetworkPage() {
   const setReadiness = useSystemStore(s => s.setReadiness)
 
   const [hydrated, setHydrated] = useState(false)
-  const [webglOK] = useState(webglAvailable)
+  const [webglOK, setWebglOK] = useState(true) // optimistic default
   const [isStaleFallback, setIsStaleFallback] = useState(false)
   const [liveGraphUpdate, setLiveGraphUpdate] = useState(null) // { nodes_count, edges_count, ts }
   const [livePulse, setLivePulse] = useState(false)
@@ -212,6 +222,21 @@ export default function NeuralNetworkPage() {
   const [mergeConfirm, setMergeConfirm] = useState('')
   const [selectedBackup, setSelectedBackup] = useState('')
   const retryCount = useRef(0)
+
+  // ── WebGL availability — checked after mount so WebKit has time to init GL ──
+  useEffect(() => {
+    const check = () => {
+      try {
+        const c = document.createElement('canvas')
+        const gl = c.getContext('webgl') || c.getContext('experimental-webgl')
+        if (!gl) setWebglOK(false)
+      } catch { setWebglOK(false) }
+    }
+    check()
+    // Retry once after 800ms in case WebKit GL wasn't ready on first check
+    const t = setTimeout(check, 800)
+    return () => clearTimeout(t)
+  }, [])
 
   // ── brain:graph_updated WebSocket listener ───────────────────────────────
   useEffect(() => {
@@ -298,6 +323,7 @@ export default function NeuralNetworkPage() {
   useEffect(() => {
     let cancelled = false
     const load = () => {
+      if (document.visibilityState === 'hidden') return
       Promise.all([
         fetchJson('/api/memory/router/status').catch(error => ({ error: error.message })),
         fetchJson('/api/memory/graph/status').catch(error => ({ error: error.message, state: 'degraded' })),
@@ -541,7 +567,7 @@ export default function NeuralNetworkPage() {
                   <ErrorBoundary
                     label="neural-graph"
                     severity="widget"
-                    fallback={<MemoryGraphCanvas data={toCanvasData(nodes, edges)} emptyHint="No nodes yet." />}
+                    fallback={<DelayedFallback delay={500}><MemoryGraphCanvas data={toCanvasData(nodes, edges)} emptyHint="No nodes yet." /></DelayedFallback>}
                   >
                     <UnifiedBrain
                       showKnowledgeNodes={showKnowledgeNodes}

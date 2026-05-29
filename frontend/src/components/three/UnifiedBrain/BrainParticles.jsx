@@ -31,7 +31,7 @@ export default function BrainParticles() {
   }, [positions])
 
   useFrame(() => {
-    if (!pointsRef.current) return
+    if (!pointsRef.current || document.hidden) return
     const posAttr = pointsRef.current.geometry.attributes.position
     for (let i = 0; i < COUNT; i++) {
       posAttr.array[i * 3]     += velocities[i * 3]
