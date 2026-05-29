@@ -1,0 +1,34 @@
+{
+  "skill_id": "ui_component_upgrade",
+  "name": "UI Component Upgrade",
+  "description": "Upgrade, refactor, or add new UI components with loading, error, and empty states.",
+  "triggers": ["component", "ui", "frontend", "react", "jsx", "css", "style", "button", "modal", "panel", "form", "layout", "page", "view", "dashboard"],
+  "required_context": ["file_tree", "package_json", "existing_components"],
+  "allowed_tools": ["read_file", "write_file", "run_lint", "run_build"],
+  "blocked_tools": ["database_drop", "rm_rf"],
+  "checklist": [
+    "Read existing component before modifying",
+    "Add loading state (spinner or skeleton)",
+    "Add error state with user-friendly message",
+    "Add empty state with call-to-action",
+    "Add refresh/retry action button",
+    "Ensure all data comes from real API endpoints",
+    "Match existing CSS naming convention (e.g. .af-* prefix)",
+    "Test with real backend data before marking complete",
+    "Check for prop-types or TypeScript type coverage",
+    "Verify no broken imports after change"
+  ],
+  "verification_commands": ["npm run lint", "npm run build", "npx tsc --noEmit"],
+  "example_tasks": [
+    "Add loading and error states to RunHistoryPane",
+    "Create a new BacklogPane component with item cards",
+    "Upgrade the TopBar to show autopilot status"
+  ],
+  "common_failure_modes": [
+    "Missing empty state causes blank panel",
+    "No error boundary leaves users with white screen",
+    "CSS class conflict with existing styles",
+    "Fetching wrong API endpoint"
+  ],
+  "output_format": "React JSX component with named export"
+}

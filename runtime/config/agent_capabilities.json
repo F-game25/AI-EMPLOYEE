@@ -2,8 +2,8 @@
     "_meta": {
         "version": "2.1",
         "description": "Capabilities map for all AI agents \u2014 used by task-orchestrator for intelligent routing",
-        "total_agents": 101,
-        "updated_at": "2026-05-22",
+        "total_agents": 106,
+        "updated_at": "2026-05-28",
         "model_routing": {
             "sales": {
                 "provider": "openai",
@@ -2628,6 +2628,118 @@
                 "Twilio webhook",
                 "inbound parsing",
                 "conversation routing"
+            ],
+            "parallel_capable": false
+        },
+        "discovery": {
+            "description": "Discovery Bot \u2014 scans skill gaps and market opportunities, proposes new skills or workflows using AI-powered analysis; all proposals require explicit user approval before any changes",
+            "category": "research",
+            "skills": [
+                "skill_gap_analysis",
+                "market_research",
+                "improvement_proposals",
+                "ai_powered_scanning"
+            ],
+            "commands": [
+                "discover",
+                "improvements",
+                "scan gaps"
+            ],
+            "specialties": [
+                "skill gap detection",
+                "market opportunity research",
+                "safe proposal generation"
+            ],
+            "parallel_capable": false
+        },
+        "feedback-loop": {
+            "description": "Feedback Loop \u2014 tracks outreach message effectiveness by scoring templates based on reply/conversion outcomes, surfaces best-performing templates for reuse, and automatically updates scores from CRM status changes",
+            "category": "analytics",
+            "skills": [
+                "message_performance_tracking",
+                "template_scoring",
+                "crm_outcome_monitoring",
+                "prompt_optimization"
+            ],
+            "commands": [
+                "feedback status",
+                "feedback top",
+                "feedback reset"
+            ],
+            "specialties": [
+                "outreach template scoring",
+                "reply rate tracking",
+                "CRM integration",
+                "prompt optimization"
+            ],
+            "parallel_capable": false
+        },
+        "lead-generator": {
+            "description": "Lead Generator Bot \u2014 finds local business and real estate leads via web search, generates personalised cold emails using AI, manages a JSON CRM, and schedules follow-ups automatically",
+            "category": "sales",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "lead_generation",
+                "cold_email_writing",
+                "crm_management",
+                "follow_up_automation",
+                "web_scraping"
+            ],
+            "commands": [
+                "leads",
+                "outreach",
+                "leads status",
+                "leads pipeline",
+                "leads followup",
+                "leads export"
+            ],
+            "specialties": [
+                "local business lead generation",
+                "real estate leads",
+                "AI cold email personalisation",
+                "CRM pipeline management"
+            ],
+            "parallel_capable": false
+        },
+        "scheduler-runner": {
+            "description": "Scheduler Runner \u2014 reads a schedules config and triggers tasks (bot start/stop, chat commands, status reports) at defined intervals or daily/weekly times; supports graceful shutdown",
+            "category": "coordination",
+            "skills": [
+                "task_scheduling",
+                "cron_management",
+                "bot_lifecycle",
+                "chat_task_dispatch"
+            ],
+            "commands": [
+                "schedule",
+                "scheduler status"
+            ],
+            "specialties": [
+                "interval and cron scheduling",
+                "bot start/stop automation",
+                "scheduled chat task dispatch"
+            ],
+            "parallel_capable": false
+        },
+        "status-reporter": {
+            "description": "Status Reporter \u2014 generates compact hourly system-health summaries and delivers them via WhatsApp and Discord; aggregates bot states, trading activity, and pending improvement proposals",
+            "category": "coordination",
+            "skills": [
+                "system_health_reporting",
+                "whatsapp_notifications",
+                "discord_notifications",
+                "state_aggregation"
+            ],
+            "commands": [
+                "status",
+                "report"
+            ],
+            "specialties": [
+                "system health summarisation",
+                "WhatsApp status delivery",
+                "Discord notifications",
+                "multi-bot state aggregation"
             ],
             "parallel_capable": false
         }
