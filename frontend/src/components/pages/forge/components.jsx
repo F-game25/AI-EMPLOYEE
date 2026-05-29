@@ -8,5 +8,5 @@ export {
   RunTimeline, RunHistoryPane, PendingApprovalsPanel, RunMetricsPane, ReplayTimeline,
   BacklogPane, DecomposerPane, SkillsLibraryPane, ModelRouterPane,
   CyclesPane, RoadmapPane, SuggestionsPane,
-  MemoryV3Pane, SafetyPane,
+  MemoryV3Pane, SafetyPane, LearningPane,
 } from './panels'

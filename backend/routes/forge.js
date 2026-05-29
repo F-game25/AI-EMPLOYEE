@@ -20,6 +20,7 @@ const { spawn, spawnSync } = require('child_process')
 const { getAscendForgeEngine, DEFAULT_APPROVAL_POLICY } = require('../ascendforge/engine')
 const { getSandboxExecutor } = require('../infra/sandbox/executor')
 const { ForgeStore } = require('../services/forge_store')
+const forgeLearning = require('../services/forge_learning')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 const STATE_DIR = path.resolve(process.env.STATE_DIR || process.env.AI_EMPLOYEE_STATE_DIR || path.join(os.homedir(), '.ai-employee', 'state'))
@@ -3100,6 +3101,20 @@ Respond with ONLY valid JSON (no markdown fences):
     const finalRun = updateRun(runId, { status: success ? 'verified' : 'verify_failed', final_report: finalReport })
     appendAudit('forge_agentic_done', { run_id: runId, project_id: project.id, success, iterations: transcript.length, workspace_removed: workspaceCleaned })
     try { recordTaskMemory(runId, goal, transcript, success, repoIdx?.stack) } catch { /* best-effort */ }
+
+    // Phase 7: distill run trajectory into learning record (best-effort, never blocks result)
+    setImmediate(() => {
+      try {
+        const completedRun = findRun(runId)
+        if (completedRun) {
+          const distRec = forgeLearning.buildDistillationRecord(completedRun, project)
+          forgeRunStore.upsertDistillationRecord(distRec)
+          _persistDistillationArtifacts(distRec, project)
+          appendAudit('forge_distillation_created', { run_id: runId, confidence: distRec.confidence, lessons: distRec.lessons?.length || 0, is_positive: distRec.scores?.is_positive })
+        }
+      } catch { /* learning failures must never affect run result */ }
+    })
+
     return { ok: true, success, run_id: runId, run: finalRun, iterations: transcript.length, transcript, rolled_back: workspaceCleaned, summary: finalRun?.final_report?.summary || (success ? 'Run completed.' : 'Run failed.') }
   }
 
@@ -3829,6 +3844,233 @@ Return JSON:
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     res.json({ ok: true, facts: forgeRunStore.getMemoryFacts(project.id, req.query.category || undefined) })
   })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 7 — ON-POLICY SELF-DISTILLATION LEARNING
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // GET /api/forge/projects/:id/learning — summary card
+  router.get('/projects/:id/learning', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const summary = forgeLearning.getLearningSummary(project.id, forgeRunStore)
+    const recent = forgeRunStore.getDistillationRecords(project.id, 5)
+    res.json({ ok: true, summary, recent_records: recent })
+  })
+
+  // GET /api/forge/runs/:id/distillation — get distillation record for a run
+  router.get('/runs/:id/distillation', requireAuth, (req, res) => {
+    const rec = forgeRunStore.findDistillationByRun(req.params.id)
+    if (!rec) return res.status(404).json({ ok: false, error: 'no distillation record for this run' })
+    // Verify project ownership
+    const project = findProject(rec.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, distillation: rec })
+  })
+
+  // POST /api/forge/runs/:id/distill — manually trigger distillation
+  router.post('/runs/:id/distill', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const project = findProject(run.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    try {
+      const rec = forgeLearning.buildDistillationRecord(run, project)
+      forgeRunStore.upsertDistillationRecord(rec)
+      // Persist individual lessons and other artifacts
+      _persistDistillationArtifacts(rec, project)
+      res.json({ ok: true, distillation: rec })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  // GET /api/forge/projects/:id/learning/lessons
+  router.get('/projects/:id/learning/lessons', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const opts = { category: req.query.category || undefined, limit: Math.min(200, parseInt(req.query.limit) || 100) }
+    if (req.query.promoted === 'true') opts.promoted = true
+    if (req.query.promoted === 'false') opts.promoted = false
+    res.json({ ok: true, lessons: forgeRunStore.getLessons(project.id, opts) })
+  })
+
+  // POST /api/forge/learning/lessons/:lessonId/promote-memory
+  router.post('/learning/lessons/:lessonId/promote-memory', requireAuth, (req, res) => {
+    const lessons = forgeRunStore.getLessons(req.params.lessonId, { limit: 1 })
+    // lesson_id lookup — getLessons filters by project, use raw query via store
+    const lesson = _findLessonById(req.params.lessonId)
+    if (!lesson) return res.status(404).json({ ok: false, error: 'lesson not found' })
+    const project = findProject(lesson.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const result = forgeLearning.promoteLesson(lesson, forgeRunStore)
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error })
+    res.json({ ok: true, promoted: true })
+  })
+
+  // GET /api/forge/projects/:id/preference-pairs
+  router.get('/projects/:id/preference-pairs', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const limit = Math.min(200, parseInt(req.query.limit) || 100)
+    res.json({ ok: true, pairs: forgeRunStore.getPreferencePairs(project.id, limit) })
+  })
+
+  // PATCH /api/forge/preference-pairs/:pairId — approve/reject for training
+  router.patch('/preference-pairs/:pairId', requireAuth, (req, res) => {
+    const { approved_for_training } = req.body || {}
+    if (approved_for_training === undefined) return res.status(400).json({ ok: false, error: 'approved_for_training required' })
+    const updated = forgeRunStore.updatePreferencePair(req.params.pairId, { approved_for_training: !!approved_for_training })
+    if (!updated) return res.status(404).json({ ok: false, error: 'pair not found' })
+    res.json({ ok: true, pair: updated })
+  })
+
+  // GET /api/forge/projects/:id/evaluation-cases
+  router.get('/projects/:id/evaluation-cases', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const opts = { eval_type: req.query.eval_type || undefined, limit: Math.min(200, parseInt(req.query.limit) || 100) }
+    res.json({ ok: true, cases: forgeRunStore.getEvalCases(project.id, opts) })
+  })
+
+  // GET /api/forge/projects/:id/skill-proposals
+  router.get('/projects/:id/skill-proposals', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const opts = { status: req.query.status || undefined, limit: Math.min(200, parseInt(req.query.limit) || 100) }
+    res.json({ ok: true, proposals: forgeRunStore.getSkillProposals(project.id, opts) })
+  })
+
+  // POST /api/forge/skill-proposals/:id/approve
+  router.post('/skill-proposals/:id/approve', requireAuth, (req, res) => {
+    const updated = forgeRunStore.updateSkillProposal(req.params.id, { status: 'APPROVED' })
+    if (!updated) return res.status(404).json({ ok: false, error: 'proposal not found' })
+    appendAudit('skill_proposal_approved', { proposal_id: req.params.id })
+    res.json({ ok: true, proposal: updated })
+  })
+
+  // POST /api/forge/skill-proposals/:id/reject
+  router.post('/skill-proposals/:id/reject', requireAuth, (req, res) => {
+    const updated = forgeRunStore.updateSkillProposal(req.params.id, { status: 'REJECTED' })
+    if (!updated) return res.status(404).json({ ok: false, error: 'proposal not found' })
+    appendAudit('skill_proposal_rejected', { proposal_id: req.params.id })
+    res.json({ ok: true, proposal: updated })
+  })
+
+  // POST /api/forge/skill-proposals/:id/apply — apply APPROVED proposal to skill file
+  router.post('/skill-proposals/:id/apply', requireAuth, (req, res) => {
+    const row = forgeRunStore.getSkillProposals(req.params.id, {})
+    // Lookup by proposal_id — narrow helper below
+    const proposal = _findProposalById(req.params.id)
+    if (!proposal) return res.status(404).json({ ok: false, error: 'proposal not found' })
+    if (proposal.status !== 'APPROVED') return res.status(400).json({ ok: false, error: 'proposal must be APPROVED before applying' })
+    try {
+      const result = _applySkillProposal(proposal)
+      forgeRunStore.updateSkillProposal(req.params.id, { status: 'APPLIED', applied_at: nowIso() })
+      appendAudit('skill_proposal_applied', { proposal_id: req.params.id, skill_id: proposal.skill_id })
+      res.json({ ok: true, applied: true, result })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  // GET /api/forge/projects/:id/learning/datasets
+  router.get('/projects/:id/learning/datasets', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, datasets: forgeRunStore.getLearningDatasets(project.id) })
+  })
+
+  // POST /api/forge/projects/:id/learning/export
+  router.post('/projects/:id/learning/export', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const ALLOWED_TYPES = ['jsonl', 'preference_jsonl', 'eval_jsonl']
+    const datasetType = req.body?.dataset_type || 'jsonl'
+    if (!ALLOWED_TYPES.includes(datasetType)) return res.status(400).json({ ok: false, error: `dataset_type must be one of: ${ALLOWED_TYPES.join(', ')}` })
+    const minConf = ['low', 'medium', 'high'].includes(req.body?.min_confidence) ? req.body.min_confidence : 'low'
+    try {
+      const ds = await forgeLearning.exportLearningDataset(project.id, {
+        min_confidence: minConf,
+        include_positive: req.body?.include_positive !== false,
+        include_negative: req.body?.include_negative !== false,
+        only_human_approved: !!req.body?.only_human_approved,
+        dataset_type: datasetType,
+        name: req.body?.name || `export-${Date.now().toString(36)}`,
+      }, forgeRunStore, FORGE_HOME)
+      appendAudit('learning_dataset_exported', { project_id: project.id, dataset_id: ds.dataset_id, record_count: ds.record_count, type: datasetType })
+      res.json({ ok: true, dataset: { ...ds, export_path: '[FORGE_HOME]/learning/...' } })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  // ── Phase 7 internal helpers ────────────────────────────────────────────────
+
+  function _persistDistillationArtifacts(rec, project) {
+    try {
+      for (const lesson of (rec.lessons || [])) {
+        if (lesson.lesson_id) forgeRunStore.upsertLesson({ ...lesson, project_id: project.id })
+      }
+      for (const pair of (rec.preference_pairs || [])) {
+        if (pair.pair_id) forgeRunStore.upsertPreferencePair({ ...pair, project_id: project.id })
+      }
+      for (const proposal of (rec.skill_proposals || [])) {
+        if (proposal.proposal_id) forgeRunStore.upsertSkillProposal({ ...proposal, project_id: project.id })
+      }
+      for (const ec of (rec.eval_cases || [])) {
+        if (ec.eval_id) forgeRunStore.upsertEvalCase({ ...ec, project_id: project.id })
+      }
+    } catch { /* best-effort */ }
+  }
+
+  function _findLessonById(lessonId) {
+    if (!forgeRunStore._db) return null
+    try {
+      const r = forgeRunStore._db.prepare('SELECT * FROM forge_learning_lessons WHERE lesson_id = ?').get(lessonId)
+      if (!r) return null
+      return { ...r, evidence: (() => { try { return JSON.parse(r.evidence_json) } catch { return {} } })(), promoted_to_memory: !!r.promoted_to_memory }
+    } catch { return null }
+  }
+
+  function _findProposalById(proposalId) {
+    if (!forgeRunStore._db) return null
+    try {
+      const r = forgeRunStore._db.prepare('SELECT * FROM forge_skill_update_proposals WHERE proposal_id = ?').get(proposalId)
+      if (!r) return null
+      return { ...r, proposed_change: (() => { try { return JSON.parse(r.proposed_change_json) } catch { return {} } })(), evidence: (() => { try { return JSON.parse(r.evidence_json) } catch { return {} } })() }
+    } catch { return null }
+  }
+
+  function _applySkillProposal(proposal) {
+    const change = proposal.proposed_change || {}
+    const skillId = proposal.skill_id || ''
+    // Skill files live in runtime/config/skills_library.json or runtime/skills/*.json
+    const skillsLibPath = path.join(REPO_ROOT, 'runtime', 'config', 'skills_library.json')
+    if (!fs.existsSync(skillsLibPath)) return { applied: false, reason: 'skills_library.json not found' }
+    const lib = JSON.parse(fs.readFileSync(skillsLibPath, 'utf8'))
+    const skills = Array.isArray(lib) ? lib : (lib.skills || [])
+    const idx = skills.findIndex(s => s.id === skillId || s.name === skillId)
+    if (idx === -1) return { applied: false, reason: `skill "${skillId}" not found in library` }
+    // Backup before mutation
+    const backupPath = skillsLibPath + `.bak-${Date.now()}`
+    fs.copyFileSync(skillsLibPath, backupPath)
+    // Apply safe additions only — append to checklist/rules/failure_modes
+    const skill = { ...skills[idx] }
+    if (change.checklist_addition && Array.isArray(skill.checklist)) {
+      if (!skill.checklist.includes(change.checklist_addition)) skill.checklist.push(change.checklist_addition)
+    }
+    if (change.rule_addition && Array.isArray(skill.rules)) {
+      if (!skill.rules.includes(change.rule_addition)) skill.rules.push(change.rule_addition)
+    }
+    if (change.failure_mode && Array.isArray(skill.failure_modes)) {
+      if (!skill.failure_modes.includes(change.failure_mode)) skill.failure_modes.push(change.failure_mode)
+    }
+    skills[idx] = skill
+    const toWrite = Array.isArray(lib) ? skills : { ...lib, skills }
+    fs.writeFileSync(skillsLibPath, JSON.stringify(toWrite, null, 2), { mode: 0o644 })
+    return { applied: true, skill_id: skillId, backup_path: backupPath }
+  }
 
   return router
 }

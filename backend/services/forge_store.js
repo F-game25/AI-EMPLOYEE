@@ -345,6 +345,102 @@ class ForgeStore {
         );
         CREATE INDEX IF NOT EXISTS idx_forge_child_runs_parent
           ON forge_child_runs(parent_run_id);
+
+        CREATE TABLE IF NOT EXISTS forge_distillation_records (
+          distill_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          goal TEXT,
+          stack_json TEXT DEFAULT '{}',
+          trajectory_summary_json TEXT DEFAULT '{}',
+          outcome_summary_json TEXT DEFAULT '{}',
+          scores_json TEXT DEFAULT '{}',
+          lessons_json TEXT DEFAULT '[]',
+          preference_pairs_json TEXT DEFAULT '[]',
+          skill_proposals_json TEXT DEFAULT '[]',
+          eval_cases_json TEXT DEFAULT '[]',
+          confidence TEXT DEFAULT 'low',
+          approved_for_training INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_distillation_project
+          ON forge_distillation_records(project_id, created_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_forge_distillation_run
+          ON forge_distillation_records(run_id);
+
+        CREATE TABLE IF NOT EXISTS forge_learning_lessons (
+          lesson_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          run_id TEXT,
+          category TEXT NOT NULL,
+          lesson TEXT NOT NULL,
+          evidence_json TEXT DEFAULT '{}',
+          confidence TEXT DEFAULT 'low',
+          promoted_to_memory INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_lessons_project
+          ON forge_learning_lessons(project_id, category, confidence);
+
+        CREATE TABLE IF NOT EXISTS forge_preference_pairs (
+          pair_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          run_id TEXT,
+          context_json TEXT DEFAULT '{}',
+          preferred_json TEXT DEFAULT '{}',
+          rejected_json TEXT DEFAULT '{}',
+          reason TEXT,
+          confidence TEXT DEFAULT 'low',
+          approved_for_training INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_preference_pairs_project
+          ON forge_preference_pairs(project_id, confidence);
+
+        CREATE TABLE IF NOT EXISTS forge_skill_update_proposals (
+          proposal_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          run_id TEXT,
+          skill_id TEXT NOT NULL,
+          proposed_change_json TEXT DEFAULT '{}',
+          reason TEXT,
+          evidence_json TEXT DEFAULT '{}',
+          confidence TEXT DEFAULT 'low',
+          status TEXT DEFAULT 'NEW',
+          created_at TEXT NOT NULL,
+          applied_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_skill_proposals_project
+          ON forge_skill_update_proposals(project_id, status);
+
+        CREATE TABLE IF NOT EXISTS forge_evaluation_cases (
+          eval_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          run_id TEXT,
+          eval_type TEXT NOT NULL,
+          input_json TEXT DEFAULT '{}',
+          expected_json TEXT DEFAULT '{}',
+          negative_case_json TEXT DEFAULT '{}',
+          source TEXT DEFAULT 'run',
+          confidence TEXT DEFAULT 'low',
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_eval_cases_project
+          ON forge_evaluation_cases(project_id, eval_type);
+
+        CREATE TABLE IF NOT EXISTS forge_learning_datasets (
+          dataset_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          name TEXT,
+          dataset_type TEXT DEFAULT 'jsonl',
+          filters_json TEXT DEFAULT '{}',
+          record_count INTEGER DEFAULT 0,
+          export_path TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_learning_datasets_project
+          ON forge_learning_datasets(project_id, created_at);
       `)
       this.backend = 'sqlite'
       this.lastError = null
@@ -924,6 +1020,308 @@ class ForgeStore {
       }
       return this.upsertChildRun({ ...existing, ...patch, child_id: id, updated_at: nowIso() })
     } catch (err) { this._degrade(err); return null }
+  }
+
+  // ── Phase 7 — Learning / Distillation ────────────────────────────────────
+
+  upsertDistillationRecord(rec) {
+    this._ensureDb()
+    if (!this._db) return rec
+    const now = nowIso()
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_distillation_records
+          (distill_id, project_id, run_id, goal, stack_json, trajectory_summary_json,
+           outcome_summary_json, scores_json, lessons_json, preference_pairs_json,
+           skill_proposals_json, eval_cases_json, confidence, approved_for_training,
+           created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        rec.distill_id, rec.project_id, rec.run_id, rec.goal || '',
+        JSON.stringify(rec.stack || {}), JSON.stringify(rec.trajectory_summary || {}),
+        JSON.stringify(rec.outcome_summary || {}), JSON.stringify(rec.scores || {}),
+        JSON.stringify(rec.lessons || []), JSON.stringify(rec.preference_pairs || []),
+        JSON.stringify(rec.skill_proposals || []), JSON.stringify(rec.eval_cases || []),
+        rec.confidence || 'low', rec.approved_for_training ? 1 : 0,
+        rec.created_at || now, now,
+      )
+    } catch (err) { this._degrade(err) }
+    return rec
+  }
+
+  findDistillationByRun(runId) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare('SELECT * FROM forge_distillation_records WHERE run_id = ?').get(runId)
+      if (!r) return null
+      return this._parseDistillRow(r)
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  getDistillationRecords(projectId, limit = 50) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      return this._db.prepare(
+        'SELECT * FROM forge_distillation_records WHERE project_id = ? ORDER BY created_at DESC LIMIT ?'
+      ).all(projectId, limit).map(r => this._parseDistillRow(r))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  _parseDistillRow(r) {
+    const p = k => { try { return JSON.parse(r[k]) } catch { return {} } }
+    const pa = k => { try { return JSON.parse(r[k]) } catch { return [] } }
+    return {
+      ...r,
+      stack: p('stack_json'), trajectory_summary: p('trajectory_summary_json'),
+      outcome_summary: p('outcome_summary_json'), scores: p('scores_json'),
+      lessons: pa('lessons_json'), preference_pairs: pa('preference_pairs_json'),
+      skill_proposals: pa('skill_proposals_json'), eval_cases: pa('eval_cases_json'),
+      approved_for_training: !!r.approved_for_training,
+    }
+  }
+
+  upsertLesson(lesson) {
+    this._ensureDb()
+    if (!this._db) return lesson
+    const now = nowIso()
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_learning_lessons
+          (lesson_id, project_id, run_id, category, lesson, evidence_json, confidence,
+           promoted_to_memory, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?)
+      `).run(
+        lesson.lesson_id, lesson.project_id, lesson.run_id || null,
+        lesson.category || 'planning', lesson.lesson,
+        JSON.stringify(lesson.evidence || {}),
+        lesson.confidence || 'low', lesson.promoted_to_memory ? 1 : 0,
+        lesson.created_at || now,
+      )
+    } catch (err) { this._degrade(err) }
+    return lesson
+  }
+
+  getLessons(projectId, opts = {}) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      let q = 'SELECT * FROM forge_learning_lessons WHERE project_id = ?'
+      const args = [projectId]
+      if (opts.category) { q += ' AND category = ?'; args.push(opts.category) }
+      if (opts.promoted === false) { q += ' AND promoted_to_memory = 0' }
+      if (opts.promoted === true) { q += ' AND promoted_to_memory = 1' }
+      q += ' ORDER BY created_at DESC LIMIT ?'
+      args.push(opts.limit || 100)
+      return this._db.prepare(q).all(...args).map(r => ({
+        ...r,
+        evidence: (() => { try { return JSON.parse(r.evidence_json) } catch { return {} } })(),
+        promoted_to_memory: !!r.promoted_to_memory,
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  markLessonPromoted(lessonId) {
+    this._ensureDb()
+    if (!this._db) return
+    try {
+      this._db.prepare('UPDATE forge_learning_lessons SET promoted_to_memory = 1 WHERE lesson_id = ?').run(lessonId)
+    } catch (err) { this._degrade(err) }
+  }
+
+  upsertPreferencePair(pair) {
+    this._ensureDb()
+    if (!this._db) return pair
+    const now = nowIso()
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_preference_pairs
+          (pair_id, project_id, run_id, context_json, preferred_json, rejected_json,
+           reason, confidence, approved_for_training, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        pair.pair_id, pair.project_id, pair.run_id || null,
+        JSON.stringify(pair.context || {}), JSON.stringify(pair.preferred || {}),
+        JSON.stringify(pair.rejected || {}), pair.reason || '',
+        pair.confidence || 'low', pair.approved_for_training ? 1 : 0,
+        pair.created_at || now,
+      )
+    } catch (err) { this._degrade(err) }
+    return pair
+  }
+
+  getPreferencePairs(projectId, limit = 100) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      return this._db.prepare(
+        'SELECT * FROM forge_preference_pairs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?'
+      ).all(projectId, limit).map(r => ({
+        ...r,
+        context: (() => { try { return JSON.parse(r.context_json) } catch { return {} } })(),
+        preferred: (() => { try { return JSON.parse(r.preferred_json) } catch { return {} } })(),
+        rejected: (() => { try { return JSON.parse(r.rejected_json) } catch { return {} } })(),
+        approved_for_training: !!r.approved_for_training,
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  updatePreferencePair(pairId, patch) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare('SELECT * FROM forge_preference_pairs WHERE pair_id = ?').get(pairId)
+      if (!r) return null
+      if (patch.approved_for_training !== undefined) {
+        this._db.prepare('UPDATE forge_preference_pairs SET approved_for_training = ? WHERE pair_id = ?')
+          .run(patch.approved_for_training ? 1 : 0, pairId)
+      }
+      return this._db.prepare('SELECT * FROM forge_preference_pairs WHERE pair_id = ?').get(pairId)
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  upsertSkillProposal(proposal) {
+    this._ensureDb()
+    if (!this._db) return proposal
+    const now = nowIso()
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_skill_update_proposals
+          (proposal_id, project_id, run_id, skill_id, proposed_change_json, reason,
+           evidence_json, confidence, status, created_at, applied_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        proposal.proposal_id, proposal.project_id, proposal.run_id || null,
+        proposal.skill_id, JSON.stringify(proposal.proposed_change || {}),
+        proposal.reason || '', JSON.stringify(proposal.evidence || {}),
+        proposal.confidence || 'low', proposal.status || 'NEW',
+        proposal.created_at || now, proposal.applied_at || null,
+      )
+    } catch (err) { this._degrade(err) }
+    return proposal
+  }
+
+  getSkillProposals(projectId, opts = {}) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      let q = 'SELECT * FROM forge_skill_update_proposals WHERE project_id = ?'
+      const args = [projectId]
+      if (opts.status) { q += ' AND status = ?'; args.push(opts.status) }
+      q += ' ORDER BY created_at DESC LIMIT ?'
+      args.push(opts.limit || 100)
+      return this._db.prepare(q).all(...args).map(r => ({
+        ...r,
+        proposed_change: (() => { try { return JSON.parse(r.proposed_change_json) } catch { return {} } })(),
+        evidence: (() => { try { return JSON.parse(r.evidence_json) } catch { return {} } })(),
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  updateSkillProposal(proposalId, patch) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare('SELECT * FROM forge_skill_update_proposals WHERE proposal_id = ?').get(proposalId)
+      if (!r) return null
+      const allowed = ['status', 'applied_at', 'reason']
+      const sets = []
+      const args = []
+      for (const k of allowed) {
+        if (patch[k] !== undefined) { sets.push(`${k} = ?`); args.push(patch[k]) }
+      }
+      if (!sets.length) return r
+      args.push(proposalId)
+      this._db.prepare(`UPDATE forge_skill_update_proposals SET ${sets.join(', ')} WHERE proposal_id = ?`).run(...args)
+      return this._db.prepare('SELECT * FROM forge_skill_update_proposals WHERE proposal_id = ?').get(proposalId)
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  upsertEvalCase(ec) {
+    this._ensureDb()
+    if (!this._db) return ec
+    const now = nowIso()
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_evaluation_cases
+          (eval_id, project_id, run_id, eval_type, input_json, expected_json,
+           negative_case_json, source, confidence, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        ec.eval_id, ec.project_id, ec.run_id || null, ec.eval_type || 'planner_eval',
+        JSON.stringify(ec.input || {}), JSON.stringify(ec.expected || {}),
+        JSON.stringify(ec.negative_case || {}), ec.source || 'run',
+        ec.confidence || 'low', ec.created_at || now,
+      )
+    } catch (err) { this._degrade(err) }
+    return ec
+  }
+
+  getEvalCases(projectId, opts = {}) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      let q = 'SELECT * FROM forge_evaluation_cases WHERE project_id = ?'
+      const args = [projectId]
+      if (opts.eval_type) { q += ' AND eval_type = ?'; args.push(opts.eval_type) }
+      q += ' ORDER BY created_at DESC LIMIT ?'
+      args.push(opts.limit || 100)
+      return this._db.prepare(q).all(...args).map(r => ({
+        ...r,
+        input: (() => { try { return JSON.parse(r.input_json) } catch { return {} } })(),
+        expected: (() => { try { return JSON.parse(r.expected_json) } catch { return {} } })(),
+        negative_case: (() => { try { return JSON.parse(r.negative_case_json) } catch { return {} } })(),
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  upsertLearningDataset(ds) {
+    this._ensureDb()
+    if (!this._db) return ds
+    const now = nowIso()
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_learning_datasets
+          (dataset_id, project_id, name, dataset_type, filters_json, record_count, export_path, created_at)
+        VALUES (?,?,?,?,?,?,?,?)
+      `).run(
+        ds.dataset_id, ds.project_id, ds.name || 'export',
+        ds.dataset_type || 'jsonl', JSON.stringify(ds.filters || {}),
+        ds.record_count || 0, ds.export_path || null, ds.created_at || now,
+      )
+    } catch (err) { this._degrade(err) }
+    return ds
+  }
+
+  getLearningDatasets(projectId) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      return this._db.prepare(
+        'SELECT * FROM forge_learning_datasets WHERE project_id = ? ORDER BY created_at DESC LIMIT 50'
+      ).all(projectId).map(r => ({
+        ...r,
+        filters: (() => { try { return JSON.parse(r.filters_json) } catch { return {} } })(),
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  getLearningSummary(projectId) {
+    this._ensureDb()
+    if (!this._db) return { records: 0, lessons: 0, preference_pairs: 0, eval_cases: 0, skill_proposals: 0, datasets: 0, pending_proposals: 0 }
+    try {
+      const count = (q, ...args) => this._db.prepare(q).get(...args)?.cnt || 0
+      return {
+        records: count('SELECT COUNT(*) as cnt FROM forge_distillation_records WHERE project_id = ?', projectId),
+        lessons: count('SELECT COUNT(*) as cnt FROM forge_learning_lessons WHERE project_id = ?', projectId),
+        preference_pairs: count('SELECT COUNT(*) as cnt FROM forge_preference_pairs WHERE project_id = ?', projectId),
+        eval_cases: count('SELECT COUNT(*) as cnt FROM forge_evaluation_cases WHERE project_id = ?', projectId),
+        skill_proposals: count('SELECT COUNT(*) as cnt FROM forge_skill_update_proposals WHERE project_id = ?', projectId),
+        pending_proposals: count("SELECT COUNT(*) as cnt FROM forge_skill_update_proposals WHERE project_id = ? AND status = 'NEW'", projectId),
+        datasets: count('SELECT COUNT(*) as cnt FROM forge_learning_datasets WHERE project_id = ?', projectId),
+      }
+    } catch (err) { this._degrade(err); return { records: 0, lessons: 0, preference_pairs: 0, eval_cases: 0, skill_proposals: 0, datasets: 0, pending_proposals: 0 } }
   }
 
   _degrade(err) {

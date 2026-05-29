@@ -191,6 +191,22 @@ const api = {
     // ── Phase 5 — Memory ─────────────────────────────────────────────
     getMemory:           (pid, cat)  => api.get(`/api/forge/projects/${pid}/memory${cat ? `?category=${cat}` : ''}`),
 
+    // ── Phase 7 — Learning / Distillation ───────────────────────────
+    getLearning:         (pid)       => api.get(`/api/forge/projects/${pid}/learning`),
+    getLessons:          (pid, opts) => api.get(`/api/forge/projects/${pid}/learning/lessons${opts?.category ? `?category=${opts.category}` : ''}`),
+    promoteLesson:       (lid)       => api.post(`/api/forge/learning/lessons/${lid}/promote-memory`, {}),
+    getPreferencePairs:  (pid)       => api.get(`/api/forge/projects/${pid}/preference-pairs`),
+    updatePreferencePair:(id, body)  => api.patch(`/api/forge/preference-pairs/${id}`, body),
+    getEvalCases:        (pid, opts) => api.get(`/api/forge/projects/${pid}/evaluation-cases${opts?.eval_type ? `?eval_type=${opts.eval_type}` : ''}`),
+    getSkillProposals:   (pid, opts) => api.get(`/api/forge/projects/${pid}/skill-proposals${opts?.status ? `?status=${opts.status}` : ''}`),
+    approveProposal:     (id)        => api.post(`/api/forge/skill-proposals/${id}/approve`, {}),
+    rejectProposal:      (id)        => api.post(`/api/forge/skill-proposals/${id}/reject`, {}),
+    applyProposal:       (id)        => api.post(`/api/forge/skill-proposals/${id}/apply`, {}),
+    getDatasets:         (pid)       => api.get(`/api/forge/projects/${pid}/learning/datasets`),
+    exportDataset:       (pid, body) => api.post(`/api/forge/projects/${pid}/learning/export`, body),
+    getRunDistillation:  (rid)       => api.get(`/api/forge/runs/${rid}/distillation`),
+    distillRun:          (rid)       => api.post(`/api/forge/runs/${rid}/distill`, {}),
+
     // ── Phase 5 — Metrics / Replay / Patches / Approvals ────────────
     getForgeMetrics:     (pid)       => api.get(`/api/forge/projects/${pid}/forge-metrics`),
     getRunReplay:        (rid)       => api.get(`/api/forge/runs/${rid}/replay`),
