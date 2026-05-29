@@ -1724,6 +1724,12 @@ app = FastAPI(
     ],
 )
 
+
+@app.exception_handler(Exception)
+async def _generic_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled API error on %s", request.url.path)
+    return JSONResponse({"detail": "Internal server error"}, status_code=500)
+
 # ── Multi-tenancy initialization ──────────────────────────────────────────────
 from core.tenancy import init_tenant_manager
 from core.tenant_middleware import TenantMiddleware
