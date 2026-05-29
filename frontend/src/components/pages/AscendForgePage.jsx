@@ -79,15 +79,15 @@ export default function AscendForgePage() {
       .catch(e => toastError(`Session error: ${e.message}`))
   }, [projectId, provider, selectedSkillIds])
 
-  // ── Phase 5 summary loader ─────────────────────────────────────────
-  useEffect(() => {
-    if (!projectId) return
+  // ── Phase 5 summary loader (callable from anywhere) ───────────────
+  const refreshForgeSummary = useCallback((pid = projectId) => {
+    if (!pid) return
     const H = TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {}
     Promise.all([
-      fetch(`/api/forge/projects/${projectId}/backlog`, { headers: H }).then(r => r.json()).catch(() => ({ backlog: [] })),
-      fetch(`/api/forge/projects/${projectId}/suggestions`, { headers: H }).then(r => r.json()).catch(() => ({ suggestions: [] })),
-      fetch(`/api/forge/projects/${projectId}/autopilot/status`, { headers: H }).then(r => r.json()).catch(() => ({ status: { active: false } })),
-      fetch(`/api/forge/projects/${projectId}/forge-metrics`, { headers: H }).then(r => r.json()).catch(() => null),
+      fetch(`/api/forge/projects/${pid}/backlog`, { headers: H }).then(r => r.json()).catch(() => ({ backlog: [] })),
+      fetch(`/api/forge/projects/${pid}/suggestions`, { headers: H }).then(r => r.json()).catch(() => ({ suggestions: [] })),
+      fetch(`/api/forge/projects/${pid}/autopilot/status`, { headers: H }).then(r => r.json()).catch(() => ({ status: { active: false } })),
+      fetch(`/api/forge/projects/${pid}/forge-metrics`, { headers: H }).then(r => r.json()).catch(() => null),
     ]).then(([bl, sg, ap, mt]) => {
       setBacklogCount((bl.backlog || []).filter(i => i.status !== 'DONE' && i.status !== 'CANCELLED').length)
       setSuggestions((sg.suggestions || []).filter(s => s.status === 'new'))
@@ -95,6 +95,8 @@ export default function AscendForgePage() {
       setMetrics(mt || null)
     })
   }, [projectId])
+
+  useEffect(() => { refreshForgeSummary(projectId) }, [projectId])
 
   // ── Keyboard navigation (1-8 for views) ───────────────────────────
   useEffect(() => {
@@ -382,6 +384,7 @@ export default function AscendForgePage() {
               onApprove={approveAction}
               onReject={rejectAction}
               onContinue={() => setActiveForgeSection(null)}
+              onRefreshSummary={refreshForgeSummary}
             />
           ) : (
             <>

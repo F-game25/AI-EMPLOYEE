@@ -116,15 +116,15 @@ export function ForgeSystemsNav({ activeSection, onSection, suggestionCount, bac
 }
 
 // ── ForgeSectionView — full-workspace panel router ────────────────────────────
-export function ForgeSectionView({ section, project, activeRun, onApprove, onReject, onContinue }) {
+export function ForgeSectionView({ section, project, activeRun, onApprove, onReject, onContinue, onRefreshSummary }) {
   const map = {
-    backlog:     <BacklogPane project={project} />,
+    backlog:     <BacklogPane project={project} onRefreshSummary={onRefreshSummary} />,
     roadmap:     <RoadmapPane project={project} />,
     cycles:      <CyclesPane project={project} />,
-    decompose:   <DecomposerPane project={project} />,
+    decompose:   <DecomposerPane project={project} onRefreshSummary={onRefreshSummary} />,
     skills:      <SkillsLibraryPane project={project} />,
     models:      <ModelRouterPane project={project} />,
-    suggestions: <SuggestionsPane project={project} />,
+    suggestions: <SuggestionsPane project={project} onRefreshSummary={onRefreshSummary} />,
     memory:      <MemoryV3Pane project={project} />,
     metrics:     <RunMetricsPane project={project} />,
     history:     <RunHistoryPane project={project} />,

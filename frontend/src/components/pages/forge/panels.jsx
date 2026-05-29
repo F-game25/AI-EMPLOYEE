@@ -1348,10 +1348,13 @@ export function RunMetricsPane({ project }) {
 // PHASE 5 PANELS
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Shared token helper — reads the same key as api/client.js (ai_jwt)
+const tok = () => localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || ''
+
 const STATUS_COLORS = { IDEA:'#6b7280', READY:'#3b82f6', PLANNING:'#8b5cf6', IN_PROGRESS:'#f59e0b', WAITING_APPROVAL:'#ef4444', BLOCKED:'#dc2626', DONE:'#10b981', FAILED:'#ef4444', CANCELLED:'#6b7280' }
 const CATEGORY_ICONS = { BUG:'🐛', FEATURE:'✨', REFACTOR:'♻️', SECURITY:'🔒', UI:'🎨', PERFORMANCE:'⚡', TESTING:'🧪', DOCS:'📄', ARCHITECTURE:'🏗️', AUTOMATION:'🤖' }
 
-export function BacklogPane({ project }) {
+export function BacklogPane({ project, onRefreshSummary }) {
   const [backlog, setBacklog] = useState([])
   const [autopilot, setAutopilot] = useState({ active: false })
   const [loading, setLoading] = useState(true)
@@ -1364,8 +1367,8 @@ export function BacklogPane({ project }) {
     if (!project?.id) return
     setLoading(true); setError(null)
     Promise.all([
-      fetch(`/api/forge/projects/${project.id}/backlog`, { headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } }).then(r => r.json()),
-      fetch(`/api/forge/projects/${project.id}/autopilot/status`, { headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } }).then(r => r.json()).catch(() => ({ status: { active: false } })),
+      fetch(`/api/forge/projects/${project.id}/backlog`, { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()),
+      fetch(`/api/forge/projects/${project.id}/autopilot/status`, { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()).catch(() => ({ status: { active: false } })),
     ]).then(([bl, ap]) => {
       if (bl.ok) setBacklog(bl.backlog || [])
       else setError(bl.error || 'Failed to load backlog')
@@ -1378,29 +1381,29 @@ export function BacklogPane({ project }) {
   const addItem = async () => {
     if (!newItem.title.trim()) return
     setBusy(b => ({ ...b, add: true }))
-    const r = await fetch(`/api/forge/projects/${project.id}/backlog`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('forge_token')}` }, body: JSON.stringify(newItem) }).then(r => r.json())
+    const r = await fetch(`/api/forge/projects/${project.id}/backlog`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify(newItem) }).then(r => r.json())
     setBusy(b => ({ ...b, add: false }))
-    if (r.ok) { setShowAdd(false); setNewItem({ title:'', description:'', priority:50, category:'FEATURE', status:'IDEA', risk_level:'low' }); refresh() }
+    if (r.ok) { setShowAdd(false); setNewItem({ title:'', description:'', priority:50, category:'FEATURE', status:'IDEA', risk_level:'low' }); refresh(); onRefreshSummary?.() }
     else setError(r.error)
   }
 
   const updateItem = async (id, patch) => {
     setBusy(b => ({ ...b, [id]: true }))
-    await fetch(`/api/forge/backlog/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('forge_token')}` }, body: JSON.stringify(patch) }).then(r => r.json())
-    setBusy(b => ({ ...b, [id]: false })); refresh()
+    await fetch(`/api/forge/backlog/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify(patch) }).then(r => r.json())
+    setBusy(b => ({ ...b, [id]: false })); refresh(); onRefreshSummary?.()
   }
 
   const deleteItem = async (id) => {
     if (!confirm('Delete this backlog item?')) return
     setBusy(b => ({ ...b, [id]: true }))
-    await fetch(`/api/forge/backlog/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } })
-    setBusy(b => ({ ...b, [id]: false })); refresh()
+    await fetch(`/api/forge/backlog/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tok()}` } })
+    setBusy(b => ({ ...b, [id]: false })); refresh(); onRefreshSummary?.()
   }
 
   const toggleAutopilot = async () => {
     const url = `/api/forge/projects/${project.id}/autopilot/${autopilot.active ? 'stop' : 'start'}`
-    await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } }).then(r => r.json())
-    refresh()
+    await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json())
+    refresh(); onRefreshSummary?.()
   }
 
   if (!project) return <div className="af-backlog__empty"><EmptyState title="No project selected" body="Select a project to manage its backlog." /></div>
@@ -1470,7 +1473,7 @@ export function BacklogPane({ project }) {
   )
 }
 
-export function DecomposerPane({ project }) {
+export function DecomposerPane({ project, onRefreshSummary }) {
   const [goal, setGoal] = useState('')
   const [addToBacklog, setAddToBacklog] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -1480,9 +1483,9 @@ export function DecomposerPane({ project }) {
   const decompose = async () => {
     if (!goal.trim() || !project?.id) return
     setLoading(true); setError(null); setResult(null)
-    const r = await fetch(`/api/forge/projects/${project.id}/decompose`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('forge_token')}` }, body: JSON.stringify({ goal, add_to_backlog: addToBacklog }) }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }))
+    const r = await fetch(`/api/forge/projects/${project.id}/decompose`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify({ goal, add_to_backlog: addToBacklog }) }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }))
     setLoading(false)
-    if (r.ok) setResult(r)
+    if (r.ok) { setResult(r); if (r.added_to_backlog > 0) onRefreshSummary?.() }
     else setError(r.error || 'Decomposition failed')
   }
 
@@ -1535,13 +1538,13 @@ export function SkillsLibraryPane({ project }) {
 
   const refresh = () => {
     setLoading(true); setError(null)
-    fetch('/api/forge/skills', { headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } })
+    fetch('/api/forge/skills', { headers: { Authorization: `Bearer ${tok()}` } })
       .then(r => r.json()).then(d => { if (d.ok) setSkills(d.skills || []); else setError(d.error) }).catch(e => setError(e.message)).finally(() => setLoading(false))
   }
   useEffect(() => { refresh() }, [])
 
   const reload = async () => {
-    await fetch('/api/forge/skills/reload', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } }).then(r => r.json())
+    await fetch('/api/forge/skills/reload', { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json())
     refresh()
   }
 
@@ -1614,8 +1617,8 @@ export function ModelRouterPane({ project }) {
   const refresh = () => {
     setLoading(true); setError(null)
     Promise.all([
-      fetch('/api/forge/models', { headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } }).then(r => r.json()),
-      project?.id ? fetch(`/api/forge/projects/${project.id}/model-routing-stats`, { headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } }).then(r => r.json()).catch(() => ({ ok: true, stats: [] })) : Promise.resolve({ stats: [] }),
+      fetch('/api/forge/models', { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()),
+      project?.id ? fetch(`/api/forge/projects/${project.id}/model-routing-stats`, { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()).catch(() => ({ ok: true, stats: [] })) : Promise.resolve({ stats: [] }),
     ]).then(([md, st]) => {
       if (md.ok) setModels(md.models || []); else setError(md.error)
       setStats(st.stats || [])
@@ -1626,7 +1629,7 @@ export function ModelRouterPane({ project }) {
   const addModel = async () => {
     if (!newModel.model_id || !newModel.provider) return
     setBusy(b => ({ ...b, add: true }))
-    const r = await fetch('/api/forge/models', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('forge_token')}` }, body: JSON.stringify(newModel) }).then(r => r.json())
+    const r = await fetch('/api/forge/models', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify(newModel) }).then(r => r.json())
     setBusy(b => ({ ...b, add: false }))
     if (r.ok) { setShowAdd(false); setNewModel({ model_id:'', provider:'anthropic', role:'any', cost_tier:'medium', speed_tier:'medium' }); refresh() }
     else setError(r.error)
@@ -1634,7 +1637,7 @@ export function ModelRouterPane({ project }) {
 
   const toggleModel = async (m) => {
     setBusy(b => ({ ...b, [m.model_id]: true }))
-    await fetch(`/api/forge/models/${m.model_id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('forge_token')}` }, body: JSON.stringify({ enabled: !m.enabled }) }).then(r => r.json())
+    await fetch(`/api/forge/models/${m.model_id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify({ enabled: !m.enabled }) }).then(r => r.json())
     setBusy(b => ({ ...b, [m.model_id]: false })); refresh()
   }
 
@@ -1718,7 +1721,7 @@ export function CyclesPane({ project }) {
   const refresh = () => {
     if (!project?.id) return
     setLoading(true); setError(null)
-    fetch(`/api/forge/projects/${project.id}/cycles`, { headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } })
+    fetch(`/api/forge/projects/${project.id}/cycles`, { headers: { Authorization: `Bearer ${tok()}` } })
       .then(r => r.json()).then(d => { if (d.ok) setCycles(d.cycles || []); else setError(d.error) }).catch(e => setError(e.message)).finally(() => setLoading(false))
   }
   useEffect(() => { refresh() }, [project?.id])
@@ -1726,14 +1729,14 @@ export function CyclesPane({ project }) {
   const createCycle = async () => {
     if (!newCycle.goal.trim()) return
     setBusy(b => ({ ...b, create: true }))
-    const r = await fetch(`/api/forge/projects/${project.id}/cycles`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('forge_token')}` }, body: JSON.stringify(newCycle) }).then(r => r.json())
+    const r = await fetch(`/api/forge/projects/${project.id}/cycles`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify(newCycle) }).then(r => r.json())
     setBusy(b => ({ ...b, create: false }))
     if (r.ok) { setShowCreate(false); setNewCycle({ goal:'', autonomy_level:2, max_runs:10 }); refresh() } else setError(r.error)
   }
 
   const cycleAction = async (cycleId, action) => {
     setBusy(b => ({ ...b, [cycleId]: true }))
-    await fetch(`/api/forge/cycles/${cycleId}/${action}`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } }).then(r => r.json())
+    await fetch(`/api/forge/cycles/${cycleId}/${action}`, { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json())
     setBusy(b => ({ ...b, [cycleId]: false })); refresh()
   }
 
@@ -1801,14 +1804,14 @@ export function RoadmapPane({ project }) {
   const refresh = () => {
     if (!project?.id) return
     setLoading(true); setError(null)
-    fetch(`/api/forge/projects/${project.id}/roadmap`, { headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } })
+    fetch(`/api/forge/projects/${project.id}/roadmap`, { headers: { Authorization: `Bearer ${tok()}` } })
       .then(r => r.json()).then(d => { if (d.ok) setRoadmap(d.roadmap); else setError(d.error) }).catch(e => setError(e.message)).finally(() => setLoading(false))
   }
   useEffect(() => { refresh() }, [project?.id])
 
   const generate = async () => {
     setGenerating(true); setError(null)
-    const r = await fetch(`/api/forge/projects/${project.id}/roadmap/generate`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }))
+    const r = await fetch(`/api/forge/projects/${project.id}/roadmap/generate`, { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }))
     setGenerating(false)
     if (r.ok) setRoadmap(r.roadmap)
     else setError(r.error || 'Generation failed')
@@ -1866,7 +1869,7 @@ export function RoadmapPane({ project }) {
   )
 }
 
-export function SuggestionsPane({ project }) {
+export function SuggestionsPane({ project, onRefreshSummary }) {
   const [suggestions, setSuggestions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -1875,15 +1878,15 @@ export function SuggestionsPane({ project }) {
   const refresh = () => {
     if (!project?.id) return
     setLoading(true); setError(null)
-    fetch(`/api/forge/projects/${project.id}/suggestions`, { headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } })
+    fetch(`/api/forge/projects/${project.id}/suggestions`, { headers: { Authorization: `Bearer ${tok()}` } })
       .then(r => r.json()).then(d => { if (d.ok) setSuggestions(d.suggestions || []); else setError(d.error) }).catch(e => setError(e.message)).finally(() => setLoading(false))
   }
   useEffect(() => { refresh() }, [project?.id])
 
   const action = async (id, endpoint) => {
     setBusy(b => ({ ...b, [id]: true }))
-    await fetch(`/api/forge/suggestions/${id}/${endpoint}`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('forge_token')}` } }).then(r => r.json())
-    setBusy(b => ({ ...b, [id]: false })); refresh()
+    await fetch(`/api/forge/suggestions/${id}/${endpoint}`, { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json())
+    setBusy(b => ({ ...b, [id]: false })); refresh(); onRefreshSummary?.()
   }
 
   if (!project) return <EmptyState title="No project selected" body="Select a project to view improvement suggestions." />
@@ -1942,7 +1945,7 @@ export function MemoryV3Pane({ project }) {
   const load = useCallback(() => {
     if (!project?.id) return
     setLoading(true); setError(null)
-    const token = localStorage.getItem('forge_token') || localStorage.getItem('ai_jwt') || ''
+    const token = tok()
     const url = `/api/forge/projects/${project.id}/memory${category ? `?category=${encodeURIComponent(category)}` : ''}`
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
@@ -2006,21 +2009,13 @@ export function MemoryV3Pane({ project }) {
 export function SafetyPane({ project, activeRun, onApprove, onReject, onContinue }) {
   const [patches, setPatches] = useState([])
   const [loading, setLoading] = useState(false)
-  const [autonomyLevel, setAutonomyLevel] = useState(null)
-
-  useEffect(() => {
-    if (!project?.id) return
-    const H = { Authorization: `Bearer ${localStorage.getItem('forge_token') || localStorage.getItem('ai_jwt') || ''}` }
-    fetch(`/api/forge/projects/${project.id}`, { headers: H })
-      .then(r => r.json())
-      .then(d => setAutonomyLevel(d.project?.autonomy_level ?? null))
-      .catch(() => {})
-  }, [project?.id])
+  // Derive autonomy_level from project prop — no extra fetch needed
+  const autonomyLevel = project?.autonomy_level ?? null
 
   useEffect(() => {
     if (!activeRun?.id) { setPatches([]); return }
     setLoading(true)
-    const H = { Authorization: `Bearer ${localStorage.getItem('forge_token') || localStorage.getItem('ai_jwt') || ''}` }
+    const H = { Authorization: `Bearer ${tok()}` }
     fetch(`/api/forge/runs/${activeRun.id}/patches`, { headers: H })
       .then(r => r.json())
       .then(d => setPatches(d.patches || []))
