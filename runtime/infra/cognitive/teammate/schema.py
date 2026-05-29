@@ -31,10 +31,10 @@ class HabitPattern:
 @dataclass
 class ProactiveInsight:
     tenant_id: str
-    user_id: Optional[str]
     title: str
     body: str
     insight_type: str  # habit_reminder | blocked_initiative | anomaly
+    user_id: Optional[str] = None
     priority: int = 5
     dismissed: bool = False
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
