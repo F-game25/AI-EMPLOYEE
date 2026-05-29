@@ -3269,13 +3269,30 @@ Respond with ONLY valid JSON (no markdown fences):
   router.patch('/backlog/:backlogId', requireAuth, (req, res) => {
     const item = forgeRunStore.findBacklogItem(req.params.backlogId)
     if (!item) return res.status(404).json({ ok: false, error: 'backlog item not found' })
-    const updated = forgeRunStore.updateBacklogItem(req.params.backlogId, req.body || {})
+    // Whitelist mutable fields — prevent mass assignment of backlog_id/project_id
+    const { title, description, priority, category, status, risk_level,
+            estimated_complexity, dependencies, acceptance_criteria, linked_files } = req.body || {}
+    const patch = {}
+    if (title !== undefined) patch.title = String(title)
+    if (description !== undefined) patch.description = String(description)
+    if (priority !== undefined) patch.priority = typeof priority === 'number' ? Math.min(100, Math.max(0, priority)) : item.priority
+    if (category !== undefined) patch.category = BACKLOG_CATEGORIES.includes(category) ? category : item.category
+    if (status !== undefined) patch.status = BACKLOG_STATUSES.includes(status) ? status : item.status
+    if (risk_level !== undefined) patch.risk_level = ['low','medium','high'].includes(risk_level) ? risk_level : item.risk_level
+    if (estimated_complexity !== undefined) patch.estimated_complexity = estimated_complexity || null
+    if (dependencies !== undefined) patch.dependencies = Array.isArray(dependencies) ? dependencies : item.dependencies
+    if (acceptance_criteria !== undefined) patch.acceptance_criteria = acceptance_criteria || null
+    if (linked_files !== undefined) patch.linked_files = Array.isArray(linked_files) ? linked_files : item.linked_files
+    const updated = forgeRunStore.updateBacklogItem(req.params.backlogId, patch)
     res.json({ ok: true, item: updated })
   })
 
   router.delete('/backlog/:backlogId', requireAuth, (req, res) => {
     const item = forgeRunStore.findBacklogItem(req.params.backlogId)
     if (!item) return res.status(404).json({ ok: false, error: 'backlog item not found' })
+    // Verify caller has access to this item's project
+    const project = findProject(item.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     forgeRunStore.deleteBacklogItem(req.params.backlogId)
     res.json({ ok: true, deleted: req.params.backlogId })
   })
@@ -3527,7 +3544,21 @@ Output a JSON array:
   router.patch('/models/:modelId', requireAuth, (req, res) => {
     const existing = forgeRunStore.getModel(req.params.modelId)
     if (!existing) return res.status(404).json({ ok: false, error: 'model not found' })
-    const updated = forgeRunStore.updateModel(req.params.modelId, req.body || {})
+    // Whitelist mutable fields — prevent model_id takeover
+    const { provider, role, cost_tier, speed_tier, context_window,
+            supports_tools, supports_json, supports_code, local_or_remote, enabled } = req.body || {}
+    const patch = {}
+    if (provider !== undefined) patch.provider = String(provider)
+    if (role !== undefined) patch.role = String(role)
+    if (cost_tier !== undefined) patch.cost_tier = ['low','medium','high'].includes(cost_tier) ? cost_tier : existing.cost_tier
+    if (speed_tier !== undefined) patch.speed_tier = ['fast','medium','slow'].includes(speed_tier) ? speed_tier : existing.speed_tier
+    if (context_window !== undefined) patch.context_window = Number(context_window) || existing.context_window
+    if (supports_tools !== undefined) patch.supports_tools = Boolean(supports_tools)
+    if (supports_json !== undefined) patch.supports_json = Boolean(supports_json)
+    if (supports_code !== undefined) patch.supports_code = Boolean(supports_code)
+    if (local_or_remote !== undefined) patch.local_or_remote = ['local','remote'].includes(local_or_remote) ? local_or_remote : existing.local_or_remote
+    if (enabled !== undefined) patch.enabled = Boolean(enabled)
+    const updated = forgeRunStore.updateModel(req.params.modelId, patch)
     res.json({ ok: true, model: updated })
   })
 
@@ -3658,21 +3689,29 @@ Return JSON:
     res.json({ ok: true, suggestions: forgeRunStore.getSuggestions(project.id) })
   })
 
+  function findSuggestionWithProject(suggestionId, res) {
+    const s = forgeRunStore.findSuggestion(suggestionId)
+    if (!s) { res.status(404).json({ ok: false, error: 'suggestion not found' }); return null }
+    const project = findProject(s.project_id)
+    if (!project) { res.status(404).json({ ok: false, error: 'project not found' }); return null }
+    return s
+  }
+
   router.post('/suggestions/:suggestionId/accept', requireAuth, (req, res) => {
-    const s = forgeRunStore.findSuggestion(req.params.suggestionId)
-    if (!s) return res.status(404).json({ ok: false, error: 'suggestion not found' })
+    const s = findSuggestionWithProject(req.params.suggestionId, res)
+    if (!s) return
     res.json({ ok: true, suggestion: forgeRunStore.updateSuggestion(s.suggestion_id, { status: 'accepted' }) })
   })
 
   router.post('/suggestions/:suggestionId/reject', requireAuth, (req, res) => {
-    const s = forgeRunStore.findSuggestion(req.params.suggestionId)
-    if (!s) return res.status(404).json({ ok: false, error: 'suggestion not found' })
+    const s = findSuggestionWithProject(req.params.suggestionId, res)
+    if (!s) return
     res.json({ ok: true, suggestion: forgeRunStore.updateSuggestion(s.suggestion_id, { status: 'rejected' }) })
   })
 
   router.post('/suggestions/:suggestionId/create-backlog-item', requireAuth, (req, res) => {
-    const s = forgeRunStore.findSuggestion(req.params.suggestionId)
-    if (!s) return res.status(404).json({ ok: false, error: 'suggestion not found' })
+    const s = findSuggestionWithProject(req.params.suggestionId, res)
+    if (!s) return
     const item = forgeRunStore.upsertBacklogItem({
       backlog_id: crypto.randomUUID(), project_id: s.project_id, title: s.title,
       description: s.description || s.recommended_fix || '',

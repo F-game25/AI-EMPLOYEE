@@ -187,7 +187,7 @@ function PitchBox({ order, onStatusChange }) {
   )
 }
 
-function OrderCard({ order: initialOrder, onRefresh, onPreviewDemo }) {
+function OrderCard({ order: initialOrder, onRefresh, onPreviewDemo, onDelete }) {
   const [order, setOrder] = useState(initialOrder)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -251,6 +251,9 @@ function OrderCard({ order: initialOrder, onRefresh, onPreviewDemo }) {
           <span className="op-card__branche"> ({order.branche})</span>
         </div>
         <span className={`op-badge op-badge--${s}`}>{STATUS_LABELS[s] || s}</span>
+        <button className="op-card__delete" title="Verwijder order" onClick={() => {
+          if (confirm(`Verwijder "${order.bedrijfsnaam}"?`)) onDelete?.(order.id)
+        }}>✕</button>
       </div>
 
       <StatusPipe current={s} />
@@ -327,6 +330,18 @@ export default function OrdersPage() {
     setPreviewUrl(prev => prev === url ? null : url)
   }
 
+  async function handleDelete(id) {
+    try {
+      const res = await api.delete(`/api/orders/${id}`)
+      if (res.ok) {
+        setOrders(prev => prev.filter(o => o.id !== id))
+        setPreviewUrl(null)
+      } else {
+        setErr(res.error || 'Verwijderen mislukt')
+      }
+    } catch (e) { setErr(e.message) }
+  }
+
   return (
     <div className="op-root">
       <div className="op-header">
@@ -360,7 +375,7 @@ export default function OrdersPage() {
       <div className={`op-workspace${previewUrl ? ' op-workspace--split' : ''}`}>
         <div className="op-list">
           {orders.map(o => (
-            <OrderCard key={o.id} order={o} onRefresh={load} onPreviewDemo={handlePreviewDemo} />
+            <OrderCard key={o.id} order={o} onRefresh={load} onPreviewDemo={handlePreviewDemo} onDelete={handleDelete} />
           ))}
           {!loading && orders.length === 0 && (
             <p className="op-empty">Nog geen orders. Gebruik "Zoek bedrijven" of "+ Handmatig".</p>

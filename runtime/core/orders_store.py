@@ -50,10 +50,16 @@ def _init_table() -> None:
                 status       TEXT NOT NULL DEFAULT 'gevonden',
                 demo_pad     TEXT DEFAULT '',
                 prijs        REAL DEFAULT 0.0,
-                aangemaakt_op TEXT NOT NULL
+                aangemaakt_op TEXT NOT NULL,
+                pitch_tekst  TEXT DEFAULT ''
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)")
+        # Add pitch_tekst column to existing databases that predate this field
+        try:
+            conn.execute("ALTER TABLE orders ADD COLUMN pitch_tekst TEXT DEFAULT ''")
+        except Exception:
+            pass  # column already exists
 
 
 _init_table()
@@ -116,3 +122,23 @@ def orders_ophalen(status: str | None = None, limit: int = 50) -> list[dict[str,
                 "SELECT * FROM orders ORDER BY aangemaakt_op DESC LIMIT ?", (limit,)
             ).fetchall()
     return [dict(r) for r in rows]
+
+
+def order_verwijderen(order_id: str) -> dict[str, Any]:
+    """Delete an order by ID. Returns ok/error."""
+    with _conn() as conn:
+        row = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
+        if not row:
+            return {"ok": False, "error": f"Order {order_id} niet gevonden"}
+        conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+    return {"ok": True, "deleted": order_id}
+
+
+def pitch_bijwerken(order_id: str, pitch_tekst: str) -> dict[str, Any]:
+    """Update the pitch_tekst of an existing order. Returns updated order."""
+    with _conn() as conn:
+        row = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
+        if not row:
+            return {"ok": False, "error": f"Order {order_id} niet gevonden"}
+        conn.execute("UPDATE orders SET pitch_tekst=? WHERE id=?", (pitch_tekst, order_id))
+    return {"ok": True, "order": order_ophalen(order_id)}

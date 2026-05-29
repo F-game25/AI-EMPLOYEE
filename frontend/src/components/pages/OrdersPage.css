@@ -139,6 +139,19 @@
 }
 
 /* ── New-tab icon next to demo button ───────────────── */
+.op-card__delete {
+  padding: 0.15rem 0.4rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted, #555);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  margin-left: 4px;
+}
+.op-card__delete:hover { background: rgba(239,68,68,0.10); color: #ef4444; border-color: rgba(239,68,68,0.3); }
+
 .op-card__newtab {
   display: inline-flex;
   align-items: center;

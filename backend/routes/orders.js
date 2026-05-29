@@ -58,9 +58,10 @@ module.exports = function createOrdersRouter(requireAuth) {
       if (!stad || !branche) {
         return res.status(400).json({ ok: false, error: 'stad en branche zijn verplicht' });
       }
+      const aantalNum = Math.min(20, Math.max(1, parseInt(aantal, 10) || 8));
       const snippet = `
 from core.bedrijf_finder import zoek_bedrijven
-result = zoek_bedrijven(${JSON.stringify(stad)}, ${JSON.stringify(branche)}, ${Number(aantal)})
+result = zoek_bedrijven(${JSON.stringify(stad)}, ${JSON.stringify(branche)}, ${aantalNum})
 print(json.dumps(result))
 `;
       const result = await pyCall(snippet, 120_000);
@@ -111,6 +112,11 @@ print(json.dumps(result))
       if (!bedrijfsnaam || !plaats || !branche) {
         return res.status(400).json({ ok: false, error: 'bedrijfsnaam, plaats en branche zijn verplicht' });
       }
+      // Sanitize prijs: must be a finite positive number — NaN/Infinity would inject as Python tokens
+      const prijsNum = parseFloat(prijs)
+      if (!Number.isFinite(prijsNum) || prijsNum <= 0) {
+        return res.status(400).json({ ok: false, error: 'prijs moet een positief getal zijn' });
+      }
       const snippet = `
 from core.orders_store import order_aanmaken
 result = order_aanmaken(
@@ -118,7 +124,7 @@ result = order_aanmaken(
   plaats=${JSON.stringify(plaats)},
   branche=${JSON.stringify(branche)},
   contact=${JSON.stringify(contact)},
-  prijs=${Number(prijs)},
+  prijs=${prijsNum},
 )
 print(json.dumps(result))
 `;
@@ -241,6 +247,23 @@ print(json.dumps(result))
       const result = await pyCall(snippet);
       const httpStatus = result.ok ? 200 : 400;
       res.status(httpStatus).json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // DELETE /api/orders/:id — archive/delete an order (for dedup cleanup)
+  r.delete('/:id', requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const snippet = `
+from core.orders_store import order_verwijderen
+result = order_verwijderen(${JSON.stringify(id)})
+print(json.dumps(result))
+`;
+      const result = await pyCall(snippet, 10_000);
+      const status = result.ok ? 200 : 404;
+      res.status(status).json(result);
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

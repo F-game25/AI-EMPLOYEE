@@ -82,6 +82,18 @@ const api = {
   patch:  (path, body, opts) => _fetch('PATCH',  path, body,      opts),
   delete: (path, opts)       => _fetch('DELETE', path, undefined, opts),
 
+  // ── Orders ───────────────────────────────────────────────────────────────
+  orders: {
+    list:   ()        => api.get('/api/orders'),
+    get:    (id)      => api.get(`/api/orders/${id}`),
+    create: (body)    => api.post('/api/orders', body),
+    delete: (id)      => api.delete(`/api/orders/${id}`),
+    status: (id, s)   => api.post(`/api/orders/${id}/status`, { status: s }),
+    demo:   (id)      => api.post(`/api/orders/${id}/demo`, {}),
+    approve:(id)      => api.post(`/api/orders/${id}/approve`, {}),
+    pitch:  (id)      => api.post(`/api/orders/${id}/pitch`, {}),
+  },
+
   // ── Auth ──────────────────────────────────────────────────────────────────
   auth: {
     token: (secret)  => api.post('/api/auth/token', { secret }),
