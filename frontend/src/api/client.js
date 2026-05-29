@@ -119,6 +119,7 @@ const api = {
 
   // ── Forge ─────────────────────────────────────────────────────────────────
   forge: {
+    getProject: (id)         => api.get(`/api/forge/projects/${id}`),
     submit:    (goal, opts)  => api.post('/api/forge/submit', { goal, ...opts }),
     approve:   (id, by)      => api.post(`/api/forge/approve/${id}`, { approved_by: by }),
     reject:    (id, reason)  => api.post(`/api/forge/reject/${id}`, { reason }),

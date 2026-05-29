@@ -1764,6 +1764,15 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     res.json({ ok: true, state: 'live', projects: loadProjects() })
   })
 
+  router.get('/projects/:id', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    // Attach autonomy_level from most recent run for this project
+    const runs = forgeRunStore.getRuns ? forgeRunStore.getRuns({ project_id: project.id, limit: 1 }) : []
+    const autonomyLevel = runs[0]?.autonomy_level ?? project.autonomy_level ?? null
+    res.json({ ok: true, project: { ...project, autonomy_level: autonomyLevel } })
+  })
+
   router.post('/projects', requireAuth, (req, res) => {
     const name = String(req.body?.name || '').trim()
     const template = String(req.body?.template || 'web-app')

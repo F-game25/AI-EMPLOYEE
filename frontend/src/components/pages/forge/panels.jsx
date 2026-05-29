@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { SectionLabel, StatusPill, EmptyState } from '../../nexus-ui'
 import { toastSuccess, toastError } from '../../nexus-ui/Toaster'
 import { JPOST, JGET, JPOST_JSON, TEMPLATES, DEFAULT_SKILL_PACKS, textFrom, titleize, normalizeAction, isPendingAction, canBatchApprove } from './helpers'
+import api from '../../../api/client'
 import { MiniField, StructuredList, StructuredMessageBlock } from './primitives'
 
 const RUN_WRITE_TYPES = new Set(['write_file', 'file_create', 'file_update', 'scaffold_create'])
@@ -1363,46 +1364,50 @@ export function BacklogPane({ project, onRefreshSummary }) {
   const [newItem, setNewItem] = useState({ title:'', description:'', priority:50, category:'FEATURE', status:'IDEA', risk_level:'low' })
   const [busy, setBusy] = useState({})
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     if (!project?.id) return
     setLoading(true); setError(null)
     Promise.all([
-      fetch(`/api/forge/projects/${project.id}/backlog`, { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()),
-      fetch(`/api/forge/projects/${project.id}/autopilot/status`, { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()).catch(() => ({ status: { active: false } })),
+      api.forge.getBacklog(project.id).catch(() => ({ backlog: [] })),
+      api.forge.autopilotStatus(project.id).catch(() => ({ status: { active: false } })),
     ]).then(([bl, ap]) => {
       if (bl.ok) setBacklog(bl.backlog || [])
       else setError(bl.error || 'Failed to load backlog')
       setAutopilot(ap.status || { active: false })
     }).catch(e => setError(e.message)).finally(() => setLoading(false))
-  }
+  }, [project?.id])
 
-  useEffect(() => { refresh() }, [project?.id])
+  useEffect(() => { refresh() }, [refresh])
 
   const addItem = async () => {
     if (!newItem.title.trim()) return
     setBusy(b => ({ ...b, add: true }))
-    const r = await fetch(`/api/forge/projects/${project.id}/backlog`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify(newItem) }).then(r => r.json())
-    setBusy(b => ({ ...b, add: false }))
-    if (r.ok) { setShowAdd(false); setNewItem({ title:'', description:'', priority:50, category:'FEATURE', status:'IDEA', risk_level:'low' }); refresh(); onRefreshSummary?.() }
-    else setError(r.error)
+    try {
+      const r = await api.forge.createBacklogItem(project.id, newItem)
+      if (r.ok) { setShowAdd(false); setNewItem({ title:'', description:'', priority:50, category:'FEATURE', status:'IDEA', risk_level:'low' }); refresh(); onRefreshSummary?.() }
+      else setError(r.error)
+    } catch (e) { setError(e.message) }
+    finally { setBusy(b => ({ ...b, add: false })) }
   }
 
   const updateItem = async (id, patch) => {
     setBusy(b => ({ ...b, [id]: true }))
-    await fetch(`/api/forge/backlog/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify(patch) }).then(r => r.json())
+    try { await api.forge.updateBacklogItem(id, patch) } catch { /* ignore, refresh anyway */ }
     setBusy(b => ({ ...b, [id]: false })); refresh(); onRefreshSummary?.()
   }
 
   const deleteItem = async (id) => {
     if (!confirm('Delete this backlog item?')) return
     setBusy(b => ({ ...b, [id]: true }))
-    await fetch(`/api/forge/backlog/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tok()}` } })
+    try { await api.forge.deleteBacklogItem(id) } catch { /* ignore */ }
     setBusy(b => ({ ...b, [id]: false })); refresh(); onRefreshSummary?.()
   }
 
   const toggleAutopilot = async () => {
-    const url = `/api/forge/projects/${project.id}/autopilot/${autopilot.active ? 'stop' : 'start'}`
-    await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json())
+    try {
+      if (autopilot.active) await api.forge.stopAutopilot(project.id)
+      else await api.forge.startAutopilot(project.id, {})
+    } catch { /* ignore */ }
     refresh(); onRefreshSummary?.()
   }
 
@@ -1483,10 +1488,12 @@ export function DecomposerPane({ project, onRefreshSummary }) {
   const decompose = async () => {
     if (!goal.trim() || !project?.id) return
     setLoading(true); setError(null); setResult(null)
-    const r = await fetch(`/api/forge/projects/${project.id}/decompose`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify({ goal, add_to_backlog: addToBacklog }) }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }))
-    setLoading(false)
-    if (r.ok) { setResult(r); if (r.added_to_backlog > 0) onRefreshSummary?.() }
-    else setError(r.error || 'Decomposition failed')
+    try {
+      const r = await api.forge.decomposeTask(project.id, { goal, add_to_backlog: addToBacklog })
+      if (r.ok) { setResult(r); if (r.added_to_backlog > 0) onRefreshSummary?.() }
+      else setError(r.error || 'Decomposition failed')
+    } catch (e) { setError(e.message || 'Decomposition failed') }
+    finally { setLoading(false) }
   }
 
   if (!project) return <EmptyState title="No project selected" body="Select a project first." />
@@ -1536,15 +1543,17 @@ export function SkillsLibraryPane({ project }) {
   const [error, setError] = useState(null)
   const [expanded, setExpanded] = useState(null)
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     setLoading(true); setError(null)
-    fetch('/api/forge/skills', { headers: { Authorization: `Bearer ${tok()}` } })
-      .then(r => r.json()).then(d => { if (d.ok) setSkills(d.skills || []); else setError(d.error) }).catch(e => setError(e.message)).finally(() => setLoading(false))
-  }
-  useEffect(() => { refresh() }, [])
+    api.forge.getSkills()
+      .then(d => { if (d.ok) setSkills(d.skills || []); else setError(d.error) })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [])
+  useEffect(() => { refresh() }, [refresh])
 
   const reload = async () => {
-    await fetch('/api/forge/skills/reload', { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json())
+    try { await api.forge.reloadSkills() } catch { /* ignore */ }
     refresh()
   }
 
@@ -1614,30 +1623,32 @@ export function ModelRouterPane({ project }) {
   const [newModel, setNewModel] = useState({ model_id:'', provider:'anthropic', role:'any', cost_tier:'medium', speed_tier:'medium' })
   const [busy, setBusy] = useState({})
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     setLoading(true); setError(null)
     Promise.all([
-      fetch('/api/forge/models', { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()),
-      project?.id ? fetch(`/api/forge/projects/${project.id}/model-routing-stats`, { headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()).catch(() => ({ ok: true, stats: [] })) : Promise.resolve({ stats: [] }),
+      api.forge.getModels(),
+      project?.id ? api.forge.modelRoutingStats(project.id).catch(() => ({ stats: [] })) : Promise.resolve({ stats: [] }),
     ]).then(([md, st]) => {
       if (md.ok) setModels(md.models || []); else setError(md.error)
       setStats(st.stats || [])
     }).catch(e => setError(e.message)).finally(() => setLoading(false))
-  }
-  useEffect(() => { refresh() }, [project?.id])
+  }, [project?.id])
+  useEffect(() => { refresh() }, [refresh])
 
   const addModel = async () => {
     if (!newModel.model_id || !newModel.provider) return
     setBusy(b => ({ ...b, add: true }))
-    const r = await fetch('/api/forge/models', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify(newModel) }).then(r => r.json())
-    setBusy(b => ({ ...b, add: false }))
-    if (r.ok) { setShowAdd(false); setNewModel({ model_id:'', provider:'anthropic', role:'any', cost_tier:'medium', speed_tier:'medium' }); refresh() }
-    else setError(r.error)
+    try {
+      const r = await api.forge.createModel(newModel)
+      if (r.ok) { setShowAdd(false); setNewModel({ model_id:'', provider:'anthropic', role:'any', cost_tier:'medium', speed_tier:'medium' }); refresh() }
+      else setError(r.error)
+    } catch (e) { setError(e.message) }
+    finally { setBusy(b => ({ ...b, add: false })) }
   }
 
   const toggleModel = async (m) => {
     setBusy(b => ({ ...b, [m.model_id]: true }))
-    await fetch(`/api/forge/models/${m.model_id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify({ enabled: !m.enabled }) }).then(r => r.json())
+    try { await api.forge.updateModel(m.model_id, { enabled: !m.enabled }) } catch { /* ignore */ }
     setBusy(b => ({ ...b, [m.model_id]: false })); refresh()
   }
 
@@ -1721,22 +1732,31 @@ export function CyclesPane({ project }) {
   const refresh = () => {
     if (!project?.id) return
     setLoading(true); setError(null)
-    fetch(`/api/forge/projects/${project.id}/cycles`, { headers: { Authorization: `Bearer ${tok()}` } })
-      .then(r => r.json()).then(d => { if (d.ok) setCycles(d.cycles || []); else setError(d.error) }).catch(e => setError(e.message)).finally(() => setLoading(false))
+    api.forge.getCycles(project.id)
+      .then(d => { if (d.ok) setCycles(d.cycles || []); else setError(d.error) })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
   }
   useEffect(() => { refresh() }, [project?.id])
 
   const createCycle = async () => {
     if (!newCycle.goal.trim()) return
     setBusy(b => ({ ...b, create: true }))
-    const r = await fetch(`/api/forge/projects/${project.id}/cycles`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` }, body: JSON.stringify(newCycle) }).then(r => r.json())
-    setBusy(b => ({ ...b, create: false }))
-    if (r.ok) { setShowCreate(false); setNewCycle({ goal:'', autonomy_level:2, max_runs:10 }); refresh() } else setError(r.error)
+    try {
+      const r = await api.forge.createCycle(project.id, newCycle)
+      if (r.ok) { setShowCreate(false); setNewCycle({ goal:'', autonomy_level:2, max_runs:10 }); refresh() }
+      else setError(r.error)
+    } catch (e) { setError(e.message) }
+    finally { setBusy(b => ({ ...b, create: false })) }
   }
 
   const cycleAction = async (cycleId, action) => {
     setBusy(b => ({ ...b, [cycleId]: true }))
-    await fetch(`/api/forge/cycles/${cycleId}/${action}`, { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json())
+    try {
+      if (action === 'pause') await api.forge.pauseCycle(cycleId)
+      else if (action === 'resume') await api.forge.resumeCycle(cycleId)
+      else if (action === 'cancel') await api.forge.cancelCycle(cycleId)
+    } catch { /* ignore */ }
     setBusy(b => ({ ...b, [cycleId]: false })); refresh()
   }
 
@@ -1801,17 +1821,20 @@ export function RoadmapPane({ project }) {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState(null)
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     if (!project?.id) return
     setLoading(true); setError(null)
-    fetch(`/api/forge/projects/${project.id}/roadmap`, { headers: { Authorization: `Bearer ${tok()}` } })
-      .then(r => r.json()).then(d => { if (d.ok) setRoadmap(d.roadmap); else setError(d.error) }).catch(e => setError(e.message)).finally(() => setLoading(false))
-  }
-  useEffect(() => { refresh() }, [project?.id])
+    api.forge.getRoadmap(project.id)
+      .then(d => { if (d.ok) setRoadmap(d.roadmap); else setError(d.error) })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [project?.id])
+  useEffect(() => { refresh() }, [refresh])
 
   const generate = async () => {
     setGenerating(true); setError(null)
-    const r = await fetch(`/api/forge/projects/${project.id}/roadmap/generate`, { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }))
+    let r
+    try { r = await api.forge.generateRoadmap(project.id) } catch (e) { r = { ok: false, error: e.message } }
     setGenerating(false)
     if (r.ok) setRoadmap(r.roadmap)
     else setError(r.error || 'Generation failed')
@@ -1875,17 +1898,23 @@ export function SuggestionsPane({ project, onRefreshSummary }) {
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState({})
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     if (!project?.id) return
     setLoading(true); setError(null)
-    fetch(`/api/forge/projects/${project.id}/suggestions`, { headers: { Authorization: `Bearer ${tok()}` } })
-      .then(r => r.json()).then(d => { if (d.ok) setSuggestions(d.suggestions || []); else setError(d.error) }).catch(e => setError(e.message)).finally(() => setLoading(false))
-  }
-  useEffect(() => { refresh() }, [project?.id])
+    api.forge.getSuggestions(project.id)
+      .then(d => { if (d.ok) setSuggestions(d.suggestions || []); else setError(d.error) })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [project?.id])
+  useEffect(() => { refresh() }, [refresh])
 
   const action = async (id, endpoint) => {
     setBusy(b => ({ ...b, [id]: true }))
-    await fetch(`/api/forge/suggestions/${id}/${endpoint}`, { method: 'POST', headers: { Authorization: `Bearer ${tok()}` } }).then(r => r.json())
+    try {
+      if (endpoint === 'accept') await api.forge.acceptSuggestion(id)
+      else if (endpoint === 'reject') await api.forge.rejectSuggestion(id)
+      else if (endpoint === 'create-backlog-item') await api.forge.suggestionToBacklog(id)
+    } catch { /* ignore */ }
     setBusy(b => ({ ...b, [id]: false })); refresh(); onRefreshSummary?.()
   }
 
@@ -1945,10 +1974,7 @@ export function MemoryV3Pane({ project }) {
   const load = useCallback(() => {
     if (!project?.id) return
     setLoading(true); setError(null)
-    const token = tok()
-    const url = `/api/forge/projects/${project.id}/memory${category ? `?category=${encodeURIComponent(category)}` : ''}`
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
+    api.forge.getMemory(project.id, category || undefined)
       .then(d => { if (d.ok) setFacts(d.facts || []); else setError(d.error || 'Failed to load memory') })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -2015,9 +2041,7 @@ export function SafetyPane({ project, activeRun, onApprove, onReject, onContinue
   useEffect(() => {
     if (!activeRun?.id) { setPatches([]); return }
     setLoading(true)
-    const H = { Authorization: `Bearer ${tok()}` }
-    fetch(`/api/forge/runs/${activeRun.id}/patches`, { headers: H })
-      .then(r => r.json())
+    api.forge.getRunPatches(activeRun.id)
       .then(d => setPatches(d.patches || []))
       .catch(() => setPatches([]))
       .finally(() => setLoading(false))

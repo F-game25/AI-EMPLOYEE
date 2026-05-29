@@ -327,7 +327,7 @@ function ForgeOnboarding({ onNew, onBrowse }) {
 }
 
 // ── Phase5StatusCard — sidebar card surfacing P5 features ────────────────────
-function Phase5StatusCard({ project, backlogCount, autopilot, suggestions, onNavigate }) {
+function Phase5StatusCard({ project, backlogCount, autopilot, suggestions, onNavigate, onRefreshSummary }) {
   const [apBusy, setApBusy] = useState(false)
 
   const toggleAutopilot = async () => {
@@ -336,8 +336,9 @@ function Phase5StatusCard({ project, backlogCount, autopilot, suggestions, onNav
     try {
       if (autopilot?.active) await api.forge.stopAutopilot(project.id)
       else await api.forge.startAutopilot(project.id, {})
-    } catch { /* parent will show stale state; user can refresh */ }
-    setApBusy(false)
+      onRefreshSummary?.()
+    } catch { /* ignore — summary will refresh on next load */ }
+    finally { setApBusy(false) }
   }
 
   const rows = [
@@ -385,7 +386,7 @@ function Phase5StatusCard({ project, backlogCount, autopilot, suggestions, onNav
 }
 
 // ── ComposeView ──────────────────────────────────────────────────────────────
-export function ComposeView({ project, messages, sending, onSend, selectedSkillIds, onSkillChange, tab, setTab, showTools, setShowTools, onNewProject, onSelectProject, draftGoal, setDraftGoal, onTemplateSelect, backlogCount, autopilot, suggestions, onSection }) {
+export function ComposeView({ project, messages, sending, onSend, selectedSkillIds, onSkillChange, tab, setTab, showTools, setShowTools, onNewProject, onSelectProject, draftGoal, setDraftGoal, onTemplateSelect, backlogCount, autopilot, suggestions, onSection, onRefreshSummary }) {
   const handleTemplateClick = (t) => {
     setDraftGoal?.(t.prompt)
     setTab('chat')
@@ -492,6 +493,7 @@ export function ComposeView({ project, messages, sending, onSend, selectedSkillI
             autopilot={autopilot || { active: false }}
             suggestions={suggestions || []}
             onNavigate={onSection || (t => setTab(t))}
+            onRefreshSummary={onRefreshSummary}
           />
           <ForgePanel title="Hotkeys" sub="cheat sheet">
             <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>

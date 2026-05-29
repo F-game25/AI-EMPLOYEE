@@ -399,6 +399,7 @@ export default function AscendForgePage() {
                   onTemplateSelect={onTemplateSelect}
                   backlogCount={backlogCount} autopilot={autopilot} suggestions={suggestions}
                   onSection={setActiveForgeSection}
+                  onRefreshSummary={refreshForgeSummary}
                 />
               )}
               {activeView === 'activity' && <ActivityView termLines={termLines} activeRun={activeRun} onNavTab={tab => { setActiveView('compose'); setTab(tab) }} />}
