@@ -82,20 +82,20 @@ class TestSidebarNavigation:
     def test_nav_items_have_required_fields(self) -> None:
         """Each nav item must have id, icon, and label."""
         content = _read_text(self.SIDEBAR_PATH)
-        # Extract the NAV_ITEMS array literal
-        match = re.search(r"NAV_ITEMS\s*=\s*\[(.*?)\]", content, re.DOTALL)
-        assert match, "Could not parse NAV_ITEMS"
+        # Sidebar now defines grouped navigation and derives NAV_ITEMS from it.
+        match = re.search(r"NAV_GROUPS\s*=\s*\[(.*?)\]\s*// Flat item list", content, re.DOTALL)
+        assert match, "Could not parse NAV_GROUPS"
         items_text = match.group(1)
         # Each item object must have id, icon, label
         for field in ("id:", "icon:", "label:"):
-            assert field in items_text, f"NAV_ITEMS missing '{field}' field"
+            assert field in items_text, f"NAV_GROUPS missing '{field}' field"
 
     def test_expected_nav_ids_present(self) -> None:
-        """Dashboard, agents, control-center must be in the nav."""
+        """Core, agent, forge, and prompt inspection destinations must be in the nav."""
         content = _read_text(self.SIDEBAR_PATH)
-        for nav_id in ("dashboard", "agents", "control-center"):
+        for nav_id in ("nexus", "agents", "ascend-forge", "prompt-inspector"):
             assert f"'{nav_id}'" in content or f'"{nav_id}"' in content, (
-                f"NAV_ITEMS missing '{nav_id}'"
+                f"NAV_GROUPS missing '{nav_id}'"
             )
 
 
@@ -117,7 +117,17 @@ class TestDashboardRouting:
 
     @pytest.mark.parametrize(
         "page_id",
-        ["dashboard", "ai-control", "neural-brain", "operations", "agents", "control-center", "system", "voice"],
+        [
+            "dashboard",
+            "nexus",
+            "cognition",
+            "operations",
+            "agents",
+            "ascend-forge",
+            "prompt-inspector",
+            "security",
+            "settings",
+        ],
     )
     def test_page_id_in_routing(self, page_id: str) -> None:
         content = _read_text(self.DASHBOARD_PATH)
