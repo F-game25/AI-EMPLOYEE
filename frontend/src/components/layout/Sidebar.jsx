@@ -48,12 +48,12 @@ function HealthGauge({ value = 0 }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Navigation Structure: 5 Groups × 17 Items
+// Navigation Structure: 5 Groups x 29 Items
 // CORE (5): Nexus, Cognition, Agents, Memory, Economy
-// OPERATIONS (3): Tasks, Workflows, Infrastructure
-// INTELLIGENCE (4): Neural Graph, Knowledge, Trends, Research
-// SECURITY (2): Security, Audit
-// SYSTEM (4): Setup, Integrations, Models, Settings
+// OPERATIONS (4): Tasks, Workflows, Infrastructure, Ascend Forge
+// INTELLIGENCE (6): Neural Graph, Memory Graphs, Knowledge, Trends, Research, Prompt Inspector
+// SECURITY (6): Security, Recon, Blacklight, Audit, Approvals, Proof
+// SYSTEM (8): Setup, Integrations, Models, Model Fabric, Compute, API Catalog, Perspectives, Settings
 // ─────────────────────────────────────────────────────────────────────────
 
 const NAV_GROUPS = [
@@ -142,6 +142,11 @@ const NAV_GROUPS = [
         id: 'research',
         label: 'Research',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="6.5" cy="6.5" r="3.5"/><path d="M9.5 9.5l4 4M1 8c0 3.9 3.1 7 7 7s7-3.1 7-7-3.1-7-7-7-7 3.1-7 7z"/></svg>,
+      },
+      {
+        id: 'prompt-inspector',
+        label: 'Prompt Inspector',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M4.5 6h7M4.5 8.5h4"/><circle cx="11.5" cy="11.5" r="2"/><path d="M13 13l1.5 1.5"/></svg>,
       },
     ],
   },
