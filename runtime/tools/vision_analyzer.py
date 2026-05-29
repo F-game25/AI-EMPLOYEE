@@ -20,6 +20,7 @@ import base64
 import json
 import logging
 import os
+import re
 import urllib.request
 from pathlib import Path
 from typing import Optional
@@ -44,12 +45,13 @@ _OLLAMA_VISION_MODELS = ["llava", "bakllava", "llama3.2-vision", "llava-phi3", "
 _NVIDIA_VISION_MODEL  = "meta/llama-3.2-11b-vision-instruct"
 _NVIDIA_ENDPOINT      = "https://integrate.api.nvidia.com/v1/chat/completions"
 _ANTHROPIC_MODEL      = "claude-haiku-4-5-20251001"
+_SAFE_FILE_NAME = re.compile(r"^[A-Za-z0-9_. -]{1,160}$")
 
 
 def _safe_workspace_file(file_path: str) -> Path:
     root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
     filename = os.path.basename(file_path)
-    if filename in {"", ".", ".."}:
+    if filename in {"", ".", ".."} or not _SAFE_FILE_NAME.fullmatch(filename):
         raise ValueError("invalid file name")
     candidate = os.path.normpath(os.path.join(root, filename))
     if os.path.commonpath([root, candidate]) != root:

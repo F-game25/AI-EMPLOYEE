@@ -40,6 +40,7 @@ _JS_SYMBOL = re.compile(r"^\s*(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|cla
 _PY_IMPORT = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", re.M)
 _JS_IMPORT = re.compile(r"""(?:import[^'"]*['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))""")
 _SAFE_PROJECT_ID = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+_SAFE_PROJECT_DIR = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
 
 
 def _safe_project_id(project_id: str) -> str:
@@ -52,10 +53,9 @@ def _safe_project_root(root: str) -> Path:
     allowed_root = os.path.realpath(os.environ.get("ASCENDFORGE_ALLOWED_ROOT", os.getcwd()))
     if root in {"", "."}:
         return Path(allowed_root)
-    absolute_candidate = os.path.realpath(root)
-    if os.path.commonpath([allowed_root, absolute_candidate]) == allowed_root:
-        return Path(absolute_candidate)
     project_dir = os.path.basename(root.rstrip(os.sep))
+    if not _SAFE_PROJECT_DIR.fullmatch(project_dir):
+        raise ValueError("invalid project directory")
     if project_dir in {"", ".", ".."}:
         raise ValueError("invalid project root")
     candidate = os.path.normpath(os.path.join(allowed_root, project_dir))
@@ -78,7 +78,7 @@ def _index_dir() -> Path:
 def _store_for(project_id: str):
     from memory.vector_store import VectorStore
     safe_project = _safe_project_id(project_id)
-    return VectorStore(path=_index_dir() / f"{safe_project}.json")
+    return VectorStore(store_name=f"code_index/{safe_project}.json")
 
 
 def _summary_path(project_id: str) -> Path:

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -46,6 +47,8 @@ from core.memory_index import embed_text, cosine_similarity, clamp
 
 _LOCK = threading.RLock()
 _MAX_ENTRIES = int(os.environ.get("AI_EMPLOYEE_VECTOR_STORE_MAX", "10000"))
+_SAFE_ROOT_STORE = re.compile(r"^[A-Za-z0-9_.-]{1,96}\.json$")
+_SAFE_CODE_INDEX_STORE = re.compile(r"^code_index/[A-Za-z0-9_.-]{1,96}\.json$")
 
 
 def _default_path() -> Path:
@@ -62,12 +65,16 @@ def _default_path() -> Path:
     return path
 
 
-def _safe_store_path(path: Path) -> Path:
+def _safe_store_path(store_name: str = "vector_store.json") -> Path:
     base = os.path.realpath(os.getenv("STATE_DIR") or Path.home() / ".ai-employee" / "state")
-    filename = Path(path).name
-    if not filename.endswith(".json") or filename in {"", ".", ".."}:
+    if _SAFE_CODE_INDEX_STORE.fullmatch(store_name):
+        subdir = "code_index"
+        filename = store_name.removeprefix("code_index/")
+    elif _SAFE_ROOT_STORE.fullmatch(store_name):
+        subdir = ""
+        filename = store_name
+    else:
         raise ValueError("invalid vector store filename")
-    subdir = "code_index" if Path(path).parent.name == "code_index" else ""
     fullpath = os.path.normpath(os.path.join(base, subdir, filename))
     if os.path.commonpath([base, fullpath]) != base:
         raise ValueError("vector store path is outside allowed state root")
@@ -83,8 +90,8 @@ def _ts() -> str:
 class VectorStore:
     """File-backed long-term semantic memory with vector similarity search."""
 
-    def __init__(self, path: Path | None = None) -> None:
-        self._path = _safe_store_path(path or _default_path())
+    def __init__(self, store_name: str = "vector_store.json") -> None:
+        self._path = _safe_store_path(store_name)
         self._entries: dict[str, dict[str, Any]] = {}
         self._load()
 

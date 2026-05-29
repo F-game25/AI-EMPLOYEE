@@ -51,12 +51,13 @@ _CODE_LANGUAGES = {
 }
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_SAFE_FILE_NAME = re.compile(r"^[A-Za-z0-9_. -]{1,160}$")
 
 
 def _safe_document_path(file_path: str) -> Path:
     root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
     filename = os.path.basename(file_path)
-    if filename in {"", ".", ".."}:
+    if filename in {"", ".", ".."} or not _SAFE_FILE_NAME.fullmatch(filename):
         raise ValueError("invalid file name")
     candidate = os.path.normpath(os.path.join(root, filename))
     if os.path.commonpath([root, candidate]) != root:
