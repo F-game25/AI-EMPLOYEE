@@ -68,10 +68,7 @@ def _append_ingestion_log(record: dict[str, Any]) -> None:
     log_path = _state_path() / "ingestion_log.jsonl"
     safe_record = {
         "ts": record.get("ts"),
-        "tenant_id": record.get("tenant_id"),
         "file_type": record.get("file_type"),
-        "source_file_name": Path(str(record.get("source_file", ""))).name,
-        "text_len": len(str(record.get("text", ""))),
         "status": record.get("status"),
     }
     try:
