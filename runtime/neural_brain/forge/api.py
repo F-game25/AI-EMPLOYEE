@@ -1,11 +1,14 @@
 """Neural Brain Forge API — all operations delegate through ConsciousnessEngine kernel."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 forge_router = APIRouter(prefix="/forge", tags=["neural-brain-forge"])
 forge_compat_router = APIRouter(prefix="/api/forge", tags=["neural-brain-forge-compat"])
+logger = logging.getLogger(__name__)
 
 
 class ForgeSubmitRequest(BaseModel):
@@ -37,6 +40,11 @@ class ForgeActionApprovalRequest(BaseModel):
     session_id: str = ""
     ownerApproved: bool = False
     approval: str = ""
+
+
+def _server_error(operation: str, exc: Exception) -> HTTPException:
+    logger.warning("forge API %s failed: %s", operation, type(exc).__name__)
+    return HTTPException(status_code=500, detail=f"{operation} failed")
 
 
 def _skill_recommendations(message: str) -> list[dict]:
@@ -104,7 +112,7 @@ async def get_forge_queue(status: str | None = Query(None)):
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().forge_list(status=status)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("queue list", e)
 
 
 @forge_router.post("/submit")
@@ -113,7 +121,7 @@ async def submit_forge_goal(req: ForgeSubmitRequest):
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().forge_submit(goal=req.goal, module=req.module, priority=req.priority, code=req.code)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("goal submission", e)
 
 
 @forge_router.post("/approve/{snapshot_id}")
@@ -122,7 +130,7 @@ async def approve_forge_item(snapshot_id: str, req: ForgeApproveRequest = None):
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().forge_approve(snapshot_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("approval", e)
 
 
 @forge_router.post("/reject/{snapshot_id}")
@@ -131,7 +139,7 @@ async def reject_forge_item(snapshot_id: str):
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().forge_reject(snapshot_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("rejection", e)
 
 
 # ── Evolution Status routes ───────────────────────────────────────────────────
@@ -142,7 +150,7 @@ async def get_evolution_status():
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().evolution_status()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("evolution status", e)
 
 
 @forge_router.post("/evolution/mode")
@@ -151,7 +159,7 @@ async def set_evolution_mode(mode: str = Query(..., description="AUTO|SAFE|OFF")
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().evolution_set_mode(mode)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("evolution mode", e)
 
 
 # ── Builder routes ────────────────────────────────────────────────────────────
@@ -166,7 +174,7 @@ async def builder_generate(req: BuilderRequest):
             target_type=req.target_type,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("builder generation", e)
 
 
 @forge_router.post("/chat")

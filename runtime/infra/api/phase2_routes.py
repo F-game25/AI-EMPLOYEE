@@ -106,6 +106,11 @@ def _tenant(request: Request) -> str:
     return request.headers.get("X-Tenant-Id", "system")
 
 
+def _server_error(operation: str, exc: Exception) -> HTTPException:
+    logger.warning("phase2 %s failed: %s", operation, type(exc).__name__)
+    return HTTPException(status_code=500, detail=f"{operation} failed")
+
+
 # ── RAG routes ────────────────────────────────────────────────────────────────
 
 @phase2_router.get("/rag/status")
@@ -114,7 +119,8 @@ async def rag_status(request: Request):
         from infra.rag.sync_daemon import get_sync_daemon
         return {"ok": True, "stats": get_sync_daemon().get_stats()}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        logger.warning("rag status failed: %s", type(e).__name__)
+        return {"ok": False, "error": "rag status failed"}
 
 @phase2_router.post("/rag/query")
 async def rag_query(req: RAGQueryRequest, request: Request):
@@ -136,8 +142,7 @@ async def rag_query(req: RAGQueryRequest, request: Request):
             ],
         }
     except Exception as e:
-        logger.error("RAG query failed: %s", e)
-        raise HTTPException(500, str(e))
+        raise _server_error("rag query", e)
 
 @phase2_router.post("/rag/sync")
 async def rag_sync(req: RAGSyncRequest, request: Request):
@@ -149,7 +154,7 @@ async def rag_sync(req: RAGSyncRequest, request: Request):
         stats = await get_sync_daemon().trigger_sync(tenant_id, st, full=req.full)
         return {"ok": True, "stats": stats}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("rag sync", e)
 
 @phase2_router.post("/rag/ingest")
 async def rag_ingest(req: RAGIngestRequest, request: Request):
@@ -176,7 +181,7 @@ async def rag_ingest(req: RAGIngestRequest, request: Request):
         n = await pipeline.ingest_doc(doc)
         return {"ok": True, "chunks": n, "doc_id": doc.id}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("rag ingest", e)
 
 @phase2_router.get("/rag/sources")
 async def rag_sources(request: Request):
@@ -189,7 +194,8 @@ async def rag_sources(request: Request):
             for c in daemon._configs
         ]}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        logger.warning("rag sources failed: %s", type(e).__name__)
+        return {"ok": False, "error": "rag sources failed"}
 
 
 # ── Planning routes ───────────────────────────────────────────────────────────
@@ -212,7 +218,7 @@ async def create_goal(req: GoalCreateRequest, request: Request):
         )
         return {"ok": True, "goal": goal.to_dict()}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/planning/goals")
 async def list_goals(request: Request,
@@ -232,7 +238,7 @@ async def list_goals(request: Request,
         )
         return {"ok": True, "count": len(goals), "goals": [g.to_dict() for g in goals]}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/planning/goals/{goal_id}")
 async def get_goal(goal_id: str, request: Request):
@@ -247,7 +253,7 @@ async def get_goal(goal_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.patch("/planning/goals/{goal_id}/status")
 async def update_goal_status(goal_id: str, req: GoalStatusRequest, request: Request):
@@ -259,7 +265,7 @@ async def update_goal_status(goal_id: str, req: GoalStatusRequest, request: Requ
         ok = engine.update_status(goal_id, tenant_id, GoalStatus(req.status))
         return {"ok": ok}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.patch("/planning/goals/{goal_id}/kr/{kr_id}")
 async def update_kr(goal_id: str, kr_id: str, req: KRUpdateRequest, request: Request):
@@ -270,7 +276,7 @@ async def update_kr(goal_id: str, kr_id: str, req: KRUpdateRequest, request: Req
         ok = engine.update_key_result(goal_id, tenant_id, kr_id, req.current)
         return {"ok": ok}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/planning/goals/{goal_id}/events")
 async def goal_events(goal_id: str, request: Request):
@@ -279,7 +285,7 @@ async def goal_events(goal_id: str, request: Request):
         events = get_goal_engine().get_events(goal_id)
         return {"ok": True, "events": events}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.post("/planning/plan/weekly")
 async def generate_weekly_plan(request: Request):
@@ -289,7 +295,7 @@ async def generate_weekly_plan(request: Request):
         plan = await get_strategic_planner(tenant_id).generate_weekly_plan()
         return {"ok": True, "plan": plan}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.post("/planning/plan/reprioritize")
 async def reprioritize(request: Request):
@@ -299,7 +305,7 @@ async def reprioritize(request: Request):
         changes = await get_strategic_planner(tenant_id).reprioritize()
         return {"ok": True, "changes": changes}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/planning/tree/{root_id}")
 async def objective_tree(root_id: str, request: Request):
@@ -309,7 +315,7 @@ async def objective_tree(root_id: str, request: Request):
         tree = get_strategic_planner(tenant_id).get_objective_tree(root_id)
         return {"ok": True, "tree": tree}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 
 # ── Economics routes ──────────────────────────────────────────────────────────
@@ -335,7 +341,7 @@ async def econ_evaluate(req: EvalRequest, request: Request):
         decision = get_economic_orchestrator().evaluate(profile)
         return {"ok": True, **decision.__dict__}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.post("/economics/record")
 async def econ_record(req: RecordActualRequest, request: Request):
@@ -350,7 +356,7 @@ async def econ_record(req: RecordActualRequest, request: Request):
         )
         return {"ok": True, "actual_cost_usd": round(cost, 6)}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/economics/summary")
 async def econ_summary(request: Request):
@@ -359,7 +365,7 @@ async def econ_summary(request: Request):
         from infra.economics.engine import get_economic_orchestrator
         return {"ok": True, "summary": get_economic_orchestrator().get_summary(tenant_id)}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/economics/costs")
 async def econ_costs(request: Request):
@@ -368,7 +374,7 @@ async def econ_costs(request: Request):
         from infra.economics.engine import get_economic_orchestrator
         return {"ok": True, "costs": get_economic_orchestrator().top_costs(tenant_id)}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/economics/models")
 async def econ_models():
@@ -382,7 +388,7 @@ async def econ_models():
             for m in get_pricing_catalog().all_models()
         ]}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.put("/economics/budget")
 async def set_budget(req: BudgetRequest, request: Request):
@@ -392,7 +398,7 @@ async def set_budget(req: BudgetRequest, request: Request):
         get_economic_orchestrator().set_budget(tenant_id, req.ceiling_usd)
         return {"ok": True, "tenant_id": tenant_id, "ceiling_usd": req.ceiling_usd}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 
 # ── Governance routes ─────────────────────────────────────────────────────────
@@ -428,7 +434,7 @@ async def governance_validate(req: ValidateRequest, request: Request):
         }
     except Exception as e:
         logger.error("Governance validate error: %s", e)
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/governance/agents")
 async def list_agents(request: Request):
@@ -438,7 +444,7 @@ async def list_agents(request: Request):
         agents = get_trust_ledger().list_agents(tenant_id)
         return {"ok": True, "agents": agents}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/governance/agents/{agent_id}")
 async def get_agent_trust(agent_id: str, request: Request):
@@ -454,7 +460,7 @@ async def get_agent_trust(agent_id: str, request: Request):
                 "supervised" if score < TRUST_FULL_AUTONOMY else "full_autonomy"
         return {"ok": True, "profile": profile, "trust_level": level, "events": events}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.post("/governance/agents/{agent_id}/veto")
 async def veto_agent(agent_id: str, req: VetoRequest, request: Request):
@@ -465,7 +471,7 @@ async def veto_agent(agent_id: str, req: VetoRequest, request: Request):
         score = get_trust_ledger().get_score(agent_id, tenant_id)
         return {"ok": True, "agent_id": agent_id, "new_score": score}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/governance/trust/stats")
 async def trust_stats(request: Request):
@@ -484,7 +490,7 @@ async def trust_stats(request: Request):
             "full_autonomy": sum(1 for s in scores if s >= TRUST_FULL_AUTONOMY),
         }
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 
 # ── Telemetry routes ──────────────────────────────────────────────────────────
@@ -502,7 +508,7 @@ async def list_traces(request: Request,
         )
         return {"ok": True, "count": len(records), "records": records}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/telemetry/traces/{trace_id}")
 async def get_trace(trace_id: str):
@@ -511,7 +517,7 @@ async def get_trace(trace_id: str):
         records = get_execution_store().get_trace(trace_id)
         return {"ok": True, "trace_id": trace_id, "records": records}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/telemetry/lineage/{record_id}")
 async def get_lineage(record_id: str):
@@ -520,7 +526,7 @@ async def get_lineage(record_id: str):
         lineage = get_execution_store().get_lineage(record_id)
         return {"ok": True, "record_id": record_id, "lineage": lineage}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/telemetry/spans")
 async def get_otel_spans():
@@ -528,7 +534,7 @@ async def get_otel_spans():
         from infra.telemetry.otel import get_in_memory_spans
         return {"ok": True, "spans": get_in_memory_spans()}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.post("/telemetry/replay/{trace_id}")
 async def replay_trace(trace_id: str):
@@ -555,7 +561,7 @@ async def replay_trace(trace_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/telemetry/anomalies")
 async def get_anomalies(request: Request, limit: int = 20):
@@ -582,7 +588,7 @@ async def get_anomalies(request: Request, limit: int = 20):
                                    "agent_id": r_dict.get("agent_id"), "flags": flags})
         return {"ok": True, "anomalies": anomalies}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)
 
 @phase2_router.get("/telemetry/decisions/{task_id}")
 async def get_decisions(task_id: str, request: Request):
@@ -593,4 +599,4 @@ async def get_decisions(task_id: str, request: Request):
         all_decisions = [d for r in records for d in r.get("decisions", [])]
         return {"ok": True, "task_id": task_id, "decisions": all_decisions}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise _server_error("phase2 route", e)

@@ -59,7 +59,8 @@ async def release_history():
         history = json.loads(result.stdout) if result.returncode == 0 else []
         return {"ok": True, "history": history}
     except Exception as e:
-        return {"ok": False, "reason": str(e), "history": []}
+        logger.warning("release history failed: %s", type(e).__name__)
+        return {"ok": False, "reason": "release history unavailable", "history": []}
 
 
 @router.post("/blue-green")

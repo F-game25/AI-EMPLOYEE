@@ -308,8 +308,8 @@ def rag_query(req: RagQueryReq):
                 results.append({"text": str(h), "source": "memory"})
         return {"status": "success", "query": req.query, "count": len(results), "results": results}
     except Exception as e:  # noqa: BLE001
-        logger.warning("rag_query failed: %s", e)
-        return {"status": "error", "error": str(e), "results": []}
+        logger.warning("rag_query failed: %s", type(e).__name__)
+        return {"status": "error", "error": "rag query failed", "results": []}
 
 
 # ── Lifecycle ──────────────────────────────────────────────────────────────────
@@ -406,7 +406,8 @@ def _run_pull(tag: str):
         _pull_state["error"] = None if proc.returncode == 0 else (proc.stderr or "")[-2000:]
     except Exception as e:  # noqa: BLE001
         _pull_state["ok"] = False
-        _pull_state["error"] = str(e)
+        logger.warning("quantization pull failed: %s", type(e).__name__)
+        _pull_state["error"] = "model pull failed"
     finally:
         _pull_state["running"] = False
         _pull_state["finished_at"] = _now_iso()
@@ -471,5 +472,5 @@ def rag_ingest(req: RagIngestReq):
             return {"status": "success", "mode": "text", "chars": len(req.text)}
         return {"status": "error", "error": "Provide text or file_path"}
     except Exception as e:  # noqa: BLE001
-        logger.warning("rag_ingest failed: %s", e)
-        return {"status": "error", "error": str(e)}
+        logger.warning("rag_ingest failed: %s", type(e).__name__)
+        return {"status": "error", "error": "rag ingest failed"}

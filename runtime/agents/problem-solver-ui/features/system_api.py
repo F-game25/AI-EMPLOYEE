@@ -214,13 +214,13 @@ def run_goal(body: RunGoalRequest):
             **norm,
         })
     except Exception as exc:
-        _log.exception("run_goal failed")
+        _log.warning("run_goal failed: %s", type(exc).__name__)
         # Degrade with a real reason instead of a bare 500 so the UI shows the truth.
         return JSONResponse(status_code=200, content={
             "ok": False, "source": "agent_controller", "task": goal,
-            "tasks": [], "proof": [{"type": "task_error", "label": str(exc), "status": "failed"}],
+            "tasks": [], "proof": [{"type": "task_error", "label": "Agent controller failed", "status": "failed"}],
             "performance_score": 0.0, "success_rate": 0.0,
-            "error": str(exc), "degraded": True,
+            "error": "Agent controller failed", "degraded": True,
         })
 
 
@@ -889,8 +889,8 @@ def set_evolution_mode(body: EvolutionModeBody):
         controller = get_evolution_controller()
         mode = controller.set_mode(body.mode)
         return JSONResponse({"mode": mode, "status": controller.status()})
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid evolution mode")
     except Exception:
         _log.exception("set_evolution_mode failed")
         raise HTTPException(status_code=500, detail="Internal server error")

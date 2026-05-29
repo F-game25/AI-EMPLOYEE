@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Request
+import logging
+
 from .event_prioritizer import get_event_prioritizer
 from .subsystem_isolator import get_subsystem_isolator
 from .adaptive_throttler import get_adaptive_throttler
@@ -6,6 +8,7 @@ from .load_shedder import get_load_shedder
 from .backpressure_propagator import get_backpressure_propagator
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _tenant(req: Request) -> str:
@@ -62,7 +65,8 @@ async def emergency_stop(req: Request):
         })
         return {"status": "emergency_stop_initiated"}
     except Exception as e:
-        return {"error": str(e)}
+        logger.warning("emergency stop failed: %s", type(e).__name__)
+        return {"error": "emergency stop failed"}
 
 
 @router.post("/resume")
@@ -75,4 +79,5 @@ async def resume(req: Request):
         })
         return {"status": "resume_initiated"}
     except Exception as e:
-        return {"error": str(e)}
+        logger.warning("resume failed: %s", type(e).__name__)
+        return {"error": "resume failed"}

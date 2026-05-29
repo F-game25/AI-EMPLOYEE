@@ -148,4 +148,5 @@ async def replay_trace(body: ReplayRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, str(e))
+        logger.warning("simulation replay failed: %s", type(e).__name__)
+        raise HTTPException(status_code=500, detail="simulation replay failed")

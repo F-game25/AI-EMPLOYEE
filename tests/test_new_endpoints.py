@@ -148,23 +148,27 @@ class TestTelemetrySummary:
 class TestBillingSummary:
     """GET /api/billing/summary."""
 
+    @staticmethod
+    def _headers() -> dict[str, str]:
+        return {"Authorization": f"Bearer {_make_test_token()}"}
+
     def test_returns_200_when_auth_disabled(self, client):
-        resp = client.get("/api/billing/summary")
+        resp = client.get("/api/billing/summary", headers=self._headers())
         assert resp.status_code == 200
 
     def test_response_is_json(self, client):
-        resp = client.get("/api/billing/summary")
+        resp = client.get("/api/billing/summary", headers=self._headers())
         assert resp.headers["content-type"].startswith("application/json")
 
     def test_response_contains_expected_shape(self, client):
-        resp = client.get("/api/billing/summary")
+        resp = client.get("/api/billing/summary", headers=self._headers())
         if resp.status_code == 200:
             data = resp.json()
             # Either returns a billing summary dict or an error — both are valid
             assert isinstance(data, dict)
 
     def test_summary_keys_present_on_success(self, client):
-        resp = client.get("/api/billing/summary")
+        resp = client.get("/api/billing/summary", headers=self._headers())
         if resp.status_code != 200:
             pytest.skip("Billing endpoint not available (200 not returned)")
         data = resp.json()

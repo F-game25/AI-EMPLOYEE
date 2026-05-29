@@ -6,12 +6,15 @@
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 privacy_router  = APIRouter(prefix="/api/privacy",  tags=["privacy"])
 telemetry_router = APIRouter(prefix="/api/telemetry", tags=["telemetry"])
 updates_router  = APIRouter(prefix="/api/updates",  tags=["updates"])
+logger = logging.getLogger(__name__)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -23,6 +26,11 @@ def _require_admin(request: Request) -> None:
     from neural_brain.auth.rbac import require_role, Role
     if not require_role(_get_role(request), Role.ADMIN):
         raise HTTPException(status_code=403, detail="Admin role required")
+
+
+def _server_error(operation: str, exc: Exception) -> HTTPException:
+    logger.warning("privacy API %s failed: %s", operation, type(exc).__name__)
+    return HTTPException(status_code=500, detail=f"{operation} failed")
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -90,7 +98,7 @@ async def telemetry_stats(request: Request):
         from neural_brain.telemetry.telemetry_engine import get_telemetry_engine
         return {"ok": True, **get_telemetry_engine().get_stats()}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("telemetry stats", e)
 
 
 @telemetry_router.get("/errors")
@@ -99,7 +107,7 @@ async def top_errors(request: Request, limit: int = 10):
         from neural_brain.telemetry.telemetry_engine import get_telemetry_engine
         return {"ok": True, "errors": get_telemetry_engine().get_top_errors(limit)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("top errors", e)
 
 
 @telemetry_router.get("/summary")
@@ -108,7 +116,7 @@ async def event_summary(request: Request, window_hours: int = 24):
         from neural_brain.telemetry.telemetry_engine import get_telemetry_engine
         return {"ok": True, "summary": get_telemetry_engine().get_event_summary(window_hours)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("event summary", e)
 
 
 @telemetry_router.post("/bundle")
@@ -120,7 +128,7 @@ async def force_bundle(request: Request):
         bundle_id = get_telemetry_engine().force_bundle()
         return {"ok": True, "bundle_id": bundle_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("bundle creation", e)
 
 
 @telemetry_router.post("/rotate-id")
@@ -132,7 +140,7 @@ async def rotate_system_id(request: Request):
         new_id = get_telemetry_engine().rotate_system_id()
         return {"ok": True, "new_id_prefix": new_id[:8]}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("system id rotation", e)
 
 
 @telemetry_router.post("/feedback")
@@ -148,7 +156,7 @@ async def submit_feedback(req: FeedbackRequest, request: Request):
         )
         return {"ok": True, "feedback_id": feedback_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("feedback submission", e)
 
 
 @telemetry_router.get("/analyze")
@@ -159,7 +167,7 @@ async def run_local_analysis(request: Request):
         issues = get_local_analyzer().analyze()
         return {"ok": True, "issues": issues, "count": len(issues)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("local analysis", e)
 
 
 @telemetry_router.get("/analyze/last")
@@ -168,7 +176,7 @@ async def last_analysis(request: Request):
         from neural_brain.telemetry.local_analyzer import get_local_analyzer
         return {"ok": True, "issues": get_local_analyzer().get_last_analysis()}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("last analysis", e)
 
 
 # ── /api/updates/* ────────────────────────────────────────────────────────────
@@ -180,7 +188,7 @@ async def update_status(request: Request):
         from neural_brain.updates.update_manager import get_update_manager
         return {"ok": True, **get_update_manager().get_status()}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("update status", e)
 
 
 @updates_router.post("/check")
@@ -191,7 +199,7 @@ async def check_updates(request: Request):
         info = get_update_manager().check()
         return {"ok": True, "available": info}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("update check", e)
 
 
 @updates_router.post("/download")
@@ -204,7 +212,7 @@ async def download_update(request: Request, version: str | None = None):
             return {"ok": False, "detail": "No update available or download failed"}
         return {"ok": True, "path": str(path)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("update download", e)
 
 
 @updates_router.post("/apply")
@@ -220,4 +228,4 @@ async def apply_update(request: Request, dry_run: bool = False):
         result = get_update_manager().apply(packages[0], dry_run=dry_run)
         return {"ok": result.get("ok", False), **result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error("update apply", e)

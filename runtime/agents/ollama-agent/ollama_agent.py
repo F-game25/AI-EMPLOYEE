@@ -12,6 +12,7 @@ Configuration (in ~/.ai-employee/config/ollama-agent.env):
     OLLAMA_AGENT_HOST   — bind address     (default: 127.0.0.1)
     OLLAMA_AGENT_PORT   — port             (default: 8789)
 """
+import logging
 import os
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
 
+logger = logging.getLogger(__name__)
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
@@ -183,7 +185,8 @@ def ask(payload: dict) -> JSONResponse:
         }, status_code=503)
     except Exception as exc:
         _history.pop()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        logger.warning("ollama message failed: %s", type(exc).__name__)
+        return JSONResponse({"error": "Ollama request failed"}, status_code=500)
 
 
 @app.post("/api/clear")
