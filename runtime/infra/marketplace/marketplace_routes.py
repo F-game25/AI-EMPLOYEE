@@ -56,7 +56,7 @@ async def install_plugin(req: Request, file: UploadFile = File(...)):
     data = b"".join(chunks)
     result = get_registry().install_from_bytes(data, tid, requested_by=_user(req))
     if not result["ok"]:
-        logger.warning("plugin install failed: %s", result.get("error", "install_failed"))
+        logger.warning("plugin install failed")
         raise HTTPException(400, "install_failed")
     return result
 
@@ -126,7 +126,7 @@ async def validate_package(req: Request, file: UploadFile = File(...)):
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
         manifest_data = json.loads(zf.read("manifest.json"))
-    except Exception as e:
-        raise HTTPException(400, f"Invalid package: {e}")
+    except Exception:
+        raise HTTPException(400, "invalid_package")
     ok, errors = validate_manifest(manifest_data)
     return {"valid": ok, "errors": errors, "manifest": manifest_data if ok else None}
