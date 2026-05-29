@@ -135,7 +135,8 @@ class TestSignedEvents:
 class TestTenantSecurityEnforcer:
     """Test tenant isolation enforcement"""
 
-    def setup_method(self, tmp_path):
+    @pytest.fixture(autouse=True)
+    def setup_tenant_security(self, tmp_path):
         self.tmp_path = tmp_path
         self.tenant_manager = TenantManager(self.tmp_path)
         self.enforcer = TenantSecurityEnforcer(self.tenant_manager)

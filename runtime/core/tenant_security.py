@@ -18,7 +18,10 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
-from tenancy import TenantContext, TenantManager
+try:
+    from .tenancy import TenantContext, TenantManager
+except ImportError:  # pragma: no cover - compatibility for direct module imports
+    from tenancy import TenantContext, TenantManager
 
 logger = logging.getLogger(__name__)
 
