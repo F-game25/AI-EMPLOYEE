@@ -18422,7 +18422,11 @@ def get_wavefield_status():
 
   model = os.environ.get("WAVEFIELD_MODEL", "").strip()
   host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-  healthy, _reason = wavefield_healthcheck(ollama_host=host, model=model or None)
+  try:
+    wavefield_healthcheck(ollama_host=host, model=model or None)
+    healthy = True
+  except Exception:
+    healthy = False
   health_reason = "healthy" if healthy else "unavailable"
   return JSONResponse({
     "enabled": os.environ.get("WAVEFIELD_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"},

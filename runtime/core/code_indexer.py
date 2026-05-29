@@ -144,8 +144,8 @@ def index_project(root: str, project_id: str, *, max_files: int = _MAX_FILES) ->
     try:
         project_id = _safe_project_id(project_id)
         root_p = _safe_project_root()
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+    except ValueError:
+        return {"ok": False, "error": "invalid_index_request"}
     if not root_p.is_dir():
         return {"ok": False, "error": f"not a directory: {root}"}
     store = _store_for(project_id)
@@ -214,8 +214,8 @@ def query_context(project_id: str, query: str, *, k: int = 6) -> dict:
     try:
         store = _store_for(project_id)
         hits = store.search(query, top_k=k * 3, memory_type="code") or []
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": str(e), "results": []}
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": "context_failed", "results": []}
     results = []
     seen_paths = set()
     for h in hits:
@@ -238,12 +238,12 @@ def query_context(project_id: str, query: str, *, k: int = 6) -> dict:
 def get_summary(project_id: str) -> dict:
     try:
         project_id = _safe_project_id(project_id)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc), "project_id": project_id}
+    except ValueError:
+        return {"ok": False, "error": "invalid_project_id", "project_id": project_id}
     try:
         summary = _read_summaries().get(project_id)
         if not isinstance(summary, dict):
             return {"ok": False, "error": "not indexed yet", "project_id": project_id}
         return {"ok": True, **summary}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": str(e)}
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": "summary_failed"}

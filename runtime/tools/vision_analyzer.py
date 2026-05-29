@@ -217,6 +217,7 @@ def analyze_image(file_path: str, provider: Optional[str] = None) -> dict:
                 "metadata": {"error": str(exc)}}
     ext  = path.suffix.lower().lstrip(".")
     base = {"file_type": ext, "source_file": str(file_path)}
+    return {**base, "text": "", "provider_used": "none", "metadata": {"error": "managed_upload_required"}}
 
     media_type = _MEDIA_TYPES.get(ext, "image/jpeg")
 

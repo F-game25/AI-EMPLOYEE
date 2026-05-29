@@ -79,7 +79,8 @@ class ContextReq(BaseModel):
 def index(req: IndexReq):
     try:
         from core.code_indexer import index_project
-        return _public_index(index_project(req.root, req.project_id, max_files=req.max_files))
+        result = index_project(req.root, req.project_id, max_files=req.max_files)
+        return _public_index(result)
     except Exception:
         logger.warning("code-index index failed")
         raise HTTPException(status_code=500, detail="Code index failed")
@@ -89,7 +90,8 @@ def index(req: IndexReq):
 def context(req: ContextReq):
     try:
         from core.code_indexer import query_context
-        return _public_context(query_context(req.project_id, req.query, k=req.k))
+        result = query_context(req.project_id, req.query, k=req.k)
+        return _public_context(result)
     except Exception:
         logger.warning("code-index context failed")
         raise HTTPException(status_code=500, detail="Code context failed")
@@ -99,7 +101,8 @@ def context(req: ContextReq):
 def summary(project_id: str):
     try:
         from core.code_indexer import get_summary
-        return _public_index(get_summary(project_id))
+        result = get_summary(project_id)
+        return _public_index(result)
     except Exception:
         logger.warning("code-index summary failed")
         raise HTTPException(status_code=500, detail="Code summary failed")

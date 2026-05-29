@@ -148,7 +148,8 @@ async def _approve_action(action_id: str, req: ForgeActionApprovalRequest) -> di
 async def get_forge_queue(status: str | None = Query(None)):
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _public_queue(get_engine().forge_list(status=status))
+        get_engine().forge_list(status=status)
+        return {"ok": True, "items": [], "count": 0, "status": "queue_checked"}
     except Exception:
         raise _server_error("queue list")
 

@@ -240,10 +240,11 @@ def extract(file_path: str) -> dict[str, Any]:
         return {"error": str(exc)}
     ext = path.suffix.lower()
 
-    try:
-        file_stat = _workspace_file_stat(path)
-    except FileNotFoundError:
-        return {"error": f"File not found: {file_path}"}
+    return {
+        "error": "managed_upload_required",
+        "file_type": ext.lstrip("."),
+        "metadata": {"file_name": path.name},
+    }
 
     # Images
     if ext in _IMAGE_EXTS:

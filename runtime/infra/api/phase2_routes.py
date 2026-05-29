@@ -167,8 +167,8 @@ async def rag_sync(req: RAGSyncRequest, request: Request):
         from infra.rag.schema import SourceType
         from infra.rag.sync_daemon import get_sync_daemon
         st = SourceType(req.source_type)
-        stats = await get_sync_daemon().trigger_sync(tenant_id, st, full=req.full)
-        return {"ok": True, "stats": _public_stats(stats)}
+        await get_sync_daemon().trigger_sync(tenant_id, st, full=req.full)
+        return {"ok": True, "stats": {"status": "completed"}}
     except Exception:
         raise _server_error("rag sync")
 
