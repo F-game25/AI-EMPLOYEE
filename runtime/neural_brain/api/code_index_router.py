@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -27,17 +27,29 @@ class ContextReq(BaseModel):
 
 @router.post("/index")
 def index(req: IndexReq):
-    from core.code_indexer import index_project
-    return index_project(req.root, req.project_id, max_files=req.max_files)
+    try:
+        from core.code_indexer import index_project
+        return index_project(req.root, req.project_id, max_files=req.max_files)
+    except Exception:
+        logger.exception("code-index index failed")
+        raise HTTPException(status_code=500, detail="Code index failed")
 
 
 @router.post("/context")
 def context(req: ContextReq):
-    from core.code_indexer import query_context
-    return query_context(req.project_id, req.query, k=req.k)
+    try:
+        from core.code_indexer import query_context
+        return query_context(req.project_id, req.query, k=req.k)
+    except Exception:
+        logger.exception("code-index context failed")
+        raise HTTPException(status_code=500, detail="Code context failed")
 
 
 @router.get("/summary/{project_id}")
 def summary(project_id: str):
-    from core.code_indexer import get_summary
-    return get_summary(project_id)
+    try:
+        from core.code_indexer import get_summary
+        return get_summary(project_id)
+    except Exception:
+        logger.exception("code-index summary failed")
+        raise HTTPException(status_code=500, detail="Code summary failed")
