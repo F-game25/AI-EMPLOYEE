@@ -10,3 +10,4 @@ export {
   CyclesPane, RoadmapPane, SuggestionsPane,
   MemoryV3Pane, SafetyPane, LearningPane,
 } from './panels'
+export { TrainingPane } from './TrainingPane'

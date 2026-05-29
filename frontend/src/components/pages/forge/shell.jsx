@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { StatusPill, SectionLabel } from '../../nexus-ui'
 import api from '../../../api/client'
-import { DiffViewer, FileEditor, ChatPane, FileTree, ProjectPicker, ActionQueue, Terminal, PolicyPreview, ForgeSystemPanel, RunTimeline, UnderstandPane, AgenticPane, RunHistoryPane, RunMetricsPane, BacklogPane, DecomposerPane, SkillsLibraryPane, ModelRouterPane, CyclesPane, RoadmapPane, SuggestionsPane, MemoryV3Pane, SafetyPane, LearningPane } from './components'
+import { DiffViewer, FileEditor, ChatPane, FileTree, ProjectPicker, ActionQueue, Terminal, PolicyPreview, ForgeSystemPanel, RunTimeline, UnderstandPane, AgenticPane, RunHistoryPane, RunMetricsPane, BacklogPane, DecomposerPane, SkillsLibraryPane, ModelRouterPane, CyclesPane, RoadmapPane, SuggestionsPane, MemoryV3Pane, SafetyPane, LearningPane, TrainingPane } from './components'
 
 // ── SVG Icon system ─────────────────────────────────────────────────────────
 const ICONS = {
@@ -90,6 +90,7 @@ const FORGE_SECTIONS = [
   { id: 'history',     label: 'History',   icon: '⊚' },
   { id: 'safety',      label: 'Safety',    icon: '⊘' },
   { id: 'learning',    label: 'Learning',  icon: '⟁' },
+  { id: 'training',    label: 'Training',  icon: '⊹' },
 ]
 
 export function ForgeSystemsNav({ activeSection, onSection, suggestionCount, backlogCount }) {
@@ -131,6 +132,7 @@ export function ForgeSectionView({ section, project, activeRun, onApprove, onRej
     history:     <RunHistoryPane project={project} />,
     safety:      <SafetyPane project={project} activeRun={activeRun} onApprove={onApprove} onReject={onReject} onContinue={onContinue} />,
     learning:    <LearningPane project={project} />,
+    training:    <TrainingPane project={project} />,
   }
   const content = map[section]
   if (!content) return null

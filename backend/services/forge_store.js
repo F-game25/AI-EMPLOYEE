@@ -441,6 +441,85 @@ class ForgeStore {
         );
         CREATE INDEX IF NOT EXISTS idx_forge_learning_datasets_project
           ON forge_learning_datasets(project_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS forge_training_runs (
+          training_run_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          dataset_id TEXT,
+          model_type TEXT NOT NULL,
+          base_model TEXT,
+          training_method TEXT DEFAULT 'rule_augmented',
+          status TEXT DEFAULT 'CREATED',
+          config_json TEXT DEFAULT '{}',
+          metrics_json TEXT DEFAULT '{}',
+          logs_path TEXT,
+          output_path TEXT,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          finished_at TEXT,
+          error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_training_runs_project
+          ON forge_training_runs(project_id, status, created_at);
+
+        CREATE TABLE IF NOT EXISTS forge_model_versions (
+          model_version_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          training_run_id TEXT,
+          model_type TEXT NOT NULL,
+          base_model TEXT,
+          model_path TEXT,
+          adapter_path TEXT,
+          version_label TEXT,
+          status TEXT DEFAULT 'CANDIDATE',
+          eval_score REAL,
+          promoted INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_model_versions_project
+          ON forge_model_versions(project_id, model_type, status);
+
+        CREATE TABLE IF NOT EXISTS forge_model_evaluations (
+          evaluation_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          model_version_id TEXT,
+          eval_dataset_id TEXT,
+          eval_type TEXT,
+          score_json TEXT DEFAULT '{}',
+          passed INTEGER DEFAULT 0,
+          failure_reasons_json TEXT DEFAULT '[]',
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_model_evaluations_project
+          ON forge_model_evaluations(project_id, model_version_id);
+
+        CREATE TABLE IF NOT EXISTS forge_model_promotions (
+          promotion_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          model_version_id TEXT NOT NULL,
+          previous_model_version_id TEXT,
+          promoted_by TEXT,
+          reason TEXT,
+          created_at TEXT NOT NULL,
+          rolled_back_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_model_promotions_project
+          ON forge_model_promotions(project_id, model_version_id);
+
+        CREATE TABLE IF NOT EXISTS forge_training_dataset_checks (
+          check_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          dataset_id TEXT,
+          result TEXT,
+          issues_json TEXT DEFAULT '[]',
+          record_count INTEGER DEFAULT 0,
+          approved_count INTEGER DEFAULT 0,
+          rejected_count INTEGER DEFAULT 0,
+          secret_scan_passed INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_dataset_checks_project
+          ON forge_training_dataset_checks(project_id, dataset_id);
       `)
       this.backend = 'sqlite'
       this.lastError = null
@@ -1322,6 +1401,264 @@ class ForgeStore {
         datasets: count('SELECT COUNT(*) as cnt FROM forge_learning_datasets WHERE project_id = ?', projectId),
       }
     } catch (err) { this._degrade(err); return { records: 0, lessons: 0, preference_pairs: 0, eval_cases: 0, skill_proposals: 0, datasets: 0, pending_proposals: 0 } }
+  }
+
+  // ── Phase 8 — Local Model Training ────────────────────────────────────────
+
+  upsertTrainingRun(tr) {
+    this._ensureDb()
+    if (!this._db) return tr
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_training_runs
+          (training_run_id, project_id, dataset_id, model_type, base_model, training_method,
+           status, config_json, metrics_json, logs_path, output_path,
+           created_at, started_at, finished_at, error)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        tr.training_run_id, tr.project_id, tr.dataset_id || null,
+        tr.model_type, tr.base_model || null, tr.training_method || 'rule_augmented',
+        tr.status || 'CREATED', JSON.stringify(tr.config || {}), JSON.stringify(tr.metrics || {}),
+        tr.logs_path || null, tr.output_path || null,
+        tr.created_at || nowIso(), tr.started_at || null, tr.finished_at || null, tr.error || null,
+      )
+    } catch (err) { this._degrade(err) }
+    return tr
+  }
+
+  findTrainingRun(id) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare('SELECT * FROM forge_training_runs WHERE training_run_id = ?').get(id)
+      return r ? this._parseTrainingRow(r) : null
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  _parseTrainingRow(r) {
+    return {
+      ...r,
+      config: (() => { try { return JSON.parse(r.config_json) } catch { return {} } })(),
+      metrics: (() => { try { return JSON.parse(r.metrics_json) } catch { return {} } })(),
+    }
+  }
+
+  getTrainingRuns(projectId, limit = 100) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      return this._db.prepare(
+        'SELECT * FROM forge_training_runs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?'
+      ).all(projectId, limit).map(r => this._parseTrainingRow(r))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  updateTrainingRun(id, patch) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const existing = this.findTrainingRun(id)
+      if (!existing) return null
+      const merged = { ...existing, ...patch }
+      if (patch.config) merged.config = patch.config
+      if (patch.metrics) merged.metrics = patch.metrics
+      return this.upsertTrainingRun(merged)
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  upsertModelVersion(mv) {
+    this._ensureDb()
+    if (!this._db) return mv
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_model_versions
+          (model_version_id, project_id, training_run_id, model_type, base_model,
+           model_path, adapter_path, version_label, status, eval_score, promoted, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        mv.model_version_id, mv.project_id, mv.training_run_id || null,
+        mv.model_type, mv.base_model || null, mv.model_path || null, mv.adapter_path || null,
+        mv.version_label || null, mv.status || 'CANDIDATE',
+        mv.eval_score ?? null, mv.promoted ? 1 : 0, mv.created_at || nowIso(),
+      )
+    } catch (err) { this._degrade(err) }
+    return mv
+  }
+
+  findModelVersion(id) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare('SELECT * FROM forge_model_versions WHERE model_version_id = ?').get(id)
+      return r ? { ...r, promoted: !!r.promoted } : null
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  getModelVersions(projectId, opts = {}) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      let q = 'SELECT * FROM forge_model_versions WHERE project_id = ?'
+      const args = [projectId]
+      if (opts.model_type) { q += ' AND model_type = ?'; args.push(opts.model_type) }
+      if (opts.status) { q += ' AND status = ?'; args.push(opts.status) }
+      q += ' ORDER BY created_at DESC LIMIT ?'
+      args.push(opts.limit || 100)
+      return this._db.prepare(q).all(...args).map(r => ({ ...r, promoted: !!r.promoted }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  // Returns the currently ACTIVE helper model for a given type, if any
+  getActiveModelVersion(projectId, modelType) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare(
+        "SELECT * FROM forge_model_versions WHERE project_id = ? AND model_type = ? AND status = 'ACTIVE' ORDER BY created_at DESC LIMIT 1"
+      ).get(projectId, modelType)
+      return r ? { ...r, promoted: !!r.promoted } : null
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  updateModelVersion(id, patch) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const existing = this.findModelVersion(id)
+      if (!existing) return null
+      return this.upsertModelVersion({ ...existing, ...patch, model_version_id: id })
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  upsertModelEvaluation(ev) {
+    this._ensureDb()
+    if (!this._db) return ev
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_model_evaluations
+          (evaluation_id, project_id, model_version_id, eval_dataset_id, eval_type,
+           score_json, passed, failure_reasons_json, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?)
+      `).run(
+        ev.evaluation_id, ev.project_id, ev.model_version_id || null,
+        ev.eval_dataset_id || null, ev.eval_type || null,
+        JSON.stringify(ev.score || {}), ev.passed ? 1 : 0,
+        JSON.stringify(ev.failure_reasons || []), ev.created_at || nowIso(),
+      )
+    } catch (err) { this._degrade(err) }
+    return ev
+  }
+
+  getModelEvaluations(projectId, modelVersionId = null) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      const q = modelVersionId
+        ? 'SELECT * FROM forge_model_evaluations WHERE project_id = ? AND model_version_id = ? ORDER BY created_at DESC'
+        : 'SELECT * FROM forge_model_evaluations WHERE project_id = ? ORDER BY created_at DESC LIMIT 100'
+      const args = modelVersionId ? [projectId, modelVersionId] : [projectId]
+      return this._db.prepare(q).all(...args).map(r => ({
+        ...r,
+        score: (() => { try { return JSON.parse(r.score_json) } catch { return {} } })(),
+        failure_reasons: (() => { try { return JSON.parse(r.failure_reasons_json) } catch { return [] } })(),
+        passed: !!r.passed,
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  upsertModelPromotion(p) {
+    this._ensureDb()
+    if (!this._db) return p
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_model_promotions
+          (promotion_id, project_id, model_version_id, previous_model_version_id,
+           promoted_by, reason, created_at, rolled_back_at)
+        VALUES (?,?,?,?,?,?,?,?)
+      `).run(
+        p.promotion_id, p.project_id, p.model_version_id, p.previous_model_version_id || null,
+        p.promoted_by || null, p.reason || null, p.created_at || nowIso(), p.rolled_back_at || null,
+      )
+    } catch (err) { this._degrade(err) }
+    return p
+  }
+
+  getLatestPromotion(projectId, modelVersionId) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      return this._db.prepare(
+        'SELECT * FROM forge_model_promotions WHERE project_id = ? AND model_version_id = ? ORDER BY created_at DESC LIMIT 1'
+      ).get(projectId, modelVersionId) || null
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  updateModelPromotion(id, patch) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare('SELECT * FROM forge_model_promotions WHERE promotion_id = ?').get(id)
+      if (!r) return null
+      if (patch.rolled_back_at !== undefined) {
+        this._db.prepare('UPDATE forge_model_promotions SET rolled_back_at = ? WHERE promotion_id = ?').run(patch.rolled_back_at, id)
+      }
+      return this._db.prepare('SELECT * FROM forge_model_promotions WHERE promotion_id = ?').get(id)
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  upsertDatasetCheck(c) {
+    this._ensureDb()
+    if (!this._db) return c
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_training_dataset_checks
+          (check_id, project_id, dataset_id, result, issues_json, record_count,
+           approved_count, rejected_count, secret_scan_passed, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        c.check_id, c.project_id, c.dataset_id || null, c.result || 'unknown',
+        JSON.stringify(c.issues || []), c.record_count || 0,
+        c.approved_count || 0, c.rejected_count || 0,
+        c.secret_scan_passed ? 1 : 0, c.created_at || nowIso(),
+      )
+    } catch (err) { this._degrade(err) }
+    return c
+  }
+
+  getDatasetChecks(projectId, datasetId = null) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      const q = datasetId
+        ? 'SELECT * FROM forge_training_dataset_checks WHERE project_id = ? AND dataset_id = ? ORDER BY created_at DESC'
+        : 'SELECT * FROM forge_training_dataset_checks WHERE project_id = ? ORDER BY created_at DESC LIMIT 50'
+      const args = datasetId ? [projectId, datasetId] : [projectId]
+      return this._db.prepare(q).all(...args).map(r => ({
+        ...r,
+        issues: (() => { try { return JSON.parse(r.issues_json) } catch { return [] } })(),
+        secret_scan_passed: !!r.secret_scan_passed,
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  getTrainingSummary(projectId) {
+    this._ensureDb()
+    const empty = { datasets: 0, training_runs: 0, candidates: 0, active_helpers: 0, last_eval_score: null, failed_jobs: 0 }
+    if (!this._db) return empty
+    try {
+      const count = (q, ...args) => this._db.prepare(q).get(...args)?.cnt || 0
+      const lastEval = this._db.prepare(
+        'SELECT eval_score FROM forge_model_versions WHERE project_id = ? AND eval_score IS NOT NULL ORDER BY created_at DESC LIMIT 1'
+      ).get(projectId)
+      return {
+        datasets: count('SELECT COUNT(*) as cnt FROM forge_learning_datasets WHERE project_id = ?', projectId),
+        training_runs: count('SELECT COUNT(*) as cnt FROM forge_training_runs WHERE project_id = ?', projectId),
+        candidates: count("SELECT COUNT(*) as cnt FROM forge_model_versions WHERE project_id = ? AND status = 'CANDIDATE'", projectId),
+        active_helpers: count("SELECT COUNT(*) as cnt FROM forge_model_versions WHERE project_id = ? AND status = 'ACTIVE'", projectId),
+        last_eval_score: lastEval?.eval_score ?? null,
+        failed_jobs: count("SELECT COUNT(*) as cnt FROM forge_training_runs WHERE project_id = ? AND status = 'FAILED'", projectId),
+      }
+    } catch (err) { this._degrade(err); return empty }
   }
 
   _degrade(err) {

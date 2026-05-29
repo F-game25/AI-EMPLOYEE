@@ -207,6 +207,23 @@ const api = {
     getRunDistillation:  (rid)       => api.get(`/api/forge/runs/${rid}/distillation`),
     distillRun:          (rid)       => api.post(`/api/forge/runs/${rid}/distill`, {}),
 
+    // ── Phase 8 — Local Model Training ──────────────────────────────
+    training: {
+      getOverview:        (pid)       => api.get(`/api/forge/projects/${pid}/training`),
+      getSummary:         (pid)       => api.get(`/api/forge/projects/${pid}/training-summary`),
+      getRuns:            (pid)       => api.get(`/api/forge/projects/${pid}/training-runs`),
+      createRun:          (pid, body) => api.post(`/api/forge/projects/${pid}/training-runs`, body),
+      getRun:             (trid)      => api.get(`/api/forge/training-runs/${trid}`),
+      validateRun:        (trid, body)=> api.post(`/api/forge/training-runs/${trid}/validate`, body || {}),
+      startRun:           (trid, body)=> api.post(`/api/forge/training-runs/${trid}/start`, body || {}),
+      evaluateRun:        (trid)      => api.post(`/api/forge/training-runs/${trid}/evaluate`, {}),
+      getModelVersions:   (pid, opts) => api.get(`/api/forge/projects/${pid}/model-versions${opts?.model_type ? `?model_type=${opts.model_type}` : ''}`),
+      promoteVersion:     (id, body)  => api.post(`/api/forge/model-versions/${id}/promote`, body || {}),
+      rejectVersion:      (id)        => api.post(`/api/forge/model-versions/${id}/reject`, {}),
+      rollbackVersion:    (id)        => api.post(`/api/forge/model-versions/${id}/rollback`, {}),
+      helperAdvise:       (pid, body) => api.post(`/api/forge/projects/${pid}/helper-advise`, body),
+    },
+
     // ── Phase 5 — Metrics / Replay / Patches / Approvals ────────────
     getForgeMetrics:     (pid)       => api.get(`/api/forge/projects/${pid}/forge-metrics`),
     getRunReplay:        (rid)       => api.get(`/api/forge/runs/${rid}/replay`),

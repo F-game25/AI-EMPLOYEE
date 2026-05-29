@@ -21,6 +21,7 @@ const { getAscendForgeEngine, DEFAULT_APPROVAL_POLICY } = require('../ascendforg
 const { getSandboxExecutor } = require('../infra/sandbox/executor')
 const { ForgeStore } = require('../services/forge_store')
 const forgeLearning = require('../services/forge_learning')
+const forgeTraining = require('../services/forge_training')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 const STATE_DIR = path.resolve(process.env.STATE_DIR || process.env.AI_EMPLOYEE_STATE_DIR || path.join(os.homedir(), '.ai-employee', 'state'))
@@ -3551,6 +3552,38 @@ Output a JSON array:
     return candidates.sort((a, b) => _scoreModel(b, ctx) - _scoreModel(a, ctx))[0]
   }
 
+  // Phase 8: advisory inference from a promoted local helper model.
+  // ADVISORY ONLY — the caller's existing rules/gates remain authoritative.
+  // Returns null if no ACTIVE helper of that type exists or inference fails.
+  async function helperModelAdvise(projectId, modelType, featureInput) {
+    try {
+      const active = forgeRunStore.getActiveModelVersion(projectId, modelType)
+      if (!active || !active.model_path) return null
+      // model_path was written by our own trainer under FORGE_HOME — re-check boundary
+      try { forgeTraining.assertInsideForgeHome(active.model_path, FORGE_HOME) } catch { return null }
+      if (!fs.existsSync(active.model_path)) return null
+      const result = await forgeTraining.runPythonTrainer(
+        { operation: 'predict', model_path: active.model_path, input: featureInput },
+        15000,
+      )
+      if (!result.ok) return null
+      return { advisory: true, model_version_id: active.model_version_id, model_type: modelType, prediction: result.prediction, confidence: result.confidence, ranked: result.ranked }
+    } catch { return null }
+  }
+
+  // Advisory endpoint — surfaces a helper-model suggestion without enforcing it.
+  router.post('/projects/:id/helper-advise', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const { model_type, input } = req.body || {}
+    if (!model_type || !forgeTraining.MODEL_TYPES[model_type]) {
+      return res.status(400).json({ ok: false, error: 'valid model_type required' })
+    }
+    const advice = await helperModelAdvise(project.id, model_type, input || {})
+    if (!advice) return res.json({ ok: true, advisory: null, note: 'no active helper model or inference unavailable — existing rules apply' })
+    res.json({ ok: true, advisory: advice, note: 'ADVISORY ONLY — safety gates and rules remain authoritative' })
+  })
+
   router.get('/models', requireAuth, (_req, res) => {
     res.json({ ok: true, models: forgeRunStore.getModels() })
   })
@@ -4071,6 +4104,320 @@ Return JSON:
     fs.writeFileSync(skillsLibPath, JSON.stringify(toWrite, null, 2), { mode: 0o644 })
     return { applied: true, skill_id: skillId, backup_path: backupPath }
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 8 — LOCAL MODEL TRAINING PIPELINE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // GET /api/forge/projects/:id/training — summary card + recent runs
+  router.get('/projects/:id/training', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({
+      ok: true,
+      summary: forgeRunStore.getTrainingSummary(project.id),
+      datasets: forgeRunStore.getLearningDatasets(project.id),
+      model_types: Object.entries(forgeTraining.MODEL_TYPES).map(([id, s]) => ({ id, label: s.label, min_preferred: s.min_preferred, warn_below: s.warn_below })),
+      training_methods: forgeTraining.TRAINING_METHODS,
+    })
+  })
+
+  // GET /api/forge/projects/:id/training-summary
+  router.get('/projects/:id/training-summary', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, summary: forgeRunStore.getTrainingSummary(project.id) })
+  })
+
+  // GET /api/forge/projects/:id/training-runs — list training runs
+  router.get('/projects/:id/training-runs', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, training_runs: forgeRunStore.getTrainingRuns(project.id) })
+  })
+
+  // POST /api/forge/projects/:id/training-runs — create a training run record
+  router.post('/projects/:id/training-runs', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const { dataset_id, model_type, base_model, training_method } = req.body || {}
+    if (!model_type || !forgeTraining.MODEL_TYPES[model_type]) {
+      return res.status(400).json({ ok: false, error: `model_type must be one of: ${Object.keys(forgeTraining.MODEL_TYPES).join(', ')}` })
+    }
+    const method = forgeTraining.TRAINING_METHODS.includes(training_method) ? training_method : 'local_classifier'
+    if (dataset_id) {
+      const ds = forgeRunStore.getLearningDatasets(project.id).find(d => d.dataset_id === dataset_id)
+      if (!ds) return res.status(404).json({ ok: false, error: 'dataset not found for this project' })
+    }
+    const tr = forgeRunStore.upsertTrainingRun({
+      training_run_id: `trn-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      project_id: project.id,
+      dataset_id: dataset_id || null,
+      model_type,
+      base_model: base_model || null,
+      training_method: method,
+      status: 'CREATED',
+      config: { created_via: 'api' },
+      created_at: nowIso(),
+    })
+    appendAudit('training_run_created', { project_id: project.id, training_run_id: tr.training_run_id, model_type, method })
+    res.json({ ok: true, training_run: forgeRunStore.findTrainingRun(tr.training_run_id) })
+  })
+
+  // GET /api/forge/training-runs/:id
+  router.get('/training-runs/:id', requireAuth, (req, res) => {
+    const tr = forgeRunStore.findTrainingRun(req.params.id)
+    if (!tr) return res.status(404).json({ ok: false, error: 'training run not found' })
+    if (!findProject(tr.project_id)) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, training_run: tr })
+  })
+
+  // POST /api/forge/training-runs/:id/validate — validate the dataset
+  router.post('/training-runs/:id/validate', requireAuth, (req, res) => {
+    const tr = forgeRunStore.findTrainingRun(req.params.id)
+    if (!tr) return res.status(404).json({ ok: false, error: 'training run not found' })
+    const project = findProject(tr.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    if (!tr.dataset_id) return res.status(400).json({ ok: false, error: 'training run has no dataset_id' })
+    const dataset = forgeRunStore.getLearningDatasets(project.id).find(d => d.dataset_id === tr.dataset_id)
+    if (!dataset) return res.status(404).json({ ok: false, error: 'dataset not found' })
+
+    forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'VALIDATING_DATASET' })
+    let validation
+    try {
+      validation = forgeTraining.validateTrainingDataset(dataset, tr.model_type, {
+        min_confidence: req.body?.min_confidence || 'low',
+        only_human_approved: !!req.body?.only_human_approved,
+      }, FORGE_HOME)
+    } catch (err) {
+      forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'FAILED', error: err.message })
+      return res.status(500).json({ ok: false, error: err.message })
+    }
+
+    const check = forgeRunStore.upsertDatasetCheck({
+      check_id: `chk-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+      project_id: project.id,
+      dataset_id: tr.dataset_id,
+      result: validation.result,
+      issues: validation.issues,
+      record_count: validation.record_count,
+      approved_count: validation.approved_count,
+      rejected_count: validation.rejected_count,
+      secret_scan_passed: validation.secret_scan_passed,
+      created_at: nowIso(),
+    })
+    const newStatus = validation.ok ? 'READY' : (validation.result === 'too_small' ? 'CREATED' : 'FAILED')
+    forgeRunStore.updateTrainingRun(tr.training_run_id, {
+      status: newStatus,
+      error: validation.ok ? null : validation.issues.join('; '),
+      config: { ...tr.config, last_validation: { result: validation.result, approved_count: validation.approved_count, class_distribution: validation.class_distribution } },
+    })
+    appendAudit('training_dataset_validated', { project_id: project.id, training_run_id: tr.training_run_id, result: validation.result, secret_scan_passed: validation.secret_scan_passed })
+    // Never return raw examples — only counts + issues
+    res.json({ ok: validation.ok, validation: { result: validation.result, issues: validation.issues, record_count: validation.record_count, approved_count: validation.approved_count, rejected_count: validation.rejected_count, secret_scan_passed: validation.secret_scan_passed, class_distribution: validation.class_distribution }, check_id: check.check_id, status: newStatus })
+  })
+
+  // POST /api/forge/training-runs/:id/start — run local training
+  router.post('/training-runs/:id/start', requireAuth, async (req, res) => {
+    const tr = forgeRunStore.findTrainingRun(req.params.id)
+    if (!tr) return res.status(404).json({ ok: false, error: 'training run not found' })
+    const project = findProject(tr.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const override = !!req.body?.override_too_small
+
+    const dataset = forgeRunStore.getLearningDatasets(project.id).find(d => d.dataset_id === tr.dataset_id)
+    if (!dataset) return res.status(404).json({ ok: false, error: 'dataset not found' })
+
+    // Re-validate at training time (defense in depth)
+    let validation
+    try {
+      validation = forgeTraining.validateTrainingDataset(dataset, tr.model_type, { min_confidence: req.body?.min_confidence || 'low', only_human_approved: !!req.body?.only_human_approved }, FORGE_HOME)
+    } catch (err) {
+      forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'FAILED', error: err.message })
+      return res.status(500).json({ ok: false, error: err.message })
+    }
+    if (!validation.secret_scan_passed) {
+      forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'FAILED', error: 'secret scan failed — training blocked' })
+      return res.status(400).json({ ok: false, error: 'secret scan failed — training blocked' })
+    }
+    if (validation.result === 'failed') {
+      forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'FAILED', error: validation.issues.join('; ') })
+      return res.status(400).json({ ok: false, error: 'dataset validation failed', issues: validation.issues })
+    }
+    if (validation.result === 'too_small' && !override) {
+      return res.status(400).json({ ok: false, error: 'dataset too small for real training — pass override_too_small:true for a dry run', issues: validation.issues })
+    }
+
+    // LoRA path requires explicit deps — report NEEDS_SETUP cleanly
+    if (tr.training_method === 'lora_adapter') {
+      forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'FAILED', error: 'LoRA adapter training requires local training dependencies (peft, transformers, torch). Install them and enable explicitly.', config: { ...tr.config, needs_setup: true } })
+      return res.json({ ok: false, code: 'NEEDS_SETUP', error: 'LoRA adapter training needs setup: install peft/transformers/torch, then enable.', status: 'FAILED' })
+    }
+
+    const dir = forgeTraining.trainingDir(FORGE_HOME, project.id, tr.training_run_id)
+    let prepared
+    try {
+      prepared = forgeTraining.prepareTrainingData(validation.examples, dir)
+    } catch (err) {
+      forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'FAILED', error: err.message })
+      return res.status(500).json({ ok: false, error: err.message })
+    }
+    fs.writeFileSync(path.join(dir, 'validation_report.json'), JSON.stringify({ result: validation.result, issues: validation.issues, class_distribution: validation.class_distribution, approved_count: validation.approved_count }, null, 2), { mode: 0o600 })
+
+    forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'TRAINING', started_at: nowIso(), output_path: dir, logs_path: path.join(dir, 'training.log') })
+
+    // rule_augmented: no ML — records the baseline (rules + memory)
+    if (tr.training_method === 'rule_augmented') {
+      const baselineMetrics = { method: 'rule_augmented', train_records: prepared.train_count, note: 'Rule-augmented baseline — uses distilled rules + memory; no ML weights.' }
+      forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'COMPLETED', finished_at: nowIso(), metrics: baselineMetrics })
+      const mv = forgeRunStore.upsertModelVersion({
+        model_version_id: `mv-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+        project_id: project.id, training_run_id: tr.training_run_id, model_type: tr.model_type,
+        base_model: 'rule_baseline', model_path: null, version_label: `${tr.model_type}-baseline`,
+        status: 'CANDIDATE', created_at: nowIso(),
+      })
+      appendAudit('training_completed', { project_id: project.id, training_run_id: tr.training_run_id, method: 'rule_augmented', model_version_id: mv.model_version_id })
+      return res.json({ ok: true, status: 'COMPLETED', method: 'rule_augmented', model_version_id: mv.model_version_id })
+    }
+
+    // local_classifier: invoke numpy trainer
+    const modelPath = path.join(dir, 'model.json')
+    const result = await forgeTraining.runPythonTrainer({ operation: 'train', train_path: prepared.trainPath, model_path: modelPath, epochs: 300 })
+    if (!result.ok) {
+      const code = result.code === 'NEEDS_SETUP' ? 'NEEDS_SETUP' : 'FAILED'
+      forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'FAILED', error: result.error, finished_at: nowIso(), config: { ...tr.config, needs_setup: code === 'NEEDS_SETUP' } })
+      appendAudit('training_failed', { project_id: project.id, training_run_id: tr.training_run_id, error: result.error, code })
+      return res.json({ ok: false, code, error: result.error, status: 'FAILED' })
+    }
+    forgeRunStore.updateTrainingRun(tr.training_run_id, {
+      status: 'COMPLETED', finished_at: nowIso(),
+      metrics: { method: 'local_classifier', train_accuracy: result.train_accuracy, classes: result.classes, train_records: result.train_records },
+    })
+    const mv = forgeRunStore.upsertModelVersion({
+      model_version_id: `mv-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      project_id: project.id, training_run_id: tr.training_run_id, model_type: tr.model_type,
+      base_model: 'numpy_logreg_v1', model_path: modelPath, version_label: `${tr.model_type}-${new Date().toISOString().slice(0, 10)}`,
+      status: 'CANDIDATE', created_at: nowIso(),
+    })
+    appendAudit('training_completed', { project_id: project.id, training_run_id: tr.training_run_id, method: 'local_classifier', train_accuracy: result.train_accuracy, model_version_id: mv.model_version_id })
+    res.json({ ok: true, status: 'COMPLETED', method: 'local_classifier', train_accuracy: result.train_accuracy, model_version_id: mv.model_version_id })
+  })
+
+  // POST /api/forge/training-runs/:id/evaluate — run evaluation gate
+  router.post('/training-runs/:id/evaluate', requireAuth, async (req, res) => {
+    const tr = forgeRunStore.findTrainingRun(req.params.id)
+    if (!tr) return res.status(404).json({ ok: false, error: 'training run not found' })
+    const project = findProject(tr.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const mv = forgeRunStore.getModelVersions(project.id).find(m => m.training_run_id === tr.training_run_id)
+    if (!mv) return res.status(404).json({ ok: false, error: 'no model version for this training run' })
+
+    forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'EVALUATING' })
+
+    let metrics
+    if (mv.base_model === 'rule_baseline' || !mv.model_path) {
+      metrics = { accuracy: 0, note: 'Rule baseline — establishes the bar candidates must beat.', baseline: true }
+    } else {
+      const evalPath = path.join(path.dirname(mv.model_path), 'prepared_eval.jsonl')
+      const result = await forgeTraining.runPythonTrainer({ operation: 'evaluate', model_path: mv.model_path, eval_path: evalPath })
+      if (!result.ok) {
+        forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'FAILED', error: result.error })
+        return res.json({ ok: false, error: result.error, status: 'FAILED' })
+      }
+      metrics = result.metrics
+    }
+
+    const gate = forgeTraining.applyEvalGate(tr.model_type, metrics, 0)
+    const ev = forgeRunStore.upsertModelEvaluation({
+      evaluation_id: `evl-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+      project_id: project.id, model_version_id: mv.model_version_id,
+      eval_dataset_id: tr.dataset_id, eval_type: tr.model_type,
+      score: metrics, passed: gate.passed && !metrics.baseline,
+      failure_reasons: metrics.baseline ? ['baseline is not a promotable model'] : gate.failure_reasons,
+      created_at: nowIso(),
+    })
+    forgeRunStore.updateModelVersion(mv.model_version_id, { eval_score: metrics.accuracy ?? null })
+    forgeRunStore.updateTrainingRun(tr.training_run_id, { status: 'COMPLETED', metrics: { ...tr.metrics, eval: metrics, eval_passed: ev.passed } })
+    appendAudit('model_evaluated', { project_id: project.id, model_version_id: mv.model_version_id, passed: ev.passed, accuracy: metrics.accuracy })
+    res.json({ ok: true, passed: ev.passed, metrics, failure_reasons: ev.failure_reasons, model_version_id: mv.model_version_id })
+  })
+
+  // GET /api/forge/projects/:id/model-versions
+  router.get('/projects/:id/model-versions', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const opts = { model_type: req.query.model_type || undefined, status: req.query.status || undefined }
+    const versions = forgeRunStore.getModelVersions(project.id, opts).map(v => ({
+      ...v,
+      evaluations: forgeRunStore.getModelEvaluations(project.id, v.model_version_id),
+    }))
+    res.json({ ok: true, model_versions: versions })
+  })
+
+  // POST /api/forge/model-versions/:id/promote — requires passed eval + user approval
+  router.post('/model-versions/:id/promote', requireAuth, (req, res) => {
+    const mv = forgeRunStore.findModelVersion(req.params.id)
+    if (!mv) return res.status(404).json({ ok: false, error: 'model version not found' })
+    const project = findProject(mv.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    if (mv.status === 'ACTIVE') return res.status(400).json({ ok: false, error: 'model is already active' })
+    if (mv.base_model === 'rule_baseline') return res.status(400).json({ ok: false, error: 'rule baseline cannot be promoted as a helper model' })
+
+    const evals = forgeRunStore.getModelEvaluations(project.id, mv.model_version_id)
+    if (!evals.some(e => e.passed)) {
+      return res.status(400).json({ ok: false, error: 'promotion blocked: no passed evaluation. Run evaluate first.' })
+    }
+
+    const previousActive = forgeRunStore.getActiveModelVersion(project.id, mv.model_type)
+    if (previousActive) {
+      forgeRunStore.updateModelVersion(previousActive.model_version_id, { status: 'APPROVED' })
+    }
+    forgeRunStore.updateModelVersion(mv.model_version_id, { status: 'ACTIVE', promoted: 1 })
+    const promotion = forgeRunStore.upsertModelPromotion({
+      promotion_id: `prm-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+      project_id: project.id, model_version_id: mv.model_version_id,
+      previous_model_version_id: previousActive?.model_version_id || null,
+      promoted_by: req.user?.username || req.user?.sub || 'operator',
+      reason: String(req.body?.reason || 'manual promotion').slice(0, 300),
+      created_at: nowIso(),
+    })
+    appendAudit('model_promoted', { project_id: project.id, model_version_id: mv.model_version_id, model_type: mv.model_type, previous: previousActive?.model_version_id })
+    res.json({ ok: true, model_version: forgeRunStore.findModelVersion(mv.model_version_id), promotion_id: promotion.promotion_id })
+  })
+
+  // POST /api/forge/model-versions/:id/reject
+  router.post('/model-versions/:id/reject', requireAuth, (req, res) => {
+    const mv = forgeRunStore.findModelVersion(req.params.id)
+    if (!mv) return res.status(404).json({ ok: false, error: 'model version not found' })
+    if (!findProject(mv.project_id)) return res.status(404).json({ ok: false, error: 'project not found' })
+    if (mv.status === 'ACTIVE') return res.status(400).json({ ok: false, error: 'cannot reject an active model — roll it back first' })
+    const updated = forgeRunStore.updateModelVersion(mv.model_version_id, { status: 'REJECTED' })
+    appendAudit('model_rejected', { project_id: mv.project_id, model_version_id: mv.model_version_id })
+    res.json({ ok: true, model_version: updated })
+  })
+
+  // POST /api/forge/model-versions/:id/rollback — restore previous active model
+  router.post('/model-versions/:id/rollback', requireAuth, (req, res) => {
+    const mv = forgeRunStore.findModelVersion(req.params.id)
+    if (!mv) return res.status(404).json({ ok: false, error: 'model version not found' })
+    const project = findProject(mv.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    if (mv.status !== 'ACTIVE') return res.status(400).json({ ok: false, error: 'only an ACTIVE model can be rolled back' })
+
+    const promotion = forgeRunStore.getLatestPromotion(project.id, mv.model_version_id)
+    forgeRunStore.updateModelVersion(mv.model_version_id, { status: 'ROLLED_BACK', promoted: 0 })
+    let restored = null
+    if (promotion?.previous_model_version_id) {
+      const prev = forgeRunStore.findModelVersion(promotion.previous_model_version_id)
+      if (prev) {
+        forgeRunStore.updateModelVersion(prev.model_version_id, { status: 'ACTIVE', promoted: 1 })
+        restored = prev.model_version_id
+      }
+    }
+    if (promotion) forgeRunStore.updateModelPromotion(promotion.promotion_id, { rolled_back_at: nowIso() })
+    appendAudit('model_rolled_back', { project_id: project.id, model_version_id: mv.model_version_id, restored_previous: restored })
+    res.json({ ok: true, rolled_back: mv.model_version_id, restored_previous: restored })
+  })
 
   return router
 }
