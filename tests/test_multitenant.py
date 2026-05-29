@@ -46,11 +46,15 @@ class TestTenantCreation:
         assert config_dir.exists()
 
     def test_nonexistent_tenant_error(self, tmp_path):
-        """Accessing non-existent tenant should raise error."""
+        """Accessing non-existent tenant config dir should raise error.
+
+        Note: get_tenant_state_dir auto-provisions in local mode, so we test
+        get_tenant_config_dir which does raise for unknown tenants.
+        """
         manager = TenantManager(tmp_path)
 
         with pytest.raises(ValueError, match="Tenant .* not found"):
-            manager.get_tenant_state_dir("nonexistent")
+            manager.get_tenant_config_dir("nonexistent")
 
 
 class TestTenantContext:

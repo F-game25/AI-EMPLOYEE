@@ -47,7 +47,8 @@ const MemoryPage        = lazy(() => import('./pages/MemoryPage'))
 const KnowledgePage     = lazy(() => import('./pages/KnowledgePage'))
 const ResearchPage      = lazy(() => import('./pages/ResearchPage'))
 const CognitionPage     = lazy(() => import('./pages/CognitionPage'))
-const ReconPage         = lazy(() => import('./pages/ReconPage'))
+const ReconPage             = lazy(() => import('./pages/ReconPage'))
+const PromptInspectorPage   = lazy(() => import('./pages/PromptInspectorPage'))
 import { API_URL } from '../config/api'
 import TopBar from './dashboard/TopBar'
 import BottomDrawer from './dock/BottomDrawer'
@@ -90,6 +91,7 @@ const PAGES = {
   'trends':         IntelligencePage,
   'research':       ResearchPage,
   'recon':          ReconPage,
+  'prompt-inspector': PromptInspectorPage,
   // SECURITY — panel switches internally on activeSection
   'policies':       SecurityPanel,
   'security':       SecurityPanel,

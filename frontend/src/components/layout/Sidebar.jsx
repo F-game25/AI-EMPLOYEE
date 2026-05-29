@@ -177,6 +177,11 @@ const NAV_GROUPS = [
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 14h12V4H2v10z"/><path d="M5 2h6M5 6h2M5 9h6M5 12h2"/></svg>,
       },
       {
+        id: 'prompt-inspector',
+        label: 'Prompt Inspector',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h12v10H2z"/><path d="M5 7h6M5 10h3"/><circle cx="12" cy="4" r="1.5" fill="currentColor"/></svg>,
+      },
+      {
         id: 'approvals',
         label: 'Approvals',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.5l5 2v3.5c0 3.4-2.2 5.8-5 7.5-2.8-1.7-5-4.1-5-7.5V3.5l5-2z"/><path d="M5.5 8l1.5 1.5L10.8 6"/></svg>,

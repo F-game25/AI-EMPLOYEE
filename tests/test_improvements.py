@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import jwt as _jwt_lib
 from fastapi.testclient import TestClient
 
 # ── Path setup ────────────────────────────────────────────────────────────────
@@ -26,6 +27,9 @@ _SERVER_PATH = (
     Path(__file__).parent.parent
     / "runtime" / "agents" / "problem-solver-ui" / "server.py"
 )
+
+
+_TEST_JWT_SECRET = "test-jwt-secret-key-for-ci-minimum-32-chars"
 
 
 def _load_server(tmp_path: Path):
@@ -39,7 +43,16 @@ def _load_server(tmp_path: Path):
     (fake_home / "agents").mkdir(exist_ok=True)
     os.environ["AI_HOME"] = str(fake_home)
 
-    # Force a fresh import so module-level constants use the new AI_HOME
+    # Set a known JWT secret BEFORE importing so all auth modules pick it up at
+    # module-level (request_guard, jwt_handler etc read os.getenv at import time).
+    os.environ["JWT_SECRET_KEY"] = _TEST_JWT_SECRET
+
+    # Evict any previously cached neural_brain auth module so it re-reads the secret
+    for key in list(sys.modules.keys()):
+        if "neural_brain" in key or "request_guard" in key or "jwt_handler" in key:
+            del sys.modules[key]
+
+    # Force a fresh import so module-level constants use the new AI_HOME + secret
     spec = importlib.util.spec_from_file_location("server_test", _SERVER_PATH)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -50,19 +63,51 @@ def _load_server(tmp_path: Path):
 # Shared fixture
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _make_test_token() -> str:
+    """Return a signed JWT satisfying both TenantMiddleware and RequestGuard.
+
+    RequestGuard.verify_access_token() requires type="access" and verifies with
+    the jwt_handler's _JWT_SECRET. TenantMiddleware requires tenant_id and verifies
+    with server._jwt_secret_env. Both use the same _TEST_JWT_SECRET so one token works.
+    """
+    import time, uuid
+    payload = {
+        "sub": "test-user",
+        "email": "test@example.com",
+        "tenant_id": "test-tenant",
+        "role": "admin",
+        "type": "access",           # required by RequestGuard.verify_access_token
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 3600,
+        "jti": str(uuid.uuid4()),
+    }
+    return _jwt_lib.encode(payload, _TEST_JWT_SECRET, algorithm="HS256")
+
+
 @pytest.fixture()
 def server(tmp_path):
     """Load server module and return (module, TestClient).
 
-    ``require_auth`` is bypassed via FastAPI's dependency_overrides so that
-    tests exercise business logic rather than auth mechanics.  This is the
-    correct approach because FastAPI captures the function *object* (not the
-    module attribute name) at route-registration time, so ``patch.object``
-    alone cannot override a ``Depends(require_auth)`` dependency.
+    Two auth middlewares intercept every request:
+      1. TenantMiddleware — requires Bearer JWT with tenant_id claim
+      2. RequestGuard — verifies JWT using neural_brain.auth.jwt_handler
+
+    Both read JWT_SECRET_KEY at module-import time. We set a known test secret
+    before loading the server module and cache-bust the auth sub-modules so they
+    re-read it. Then we generate a matching token and attach it to every
+    TestClient request via the headers kwarg.
+
+    require_auth is also overridden via dependency_overrides to bypass the
+    per-route Depends() check (middleware + route = full access).
     """
     mod = _load_server(tmp_path)
     mod.app.dependency_overrides[mod.require_auth] = lambda: None
-    client = TestClient(mod.app, raise_server_exceptions=True)
+    token = _make_test_token()
+    client = TestClient(
+        mod.app,
+        raise_server_exceptions=True,
+        headers={"Authorization": f"Bearer {token}"},
+    )
     yield mod, client
     mod.app.dependency_overrides.clear()
 
