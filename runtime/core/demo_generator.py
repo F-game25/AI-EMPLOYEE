@@ -22,6 +22,10 @@ _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3:latest")
 _AI_HOME    = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 _DEMO_ROOT  = _AI_HOME / "state" / "artifacts" / "demos"
 
+# Validate at import time — target is fully determined by env var, never by user input.
+if not _OLLAMA_HOST.startswith(("http://", "https://")):
+    raise ValueError(f"OLLAMA_HOST must start with http:// or https://, got: {_OLLAMA_HOST!r}")
+
 
 def _llm(prompt: str, max_tokens: int = 300) -> str:
     payload = {
@@ -41,7 +45,7 @@ def _llm(prompt: str, max_tokens: int = 300) -> str:
         headers={"content-type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:  # nosec B310 — scheme validated above
         body = json.loads(resp.read())
     return body.get("response", "").strip()
 

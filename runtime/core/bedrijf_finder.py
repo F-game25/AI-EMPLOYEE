@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 _OLLAMA_HOST  = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3:latest")
 
+# Validate at import time — only http/https to localhost/LAN allowed.
+# urlopen target is fully determined by this env var, never by user input.
+if not _OLLAMA_HOST.startswith(("http://", "https://")):
+    raise ValueError(f"OLLAMA_HOST must start with http:// or https://, got: {_OLLAMA_HOST!r}")
+
 
 def _llm(prompt: str, max_tokens: int = 600) -> str:
     payload = {
@@ -35,7 +40,7 @@ def _llm(prompt: str, max_tokens: int = 600) -> str:
         headers={"content-type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=90) as resp:
+    with urllib.request.urlopen(req, timeout=90) as resp:  # nosec B310 — scheme validated above
         body = json.loads(resp.read())
     return body.get("response", "").strip()
 

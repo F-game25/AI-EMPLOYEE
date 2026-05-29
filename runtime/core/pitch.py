@@ -23,8 +23,16 @@ _OLLAMA_HOST  = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("
 _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3:latest")
 
 # Lars' eigen PayPal.me link — stel in via env of ~/.ai-employee/.env
-# Voorbeeld: PAYPAL_LINK=https://paypal.me/larsjansen/299
+# Voorbeeld: PAYPAL_LINK=https://paypal.me/larsfluks
 _PAYPAL_LINK = os.environ.get("PAYPAL_LINK", "https://paypal.me/jouwlink")
+
+# BASE_URL for demo links sent to customers — set to your public URL or ngrok tunnel.
+# Falls back to localhost only as a last resort; set this in .env for production use.
+_BASE_URL = os.environ.get("BASE_URL", "http://localhost:8787").rstrip("/")
+
+# Validate at import time — target is fully determined by env var, never by user input.
+if not _OLLAMA_HOST.startswith(("http://", "https://")):
+    raise ValueError(f"OLLAMA_HOST must start with http:// or https://, got: {_OLLAMA_HOST!r}")
 
 
 def _llm(prompt: str, max_tokens: int = 350) -> str:
@@ -45,7 +53,7 @@ def _llm(prompt: str, max_tokens: int = 350) -> str:
         headers={"content-type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:  # nosec B310 — scheme validated above
         body = json.loads(resp.read())
     return body.get("response", "").strip()
 

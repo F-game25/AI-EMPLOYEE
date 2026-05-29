@@ -16,6 +16,11 @@ const AI_HOME = path.resolve(
   process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee')
 );
 
+// Public base URL for demo links sent to customers.
+// Set BASE_URL in .env to your domain or ngrok tunnel for production use.
+// Falls back to reading the request host (breaks behind reverse proxies without this).
+const BASE_URL = (process.env.BASE_URL || '').replace(/\/$/, '');
+
 // Run a one-shot Python snippet with sys.path pre-loaded.
 // Returns parsed JSON output or throws.
 function pyCall(snippet, timeoutMs = 90_000) {
@@ -210,7 +215,8 @@ import json; print(json.dumps(o or {}))
           const fname = (orderData.demo_pad || '').split('/').pop();
           if (fname) {
             const token = (req.headers.authorization || '').replace('Bearer ', '');
-            const host = req.protocol + '://' + req.get('host');
+            // Use BASE_URL env var; fall back to request host only if unset
+            const host = BASE_URL || (req.protocol + '://' + req.get('host'));
             demo_url = `${host}/api/demos/${fname}?token=${encodeURIComponent(token)}`;
           }
         } catch { /* fall through — demo_url stays empty */ }
