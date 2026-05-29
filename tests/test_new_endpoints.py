@@ -58,10 +58,10 @@ def client():
 def _make_test_token(secret: str | None = None, role: str = "admin",
                      tenant_id: str = "test-tenant") -> str:
     """Create a minimal signed token that passes require_auth when REQUIRE_AUTH=1."""
-    import base64
-    import hmac
-    import json
     import time
+    import uuid
+
+    import jwt
 
     signing_secret = secret or os.environ.get("JWT_SECRET_KEY", "test-secret")
     payload = {
@@ -70,19 +70,12 @@ def _make_test_token(secret: str | None = None, role: str = "admin",
         "org_name": "Pytest",
         "email": "pytest@example.com",
         "role": role,
+        "iat": int(time.time()),
         "exp": int(time.time()) + 3600,
-        "jti": "test-jti-12345",
+        "jti": str(uuid.uuid4()),
         "type": "access",
     }
-    # Build a HS256-style JWT (header.payload.signature)
-    def b64url(data: bytes) -> str:
-        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-    header = b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-    body = b64url(json.dumps(payload).encode())
-    signing_input = f"{header}.{body}"
-    sig = hmac.new(signing_secret.encode(), signing_input.encode(), "sha256").digest()
-    return f"{signing_input}.{b64url(sig)}"
+    return jwt.encode(payload, signing_secret, algorithm="HS256")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
