@@ -214,10 +214,9 @@ import json; print(json.dumps(o or {}))
           const orderData = await pyCall(orderSnippet, 10_000);
           const fname = (orderData.demo_pad || '').split('/').pop();
           if (fname) {
-            const token = (req.headers.authorization || '').replace('Bearer ', '');
-            // Use BASE_URL env var; fall back to request host only if unset
+            // No token — demos are now publicly accessible so customers can open them
             const host = BASE_URL || (req.protocol + '://' + req.get('host'));
-            demo_url = `${host}/api/demos/${fname}?token=${encodeURIComponent(token)}`;
+            demo_url = `${host}/api/demos/${fname}`;
           }
         } catch { /* fall through — demo_url stays empty */ }
       }

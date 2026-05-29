@@ -209,10 +209,9 @@ function OrderCard({ order: initialOrder, onRefresh, onPreviewDemo, onDelete }) 
   }
 
   function demoUrl() {
-    const token = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || ''
     const fname = order.demo_pad ? order.demo_pad.split('/').pop() : ''
     if (!fname) return null
-    return `/api/demos/${fname}?token=${encodeURIComponent(token)}`
+    return `/api/demos/${fname}`
   }
 
   function openDemo() {

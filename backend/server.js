@@ -653,16 +653,18 @@ app.use('/api/memory', createHybridMemoryRouter(requireAuth));
 // Orders pipeline — website-sales flow (Lars)
 app.use('/api/orders', require('./routes/orders')(requireAuth));
 
-// Serve generated demo HTML files (read-only, auth-gated via query token)
+// Serve generated demo HTML files — publicly accessible (no auth required).
+// Demo files are static HTML pages generated for customers to preview;
+// they contain no sensitive data and must be openable without a JWT token,
+// both in Lars's browser and when the link is shared with the customer.
 app.get('/api/demos/:filename', (req, res) => {
   const fname = path.basename(req.params.filename);
   if (!fname.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
-  // Allow JWT in query param so the URL can be used as <a href> / window.open
-  const token = req.query.token || (req.headers.authorization || '').replace('Bearer ', '');
-  try { jwt.verify(token, JWT_SECRET); } catch { return res.status(401).send('Unauthorized'); }
   const demoPath = path.join(AI_HOME, 'state', 'artifacts', 'demos', fname);
   if (!fs.existsSync(demoPath)) return res.status(404).send('Demo niet gevonden');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  // Allow embedding in iframes (same origin for the dashboard preview)
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.sendFile(demoPath);
 });
 
