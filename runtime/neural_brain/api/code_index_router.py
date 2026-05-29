@@ -30,8 +30,8 @@ def index(req: IndexReq):
     try:
         from core.code_indexer import index_project
         return index_project(req.root, req.project_id, max_files=req.max_files)
-    except Exception:
-        logger.exception("code-index index failed")
+    except Exception as exc:
+        logger.warning("code-index index failed: %s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Code index failed")
 
 
@@ -40,8 +40,8 @@ def context(req: ContextReq):
     try:
         from core.code_indexer import query_context
         return query_context(req.project_id, req.query, k=req.k)
-    except Exception:
-        logger.exception("code-index context failed")
+    except Exception as exc:
+        logger.warning("code-index context failed: %s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Code context failed")
 
 
@@ -50,6 +50,6 @@ def summary(project_id: str):
     try:
         from core.code_indexer import get_summary
         return get_summary(project_id)
-    except Exception:
-        logger.exception("code-index summary failed")
+    except Exception as exc:
+        logger.warning("code-index summary failed: %s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Code summary failed")

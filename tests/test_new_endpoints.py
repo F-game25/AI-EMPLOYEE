@@ -63,7 +63,12 @@ def _make_test_token(secret: str | None = None, role: str = "admin",
 
     import jwt
 
-    signing_secret = secret or os.environ.get("JWT_SECRET_KEY", "test-secret")
+    server = sys.modules.get("server")
+    signing_secret = (
+        secret
+        or getattr(server, "_jwt_secret_env", None)
+        or os.environ.get("JWT_SECRET_KEY", "test-secret")
+    )
     payload = {
         "sub": "test-user",
         "tenant_id": tenant_id,

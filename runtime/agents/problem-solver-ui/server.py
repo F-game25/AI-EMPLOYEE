@@ -1727,7 +1727,7 @@ app = FastAPI(
 
 @app.exception_handler(Exception)
 async def _generic_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unhandled API error on %s", request.url.path)
+    logger.warning("Unhandled API error on %s: %s", request.url.path, type(exc).__name__)
     return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
 # ── Multi-tenancy initialization ──────────────────────────────────────────────
@@ -18080,7 +18080,7 @@ async def bg_approve(
     except KeyError:
         raise HTTPException(status_code=404, detail="Break-glass request not found")
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail="operation_failed")
 
     req = store._requests[request_id]
     _get_audit_db().append(
@@ -18126,7 +18126,7 @@ async def bg_deny(
     except KeyError:
         raise HTTPException(status_code=404, detail="Break-glass request not found")
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail="operation_failed")
 
     req = store._requests[request_id]
     _get_audit_db().append(
@@ -18454,7 +18454,7 @@ def post_models_reload(_auth: None = Depends(require_auth), _rbac=Depends(requir
         return JSONResponse({"ok": True, "config": cfg})
     except Exception as exc:
         logger.warning("models/reload failed: %s", exc)
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/evolution/status")
@@ -18464,7 +18464,7 @@ def get_evolution_status():
         return JSONResponse(get_evolution_controller().status())
     except Exception as exc:
         logger.warning("evolution: status failed: %s", exc)
-        return JSONResponse({"running": False, "mode": "OFF", "available": False, "error": str(exc)})
+        return JSONResponse({"running": False, "mode": "OFF", "available": False, "error": "operation_failed"})
 
 
 class EvolutionModeRequest(BaseModel):
@@ -18481,10 +18481,10 @@ def post_evolution_mode(req: EvolutionModeRequest):
         ctrl.stop() if mode == "OFF" else ctrl.start()
         return JSONResponse({"mode": mode, "status": ctrl.status()})
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail="operation_failed")
     except Exception as exc:
         logger.warning("evolution: set mode failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="operation_failed")
 
 
 # ── Doctor structured diagnostics ─────────────────────────────────────────────
@@ -20805,8 +20805,8 @@ def run_task_with_agent_controller(payload: dict, _auth: None = Depends(require_
         from core.agent_controller import get_agent_controller  # noqa: PLC0415
         summary = get_agent_controller().run_goal(goal)
     except Exception as exc:
-        logger.exception("AgentController task run failed")
-        error_message = str(exc) or exc.__class__.__name__
+        logger.warning("AgentController task run failed: %s", type(exc).__name__)
+        error_message = "AgentController failed"
         return JSONResponse({
             "ok": False,
             "source": "agent_controller",
@@ -23158,7 +23158,7 @@ def blacklight_start(payload: dict, _auth: None = Depends(require_auth)):
     except RuntimeError as exc:
         # Legal-review gate raised by blacklight.start()
         logger.warning("blacklight start blocked: %s", exc)
-        raise HTTPException(403, str(exc))
+        raise HTTPException(status_code=403, detail="forbidden")
     except Exception as exc:
         logger.error("blacklight start error: %s", exc)
         raise HTTPException(500, "Failed to start BLACKLIGHT")
@@ -23399,11 +23399,11 @@ def _run_ascend_task(task_id: str, task: str) -> None:
             _af_current_task.update({
                 "status": "error",
                 "progress": 0,
-                "result": str(exc),
+                "result": "operation_failed",
                 "finished_at": now_iso(),
             })
             _af_append_event("error", 0, f"Task failed: {exc}")
-        _log_activity("task_run", "Ascend Forge task failed", details={"task_id": task_id, "status": "error", "agent_id": "ascend-forge", "error": str(exc)}, source="ascend")
+        _log_activity("task_run", "Ascend Forge task failed", details={"task_id": task_id, "status": "error", "agent_id": "ascend-forge", "error": "operation_failed"}, source="ascend")
 
 
 @app.post("/api/ascend/task")
@@ -23492,7 +23492,7 @@ def _run_blacklight_task(task_id: str, task: str) -> None:
             _bl_direct_task.update({
                 "status": "error",
                 "progress": 0,
-                "result": str(exc),
+                "result": "operation_failed",
                 "finished_at": now_iso(),
             })
 
@@ -26849,7 +26849,7 @@ def get_brain_status():
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         })
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.post("/internal/suggest")
@@ -26870,7 +26870,7 @@ async def suggest_action(payload: dict):
         suggestion = slb.suggest_action(context=context, candidates=candidates)
         return JSONResponse({"ok": True, "suggestion": suggestion})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=400)
 
 
 @app.post("/internal/reinforce")
@@ -26891,7 +26891,7 @@ async def reinforce_action(payload: dict):
         slb.reinforce(action, reward)
         return JSONResponse({"ok": True, "message": f"Reinforced {action} by {reward}"})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=400)
 
 
 # ── AI Middleware Layer ────────────────────────────────────────────────────────
@@ -26931,7 +26931,7 @@ async def middleware_process(body: dict):
             "elapsed_ms": result.elapsed_ms,
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/middleware/status")
@@ -26953,7 +26953,7 @@ async def middleware_status():
             },
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 # ── PostgreSQL Database API Routes ──────────────────────────────────────────────
@@ -26970,7 +26970,7 @@ async def db_query(payload: dict, _auth: None = Depends(require_auth)):
         results = db.execute(sql, tuple(params), tenant_id=tenant.tenant_id)
         return JSONResponse({"results": results, "count": len(results)})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"error": "operation_failed"}, status_code=400)
 
 
 @app.post("/api/db/insert")
@@ -26986,7 +26986,7 @@ async def db_insert(payload: dict, _auth: None = Depends(require_auth)):
         result = db.insert(table, data, tenant_id=tenant.tenant_id)
         return JSONResponse({"inserted": result})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"error": "operation_failed"}, status_code=400)
 
 
 @app.post("/api/db/update")
@@ -27004,7 +27004,7 @@ async def db_update(payload: dict, _auth: None = Depends(require_auth)):
         count = db.update(table, data, where, params, tenant_id=tenant.tenant_id)
         return JSONResponse({"updated": count})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"error": "operation_failed"}, status_code=400)
 
 
 @app.post("/api/db/delete")
@@ -27021,7 +27021,7 @@ async def db_delete(payload: dict, _auth: None = Depends(require_auth)):
         count = db.delete(table, where, params, tenant_id=tenant.tenant_id)
         return JSONResponse({"deleted": count})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"error": "operation_failed"}, status_code=400)
 
 
 @app.post("/api/backup/create")
@@ -27036,7 +27036,7 @@ async def create_backup(_auth: None = Depends(require_auth)):
         else:
             return JSONResponse({"error": "Backup failed"}, status_code=500)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/backup/list")
@@ -27048,7 +27048,7 @@ async def list_backups(_auth: None = Depends(require_auth)):
         backups = manager.list_backups()
         return JSONResponse({"backups": backups})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.post("/api/backup/restore/{backup_name}")
@@ -27065,7 +27065,7 @@ async def restore_backup(backup_name: str, _auth: None = Depends(require_auth)):
         else:
             return JSONResponse({"error": "Backup not found"}, status_code=404)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 # ── Payment & Stripe Integration ──────────────────────────────────────────────
@@ -27096,7 +27096,7 @@ async def create_stripe_customer(payload: dict, _auth: None = Depends(require_au
             return JSONResponse({"customer_id": customer_id, "status": "created"})
         return JSONResponse({"ok": False, "error": "Failed to create customer"}, status_code=500)
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.post("/api/billing/payment-intent/create", tags=["billing"])
@@ -27117,7 +27117,7 @@ async def create_payment_intent(payload: dict, _auth: None = Depends(require_aut
             return JSONResponse(result)
         return JSONResponse({"ok": False, "error": "Failed to create payment intent"}, status_code=500)
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.post("/api/billing/subscription/create", tags=["billing"])
@@ -27137,7 +27137,7 @@ async def create_subscription(payload: dict, _auth: None = Depends(require_auth)
             return JSONResponse(result)
         return JSONResponse({"ok": False, "error": "Failed to create subscription"}, status_code=500)
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/billing/subscription/{subscription_id}", tags=["billing"])
@@ -27153,7 +27153,7 @@ async def get_subscription(subscription_id: str, _auth: None = Depends(require_a
             return JSONResponse(result)
         return JSONResponse({"ok": False, "error": "Subscription not found"}, status_code=404)
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.post("/api/billing/subscription/{subscription_id}/cancel", tags=["billing"])
@@ -27167,7 +27167,7 @@ async def cancel_subscription(subscription_id: str, payload: dict = {}, _auth: N
         success = stripe_mgr.cancel_subscription(subscription_id, at_period_end=payload.get("at_period_end", False))
         return JSONResponse({"status": "cancelled" if success else "failed"})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 # ── Stripe webhook — validates Stripe-Signature, no JWT auth ──────────────────
@@ -27203,7 +27203,7 @@ async def stripe_webhook(request: Request):
         return JSONResponse({"ok": True, "type": event_type})
     except Exception as e:
         logger.error("stripe_webhook error: %s", e)
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.post("/api/billing/stripe/customer", tags=["billing"])
@@ -27230,7 +27230,7 @@ async def stripe_create_or_get_customer(body: dict, auth=Depends(require_auth)):
             return JSONResponse({"ok": False, "error": "Failed to create Stripe customer"}, status_code=500)
         return JSONResponse({"ok": True, "customer_id": customer_id, "status": "created"})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/billing/stripe/subscription", tags=["billing"])
@@ -27254,7 +27254,7 @@ async def stripe_get_subscription(auth=Depends(require_auth)):
         result = get_stripe_manager().get_subscription_status(subs.data[0].id)
         return JSONResponse({"ok": True, "subscription": result})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.post("/api/billing/stripe/checkout", tags=["billing"])
@@ -27290,7 +27290,7 @@ async def stripe_create_checkout(body: dict, auth=Depends(require_auth)):
         session = _stripe.checkout.Session.create(**session_kwargs)
         return JSONResponse({"ok": True, "session_id": session.id, "url": session.url})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 @app.post("/api/billing/stripe/sync-usage", tags=["billing", "admin"])
@@ -27331,10 +27331,10 @@ async def stripe_sync_usage(_rbac=Depends(require_permission("admin:*"))):
                         )
                         synced.append({"tenant_id": tenant_id, "customer_id": customer_id, "usage_units": quantity})
             except Exception as ex:
-                errors.append({"tenant_id": tenant_id, "error": str(ex)})
+                errors.append({"tenant_id": tenant_id, "error": "operation_failed"})
         return JSONResponse({"ok": True, "synced": synced, "errors": errors})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
 # ── RBAC Routes ───────────────────────────────────────────────────────────────
@@ -27362,7 +27362,7 @@ async def assign_user_role(payload: dict, _auth: None = Depends(require_auth)):
         success = rbac.assign_role(target_user_id, role, tenant.tenant_id)
         return JSONResponse({"status": "assigned" if success else "failed", "user_id": target_user_id, "role": role.value})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/rbac/user-role")
@@ -27381,7 +27381,7 @@ async def get_user_role(_auth: None = Depends(require_auth)):
 
         return JSONResponse({"user_id": user.get("user_id"), "role": role.value})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/rbac/roles")
@@ -27403,7 +27403,7 @@ async def list_user_roles(_auth: None = Depends(require_auth)):
         roles = rbac.list_user_roles(tenant.tenant_id)
         return JSONResponse({"roles": roles})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 # ── Billing Metrics Routes (Phase 4) ──────────────────────────────────────────
@@ -27422,7 +27422,7 @@ async def get_billing_metrics(_auth: None = Depends(require_auth)):
         else:
             return JSONResponse({"error": "No metrics available"}, status_code=404)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/billing/all-metrics", tags=["billing", "admin"])
@@ -27447,7 +27447,7 @@ async def get_all_billing_metrics(_auth: None = Depends(require_auth)):
         all_metrics = collector.get_all_tenant_metrics(period_days=30)
         return JSONResponse({"metrics": [asdict(m) for m in all_metrics]})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 # ── Rate Limiting Routes (Phase 4) ────────────────────────────────────────────
@@ -27474,7 +27474,7 @@ async def get_quota_usage(_auth: None = Depends(require_auth)):
             }
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 # ── Embeddings Routes (Phase 4) ──────────────────────────────────────────────
@@ -27499,7 +27499,7 @@ async def embed_text(payload: dict, _auth: None = Depends(require_auth)):
             "mode": manager.get_mode(),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.post("/api/embeddings/similarity")
@@ -27519,7 +27519,7 @@ async def similarity_score(payload: dict, _auth: None = Depends(require_auth)):
 
         return JSONResponse({"similarity": score})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 # ── Audit Logging Routes (Phase 4) ───────────────────────────────────────────
@@ -27536,7 +27536,7 @@ async def get_audit_logs(_auth: None = Depends(require_auth)):
         # TODO: Fetch from database when audit_logs table available
         return JSONResponse({"logs": [], "tenant_id": tenant.tenant_id, "count": 0})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/audit/model-decisions", tags=["admin"])
@@ -27554,7 +27554,7 @@ async def model_decision_audit_admin(
             "stats": audit.get_stats(window_hours=24),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/audit/chain-verify", tags=["admin"])
@@ -27565,7 +27565,7 @@ async def audit_chain_verify(_rbac=Depends(require_permission("admin:*"))):
         ok, msg = get_audit_db().verify_chain()
         return JSONResponse({"valid": ok, "message": msg})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 # ── Observability Status Routes (Phase 4) ────────────────────────────────────
@@ -27581,7 +27581,7 @@ async def get_sentry_status(_auth: None = Depends(require_auth)):
 
         return JSONResponse({"status": status, "dsn_configured": bool(client)})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/observability/embeddings")
@@ -27598,7 +27598,7 @@ async def get_embeddings_status(_auth: None = Depends(require_auth)):
             "dimension": 384,
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/monitoring/drift")
@@ -27608,7 +27608,7 @@ async def drift_report(_auth: None = Depends(require_auth)):
         from core.drift_monitor import DriftMonitor
         return JSONResponse(DriftMonitor().get_report())
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 @app.get("/api/monitoring/decisions")
@@ -27622,7 +27622,7 @@ async def decision_audit(_auth: None = Depends(require_auth)):
             "stats": audit.get_stats(window_hours=24),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "operation_failed"}, status_code=500)
 
 
 # ── User Profile & Intelligence (Phase 5 — 100/100) ──────────────────────────
@@ -27657,7 +27657,7 @@ async def get_user_profile(_auth: None = Depends(require_auth)):
         }
         return JSONResponse(profile)
     except Exception as e:
-        return JSONResponse({"error": str(e), "status": "unavailable"}, status_code=200)
+        return JSONResponse({"error": "operation_failed", "status": "unavailable"}, status_code=200)
 
 
 @app.get("/api/metrics")
@@ -27704,7 +27704,7 @@ async def get_prometheus_metrics(_auth: None = Depends(require_auth)):
         metrics_text = "\n".join(lines)
         return HTMLResponse(content=metrics_text, media_type="text/plain; version=0.0.4")
     except Exception as e:
-        return HTMLResponse(f"# Error: {str(e)}", status_code=500, media_type="text/plain")
+        return HTMLResponse("# Error: operation failed", status_code=500, media_type="text/plain")
 
 
 @app.get("/api/agents")
@@ -27730,7 +27730,7 @@ async def get_agents_http_fallback():
         else:
             return JSONResponse({"agents": [], "total": 0})
     except Exception as e:
-        return JSONResponse({"error": str(e), "agents": [], "total": 0}, status_code=500)
+        return JSONResponse({"error": "operation_failed", "agents": [], "total": 0}, status_code=500)
 
 
 @app.middleware("http")
@@ -27955,7 +27955,7 @@ async def task_context_response(task_id: str, body: _ContextResponseRequest):
         return JSONResponse({"ok": bool(ok), "task_id": task_id, "choice": body.choice})
     except Exception as exc:
         logger.warning("context-response failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="operation_failed")
 
 
 @app.get("/api/research/recent")
@@ -27980,7 +27980,7 @@ async def research_recent(limit: int = 20):
         return JSONResponse({"sessions": sessions[:max(1, int(limit))]})
     except Exception as exc:
         logger.warning("research_recent failed: %s", exc)
-        return JSONResponse({"sessions": [], "error": str(exc)})
+        return JSONResponse({"sessions": [], "error": "operation_failed"})
 
 
 @app.post("/api/research/discover")
@@ -28056,7 +28056,7 @@ async def _run_research_session_v2(agent, query: str, urls: list, depth: str, se
     except Exception as exc:
         logger.warning("research session %s failed: %s", session_id, exc)
         try:
-            await _ws_broadcast("task:research_failed", {"session_id": session_id, "error": str(exc)})
+            await _ws_broadcast("task:research_failed", {"session_id": session_id, "error": "operation_failed"})
         except Exception:
             pass
 
@@ -28126,7 +28126,7 @@ async def knowledge_upload(request: Request, _auth: None = Depends(require_auth)
             raw = await upload.read()
             content = raw.decode("utf-8", errors="replace")
         except Exception as exc:
-            results.append({"filename": filename, "error": str(exc), "chunks": 0})
+            results.append({"filename": filename, "error": "operation_failed", "chunks": 0})
             continue
 
         chunks = _chunk_text(content, chunk_size=512, overlap=51)
@@ -28375,7 +28375,7 @@ async def memory_hybrid_search(q: str = Query(..., min_length=1, max_length=500)
         return {"results": results, "query": q, "alpha": alpha, "mode": "hybrid"}
     except Exception as exc:
         logger.warning(f"hybrid_search failed: {exc}")
-        return {"results": [], "query": q, "alpha": alpha, "mode": "hybrid", "error": str(exc)}
+        return {"results": [], "query": q, "alpha": alpha, "mode": "hybrid", "error": "operation_failed"}
 
 
 class _RagRetrieveRequest(BaseModel):
@@ -28403,7 +28403,7 @@ async def rag_retrieve_endpoint(body: _RagRetrieveRequest):
         return result
     except Exception as exc:
         logger.warning(f"rag_retrieve failed: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="operation_failed")
 
 
 # ── Verification engine + pending review queue ──────────────────────────
@@ -28497,7 +28497,7 @@ async def topics_list():
         return {"topics": list_topics()}
     except Exception as e:
         logger.warning(f"topics_list failed: {e}")
-        return {"topics": [], "error": str(e)}
+        return {"topics": [], "error": "operation_failed"}
 
 
 @app.get("/api/topics/{topic_id}")
@@ -28620,7 +28620,7 @@ async def orchestrate_v2(req: _OrchestrateV2Request, _auth=Depends(require_auth)
         return JSONResponse(content=result, status_code=200 if result.get("success") else 422)
     except Exception as exc:
         logger.error("OrchestratorV2 error: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="operation_failed")
 
 
 # ── Knowledge Vault routes ────────────────────────────────────────────────────

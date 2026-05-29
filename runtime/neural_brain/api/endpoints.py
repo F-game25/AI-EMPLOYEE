@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 _SAFE_TRACE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 
-def _server_error(operation: str, exc: Exception) -> HTTPException:
-    logger.warning("neural brain %s failed: %s", operation, type(exc).__name__)
+def _server_error(operation: str, exc_type: str) -> HTTPException:
+    logger.warning("neural brain %s failed: %s", operation, exc_type)
     return HTTPException(status_code=500, detail=f"{operation} failed")
 
 # Mount forge sub-router (lazy import to avoid circular issues at module load)
@@ -65,7 +65,7 @@ async def think(req: ThinkRequest):
         )
         return result
     except Exception as e:
-        raise _server_error("think", e)
+        raise _server_error("think", type(e).__name__)
 
 
 @router.post("/recall")
@@ -75,7 +75,7 @@ async def recall(req: RecallRequest):
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().recall(req.query, user_id=req.user_id, k=req.k)
     except Exception as e:
-        raise _server_error("recall", e)
+        raise _server_error("recall", type(e).__name__)
 
 
 @router.post("/remember")
@@ -85,7 +85,7 @@ async def remember(req: RememberRequest):
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().remember(req.content, memory_type=req.type, user_id=req.user_id, metadata=req.metadata)
     except Exception as e:
-        raise _server_error("remember", e)
+        raise _server_error("remember", type(e).__name__)
 
 
 @router.delete("/forget/{memory_id}")
@@ -95,7 +95,7 @@ async def forget(memory_id: str):
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().forget(memory_id)
     except Exception as e:
-        raise _server_error("forget", e)
+        raise _server_error("forget", type(e).__name__)
 
 
 @router.get("/graph")
@@ -105,7 +105,7 @@ async def get_graph(depth: int = Query(2, ge=1, le=5), limit: int = Query(200, g
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().get_graph_snapshot(limit=limit)
     except Exception as e:
-        raise _server_error("graph snapshot", e)
+        raise _server_error("graph snapshot", type(e).__name__)
 
 
 @router.get("/graph/snapshot")
@@ -115,7 +115,7 @@ async def get_graph_snapshot(limit: int = Query(200, ge=10, le=1000)):
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().get_graph_snapshot(limit=limit)
     except Exception as e:
-        raise _server_error("graph snapshot", e)
+        raise _server_error("graph snapshot", type(e).__name__)
 
 
 @router.get("/graph/views/{view}")
@@ -125,7 +125,7 @@ async def get_graph_view(view: str, limit: int = Query(300, ge=10, le=1000)):
         from neural_brain.graph.memory_graphs import build_view
         return build_view(view, limit=limit)
     except Exception as e:  # noqa: BLE001
-        raise _server_error("graph view", e)
+        raise _server_error("graph view", type(e).__name__)
 
 
 @router.get("/threads")
@@ -150,7 +150,7 @@ async def list_threads(limit: int = Query(20, ge=1, le=200)):
             threads.append({"thread_id": thread_id, "last_node": last_node, "ts": f.stat().st_mtime})
         return {"threads": threads}
     except Exception as e:
-        raise _server_error("threads list", e)
+        raise _server_error("threads list", type(e).__name__)
 
 
 @router.post("/models/route")
@@ -160,7 +160,7 @@ async def route_model(req: ModelRouteRequest):
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().route_model(req.arch, req.request)
     except Exception as e:
-        raise _server_error("model route", e)
+        raise _server_error("model route", type(e).__name__)
 
 
 @router.get("/models/status")
@@ -172,7 +172,7 @@ async def get_model_status():
         archs = ["LLM", "SLM", "MoE", "VLM", "MLM", "LAM", "LCM", "SAM"]
         return {arch: tracker.get_all_stats(arch) for arch in archs}
     except Exception as e:
-        raise _server_error("model status", e)
+        raise _server_error("model status", type(e).__name__)
 
 
 @router.get("/models/registry")
@@ -182,7 +182,7 @@ async def get_registry():
         from neural_brain.models.model_architecture_router import ModelArchitectureRouter
         return ModelArchitectureRouter.get_registry()
     except Exception as e:
-        raise _server_error("model registry", e)
+        raise _server_error("model registry", type(e).__name__)
 
 
 @router.get("/status")
@@ -192,7 +192,7 @@ async def get_status():
         from neural_brain.core.consciousness_engine import get_engine
         return get_engine().get_status()
     except Exception as e:
-        raise _server_error("status", e)
+        raise _server_error("status", type(e).__name__)
 
 
 @router.get("/reasoning/{trace_id}")
@@ -217,4 +217,4 @@ async def get_reasoning_trace(trace_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise _server_error("reasoning trace", e)
+        raise _server_error("reasoning trace", type(e).__name__)

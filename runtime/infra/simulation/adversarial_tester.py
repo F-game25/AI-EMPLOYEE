@@ -132,12 +132,12 @@ class AdversarialTester:
                 "verdict": result.verdict.value,
                 "blockers": [r.message for r in result.results if not r.approved],
             }
-        except Exception as e:
+        except Exception:
             return {
                 "case_id": case["case_id"],
                 "category": case["category"],
                 "passed": False,
-                "error": str(e),
+                "error": "adversarial case failed",
             }
 
     async def run_suite(self, agent_id: str) -> dict:

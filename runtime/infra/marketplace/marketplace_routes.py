@@ -56,7 +56,8 @@ async def install_plugin(req: Request, file: UploadFile = File(...)):
     data = b"".join(chunks)
     result = get_registry().install_from_bytes(data, tid, requested_by=_user(req))
     if not result["ok"]:
-        raise HTTPException(400, result.get("error", "install_failed"))
+        logger.warning("plugin install failed: %s", result.get("error", "install_failed"))
+        raise HTTPException(400, "install_failed")
     return result
 
 

@@ -56,7 +56,8 @@ class K8sClient:
                 })
             return {"ok": True, "k8s_available": True, "deployments": result}
         except Exception as e:
-            return {**_unavailable(str(e)), "deployments": []}
+            logger.warning("list deployments failed: %s", type(e).__name__)
+            return {**_unavailable("k8s_request_failed"), "deployments": []}
 
     def get_pods(self, namespace: str = "default") -> dict:
         if not self.available():
@@ -77,7 +78,8 @@ class K8sClient:
                 })
             return {"ok": True, "k8s_available": True, "pods": result}
         except Exception as e:
-            return {**_unavailable(str(e)), "pods": []}
+            logger.warning("list pods failed: %s", type(e).__name__)
+            return {**_unavailable("k8s_request_failed"), "pods": []}
 
     def scale(self, deployment: str, replicas: int, namespace: str = "default") -> dict:
         if not self.available():
@@ -89,7 +91,8 @@ class K8sClient:
             return {"ok": True, "k8s_available": True,
                     "deployment": deployment, "replicas": replicas}
         except Exception as e:
-            return _unavailable(str(e))
+            logger.warning("scale deployment failed: %s", type(e).__name__)
+            return _unavailable("k8s_request_failed")
 
     def rollback(self, deployment: str, namespace: str = "default") -> dict:
         if not self.available():
@@ -105,7 +108,8 @@ class K8sClient:
             return {"ok": True, "k8s_available": True, "deployment": deployment,
                     "message": "Rollback annotation applied — run helm rollback for full rollback"}
         except Exception as e:
-            return _unavailable(str(e))
+            logger.warning("rollback deployment failed: %s", type(e).__name__)
+            return _unavailable("k8s_request_failed")
 
     def get_resource_metrics(self, namespace: str = "default") -> dict:
         if not self.available():
@@ -130,7 +134,8 @@ class K8sClient:
                 })
             return {"ok": True, "k8s_available": True, "metrics": result}
         except Exception as e:
-            return {**_unavailable(str(e)), "metrics": []}
+            logger.warning("resource metrics failed: %s", type(e).__name__)
+            return {**_unavailable("k8s_request_failed"), "metrics": []}
 
 
 _k8s: Optional[K8sClient] = None

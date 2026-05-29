@@ -173,9 +173,9 @@ async def run_scenario(scenario_id: str, tenant_id: str = "system",
         result.status = RunStatus.FAILED
         result.error = "timeout"
         result.completed_at = time.time()
-    except Exception as e:
+    except Exception:
         result.status = RunStatus.FAILED
-        result.error = str(e)
+        result.error = "scenario execution failed"
         result.completed_at = time.time()
 
     _eval.persist(result)
