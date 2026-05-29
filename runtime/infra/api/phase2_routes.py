@@ -111,6 +111,20 @@ def _server_error(operation: str) -> HTTPException:
     return HTTPException(status_code=500, detail=f"{operation} failed")
 
 
+_ERROR_KEYS = {"error", "errors", "detail", "details", "exception", "traceback", "stack"}
+
+
+def _safe_payload(value):
+    if isinstance(value, dict):
+        return {
+            key: "operation_failed" if str(key).lower() in _ERROR_KEYS else _safe_payload(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_safe_payload(item) for item in value]
+    return value
+
+
 # ── RAG routes ────────────────────────────────────────────────────────────────
 
 @phase2_router.get("/rag/status")
@@ -152,7 +166,7 @@ async def rag_sync(req: RAGSyncRequest, request: Request):
         from infra.rag.sync_daemon import get_sync_daemon
         st = SourceType(req.source_type)
         stats = await get_sync_daemon().trigger_sync(tenant_id, st, full=req.full)
-        return {"ok": True, "stats": stats}
+        return {"ok": True, "stats": _safe_payload(stats)}
     except Exception:
         raise _server_error("rag sync")
 

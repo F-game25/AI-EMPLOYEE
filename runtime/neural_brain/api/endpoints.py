@@ -17,6 +17,20 @@ def _server_error(operation: str) -> HTTPException:
     logger.warning("neural brain %s failed", operation)
     return HTTPException(status_code=500, detail=f"{operation} failed")
 
+
+_ERROR_KEYS = {"error", "errors", "detail", "details", "exception", "traceback", "stack"}
+
+
+def _safe_payload(value):
+    if isinstance(value, dict):
+        return {
+            key: "operation_failed" if str(key).lower() in _ERROR_KEYS else _safe_payload(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_safe_payload(item) for item in value]
+    return value
+
 # Mount forge sub-router (lazy import to avoid circular issues at module load)
 try:
     from neural_brain.forge.api import forge_router
@@ -73,7 +87,7 @@ async def recall(req: RecallRequest):
     """Retrieve from long-term memory."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return get_engine().recall(req.query, user_id=req.user_id, k=req.k)
+        return _safe_payload(get_engine().recall(req.query, user_id=req.user_id, k=req.k))
     except Exception:
         raise _server_error("recall")
 
@@ -83,7 +97,7 @@ async def remember(req: RememberRequest):
     """Store in long-term memory."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return get_engine().remember(req.content, memory_type=req.type, user_id=req.user_id, metadata=req.metadata)
+        return _safe_payload(get_engine().remember(req.content, memory_type=req.type, user_id=req.user_id, metadata=req.metadata))
     except Exception:
         raise _server_error("remember")
 
@@ -93,7 +107,7 @@ async def forget(memory_id: str):
     """Remove memory."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return get_engine().forget(memory_id)
+        return _safe_payload(get_engine().forget(memory_id))
     except Exception:
         raise _server_error("forget")
 
@@ -103,7 +117,7 @@ async def get_graph(depth: int = Query(2, ge=1, le=5), limit: int = Query(200, g
     """Fetch knowledge graph snapshot."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return get_engine().get_graph_snapshot(limit=limit)
+        return _safe_payload(get_engine().get_graph_snapshot(limit=limit))
     except Exception:
         raise _server_error("graph snapshot")
 
@@ -113,7 +127,7 @@ async def get_graph_snapshot(limit: int = Query(200, ge=10, le=1000)):
     """Alias for /graph — returns the full graph snapshot for dashboard use."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return get_engine().get_graph_snapshot(limit=limit)
+        return _safe_payload(get_engine().get_graph_snapshot(limit=limit))
     except Exception:
         raise _server_error("graph snapshot")
 
@@ -158,7 +172,7 @@ async def route_model(req: ModelRouteRequest):
     """Route request to specified architecture."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return get_engine().route_model(req.arch, req.request)
+        return _safe_payload(get_engine().route_model(req.arch, req.request))
     except Exception:
         raise _server_error("model route")
 

@@ -11,6 +11,18 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/code-index", tags=["code-index"])
+_ERROR_KEYS = {"error", "errors", "detail", "details", "exception", "traceback", "stack"}
+
+
+def _safe_payload(value):
+    if isinstance(value, dict):
+        return {
+            key: "operation_failed" if str(key).lower() in _ERROR_KEYS else _safe_payload(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_safe_payload(item) for item in value]
+    return value
 
 
 class IndexReq(BaseModel):
@@ -29,7 +41,7 @@ class ContextReq(BaseModel):
 def index(req: IndexReq):
     try:
         from core.code_indexer import index_project
-        return index_project(req.root, req.project_id, max_files=req.max_files)
+        return _safe_payload(index_project(req.root, req.project_id, max_files=req.max_files))
     except Exception:
         logger.warning("code-index index failed")
         raise HTTPException(status_code=500, detail="Code index failed")
@@ -39,7 +51,7 @@ def index(req: IndexReq):
 def context(req: ContextReq):
     try:
         from core.code_indexer import query_context
-        return query_context(req.project_id, req.query, k=req.k)
+        return _safe_payload(query_context(req.project_id, req.query, k=req.k))
     except Exception:
         logger.warning("code-index context failed")
         raise HTTPException(status_code=500, detail="Code context failed")
@@ -49,7 +61,7 @@ def context(req: ContextReq):
 def summary(project_id: str):
     try:
         from core.code_indexer import get_summary
-        return get_summary(project_id)
+        return _safe_payload(get_summary(project_id))
     except Exception:
         logger.warning("code-index summary failed")
         raise HTTPException(status_code=500, detail="Code summary failed")

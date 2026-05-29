@@ -32,6 +32,16 @@ def _user(req: Request) -> str:
     return (user.get("sub") or user.get("email") or "system") if user else "system"
 
 
+def _safe_install_result(result: dict) -> dict:
+    return {
+        "ok": bool(result.get("ok")),
+        "plugin_id": result.get("plugin_id", ""),
+        "status": result.get("status", "install_failed"),
+        "approval_required": bool(result.get("approval_required", False)),
+        **({"approval_id": result["approval_id"]} if result.get("approval_id") else {}),
+    }
+
+
 class ApproveRequest(BaseModel):
     approved: bool
     notes: str = ""
@@ -58,7 +68,7 @@ async def install_plugin(req: Request, file: UploadFile = File(...)):
     if not result["ok"]:
         logger.warning("plugin install failed")
         raise HTTPException(400, "install_failed")
-    return result
+    return _safe_install_result(result)
 
 
 @router.get("/plugins/{plugin_id}")
